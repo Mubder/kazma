@@ -312,6 +312,14 @@
     _isGenerating = true;
     _awaitingApproval = false;
     _armTurnWatchdog();
+    // Fresh progress log for this turn (don't reuse previous bubble's panel)
+    if (currentMsgEl) {
+      var oldProg = currentMsgEl.querySelector('.agent-progress');
+      if (oldProg) oldProg.remove();
+    }
+    _progressEl = null;
+    _progressStepCount = 0;
+    logProgress({ kind: 'status', title: 'Kazma is thinking\u2026', state: 'running' });
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Kazma is thinking\u2026 type to queue your next message';
@@ -329,6 +337,7 @@
     _clearTurnTimers();
     _isGenerating = false;
     _awaitingApproval = false;
+    finalizeProgress(true);
     if (activeTypingEl && KS.hideTyping) {
       KS.hideTyping(activeTypingEl);
     }
@@ -343,6 +352,15 @@
       sendBtn.classList.remove('stop-mode');
       sendBtn.title = 'Send (Enter / Ctrl+Enter)';
       sendBtn.innerHTML = _SEND_SVG;
+    }
+    // Stamp finish time on the open assistant meta if still empty-ish
+    if (currentMsgEl) {
+      var meta = currentMsgEl.querySelector('.message-meta time');
+      if (meta) {
+        var now = new Date();
+        meta.setAttribute('datetime', now.toISOString());
+        meta.textContent = formatMsgTime(now);
+      }
     }
     // Finalize open assistant bubble so the next token starts a new one.
     currentMsgEl = null;
@@ -368,6 +386,11 @@
         store._turnActive = false;
       }
     } catch (e) {}
+    // endTurn already finalizes progress as stopped when we mark it first
+    if (_progressEl) {
+      var titleEl = _progressEl.querySelector('.agent-progress-title');
+      if (titleEl) titleEl.textContent = 'Stopped';
+    }
     endTurn();
   }
 
@@ -705,7 +728,12 @@
     // Show user message
     appendMessage('user', content, displayAttachName);
     scrollToBottom();
-    disableInput();
+
+    // Start a clean assistant turn (must clear currentMsgEl *before* beginTurn
+    // so progress attaches to a new bubble, not the previous reply).
+    currentMsgEl = null;
+    tokenAccum = '';
+    disableInput(); // → beginTurn → progress panel on new assistant bubble
 
     // Reset attachment state
     pendingText = '';
@@ -728,9 +756,6 @@
     // Sidebar: show this season immediately (before the server list round-trip).
     // Critical for WS path which used to skip loadSessions entirely.
     noteSessionActivity(text || content);
-
-    currentMsgEl = null;
-    tokenAccum = '';
 
     // Route over Central WebSocket Telemetry Bus if connected
     const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
@@ -757,6 +782,9 @@
         if (!currentMsgEl) {
           currentMsgEl = createAssistantMessage();
         }
+        if (!tokenAccum) {
+          logProgress({ kind: 'status', title: 'Writing reply\u2026', state: 'running' });
+        }
         tokenAccum += data.content;
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = KS.markdown(tokenAccum);
@@ -765,37 +793,34 @@
 
       onToolCall: function(data) {
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-        var content = currentMsgEl.querySelector('.message-content');
-        var box = document.createElement('div');
-        box.className = 'tool-call-box';
-        box.innerHTML = '<span class="tool-name">\u2699 ' + escapeHtml(data.tool_name) + '</span>' +
-          '<code class="tool-inputs">' + escapeHtml(truncateStr(data.inputs, 200)) + '</code>' +
-          '<span class="tool-status running">Running\u2026</span>';
-        content.appendChild(box);
-        scrollToBottom();
+        var inputs = data.inputs;
+        if (typeof inputs === 'object') {
+          try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
+        }
+        logProgress({
+          kind: 'tool',
+          title: data.tool_name || 'tool',
+          detail: truncateStr(String(inputs || ''), 160),
+          state: 'running',
+        });
       },
 
       onToolResult: function(data) {
         if (!currentMsgEl) return;
-        var content = currentMsgEl.querySelector('.message-content');
-        // Update last tool-call box
-        var boxes = content.querySelectorAll('.tool-call-box');
-        var lastBox = boxes.length ? boxes[boxes.length - 1] : null;
-        if (lastBox) {
-          var statusEl = lastBox.querySelector('.tool-status');
-          if (statusEl) { statusEl.textContent = 'Done'; statusEl.className = 'tool-status done'; }
-        }
-        // Add result box or active background task badge
         var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
-        var resultBox = document.createElement('div');
+        logProgress({
+          kind: 'tool',
+          title: data.tool_name || 'tool',
+          detail: truncateStr(String(data.result || ''), 200),
+          state: isSwarm ? 'running' : 'done',
+        });
         if (isSwarm) {
+          var content = currentMsgEl.querySelector('.message-content');
+          var resultBox = document.createElement('div');
           resultBox.className = 'swarm-bg-badge';
           resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>Background Task Active:</strong> ' + escapeHtml(truncateStr(data.result, 300)) + '</div>';
-        } else {
-          resultBox.className = 'tool-result-box';
-          resultBox.innerHTML = '<strong>Result:</strong> ' + escapeHtml(truncateStr(data.result, 500));
+          content.appendChild(resultBox);
         }
-        content.appendChild(resultBox);
         scrollToBottom();
       },
 
@@ -855,6 +880,12 @@
         // HITL: graph paused — render scope-aware approval card and lock input.
         KS.hideTyping(typingEl);
         activeTypingEl = null;
+        logProgress({
+          kind: 'status',
+          title: 'Waiting for approval',
+          detail: (data && (data.tool || data.message)) || '',
+          state: 'info',
+        });
         pauseForApproval(data);
         renderHitlCard(data);
         refreshSessionsSoon();
@@ -888,19 +919,196 @@
     }
   }
 
+  // ── Timestamps ────────────────────────────────────────
+  function formatMsgTime(isoOrDate) {
+    var d;
+    try {
+      d = isoOrDate ? new Date(isoOrDate) : new Date();
+      if (isNaN(d.getTime())) d = new Date();
+    } catch (e) {
+      d = new Date();
+    }
+    var now = new Date();
+    var sameDay = d.toDateString() === now.toDateString();
+    var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (sameDay) return time;
+    var day = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return day + ', ' + time;
+  }
+
+  // ── Live agent progress feed (per assistant turn) ─────
+  // Shows node routing, tool runs, YOLO heartbeats, and short status
+  // lines so the user can see work in progress (not a silent Stop pulse).
+  var _progressEl = null;
+  var _progressStepCount = 0;
+
+  function ensureProgressPanel() {
+    if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+    var content = currentMsgEl.querySelector('.message-content');
+    if (!content) return null;
+    var panel = content.querySelector('.agent-progress');
+    if (panel) {
+      _progressEl = panel;
+      return panel;
+    }
+    panel = document.createElement('div');
+    panel.className = 'agent-progress is-active';
+    panel.innerHTML =
+      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand progress">' +
+        '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
+        '<span class="agent-progress-title">Working\u2026</span>' +
+        '<span class="agent-progress-count">0 steps</span>' +
+        '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
+      '</div>' +
+      '<ul class="agent-progress-steps"></ul>';
+    // Insert progress *before* the final message text so the answer lands below steps
+    var textEl = content.querySelector('.message-text');
+    if (textEl) content.insertBefore(panel, textEl);
+    else content.appendChild(panel);
+    var header = panel.querySelector('.agent-progress-header');
+    function toggle() {
+      panel.classList.toggle('is-collapsed');
+      var chev = panel.querySelector('.agent-progress-chevron');
+      if (chev) chev.textContent = panel.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
+    }
+    if (header) {
+      header.addEventListener('click', toggle);
+      header.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      });
+    }
+    _progressEl = panel;
+    _progressStepCount = 0;
+    return panel;
+  }
+
+  /**
+   * @param {object} step
+   * @param {string} step.kind  status|tool|thought|plan|error|done
+   * @param {string} step.title short label
+   * @param {string} [step.detail] optional secondary line
+   * @param {string} [step.state] running|done|failed|info
+   */
+  function logProgress(step) {
+    if (!step) return;
+    var panel = ensureProgressPanel();
+    if (!panel) return;
+    var list = panel.querySelector('.agent-progress-steps');
+    if (!list) return;
+
+    var kind = step.kind || 'status';
+    var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
+    var title = String(step.title || '').trim() || '…';
+    var detail = step.detail != null ? String(step.detail) : '';
+
+    // Coalesce rapid identical status lines (heartbeats still update last row)
+    var last = list.lastElementChild;
+    if (last && kind === 'status' && last.dataset.kind === 'status' && last.dataset.title === title && !detail) {
+      last.querySelector('.step-time').textContent = formatMsgTime();
+      last.className = 'agent-progress-step step-' + kind + ' state-' + state;
+      scrollToBottom();
+      return;
+    }
+    // Update in-place when the same tool is completing
+    if (last && kind === 'tool' && state !== 'running' && last.dataset.kind === 'tool' && last.dataset.title === title) {
+      last.className = 'agent-progress-step step-tool state-' + state;
+      last.dataset.state = state;
+      var st = last.querySelector('.step-state');
+      if (st) st.textContent = state === 'done' ? 'Done' : (state === 'failed' ? 'Failed' : state);
+      if (detail) {
+        var det = last.querySelector('.step-detail');
+        if (!det) {
+          det = document.createElement('div');
+          det.className = 'step-detail';
+          last.appendChild(det);
+        }
+        det.textContent = truncateStr(detail, 240);
+      }
+      last.querySelector('.step-time').textContent = formatMsgTime();
+      scrollToBottom();
+      return;
+    }
+
+    _progressStepCount += 1;
+    var li = document.createElement('li');
+    li.className = 'agent-progress-step step-' + kind + ' state-' + state;
+    li.dataset.kind = kind;
+    li.dataset.title = title;
+    li.dataset.state = state;
+
+    var icon = kind === 'tool' ? '\u2699'
+      : (kind === 'thought' || kind === 'plan' ? '\u25C8'
+        : (kind === 'error' ? '\u26A0' : '\u2022'));
+
+    li.innerHTML =
+      '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
+      '<div class="step-body">' +
+        '<div class="step-line">' +
+          '<span class="step-title">' + escapeHtml(title) + '</span>' +
+          (kind === 'tool'
+            ? ' <span class="step-state">' + escapeHtml(state === 'running' ? 'Running\u2026' : (state === 'done' ? 'Done' : state)) + '</span>'
+            : '') +
+          '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
+        '</div>' +
+        (detail ? '<div class="step-detail">' + escapeHtml(truncateStr(detail, 240)) + '</div>' : '') +
+      '</div>';
+
+    list.appendChild(li);
+    // Cap DOM size on very long tool storms
+    while (list.children.length > 80) list.removeChild(list.firstChild);
+
+    var countEl = panel.querySelector('.agent-progress-count');
+    if (countEl) countEl.textContent = _progressStepCount + (_progressStepCount === 1 ? ' step' : ' steps');
+    var titleEl = panel.querySelector('.agent-progress-title');
+    if (titleEl && state === 'running') titleEl.textContent = 'Working\u2026';
+    if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
+
+    panel.classList.add('is-active');
+    panel.classList.remove('is-collapsed', 'is-done');
+    scrollToBottom();
+  }
+
+  function finalizeProgress(ok) {
+    if (!_progressEl) return;
+    var panel = _progressEl;
+    panel.classList.remove('is-active');
+    panel.classList.add('is-done');
+    var titleEl = panel.querySelector('.agent-progress-title');
+    if (titleEl) titleEl.textContent = ok === false ? 'Stopped' : 'Activity';
+    var pulse = panel.querySelector('.agent-progress-pulse');
+    if (pulse) pulse.classList.add('is-off');
+    // Auto-collapse long activity logs so the answer stays readable
+    if (_progressStepCount >= 4) {
+      panel.classList.add('is-collapsed');
+      var chev = panel.querySelector('.agent-progress-chevron');
+      if (chev) chev.textContent = '\u25B8';
+    }
+    _progressEl = null;
+  }
+
   // ── Message rendering ─────────────────────────────────
-  function appendMessage(role, content, attachmentName) {
+  function appendMessage(role, content, attachmentName, ts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
 
     var avatar = role === 'user' ? 'You' : 'K';
     var avatarBg = role === 'user' ? 'var(--accent)' : 'var(--bg-surface)';
+    var when = formatMsgTime(ts);
+    var iso = '';
+    try {
+      iso = ts ? new Date(ts).toISOString() : new Date().toISOString();
+    } catch (e) {
+      iso = new Date().toISOString();
+    }
 
     wrapper.innerHTML =
       '<div class="message-avatar" style="background:' + avatarBg + '">' + avatar + '</div>' +
       '<div class="message-content">' +
         '<div class="message-text">' + (role === 'user' ? escapeHtml(content) : KS.markdown(content)) + '</div>' +
-        '<div class="message-meta">' + (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') + 'just now</div>' +
+        '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
+          (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
+          '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
+        '</div>' +
       '</div>';
 
     if (role === 'user') {
@@ -1587,7 +1795,7 @@
 
         messages.forEach(function(msg) {
           var role = msg.role === 'assistant' ? 'assistant' : 'user';
-          appendMessage(role, msg.content || '');
+          appendMessage(role, msg.content || '', null, msg.ts || msg.timestamp || msg.created_at || null);
         });
         scrollToBottom();
         checkPendingApprovals();
@@ -1786,10 +1994,15 @@
     },
 
     // Telemetry WS hooks — called by agentStore
+    logProgress: logProgress,
+    finalizeProgress: finalizeProgress,
     appendLiveToken: function(content) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      if (!tokenAccum) {
+        logProgress({ kind: 'status', title: 'Writing reply\u2026', state: 'running' });
+      }
       tokenAccum += content;
       var textEl = currentMsgEl.querySelector('.message-text');
       if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
@@ -1798,10 +2011,12 @@
     appendErrorMessage: function(errMsg) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;
+      logProgress({ kind: 'error', title: 'Error', detail: String(errMsg || ''), state: 'failed' });
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       var textEl = currentMsgEl.querySelector('.message-text');
       if (textEl) textEl.innerHTML = '<div class="error-message">⚠️ ' + escapeHtml(errMsg) + '</div>';
       // endTurn is invoked by agentStore after graph_error; keep bubble closed.
+      finalizeProgress(false);
       currentMsgEl = null;
       tokenAccum = '';
     },

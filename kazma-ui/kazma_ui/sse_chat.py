@@ -1030,7 +1030,10 @@ def create_sse_chat_router(
             cost_breaker.record_user_interaction()
 
         # ── Persist UI projection (display only) ───────────────────
-        session.messages.append({"role": "user", "content": user_message})
+        from datetime import UTC, datetime as _dt
+
+        _ts = _dt.now(UTC).isoformat()
+        session.messages.append({"role": "user", "content": user_message, "ts": _ts})
         # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         try:
             _get_store().put(session)

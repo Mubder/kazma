@@ -1569,7 +1569,7 @@ tbody tr:last-child td {
 .thinking-indicator {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: var(--sp-2) var(--sp-4);
   color: var(--text-tertiary);
   font-size: 0.875rem;
@@ -1583,6 +1583,147 @@ tbody tr:last-child td {
 }
 .thinking-indicator .dot:nth-child(1) { animation-delay: -0.32s; }
 .thinking-indicator .dot:nth-child(2) { animation-delay: -0.16s; }
+.thinking-indicator .thinking-text {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.thinking-indicator .thinking-node {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+/* ── Agent live progress (per-turn activity log) ─────────────────── */
+.agent-progress {
+  margin: 0 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated, var(--bg-panel));
+  overflow: hidden;
+  font-size: 0.8rem;
+}
+.agent-progress.is-active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.agent-progress.is-done {
+  opacity: 0.92;
+}
+.agent-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
+}
+.agent-progress-header:hover {
+  background: var(--bg-hover);
+}
+.agent-progress-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: agentPulse 1.4s ease-out infinite;
+}
+.agent-progress-pulse.is-off,
+.agent-progress.is-done .agent-progress-pulse {
+  animation: none;
+  background: var(--text-muted);
+  box-shadow: none;
+}
+@keyframes agentPulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.agent-progress-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-progress-count {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+.agent-progress-chevron {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+.agent-progress-steps {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-subtle);
+}
+.agent-progress.is-collapsed .agent-progress-steps {
+  display: none;
+}
+.agent-progress-step {
+  display: flex;
+  gap: 8px;
+  padding: 5px 12px;
+  align-items: flex-start;
+  color: var(--text-secondary);
+}
+.agent-progress-step .step-icon {
+  flex-shrink: 0;
+  width: 1.1em;
+  text-align: center;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+.agent-progress-step .step-body { flex: 1; min-width: 0; }
+.agent-progress-step .step-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.agent-progress-step .step-title {
+  color: var(--text-primary);
+  font-weight: 500;
+  word-break: break-word;
+}
+.agent-progress-step .step-state {
+  font-size: 0.72rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+.agent-progress-step.state-done .step-state { color: var(--success, #34d399); }
+.agent-progress-step.state-failed .step-state,
+.agent-progress-step.step-error .step-title { color: var(--danger, #f87171); }
+.agent-progress-step .step-time {
+  margin-inline-start: auto;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.agent-progress-step .step-detail {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 3.6em;
+  overflow: hidden;
+}
+.agent-progress-step.step-plan .step-title { color: var(--accent); }
+.agent-progress-step.step-thought .step-title { font-style: italic; color: var(--text-secondary); }
+.message-meta time {
+  font-variant-numeric: tabular-nums;
+}
 
 /* ── 14. Skills & MCP Cards ─────────────────────────────────────── */
 .skills-grid {

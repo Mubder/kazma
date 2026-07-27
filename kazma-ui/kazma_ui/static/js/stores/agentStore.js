@@ -36,6 +36,10 @@ document.addEventListener('alpine:init', () => {
     _chat() {
       return window.KazmaChat || null;
     },
+    _progress(step) {
+      const chat = this._chat();
+      if (chat && typeof chat.logProgress === 'function') chat.logProgress(step);
+    },
     _beginTurn() {
       this._turnActive = true;
       this.isThinking = true;
@@ -78,6 +82,24 @@ document.addEventListener('alpine:init', () => {
       this.activeTool = null;
       this.pendingApproval = null;
       this.statusMessage = 'Kazma is thinking...';
+    },
+
+    /** Keep the bottom thinking banner in sync with live status text. */
+    _syncThinkingBanner() {
+      try {
+        const el = document.getElementById('thinking-indicator');
+        if (!el) return;
+        let text = el.querySelector('.thinking-text');
+        if (!text) {
+          // Vanilla path may have replaced children via showTyping
+          const spans = el.querySelectorAll('span');
+          // last text node area
+        }
+        text = el.querySelector('.thinking-text');
+        if (text && this.statusMessage) {
+          text.textContent = this.statusMessage;
+        }
+      } catch (e) { /* ignore */ }
     },
 
     // ── Connection Lifecycle ─────────────────────────────────
@@ -269,12 +291,31 @@ document.addEventListener('alpine:init', () => {
             this._turnActive = true;
             this.statusMessage = frame.message || data.message || 'Kazma is thinking...';
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
+            this._progress({
+              kind: 'status',
+              title: this.statusMessage,
+              detail: this.activeNode ? ('Node: ' + this.activeNode) : '',
+              state: 'running',
+            });
+            this._syncThinkingBanner();
           } else if (statusVal === 'routing_node') {
             this.isThinking = true;
             this._turnActive = true;
             this.activeNode = frame.active_node || data.active_node || 'Supervisor';
             this.statusMessage = `Routing: ${this.activeNode}`;
+            this._progress({
+              kind: 'plan',
+              title: 'Routing → ' + this.activeNode,
+              state: 'running',
+            });
+            this._syncThinkingBanner();
           } else if (statusVal === 'paused_for_approval') {
+            this._progress({
+              kind: 'status',
+              title: 'Waiting for approval',
+              detail: frame.tool || data.tool || data.message || '',
+              state: 'info',
+            });
             this._pauseForApproval({
               thread_id: frame.thread_id || data.thread_id || this.sessionId,
               tool: frame.tool || data.tool || '',
@@ -294,24 +335,52 @@ document.addEventListener('alpine:init', () => {
           this.isThinking = true;
           this._turnActive = true;
           const toolStatus = frame.status || data.status || 'tool_running';
+          const tName = frame.tool_name || data.tool_name || 'tool';
           if (type === 'tool_start' || toolStatus === 'tool_running') {
             this.activeTool = {
-              name: frame.tool_name || data.tool_name || 'tool',
+              name: tName,
               status: 'running',
               inputs: frame.input || data.inputs || null,
               result: null,
               error: null,
             };
+            let detail = '';
+            try {
+              const raw = this.activeTool.inputs;
+              detail = typeof raw === 'string' ? raw : JSON.stringify(raw || {});
+            } catch (e) {
+              detail = String(this.activeTool.inputs || '');
+            }
+            this._progress({
+              kind: 'tool',
+              title: tName,
+              detail: (detail || '').slice(0, 160),
+              state: 'running',
+            });
+            this.statusMessage = 'Running ' + tName + '…';
+            this._syncThinkingBanner();
           } else if (toolStatus === 'tool_completed') {
             if (this.activeTool) {
               this.activeTool.status = 'completed';
               this.activeTool.result = frame.output || data.result || 'Done';
             }
+            this._progress({
+              kind: 'tool',
+              title: tName,
+              detail: String(frame.output || data.result || '').slice(0, 200),
+              state: 'done',
+            });
           } else if (toolStatus === 'tool_failed') {
             if (this.activeTool) {
               this.activeTool.status = 'failed';
               this.activeTool.error = frame.output || data.error || 'Execution failed';
             }
+            this._progress({
+              kind: 'tool',
+              title: tName,
+              detail: String(frame.output || data.error || 'failed').slice(0, 200),
+              state: 'failed',
+            });
           }
           break;
         }
@@ -321,10 +390,22 @@ document.addEventListener('alpine:init', () => {
           if (this.activeTool) {
             this.activeTool.status = 'completed';
             this.activeTool.result = frame.output || 'Done';
+            this._progress({
+              kind: 'tool',
+              title: this.activeTool.name || 'tool',
+              detail: String(frame.output || 'Done').slice(0, 200),
+              state: 'done',
+            });
           }
           break;
 
         case 'approval_required':
+          this._progress({
+            kind: 'status',
+            title: 'Waiting for approval',
+            detail: frame.tool || data.tool || frame.message || '',
+            state: 'info',
+          });
           this._pauseForApproval({
             thread_id: frame.thread_id || data.thread_id || this.sessionId,
             tool: frame.tool || data.tool || '',
@@ -342,6 +423,12 @@ document.addEventListener('alpine:init', () => {
           this.statusMessage =
             (data && data.message) ||
             (type === 'approval_resuming' ? 'Resuming execution...' : 'Processing approval...');
+          this._progress({
+            kind: 'thought',
+            title: this.statusMessage,
+            state: 'running',
+          });
+          this._syncThinkingBanner();
           break;
 
         case 'approval_complete':

@@ -77,13 +77,6 @@
       </div>
     </div>
 
-    <!-- Reactive Active Tool Status Card -->
-    <div x-data x-cloak x-show="$store.agent && $store.agent.activeTool" class="tool-call-box" style="margin:8px 16px;">
-      <span class="tool-name">⚙ <span x-text="$store.agent?.activeTool?.name || 'tool'"></span></span>
-      <span class="tool-status" :class="$store.agent?.activeTool?.status || 'running'"
-            x-text="$store.agent?.activeTool?.status === 'running' ? 'Running…' : ($store.agent?.activeTool?.status === 'completed' ? 'Done' : 'Failed')"></span>
-    </div>
-
     <!-- Reactive HITL Pending Approval Card -->
     <div x-data x-cloak x-show="$store.agent && $store.agent.pendingApproval" class="hitl-approval-card" style="margin:12px 16px;">
       <div class="hitl-approval-header">⚠ Approval Required</div>
@@ -102,10 +95,14 @@
       </div>
     </div>
 
-    <!-- Reactive "Kazma is Thinking..." Banner -->
-    <div id="thinking-indicator" class="thinking-indicator" x-data x-cloak x-show="$store.agent && $store.agent.isThinking">
+    <!-- Live status strip (detailed steps live in the message progress panel) -->
+    <div id="thinking-indicator" class="thinking-indicator" x-data x-cloak
+         x-show="$store.agent && $store.agent.isThinking">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="thinking-text">{{ t('chat.thinking') }}</span>
+      <span class="thinking-text"
+            x-text="($store.agent && $store.agent.statusMessage) || '{{ t('chat.thinking') }}'"></span>
+      <span class="thinking-node" x-show="$store.agent && $store.agent.activeNode"
+            x-text="$store.agent && $store.agent.activeNode ? ('· ' + $store.agent.activeNode) : ''"></span>
     </div>
 
     <!-- Chat Input Area -->

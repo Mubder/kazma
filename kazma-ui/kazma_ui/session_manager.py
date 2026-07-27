@@ -80,10 +80,11 @@ class ChatSession:
         # Deduplicate consecutive identical messages
         if self.messages and self.messages[-1].get("role") == role and self.messages[-1].get("content") == content:
             return
-        self.messages.append({"role": role, "content": content})
+        now = datetime.now(UTC).isoformat()
+        self.messages.append({"role": role, "content": content, "ts": now})
         if len(self.messages) > MAX_MESSAGES_PER_SESSION:
             self.messages = self.messages[-MAX_MESSAGES_PER_SESSION:]
-        self.updated_at = datetime.now(UTC).isoformat()
+        self.updated_at = now
 
     def to_summary(self) -> dict[str, Any]:
         """Return a serializable summary used by the session-list API."""
