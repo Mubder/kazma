@@ -121,26 +121,56 @@
 
   <!-- ── Memory & Governance ── -->
   <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
-    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;">
+    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;gap:12px;flex-wrap:wrap;">
       <span><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('dashboard.memory_governance') }}</span>
-      <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
-    </h3>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
-      <span style="font-size:0.85rem;color:var(--text-secondary);line-height:1.4;" id="memory-status-desc">
-        {{ t('dashboard.memory_desc_active') }}
+      <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
+        <button type="button" id="memory-refresh-btn" class="btn btn-sm" style="font-size:0.72rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="{{ t('dashboard.memory_refresh') }}">{{ t('dashboard.memory_refresh') }}</button>
       </span>
+    </h3>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.45;" id="memory-status-desc">
+          {{ t('dashboard.memory_desc_active') }}
+        </div>
+        <div id="memory-pipeline" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;"></div>
+      </div>
       <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
         {{ t('dashboard.install_ml') }}
       </button>
     </div>
 
-    <!-- Live component health board (green / yellow / red) -->
-    <div style="margin-top:14px;">
+    <!-- KPI strip: store sizes + graph -->
+    <div id="memory-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px;">
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.vector_store') }}</div>
+        <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">L1 Chroma</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.fts5_db') }}</div>
+        <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">L3 BM25</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_graph_title') }}</div>
+        <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">L2 graph</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
+        <div id="kpi-health-summary" style="font-size:1.05rem;font-weight:700;margin-top:8px;font-family:var(--font-mono);">–</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.memory_components') }}</div>
+      </div>
+    </div>
+
+    <!-- Live component health board (grouped) -->
+    <div style="margin-top:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
         <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">{{ t('dashboard.memory_components') }}</span>
         <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
       </div>
-      <div id="memory-components-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;">
+      <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:14px;">
         <div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">
           {{ t('dashboard.memory_probing') }}
         </div>
@@ -149,13 +179,19 @@
     </div>
 
     <!-- Property graph explorer -->
-    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);">
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border-subtle);">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
         <div>
           <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">
             {{ t('dashboard.memory_graph_title') }}
           </div>
           <div id="kg-stats-line" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);">–</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:0.68rem;color:var(--text-muted);">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(145,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_person') }}</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(280,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_chunk') }}</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(40,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_tag') }}</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(190,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_entity') }}</span>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <input id="kg-search-input" type="search" placeholder="{{ t('dashboard.memory_graph_search_ph') }}"
@@ -165,17 +201,24 @@
           <button id="kg-clear-btn" class="btn btn-sm btn-danger" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_clear') }}</button>
         </div>
       </div>
-      <div id="kg-canvas-wrap" style="position:relative;height:280px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
-        <canvas id="kg-canvas" width="800" height="280" style="width:100%;height:100%;display:block;"></canvas>
-        <div id="kg-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">
-          {{ t('dashboard.memory_graph_empty') }}
+      <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(220px,0.8fr);gap:12px;align-items:stretch;">
+        <div id="kg-canvas-wrap" style="position:relative;height:300px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
+          <canvas id="kg-canvas" width="800" height="300" style="width:100%;height:100%;display:block;"></canvas>
+          <div id="kg-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">
+            {{ t('dashboard.memory_graph_empty') }}
+          </div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:300px;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">
+            {{ t('dashboard.memory_graph_nodes_list') }}
+          </div>
+          <div id="kg-results" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:260px;"></div>
         </div>
       </div>
-      <div id="kg-results" style="margin-top:10px;max-height:160px;overflow-y:auto;font-size:0.78rem;"></div>
     </div>
 
     <!-- Expansion Deck Toggle -->
-    <div style="margin-top:12px;">
+    <div style="margin-top:14px;">
       <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
         <span id="deck-toggle-arrow"><span class="ki" data-icon="play" aria-hidden="true"></span></span> {{ t('dashboard.backup_maintenance') }}
       </button>
@@ -185,22 +228,22 @@
     <div id="maintenance-deck" style="display:none;margin-top:14px;padding-top:10px;animation: fadeIn 0.3s ease;">
       
       <!-- Metrics & Actions Grid -->
-      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px;">
-        <!-- FTS5 Metrics Card -->
+      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));gap:16px;margin-bottom:16px;">
         <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.fts5_db') }}</h4>
           <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="fts5-size-metric">–</div>
           <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 {{ t('dashboard.records') }}</span>
         </div>
-
-        <!-- Vector Metrics Card -->
         <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.vector_store') }}</h4>
           <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="vector-size-metric">–</div>
           <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 {{ t('dashboard.vectors') }}</span>
         </div>
-
-        <!-- Dynamic Actions Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.memory_graph_title') }}</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="graph-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="graph-count-metric">0 {{ t('dashboard.memory_graph_edges') }}</span>
+        </div>
         <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
@@ -370,7 +413,14 @@
     graphConfirmClear: "{{ t('dashboard.memory_graph_confirm_clear') }}",
     graphCleared: "{{ t('dashboard.memory_graph_cleared') }}",
     graphNodes: "{{ t('dashboard.memory_graph_nodes') }}",
-    graphEdges: "{{ t('dashboard.memory_graph_edges') }}"
+    graphEdges: "{{ t('dashboard.memory_graph_edges') }}",
+    pipeEnabled: "{{ t('dashboard.memory_pipe_enabled') }}",
+    pipePerTurn: "{{ t('dashboard.memory_pipe_per_turn') }}",
+    pipeAutoStore: "{{ t('dashboard.memory_pipe_auto_store') }}",
+    pipeConsolidate: "{{ t('dashboard.memory_pipe_consolidator') }}",
+    groupFeatures: "{{ t('dashboard.memory_group_features') }}",
+    groupLayers: "{{ t('dashboard.memory_group_layers') }}",
+    groupPackages: "{{ t('dashboard.memory_group_packages') }}"
   };
 
   async function _loadSessions() {
@@ -544,6 +594,70 @@
     };
   }
 
+  function _memCardHtml(c) {
+    const s = _chipStyle(c.status || (c.ok ? 'ok' : 'error'));
+    const statusLabel = (c.status || (c.ok ? 'ok' : 'error')).toUpperCase();
+    const detail = (c.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const name = (c.name || c.id || 'component').replace(/</g, '&lt;');
+    return (
+      '<div style="padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
+          '<span style="font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
+          '<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
+            '<span style="width:7px;height:7px;border-radius:50%;background:' + s.dot + ';box-shadow:0 0 6px ' + s.dot + ';"></span>' +
+            statusLabel +
+          '</span>' +
+        '</div>' +
+        '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);">' + detail + '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderMemoryPipeline(data) {
+    var el = document.getElementById('memory-pipeline');
+    if (!el) return;
+    var flags = data.flags || {};
+    var chips = [
+      { id: 'memory_enabled', label: I18N.pipeEnabled || 'Memory' },
+      { id: 'per_turn_retrieval', label: I18N.pipePerTurn || 'Per-turn RAG' },
+      { id: 'auto_store', label: I18N.pipeAutoStore || 'Auto-store' },
+      { id: 'consolidation', label: I18N.pipeConsolidate || 'Consolidator' },
+      { id: 'layer_l1', label: 'L1' },
+      { id: 'layer_l2', label: 'L2' },
+      { id: 'layer_l3', label: 'L3' },
+      { id: 'layer_l4', label: 'L4' },
+    ];
+    el.innerHTML = chips.map(function(ch) {
+      var f = flags[ch.id] || {};
+      var st = f.status || (f.ok ? 'ok' : 'off');
+      var s = _chipStyle(st);
+      return (
+        '<span title="' + String(f.detail || ch.label).replace(/"/g, '&quot;') + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
+          '<span style="width:6px;height:6px;border-radius:50%;background:' + s.dot + ';"></span>' + ch.label +
+        '</span>'
+      );
+    }).join('');
+  }
+
+  function renderMemoryKpis(data) {
+    var g = data.graph || {};
+    var set = function(id, text) {
+      var n = document.getElementById(id);
+      if (n) n.textContent = text;
+    };
+    set('kpi-vector-count', data.vector_count != null ? String(data.vector_count) : '–');
+    set('kpi-vector-size', data.vector_size != null ? (formatBytes(data.vector_size) + ' · L1 Chroma') : 'L1 Chroma');
+    set('kpi-fts-count', data.fts5_count != null ? String(data.fts5_count) : '–');
+    set('kpi-fts-size', data.fts5_size != null ? (formatBytes(data.fts5_size) + ' · L3 BM25') : 'L3 BM25');
+    set('kpi-graph-nodes', g.nodes != null ? String(g.nodes) : '–');
+    set('kpi-graph-edges', (g.edges != null ? g.edges + ' edges' : 'L2 graph') + (g.backend ? ' · ' + g.backend : ''));
+    var comps = Array.isArray(data.components) ? data.components : [];
+    var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
+    set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' OK') : (data.summary || '–'));
+    set('graph-size-metric', g.nodes != null ? String(g.nodes) + ' nodes' : '–');
+    set('graph-count-metric', (g.edges != null ? g.edges : 0) + ' ' + (I18N.graphEdges || 'edges'));
+  }
+
   function renderMemoryComponents(data) {
     const grid = document.getElementById('memory-components-grid');
     const summaryEl = document.getElementById('memory-health-summary');
@@ -555,27 +669,45 @@
       summaryEl.textContent = data.summary || (components.length ? `${components.filter(c => c.status === 'ok').length}/${components.length} OK` : '');
     }
 
+    renderMemoryPipeline(data);
+    renderMemoryKpis(data);
+
     if (!components.length) {
       grid.innerHTML = `<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">No component data yet.</div>`;
     } else {
-      grid.innerHTML = components.map(function(c) {
-        const s = _chipStyle(c.status || (c.ok ? 'ok' : 'error'));
-        const statusLabel = (c.status || (c.ok ? 'ok' : 'error')).toUpperCase();
-        const detail = (c.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const name = (c.name || c.id || 'component').replace(/</g, '&lt;');
+      var groups = [
+        { title: I18N.groupFeatures || 'Features', ids: ['memory_enabled', 'per_turn_retrieval', 'auto_store', 'consolidation'] },
+        { title: I18N.groupLayers || 'Memory layers', ids: ['embedder', 'vector_memory', 'layer_l1', 'layer_l2', 'layer_l3', 'layer_l4'] },
+        { title: I18N.groupPackages || 'Packages & stores', ids: ['pkg_chromadb', 'pkg_st', 'pkg_sqlite_vec', 'pkg_psycopg', 'pkg_lg_pg', 'store_config', 'store_checkpoints'] },
+      ];
+      var byId = {};
+      components.forEach(function(c) { byId[c.id] = c; });
+      var used = {};
+      var html = groups.map(function(g) {
+        var cards = g.ids.map(function(id) { return byId[id]; }).filter(Boolean);
+        cards.forEach(function(c) { used[c.id] = true; });
+        if (!cards.length) return '';
         return (
-          '<div style="padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
-            '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
-              '<span style="font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
-              '<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
-                '<span style="width:7px;height:7px;border-radius:50%;background:' + s.dot + ';box-shadow:0 0 6px ' + s.dot + ';"></span>' +
-                statusLabel +
-              '</span>' +
+          '<div>' +
+            '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-bottom:6px;">' + g.title + '</div>' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">' +
+              cards.map(_memCardHtml).join('') +
             '</div>' +
-            '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);">' + detail + '</div>' +
           '</div>'
         );
       }).join('');
+      var rest = components.filter(function(c) { return !used[c.id]; });
+      if (rest.length) {
+        html += (
+          '<div>' +
+            '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-bottom:6px;">Other</div>' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">' +
+              rest.map(_memCardHtml).join('') +
+            '</div>' +
+          '</div>'
+        );
+      }
+      grid.innerHTML = html;
     }
 
     const issues = Array.isArray(data.issues) ? data.issues : [];
@@ -870,14 +1002,14 @@
       const ftsCountEl = document.getElementById('fts5-count-metric');
       if (ftsSizeEl && data.fts5_size !== undefined) {
         ftsSizeEl.textContent = formatBytes(data.fts5_size);
-        ftsCountEl.textContent = `${data.fts5_count || 0} ${I18N.records}`;
+        if (ftsCountEl) ftsCountEl.textContent = `${data.fts5_count || 0} ${I18N.records}`;
       }
 
       const vecSizeEl = document.getElementById('vector-size-metric');
       const vecCountEl = document.getElementById('vector-count-metric');
       if (vecSizeEl && data.vector_size !== undefined) {
         vecSizeEl.textContent = formatBytes(data.vector_size);
-        vecCountEl.textContent = `${data.vector_count || 0} ${I18N.vectors}`;
+        if (vecCountEl) vecCountEl.textContent = `${data.vector_count || 0} ${I18N.vectors}`;
       }
 
     } catch (e) {
@@ -885,15 +1017,24 @@
     }
   }
 
+  var memoryRefreshBtn = document.getElementById('memory-refresh-btn');
+  if (memoryRefreshBtn) {
+    memoryRefreshBtn.addEventListener('click', function() {
+      pollMemoryStatus();
+      if (typeof loadKnowledgeGraph === 'function') loadKnowledgeGraph('');
+    });
+  }
+
   if (installBtn) {
     installBtn.addEventListener('click', async function() {
       installBtn.disabled = true;
       installBtn.textContent = I18N.installing;
       try {
+        // Prefer full [rag] extra (chromadb + sentence-transformers + sqlite-vec)
         await fetch('/api/system/install', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ package_name: 'sentence-transformers' })
+          body: JSON.stringify({ extra: 'rag' })
         });
       } catch (e) {
         window.kazmaAlert({ title: 'Install failed', message: I18N.installFailed, variant: 'btn-danger' });
