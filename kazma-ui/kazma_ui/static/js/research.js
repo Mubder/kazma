@@ -138,10 +138,51 @@
 
     viewDetail: function (id) {
       currentId = id;
-      // Hide the list, show only the detail view (replaces the list, not appended below).
       $('research-list').style.display = 'none';
       $('research-detail').style.display = 'block';
       $('research-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      // Pipeline papers (not swarm tasks)
+      if (String(id).indexOf('paper:') === 0) {
+        var paper = null;
+        for (var i = 0; i < allTasks.length; i++) {
+          if (allTasks[i].id === id) { paper = allTasks[i]; break; }
+        }
+        if (!paper || !paper.report_path) {
+          toast('Paper not found', 'error');
+          return;
+        }
+        $('research-detail-title').textContent = (paper.prompt || 'Paper').slice(0, 100);
+        $('research-detail-meta').innerHTML =
+          '<span>Pipeline paper</span> · ' +
+          (paper.sources != null ? '<span>Sources: ' + paper.sources + '</span> · ' : '') +
+          '<span dir="ltr">' + esc(paper.report_path) + '</span>';
+        var el = $('research-detail-output');
+        el.className = 'markdown-body bidi-content';
+        el.textContent = 'Loading…';
+        fetch('/api/research/papers/file?path=' + encodeURIComponent(paper.report_path), {
+          credentials: 'same-origin',
+        })
+          .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+          .then(function (md) {
+            if (window.KazmaStream && KazmaStream.markdown) {
+              el.innerHTML = KazmaStream.markdown(md);
+            } else {
+              el.textContent = md;
+            }
+            if (window.KazmaBidi) KazmaBidi.apply(el, md);
+            var archBtn = $('detail-archive-btn');
+            var restBtn = $('detail-restore-btn');
+            if (archBtn) archBtn.style.display = 'none';
+            if (restBtn) restBtn.style.display = 'none';
+          })
+          .catch(function () {
+            el.textContent = 'Could not load report file.';
+            toast('Could not load paper', 'error');
+          });
+        return;
+      }
+
       fetch('/api/research/tasks/' + encodeURIComponent(id), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
@@ -149,6 +190,7 @@
           var t = data.task;
           $('research-detail').style.display = 'block';
           $('research-detail-title').textContent = (t.prompt || 'Research').slice(0, 80);
+          if (window.KazmaBidi) KazmaBidi.apply($('research-detail-title'), t.prompt || '');
           $('research-detail-meta').innerHTML =
             '<span>Cost: <strong>$' + (t.cost || 0).toFixed(4) + '</strong></span> · ' +
             '<span>Tokens: ' + (t.tokens || 0) + '</span> · ' +
@@ -157,15 +199,14 @@
           var output = t.aggregated_output || t.synthesized_output ||
             (t.worker_results && t.worker_results[0] ? t.worker_results[0].output : '') ||
             '(no output)';
-          // Render as markdown (formatted) — same renderer as chat messages.
           var el = $('research-detail-output');
-          el.className = 'markdown-body';
+          el.className = 'markdown-body bidi-content';
           if (window.KazmaStream && KazmaStream.markdown) {
             el.innerHTML = KazmaStream.markdown(output);
           } else {
             el.textContent = output;
           }
-          // Show archive or restore button depending on state.
+          if (window.KazmaBidi) KazmaBidi.apply(el, output);
           var isArchived = t.metadata && t.metadata.archived;
           var archBtn = $('detail-archive-btn');
           var restBtn = $('detail-restore-btn');
@@ -177,20 +218,39 @@
     exportCurrent: function (fmt) {
       if (!currentId) { toast('Select a research result first', 'error'); return; }
       toast('Exporting to ' + fmt + '…', 'info');
-      fetch('/api/research/' + encodeURIComponent(currentId) + '/export', {
+      // Pipeline papers: use dedicated export that reads report.md
+      var exportUrl = String(currentId).indexOf('paper:') === 0
+        ? '/api/research/papers/export'
+        : '/api/research/' + encodeURIComponent(currentId) + '/export';
+      var body = String(currentId).indexOf('paper:') === 0
+        ? (function () {
+            var paper = null;
+            for (var i = 0; i < allTasks.length; i++) {
+              if (allTasks[i].id === currentId) { paper = allTasks[i]; break; }
+            }
+            return {
+              format: fmt,
+              report_path: paper && paper.report_path,
+              topic: paper && paper.prompt,
+            };
+          })()
+        : { format: fmt };
+      fetch(exportUrl, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format: fmt }),
+        body: JSON.stringify(body),
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.error) { toast('Export failed: ' + data.error, 'error'); return; }
           toast('Exported: ' + (data.filename || fmt), 'success');
-          // Trigger a file download. Use the bare filename so the server
-          // resolves it from kazma-data/documents/.
-          if (data.filename) {
+          if (data.download_url) {
+            window.open(data.download_url, '_blank');
+          } else if (data.filename) {
             window.open('/api/research/download?path=' + encodeURIComponent(data.filename), '_blank');
+          } else if (data.path) {
+            window.open('/api/research/download?path=' + encodeURIComponent(data.path), '_blank');
           }
         })
         .catch(function () { toast('Export request failed', 'error'); });
@@ -386,8 +446,8 @@
             : ''))
         : ('<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
            '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>');
-      var onclick = isPaper ? '' : ' onclick="KazmaResearch.viewDetail(\'' + t.id + '\')"';
-      return '<div class="card" style="padding:12px 16px;cursor:' + (isPaper ? 'default' : 'pointer') + ';max-width:100%;overflow:hidden;box-sizing:border-box;"' + onclick + '>' +
+      var onclick = ' onclick="KazmaResearch.viewDetail(\'' + String(t.id).replace(/'/g, "\\'") + '\')"';
+      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;"' + onclick + '>' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
             '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +

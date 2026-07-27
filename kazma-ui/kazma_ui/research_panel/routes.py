@@ -167,6 +167,85 @@ def create_research_router() -> APIRouter:
         )
         return FileResponse(str(target), filename=target.name, media_type=media)
 
+    @router.post("/api/research/papers/export")
+    async def export_paper(body: dict[str, Any]) -> JSONResponse:
+        """Export a pipeline paper (report.md) to markdown / docx / pdf."""
+        fmt = str(body.get("format") or "markdown").strip().lower()
+        report_path = str(body.get("report_path") or "").strip().replace("\\", "/")
+        topic = str(body.get("topic") or "Research report").strip()
+        if not report_path:
+            return JSONResponse({"error": "report_path required"}, status_code=400)
+
+        # Resolve file via same logic as get_paper_file
+        from kazma_core.tools.research_pipeline import _candidate_report_roots
+
+        target: Path | None = None
+        if Path(report_path).is_absolute() and Path(report_path).is_file():
+            target = Path(report_path)
+        else:
+            for root in _candidate_report_roots():
+                cand = (root / report_path).resolve()
+                if cand.is_file():
+                    target = cand
+                    break
+        if target is None or not target.is_file():
+            return JSONResponse({"error": "report not found"}, status_code=404)
+
+        try:
+            md = target.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+        # Build sections for document generator
+        sections: list[dict[str, str]] = []
+        cur_h = "Report"
+        cur_b: list[str] = []
+        for line in md.splitlines():
+            if line.startswith("#"):
+                if cur_b or sections:
+                    sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+                cur_h = line
+                cur_b = []
+            else:
+                cur_b.append(line)
+        if cur_b or not sections:
+            sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+
+        title = topic.replace("[Paper] ", "")[:120] or "Research report"
+        try:
+            if fmt == "docx":
+                from kazma_skills.native.document_generator.tools import generate_docx
+
+                msg = await generate_docx(title, sections)
+            elif fmt == "pdf":
+                from kazma_skills.native.document_generator.tools import generate_pdf
+
+                msg = await generate_pdf(title, sections)
+            else:
+                from kazma_skills.native.document_generator.tools import generate_markdown_doc
+
+                msg = await generate_markdown_doc(title, sections)
+        except Exception as exc:
+            logger.exception("[research] paper export failed")
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+        path = ""
+        if isinstance(msg, str) and "Saved to:" in msg:
+            path = msg.split("Saved to:")[-1].strip()
+        filename = Path(path).name if path else ""
+        return JSONResponse(
+            {
+                "ok": True,
+                "format": fmt,
+                "message": msg,
+                "path": path,
+                "filename": filename,
+                "download_url": (
+                    f"/api/research/download?path={filename}" if filename else ""
+                ),
+            }
+        )
+
     @router.get("/api/research/tasks")
     async def list_research(
         page: int = 1,

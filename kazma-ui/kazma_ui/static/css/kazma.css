@@ -1369,12 +1369,30 @@ tbody tr:last-child td {
 .skill-desc,
 .tool-desc-ar-safe,
 .step-detail,
-.agent-plan-item .plan-text {
-  unicode-bidi: plaintext;
+.agent-plan-item .plan-text,
+.markdown-body,
+#research-detail-output {
+  unicode-bidi: isolate;
+}
+/* Arabic-dominant blocks: force RTL base even when page UI is English/LTR */
+.ar-dominant,
+[dir="rtl"].bidi-content,
+[dir="rtl"].markdown-body,
+[dir="rtl"].message-text {
+  direction: rtl;
+  text-align: start;
+  unicode-bidi: isolate;
+}
+.en-dominant,
+[dir="ltr"].bidi-content,
+[dir="ltr"].message-text {
+  direction: ltr;
+  text-align: start;
 }
 /* Isolate inline Latin/Arabic spans so numbers and brand names keep order */
 .bidi-isolate {
   unicode-bidi: isolate;
+  display: inline;
 }
 .message-user .message-text { background: var(--accent); color: #001016; font-weight: 500; }
 .message-assistant .message-text {

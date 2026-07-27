@@ -427,9 +427,25 @@ class SettingsRouterBuilder:
             return _get_sm().get_sessions()
 
         @router.get("/api/settings/tools")
-        async def api_get_tools() -> list[dict[str, Any]]:
-            """List all registered tools."""
-            return _get_sm().get_tool_registry()
+        async def api_get_tools(request: Request) -> list[dict[str, Any]]:
+            """List all registered tools with UI-language descriptions."""
+            tools = _get_sm().get_tool_registry()
+            lang = request.cookies.get("kazma-lang") or "en"
+            if lang not in ("ar", "en"):
+                lang = "en"
+            try:
+                from kazma_ui.i18n import t as i18n_t
+
+                for tool in tools:
+                    name = tool.get("name") or ""
+                    key = f"tool.desc.{name}"
+                    localized = i18n_t(key, lang=lang)
+                    if localized and localized != key:
+                        tool["description"] = localized
+                        tool["description_i18n"] = True
+            except Exception:
+                pass
+            return tools
 
         @router.put("/api/settings/tools/{tool_name}/toggle")
         async def api_toggle_tool(tool_name: str, req: dict[str, Any]) -> dict[str, str]:
