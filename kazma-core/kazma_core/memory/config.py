@@ -42,6 +42,7 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "min_user_chars": 24,
         "every_n_turns": 1,
         "skip_adapter_if_auto_stored": True,
+        "skip_llm_if_auto_stored": True,
         "skip_llm_in_demo": True,
     },
 }
@@ -92,6 +93,7 @@ def _read_store_overlay() -> dict[str, Any]:
             "min_user_chars",
             "every_n_turns",
             "skip_adapter_if_auto_stored",
+            "skip_llm_if_auto_stored",
             "skip_llm_in_demo",
         ):
             val = store.get(f"memory.consolidation.{sub}")

@@ -106,6 +106,8 @@ memory:
     min_user_chars: 24
     every_n_turns: 1
     skip_adapter_if_auto_stored: true
+    # Skip LLM extract when auto_store already vacuumed durable text this turn
+    skip_llm_if_auto_stored: true
     skip_llm_in_demo: true
   embedding:
     provider: local

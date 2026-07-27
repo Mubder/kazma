@@ -17,6 +17,8 @@ Config (``memory.consolidation.*`` via :func:`kazma_core.memory.config.read_memo
 - ``every_n_turns`` (default 1 — run every turn; 3 = every 3rd turn)
 - ``skip_adapter_if_auto_stored`` (default True — skip L1/L3/L4 text when
   auto_store already wrote durable text for this turn; graph triples still land)
+- ``skip_llm_if_auto_stored`` (default True — skip the LLM extract when
+  auto_store already vacuumed durable text this turn; heuristic triples still run)
 - ``skip_llm_in_demo`` (default True — no LLM under KAZMA_DEMO_MODE)
 """
 
@@ -135,6 +137,12 @@ def _every_n_turns(cfg: dict[str, Any]) -> int:
 def _skip_adapter_if_auto_stored(cfg: dict[str, Any]) -> bool:
     block = _cons_block(cfg)
     return bool(block.get("skip_adapter_if_auto_stored", True))
+
+
+def _skip_llm_if_auto_stored(cfg: dict[str, Any]) -> bool:
+    """Skip expensive LLM extract when auto_store already wrote durable text."""
+    block = _cons_block(cfg)
+    return bool(block.get("skip_llm_if_auto_stored", True))
 
 
 def normalize_fact(text: str) -> str:
@@ -508,6 +516,7 @@ async def consolidate_from_messages(
         "skipped_turn": False,
         "skipped_dup": 0,
         "skipped_adapter": 0,
+        "skipped_llm_auto": False,
     }
     if not consolidation_enabled(cfg):
         return stats
@@ -528,9 +537,22 @@ async def consolidate_from_messages(
     if user.strip().startswith("/"):
         return stats
 
+    auto_durable = bool(
+        auto_store_stats and int(auto_store_stats.get("durable") or 0) > 0
+    )
+
     extracted: dict[str, Any] | None = None
     llm_tried = False
-    if _use_llm(cfg):
+    # P2 cost control: if auto_store already vacuumed durable text this turn,
+    # skip the LLM extract (heuristic still extracts triples for the graph).
+    allow_llm = _use_llm(cfg)
+    if auto_durable and _skip_llm_if_auto_stored(cfg):
+        allow_llm = False
+        stats["skipped_llm_auto"] = True
+        logger.debug(
+            "[consolidator] skip LLM — auto_store already wrote durable this turn"
+        )
+    if allow_llm:
         llm_tried = True
         extracted = await _extract_with_llm(user, assistant)
 
@@ -560,15 +582,11 @@ async def consolidate_from_messages(
         if auto_store_stats.get("durable"):
             prior_texts.append(user)
 
+    # P2: when auto_store already wrote durable L1/L3/L4, skip re-storing
+    # fact text via the adapter (graph triples still land in _apply).
     store_adapter = True
-    if (
-        _skip_adapter_if_auto_stored(cfg)
-        and auto_store_stats
-        and int(auto_store_stats.get("durable") or 0) > 0
-    ):
-        # Still store non-duplicate refined facts; skip only near-dups
-        # (handled inside _apply). Mark intent for logging.
-        store_adapter = True
+    if _skip_adapter_if_auto_stored(cfg) and auto_durable:
+        store_adapter = False
 
     applied = await _apply_to_memory(
         facts,
@@ -579,11 +597,14 @@ async def consolidate_from_messages(
     stats.update(applied)
     if stats["facts_stored"] or stats["triples"] or stats.get("skipped_dup"):
         logger.info(
-            "[consolidator] source=%s facts=%d triples=%d dup_skip=%d ids=%s",
+            "[consolidator] source=%s facts=%d triples=%d dup_skip=%d "
+            "skip_llm_auto=%s skip_adapter=%s ids=%s",
             stats.get("source"),
             stats["facts_stored"],
             stats["triples"],
             stats.get("skipped_dup", 0),
+            stats.get("skipped_llm_auto"),
+            not store_adapter,
             stats["ids"][:3],
         )
     return stats

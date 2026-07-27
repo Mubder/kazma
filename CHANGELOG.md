@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — Memory polish P2–P7 (2026-07-27)
+
+- **P2 cost:** `skip_llm_if_auto_stored` (default true) skips consolidator LLM
+  when auto_store already wrote durable text; `skip_adapter_if_auto_stored`
+  now correctly skips adapter re-store (graph triples still land).
+- **P3 graph UI:** hover tooltips on canvas, always-on edge labels, **Export**
+  JSON (`GET /api/memory/graph/export`).
+- **P4 fence at inject:** per-turn RAG memories wrap in `format_untrusted_block`
+  and drop override-like hits.
+- **P5 Chroma:** shared `get_chroma_client()` for VectorMemory + L1 VectorStore.
+- **P6 L3 tenant:** hard `tenant_id = ?` filter (no NULL sharing when scoped).
+- **P7 tests:** `test_memory_polish_p2_p7.py` lightweight L2+L3+fence E2E.
+- Docs: `docs/plans/MEMORY_REMAINING.md` updated (P1–P7 done; S1–S4 remain).
+
 ## Unreleased — TUI Phase 4 polish: collapsible nav, graph actions, density (2026-07-27)
 
 - **NavRail** collapse/expand (`[` key + footer button); auto-collapse under

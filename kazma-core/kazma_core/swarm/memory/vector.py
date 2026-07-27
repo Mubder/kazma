@@ -69,15 +69,11 @@ class VectorStore:
         if self._ready:
             return True
         try:
-            import chromadb
+            from kazma_core.memory.chroma_client import get_chroma_client
             from kazma_core.swarm.memory.embedder import make_chroma_embedding_function
 
-            if self._persist_dir:
-                self._client = chromadb.PersistentClient(path=self._persist_dir)
-            else:
-                self._client = chromadb.Client(
-                    chromadb.config.Settings(anonymized_telemetry=False)
-                )
+            # P5: share client with VectorMemory when same persist path
+            self._client = get_chroma_client(self._persist_dir)
             # Build the embedding function from the shared embedder
             self._model = get_encoder()
             chroma_ef = make_chroma_embedding_function(self._model) if self._model else None

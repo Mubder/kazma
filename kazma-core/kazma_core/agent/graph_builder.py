@@ -211,27 +211,48 @@ def _rag_top_k() -> int:
 
 
 def _format_retrieved_memories(memories: list[dict[str, Any]]) -> str:
-    """Render retrieved memories as a compact system-message block.
+    """Render retrieved memories as a fenced untrusted system-message block.
 
-    Mirrors the compaction format (compaction.py:_build_compacted_system)
-    but for per-turn injection — a short "## Relevant context from memory"
-    block. Each memory is capped to keep the prompt lean.
+    Per-turn RAG hits come from conversation-derived stores (auto_store /
+    consolidator). Defense-in-depth (P4):
+    * drop rows that look like prompt-injection overrides
+    * wrap the rest in :func:`format_untrusted_block` so the model treats
+      them as observation data, not instructions
     """
     if not memories:
         return ""
-    parts = ["## Relevant context from memory"]
-    for i, mem in enumerate(memories, 1):
+    try:
+        from kazma_core.safety.prompt_fence import (
+            format_untrusted_block,
+            is_override_delta,
+        )
+    except Exception:  # pragma: no cover — fence always ship with core
+        format_untrusted_block = None  # type: ignore[assignment]
+        is_override_delta = None  # type: ignore[assignment]
+
+    lines: list[str] = []
+    for mem in memories:
         content = mem.get("content", mem.get("text", ""))
         if not content:
             continue
-        # Cap each memory at 300 chars so 5 memories ≤ ~1500 chars.
         text = str(content).strip()
+        if not text:
+            continue
+        if is_override_delta is not None and is_override_delta(text):
+            logger.warning(
+                "[graph_builder] dropped injection-like memory hit: %.80s", text
+            )
+            continue
+        # Cap each memory at 300 chars so 5 memories ≤ ~1500 chars.
         if len(text) > 300:
             text = text[:300] + "…"
-        parts.append(f"{i}. {text}")
-    if len(parts) == 1:
-        return ""  # all memories were empty
-    return "\n".join(parts)
+        lines.append(f"- {text}")
+    if not lines:
+        return ""
+    body = "## Relevant context from memory\n" + "\n".join(lines)
+    if format_untrusted_block is not None:
+        return format_untrusted_block(body, source="memory_rag")
+    return body
 
 
 def _ensure_personality(

@@ -222,14 +222,17 @@ class SQLiteMemoryBackend:
 
         # Try FTS5 BM25 search first (keyword matching)
         try:
-            # Search directly in FTS5 table with rowid, and filter by tenant_id on memories join if specified
+            # Search directly in FTS5 table with rowid.
+            # Hard tenant filter (P6): when tenant_id is set, only exact matches
+            # (NULL/shared rows are excluded — single-tenant installs leave
+            # tenant_id unset so this branch is not used).
             if tenant_id is not None:
                 cursor = await conn.execute(
                     """
                     SELECT f.memory_id, bm25(f.memories_fts) as bm25_score
                     FROM memories_fts f
                     JOIN memories m ON m.id = f.memory_id
-                    WHERE f.memories_fts MATCH ? AND (m.tenant_id = ? OR m.tenant_id IS NULL)
+                    WHERE f.memories_fts MATCH ? AND m.tenant_id = ?
                     ORDER BY bm25_score ASC
                     LIMIT ?
                     """,
@@ -259,7 +262,7 @@ class SQLiteMemoryBackend:
                         f"""
                         SELECT id, content, content_arabic, metadata, timestamp, source, relevance
                         FROM memories
-                        WHERE id IN ({placeholders}) AND (tenant_id = ? OR tenant_id IS NULL)
+                        WHERE id IN ({placeholders}) AND tenant_id = ?
                         """,
                         memory_ids + [tenant_id],
                     )
@@ -295,7 +298,7 @@ class SQLiteMemoryBackend:
             # Fallback to simple LIKE search
             if tenant_id is not None:
                 cursor = await conn.execute(
-                    "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT ?",
+                    "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? AND tenant_id = ? LIMIT ?",
                     (f"%{query}%", tenant_id, limit),
                 )
             else:
@@ -395,7 +398,7 @@ class SQLiteMemoryBackend:
                 """
                 SELECT id, content, metadata, timestamp, source, relevance, embedding
                 FROM memories
-                WHERE embedding IS NOT NULL AND (tenant_id = ? OR tenant_id IS NULL)
+                WHERE embedding IS NOT NULL AND tenant_id = ?
                 """,
                 (tenant_id,),
             )

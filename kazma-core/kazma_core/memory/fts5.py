@@ -198,23 +198,45 @@ class FTS5Memory:
         query: str,
         limit: int = 5,
         min_score: float = 0.0,
+        tenant_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Search via FTS5 BM25 on memories_fts, join back to memories."""
+        """Search via FTS5 BM25 on memories_fts, join back to memories.
+
+        When *tenant_id* is set, apply a **hard** tenant filter (P6): only rows
+        whose ``tenant_id`` column equals that value. Rows with NULL/empty
+        tenant are excluded from tenant-scoped queries.
+        """
         try:
             safe_query = (query or "").strip().replace('"', '""')
             safe_query = f'"{safe_query}"' if safe_query else '""'
             with self._lock:
-                rows = self._conn.execute(
-                    """
-                    SELECT m.id AS doc_id, m.content AS text, m.metadata, bm25(memories_fts) AS rank
-                    FROM memories_fts
-                    JOIN memories m ON m.id = memories_fts.memory_id
-                    WHERE memories_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                    """,
-                    (safe_query, limit),
-                ).fetchall()
+                if tenant_id:
+                    rows = self._conn.execute(
+                        """
+                        SELECT m.id AS doc_id, m.content AS text, m.metadata,
+                               m.tenant_id AS tenant_id, bm25(memories_fts) AS rank
+                        FROM memories_fts
+                        JOIN memories m ON m.id = memories_fts.memory_id
+                        WHERE memories_fts MATCH ?
+                          AND m.tenant_id = ?
+                        ORDER BY rank
+                        LIMIT ?
+                        """,
+                        (safe_query, tenant_id, limit),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        """
+                        SELECT m.id AS doc_id, m.content AS text, m.metadata,
+                               m.tenant_id AS tenant_id, bm25(memories_fts) AS rank
+                        FROM memories_fts
+                        JOIN memories m ON m.id = memories_fts.memory_id
+                        WHERE memories_fts MATCH ?
+                        ORDER BY rank
+                        LIMIT ?
+                        """,
+                        (safe_query, limit),
+                    ).fetchall()
 
             results = []
             for row in rows:
@@ -226,12 +248,16 @@ class FTS5Memory:
                     meta = json.loads(meta_raw) if meta_raw else {}
                 except Exception:
                     meta = {}
+                tid = row["tenant_id"] if "tenant_id" in row.keys() else None
+                if tid and "tenant_id" not in meta:
+                    meta["tenant_id"] = tid
                 results.append(
                     {
                         "text": row["text"],
                         "metadata": meta,
                         "doc_id": row["doc_id"],
                         "score": score,
+                        "tenant_id": tid,
                     }
                 )
             return results

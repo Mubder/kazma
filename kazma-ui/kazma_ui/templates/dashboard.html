@@ -198,12 +198,14 @@
             style="min-width:160px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.8rem;" />
           <button id="kg-search-btn" class="btn btn-sm btn-primary" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_search') }}</button>
           <button id="kg-refresh-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_graph_refresh') }}</button>
+          <button id="kg-export-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="Download graph JSON">Export</button>
           <button id="kg-clear-btn" class="btn btn-sm btn-danger" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_clear') }}</button>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(220px,0.8fr);gap:12px;align-items:stretch;">
         <div id="kg-canvas-wrap" style="position:relative;height:300px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
-          <canvas id="kg-canvas" width="800" height="300" style="width:100%;height:100%;display:block;"></canvas>
+          <canvas id="kg-canvas" width="800" height="300" style="width:100%;height:100%;display:block;cursor:crosshair;"></canvas>
+          <div id="kg-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:240px;padding:6px 10px;border-radius:6px;background:rgba(15,23,32,0.95);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.75rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,0.4);"></div>
           <div id="kg-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">
             {{ t('dashboard.memory_graph_empty') }}
           </div>
@@ -731,6 +733,8 @@
   // ── Property graph (L2) explorer ─────────────────────────────────
   var _kgData = { nodes: [], edges: [] };
   var _kgAnim = null;
+  var _kgPts = []; // last layout for hover hit-testing
+  var _kgHoverBound = false;
 
   function _kgEsc(s) {
     return String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -796,7 +800,10 @@
         x: w / 2 + Math.cos(ang) * r,
         y: h / 2 + Math.sin(ang) * r,
         vx: 0, vy: 0,
+        id: n.id,
         label: String(n.label || n.id || '').slice(0, 18),
+        fullLabel: String(n.label || n.id || ''),
+        title: String(n.title || ''),
         group: n.group || 'entity',
       };
     });
@@ -836,9 +843,9 @@
     }
     for (var s = 0; s < 40; s++) step();
 
-    // edges
-    ctx.strokeStyle = 'rgba(148,163,184,0.35)';
-    ctx.lineWidth = 1;
+    // edges — always draw relation labels (P3)
+    ctx.strokeStyle = 'rgba(148,163,184,0.4)';
+    ctx.lineWidth = 1.25;
     es.forEach(function(e) {
       var a = pts[ids[e.from]], b = pts[ids[e.to]];
       if (!a || !b) return;
@@ -846,11 +853,18 @@
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
-      if (e.label) {
-        ctx.fillStyle = 'rgba(148,163,184,0.7)';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(String(e.label).slice(0, 16), (a.x + b.x) / 2, (a.y + b.y) / 2);
-      }
+      var elabel = String(e.label || e.relation || 'related').slice(0, 18);
+      var mx = (a.x + b.x) / 2;
+      var my = (a.y + b.y) / 2;
+      ctx.save();
+      ctx.font = '10px var(--font-sans, sans-serif)';
+      var tw = ctx.measureText(elabel).width;
+      ctx.fillStyle = 'rgba(15,23,32,0.75)';
+      ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 14);
+      ctx.fillStyle = 'rgba(186,198,214,0.95)';
+      ctx.textAlign = 'center';
+      ctx.fillText(elabel, mx, my + 3);
+      ctx.restore();
     });
 
     // nodes
@@ -865,7 +879,49 @@
       ctx.fill();
       ctx.fillStyle = 'rgba(226,232,240,0.95)';
       ctx.font = '11px var(--font-sans, sans-serif)';
+      ctx.textAlign = 'left';
       ctx.fillText(p.label, p.x + 10, p.y + 4);
+    });
+
+    _kgPts = pts;
+    _wireKgHover(canvas, wrap);
+  }
+
+  function _wireKgHover(canvas, wrap) {
+    if (_kgHoverBound || !canvas || !wrap) return;
+    _kgHoverBound = true;
+    var tip = document.getElementById('kg-tooltip');
+    canvas.addEventListener('mousemove', function(ev) {
+      if (!tip || !_kgPts.length) return;
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = canvas.width / Math.max(rect.width, 1);
+      var scaleY = canvas.height / Math.max(rect.height, 1);
+      var mx = (ev.clientX - rect.left) * scaleX;
+      var my = (ev.clientY - rect.top) * scaleY;
+      var hit = null;
+      for (var i = 0; i < _kgPts.length; i++) {
+        var p = _kgPts[i];
+        var dx = p.x - mx, dy = p.y - my;
+        if (dx * dx + dy * dy <= 14 * 14) { hit = p; break; }
+      }
+      if (!hit) {
+        tip.style.display = 'none';
+        canvas.style.cursor = 'crosshair';
+        return;
+      }
+      canvas.style.cursor = 'pointer';
+      var html = '<strong>' + _kgEsc(hit.fullLabel || hit.label) + '</strong>';
+      if (hit.group) html += '<div style="color:var(--text-muted);margin-top:2px;">' + _kgEsc(hit.group) + '</div>';
+      if (hit.title) html += '<div style="margin-top:4px;">' + _kgEsc(hit.title.slice(0, 180)) + '</div>';
+      tip.innerHTML = html;
+      tip.style.display = 'block';
+      var wx = ev.clientX - wrap.getBoundingClientRect().left + 12;
+      var wy = ev.clientY - wrap.getBoundingClientRect().top + 12;
+      tip.style.left = Math.min(wx, wrap.clientWidth - 200) + 'px';
+      tip.style.top = Math.min(wy, wrap.clientHeight - 60) + 'px';
+    });
+    canvas.addEventListener('mouseleave', function() {
+      if (tip) tip.style.display = 'none';
     });
   }
 
@@ -897,6 +953,7 @@
     var searchBtn = document.getElementById('kg-search-btn');
     var refreshBtn = document.getElementById('kg-refresh-btn');
     var clearBtn = document.getElementById('kg-clear-btn');
+    var exportBtn = document.getElementById('kg-export-btn');
     var input = document.getElementById('kg-search-input');
     if (searchBtn) {
       searchBtn.addEventListener('click', function() {
@@ -912,6 +969,25 @@
       refreshBtn.addEventListener('click', function() {
         if (input) input.value = '';
         loadKnowledgeGraph('');
+      });
+    }
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async function() {
+        try {
+          var resp = await fetch('/api/memory/graph/export');
+          var data = await resp.json();
+          var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'kazma-knowledge-graph.json';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+          if (window.showToast) window.showToast('Graph exported', 'success');
+        } catch (e) {
+          if (window.showToast) window.showToast('Export failed: ' + e.message, 'error');
+        }
       });
     }
     if (clearBtn) {

@@ -188,6 +188,16 @@ def register_direct_routes(self: Any) -> None:
             "stats": after,
         }
 
+    @self.app.get("/api/memory/graph/export")
+    async def _memory_graph_export():
+        """Export L2 property graph as JSON (nodes + edges + stats)."""
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        kg = get_knowledge_graph()
+        data = kg.to_json()
+        data["stats"] = kg.stats()
+        return data
+
     import kazma_core.time_travel as _tt_mod
 
     @self.app.get("/api/session/history")

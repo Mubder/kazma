@@ -75,16 +75,21 @@ class FTS5LexicalStore:
         self,
         query: str,
         limit: int = 10,
+        tenant_id: str | None = None,
     ) -> list[tuple[str, float]]:
         """Full-text search with BM25 ranking.
 
         Returns list of (memory_id, bm25_score) tuples.
+        Passes *tenant_id* through for hard tenant isolation (P6).
         """
         backend = await self._ensure_backend()
         if backend is None:
             return []
         try:
-            results = await backend.search(query, limit=limit)
+            kwargs: dict[str, Any] = {}
+            if tenant_id is not None:
+                kwargs["tenant_id"] = tenant_id
+            results = await backend.search(query, limit=limit, **kwargs)
             scored: list[tuple[str, float]] = []
             for r in results:
                 rid = r.get("id", "")

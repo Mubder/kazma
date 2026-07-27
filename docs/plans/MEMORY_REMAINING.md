@@ -1,7 +1,7 @@
 # Memory — Done vs Remaining
 
 **Status date:** 2026-07-27  
-**Shipped commit (main):** `73a2e82b` (+ follow-ups in this doc wave)  
+**Shipped polish commit:** see CHANGELOG *Memory polish P2–P7*  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)
 
 Use this file when picking up memory work later. Do **not** start a greenfield rewrite unless a multi-replica product requirement appears.
@@ -10,53 +10,21 @@ Use this file when picking up memory work later. Do **not** start a greenfield r
 
 ## 1. What we did (shipped)
 
-### A. Strengthen existing stack (no rewrite)
+### A–E. Core stack (prior)
 
-| Item | Detail |
-|------|--------|
-| Fail-closed store | `UnifiedMemoryAdapter.store()` / `index()` only return an id when **L1, L3, or L4** confirms a write. L2 alone is not durable. Tools never claim success with an empty id. |
-| Config SoT | `kazma_core.memory.config` — ConfigStore overlays `kazma.yaml`. TUI `/config memory` and `memory.enabled` actually gate per-turn + auto-store. |
-| FTS unify | `FTS5Memory` uses canonical `memories` / `memories_fts` (same as L3). Legacy `memory_fts` migrated once. |
-| Empty-hit filter | RRF drops blank content so chat inject never shows empty rows. |
-| L1 chunking on adapter | 2000/200 chunks aligned with VectorMemory. |
-| Zero-vector embedder | Health treats zero embeddings as **error**. |
-| Docs honesty | FAQ / architecture / memory-and-rag corrected (auto recall + adapter = chat path). |
+Fail-closed store, config SoT, FTS unify, L2 SQLite graph, consolidator, dashboard graph UI, unit tests. See git history / earlier CHANGELOG sections.
 
-### B. L2 = real property graph
+### F. Polish P1–P7 (this wave)
 
-| Item | Detail |
-|------|--------|
-| Backend | SQLite `kazma-data/knowledge_graph.db` (nodes, edges, FTS5, multi-hop BFS) |
-| Replaces | NetworkX + JSON file |
-| API | `add_entity`, `add_relation`, `upsert_triple`, `search`, `query_related`, `to_json`, `clear` |
-| Singleton | `get_knowledge_graph()` shared by adapter + HTTP API |
-| Migrate | Legacy `knowledge_graph.json` → one-shot import → `.migrated` |
-
-### C. Consolidator (librarian)
-
-| Item | Detail |
-|------|--------|
-| Module | `kazma_core.memory.consolidator` |
-| Flow | Post-turn: `schedule_post_turn_memory` → auto_store then consolidator |
-| Extract | LLM JSON facts + SPO triples; heuristic fallback |
-| Writes | Clean facts → adapter (L1/L3/L4); triples → L2 graph |
-| Fence | `is_override_delta` rejects injection-like facts |
-| Dedup | Near-dup skip vs auto_store `texts` |
-| Cost | `every_n_turns`, `skip_llm_in_demo`, `skip_adapter_if_auto_stored` |
-
-### D. Dashboard graph UI
-
-| Item | Detail |
-|------|--------|
-| UI | Memory & Governance → property graph canvas, labels, list |
-| Actions | Search, refresh, clear (confirm) |
-| APIs | `GET /api/memory/graph[?q=]`, `/search`, `/stats`, `POST /clear` |
-
-### E. Tests
-
-- `kazma-core/tests/test_memory_strengthen.py`
-- `kazma-core/tests/test_graph_and_consolidator.py`
-- Existing auto_store / health / per_turn tests kept green
+| # | Item | Status |
+|---|------|--------|
+| **P1** | Consolidator settings UI | **Done** — TUI Settings toggles; Web Packages/health surfaces consolidator |
+| **P2** | Stronger consolidator cost | **Done** — `skip_llm_if_auto_stored` (default true) + fixed `skip_adapter_if_auto_stored` |
+| **P3** | Graph UI polish | **Done** — hover tooltips, always-on edge labels, **Export** JSON |
+| **P4** | Fence at injection time | **Done** — per-turn RAG uses `format_untrusted_block` + drops override-like hits |
+| **P5** | Dual Chroma client cleanup | **Done** — `chroma_client.get_chroma_client()` shared by VectorMemory + L1 |
+| **P6** | L3 hard tenant filter | **Done** — exact `tenant_id` match only (no NULL sharing when tenant set) |
+| **P7** | Integration RAG E2E | **Done** — lightweight L2+L3+fence tests (no Chroma cold-start in CI) |
 
 ---
 
@@ -65,12 +33,14 @@ Use this file when picking up memory work later. Do **not** start a greenfield r
 ```text
 User turn
   → per-turn RAG (RRF: L1 Chroma + L2 graph + L3 FTS + L4 sqlite-vec)
+       → fence + injection-filter before system prompt
   → LLM reply
   → schedule_post_turn_memory
        → auto_store (heuristic vacuum)
-       → consolidator (librarian: fence + dedup + LLM/heuristic)
-            → adapter.store facts
-            → graph.upsert_triple
+       → consolidator (librarian)
+            → if auto_store durable: skip LLM extract + skip adapter re-store
+            → graph triples always eligible
+            → adapter facts only when not skip_adapter
 
 Tools memory_store / memory_search → adapter first → VectorMemory fallback
 KB (kazma_kb_*) → isolated from chat memory
@@ -91,9 +61,10 @@ memory:
     min_user_chars: 24
     every_n_turns: 1
     skip_adapter_if_auto_stored: true
+    skip_llm_if_auto_stored: true   # P2
     skip_llm_in_demo: true
   embedding:
-    provider: local       # or openai-compatible / nim
+    provider: local
     model: all-MiniLM-L6-v2
     dim: 384
 ```
@@ -102,7 +73,7 @@ memory:
 
 | Path | Role |
 |------|------|
-| `kazma-data/vector_memory/` | Chroma `agent_memory` |
+| `kazma-data/vector_memory/` | Chroma `agent_memory` (shared client) |
 | `kazma-data/memory.db` | FTS `memories` / `memories_fts` |
 | `kazma-data/knowledge_graph.db` | L2 property graph |
 | `kazma-data/vector.db` | L4 sqlite-vec (per-worker tables) |
@@ -112,18 +83,6 @@ Install for full vector: `pip install -e ".[rag]"`.
 ---
 
 ## 3. What remains (later)
-
-### Nice polish (optional)
-
-| # | Item | Why |
-|---|------|-----|
-| P1 | TUI/Settings UI for `memory.consolidation.*` | Keys work; no dedicated panel toggles |
-| P2 | Stronger consolidator cost (skip LLM if auto_store durable-only turn) | Save tokens further |
-| P3 | Graph UI polish (hover, edge labels always, export JSON) | Dashboard canvas is v1 |
-| P4 | Fence consolidator text at **injection** time too | Defense-in-depth if facts re-enter system prompt |
-| P5 | Dual Chroma client cleanup | VectorMemory + L1 still two clients; works, not elegant |
-| P6 | L3 hard tenant filter | Soft today; fine single-tenant |
-| P7 | Integration RAG E2E in CI | Unit tests green; full Chroma first-load is slow |
 
 ### Product / scale (only if required)
 
@@ -148,7 +107,7 @@ Install for full vector: `pip install -e ".[rag]"`.
 2. Dashboard → Memory health = ACTIVE (or clear layer errors)  
 3. Chat: “Remember my favorite color is teal.”  
 4. New turn / session: “What color do I like?” → recall  
-5. Dashboard graph: nodes/edges increase; search “teal”  
+5. Dashboard graph: nodes/edges; hover; **Export**; search “teal”  
 6. Toggle `memory.enabled=false` (ConfigStore/TUI) → no auto per-turn/auto-store  
 
 ---
@@ -158,17 +117,16 @@ Install for full vector: `pip install -e ".[rag]"`.
 | Concern | Path |
 |---------|------|
 | Config SoT | `kazma-core/kazma_core/memory/config.py` |
+| Shared Chroma client | `kazma-core/kazma_core/memory/chroma_client.py` |
 | Auto-store | `kazma-core/kazma_core/memory/auto_store.py` |
 | Consolidator | `kazma-core/kazma_core/memory/consolidator.py` |
-| Health | `kazma-core/kazma_core/memory/health.py` |
-| FTS (degrade path) | `kazma-core/kazma_core/memory/fts5.py` |
-| VectorMemory | `kazma-core/kazma_core/memory/vector_store.py` |
+| Per-turn fence | `kazma-core/kazma_core/agent/graph_builder.py` (`_format_retrieved_memories`) |
+| FTS + hard tenant | `kazma-core/kazma_core/memory/fts5.py`, `kazma-memory/.../search_backend.py` |
 | Adapter RRF | `kazma-core/kazma_core/swarm/memory/adapter.py` |
 | L2 graph | `kazma-core/kazma_core/swarm/memory/graph.py` |
-| Per-turn + post-turn hook | `kazma-core/kazma_core/agent/graph_builder.py` |
-| Tools | `kazma-core/kazma_core/agent/tool_registry.py` |
-| Graph HTTP | `kazma-ui/kazma_ui/routes_direct.py` |
+| Graph HTTP + export | `kazma-ui/kazma_ui/routes_direct.py` |
 | Graph UI | `kazma-ui/kazma_ui/templates/dashboard.html` |
+| Polish tests | `kazma-core/tests/test_memory_polish_p2_p7.py` |
 
 ---
 
@@ -177,3 +135,4 @@ Install for full vector: `pip install -e ".[rag]"`.
 - `CHANGELOG.md` → **Make Kazma Memory Great Again**  
 - `CHANGELOG.md` → **L2 property graph + LLM consolidator**  
 - `CHANGELOG.md` → **Consolidator cost/fence/dedup + graph UI**  
+- `CHANGELOG.md` → **Memory polish P2–P7**  

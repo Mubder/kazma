@@ -237,27 +237,29 @@ class UnifiedMemoryAdapter:
     async def _query_l3(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
         """FTS5 lexical query — fetches document content by ID after scoring.
 
-        Applies tenant isolation via post-filter on metadata when
-        ``tenant_id`` is set in context.
+        Hard tenant isolation (P6): when ``tenant_id`` is set in context it is
+        pushed into the backend search so only that tenant's rows return.
         """
         try:
             tenant_id = self._get_tenant_id()
-            results = await self._l3.lexical_search(text, limit=limit * 2)  # fetch extra for filtering
+            # Prefer signature that accepts tenant_id; fall back for stubs.
+            try:
+                results = await self._l3.lexical_search(
+                    text, limit=limit * 2, tenant_id=tenant_id
+                )
+            except TypeError:
+                results = await self._l3.lexical_search(text, limit=limit * 2)
             if not results:
                 return []
-            # Fetch document text for the scored IDs
             ids = [r[0] for r in results]
             texts = await self._l3.get_texts(ids) if hasattr(self._l3, "get_texts") else {}
-            # Post-filter by tenant if needed
             out: list[tuple[str, float, str, str, dict]] = []
             for r in results:
                 uid = r[0]
+                meta: dict[str, Any] = {}
                 if tenant_id:
-                    # Check metadata for tenant — try to parse it from stored text
-                    content = texts.get(uid, "")
-                    # If we can't determine tenant from metadata, include it
-                    # (safe default: don't over-filter)
-                out.append((uid, float(r[1]), texts.get(uid, ""), "L3:fts5", {}))
+                    meta["tenant_id"] = tenant_id
+                out.append((uid, float(r[1]), texts.get(uid, ""), "L3:fts5", meta))
                 if len(out) >= limit:
                     break
             return out
