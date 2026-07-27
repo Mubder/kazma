@@ -422,6 +422,23 @@ class AsyncMCPManager:
         except MCPBridgeError as exc:
             duration_ms = (time.monotonic() - start) * 1000
             logger.error("[MCP] Tool '%s' on '%s' failed (%.0fms): %s", tool_name, server_name, duration_ms, exc)
+            exc_s = str(exc)
+            # Huge single-line JSON-RPC (directory_tree on monorepo) is a
+            # capacity issue, not tool death — guide the model to native tools.
+            if (
+                "chunk exceed" in exc_s.lower()
+                or "separator is not found" in exc_s.lower()
+            ):
+                return {
+                    "content": (
+                        f"MCP error: response too large for stdio framing "
+                        f"({raw_tool_name}). Prefer native file_list/file_search "
+                        f"on a shallow path instead of full-tree MCP calls. "
+                        f"Detail: {exc_s[:400]}"
+                    ),
+                    "is_error": True,
+                    "outcome": "policy",
+                }
             return {"content": f"MCP error: {exc}", "is_error": True, "outcome": "hard"}
 
         except Exception as exc:
@@ -526,6 +543,19 @@ class AsyncMCPManager:
 
         logger.info("[MCP] Starting stdio server '%s': %s", name, command)
 
+        # MCP JSON-RPC is newline-delimited. A single tool result (e.g.
+        # filesystem directory_tree on a large monorepo) is often one giant
+        # JSON line. asyncio's default StreamReader limit is 64 KiB, which
+        # raises: "Separator is not found, and chunk exceed the limit" and
+        # poisons the pipe for all later calls. Raise the limit for MCP only.
+        try:
+            stdio_limit = int(
+                (os.environ.get("KAZMA_MCP_STDIO_LIMIT") or str(16 * 1024 * 1024)).strip()
+            )
+        except ValueError:
+            stdio_limit = 16 * 1024 * 1024
+        stdio_limit = max(256 * 1024, min(stdio_limit, 64 * 1024 * 1024))  # 256 KiB–64 MiB
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -534,6 +564,7 @@ class AsyncMCPManager:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=working_dir,
+                limit=stdio_limit,
             )
         except FileNotFoundError as exc:
             raise MCPBridgeError(f"Command not found: {command[0]}") from exc
@@ -772,12 +803,25 @@ class AsyncMCPManager:
         async with handle.read_lock:
             try:
                 line = await asyncio.wait_for(
-                    proc.stdout.readline(), 
-                    timeout=timeout or 60.0
+                    proc.stdout.readline(),
+                    timeout=timeout or 60.0,
                 )
             except Exception as exc:
                 # On read error, attempt to dump stderr and re-raise with diagnostic
                 stderr_snippet = await self._drain_stderr(handle, max_bytes=2048)
+                exc_s = str(exc)
+                # Framing/limit failures leave stdout mid-message — mark dead so
+                # the next call reconnects instead of failing instantly at 0ms.
+                if (
+                    "chunk exceed" in exc_s.lower()
+                    or "separator is not found" in exc_s.lower()
+                ):
+                    handle.connected = False
+                    logger.error(
+                        "[MCP] stdio framing overflow for '%s' (raise KAZMA_MCP_STDIO_LIMIT "
+                        "or avoid huge directory_tree). Marking disconnected.",
+                        handle.name,
+                    )
                 raise MCPBridgeError(
                     f"stdio read error for '{handle.name}': {exc}\nstderr: {stderr_snippet[:500]}"
                 ) from exc
