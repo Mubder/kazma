@@ -134,7 +134,7 @@ class TestDispatchCallsSwarmManager:
         data = response.json()
         assert len(data["results"]) == 1
         assert data["results"][0]["status"] == "error"
-        assert "boom" in data["results"][0]["error"]
+        assert "Dispatch failed" in data["results"][0]["error"]
 
 
 class TestDispatchNoManagerFallback:

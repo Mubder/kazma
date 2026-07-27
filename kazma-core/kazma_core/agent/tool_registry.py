@@ -812,6 +812,7 @@ class LocalToolRegistry:
             name: str = "",
             description: str = "",
             seed_url: str = "",
+            exist_ok: bool = True,
         ) -> str:
             try:
                 from kazma_core.stores.knowledge import get_knowledge_store
@@ -823,11 +824,15 @@ class LocalToolRegistry:
                 display = (name or "").strip() or lib_id.replace("_", " ").replace("-", " ")
                 existing = store.get_library(lib_id)
                 if existing:
+                    if exist_ok:
+                        return (
+                            f"Knowledge library '{existing.get('id')}' already exists and is ready for use "
+                            f"(name={existing.get('name')!r}, chunks={existing.get('chunk_count', 0)}). "
+                            "Use knowledge_ingest_url to add pages."
+                        )
                     return (
-                        f"Library already exists: id={existing.get('id')} "
-                        f"name={existing.get('name')!r} "
-                        f"chunks={existing.get('chunk_count', 0)}. "
-                        "Use knowledge_ingest_url to add pages."
+                        f"Error: Library already exists: id={existing.get('id')} "
+                        f"name={existing.get('name')!r}."
                     )
                 created = store.create_library(
                     lib_id,
@@ -1147,6 +1152,18 @@ class LocalToolRegistry:
                     "value": display,
                     "message": f"{key} is set.",
                 }
+                if key == "agent.personality":
+                    try:
+                        from kazma_core.personalities import load_personality
+                        profile = load_personality(config={})
+                        p_name = profile.get("name") or display
+                        p_desc = profile.get("description") or ""
+                        p_prompt = profile.get("system_prompt") or ""
+                        payload["description"] = f"{p_name}: {p_desc}".strip(": ")
+                        payload["prompt_preview"] = p_prompt[:300] + ("..." if len(p_prompt) > 300 else "")
+                        payload["message"] = f"agent.personality is set to '{display}' ({p_desc})."
+                    except Exception:
+                        pass
             return _json.dumps(payload, ensure_ascii=False)
 
         @self.register(
@@ -1604,8 +1621,20 @@ class LocalToolRegistry:
 
             status_str = str(task.status).lower().replace("taskstatus.", "")
             if status_str in ("running", "pending"):
+                elapsed_str = ""
+                started_iso = getattr(task, "started_at", None)
+                if started_iso:
+                    try:
+                        from datetime import datetime, timezone
+                        dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
+                        elapsed = (datetime.now(timezone.utc) - dt).total_seconds()
+                        tot_timeout = getattr(task, "timeout", None) or 300.0
+                        elapsed_str = f" (elapsed: {elapsed:.1f}s, timeout: {tot_timeout:.0f}s)"
+                    except Exception:
+                        pass
+                workers_str = f", worker: {task.workers[0]}" if task.workers else ""
                 return (
-                    f"Task {task_id} is still {status_str}. "
+                    f"Task {task_id} is still {status_str}{elapsed_str}{workers_str}. "
                     f"Check again in a moment."
                 )
 

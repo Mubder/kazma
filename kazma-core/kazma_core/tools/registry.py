@@ -114,10 +114,32 @@ class ShellTool(BaseTool):
         import time as _time
 
         if not self.is_safe(command):
+            hint = "Blocked: unsafe command pattern detected"
+            try:
+                args_check = shlex.split(command)
+                if args_check:
+                    bin_name = args_check[0].split("/")[-1].split("\\")[-1].lower()
+                    if bin_name in ("python", "python3", "node", "bash", "sh", "zsh"):
+                        hint = (
+                            f"Blocked: '{bin_name}' is an interpreter and not allowed in shell_exec. "
+                            "Use python_exec or code_exec for Python code."
+                        )
+                    elif bin_name in ("cd", "pushd", "popd", "chdir"):
+                        hint = (
+                            "Blocked: 'cd' is not allowed in shell_exec. "
+                            "Commands already execute with cwd set to the active workspace."
+                        )
+                    else:
+                        hint = (
+                            f"Blocked: '{bin_name}' is not in the allowed binary list. "
+                            f"Allowed: {', '.join(sorted(self._READ_ONLY_COMMANDS))}"
+                        )
+            except Exception:
+                pass
             return ToolResult(
                 tool_name=self.name,
                 success=False,
-                output="Blocked: unsafe command pattern detected",
+                output=hint,
                 exit_code=-1,
                 permission=self.permission,
             )

@@ -297,11 +297,19 @@ def _is_thin_extraction(text: str, html: str) -> bool:
     """
     if not text or not text.strip():
         return True
-    if len(text) >= MIN_USEFUL_CHARS:
-        return False
-    # Tiny extract: only escalate if the HTML looks like a SPA shell
+    # SPA documentation sites (Docusaurus, Next.js docs, GitBook) whose static HTML
+    # extract yields under 2000 chars of mostly nav chrome
+    html_sample = html[:8000].lower()
+    is_spa_doc = any(
+        m in html_sample
+        for m in ("docusaurus", "next-route-announcer", "__next", "_next/static", "gatsby", "gitbook", "mkdocs")
+    )
+    if is_spa_doc and len(text) < 2000 and text.count("\n") < 25:
+        return True
     if _looks_like_js_shell(html) and len(html) >= 500:
         return True
+    if len(text) >= MIN_USEFUL_CHARS:
+        return False
     # Small static document with some words — accept as not-thin
     words = len(text.split())
     if words >= 8:

@@ -331,6 +331,9 @@ class SwarmEngine:
         if task.type == TaskType.BROADCAST:
             return await self.broadcast(task)
 
+        # Sweep stale tasks before checking capacity
+        self.reap_stale_tasks()
+
         # Global admission control (audit M11): reject when at capacity so
         # chat→swarm / panel spam cannot unbounded-grow _active_tasks + LLM spend.
         max_active = self._max_concurrent_tasks()
@@ -378,7 +381,26 @@ class SwarmEngine:
         )
 
         try:
+            if task.timeout and float(task.timeout) > 0:
+                return await asyncio.wait_for(
+                    self._dispatch_inner(task, started, task_span),
+                    timeout=float(task.timeout),
+                )
             return await self._dispatch_inner(task, started, task_span)
+        except asyncio.TimeoutError:
+            logger.warning("[SwarmEngine] Task '%s' timed out after %.1fs", task.id, float(task.timeout or 0))
+            self._tracing_emitter.end_span(
+                task_span,
+                status="error",
+                status_msg=f"Task timed out after {float(task.timeout or 0):.1f}s",
+            )
+            return self._finalize_task(
+                task,
+                worker_results=[],
+                status="timeout",
+                error=f"Task timed out after {float(task.timeout or 0):.1f}s",
+                duration_seconds=perf_counter() - started,
+            )
         except asyncio.CancelledError:
             # Task was cancelled via cancel_task() — finalize as cancelled.
             self._tracing_emitter.end_span(task_span, status="cancelled")
@@ -402,6 +424,37 @@ class SwarmEngine:
                 error=str(exc),
                 duration_seconds=perf_counter() - started,
             )
+
+    def reap_stale_tasks(self) -> int:
+        """Sweep _active_tasks and finalize any that exceeded timeout + margin."""
+        reaped = 0
+        for tid, t in list(self._active_tasks.items()):
+            timeout = getattr(t, "timeout", None) or 300.0
+            started_iso = getattr(t, "started_at", None)
+            if not started_iso:
+                continue
+            try:
+                from datetime import datetime, timezone
+                dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - dt).total_seconds()
+                if elapsed > float(timeout) + 30.0:
+                    logger.warning(
+                        "[SwarmEngine] Reaping stale task %s (elapsed: %.1fs, timeout: %.1fs)",
+                        tid,
+                        elapsed,
+                        float(timeout),
+                    )
+                    self._finalize_task(
+                        t,
+                        worker_results=[],
+                        status="timeout",
+                        error=f"Task timed out after {float(timeout):.1f}s (reaped by watchdog).",
+                        duration_seconds=elapsed,
+                    )
+                    reaped += 1
+            except Exception as exc:
+                logger.debug("[SwarmEngine] Error checking task age for %s: %s", tid, exc)
+        return reaped
 
     async def _dispatch_inner(self, task: SwarmTask, started: float, task_span: Any) -> TaskResult:
         """Inner dispatch logic, wrapped by dispatch() for catch-all safety."""
