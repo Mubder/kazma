@@ -354,7 +354,7 @@ document.addEventListener('alpine:init', () => {
             this._progress({
               kind: 'tool',
               title: tName,
-              detail: (detail || '').slice(0, 160),
+              detail: detail || '',
               state: 'running',
             });
             this.statusMessage = 'Running ' + tName + '…';
@@ -367,7 +367,7 @@ document.addEventListener('alpine:init', () => {
             this._progress({
               kind: 'tool',
               title: tName,
-              detail: String(frame.output || data.result || '').slice(0, 200),
+              detail: String(frame.output || data.result || ''),
               state: 'done',
             });
           } else if (toolStatus === 'tool_failed') {
@@ -378,7 +378,7 @@ document.addEventListener('alpine:init', () => {
             this._progress({
               kind: 'tool',
               title: tName,
-              detail: String(frame.output || data.error || 'failed').slice(0, 200),
+              detail: String(frame.output || data.error || 'failed'),
               state: 'failed',
             });
           }

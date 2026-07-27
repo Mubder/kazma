@@ -319,6 +319,8 @@
     }
     _progressEl = null;
     _progressStepCount = 0;
+    _planItems = [];
+    _planParsedFromText = false;
     logProgress({ kind: 'status', title: 'Kazma is thinking\u2026', state: 'running' });
     if (inputEl) {
       inputEl.disabled = false;
@@ -786,6 +788,7 @@
           logProgress({ kind: 'status', title: 'Writing reply\u2026', state: 'running' });
         }
         tokenAccum += data.content;
+        tryIngestPlanFromText(tokenAccum);
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = KS.markdown(tokenAccum);
         scrollToBottom();
@@ -800,7 +803,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: truncateStr(String(inputs || ''), 160),
+          detail: String(inputs || ''),
           state: 'running',
         });
       },
@@ -811,7 +814,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: truncateStr(String(data.result || ''), 200),
+          detail: String(data.result || ''),
           state: isSwarm ? 'running' : 'done',
         });
         if (isSwarm) {
@@ -936,11 +939,14 @@
     return day + ', ' + time;
   }
 
-  // ── Live agent progress feed (per assistant turn) ─────
-  // Shows node routing, tool runs, YOLO heartbeats, and short status
-  // lines so the user can see work in progress (not a silent Stop pulse).
+  // ── Turn workbench (one solid progress surface) ───────
+  // Plan (sticky checklist) + Activity (tools/status/thoughts).
+  // Tool results stay expanded; panel does NOT auto-collapse on finish.
   var _progressEl = null;
   var _progressStepCount = 0;
+  var _planItems = [];
+  var _planParsedFromText = false;
+  var TOOL_DETAIL_MAX = 900;
 
   function ensureProgressPanel() {
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
@@ -954,14 +960,20 @@
     panel = document.createElement('div');
     panel.className = 'agent-progress is-active';
     panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand progress">' +
+      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
         '<span class="agent-progress-title">Working\u2026</span>' +
         '<span class="agent-progress-count">0 steps</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
       '</div>' +
-      '<ul class="agent-progress-steps"></ul>';
-    // Insert progress *before* the final message text so the answer lands below steps
+      '<div class="agent-progress-body">' +
+        '<div class="agent-plan" hidden>' +
+          '<div class="agent-plan-label">Plan</div>' +
+          '<ol class="agent-plan-list"></ol>' +
+        '</div>' +
+        '<div class="agent-activity-label">Activity</div>' +
+        '<ul class="agent-progress-steps"></ul>' +
+      '</div>';
     var textEl = content.querySelector('.message-text');
     if (textEl) content.insertBefore(panel, textEl);
     else content.appendChild(panel);
@@ -979,7 +991,96 @@
     }
     _progressEl = panel;
     _progressStepCount = 0;
+    _planItems = [];
+    _planParsedFromText = false;
     return panel;
+  }
+
+  function _renderPlanList(panel) {
+    var wrap = panel.querySelector('.agent-plan');
+    var ol = panel.querySelector('.agent-plan-list');
+    if (!wrap || !ol) return;
+    if (!_planItems.length) {
+      wrap.hidden = true;
+      ol.innerHTML = '';
+      return;
+    }
+    wrap.hidden = false;
+    ol.innerHTML = _planItems.map(function(item, idx) {
+      var done = item.done ? ' is-done' : '';
+      return '<li class="agent-plan-item' + done + '" data-idx="' + idx + '">' +
+        '<span class="plan-check" aria-hidden="true">' + (item.done ? '\u2713' : (idx + 1)) + '</span>' +
+        '<span class="plan-text">' + escapeHtml(item.text) + '</span></li>';
+    }).join('');
+  }
+
+  function setPlan(items) {
+    if (!items || !items.length) return;
+    var panel = ensureProgressPanel();
+    if (!panel) return;
+    // Merge unique plan lines (keep order)
+    items.forEach(function(raw) {
+      var text = String(raw || '').replace(/^[\-\*\d\.\)\s]+/, '').trim();
+      if (!text || text.length < 2) return;
+      var exists = _planItems.some(function(p) {
+        return p.text.toLowerCase() === text.toLowerCase();
+      });
+      if (!exists) _planItems.push({ text: text, done: false });
+    });
+    _renderPlanList(panel);
+    scrollToBottom();
+  }
+
+  function markPlanProgress(toolName) {
+    // Soft match: mark first incomplete plan item that mentions the tool or shares a word
+    if (!_planItems.length || !toolName) return;
+    var t = String(toolName).toLowerCase().replace(/_/g, ' ');
+    var marked = false;
+    for (var i = 0; i < _planItems.length; i++) {
+      if (_planItems[i].done) continue;
+      var pt = _planItems[i].text.toLowerCase();
+      if (pt.indexOf(t) >= 0 || t.split(' ').some(function(w) { return w.length > 3 && pt.indexOf(w) >= 0; })) {
+        _planItems[i].done = true;
+        marked = true;
+        break;
+      }
+    }
+    // If no lexical match, advance the next open plan step on tool completion
+    if (!marked) {
+      for (var j = 0; j < _planItems.length; j++) {
+        if (!_planItems[j].done) { _planItems[j].done = true; break; }
+      }
+    }
+    if (_progressEl) _renderPlanList(_progressEl);
+  }
+
+  /**
+   * Pull a plan from model text: ```plan ... ``` or ## Plan / **Plan** lists.
+   */
+  function tryIngestPlanFromText(text) {
+    if (!text || _planParsedFromText) return;
+    var fence = text.match(/```plan\s*([\s\S]*?)```/i);
+    var block = fence ? fence[1] : '';
+    if (!block) {
+      var md = text.match(/(?:^|\n)#{1,3}\s*plan\b[^\n]*\n([\s\S]{0,800}?)(?:\n#{1,3}\s|\n```|$)/i);
+      if (!md) md = text.match(/(?:^|\n)\*\*plan\*\*[^\n]*\n([\s\S]{0,800}?)(?:\n\*\*|\n#{1,3}\s|$)/i);
+      if (md) block = md[1];
+    }
+    if (!block) return;
+    var items = [];
+    block.split('\n').forEach(function(line) {
+      var m = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/);
+      if (m && m[1]) items.push(m[1].trim());
+    });
+    if (items.length) {
+      _planParsedFromText = true;
+      setPlan(items);
+      logProgress({
+        kind: 'status',
+        title: 'Plan locked (' + items.length + ' steps)',
+        state: 'info',
+      });
+    }
   }
 
   /**
@@ -993,25 +1094,37 @@
     if (!step) return;
     var panel = ensureProgressPanel();
     if (!panel) return;
-    var list = panel.querySelector('.agent-progress-steps');
-    if (!list) return;
 
     var kind = step.kind || 'status';
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
-    var title = String(step.title || '').trim() || '…';
+    var title = String(step.title || '').trim() || '\u2026';
     var detail = step.detail != null ? String(step.detail) : '';
 
-    // Coalesce rapid identical status lines (heartbeats still update last row)
+    // Plan lines go to the sticky plan list (not the activity log)
+    if (kind === 'plan') {
+      if (detail) {
+        setPlan(detail.split('\n'));
+      } else {
+        setPlan([title]);
+      }
+      return;
+    }
+
+    var list = panel.querySelector('.agent-progress-steps');
+    if (!list) return;
+
+    // Coalesce rapid identical status lines (heartbeats update last row)
     var last = list.lastElementChild;
     if (last && kind === 'status' && last.dataset.kind === 'status' && last.dataset.title === title && !detail) {
-      last.querySelector('.step-time').textContent = formatMsgTime();
+      var tEl = last.querySelector('.step-time');
+      if (tEl) tEl.textContent = formatMsgTime();
       last.className = 'agent-progress-step step-' + kind + ' state-' + state;
       scrollToBottom();
       return;
     }
-    // Update in-place when the same tool is completing
+    // Update in-place when the same tool is completing — keep result expanded
     if (last && kind === 'tool' && state !== 'running' && last.dataset.kind === 'tool' && last.dataset.title === title) {
-      last.className = 'agent-progress-step step-tool state-' + state;
+      last.className = 'agent-progress-step step-tool state-' + state + ' is-expanded';
       last.dataset.state = state;
       var st = last.querySelector('.step-state');
       if (st) st.textContent = state === 'done' ? 'Done' : (state === 'failed' ? 'Failed' : state);
@@ -1019,25 +1132,29 @@
         var det = last.querySelector('.step-detail');
         if (!det) {
           det = document.createElement('div');
-          det.className = 'step-detail';
-          last.appendChild(det);
+          det.className = 'step-detail is-expanded';
+          last.querySelector('.step-body').appendChild(det);
         }
-        det.textContent = truncateStr(detail, 240);
+        det.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
+        det.classList.add('is-expanded');
       }
-      last.querySelector('.step-time').textContent = formatMsgTime();
+      var t2 = last.querySelector('.step-time');
+      if (t2) t2.textContent = formatMsgTime();
+      if (state === 'done') markPlanProgress(title);
       scrollToBottom();
       return;
     }
 
     _progressStepCount += 1;
     var li = document.createElement('li');
-    li.className = 'agent-progress-step step-' + kind + ' state-' + state;
+    li.className = 'agent-progress-step step-' + kind + ' state-' + state +
+      (kind === 'tool' ? ' is-expanded' : '');
     li.dataset.kind = kind;
     li.dataset.title = title;
     li.dataset.state = state;
 
     var icon = kind === 'tool' ? '\u2699'
-      : (kind === 'thought' || kind === 'plan' ? '\u25C8'
+      : (kind === 'thought' ? '\u25C8'
         : (kind === 'error' ? '\u26A0' : '\u2022'));
 
     li.innerHTML =
@@ -1050,15 +1167,21 @@
             : '') +
           '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
         '</div>' +
-        (detail ? '<div class="step-detail">' + escapeHtml(truncateStr(detail, 240)) + '</div>' : '') +
+        (detail
+          ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
+          : '') +
       '</div>';
 
     list.appendChild(li);
-    // Cap DOM size on very long tool storms
-    while (list.children.length > 80) list.removeChild(list.firstChild);
+    while (list.children.length > 100) list.removeChild(list.firstChild);
 
     var countEl = panel.querySelector('.agent-progress-count');
-    if (countEl) countEl.textContent = _progressStepCount + (_progressStepCount === 1 ? ' step' : ' steps');
+    if (countEl) {
+      var planN = _planItems.length;
+      countEl.textContent =
+        _progressStepCount + (_progressStepCount === 1 ? ' step' : ' steps') +
+        (planN ? ' \u00B7 ' + planN + ' plan' : '');
+    }
     var titleEl = panel.querySelector('.agent-progress-title');
     if (titleEl && state === 'running') titleEl.textContent = 'Working\u2026';
     if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
@@ -1073,17 +1196,23 @@
     var panel = _progressEl;
     panel.classList.remove('is-active');
     panel.classList.add('is-done');
+    // Stay expanded — user can collapse; tool results remain visible
+    panel.classList.remove('is-collapsed');
+    var chev = panel.querySelector('.agent-progress-chevron');
+    if (chev) chev.textContent = '\u25BE';
     var titleEl = panel.querySelector('.agent-progress-title');
-    if (titleEl) titleEl.textContent = ok === false ? 'Stopped' : 'Activity';
+    if (titleEl) {
+      var donePlan = _planItems.filter(function(p) { return p.done; }).length;
+      titleEl.textContent = ok === false
+        ? 'Stopped'
+        : (_planItems.length
+          ? 'Done \u00B7 plan ' + donePlan + '/' + _planItems.length
+          : 'Done');
+    }
     var pulse = panel.querySelector('.agent-progress-pulse');
     if (pulse) pulse.classList.add('is-off');
-    // Auto-collapse long activity logs so the answer stays readable
-    if (_progressStepCount >= 4) {
-      panel.classList.add('is-collapsed');
-      var chev = panel.querySelector('.agent-progress-chevron');
-      if (chev) chev.textContent = '\u25B8';
-    }
     _progressEl = null;
+    _planParsedFromText = false;
   }
 
   // ── Message rendering ─────────────────────────────────
@@ -2004,10 +2133,12 @@
         logProgress({ kind: 'status', title: 'Writing reply\u2026', state: 'running' });
       }
       tokenAccum += content;
+      tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
       if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
       scrollToBottom();
     },
+    setPlan: setPlan,
     appendErrorMessage: function(errMsg) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;

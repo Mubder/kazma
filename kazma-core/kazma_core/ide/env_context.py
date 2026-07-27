@@ -275,6 +275,19 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "you found. If it conflicts with the user's request, report the conflict.",
             "5. Never claim the folder *name* is the product if package metadata "
             "says otherwise — report both.",
+            "",
+            "### Visible work (UI workbench)",
+            "For multi-step tasks (3+ tool calls or a long mission), open your first "
+            "assistant text with a short plan fence so the chat workbench can pin it:",
+            "",
+            "```plan",
+            "- Inspect project identity",
+            "- Run the relevant tools",
+            "- Write findings / deliverable",
+            "```",
+            "",
+            "Keep the plan to 3–7 bullets. Then use tools. The UI shows Plan + "
+            "Activity (tools/status) above your final answer — stay concrete.",
         ]
     )
 

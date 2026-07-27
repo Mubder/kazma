@@ -1592,7 +1592,7 @@ tbody tr:last-child td {
   font-size: 0.8rem;
 }
 
-/* ── Agent live progress (per-turn activity log) ─────────────────── */
+/* ── Agent turn workbench (Plan + Activity) ─────────────────────── */
 .agent-progress {
   margin: 0 0 var(--sp-2);
   border: 1px solid var(--border);
@@ -1606,7 +1606,7 @@ tbody tr:last-child td {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .agent-progress.is-done {
-  opacity: 0.92;
+  opacity: 0.96;
 }
 .agent-progress-header {
   display: flex;
@@ -1658,21 +1658,84 @@ tbody tr:last-child td {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
+.agent-progress-body {
+  border-top: 1px solid var(--border-subtle);
+}
+.agent-progress.is-collapsed .agent-progress-body {
+  display: none;
+}
+
+/* Sticky plan checklist */
+.agent-plan {
+  padding: 8px 12px 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.agent-plan-label,
+.agent-activity-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.agent-activity-label {
+  padding: 8px 12px 0;
+  margin-bottom: 0;
+}
+.agent-plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+.agent-plan-item .plan-check {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, var(--border));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+}
+.agent-plan-item.is-done .plan-check {
+  background: color-mix(in srgb, var(--success, #34d399) 25%, transparent);
+  border-color: var(--success, #34d399);
+  color: var(--success, #34d399);
+}
+.agent-plan-item.is-done .plan-text {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-muted) 60%, transparent);
+}
+
 .agent-progress-steps {
   list-style: none;
   margin: 0;
-  padding: 4px 0 8px;
-  max-height: 220px;
+  padding: 4px 0 10px;
+  max-height: 320px;
   overflow-y: auto;
-  border-top: 1px solid var(--border-subtle);
-}
-.agent-progress.is-collapsed .agent-progress-steps {
-  display: none;
 }
 .agent-progress-step {
   display: flex;
   gap: 8px;
-  padding: 5px 12px;
+  padding: 6px 12px;
   align-items: flex-start;
   color: var(--text-secondary);
 }
@@ -1710,7 +1773,7 @@ tbody tr:last-child td {
   font-variant-numeric: tabular-nums;
 }
 .agent-progress-step .step-detail {
-  margin-top: 2px;
+  margin-top: 4px;
   font-size: 0.72rem;
   color: var(--text-muted);
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -1718,8 +1781,17 @@ tbody tr:last-child td {
   word-break: break-word;
   max-height: 3.6em;
   overflow: hidden;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
+  border: 1px solid var(--border-subtle);
 }
-.agent-progress-step.step-plan .step-title { color: var(--accent); }
+/* Tool results stay fully readable */
+.agent-progress-step .step-detail.is-expanded,
+.agent-progress-step.step-tool .step-detail {
+  max-height: 14em;
+  overflow-y: auto;
+}
 .agent-progress-step.step-thought .step-title { font-style: italic; color: var(--text-secondary); }
 .message-meta time {
   font-variant-numeric: tabular-nums;
