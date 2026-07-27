@@ -1250,17 +1250,17 @@ def create_sse_chat_router(
 
                 # Store final assistant response in session history + persist to disk.
                 if content_acc:
-                    # Remove temporary message if it was added incrementally
+                    _ats = _dt.now(UTC).isoformat()
                     if assistant_message_started and session.messages:
-                        # Update the last message with final content
-                        if session.messages and session.messages[-1].get("role") == "assistant":
+                        if session.messages[-1].get("role") == "assistant":
                             session.messages[-1]["content"] = content_acc
+                            session.messages[-1].setdefault("ts", _ats)
                     else:
-                        # Add new message
                         session.messages.append(
                             {
                                 "role": "assistant",
                                 "content": content_acc,
+                                "ts": _ats,
                             }
                         )
                 try:
