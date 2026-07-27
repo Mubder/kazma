@@ -402,37 +402,55 @@ def create_kb_router() -> APIRouter:
         # Re-ingest as a background site crawl.  Per-chunk content_hash dedup
         # means only changed pages are actually re-indexed.
         job_id = f"{library_id}:refresh:{datetime.now(UTC).strftime('%H%M%S%f')}"
-        _kb_api_jobs[job_id] = {
-            "phase": "starting",
-            "library_id": library_id,
-            "url": seed,
-            "started_at": datetime.now(UTC).isoformat(),
-        }
+        _remember_job(
+            job_id,
+            {
+                "phase": "starting",
+                "library_id": library_id,
+                "url": seed,
+                "kind": "refresh",
+                "started_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
         async def _run() -> None:
             from kazma_core.stores.knowledge_ingest import ingest_site
 
             try:
                 async for update in ingest_site(library_id, seed):
-                    _kb_api_jobs[job_id].update(
-                        {
-                            "phase": update.phase,
-                            "discovered": update.discovered,
-                            "fetched": update.fetched,
-                            "ingested": update.ingested,
-                            "skipped": update.skipped,
-                            "failed": update.failed,
-                            "current_url": update.current_url,
-                            "message": update.message,
-                            "errors": list(update.errors or []),
-                        }
-                    )
-                _kb_api_jobs[job_id]["finished_at"] = datetime.now(UTC).isoformat()
+                    snap = {
+                        "phase": update.phase,
+                        "library_id": library_id,
+                        "url": seed,
+                        "kind": "refresh",
+                        "discovered": update.discovered,
+                        "fetched": update.fetched,
+                        "ingested": update.ingested,
+                        "skipped": update.skipped,
+                        "failed": update.failed,
+                        "current_url": update.current_url,
+                        "message": update.message,
+                        "errors": list(update.errors or []),
+                        "started_at": _kb_api_jobs.get(job_id, {}).get("started_at"),
+                    }
+                    _remember_job(job_id, snap)
+                done = dict(_kb_api_jobs.get(job_id, {}))
+                done["finished_at"] = datetime.now(UTC).isoformat()
+                if done.get("phase") not in ("error", "done"):
+                    done["phase"] = "done"
+                _remember_job(job_id, done)
             except Exception as exc:
                 logger.exception("[kb_api] refresh failed")
-                _kb_api_jobs[job_id].update(
-                    {"phase": "error", "message": str(exc),
-                     "finished_at": datetime.now(UTC).isoformat()}
+                _remember_job(
+                    job_id,
+                    {
+                        "phase": "error",
+                        "library_id": library_id,
+                        "url": seed,
+                        "kind": "refresh",
+                        "message": str(exc),
+                        "finished_at": datetime.now(UTC).isoformat(),
+                    },
                 )
 
         asyncio.create_task(_run())

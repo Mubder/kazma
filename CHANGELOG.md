@@ -1,11 +1,25 @@
 # CHANGELOG
 
-## Unreleased — KB + research depth plan (2026-07-27)
+## Unreleased — KB harden + deep research product (2026-07-27)
 
-- **Plan:** `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` — full findings from
-  KB and research audits, scores, workstreams (KB harden + deep research
-  product), phased PRs (protocol → soft gates → synthesize → paper pipeline),
-  acceptance metrics, and defaults for open decisions.
+Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
+
+### Knowledge Library
+- Re-ingest **purges** prior chunks per URL (no orphan indices) + Chroma delete
+- Chroma embed only for **changed** rows after upsert
+- Auto-inject: **tenant-scoped** + exclude **archived**
+- Refresh jobs **durable** (Web `kb_api` + gateway `/kb refresh`)
+- Shared Playwright browser per `ingest_site` job
+- FTS5 query sanitization (punctuation / operators)
+
+### Research depth
+- Research **protocol** in product knowledge + stronger tool descriptions
+- Soft graph **min-sources nudge** for deep intent (`research_policy.py`)
+- `web_search` default max_results **8**
+- Swarm auto-researcher full tool allowlist (save/digest/synthesize/pipeline)
+- Tools: `synthesize_from_digests`, `run_research_pipeline`
+- Slash: `/research deep <topic>` (Web SSE + gateway)
+- Reports under `research/reports/<slug>-<ts>/report.md`
 
 ## Unreleased — Multi-path diagnosis map + HITL Settings wire-up (2026-07-27)
 

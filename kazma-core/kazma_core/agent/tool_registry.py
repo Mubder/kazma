@@ -1417,15 +1417,28 @@ class LocalToolRegistry:
                         provider=profile.get("provider", ""),
                         role="researcher",
                         system_prompt=(
-                            "You are a Researcher worker. Analyze the task "
-                            "thoroughly using available tools (web_search, "
-                            "read_url, crawl_site). Provide comprehensive, "
-                            "well-structured findings."
+                            "You are a Researcher worker. Follow the research protocol: "
+                            "≥2 search queries, ≥2 full sources via read_url_to_file, "
+                            "digest long pages, then structured findings with URL citations. "
+                            "For comprehensive papers use run_research_pipeline. "
+                            "Never conclude from search snippets alone."
                         ),
                         capabilities=WorkerCapabilities(
                             role="researcher",
                             expertise=["research", "analysis", "writing"],
-                            tools=["web_search", "read_url", "crawl_site", "file_write"],
+                            tools=[
+                                "web_search",
+                                "read_url",
+                                "read_url_to_file",
+                                "crawl_site",
+                                "list_research_chunks",
+                                "read_research_chunk",
+                                "summarize_research_file",
+                                "digest_research_file",
+                                "synthesize_from_digests",
+                                "run_research_pipeline",
+                                "file_write",
+                            ],
                         ),
                     ))
                     logger.info("[dispatch_swarm] Auto-registered 'researcher' worker")
@@ -1568,8 +1581,10 @@ class LocalToolRegistry:
                 web_search,
                 description=(
                     "Search the public web (SearXNG if configured, else DuckDuckGo, "
-                    "Bing HTML last). Returns markdown titles/URLs/snippets. "
-                    "Not guaranteed against rate limits; prefer KAZMA_SEARXNG_URL for reliability."
+                    "Bing HTML last). Returns markdown titles/URLs/**snippets only**. "
+                    "For thorough research: run ≥2 queries, then fetch full pages with "
+                    "read_url_to_file / read_url — do not answer from snippets alone. "
+                    "Prefer KAZMA_SEARXNG_URL. Args: query, max_results=8."
                 ),
                 category="search",
             )
@@ -1591,9 +1606,8 @@ class LocalToolRegistry:
                 read_url,
                 description=(
                     "Fetch one public URL; text window (default ~16k, KAZMA_READ_URL_MAX_CHARS). "
-                    "Args: url, offset=0, max_chars=None. Optional backends: "
-                    "KAZMA_FIRECRAWL_API_KEY, KAZMA_JINA_READER=1, KAZMA_FETCH_BACKEND. "
-                    "Full page: read_url_to_file; multi-page: crawl_site; long digest: digest_research_file."
+                    "Args: url, offset=0, max_chars=None. Hard sites: Firecrawl/Jina recovery. "
+                    "For research: prefer read_url_to_file then digest_research_file; multi-page: crawl_site."
                 ),
                 category="search",
             )
@@ -1601,8 +1615,9 @@ class LocalToolRegistry:
                 "read_url_to_file",
                 read_url_to_file,
                 description=(
-                    "Fetch URL and save FULL extract anywhere under the workspace "
-                    "(default folder KAZMA_RESEARCH_DIR=research). Args: url, path=workspace-relative."
+                    "Fetch URL and save FULL extract under the workspace "
+                    "(default research/). Preferred for multi-source research so you can "
+                    "digest later. Args: url, path=workspace-relative."
                 ),
                 category="search",
             )
@@ -1638,13 +1653,46 @@ class LocalToolRegistry:
                 digest_research_file,
                 description=(
                     "Walk ALL chunks in-tool and return one bounded extractive digest "
-                    "(default ~12k via KAZMA_RESEARCH_DIGEST_MAX). Context-safe for long files. "
-                    "Args: path, chunk_size=4000, max_output_chars=12000."
+                    "(default ~12k). Not LLM analysis — use synthesize_from_digests for "
+                    "cross-source analysis. Args: path, chunk_size=4000, max_output_chars=12000."
                 ),
                 category="search",
             )
         except ImportError:
             logger.debug("read_url / research tools not available (missing trafilatura)")
+
+        try:
+            from kazma_core.tools.research_synthesize import synthesize_from_digests
+
+            self.register_function(
+                "synthesize_from_digests",
+                synthesize_from_digests,
+                description=(
+                    "LLM multi-source synthesis from saved research files/digests. "
+                    "Args: paths (list or comma-separated), question, outline='', max_chars=20000. "
+                    "Use after acquiring ≥2 sources via read_url_to_file."
+                ),
+                category="search",
+            )
+        except ImportError:
+            logger.debug("synthesize_from_digests not available")
+
+        try:
+            from kazma_core.tools.research_pipeline import run_research_pipeline
+
+            self.register_function(
+                "run_research_pipeline",
+                run_research_pipeline,
+                description=(
+                    "Deep research paper mode: multi-query search → acquire full pages → "
+                    "digest → LLM synthesis → write research/reports/.../report.md. "
+                    "Args: topic, depth='deep'|'standard', max_sources=8, language=''. "
+                    "Use when user wants comprehensive/thorough research or a full report."
+                ),
+                category="search",
+            )
+        except ImportError:
+            logger.debug("run_research_pipeline not available")
 
         try:
             from kazma_core.tools.web_research import crawl_site
@@ -1654,9 +1702,9 @@ class LocalToolRegistry:
                 crawl_site,
                 description=(
                     "Bounded multi-page crawl (same-domain by default). "
-                    "Args: start_url, max_pages=8 (hard max 50), max_depth=2, same_domain_only=True, "
-                    "delay_ms=300, save=True, path_prefix=optional. Saves pages under workspace; "
-                    "returns markdown index. SSRF-safe; not unlimited spidering."
+                    "Args: start_url, max_pages=8 (hard max 50; use 12–20 for deep docs), "
+                    "max_depth=2, same_domain_only=True, delay_ms=300, save=True. "
+                    "Saves pages under workspace; returns markdown index. SSRF-safe."
                 ),
                 category="search",
             )

@@ -33,7 +33,11 @@ When you give Kazma a seed URL (e.g. `https://developers.facebook.com/docs/whats
 3. **Chunk (hierarchy-aware).** Markdown is split on `#`/`##`/`###`/`####` headers with a section breadcrumb (`"Messages > Send Text Message"`). **Fenced code blocks are atomic** — never split, even when oversized.
 4. **Embed + index.** Each chunk is embedded (local `all-MiniLM-L6-v2` by default, or any OpenAI-compatible `/embeddings`) and stored in a per-library ChromaDB collection + a dedicated FTS5 table + SQLite (source of truth). Re-ingest dedups via `content_hash`.
 
-Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZMA_KB_MAX_DEPTH` (default 10), `KAZMA_KB_DELAY_MS` (default 300), `KAZMA_KB_SCOPE_MODE` (`prefix` | `domain` | `exact`, default `prefix`).
+Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZMA_KB_MAX_DEPTH` (default 10), `KAZMA_KB_DELAY_MS` (default 300), `KAZMA_KB_SCOPE_MODE` (`tree` | `prefix` | `domain` | `exact`, default **`tree`**).
+
+**Re-ingest hygiene:** indexing a URL **purges** prior chunks for that URL first (SQLite + FTS + Chroma) so page shrinks never leave orphan sections. **Refresh** jobs are durable (same ConfigStore job store as crawl). Agent tool `knowledge_ingest_site` is capped lower (~15 pages) than UI crawls — use `/knowledge` or `/kb crawl` for large trees.
+
+**Auto-inject** only includes **non-archived** libraries for the **current tenant** (when multi-user/prod tenant filter is on).
 
 ## Use it
 

@@ -670,6 +670,56 @@ def create_sse_chat_router(
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
+        # Deep research slash (runs pipeline, skips graph)
+        if raw_msg.lower().startswith("/research"):
+            from kazma_core.tools.research_pipeline import run_research_pipeline
+
+            parts = raw_msg.split(maxsplit=2)
+            if len(parts) == 1:
+                topic = ""
+                depth = "deep"
+            elif parts[1].lower() in ("deep", "full", "paper", "comprehensive"):
+                topic = parts[2] if len(parts) > 2 else ""
+                depth = "deep"
+            else:
+                topic = raw_msg[len("/research") :].strip()
+                depth = "deep"
+
+            async def _research_gen() -> AsyncGenerator[str, None]:
+                if not topic:
+                    yield _sse_frame(
+                        "token",
+                        {"content": "Usage: `/research deep <topic>`"},
+                    )
+                    yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
+                    return
+                yield _sse_frame(
+                    "token",
+                    {"content": f"🔬 Deep research starting: **{topic}**…\n\n"},
+                )
+                try:
+                    out = await run_research_pipeline(
+                        topic, depth=depth, max_sources=8
+                    )
+                    yield _sse_frame("token", {"content": out})
+                    try:
+                        session.add_message("assistant", out)
+                        _get_store().put(session)
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    yield _sse_frame(
+                        "token",
+                        {"content": f"\nResearch failed: {exc}"},
+                    )
+                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 0})
+
+            return StreamingResponse(
+                _research_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
             from kazma_core.safety.yolo import (
                 YoloDisabledError,

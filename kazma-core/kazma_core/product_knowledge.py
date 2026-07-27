@@ -44,6 +44,12 @@ def identity_line() -> str:
 
 def build_product_knowledge() -> str:
     """Full product-knowledge block for the supervisor system prompt."""
+    try:
+        from kazma_core.agent.research_policy import RESEARCH_PROTOCOL
+
+        _research_block = RESEARCH_PROTOCOL
+    except Exception:
+        _research_block = ""
     return f"""{_KNOWLEDGE_MARKER}
 
 ### Identity & naming (CRITICAL)
@@ -77,7 +83,10 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### What you can do for the user
 1. **Chat & reason** — answer, plan, research with tools.
 2. **Code in the workspace** — `file_read` / `file_write` / `file_list` / `file_search`, `shell_exec`, `python_exec` / `code_exec` (HITL on writes/exec).
-3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file`; `crawl_site`; chunk/digest helpers. Optional Firecrawl/Jina.
+3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file`; `crawl_site`; chunk/digest; `synthesize_from_digests`; `run_research_pipeline` for deep/comprehensive papers. Optional Firecrawl/Jina. **Never answer “thorough research” from search snippets alone** — fetch ≥2 full sources, digest long pages, cite URLs. User can run `/research deep <topic>`.
+
+{_research_block}
+
 4. **Email** — native skill `email-manager`: `email_list`, `email_get`, `email_send`, `email_delete`, `email_categorize`, `email_analyze`. Providers: **sandbox** (no creds); **Gmail** OAuth (Gmail API, recommended) or IMAP/POP with app password; **Microsoft** Graph OAuth (browser or device code) or IMAP/POP; generic IMAP/POP. Connect in **Settings → Email** with mode switcher **OAuth | IMAP | POP**. Default `provider=auto`. Gmail normal passwords do not work on IMAP/POP (Google policy). OAuth needs Gmail API scopes (`gmail.modify`) on the Cloud consent screen + test user. **HITL** for send/delete/categorize. Never claim send without tool success.
 5. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
 6. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.

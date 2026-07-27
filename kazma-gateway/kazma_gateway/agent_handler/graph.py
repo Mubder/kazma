@@ -27,6 +27,7 @@ from .commands import (
     _try_ide_command,
     _try_kb_command,
     _try_model_command,
+    _try_research_command,
     _try_skill_command,
     _try_swarm_command,
     _build_slash_ctx,
@@ -658,6 +659,12 @@ def create_graph_handler(
         )
         if kb_handled:
             return  # /kb command handled, skip graph
+
+        research_handled = await _try_research_command(
+            msg, _store, manager, thread_id,
+        )
+        if research_handled:
+            return
 
         # ── Agent Skills slash-command intercept ──────────────────
         # /skill install|list|… installs SKILL.md skills without LLM thrash.

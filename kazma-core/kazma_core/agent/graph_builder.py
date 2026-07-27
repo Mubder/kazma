@@ -94,6 +94,8 @@ _RESEARCH_TOOL_NAMES = frozenset(
         "read_research_chunk",
         "summarize_research_file",
         "digest_research_file",
+        "synthesize_from_digests",
+        "run_research_pipeline",
         "web_search",
         "web_search_duckduckgo",
     }
@@ -944,12 +946,34 @@ async def tool_worker_node(
                 }
             )
 
+        # Soft research-depth gate: deep intent + search-only → nudge once
+        try:
+            from kazma_core.agent.research_policy import should_nudge_more_sources
+
+            already = bool(state.get("_research_depth_nudged"))
+            turn_tools = [str(tc.get("name") or "") for tc in (safe_tools + danger_tools)]
+            # Include prior tool names this iteration chain from cumulative? use turn only
+            nudge = should_nudge_more_sources(
+                messages, turn_tools, already_nudged=already
+            )
+            if nudge:
+                tool_messages.append(
+                    {
+                        "role": "system",
+                        "content": nudge,
+                    }
+                )
+                # mark via state field below
+                state = {**state, "_research_depth_nudged": True}
+        except Exception:
+            pass
+
         # Merge into cumulative tool_results
         cumulative = dict(state.get("tool_results", {}))
         for tr in results:
             cumulative[tr["tool_call_id"]] = tr
 
-        return {
+        out: dict[str, Any] = {
             "messages": messages + tool_messages,
             "tool_calls_pending": [],  # all consumed
             "tool_calls_done": list(results),
@@ -959,6 +983,9 @@ async def tool_worker_node(
             # If the breaker just tripped or max consecutive failures hit, force RESPOND
             "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3) else NodeName.SUPERVISOR,
         }
+        if state.get("_research_depth_nudged"):
+            out["_research_depth_nudged"] = True
+        return out
     finally:
         # Always restore prior ContextVar values, even if a tool raised or
         # the graph was interrupted by HITL.

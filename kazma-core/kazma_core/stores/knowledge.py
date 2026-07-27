@@ -416,16 +416,38 @@ class KnowledgeStore:
                 raise
 
     def list_auto_inject_libraries(self) -> list[dict[str, Any]]:
-        """Return all libraries with ``auto_inject = 1`` (Phase 2)."""
+        """Return libraries with ``auto_inject = 1``, non-archived, tenant-scoped.
+
+        Multi-user/production must not inject another tenant's corpus into
+        the system prompt. Archived libraries stay searchable via explicit
+        ``knowledge_search`` but must not auto-inject.
+        """
+        tenant_clause = ""
+        params: list[Any] = []
+        if self._tenant_filter_enabled():
+            tenant_clause = " AND tenant_id = ?"
+            params.append(self._current_tenant())
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                """SELECT id, name, description, seed_url, auto_inject,
-                          chunk_count, created_at, updated_at
-                   FROM knowledge_libraries WHERE auto_inject = 1
-                   ORDER BY created_at"""
+                f"""SELECT id, name, description, seed_url, auto_inject, archived,
+                          chunk_count, created_at, updated_at, tenant_id
+                   FROM knowledge_libraries
+                   WHERE auto_inject = 1 AND archived = 0{tenant_clause}
+                   ORDER BY created_at""",
+                params,
             ).fetchall()
         return [self._library_row_to_dict(r) for r in rows]
+
+    def list_chunk_ids_for_source(self, library_id: str, source_url: str) -> list[str]:
+        """Chunk IDs for one URL (used before re-ingest purge)."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT id FROM knowledge_chunks WHERE library_id = ? AND source_url = ?",
+                (library_id, source_url),
+            ).fetchall()
+        return [r["id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows]
 
     # ------------------------------------------------------------------
     # Chunk CRUD
@@ -609,7 +631,17 @@ class KnowledgeStore:
             return []
         # Build an OR'd MATCH phrase from whitespace tokens so a multi-word
         # query matches docs containing any term (BM25 still ranks).
-        terms = [t for t in query.strip().split() if t]
+        # Strip FTS5 operators / punctuation that zero out the lexical layer.
+        raw_terms = [t for t in query.strip().split() if t]
+        terms: list[str] = []
+        for t in raw_terms:
+            cleaned = re.sub(r'[^\w\-]+', " ", t, flags=re.UNICODE).strip()
+            for part in cleaned.split():
+                if len(part) >= 2 and part.lower() not in {"or", "and", "not", "near"}:
+                    # Quote tokens so colons/hyphens inside don't break FTS5.
+                    safe = part.replace('"', "")
+                    if safe:
+                        terms.append(f'"{safe}"')
         if not terms:
             return []
         match_expr = " OR ".join(terms)

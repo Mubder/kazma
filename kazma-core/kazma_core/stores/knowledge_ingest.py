@@ -928,35 +928,22 @@ async def _fetch_html_playwright(url: str) -> str | None:
 
 # ── Page extraction (static + tabbed/JS) ────────────────────────────────────
 
+# Optional shared Playwright browser for multi-page crawl jobs (one launch
+# per ingest_site instead of launch-per-page). Set via ``_pw_browser_scope``.
+_pw_shared: dict[str, Any] = {"browser": None, "context": None, "pw": None}
 
-async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
-    """Render a URL with a stealth Chromium context, return HTML or full-DOM text.
 
-    This is the **primary** fetcher for bot-walled SPA doc sites (Meta,
-    etc.) where httpx returns a 400/error stub regardless of UA.  We:
+class _pw_browser_scope:
+    """Async context manager: reuse one Chromium for a crawl job."""
 
-    - Use ``domcontentloaded`` instead of ``networkidle`` so SPAs that
-      keep long-poll connections open don't hang forever (the cause of
-      the original crawl hanging at 0/0/0 on Meta).
-    - Apply the same stealth init scripts as ``read_url._fetch_with_playwright``
-      (``navigator.webdriver`` removal, fake plugins, etc.).
-    - Wait for *content* (``body`` innerText to exceed a threshold) rather
-      than network quiescence.
-    - Detect a returned bot-block/error page and return None so the caller
-      can fall through or surface a clean error.
-
-    Args:
-        want_text: ``False`` → return raw HTML (for link discovery).
-                   ``True``  → return the full-DOM textContent (for chunking;
-                   includes hidden-tab panels).
-    """
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        return None
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
+    async def __aenter__(self) -> "_pw_browser_scope":
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return self
+        try:
+            pw = await async_playwright().start()
+            browser = await pw.chromium.launch(
                 headless=True,
                 args=[
                     "--disable-blink-features=AutomationControlled",
@@ -964,68 +951,138 @@ async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
                     "--disable-dev-shm-usage",
                 ],
             )
+            ctx = await browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=_BROWSER_UA,
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
+            await ctx.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                window.chrome = { runtime: {} };
+                """
+            )
+            _pw_shared["pw"] = pw
+            _pw_shared["browser"] = browser
+            _pw_shared["context"] = ctx
+        except Exception as exc:
+            logger.debug("[kb_ingest] shared Playwright launch failed: %s", exc)
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        ctx = _pw_shared.get("context")
+        browser = _pw_shared.get("browser")
+        pw = _pw_shared.get("pw")
+        _pw_shared["context"] = None
+        _pw_shared["browser"] = None
+        _pw_shared["pw"] = None
+        for obj, meth in ((ctx, "close"), (browser, "close"), (pw, "stop")):
+            if obj is None:
+                continue
             try:
-                ctx = await browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=_BROWSER_UA,
-                    locale="en-US",
-                    timezone_id="America/New_York",
-                )
-                await ctx.add_init_script(
-                    """
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                    window.chrome = { runtime: {} };
-                    """
-                )
-                page = await ctx.new_page()
-                # ``domcontentloaded`` returns as soon as the DOM parses —
-                # NOT after network quiescence.  SPAs with analytics/beacon
-                # traffic never reach networkidle and would hang here.
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                # Wait for real content: body innerText must exceed the
-                # useful-chars threshold within a bounded budget.
-                try:
-                    await page.wait_for_function(
-                        f"() => (document.body && (document.body.innerText || '').length) >= {MIN_USEFUL_CHARS}",
-                        timeout=20000,
-                    )
-                except Exception:
-                    # Content never reached the threshold — give up gracefully
-                    # rather than hanging.  Caller will treat as a failed page.
-                    logger.debug("[kb_ingest] Playwright content wait failed for %s", url)
-                    return None
+                await getattr(obj, meth)()
+            except Exception:
+                pass
 
-                if not want_text:
-                    html = await page.content()
-                    if _looks_like_bot_block_html(html):
-                        return None
-                    return html
 
-                # want_text: click tabs to render hidden panels, then pull
-                # full-DOM textContent (includes display:none/aria-hidden).
-                try:
-                    await _click_tabs(page)
-                except Exception as exc:
-                    logger.debug("[kb_ingest] tab click pass skipped: %s", exc)
-                text = await page.evaluate(
-                    """() => {
-                        const root = document.body || document.documentElement;
-                        return root ? (root.textContent || '') : '';
-                    }"""
+async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
+    """Render a URL with stealth Chromium; reuse shared browser when scoped.
+
+    Args:
+        want_text: ``False`` → raw HTML (link discovery).
+                   ``True`` → full-DOM textContent (hidden tabs included).
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return None
+
+    shared_ctx = _pw_shared.get("context")
+    owns_browser = False
+    browser = None
+    ctx = shared_ctx
+    pw = None
+
+    try:
+        if ctx is None:
+            owns_browser = True
+            pw = await async_playwright().start()
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                ],
+            )
+            ctx = await browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=_BROWSER_UA,
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
+            await ctx.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                window.chrome = { runtime: {} };
+                """
+            )
+
+        page = await ctx.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            try:
+                await page.wait_for_function(
+                    f"() => (document.body && (document.body.innerText || '').length) >= {MIN_USEFUL_CHARS}",
+                    timeout=20000,
                 )
-                if not text or len(text) < MIN_USEFUL_CHARS:
+            except Exception:
+                logger.debug("[kb_ingest] Playwright content wait failed for %s", url)
+                return None
+
+            if not want_text:
+                html = await page.content()
+                if _looks_like_bot_block_html(html):
                     return None
-                # Collapse whitespace; the chunker re-introduces structure.
-                text = re.sub(r"[ \t]+\n", "\n", text)
-                text = re.sub(r"\n{3,}", "\n\n", text)
-                return text.strip()
-            finally:
-                await browser.close()
+                return html
+
+            try:
+                await _click_tabs(page)
+            except Exception as exc:
+                logger.debug("[kb_ingest] tab click pass skipped: %s", exc)
+            text = await page.evaluate(
+                """() => {
+                    const root = document.body || document.documentElement;
+                    return root ? (root.textContent || '') : '';
+                }"""
+            )
+            if not text or len(text) < MIN_USEFUL_CHARS:
+                return None
+            text = re.sub(r"[ \t]+\n", "\n", text)
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            return text.strip()
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
     except Exception as exc:
         logger.debug("[kb_ingest] Playwright render failed %s: %s", url, exc)
         return None
+    finally:
+        if owns_browser:
+            for obj, meth in ((ctx, "close"), (browser, "close"), (pw, "stop")):
+                if obj is None:
+                    continue
+                try:
+                    await getattr(obj, meth)()
+                except Exception:
+                    pass
 
 
 async def _extract_page(url: str) -> tuple[str | None, str, str]:
@@ -1307,7 +1364,7 @@ async def ingest_site(
         message=f"discovered {len(pages)} pages — starting fetch",
     )
 
-    # ── Fetch + ingest each page ─────────────────────────────────────
+    # ── Fetch + ingest each page (shared Playwright for the job) ─────
     index = get_knowledge_index()
     store = get_knowledge_store()
     fetched = 0
@@ -1315,64 +1372,60 @@ async def ingest_site(
     chunks_new = 0
     chunks_skipped = 0
 
-    for i, url in enumerate(pages):
-        yield ProgressUpdate(
-            phase="fetch",
-            discovered=len(pages), fetched=fetched, ingested=chunks_new,
-            skipped=chunks_skipped, failed=failed,
-            current_url=url,
-            message=f"[{i + 1}/{len(pages)}] {url}",
-            started_at=started,
-        )
-        try:
-            text, status, reason = await _extract_page(url)
-            if text is None or status == "error":
+    async with _pw_browser_scope():
+        for i, url in enumerate(pages):
+            yield ProgressUpdate(
+                phase="fetch",
+                discovered=len(pages), fetched=fetched, ingested=chunks_new,
+                skipped=chunks_skipped, failed=failed,
+                current_url=url,
+                message=f"[{i + 1}/{len(pages)}] {url}",
+                started_at=started,
+            )
+            try:
+                text, status, reason = await _extract_page(url)
+                if text is None or status == "error":
+                    failed += 1
+                    result.failed_urls.append(url)
+                    if reason:
+                        err_msg = f"{url}: {reason}"
+                        result.errors.append(err_msg)
+                        logger.warning("[kb_ingest] page failed %s: %s", url, reason)
+                    else:
+                        err_msg = f"{url}: fetch returned no content"
+                        result.errors.append(err_msg)
+                    yield ProgressUpdate(
+                        phase="fetch",
+                        discovered=len(pages), fetched=fetched, ingested=chunks_new,
+                        skipped=chunks_skipped, failed=failed,
+                        current_url=url,
+                        message=f"[{i + 1}/{len(pages)}] failed: {reason or 'no content'}",
+                        errors=list(result.errors[-5:]),
+                        started_at=started,
+                    )
+                    continue
+                _save_provenance(library_id, url, text)
+                chunks = chunk_markdown_doc(
+                    text,
+                    source_url=url,
+                    library_id=library_id,
+                    document_title=_derive_title(text, url),
+                )
+                if chunks:
+                    chunk_dicts = [chunk_to_dict(c) for c in chunks]
+                    new, skipped = index.index(library_id, chunk_dicts)
+                    chunks_new += new
+                    chunks_skipped += skipped
+                fetched += 1
+                result.pages_fetched += 1
+            except Exception as exc:
                 failed += 1
                 result.failed_urls.append(url)
-                # Surface the per-tier failure reason in the job log so
-                # the user can tell bot-wall from Chromium-missing from
-                # timeout — previously this was an opaque "failed=1".
-                if reason:
-                    err_msg = f"{url}: {reason}"
-                    result.errors.append(err_msg)
-                    logger.warning("[kb_ingest] page failed %s: %s", url, reason)
-                else:
-                    err_msg = f"{url}: fetch returned no content"
-                    result.errors.append(err_msg)
-                # Push a progress tick so the UI's failed counter and the
-                # error list update live (not just at the end).
-                yield ProgressUpdate(
-                    phase="fetch",
-                    discovered=len(pages), fetched=fetched, ingested=chunks_new,
-                    skipped=chunks_skipped, failed=failed,
-                    current_url=url,
-                    message=f"[{i + 1}/{len(pages)}] failed: {reason or 'no content'}",
-                    errors=list(result.errors[-5:]),  # last 5 to bound size
-                    started_at=started,
-                )
-                continue
-            _save_provenance(library_id, url, text)
-            chunks = chunk_markdown_doc(
-                text,
-                source_url=url,
-                library_id=library_id,
-                document_title=_derive_title(text, url),
-            )
-            if chunks:
-                chunk_dicts = [chunk_to_dict(c) for c in chunks]
-                new, skipped = index.index(library_id, chunk_dicts)
-                chunks_new += new
-                chunks_skipped += skipped
-            fetched += 1
-            result.pages_fetched += 1
-        except Exception as exc:
-            failed += 1
-            result.failed_urls.append(url)
-            result.errors.append(f"{url}: {exc}")
-            logger.warning("[kb_ingest] page failed %s: %s", url, exc)
+                result.errors.append(f"{url}: {exc}")
+                logger.warning("[kb_ingest] page failed %s: %s", url, exc)
 
-        if delay_ms:
-            await asyncio.sleep(delay_ms / 1000.0)
+            if delay_ms:
+                await asyncio.sleep(delay_ms / 1000.0)
 
     # Persist final chunk_count on the library row (index() also updates it,
     # but this is the authoritative post-crawl value).

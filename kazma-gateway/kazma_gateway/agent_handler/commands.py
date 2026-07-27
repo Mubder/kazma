@@ -1006,8 +1006,21 @@ async def _try_kb_command(
                 f"⚠️ Library `{lib_id}` has no seed_url to refresh from.",
             )
             return True
-        job_id = f"{lib_id}:{thread_id}"
-        _kb_jobs[job_id] = {"phase": "refreshing", "message": f"refreshing {seed}"}
+        job_id = f"{lib_id}:{thread_id}:refresh"
+        row = {
+            "phase": "refreshing",
+            "library_id": lib_id,
+            "url": seed,
+            "kind": "refresh",
+            "message": f"refreshing {seed}",
+        }
+        _kb_jobs[job_id] = row
+        try:
+            from kazma_core.stores.kb_jobs import upsert_job
+
+            upsert_job(job_id, **row)
+        except Exception:
+            pass
 
         async def _run_refresh() -> None:
             from kazma_core.stores.knowledge_ingest import ingest_site
@@ -1015,8 +1028,11 @@ async def _try_kb_command(
             final_msg = ""
             try:
                 async for update in ingest_site(lib_id, seed):
-                    _kb_jobs[job_id] = {
+                    snap = {
                         "phase": update.phase,
+                        "library_id": lib_id,
+                        "url": seed,
+                        "kind": "refresh",
                         "discovered": update.discovered,
                         "fetched": update.fetched,
                         "ingested": update.ingested,
@@ -1025,14 +1041,42 @@ async def _try_kb_command(
                         "current_url": update.current_url,
                         "message": update.message,
                     }
+                    _kb_jobs[job_id] = snap
+                    try:
+                        from kazma_core.stores.kb_jobs import upsert_job as _uj
+
+                        _uj(job_id, **snap)
+                    except Exception:
+                        pass
                     final_msg = update.message
+                done = {
+                    "phase": "done",
+                    "library_id": lib_id,
+                    "url": seed,
+                    "kind": "refresh",
+                    "message": final_msg,
+                }
+                _kb_jobs[job_id] = done
+                try:
+                    from kazma_core.stores.kb_jobs import upsert_job as _uj2
+
+                    _uj2(job_id, **done)
+                except Exception:
+                    pass
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     f"✅ Refresh complete for `{lib_id}`: {final_msg}",
                 )
             except Exception as exc:
                 logger.warning("[AgentHandler] /kb refresh failed: %s", exc)
-                _kb_jobs[job_id] = {"phase": "error", "message": str(exc)}
+                err = {"phase": "error", "library_id": lib_id, "message": str(exc)}
+                _kb_jobs[job_id] = err
+                try:
+                    from kazma_core.stores.kb_jobs import upsert_job as _uj3
+
+                    _uj3(job_id, **err)
+                except Exception:
+                    pass
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     f"⚠️ Refresh failed for `{lib_id}`: {exc}",
@@ -1171,6 +1215,61 @@ async def _try_kb_command(
         msg, store, manager, thread_id,
         f"⚠️ Unknown `/kb` subcommand `{sub}`. Send `/kb` for help.",
     )
+    return True
+
+
+async def _try_research_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/research deep <topic>`` (and ``/research <topic>`` as deep)."""
+    text = (msg.text or "").strip()
+    low = text.lower()
+    if not low.startswith("/research"):
+        return False
+    parts = text.split(maxsplit=2)
+    if len(parts) == 1:
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "🔬 *Deep research*\n\n"
+            "`/research deep <topic>` — multi-query search, full-page acquire, "
+            "digest, LLM synthesis, report under `research/reports/`.\n\n"
+            "Also available as tool: `run_research_pipeline`.",
+        )
+        return True
+    # /research deep TOPIC  or  /research TOPIC
+    if parts[1].lower() in ("deep", "full", "paper", "comprehensive"):
+        topic = parts[2] if len(parts) > 2 else ""
+        depth = "deep"
+    else:
+        topic = text[len("/research") :].strip()
+        depth = "deep"
+    if not topic:
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "⚠️ Usage: `/research deep <topic>`",
+        )
+        return True
+    await _send_model_reply(
+        msg, store, manager, thread_id,
+        f"🔬 Starting deep research on: *{topic}*\nThis may take several minutes…",
+    )
+    try:
+        from kazma_core.tools.research_pipeline import run_research_pipeline
+
+        result = await run_research_pipeline(topic, depth=depth, max_sources=8)
+        # Telegram-friendly length
+        if len(result) > 3500:
+            result = result[:3400] + "\n\n… (truncated — open the report file for full paper)"
+        await _send_model_reply(msg, store, manager, thread_id, result)
+    except Exception as exc:
+        logger.warning("[AgentHandler] /research failed: %s", exc)
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"⚠️ Research pipeline failed: {exc}",
+        )
     return True
 
 

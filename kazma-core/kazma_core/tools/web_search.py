@@ -422,14 +422,14 @@ def _format_results(
     return "\n".join(lines)
 
 
-async def web_search(query: str, max_results: int = 5) -> str:
+async def web_search(query: str, max_results: int = 8) -> str:
     """Search the public web; return markdown titles, URLs, and snippets.
 
     Tries multiple backends and continues on empty results (not only errors).
 
     Args:
         query: Search query string.
-        max_results: Maximum number of results to return (default 5).
+        max_results: Maximum number of results to return (default 8).
 
     Returns:
         Markdown-formatted search results, or a diagnostic empty/error message.
@@ -437,7 +437,7 @@ async def web_search(query: str, max_results: int = 5) -> str:
     q = (query or "").strip()
     if not q:
         return "Error: empty search query."
-    max_results = max(1, min(int(max_results or 5), 15))
+    max_results = max(1, min(int(max_results or 8), 15))
 
     try:
         results, attempts, backend = await asyncio.to_thread(_run_search, q, max_results)

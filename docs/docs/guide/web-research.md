@@ -122,13 +122,30 @@ Playwright (optional install): `pip install 'kazma[web]'` and `playwright instal
 - Digests are **extractive** (no nested LLM inside the tool); the chat model synthesizes the final report.  
 - HITL still applies to danger tools; research web tools are generally **read/safe** (writes go to workspace files via pathlib).
 
+## Modes: quick vs deep
+
+| Mode | How to trigger | Behavior |
+|------|----------------|----------|
+| **Quick** | “look up”, short questions | Free-form tools; 1–2 hops OK |
+| **Deep / paper** | “research thoroughly”, “comprehensive report”, **`/research deep <topic>`**, or tool `run_research_pipeline` | Multi-query search → full-page acquire → digests → **LLM synthesis** → report under `research/reports/` |
+
+The supervisor also has a **soft depth gate**: deep-worded requests that only ran `web_search` get one system nudge to fetch ≥2 full sources before concluding.
+
+### Synthesis tools
+
+| Tool | Role |
+|------|------|
+| `digest_research_file` | Extractive map of one file (no nested LLM) |
+| `synthesize_from_digests` | Cross-source LLM analysis |
+| `run_research_pipeline` | Full paper pipeline (search→acquire→digest→synthesize→save) |
+
 ## Recommended playbooks
 
 ### Single topic
 
-1. `web_search`  
-2. `read_url` or `read_url_to_file` on top results  
-3. `digest_research_file` on saved paths  
+1. `web_search` (≥2 queries for thorough work)  
+2. `read_url_to_file` on top results (≥2 sources)  
+3. `digest_research_file` then `synthesize_from_digests`  
 4. Answer with citations  
 
 ### Docs site
@@ -137,9 +154,17 @@ Playwright (optional install): `pip install 'kazma[web]'` and `playwright instal
 2. `digest_research_file` per saved path (or selective chunks)  
 3. Report  
 
+### Comprehensive paper
+
+```text
+/research deep <topic>
+# or
+run_research_pipeline(topic="...", depth="deep", max_sources=8)
+```
+
 ### Swarm
 
-`/swarm research …` uses workers; still the same underlying tools when workers have them registered.
+`/swarm research …` / `dispatch_swarm` auto-researcher includes save/digest/pipeline tools.
 
 ## Related
 

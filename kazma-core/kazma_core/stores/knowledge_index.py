@@ -116,6 +116,33 @@ class KnowledgeIndex:
     # Indexing
     # ------------------------------------------------------------------
 
+    def purge_source(self, library_id: str, source_url: str) -> int:
+        """Remove all SQLite/FTS + Chroma rows for one URL before re-ingest.
+
+        Prevents orphan chunk indices when a page shrinks on refresh.
+        """
+        if not source_url:
+            return 0
+        old_ids = self._store.list_chunk_ids_for_source(library_id, source_url)
+        n = self._store.delete_chunks_for_source(library_id, source_url)
+        vs = self._vector_store_for(library_id)
+        if vs.available and old_ids:
+            for oid in old_ids:
+                try:
+                    vs.delete(oid)
+                except Exception as exc:
+                    logger.debug(
+                        "[KnowledgeIndex] chroma delete %s failed: %s", oid, exc
+                    )
+        if n:
+            logger.info(
+                "[KnowledgeIndex] Purged %d chunks for library=%s url=%s",
+                n,
+                library_id,
+                source_url[:80],
+            )
+        return n
+
     def index(self, library_id: str, chunks: list[dict[str, Any]]) -> tuple[int, int]:
         """Index a batch of chunks for one library.
 
@@ -123,20 +150,39 @@ class KnowledgeIndex:
         ``source_url``, ``document_title``, ``section_header``,
         ``chunk_index``, ``has_code`` (see ``chunk_to_dict``).
 
+        When the batch is for known source URL(s), existing chunks for those
+        URLs are **purged first** so re-ingest never leaves orphan indices.
+
         Returns ``(new_count, skipped_count)`` where ``skipped`` counts
-        chunks that were already present with the same hash (dedup).
+        chunks that were already present with the same hash (dedup) — after
+        a purge this is usually 0 for that page.
         """
         if not chunks:
             return (0, 0)
 
+        # Purge per source_url so shrinks don't leave stale M..N-1 indices.
+        urls = {
+            str(c.get("source_url") or "").strip()
+            for c in chunks
+            if c.get("source_url")
+        }
+        for url in urls:
+            try:
+                self.purge_source(library_id, url)
+            except Exception as exc:
+                logger.warning(
+                    "[KnowledgeIndex] purge failed library=%s url=%s: %s",
+                    library_id,
+                    url[:80],
+                    exc,
+                )
+
         vs = self._vector_store_for(library_id)
         new_count = 0
         skipped = 0
+        wrote_chunks: list[dict[str, Any]] = []
 
         # SQLite (source of truth) + FTS5 first.
-        # Per-chunk try/except: one bad row must not abort the rest of the
-        # page (legacy content-only IDs used to raise UNIQUE and mark the
-        # whole page failed even after a successful fetch).
         for chunk in chunks:
             try:
                 wrote = self._store.upsert_chunk(chunk)
@@ -152,12 +198,13 @@ class KnowledgeIndex:
                 continue
             if wrote:
                 new_count += 1
+                wrote_chunks.append(chunk)
             else:
                 skipped += 1
 
-        # ChromaDB vector + preview (best-effort — degrade to FTS5-only on failure).
+        # ChromaDB: only embed chunks that actually changed (skip deduped).
         if vs.available:
-            for chunk in chunks:
+            for chunk in wrote_chunks:
                 if not chunk.get("content"):
                     continue
                 try:
@@ -174,7 +221,6 @@ class KnowledgeIndex:
                         },
                     )
                 except Exception as exc:
-                    # One bad chunk shouldn't kill the batch.
                     logger.warning(
                         "[KnowledgeIndex] ChromaDB index failed for %s: %s",
                         chunk.get("id"), exc,
@@ -184,7 +230,6 @@ class KnowledgeIndex:
                 "[KnowledgeIndex] ChromaDB unavailable — chunks stored in SQLite+FTS5 only"
             )
 
-        # Update the denormalized chunk_count on the library row.
         total = self._store.count_chunks(library_id)
         self._store.set_chunk_count(library_id, total)
         logger.info(
