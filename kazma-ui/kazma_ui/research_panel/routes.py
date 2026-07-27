@@ -118,27 +118,53 @@ def create_research_router() -> APIRouter:
 
     @router.get("/api/research/papers/file")
     async def get_paper_file(path: str) -> Any:
-        """Serve a research report file from the workspace (path under research/reports/)."""
-        try:
-            from kazma_core.tools.file_write import _get_workspace
+        """Serve a research report file (under research/reports/ in any known workspace)."""
+        from kazma_core.tools.research_pipeline import _candidate_report_roots
 
-            root = _get_workspace().resolve()
-        except Exception:
-            root = Path.cwd().resolve() / "kazma-data" / "workspace"
         raw = (path or "").strip().replace("\\", "/")
         if not raw or ".." in raw.split("/"):
             return JSONResponse({"error": "invalid path"}, status_code=400)
-        # Only research/reports/** under workspace
-        if not raw.startswith("research/reports/"):
-            return JSONResponse({"error": "path must be under research/reports/"}, status_code=403)
-        target = (root / raw).resolve()
-        try:
-            target.relative_to(root)
-        except ValueError:
-            return JSONResponse({"error": "path outside workspace"}, status_code=403)
-        if not target.is_file():
+        # Absolute path only if under a known reports tree
+        candidates: list[Path] = []
+        if Path(raw).is_absolute():
+            candidates.append(Path(raw))
+        elif raw.startswith("research/reports/"):
+            for root in _candidate_report_roots():
+                candidates.append((root / raw).resolve())
+        else:
+            return JSONResponse(
+                {"error": "path must be under research/reports/"}, status_code=403
+            )
+
+        target: Path | None = None
+        for cand in candidates:
+            try:
+                if not cand.is_file():
+                    continue
+                # Containment: must live under some root's research/reports
+                ok = False
+                for root in _candidate_report_roots():
+                    try:
+                        cand.relative_to((root / "research" / "reports").resolve())
+                        ok = True
+                        break
+                    except ValueError:
+                        continue
+                if ok or any(
+                    str(cand).replace("\\", "/").find("/research/reports/") >= 0
+                    for _ in (1,)
+                ):
+                    target = cand
+                    break
+            except Exception:
+                continue
+        if target is None or not target.is_file():
             return JSONResponse({"error": "not found"}, status_code=404)
-        media = "text/markdown; charset=utf-8" if target.suffix.lower() == ".md" else "application/octet-stream"
+        media = (
+            "text/markdown; charset=utf-8"
+            if target.suffix.lower() == ".md"
+            else "application/octet-stream"
+        )
         return FileResponse(str(target), filename=target.name, media_type=media)
 
     @router.get("/api/research/tasks")

@@ -37,6 +37,48 @@ def _get_ws_root() -> Path:
         return (Path.cwd() / "kazma-data" / "workspace").resolve()
 
 
+def _candidate_report_roots() -> list[Path]:
+    """All places we may have written research/reports (workspace can vary)."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path | None) -> None:
+        if p is None:
+            return
+        try:
+            r = p.resolve()
+        except Exception:
+            return
+        key = str(r).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(r)
+
+    _add(_get_ws_root())
+    try:
+        import os
+
+        env = (os.environ.get("KAZMA_WORKSPACE") or "").strip()
+        if env:
+            _add(Path(env).expanduser())
+    except Exception:
+        pass
+    _add(Path.cwd() / "kazma-data" / "workspace")
+    _add(Path.cwd())  # repo-root research/ when tools wrote relative to cwd
+    # Active WorkspaceStore (may differ from tool pin at list time)
+    try:
+        from kazma_core.stores import get_workspace_store
+
+        for row in get_workspace_store().list_workspaces() or []:
+            rp = (row or {}).get("root_path")
+            if rp:
+                _add(Path(rp).expanduser())
+    except Exception:
+        pass
+    return roots
+
+
 def _workspace_research_dir(topic: str) -> Path:
     root = _get_ws_root()
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -46,10 +88,12 @@ def _workspace_research_dir(topic: str) -> Path:
 
 
 def _rel(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(_get_ws_root()))
-    except Exception:
-        return str(path)
+    for root in _candidate_report_roots():
+        try:
+            return str(path.resolve().relative_to(root)).replace("\\", "/")
+        except Exception:
+            continue
+    return str(path)
 
 
 def _extract_urls_from_search(md: str) -> list[str]:
@@ -92,58 +136,123 @@ def _papers_index_path() -> Path:
 
 
 def _register_paper(meta: dict[str, Any]) -> None:
-    path = _papers_index_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    items: list[dict[str, Any]] = []
-    if path.is_file():
-        try:
-            items = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(items, list):
-                items = []
-        except Exception:
+    """Persist paper meta to ConfigStore (shared) + workspace index.json."""
+    for key in ("report_path", "docx_path"):
+        p = meta.get(key)
+        if p and not Path(str(p)).is_absolute():
+            try:
+                abs_p = (_get_ws_root() / str(p)).resolve()
+                if abs_p.is_file():
+                    meta[f"{key}_abs"] = str(abs_p)
+            except Exception:
+                pass
+
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        items = cs.get("research.papers_index") or []
+        if not isinstance(items, list):
             items = []
-    items.insert(0, meta)
-    items = items[:100]
-    path.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+        rp = str(meta.get("report_path") or "")
+        items = [
+            it
+            for it in items
+            if isinstance(it, dict) and it.get("report_path") != rp
+        ]
+        items.insert(0, meta)
+        cs.set("research.papers_index", items[:100], category="research")
+    except Exception as exc:
+        logger.debug("[research_pipeline] ConfigStore paper register failed: %s", exc)
+
+    try:
+        path = _papers_index_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        items2: list[dict[str, Any]] = []
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    items2 = raw
+            except Exception:
+                items2 = []
+        items2.insert(0, meta)
+        path.write_text(
+            json.dumps(items2[:100], indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception as exc:
+        logger.debug("[research_pipeline] file paper register failed: %s", exc)
 
 
 def list_research_papers(*, limit: int = 50) -> list[dict[str, Any]]:
-    """List registered paper runs + scan report.md files on disk."""
+    """List registered paper runs + scan report.md under all known roots."""
     limit = max(1, min(100, int(limit or 50)))
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    idx = _papers_index_path()
-    if idx.is_file():
+
+    def _add(it: dict[str, Any]) -> None:
+        key = str(it.get("report_path") or it.get("id") or "")
+        if not key or key in seen:
+            return
+        seen.add(key)
+        out.append(it)
+
+    try:
+        from kazma_core.config_store import get_config_store
+
+        items = get_config_store().get("research.papers_index") or []
+        if isinstance(items, list):
+            for it in items:
+                if isinstance(it, dict) and it.get("report_path"):
+                    _add(it)
+    except Exception:
+        pass
+
+    for root in _candidate_report_roots():
+        idx = root / "research" / "reports" / "index.json"
+        if idx.is_file():
+            try:
+                raw = json.loads(idx.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    for it in raw:
+                        if isinstance(it, dict) and it.get("report_path"):
+                            _add(it)
+            except Exception:
+                pass
+        reports_root = root / "research" / "reports"
+        if not reports_root.is_dir():
+            continue
         try:
-            items = json.loads(idx.read_text(encoding="utf-8"))
-            if isinstance(items, list):
-                for it in items:
-                    if isinstance(it, dict) and it.get("report_path"):
-                        key = str(it["report_path"])
-                        if key not in seen:
-                            seen.add(key)
-                            out.append(it)
+            reports = sorted(reports_root.glob("*/report.md"), reverse=True)
         except Exception:
-            pass
-    reports_root = _get_ws_root() / "research" / "reports"
-    if reports_root.is_dir():
-        for report in sorted(reports_root.glob("*/report.md"), reverse=True):
-            rel = _rel(report)
-            if rel in seen:
-                continue
-            seen.add(rel)
+            reports = []
+        for report in reports:
+            try:
+                rel = str(report.resolve().relative_to(root)).replace("\\", "/")
+            except Exception:
+                rel = str(report)
             parent = report.parent.name
-            out.append(
+            docx = report.parent / "report.docx"
+            _add(
                 {
                     "id": parent,
                     "topic": parent.rsplit("-", 1)[0].replace("-", " "),
                     "report_path": rel,
+                    "report_path_abs": str(report.resolve()),
+                    "docx_path": (
+                        str(docx.relative_to(root)).replace("\\", "/")
+                        if docx.is_file()
+                        else None
+                    ),
+                    "docx_path_abs": str(docx.resolve()) if docx.is_file() else None,
                     "created_at": datetime.fromtimestamp(
                         report.stat().st_mtime, tz=UTC
                     ).isoformat(),
                     "sources": None,
+                    "kind": "research_paper",
                 }
             )
+
     return out[:limit]
 
 

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Research panel papers list + chat logo (2026-07-27)
+
+- **Papers list:** scan all workspace candidates + ConfigStore index so
+  `/research deep` reports appear on the Research tab (not only swarm tasks).
+- **Paper file open** resolves across workspace roots.
+- **Chat avatar:** assistant messages use `/static/img/kazma-icon.png` instead of “K”.
+
 ## Unreleased — UI i18n, bidi, HITL undefined, papers open (2026-07-27)
 
 - **Bidi:** `unicode-bidi: plaintext` + `dir=auto` for chat/tool/skill text so

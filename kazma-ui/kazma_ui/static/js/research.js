@@ -68,16 +68,27 @@
         fetch('/api/research/tasks?page=1&page_size=50&archived=false', { credentials: 'same-origin' })
           .then(function (r) { return r.ok ? r.json() : { tasks: [] }; })
           .catch(function () { return { tasks: [] }; }),
-        fetch('/api/research/papers?limit=30', { credentials: 'same-origin' })
-          .then(function (r) { return r.ok ? r.json() : { papers: [] }; })
-          .catch(function () { return { papers: [] }; }),
+        fetch('/api/research/papers?limit=50', { credentials: 'same-origin' })
+          .then(function (r) {
+            if (!r.ok) {
+              console.warn('[research] papers API HTTP', r.status);
+              return { papers: [], error: 'HTTP ' + r.status };
+            }
+            return r.json();
+          })
+          .catch(function (err) {
+            console.warn('[research] papers fetch failed', err);
+            return { papers: [] };
+          }),
       ]).then(function (pair) {
         var data = pair[0] || {};
-        var papers = (pair[1] && pair[1].papers) || [];
+        var papersPayload = pair[1] || {};
+        var papers = papersPayload.papers || [];
         var paperTasks = papers.map(function (p) {
+          var topic = p.topic || p.report_path || 'report';
           return {
             id: 'paper:' + (p.id || p.report_path),
-            prompt: '[Paper] ' + (p.topic || p.report_path || 'report'),
+            prompt: '[Paper] ' + topic,
             status: 'paper',
             workers: ['research_pipeline'],
             cost: 0,
@@ -93,6 +104,9 @@
         allTasks = paperTasks.concat(data.tasks || []);
         renderList(allTasks);
         populateCompareDropdowns(data.tasks || []);
+        if (papersPayload.error) {
+          toast('Papers list: ' + papersPayload.error, 'error');
+        }
       });
     },
 

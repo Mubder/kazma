@@ -93,7 +93,8 @@
 {% block scripts %}
 <script src="/static/js/streaming.js"></script>
 <script>
-window.KAZMA_I18N = {
+// Merge page keys into global i18n — do NOT wipe window.KAZMA_I18N from base.html
+window.KAZMA_I18N = Object.assign({}, window.KAZMA_I18N || {}, {
   research_compare_desc: "{{ t('research.compare_desc') }}",
   research_no_results: "{{ t('research.no_results') }}",
   research_no_archived: "{{ t('research.no_archived') }}",
@@ -108,7 +109,8 @@ window.KAZMA_I18N = {
   research_tab_archived: "{{ t('research.tab_archived') }}",
   research_archived_msg: "{{ t('research.archived_msg') }}",
   research_restored_msg: "{{ t('research.restored_msg') }}",
-};
+  research_open_md: "{{ t('research.open_md') }}",
+});
 </script>
-<script src="/static/js/research.js?v=7"></script>
+<script src="/static/js/research.js?v={{ js_version() }}"></script>
 {% endblock %}

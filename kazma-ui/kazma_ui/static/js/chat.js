@@ -1378,8 +1378,6 @@
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
 
-    var avatar = role === 'user' ? 'You' : 'K';
-    var avatarBg = role === 'user' ? 'var(--accent)' : 'var(--bg-surface)';
     var when = formatMsgTime(ts);
     var iso = '';
     try {
@@ -1387,9 +1385,15 @@
     } catch (e) {
       iso = new Date().toISOString();
     }
+    var avatarHtml = role === 'user'
+      ? '<div class="message-avatar message-avatar-user">You</div>'
+      : '<div class="message-avatar message-avatar-agent" title="Kazma">' +
+          '<img src="/static/img/kazma-icon.png" alt="Kazma" class="message-avatar-img" ' +
+          'onerror="this.style.display=\'none\';this.parentNode.textContent=\'K\';" />' +
+        '</div>';
 
     wrapper.innerHTML =
-      '<div class="message-avatar" style="background:' + avatarBg + '">' + avatar + '</div>' +
+      avatarHtml +
       '<div class="message-content">' +
         '<div class="message-text" dir="auto">' + (role === 'user' ? escapeHtml(content) : KS.markdown(content)) + '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
