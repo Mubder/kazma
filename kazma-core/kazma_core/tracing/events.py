@@ -127,11 +127,21 @@ class EventBridge:
 
         except Exception as exc:
             logger.exception("[EventBridge] Exception in event stream processing: %s", exc)
+            raw = str(exc) or type(exc).__name__
+            # LangGraph default recursion_limit=25 is a common false "agent died" UX
+            if "Recursion limit" in raw or type(exc).__name__ == "GraphRecursionError":
+                friendly = (
+                    "This turn used too many graph steps (tool/supervisor hops) and hit "
+                    "LangGraph's recursion ceiling. Try a smaller ask, or continue in a "
+                    "follow-up message — split large smoke tests into sections."
+                )
+            else:
+                friendly = raw if len(raw) <= 500 else raw[:500] + "…"
             yield TelemetryEvent(
                 type="graph_error",
                 data={
                     "error_type": type(exc).__name__,
-                    "message": str(exc),
+                    "message": friendly,
                 },
                 thread_id=thread_id,
             )

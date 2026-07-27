@@ -23,6 +23,25 @@ logger = logging.getLogger(__name__)
 
 ws_chat_router = APIRouter(tags=["ws-chat"])
 
+# Match sse_chat / agent_runner / gateway — LangGraph default (25) is too low.
+_GRAPH_RECURSION_LIMIT = 100
+
+
+def _friendly_graph_error(exc: BaseException) -> str:
+    """Human-readable error for UI (don't dump raw LangGraph exception walls)."""
+    name = type(exc).__name__
+    msg = str(exc) or name
+    if "Recursion limit" in msg or "GRAPH_RECURSION" in msg or name == "GraphRecursionError":
+        return (
+            "This turn used too many graph steps (tool/supervisor hops) and hit "
+            "LangGraph's recursion ceiling. Try a smaller ask, or continue in a "
+            "new message — long smoke tests should be split into sections."
+        )
+    # Keep short; full traceback stays in server logs
+    if len(msg) > 500:
+        msg = msg[:500] + "…"
+    return msg
+
 
 def _extract_hitl_payload(intr: Any) -> dict[str, Any] | None:
     """Normalize LangGraph interrupt objects into a hitl payload dict."""
@@ -244,11 +263,15 @@ def create_ws_chat_router(
         logger.info("[WS-Chat] Client connected: session_id=%s", session_id)
 
         session, thread_id = _get_session_and_thread(session_id)
+        # LangGraph default recursion_limit is 25 — far too low for multi-tool
+        # YOLO/smoke turns (each Supervisor↔ToolWorker hop burns steps).
+        # Keep in lockstep with sse_chat / agent_runner / gateway (100).
         config: dict[str, Any] = {
             "configurable": {
                 "thread_id": thread_id,
                 "checkpoint_ns": "",
-            }
+            },
+            "recursion_limit": _GRAPH_RECURSION_LIMIT,
         }
 
         active_task: asyncio.Task | None = None
@@ -440,13 +463,25 @@ def create_ws_chat_router(
                                         "[WS-Chat] Failed to persist partial assistant on error: %s",
                                         e,
                                     )
+                            err_msg = _friendly_graph_error(exc)
                             await websocket.send_json(
                                 TelemetryEvent(
                                     type="graph_error",
-                                    data={"message": str(exc)},
+                                    data={"message": err_msg},
                                     thread_id=thread_id,
                                 ).to_dict()
                             )
+                            # Always surface something in the transcript
+                            try:
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="llm_delta",
+                                        data={"content": f"⚠️ {err_msg}"},
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+                            except Exception:
+                                pass
                             await websocket.send_json(
                                 EventBridge.create_idle_event(thread_id).to_dict()
                             )
@@ -492,7 +527,8 @@ def create_ws_chat_router(
                         "configurable": {
                             "thread_id": target_thread_id,
                             "checkpoint_ns": "",
-                        }
+                        },
+                        "recursion_limit": _GRAPH_RECURSION_LIMIT,
                     }
 
                     from kazma_ui.sse_utils import ApprovalEventBridge
@@ -825,10 +861,11 @@ def create_ws_chat_router(
                                         e,
                                     )
 
+                            err_msg = _friendly_graph_error(exc)
                             await websocket.send_json(
                                 ApprovalEventBridge.create_approval_error_event(
                                     target_thread_id,
-                                    error=str(exc),
+                                    error=err_msg,
                                     code="APPROVAL_FAILED",
                                     traceback_str=traceback.format_exc(),
                                     tool=tool_name,
@@ -838,10 +875,20 @@ def create_ws_chat_router(
                             await websocket.send_json(
                                 TelemetryEvent(
                                     type="graph_error",
-                                    data={"message": str(exc)},
+                                    data={"message": err_msg},
                                     thread_id=target_thread_id,
                                 ).to_dict()
                             )
+                            try:
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="llm_delta",
+                                        data={"content": f"⚠️ {err_msg}"},
+                                        thread_id=target_thread_id,
+                                    ).to_dict()
+                                )
+                            except Exception:
+                                pass
                             await websocket.send_json(
                                 EventBridge.create_idle_event(target_thread_id).to_dict()
                             )

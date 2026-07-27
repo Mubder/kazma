@@ -213,11 +213,39 @@ def build_env_context(workspace_id: str | None = None) -> str:
     slug = detect_repo_slug(root)
     branch = detect_branch(root)
 
+    # Runtime identity — stops the agent "diagnosing" that Kazma is offline
+    # while it is the process serving this chat (common smoke-test failure).
+    listen_hint = (
+        os.environ.get("KAZMA_PUBLIC_URL")
+        or os.environ.get("KAZMA_BASE_URL")
+        or ""
+    ).strip()
+    port_hint = (
+        os.environ.get("KAZMA_PORT")
+        or os.environ.get("PORT")
+        or "9090"
+    ).strip()
+
     lines: list[str] = [
-        "## Active Workspace (BINDING — not optional)",
-        f"- **Workspace name:** {ws_name}",
-        f"- **Workspace root:** `{root}`",
+        "## You are Kazma (this process)",
+        "- You **are** the Kazma agent for this deployment — not an external inspector.",
+        "- The web UI / API you serve is **already running in this process**.",
+        f"- Default local URL: `http://127.0.0.1:{port_hint}` (and `http://localhost:{port_hint}`).",
     ]
+    if listen_hint:
+        lines.append(f"- Public / configured base URL: `{listen_hint}`")
+    lines.extend(
+        [
+            "- Do **not** conclude the server is down just because `browser_navigate` "
+            "to ports 3000/8000 fails — those are often wrong ports.",
+            "- Prefer `file_*`, config tools, and in-app APIs over shell probes of "
+            "unrelated ports when verifying yourself.",
+            "",
+            "## Active Workspace (BINDING — not optional)",
+            f"- **Workspace name:** {ws_name}",
+            f"- **Workspace root:** `{root}`",
+        ]
+    )
     if ws_id:
         lines.append(f"- **Workspace id:** `{ws_id}`")
     if slug:
