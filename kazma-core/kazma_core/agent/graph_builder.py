@@ -446,6 +446,21 @@ async def supervisor_node(
     # repaired list is what gets persisted by the return paths below.
     messages = sanitize_tool_chains(messages)
 
+    # Soft force-plan: on the first supervisor hop of a tool-capable turn,
+    # remind the model to open with a ```plan fence so the UI workbench
+    # can pin a checklist (providers rarely expose true chain-of-thought).
+    if iteration == 0 and tool_definitions:
+        _plan_nudge = (
+            "UI WORKBENCH: If you will call any tools this turn, put a short "
+            "```plan fence (3–7 bullets) in your content field before or "
+            "alongside tool_calls so the user sees your plan. Then use tools."
+        )
+        if not any(
+            m.get("role") == "system" and "UI WORKBENCH" in str(m.get("content", ""))
+            for m in messages
+        ):
+            messages.append({"role": "system", "content": _plan_nudge})
+
     start = time.monotonic()
     try:
         from kazma_core.retry import friendly_llm_error, load_retry_config

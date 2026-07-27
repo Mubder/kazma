@@ -48,7 +48,9 @@ _HARD_MAX = 100_000  # single-window absolute ceiling
 _CACHE_MAX_ENTRIES = 32
 _CACHE_TTL_S = 900  # 15 minutes
 
-MIN_USEFUL_CHARS = 200
+# Short static pages (e.g. example.com) are often ~100–180 chars of real text.
+# 200 was too high and forced Playwright / false "bot wall" failures.
+MIN_USEFUL_CHARS = 80
 DEFAULT_CHUNK_SIZE = 4_000
 
 
@@ -169,31 +171,97 @@ def _friendly_error(exc: Exception, url: str = "") -> str:
 
 
 def _looks_like_bot_block(html: str, status_code: int) -> bool:
+    """True only for *HTML* challenge / hard-block pages — not short static sites.
+
+    Must NOT treat plain extracted text (or tiny legitimate pages like
+    example.com) as bot walls — that forced Playwright and failed ingests.
+    """
+    if not html:
+        return False
+    # Non-HTML extracts (markdown from Jina, already-plain text) are never
+    # Cloudflare challenges.
+    sample_head = html[:200].lstrip().lower()
+    looks_html = sample_head.startswith("<!doctype") or sample_head.startswith(
+        "<html"
+    ) or "<html" in html[:500].lower() or "<body" in html[:800].lower()
+
     if status_code in (403, 429, 503):
         html_lower = html[:5000].lower()
-        return any(marker in html_lower for marker in _BOT_DETECTION_MARKERS)
-    if len(html) < 3000:
-        html_lower = html.lower()
-        if any(
-            marker in html_lower
-            for marker in (
-                "cloudflare",
-                "checking your browser",
-                "cf-challenge",
-                "just a moment",
-                "please verify you are a human",
-            )
-        ):
+        if any(marker in html_lower for marker in _BOT_DETECTION_MARKERS):
             return True
+        # Hard deny without body
+        if status_code in (403, 429) and len(html) < 800:
+            return True
+        return False
+
+    if not looks_html:
+        return False
+
+    html_lower = html[:5000].lower()
+    # Strong challenge markers on short challenge pages only
+    strong = (
+        "checking your browser",
+        "cf-challenge",
+        "cf-browser-verification",
+        "just a moment",
+        "please verify you are a human",
+        "are you a robot",
+        "enable javascript and cookies",
+    )
+    if any(m in html_lower for m in strong):
+        return True
+    if "cloudflare" in html_lower and len(html) < 4000 and (
+        "challenge" in html_lower or "ray id" in html_lower
+    ):
+        return True
+    # Meta-style error stubs
+    if "<title>error</title>" in html_lower or "<title>403</title>" in html_lower:
+        return True
     return False
 
 
 def _looks_like_js_shell(html: str) -> bool:
     sample = html[:12000].lower()
-    return any(m in sample for m in _JS_SHELL_MARKERS)
+    # Require JS app markers AND little article-like content
+    if not any(m in sample for m in _JS_SHELL_MARKERS):
+        return False
+    # Plain sites with a root div + real paragraphs are not shells
+    if sample.count("<p") >= 2 or "<article" in sample:
+        return False
+    return True
+
+
+def _strip_html_fallback(html: str) -> str:
+    """stdlib-only extract when trafilatura is missing or returns nothing."""
+    # Drop script/style blocks first
+    cleaned = re.sub(
+        r"(?is)<(script|style|noscript|svg|iframe)[^>]*>.*?</\1>",
+        " ",
+        html,
+    )
+    # Prefer body if present
+    body_m = re.search(r"(?is)<body[^>]*>(.*)</body>", cleaned)
+    chunk = body_m.group(1) if body_m else cleaned
+    text = re.sub(r"(?is)<br\s*/?>", "\n", chunk)
+    text = re.sub(r"(?is)</(p|div|h[1-6]|li|tr|section|article)>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Unescape a few common entities
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+    )
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
 
 
 def _extract_text(html: str) -> str:
+    """Extract readable text; always try a plain-HTML fallback for static pages."""
+    text = ""
     try:
         import trafilatura
 
@@ -202,22 +270,42 @@ def _extract_text(html: str) -> str:
             include_links=True,
             include_tables=True,
             favor_recall=True,
-        )
+            include_comments=False,
+        ) or ""
     except ImportError:
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = re.sub(r"\s+", " ", text).strip()
+        text = ""
     except Exception:
-        text = html[:_HARD_MAX]
+        text = ""
 
-    return (text or "").strip()
+    text = (text or "").strip()
+    # Trafilatura often returns None/empty for minimal static pages (example.com).
+    # Fall back to a simple strip that still recovers title + body text.
+    if len(text) < MIN_USEFUL_CHARS:
+        fallback = _strip_html_fallback(html)
+        if len(fallback) > len(text):
+            text = fallback
+    return text[:_HARD_MAX].strip()
 
 
 def _is_thin_extraction(text: str, html: str) -> bool:
-    if not text or len(text) < MIN_USEFUL_CHARS:
-        if len(html) >= 500 or _looks_like_js_shell(html):
-            return True
-        if not text:
-            return True
+    """Whether Playwright is worth trying.
+
+    Short *but non-empty* extracts from small static HTML are OK (example.com).
+    Only treat as thin when empty, or tiny vs a large JS-heavy shell.
+    """
+    if not text or not text.strip():
+        return True
+    if len(text) >= MIN_USEFUL_CHARS:
+        return False
+    # Tiny extract: only escalate if the HTML looks like a SPA shell
+    if _looks_like_js_shell(html) and len(html) >= 500:
+        return True
+    # Small static document with some words — accept as not-thin
+    words = len(text.split())
+    if words >= 8:
+        return False
+    if len(html) >= 1500 and words < 5:
+        return True
     return False
 
 
@@ -548,6 +636,8 @@ async def _fetch_full_text(url: str) -> str:
 
     text = _extract_text(html)
 
+    # Only escalate to Playwright for true bot walls / empty SPA shells —
+    # not for short static pages that already extracted fine.
     if not tried_playwright and _should_try_playwright(html, status_code, extracted=text):
         logger.info(
             "[read_url] Thin/empty extract or JS shell for %s (%d chars text / %d html), trying Playwright",
@@ -556,7 +646,7 @@ async def _fetch_full_text(url: str) -> str:
             len(html),
         )
         pw_text = await _fetch_with_playwright(final_url)
-        if pw_text:
+        if pw_text and len(pw_text) > len(text):
             _cache_put(url, pw_text)
             _cache_put(final_url, pw_text)
             return pw_text
@@ -565,7 +655,8 @@ async def _fetch_full_text(url: str) -> str:
         return (
             f"Error: Could not extract readable content from {final_url}. "
             "The page may be empty, require JavaScript, or block automated access. "
-            "Optional: `pip install 'kazma[web]'` and `playwright install chromium`."
+            "Optional: set KAZMA_JINA_READER=1, KAZMA_FIRECRAWL_API_KEY, "
+            "or `pip install 'kazma[web]'` + `playwright install chromium`."
         )
 
     _cache_put(url, text)

@@ -948,6 +948,25 @@
   var _planParsedFromText = false;
   var TOOL_DETAIL_MAX = 900;
 
+  function _extractPathFromTool(toolName, detail) {
+    var n = String(toolName || '').toLowerCase();
+    if (n.indexOf('file_write') < 0 && n.indexOf('file_delete') < 0 &&
+        n.indexOf('write') < 0 && n.indexOf('delete') < 0) {
+      // still try path-like detail for shell redirects etc.
+      if (!detail || detail.indexOf('/') < 0 && detail.indexOf('\\') < 0) return '';
+    }
+    var s = String(detail || '');
+    // JSON {"path": "..."}
+    var m = s.match(/"path"\s*:\s*"([^"]+)"/);
+    if (m) return m[1];
+    m = s.match(/'path'\s*:\s*'([^']+)'/);
+    if (m) return m[1];
+    // Bare path-ish token
+    m = s.match(/(?:^|[\s"'])([A-Za-z]:\\[^\s"']+|\/[\w.\-\/]+|[\w.\-]+\/[\w.\-\/]+)/);
+    if (m) return m[1];
+    return '';
+  }
+
   function ensureProgressPanel() {
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
@@ -1155,7 +1174,23 @@
 
     var icon = kind === 'tool' ? '\u2699'
       : (kind === 'thought' ? '\u25C8'
-        : (kind === 'error' ? '\u26A0' : '\u2022'));
+        : (kind === 'error' ? '\u26A0'
+          : (kind === 'file' ? '\u2398' : '\u2022')));
+
+    // File-diff chips for write/delete tools
+    var fileChip = '';
+    if (kind === 'tool' || kind === 'file') {
+      var pathGuess = _extractPathFromTool(title, detail);
+      if (pathGuess) {
+        fileChip =
+          '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
+            '<span class="file-diff-op">' +
+              (state === 'failed' ? 'failed' : (title.indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
+            '</span> ' +
+            '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
+          '</div>';
+      }
+    }
 
     li.innerHTML =
       '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
@@ -1167,6 +1202,7 @@
             : '') +
           '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
         '</div>' +
+        fileChip +
         (detail
           ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
           : '') +

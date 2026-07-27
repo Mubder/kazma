@@ -1793,6 +1793,32 @@ tbody tr:last-child td {
   overflow-y: auto;
 }
 .agent-progress-step.step-thought .step-title { font-style: italic; color: var(--text-secondary); }
+.file-diff-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  max-width: 100%;
+}
+.file-diff-chip .file-diff-op {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+}
+.file-diff-chip .file-diff-path {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28rem;
+}
 .message-meta time {
   font-variant-numeric: tabular-nums;
 }

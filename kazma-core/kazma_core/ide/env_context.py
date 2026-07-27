@@ -276,9 +276,10 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "5. Never claim the folder *name* is the product if package metadata "
             "says otherwise — report both.",
             "",
-            "### Visible work (UI workbench)",
-            "For multi-step tasks (3+ tool calls or a long mission), open your first "
-            "assistant text with a short plan fence so the chat workbench can pin it:",
+            "### Visible work (UI workbench) — required for multi-step tasks",
+            "When you will use **2+ tools** (or any long mission), your **first** "
+            "assistant message content in that turn MUST open with a plan fence "
+            "(even if you also emit tool_calls in the same turn):",
             "",
             "```plan",
             "- Inspect project identity",
@@ -286,8 +287,9 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "- Write findings / deliverable",
             "```",
             "",
-            "Keep the plan to 3–7 bullets. Then use tools. The UI shows Plan + "
-            "Activity (tools/status) above your final answer — stay concrete.",
+            "Rules: 3–7 bullets; concrete verbs; no empty plan. The UI pins this "
+            "above Activity (tools/status). After tools, give a clear final answer. "
+            "Prefer short narration of what you are checking (the workbench shows it).",
         ]
     )
 

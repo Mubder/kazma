@@ -268,6 +268,12 @@ def test_looks_like_bot_block_html_detects_meta_error_stub():
         '<html><head><title>WhatsApp Cloud API</title></head>'
         '<body><article><p>' + ('x' * 800) + '</p></article></body></html>'
     )
+    # Plain extracted text must NOT be treated as a bot-wall (example.com bug)
+    assert not _looks_like_bot_block_html(
+        "Example Domain\n\nThis domain is for use in illustrative examples "
+        "in documents. You may use this domain in literature without prior "
+        "coordination or asking for permission."
+    )
 
 
 def test_http_get_text_decompresses_gz_sitemap():

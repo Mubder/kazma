@@ -886,16 +886,32 @@ def _looks_like_bot_block_html(html: str | None) -> bool:
     ``<title>Error</title>`` HTML stub to non-browser clients.  Detecting
     this lets us fall through to Playwright instead of treating the stub
     as a (worthless) successful fetch.
+
+    IMPORTANT: This is for **HTML** only. Do not pass already-extracted
+    plain text/markdown — short real pages (example.com) look like
+    ``len < 500`` without ``<p>`` tags and were false-positive bot walls.
     """
     if not html:
         return True
     sample = html[:2000].lower()
+    # Plain text / markdown extract (no tags) with readable words = content
+    if "<" not in sample[:80] and len(html.strip()) >= 40:
+        return False
     if "<title>error</title>" in sample:
         return True
     if "<title>404</title>" in sample or "<title>403</title>" in sample:
         return True
-    # Very short HTML with no real body content.
-    if len(html) < 500 and "<p>" not in sample and "<article" not in sample:
+    # Very short *HTML* with no real body content (challenge stubs).
+    looks_html = (
+        "<!doctype" in sample
+        or "<html" in sample
+        or "<body" in sample
+        or "<head" in sample
+    )
+    if looks_html and len(html) < 500 and "<p>" not in sample and "<article" not in sample:
+        # Allow tiny static pages that still have an h1 + some text
+        if "<h1" in sample and len(re.sub(r"<[^>]+>", " ", html).split()) >= 8:
+            return False
         return True
     return False
 
@@ -1029,33 +1045,35 @@ async def _extract_page(url: str) -> tuple[str | None, str, str]:
       instead of seeing an opaque "1 failed".
     """
     text = await _fetch_full_text(url)
-    looks_blocked = text.startswith("Error:") or _looks_like_bot_block_html(text)
-    if looks_blocked:
-        # Try Playwright full-DOM before giving up.
+    # Only treat *Error:* strings as hard failures — never re-scan extracted
+    # plain text with HTML bot-wall heuristics (false-positive on example.com).
+    if isinstance(text, str) and text.startswith("Error:"):
+        err_msg = text[6:].strip() or text
         pw_reason = _check_playwright_available()
         if pw_reason:
-            return None, "error", f"blocked by site; Playwright unavailable ({pw_reason})"
+            return None, "error", f"{err_msg}; Playwright unavailable ({pw_reason})"
         pw = await _render_with_playwright(url, want_text=True)
         if pw and len(pw) >= MIN_USEFUL_CHARS:
             return pw, "ok", ""
-        # Distinguish "Chromium missing" from "bot-walled even for browser".
         return None, "error", (
-            "page is bot-walled (httpx returned an error stub) and Playwright "
-            "could not extract usable content — install a fetch backend: "
-            "KAZMA_FIRECRAWL_API_KEY (best for bot-walled sites), "
-            "KAZMA_JINA_READER=1, or run `playwright install chromium`"
+            f"{err_msg}. Optional backends: KAZMA_FIRECRAWL_API_KEY, "
+            "KAZMA_JINA_READER=1, or `playwright install chromium`"
         )
+    text = (text or "").strip()
     if len(text) < MIN_USEFUL_CHARS:
+        # Short but real content (static pages) is still usable for ingest
+        words = len(text.split())
+        if words >= 8:
+            return text, "ok", f"short static page ({len(text)} chars)"
         pw_reason = _check_playwright_available()
         if pw_reason:
-            # No point trying Playwright if it can't launch.
-            if not text.strip():
+            if not text:
                 return None, "empty", f"empty extract; Playwright unavailable ({pw_reason})"
             return text, "thin", f"thin extract ({len(text)} chars); Playwright unavailable ({pw_reason})"
         pw = await _render_with_playwright(url, want_text=True)
         if pw and len(pw) > len(text):
             return pw, "ok", ""
-        if not text.strip():
+        if not text:
             return None, "empty", "empty extract after all tiers"
         return text, "thin", f"thin extract ({len(text)} chars) — likely a JS-only page"
     return text, "ok", ""
