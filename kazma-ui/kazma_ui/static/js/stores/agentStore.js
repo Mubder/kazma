@@ -13,10 +13,25 @@
  */
 
 document.addEventListener('alpine:init', () => {
+  function _ti(key, fallback) {
+    const m = window.CHAT_I18N || {};
+    const v = m[key];
+    return (v != null && String(v) !== '') ? String(v) : (fallback || key);
+  }
+  function _tiFmt(key, fallback, vars) {
+    let s = _ti(key, fallback);
+    if (vars) {
+      Object.keys(vars).forEach((k) => {
+        s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), String(vars[k]));
+      });
+    }
+    return s;
+  }
+
   Alpine.store('agent', {
     // ── Reactive State Properties ───────────────────────────
     isThinking: false,
-    statusMessage: 'Kazma is thinking...',
+    statusMessage: _ti('thinking', 'Kazma is thinking…'),
     activeNode: '',
     activeTool: null, // { name: string, status: string, inputs: object|null, result: string|null, error: string|null }
     pendingApproval: null, // { thread_id: string, tool: string, args: object, tools: array, message: string }
@@ -81,7 +96,7 @@ document.addEventListener('alpine:init', () => {
       this.activeNode = '';
       this.activeTool = null;
       this.pendingApproval = null;
-      this.statusMessage = 'Kazma is thinking...';
+      this.statusMessage = _ti('thinking', 'Kazma is thinking…');
     },
 
     /** Keep the bottom thinking banner in sync with live status text. */
@@ -224,7 +239,7 @@ document.addEventListener('alpine:init', () => {
       if (!text || !text.trim()) return;
       this.pendingApproval = null;
       this._beginTurn();
-      this.statusMessage = 'Kazma is thinking...';
+      this.statusMessage = _ti('thinking', 'Kazma is thinking…');
       this.activeNode = 'Supervisor';
 
       const payload = {
@@ -255,8 +270,10 @@ document.addEventListener('alpine:init', () => {
       this.pendingApproval = null;
       this._beginTurn();
       this.statusMessage = approved
-        ? (scope === 'yolo' ? 'YOLO on — running…' : 'Executing approved action...')
-        : 'Denying tool…';
+        ? (scope === 'yolo'
+          ? _ti('yolo_running', 'YOLO on — running…')
+          : _ti('executing_approved', 'Executing approved action…'))
+        : _ti('denying_tool', 'Denying tool…');
 
       this._sendPayload(payload);
     },
@@ -291,7 +308,7 @@ document.addEventListener('alpine:init', () => {
             this._turnActive = true;
             // Keep one canonical label so Activity does not show
             // "thinking…" (beginTurn) + "thinking..." (server) as two rows.
-            this.statusMessage = 'Kazma is thinking…';
+            this.statusMessage = _ti('thinking', 'Kazma is thinking…');
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
             this._progress({
               kind: 'status',
@@ -305,17 +322,17 @@ document.addEventListener('alpine:init', () => {
             this.isThinking = true;
             this._turnActive = true;
             this.activeNode = frame.active_node || data.active_node || 'Supervisor';
-            this.statusMessage = `Routing: ${this.activeNode}`;
+            this.statusMessage = _tiFmt('routing', 'Routing: {node}', { node: this.activeNode });
             this._progress({
               kind: 'plan',
-              title: 'Routing → ' + this.activeNode,
+              title: _tiFmt('routing_arrow', 'Routing → {node}', { node: this.activeNode }),
               state: 'running',
             });
             this._syncThinkingBanner();
           } else if (statusVal === 'paused_for_approval') {
             this._progress({
               kind: 'status',
-              title: 'Waiting for approval',
+              title: _ti('waiting_approval', 'Waiting for approval'),
               detail: frame.tool || data.tool || data.message || '',
               state: 'info',
             });

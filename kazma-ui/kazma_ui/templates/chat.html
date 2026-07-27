@@ -156,6 +156,34 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  /* Localized CoT / Activity strings for chat.js + agentStore.js */
+  window.CHAT_I18N = {
+    thinking: {{ t('chat.thinking') | tojson }},
+    writing_reply: {{ t('chat.writing_reply') | tojson }},
+    activity: {{ t('chat.activity') | tojson }},
+    working: {{ t('chat.working') | tojson }},
+    plan: {{ t('chat.plan') | tojson }},
+    step: {{ t('chat.step') | tojson }},
+    steps: {{ t('chat.steps') | tojson }},
+    done: {{ t('chat.done') | tojson }},
+    stopped: {{ t('chat.stopped') | tojson }},
+    running: {{ t('chat.running') | tojson }},
+    error: {{ t('chat.error') | tojson }},
+    waiting_approval: {{ t('chat.waiting_approval') | tojson }},
+    routing: {{ t('chat.routing') | tojson }},
+    routing_arrow: {{ t('chat.routing_arrow') | tojson }},
+    plan_locked: {{ t('chat.plan_locked') | tojson }},
+    plan_progress: {{ t('chat.plan_progress') | tojson }},
+    thinking_queue: {{ t('chat.thinking_queue') | tojson }},
+    type_message: {{ t('chat.type_message') | tojson }},
+    stop_generation: {{ t('chat.stop_generation') | tojson }},
+    yolo_running: {{ t('chat.yolo_running') | tojson }},
+    executing_approved: {{ t('chat.executing_approved') | tojson }},
+    denying_tool: {{ t('chat.denying_tool') | tojson }},
+    placeholder: {{ t('chat.placeholder') | tojson }}
+  };
+</script>
 <script src="/static/js/stores/agentStore.js?v={{ js_version() }}"></script>
 <script src="/static/js/streaming.js?v={{ js_version() }}"></script>
 <script src="/static/js/voice.js?v={{ js_version() }}"></script>

@@ -36,6 +36,22 @@
 
   function $(id) { return document.getElementById(id); }
 
+  /** Localized CoT / Activity strings (injected from chat.html as window.CHAT_I18N). */
+  function ti(key, fallback) {
+    var m = window.CHAT_I18N || {};
+    var v = m[key];
+    return (v != null && String(v) !== '') ? String(v) : (fallback || key);
+  }
+  function tiFmt(key, fallback, vars) {
+    var s = ti(key, fallback);
+    if (vars) {
+      Object.keys(vars).forEach(function(k) {
+        s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), String(vars[k]));
+      });
+    }
+    return s;
+  }
+
   function generateSessionId() {
     try {
       if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -321,16 +337,16 @@
     _progressStepCount = 0;
     _planItems = [];
     _planParsedFromText = false;
-    logProgress({ kind: 'status', title: 'Kazma is thinking\u2026', state: 'running' });
+    logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     if (inputEl) {
       inputEl.disabled = false;
-      inputEl.placeholder = 'Kazma is thinking\u2026 type to queue your next message';
+      inputEl.placeholder = ti('thinking_queue', 'Kazma is thinking\u2026 type to queue your next message');
     }
     hideSlashMenu();
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.classList.add('stop-mode');
-      sendBtn.title = 'Stop generation';
+      sendBtn.title = ti('stop_generation', 'Stop generation');
       sendBtn.innerHTML = _STOP_SVG;
     }
   }
@@ -743,11 +759,11 @@
     pendingUploads = [];
     inputEl.value = '';
     inputEl.style.height = 'auto';
-    inputEl.placeholder = 'Type your message\u2026 (Enter to send)';
+    inputEl.placeholder = ti('type_message', 'Type your message\u2026 (Enter to send)');
 
     // Show typing indicator (tracked so abortGeneration can clear it)
     activeTypingEl = typingEl;
-    KS.showTyping(typingEl, 'Kazma is thinking');
+    KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
 
     // Ensure we have a stable session id
     if (!chatSessionId) {
@@ -785,7 +801,7 @@
           currentMsgEl = createAssistantMessage();
         }
         if (!tokenAccum) {
-          logProgress({ kind: 'status', title: 'Writing reply\u2026', state: 'running' });
+          logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
         }
         tokenAccum += data.content;
         tryIngestPlanFromText(tokenAccum);
@@ -1047,21 +1063,21 @@
     panel.innerHTML =
       '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
-        '<span class="agent-progress-title">Working\u2026</span>' +
+        '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
         '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
-        '<span class="agent-progress-count">0 steps</span>' +
+        '<span class="agent-progress-count">0 ' + escapeHtml(ti('steps', 'steps')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
       '</div>' +
       '<div class="agent-progress-body">' +
         '<div class="agent-plan" hidden>' +
           '<div class="agent-plan-head">' +
-            '<div class="agent-plan-label">Plan</div>' +
+            '<div class="agent-plan-label">' + escapeHtml(ti('plan', 'Plan')) + '</div>' +
             '<div class="agent-plan-meta"></div>' +
           '</div>' +
           '<div class="agent-plan-bar" aria-hidden="true"><div class="agent-plan-bar-fill"></div></div>' +
           '<ol class="agent-plan-list"></ol>' +
         '</div>' +
-        '<div class="agent-activity-label">Activity</div>' +
+        '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
         '<ul class="agent-progress-steps"></ul>' +
       '</div>';
     var textEl = content.querySelector('.message-text');
@@ -1176,7 +1192,7 @@
       setPlan(items);
       logProgress({
         kind: 'status',
-        title: 'Plan locked (' + items.length + ' steps)',
+        title: tiFmt('plan_locked', 'Plan locked ({n} steps)', { n: items.length }),
         state: 'info',
       });
     }
@@ -1201,7 +1217,14 @@
 
   function _isThinkingStatus(s) {
     var n = _normalizeStatusTitle(s);
-    return n.indexOf('thinking') >= 0 || n.indexOf('kazma is') === 0 && n.indexOf('think') >= 0;
+    // EN + AR thinking heartbeats (and localized CHAT_I18N.thinking)
+    if (n.indexOf('thinking') >= 0) return true;
+    if (n.indexOf('kazma is') === 0 && n.indexOf('think') >= 0) return true;
+    if (n.indexOf('\u062a\u0641\u0643\u0631') >= 0) return true; // تفكر
+    if (n.indexOf('\u0643\u0627\u0638\u0645\u0647') >= 0 && n.indexOf('\u062a\u0641\u0643') >= 0) return true;
+    var canon = _normalizeStatusTitle(ti('thinking', ''));
+    if (canon && (n === canon || n.indexOf(canon.replace(/\.\.\.$/, '')) === 0)) return true;
+    return false;
   }
 
   function logProgress(step) {
@@ -1213,9 +1236,9 @@
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
     var rawTitle = String(step.title || '').trim() || '\u2026';
     var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
-    // Canonical display for thinking heartbeats
+    // Canonical display for thinking heartbeats (localized)
     if (kind === 'status' && _isThinkingStatus(title)) {
-      title = 'Kazma is thinking\u2026';
+      title = ti('thinking', 'Kazma is thinking\u2026');
     }
     var detail = step.detail != null ? String(step.detail) : '';
 
@@ -1327,7 +1350,11 @@
         '<div class="step-line">' +
           '<span class="step-title">' + escapeHtml(title) + '</span>' +
           (kind === 'tool'
-            ? ' <span class="step-state">' + escapeHtml(state === 'running' ? 'Running\u2026' : (state === 'done' ? 'Done' : state)) + '</span>'
+            ? ' <span class="step-state">' + escapeHtml(
+                state === 'running'
+                  ? ti('running', 'Running\u2026')
+                  : (state === 'done' ? ti('done', 'Done') : state)
+              ) + '</span>'
             : '') +
           '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
         '</div>' +
@@ -1345,13 +1372,15 @@
     if (countEl) {
       var planN = _planItems.length;
       var donePlan = _planItems.filter(function(p) { return p.done; }).length;
-      countEl.textContent =
-        _progressStepCount + (_progressStepCount === 1 ? ' step' : ' steps') +
-        (planN ? ' \u00B7 plan ' + donePlan + '/' + planN : '');
+      var stepWord = _progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
+      var planBit = planN
+        ? ' \u00B7 ' + tiFmt('plan_progress', 'plan {done}/{total}', { done: donePlan, total: planN })
+        : '';
+      countEl.textContent = _progressStepCount + ' ' + stepWord + planBit;
     }
     var titleEl = panel.querySelector('.agent-progress-title');
     if (titleEl && state === 'running') {
-      titleEl.textContent = kind === 'tool' ? title : 'Working\u2026';
+      titleEl.textContent = kind === 'tool' ? title : ti('working', 'Working\u2026');
     }
     if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
 
@@ -1397,10 +1426,13 @@
     if (titleEl) {
       var donePlan = _planItems.filter(function(p) { return p.done; }).length;
       var base = ok === false
-        ? 'Stopped'
+        ? ti('stopped', 'Stopped')
         : (_planItems.length
-          ? 'Done \u00B7 plan ' + donePlan + '/' + _planItems.length
-          : 'Done');
+          ? ti('done', 'Done') + ' \u00B7 ' + tiFmt('plan_progress', 'plan {done}/{total}', {
+              done: donePlan,
+              total: _planItems.length,
+            })
+          : ti('done', 'Done'));
       titleEl.textContent = elapsed ? base + ' \u00B7 ' + elapsed : base;
     }
     if (_progressEl) _renderPlanList(_progressEl);
@@ -2332,7 +2364,7 @@
       activeTypingEl = null;
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       if (!tokenAccum) {
-        logProgress({ kind: 'status', title: 'Writing reply\u2026', state: 'running' });
+        logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
       }
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
@@ -2344,7 +2376,7 @@
     appendErrorMessage: function(errMsg) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;
-      logProgress({ kind: 'error', title: 'Error', detail: String(errMsg || ''), state: 'failed' });
+      logProgress({ kind: 'error', title: ti('error', 'Error'), detail: String(errMsg || ''), state: 'failed' });
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       var textEl = currentMsgEl.querySelector('.message-text');
       if (textEl) textEl.innerHTML = '<div class="error-message">⚠️ ' + escapeHtml(errMsg) + '</div>';
@@ -2359,7 +2391,7 @@
       appendMessage('user', text);
       scrollToBottom();
       beginTurn();
-      KS.showTyping(typingEl, 'Kazma is thinking');
+      KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
     },
     onStreamToken: function(content) {
       KS.hideTyping(typingEl);
