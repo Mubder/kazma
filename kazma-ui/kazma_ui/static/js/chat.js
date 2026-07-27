@@ -1189,6 +1189,21 @@
    * @param {string} [step.detail] optional secondary line
    * @param {string} [step.state] running|done|failed|info
    */
+  function _normalizeStatusTitle(s) {
+    // Unify ellipsis / trailing dots so "thinking…" and "thinking..." coalesce.
+    return String(s || '')
+      .replace(/\u2026/g, '...')
+      .replace(/\.+$/, '...')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function _isThinkingStatus(s) {
+    var n = _normalizeStatusTitle(s);
+    return n.indexOf('thinking') >= 0 || n.indexOf('kazma is') === 0 && n.indexOf('think') >= 0;
+  }
+
   function logProgress(step) {
     if (!step) return;
     var panel = ensureProgressPanel();
@@ -1198,6 +1213,10 @@
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
     var rawTitle = String(step.title || '').trim() || '\u2026';
     var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
+    // Canonical display for thinking heartbeats
+    if (kind === 'status' && _isThinkingStatus(title)) {
+      title = 'Kazma is thinking\u2026';
+    }
     var detail = step.detail != null ? String(step.detail) : '';
 
     // Plan lines go to the sticky plan list (not the activity log)
@@ -1213,12 +1232,31 @@
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
 
-    // Coalesce rapid identical status lines (heartbeats update last row)
+    // Coalesce rapid identical status lines (heartbeats update last row).
+    // Also merge thinking variants from beginTurn + WS status frames.
     var last = list.lastElementChild;
-    if (last && kind === 'status' && last.dataset.kind === 'status' && last.dataset.title === title && !detail) {
+    var sameStatus =
+      last &&
+      kind === 'status' &&
+      last.dataset.kind === 'status' &&
+      (
+        last.dataset.title === title ||
+        _normalizeStatusTitle(last.dataset.title) === _normalizeStatusTitle(title) ||
+        (_isThinkingStatus(last.dataset.title) && _isThinkingStatus(title))
+      ) &&
+      (!detail || detail === (last.dataset.detail || ''));
+    if (sameStatus) {
       var tEl = last.querySelector('.step-time');
       if (tEl) tEl.textContent = formatMsgTime();
       last.className = 'agent-progress-step step-' + kind + ' state-' + state;
+      last.dataset.title = title;
+      last.dataset.detail = detail || '';
+      var titleNode = last.querySelector('.step-title');
+      if (titleNode) titleNode.textContent = title;
+      if (detail) {
+        var det0 = last.querySelector('.step-detail');
+        if (det0) det0.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
+      }
       list.scrollTop = list.scrollHeight;
       scrollToBottom();
       return;
