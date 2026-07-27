@@ -111,6 +111,19 @@ These are **not** a greenfield rewrite — strengthen-existing stack only.
 
 **P0 (agent reliability, not memory):** max-iter synthesis + Settings **Max tool rounds** (`agent.max_iterations`, clamp 5–100) already on main (`6b5aa5f0`, `8fd85ff3`).
 
+### Integrity solid fix (2026-07-27)
+
+| Issue | Fix |
+|-------|-----|
+| L3 `embedding` always NULL | Adapter + backends encode via shared embedder on write |
+| L3 `timestamp` always 0 | `resolve_unix_timestamp()` on every write; never hardcode 0 |
+| L3 semantic dead | Hybrid FTS+BLOB cosine search by default |
+| Graph empty / underused | Chunk+user edge+heuristic SPO on every store; backfill seeds from L3 |
+| Legacy rows | `memory.backfill` one-shot at boot / maintenance |
+
+**Manual full re-embed (all rows):**  
+`python -c "from kazma_core.memory.backfill import run_memory_integrity_backfill; print(run_memory_integrity_backfill(force=True))"`
+
 ---
 
 ## 4. Operator smoke checklist

@@ -133,20 +133,36 @@ class FTS5LexicalStore:
 
         Used by the UnifiedMemoryAdapter to populate the ``content`` field.
         """
+        texts = await self.get_texts([uid])
+        return texts.get(uid, "")
+
+    async def get_texts(self, ids: list[str]) -> dict[str, str]:
+        """Batch-fetch content for memory ids."""
         backend = await self._ensure_backend()
-        if backend is None:
-            return ""
+        if backend is None or not ids:
+            return {}
         try:
             conn = backend._conn if hasattr(backend, "_conn") else None
             if conn is None:
-                return ""
-            row = await conn.execute(
-                "SELECT content FROM memories WHERE id = ?", (uid,)
-            )
-            r = await row.fetchone()
-            return r[0] if r else ""
+                return {}
+            out: dict[str, str] = {}
+            # Chunk IN queries
+            chunk = 80
+            for i in range(0, len(ids), chunk):
+                part = [str(x) for x in ids[i : i + chunk] if x]
+                if not part:
+                    continue
+                placeholders = ",".join("?" * len(part))
+                cur = await conn.execute(
+                    f"SELECT id, content FROM memories WHERE id IN ({placeholders})",
+                    part,
+                )
+                rows = await cur.fetchall()
+                for r in rows:
+                    out[str(r[0])] = r[1] or ""
+            return out
         except Exception:
-            return ""
+            return {}
 
     async def get_texts(self, uids: list[str]) -> dict[str, str]:
         """Batch fetch content text for multiple IDs."""

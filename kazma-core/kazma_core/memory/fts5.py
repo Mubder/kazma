@@ -60,58 +60,10 @@ class FTS5Memory:
         )
 
     def _create_canonical_schema(self) -> None:
-        """Create memories + memories_fts + triggers (aligned with L3 backend)."""
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                content_arabic TEXT,
-                metadata TEXT DEFAULT '{}',
-                timestamp INTEGER DEFAULT 0,
-                source TEXT DEFAULT '',
-                relevance REAL DEFAULT 1.0,
-                embedding BLOB,
-                tenant_id TEXT
-            )
-            """
-        )
-        try:
-            self._conn.execute("ALTER TABLE memories ADD COLUMN tenant_id TEXT")
-        except Exception:
-            pass
-        self._conn.execute(
-            """
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(memory_id, content, content_arabic)
-            """
-        )
-        # Triggers keep FTS in sync (idempotent IF NOT EXISTS)
-        self._conn.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                INSERT INTO memories_fts(memory_id, content, content_arabic)
-                VALUES (new.id, new.content, new.content_arabic);
-            END
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                DELETE FROM memories_fts WHERE memory_id = old.id;
-            END
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                DELETE FROM memories_fts WHERE memory_id = old.id;
-                INSERT INTO memories_fts(memory_id, content, content_arabic)
-                VALUES (new.id, new.content, new.content_arabic);
-            END
-            """
-        )
-        self._conn.commit()
+        """Create memories + memories_fts + safe triggers (shared with L3 backend)."""
+        from kazma_core.memory.schema import ensure_memories_schema_sync
+
+        ensure_memories_schema_sync(self._conn)
 
     def _migrate_legacy_memory_fts(self) -> None:
         """One-shot: copy legacy memory_fts rows into memories if present.
@@ -193,28 +145,48 @@ class FTS5Memory:
         text: str,
         metadata: dict[str, Any] | None = None,
         doc_id: str | None = None,
+        *,
+        embedding: bytes | None = None,
+        timestamp: int | None = None,
     ) -> str:
-        """Store a text fragment with metadata into the canonical memories table."""
+        """Store a text fragment with metadata into the canonical memories table.
+
+        Always writes a real unix ``timestamp`` (never 0 for new rows). When
+        *embedding* is omitted, encodes via the shared embedder so L3 BLOB
+        semantic search works without Chroma.
+        """
         doc_id = doc_id or str(uuid.uuid4())
-        meta = metadata or {"source": "agent"}
-        meta_json = json.dumps(meta)
+        meta = dict(metadata or {"source": "agent"})
         source = str(meta.get("source", "agent") if isinstance(meta, dict) else "agent")
-        ts = int(datetime.now(UTC).timestamp())
-        tenant_id = None
-        if isinstance(meta, dict):
-            tenant_id = meta.get("tenant_id")
+        tenant_id = meta.get("tenant_id") if isinstance(meta, dict) else None
+
+        try:
+            from kazma_core.swarm.memory.embedder import (
+                encode_text_to_blob,
+                resolve_unix_timestamp,
+            )
+
+            ts = int(timestamp) if timestamp and int(timestamp) > 0 else resolve_unix_timestamp(meta)
+            meta.setdefault("timestamp", ts)
+            emb = embedding if embedding is not None else encode_text_to_blob(text)
+        except Exception:
+            ts = int(timestamp) if timestamp and int(timestamp) > 0 else int(datetime.now(UTC).timestamp())
+            meta.setdefault("timestamp", ts)
+            emb = embedding
+
+        meta_json = json.dumps(meta, ensure_ascii=False, default=str)
 
         with self._lock:
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO memories
-                (id, content, content_arabic, metadata, timestamp, source, relevance, tenant_id)
-                VALUES (?, ?, '', ?, ?, ?, 1.0, ?)
+                (id, content, content_arabic, metadata, timestamp, source, relevance, embedding, tenant_id)
+                VALUES (?, ?, '', ?, ?, ?, 1.0, ?, ?)
                 """,
-                (doc_id, text, meta_json, ts, source, tenant_id),
+                (doc_id, text, meta_json, ts, source, emb, tenant_id),
             )
             self._conn.commit()
-        logger.debug("[FTS5Memory] Stored doc %s: %.80s", doc_id, text)
+        logger.debug("[FTS5Memory] Stored doc %s ts=%s emb=%s: %.80s", doc_id, ts, bool(emb), text)
         return doc_id
 
     def search(

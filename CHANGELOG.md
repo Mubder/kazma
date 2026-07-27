@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — Memory integrity: L3 ts/emb + L2 graph (solid write path) (2026-07-27)
+
+- **Root cause:** adapter L3 always wrote `timestamp=0` and never set
+  `embedding` BLOBs; L3 semantic search was gated on optional kwargs; graph
+  only grew when consolidator LLM ran. **Also:** legacy FTS5
+  `VALUES('delete',…)` UPDATE triggers raised `SQL logic error` on every
+  `memories` UPDATE — so even manual/backfill timestamp+embedding writes
+  could not land until triggers were reinstalled.
+- **L3 writes:** real unix timestamps + shared-embedder BLOB on every index
+  (`adapter`, `SQLiteMemoryBackend`, `FTS5Memory.add`).
+- **L3 hybrid search:** always cosine-merge BLOB vectors with FTS when any
+  embeddings exist; load sqlite-vec via official package path when present.
+- **L2 graph:** every store adds chunk + `user→has_memory` edge + heuristic
+  SPO triples (no LLM required).
+- **Backfill:** `kazma_core.memory.backfill` repairs legacy rows + seeds graph;
+  auto one-shot at UI boot (`memory.backfill_v2_done`); also via maintenance.
+- Tests: `test_memory_integrity_fix.py`.
+
 ## Unreleased — Arabic CoT: plan RTL + HITL activity i18n (2026-07-27)
 
 - **Plan panel RTL** from the first paint in Arabic UI (`dir=rtl` / Arabic-dominant

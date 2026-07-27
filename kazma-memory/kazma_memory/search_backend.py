@@ -68,75 +68,52 @@ class SQLiteMemoryBackend:
         await conn.execute("PRAGMA synchronous=NORMAL")
         await conn.execute("PRAGMA busy_timeout=5000")
 
-        # Check for sqlite-vec extension — must actually probe vec_version(),
-        # not sqlite_version() (which exists in every SQLite build).
+        # sqlite-vec: prefer the official PyPI package (platform wheels).
+        # Bare load_extension("vec0") only works when a system binary is on
+        # the SQLite path — that was silently failing even after pip install.
+        # Note: L3 stores embeddings as BLOBs and does cosine in Python;
+        # vec0 here is optional (future vec table / diagnostics only).
+        self._vec_available = False
         try:
             await conn.enable_load_extension(True)
-            await conn.load_extension("vec0")
+        except Exception:
+            pass
+        try:
             await conn.execute("SELECT vec_version()")
             self._vec_available = True
         except Exception:
-            self._vec_available = False
-        finally:
+            pass
+        if not self._vec_available:
             try:
-                await conn.enable_load_extension(False)
+                import sqlite_vec
+
+                path = sqlite_vec.loadable_path()
+                await conn.load_extension(path)
+                await conn.execute("SELECT vec_version()")
+                self._vec_available = True
+                logger.info("[SQLiteMemoryBackend] sqlite-vec loaded via package path")
+            except Exception as exc:
+                logger.debug(
+                    "[SQLiteMemoryBackend] sqlite_vec package load failed: %s", exc
+                )
+        if not self._vec_available:
+            try:
+                await conn.load_extension("vec0")
+                await conn.execute("SELECT vec_version()")
+                self._vec_available = True
             except Exception:
-                pass
-
-        # Create memories table with vector embedding support
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                content_arabic TEXT,
-                metadata TEXT DEFAULT '{}',
-                timestamp INTEGER DEFAULT 0,
-                source TEXT DEFAULT '',
-                relevance REAL DEFAULT 1.0,
-                embedding BLOB,
-                tenant_id TEXT
-            )
-        """)
-
-        # Auto-migration: add tenant_id if not present in existing databases
+                self._vec_available = False
         try:
-            await conn.execute("ALTER TABLE memories ADD COLUMN tenant_id TEXT")
+            await conn.enable_load_extension(False)
         except Exception:
-            pass  # Already exists
+            pass
 
-        # Create FTS5 table for full-text search (self-contained)
-        # memory_id stores the memories.id for reliable joins.
-        # Triggers keep it in sync with the memories table.
-        await conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(memory_id, content, content_arabic)
-        """)
+        # Canonical table + FTS + safe triggers (see kazma_core.memory.schema).
+        # Always reinstall triggers — legacy FTS5 'delete' command form raised
+        # SQL logic error on every UPDATE (blocked timestamp/embedding writes).
+        from kazma_core.memory.schema import ensure_memories_schema_async
 
-        # Create triggers to keep FTS5 in sync with memories table
-        await conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                INSERT INTO memories_fts(memory_id, content, content_arabic)
-                VALUES (new.id, new.content, new.content_arabic);
-            END
-        """)
-
-        await conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, memory_id, content, content_arabic)
-                VALUES ('delete', old.id, old.content, old.content_arabic);
-            END
-        """)
-
-        await conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, memory_id, content, content_arabic)
-                VALUES ('delete', old.id, old.content, old.content_arabic);
-                INSERT INTO memories_fts(memory_id, content, content_arabic)
-                VALUES (new.id, new.content, new.content_arabic);
-            END
-        """)
-
-        await conn.commit()
+        await ensure_memories_schema_async(conn)
         return conn
 
     async def index(self, memory: Any, tenant_id: str | None = None) -> str:
@@ -173,11 +150,39 @@ class SQLiteMemoryBackend:
             resolved_tenant = tenant_id or getattr(memory, "tenant_id", None) or (metadata.get("tenant_id") if isinstance(metadata, dict) else None)
             resolved_tenant = resolved_tenant if resolved_tenant is not None else get_current_tenant_id()
 
+        # Never persist timestamp=0 for new content when caller forgot it
+        try:
+            ts_int = int(timestamp or 0)
+        except (TypeError, ValueError):
+            ts_int = 0
+        if ts_int <= 0:
+            try:
+                from kazma_core.swarm.memory.embedder import resolve_unix_timestamp
+
+                meta_for_ts = metadata if isinstance(metadata, dict) else {}
+                ts_int = resolve_unix_timestamp(meta_for_ts)
+            except Exception:
+                import time as _time
+
+                ts_int = int(_time.time())
+        timestamp = ts_int
+
+        # Auto-embed when BLOB missing so L3 semantic search is real
+        if not embedding:
+            try:
+                from kazma_core.swarm.memory.embedder import encode_text_to_blob
+
+                embedding = encode_text_to_blob(str(content or ""))
+            except Exception:
+                embedding = None
+
         # Process content through Arabic tokenizer
         content_arabic = self._arabic_tokenizer.tokenize(content)
 
         if isinstance(metadata, dict):
-            metadata = json.dumps(metadata)
+            if "timestamp" not in metadata:
+                metadata = {**metadata, "timestamp": timestamp}
+            metadata = json.dumps(metadata, ensure_ascii=False, default=str)
 
         await conn.execute(
             """
@@ -322,15 +327,21 @@ class SQLiteMemoryBackend:
                 ]
             )
 
-        # If vector search requested and available, add vector similarity results
-        if kwargs.get("semantic_search") and self._vec_available and kwargs.get("embedding"):
+        # Hybrid: always blend BLOB cosine search when embeddings exist.
+        # (Previously gated on kwargs + broken vec0 load — L3 semantic was dead.)
+        want_semantic = kwargs.get("semantic_search", True)
+        if want_semantic is not False:
             try:
-                vector_results = await self._vector_search(
-                    kwargs["embedding"],
-                    limit=max(limit // 2, 3),  # Reserve half slots for vector search
-                    tenant_id=tenant_id,
-                )
-                results.extend(vector_results)
+                emb = kwargs.get("embedding")
+                if not emb:
+                    emb = await self._encode_query_blob(query)
+                if emb:
+                    vector_results = await self._vector_search(
+                        emb,
+                        limit=max(limit, 5),
+                        tenant_id=tenant_id,
+                    )
+                    results.extend(vector_results)
             except Exception as e:
                 logger.warning("Vector search failed: %s", e)
 
@@ -341,30 +352,60 @@ class SQLiteMemoryBackend:
             if result_id not in unique_results:
                 unique_results[result_id] = result
 
-        # Sort by combined relevance score
-        # BM25 scores are negative-better (more negative = more relevant),
-        # so negate them so all scores are positive-better for consistent sorting.
+        # Sort by combined relevance score (positive-better).
+        # BM25 scores are negative-better → negate. Vector uses cosine similarity.
+        def _rank_key(x: dict[str, Any]) -> float:
+            if "bm25_score" in x and "similarity" in x:
+                return (-float(x["bm25_score"]) * 0.55) + (
+                    float(x.get("similarity") or 0) * 0.45
+                )
+            if "bm25_score" in x:
+                return -float(x["bm25_score"]) * 0.7 + float(x.get("relevance") or 1.0) * 0.3
+            if "similarity" in x:
+                return float(x.get("similarity") or 0) * 0.95 + float(
+                    x.get("relevance") or 1.0
+                ) * 0.05
+            return float(x.get("relevance") or 1.0)
+
         sorted_results = sorted(
             unique_results.values(),
-            key=lambda x: (
-                -x.get("bm25_score", 0) * 0.7 + x.get("relevance", 1.0) * 0.3
-                if "bm25_score" in x
-                else x.get("relevance", 1.0)
-            ),
+            key=_rank_key,
             reverse=True,
         )
 
         return sorted_results[:limit]
 
+    async def _encode_query_blob(self, query: str) -> bytes | None:
+        """Encode query text to the same float32 BLOB format as stored rows."""
+        try:
+            from kazma_core.swarm.memory.embedder import encode_text_to_blob
+
+            # encode is sync / may load MiniLM — offload via asyncio.to_thread
+            import asyncio
+
+            return await asyncio.to_thread(encode_text_to_blob, query or "")
+        except Exception:
+            logger.debug("query embed failed", exc_info=True)
+            return None
+
+    async def _has_any_embeddings(self) -> bool:
+        """Cheap probe: skip vector path when every BLOB is null."""
+        try:
+            conn = await self._ensure_connection()
+            cur = await conn.execute(
+                "SELECT 1 FROM memories WHERE embedding IS NOT NULL AND length(embedding) > 0 LIMIT 1"
+            )
+            return await cur.fetchone() is not None
+        except Exception:
+            return False
+
     async def _vector_search(self, embedding: bytes, limit: int = 10, tenant_id: str | None = None) -> list[dict[str, Any]]:
         """Perform vector similarity search using cosine distance in Python.
 
         The ``memories`` table stores embeddings as raw BLOBs.  Rather than
-        relying on a non-existent ``distance()`` SQL function, we fetch all
+        relying on a non-existent ``distance()`` SQL function, we fetch
         rows that have embeddings and compute cosine similarity in Python.
-        This is correct for small-to-medium memory sets; for large-scale
-        vector search, migrate to a proper vec0 virtual table (as done in
-        ``swarm/memory/sqlite_vec.py``).
+        Cap candidates for large stores so hybrid search stays responsive.
 
         Args:
             embedding: Query embedding as a serialized byte string (float32 array).
@@ -376,6 +417,9 @@ class SQLiteMemoryBackend:
         """
         import math
         import struct
+
+        if not await self._has_any_embeddings():
+            return []
 
         conn = await self._ensure_connection()
 
@@ -392,23 +436,29 @@ class SQLiteMemoryBackend:
         if query_norm == 0:
             return []
 
-        # Fetch candidate rows with embeddings
+        # Cap scan for large corpora (newest first by timestamp)
+        scan_cap = max(limit * 40, 500)
         if tenant_id is not None:
             cursor = await conn.execute(
                 """
                 SELECT id, content, metadata, timestamp, source, relevance, embedding
                 FROM memories
-                WHERE embedding IS NOT NULL AND tenant_id = ?
+                WHERE embedding IS NOT NULL AND length(embedding) > 0 AND tenant_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
                 """,
-                (tenant_id,),
+                (tenant_id, scan_cap),
             )
         else:
             cursor = await conn.execute(
                 """
                 SELECT id, content, metadata, timestamp, source, relevance, embedding
                 FROM memories
-                WHERE embedding IS NOT NULL
+                WHERE embedding IS NOT NULL AND length(embedding) > 0
+                ORDER BY timestamp DESC
+                LIMIT ?
                 """,
+                (scan_cap,),
             )
         rows = await cursor.fetchall()
 

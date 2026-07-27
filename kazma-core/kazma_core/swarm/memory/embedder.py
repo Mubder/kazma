@@ -23,9 +23,26 @@ from __future__ import annotations
 
 import logging
 import os
+import struct
+import time
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
-__all__ = ["DEFAULT_DIM", "DEFAULT_MODEL", "DEFAULT_PROVIDER", "Embedder", "LocalSentenceTransformerEmbedder", "OpenAICompatibleEmbedder", "get_embedder", "get_embedding_dim", "make_chroma_embedding_function", "reset_embedder"]
+__all__ = [
+    "DEFAULT_DIM",
+    "DEFAULT_MODEL",
+    "DEFAULT_PROVIDER",
+    "Embedder",
+    "LocalSentenceTransformerEmbedder",
+    "OpenAICompatibleEmbedder",
+    "encode_text_to_blob",
+    "get_embedder",
+    "get_embedding_dim",
+    "make_chroma_embedding_function",
+    "reset_embedder",
+    "resolve_unix_timestamp",
+    "serialize_f32_embedding",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -435,3 +452,80 @@ def reset_embedder() -> None:
     """Drop the singleton reference (used by test teardown)."""
     global _embedder
     _embedder = None
+
+
+def serialize_f32_embedding(embedding: list[float]) -> bytes:
+    """Pack a float list as little-endian float32 BLOB (L3 memories.embedding)."""
+    if not embedding:
+        return b""
+    return struct.pack(f"<{len(embedding)}f", *embedding)
+
+
+def encode_text_to_blob(text: str) -> bytes | None:
+    """Encode *text* with the shared embedder → float32 BLOB, or None on failure.
+
+    Used by L3 (memory.db) so semantic search can run without Chroma/L4.
+    Empty / whitespace-only input returns None (no zero-vector pollution).
+    """
+    body = (text or "").strip()
+    if not body:
+        return None
+    try:
+        emb = get_embedder()
+        if emb is None:
+            return None
+        vec = emb.encode(body)
+        if not vec:
+            return None
+        blob = serialize_f32_embedding(list(vec))
+        return blob or None
+    except Exception:
+        logger.debug("[Embedder] encode_text_to_blob failed", exc_info=True)
+        return None
+
+
+def resolve_unix_timestamp(metadata: dict[str, Any] | None = None) -> int:
+    """Resolve a unix-seconds timestamp from metadata or *now*.
+
+    Accepts ``timestamp`` / ``ts`` as int/float, ISO-8601 string, or numeric
+    string. Never returns 0 for new writes (0 is reserved for "unknown/legacy").
+    """
+    meta = metadata if isinstance(metadata, dict) else {}
+    for key in ("timestamp", "ts", "created_at", "time"):
+        raw = meta.get(key)
+        if raw is None or raw == "" or raw == 0:
+            continue
+        if isinstance(raw, bool):
+            continue
+        if isinstance(raw, (int, float)):
+            val = int(raw)
+            # ms → s if looks like epoch millis
+            if val > 10_000_000_000:
+                val = val // 1000
+            if val > 0:
+                return val
+        if isinstance(raw, str):
+            s = raw.strip()
+            if not s:
+                continue
+            try:
+                if s.isdigit() or (s[0] == "-" and s[1:].isdigit()):
+                    val = int(s)
+                    if val > 10_000_000_000:
+                        val = val // 1000
+                    if val > 0:
+                        return val
+            except ValueError:
+                pass
+            try:
+                # Support trailing Z
+                iso = s.replace("Z", "+00:00") if s.endswith("Z") else s
+                dt = datetime.fromisoformat(iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                val = int(dt.timestamp())
+                if val > 0:
+                    return val
+            except ValueError:
+                pass
+    return int(time.time())

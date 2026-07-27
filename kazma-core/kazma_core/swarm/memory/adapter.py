@@ -476,39 +476,117 @@ class UnifiedMemoryAdapter:
             return False
 
     async def _index_l2(self, text: str, meta: dict, tags: list[str] | None, uid: str) -> bool:
+        """Structural index: memory chunk + user hub + tags + heuristic SPO."""
         try:
+            # Only JSON-safe scalar props on the graph (avoid nested blobs)
+            safe_meta: dict[str, Any] = {}
+            for k, v in (meta or {}).items():
+                if k in ("content", "label"):
+                    continue
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    safe_meta[str(k)] = v
+                else:
+                    safe_meta[str(k)] = str(v)[:200]
+
             self._l2.add_entity(
                 uid,
                 "memory_chunk",
-                {"content": text[:2000], "label": text[:80], **meta},
+                {
+                    "content": text[:2000],
+                    "label": (text[:80] if text else uid),
+                    **safe_meta,
+                },
             )
-            # Link chunk to user hub when present
+            # Link chunk to user hub
             if hasattr(self._l2, "add_relation"):
                 try:
-                    self._l2.add_entity("user", "person", {"label": "user", "content": "chat user"})
-                    self._l2.add_relation("user", uid, "has_memory", {"source": meta.get("source", "memory")})
+                    self._l2.add_entity(
+                        "user", "person", {"label": "user", "content": "chat user"}
+                    )
+                    self._l2.add_relation(
+                        "user",
+                        uid,
+                        "has_memory",
+                        {"source": str(meta.get("source", "memory") or "memory")},
+                    )
                 except Exception:
-                    pass
+                    logger.debug("[Adapter] L2 user hub link failed", exc_info=True)
+
             for tag in tags or []:
-                t = str(tag)
+                t = str(tag).strip()
+                if not t:
+                    continue
                 self._l2.add_entity(t, "tag", {"label": t, "content": t})
                 self._l2.add_relation(uid, t, "tagged")
+
+            # Heuristic SPO so L2 is not empty when consolidator LLM is skipped
+            try:
+                self._index_l2_heuristic_triples(text)
+            except Exception:
+                logger.debug("[Adapter] L2 heuristic triples failed", exc_info=True)
+
             return True
         except Exception as exc:
             logger.warning("[Adapter] L2 index failed: %s", exc)
             return False
 
-    async def _index_l3(self, text: str, meta: dict, uid: str) -> bool:
+    def _index_l2_heuristic_triples(self, text: str) -> None:
+        """Promote durable cues into graph triples on every store (no LLM)."""
+        if not self._l2 or not hasattr(self._l2, "upsert_triple"):
+            return
+        body = (text or "").strip()
+        if len(body) < 8:
+            return
         try:
-            doc_id = await self._l3.index(
-                {
-                    "id": uid,
-                    "content": text,
-                    "metadata": meta,
-                    "timestamp": 0,
-                    "source": meta.get("source", "memory"),
-                }
+            from kazma_core.memory.consolidator import extract_heuristic
+
+            extracted = extract_heuristic(body, "")
+        except Exception:
+            return
+        for t in extracted.get("triples") or []:
+            if not isinstance(t, dict):
+                continue
+            s = str(t.get("subject") or "").strip()
+            p = str(t.get("predicate") or "").strip()
+            o = str(t.get("object") or "").strip()
+            if not (s and p and o):
+                continue
+            fact = f"{s} {p} {o}"
+            try:
+                self._l2.upsert_triple(
+                    s,
+                    p,
+                    o,
+                    fact=fact[:240],
+                    extra={"source": "adapter_heuristic"},
+                )
+            except Exception:
+                logger.debug("[Adapter] upsert_triple failed for %s-%s-%s", s, p, o)
+
+    async def _index_l3(self, text: str, meta: dict, uid: str) -> bool:
+        """Lexical + optional embedding BLOB into memory.db (real timestamps)."""
+        try:
+            from kazma_core.swarm.memory.embedder import (
+                encode_text_to_blob,
+                resolve_unix_timestamp,
             )
+
+            ts = resolve_unix_timestamp(meta)
+            # Stamp metadata so consumers that only read JSON still see time
+            meta_out = dict(meta or {})
+            meta_out.setdefault("timestamp", ts)
+            # Encode off the event loop (local MiniLM can be multi-second first load)
+            emb_blob = await asyncio.to_thread(encode_text_to_blob, text)
+
+            doc: dict[str, Any] = {
+                "id": uid,
+                "content": text,
+                "metadata": meta_out,
+                "timestamp": ts,
+                "source": str(meta_out.get("source", "memory") or "memory"),
+                "embedding": emb_blob,
+            }
+            doc_id = await self._l3.index(doc)
             return bool(doc_id)
         except Exception as exc:
             logger.warning("[Adapter] L3 index failed: %s", exc)

@@ -274,6 +274,34 @@ class KazmaAppBuilder:
                     if adapter is not None:
                         health = adapter.health()
                         logger.info("[VectorMemory] Adapter layers: %s", health)
+                    # One-shot integrity repair: zero timestamps / null L3
+                    # embeddings / empty graph (legacy write-path bugs).
+                    try:
+                        import threading
+                        from kazma_core.memory.backfill import maybe_auto_backfill
+
+                        def _bg_backfill() -> None:
+                            try:
+                                stats = maybe_auto_backfill(max_rows=500)
+                                if stats:
+                                    logger.info(
+                                        "[VectorMemory] Integrity backfill: %s", stats
+                                    )
+                            except Exception as bf_exc:
+                                logger.warning(
+                                    "[VectorMemory] Integrity backfill failed: %s",
+                                    bf_exc,
+                                )
+
+                        threading.Thread(
+                            target=_bg_backfill,
+                            name="kazma-memory-backfill",
+                            daemon=True,
+                        ).start()
+                    except Exception as bf_start:
+                        logger.debug(
+                            "[VectorMemory] Backfill schedule skipped: %s", bf_start
+                        )
                 except Exception as warm_exc:
                     logger.warning("[VectorMemory] Pre-warm skipped: %s", warm_exc)
             except Exception as e:
