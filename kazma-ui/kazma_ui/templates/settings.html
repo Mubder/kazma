@@ -1132,25 +1132,69 @@
             </div>
         </div>
 
+        <!-- Memory stack health (from live probe) -->
+        <div class="settings-group" x-show="pkgMemory && pkgMemory.status" x-cloak>
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                <div>
+                    <h4 style="margin:0;font-size:0.9rem;font-weight:600;">{{ t('packages.memory_stack') }}</h4>
+                    <p style="margin:4px 0 0;font-size:0.78rem;color:var(--text-muted);line-height:1.4;" x-text="pkgMemory.headline || pkgMemory.summary || ''"></p>
+                </div>
+                <span class="badge" style="font-size:0.7rem;padding:4px 10px;border-radius:10px;font-weight:700;"
+                      :class="{
+                        'badge-success': pkgMemory.status === 'ACTIVE',
+                        'badge-warning': pkgMemory.status === 'DEGRADED' || pkgMemory.status === 'INSTALLING',
+                        'badge-secondary': pkgMemory.status === 'DEMO' || pkgMemory.status === 'UNKNOWN'
+                      }"
+                      x-text="pkgMemory.status || '—'"></span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
+                <template x-for="row in pkgMemoryLayerRows" :key="row.id">
+                    <div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-elevated);">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px;">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-primary);" x-text="row.name"></span>
+                            <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;"
+                                  :style="row.ok ? 'background:#2ed573;box-shadow:0 0 6px #2ed573;' : (row.status === 'warn' || row.status === 'off' ? 'background:#f59e0b;' : 'background:#ff4757;')"></span>
+                        </div>
+                        <div style="font-size:0.68rem;color:var(--text-muted);line-height:1.35;" x-text="row.detail"></div>
+                    </div>
+                </template>
+            </div>
+            <div x-show="pkgMemory.issues && pkgMemory.issues.length" style="margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.06);font-size:0.75rem;color:#fbbf24;">
+                <div style="font-weight:700;margin-bottom:4px;">{{ t('packages.memory_issues') }}</div>
+                <ul style="margin:0;padding-left:1.1rem;">
+                    <template x-for="(iss, idx) in (pkgMemory.issues || [])" :key="idx">
+                        <li x-text="iss" style="margin-bottom:2px;"></li>
+                    </template>
+                </ul>
+            </div>
+            <p style="margin:10px 0 0;font-size:0.74rem;color:var(--text-muted);">
+                {{ t('packages.memory_hint') }}
+                <code style="font-size:0.7rem;">pip install -e ".[rag]"</code>
+            </p>
+        </div>
+
         <!-- Optional Dependencies -->
         <div class="settings-group" style="padding:0;overflow:hidden;">
             <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);">
                 <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.optional_deps') }}</h4>
+                <p style="margin:4px 0 0;font-size:0.74rem;color:var(--text-muted);">{{ t('packages.optional_deps_hint') }}</p>
             </div>
             <div x-show="pkgLoading" style="padding:40px;text-align:center;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
             <template x-for="extra in pkgExtras" :key="extra.name">
-                <div style="padding:14px 16px;border-bottom:1px solid var(--border-subtle);">
+                <div style="padding:14px 16px;border-bottom:1px solid var(--border-subtle);"
+                     :style="extra.name === 'rag' ? 'background:rgba(56,189,248,0.04);' : ''">
                     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;">
                         <div style="flex:1;">
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                                <span style="font-size:0.88rem;font-weight:600;color:var(--text-primary);" x-text="extra.name"></span>
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                                <span style="font-size:0.88rem;font-weight:600;color:var(--text-primary);" x-text="extra.title || extra.name"></span>
+                                <span style="font-family:var(--font-mono);font-size:0.68rem;color:var(--text-muted);" x-text="'[' + extra.name + ']'"></span>
                                 <span class="badge"
                                       :class="extra.installed ? 'badge-success' : (extra.partial ? 'badge-warning' : 'badge-warning')"
                                       style="font-size:0.62rem;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;"
                                       x-html="extra.installed
                                         ? (KazmaIcons.get('check') + ' ' + t('packages.installed_badge'))
                                         : (extra.partial
-                                          ? ('~ Partial (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
+                                          ? (t('packages.partial_badge') + ' (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
                                           : (KazmaIcons.get('x') + ' ' + t('packages.missing_badge')))"></span>
                             </div>
                             <p style="margin:0;font-size:0.78rem;color:var(--text-secondary);line-height:1.5;" x-text="extra.description"></p>
@@ -1161,11 +1205,11 @@
                         <template x-for="pkg in extra.packages" :key="pkg.name">
                             <span style="font-family:var(--font-mono);font-size:0.7rem;padding:2px 7px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:var(--bg-elevated);"
                                   :style="!pkg.installed ? 'opacity:0.5;border-style:dashed;' : ''"
-                                  :title="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' — not installed')"
+                                  :title="(pkg.description || '') + (pkg.installed ? (' · ' + pkg.name + ' ' + pkg.version) : (' · ' + pkg.name + ' — not installed'))"
                                   x-text="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' (missing)')"></span>
                         </template>
                     </div>
-                    <!-- Install command + one-click (only if not installed) -->
+                    <!-- Install for missing OR partial -->
                     <div x-show="!extra.installed" x-cloak
                          style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                         <span style="color:var(--text-muted);">$</span>
@@ -1175,7 +1219,7 @@
                                 @click="installExtra(extra.name)"
                                 :disabled="pkgInstalling === extra.name"
                                 style="font-size:0.62rem;padding:2px 8px;"
-                                x-text="pkgInstalling === extra.name ? t('packages.installing') : t('packages.install_btn')"></button>
+                                x-text="pkgInstalling === extra.name ? t('packages.installing') : (extra.partial ? t('packages.complete_install') : t('packages.install_btn'))"></button>
                     </div>
                 </div>
             </template>

@@ -904,7 +904,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "packages.install_all_title": {"en": "Install Everything", "ar": "تثبيت الكل"},
     "packages.install_all_desc": {"en": "To install all optional dependencies at once:", "ar": "لتثبيت جميع التبعيات الاختيارية دفعة واحدة:"},
     "packages.install_btn": {"en": "Install", "ar": "تثبيت"},
+    "packages.complete_install": {"en": "Complete install", "ar": "إكمال التثبيت"},
     "packages.installing": {"en": "Installing…", "ar": "جارٍ التثبيت…"},
+    "packages.memory_stack": {"en": "Memory stack (live)", "ar": "مكوّن الذاكرة (مباشر)"},
+    "packages.memory_issues": {"en": "Memory issues", "ar": "مشاكل الذاكرة"},
+    "packages.memory_hint": {
+        "en": "For full vector recall install the rag extra:",
+        "ar": "لاسترجاع المتجهات بالكامل ثبّت إضافة rag:",
+    },
+    "packages.optional_deps_hint": {
+        "en": "Extras are sorted by priority. Memory & RAG is first — install it for L1/L4 vectors.",
+        "ar": "الإضافات مرتبة حسب الأولوية. Memory & RAG أولاً — ثبّتها لمتجهات L1/L4.",
+    },
 
     # ── Common / Generic ──────────────────────────────────────────────
     "common.loading": {"en": "Loading…", "ar": "جاري التحميل…"},

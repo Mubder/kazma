@@ -236,20 +236,26 @@ def register_direct_routes(self: Any) -> None:
             try:
                 conn = sqlite3.connect(fts5_path)
                 cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
-                )
-                if cursor.fetchone():
-                    cursor.execute("SELECT COUNT(*) FROM memory_fts")
-                    fts5_count = cursor.fetchone()[0]
+                # Canonical L3 schema first; legacy memory_fts as fallback.
+                for table in ("memories", "memory_fts", "memory_fts_migrated"):
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=?",
+                        (table,),
+                    )
+                    if cursor.fetchone():
+                        try:
+                            cursor.execute(f"SELECT COUNT(*) FROM [{table}]")
+                            fts5_count = int(cursor.fetchone()[0] or 0)
+                            break
+                        except Exception:
+                            continue
                 conn.close()
             except Exception as _e:
                 logger.debug("fts5 count failed: %s", _e)
-                if "conn" in dir():
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+                try:
+                    conn.close()  # type: ignore[name-defined]
+                except Exception:
+                    pass
 
         vector_size = 0
         if vector_path.exists() and vector_path.is_dir():
@@ -261,13 +267,21 @@ def register_direct_routes(self: Any) -> None:
         from kazma_core.agent.tool_registry import get_vector_memory
 
         vm = get_vector_memory()
-        if vm and not getattr(vm, "degraded", False):
+        if vm is not None:
             try:
                 vector_count = vm.count
                 if callable(vector_count):
                     vector_count = vector_count()
             except Exception as _e:
                 logger.debug("vector count failed: %s", _e)
+
+        graph_stats: dict = {"nodes": 0, "edges": 0, "backend": "sqlite", "path": ""}
+        try:
+            from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+            graph_stats = get_knowledge_graph().stats()
+        except Exception as _e:
+            logger.debug("graph stats failed: %s", _e)
 
         # Per-component green/red board for Memory & Governance UI.
         health: dict = {"components": [], "issues": [], "summary": ""}
@@ -289,12 +303,37 @@ def register_direct_routes(self: Any) -> None:
                 "summary": "health probe failed",
             }
 
+        # Compact feature flags from health components for the KPI strip.
+        flags: dict = {}
+        for c in health.get("components") or []:
+            cid = c.get("id")
+            if cid in (
+                "memory_enabled",
+                "per_turn_retrieval",
+                "auto_store",
+                "consolidation",
+                "embedder",
+                "vector_memory",
+                "layer_l1",
+                "layer_l2",
+                "layer_l3",
+                "layer_l4",
+            ):
+                flags[cid] = {
+                    "ok": bool(c.get("ok")),
+                    "status": c.get("status"),
+                    "detail": c.get("detail"),
+                    "meta": c.get("meta") or {},
+                }
+
         return {
             "status": status,
             "fts5_size": fts5_size,
             "fts5_count": fts5_count,
             "vector_size": vector_size,
             "vector_count": vector_count,
+            "graph": graph_stats,
+            "flags": flags,
             "components": health.get("components", []),
             "issues": health.get("issues", []),
             "summary": health.get("summary", ""),
@@ -675,42 +714,74 @@ def register_direct_routes(self: Any) -> None:
         import importlib.metadata as ilm
 
         # ── Define the extras groups and their member packages ──
+        # Keep package lists aligned with pyproject.toml optional-deps.
         EXTRA_GROUPS = {
             "rag": {
-                "description": "Vector memory (ChromaDB) + local embeddings (sentence-transformers). Without this, memory search falls back to FTS5 text-only search.",
-                "packages": ["chromadb", "sentence-transformers"],
-                "install_cmd": 'uv pip install -e ".[rag]"   # additive — won\'t remove other extras',
+                "title": "Memory & RAG",
+                "priority": 0,
+                "description": (
+                    "Full chat memory stack: L1 Chroma vectors (chromadb) + local MiniLM "
+                    "embeddings (sentence-transformers) + L4 sqlite-vec. Without this extra, "
+                    "per-turn RAG falls back to L3 FTS5 keyword search only; the L2 SQLite "
+                    "property graph still works (stdlib + networkx)."
+                ),
+                "packages": ["chromadb", "sentence-transformers", "sqlite-vec"],
+                "install_cmd": 'uv pip install -e ".[rag]"   # L1+L4 vectors + MiniLM embeddings',
             },
             "postgres": {
+                "title": "Postgres (multi-replica)",
+                "priority": 1,
                 "description": "Multi-replica / SaaS shared state: ConfigStore, chat sessions, swarm tasks, and LangGraph checkpoints on Postgres (psycopg + langgraph-checkpoint-postgres). Set KAZMA_DATABASE_URL after install.",
                 "packages": ["psycopg", "langgraph-checkpoint-postgres"],
                 "install_cmd": 'uv pip install -e ".[postgres]"   # then set KAZMA_DATABASE_URL + migrate',
             },
             "dev": {
+                "title": "Development",
+                "priority": 10,
                 "description": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
                 "install_cmd": 'uv pip install -e ".[dev]"   # additive — won\'t remove other extras',
             },
             "test": {
+                "title": "Test",
+                "priority": 11,
                 "description": "Test-specific dependencies (lighter than dev). Includes pytest + fakeredis for unit/integration tests.",
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis"],
                 "install_cmd": 'uv pip install -e ".[test]"   # additive — won\'t remove other extras',
             },
             "tui": {
+                "title": "TUI dashboard",
+                "priority": 5,
                 "description": "Terminal dashboard UI (Textual) with RTL/bidirectional text rendering (python-bidi).",
                 "packages": ["textual", "python-bidi"],
                 "install_cmd": 'uv pip install -e ".[tui]"   # additive — won\'t remove other extras',
             },
             "observability": {
+                "title": "Observability",
+                "priority": 6,
                 "description": "Prometheus metrics export for monitoring Kazma in production (Grafana dashboards, alerting).",
                 "packages": ["prometheus-client"],
                 "install_cmd": 'uv pip install -e ".[observability]"   # additive — won\'t remove other extras',
             },
             "web": {
+                "title": "Browser automation",
+                "priority": 7,
                 "description": "Browser automation via Playwright. Used by the web crawler skill to render JavaScript-heavy pages.",
                 "packages": ["playwright"],
                 "install_cmd": 'uv pip install -e ".[web]"   # additive — won\'t remove other extras',
             },
+        }
+
+        EXTRA_PKG_DESCRIPTIONS = {
+            "chromadb": "L1 semantic vector store (agent_memory collection)",
+            "sentence-transformers": "Local MiniLM embeddings (shared embedder singleton)",
+            "sqlite-vec": "L4 local vector tables for the unified memory adapter",
+            "psycopg": "Postgres driver for multi-replica ConfigStore / sessions",
+            "langgraph-checkpoint-postgres": "Shared LangGraph checkpoints across replicas",
+            "playwright": "Headless browser for JS-heavy crawl / research",
+            "prometheus-client": "Prometheus /metrics exposition",
+            "textual": "TUI framework for kazma-tui",
+            "python-bidi": "Bidirectional text for Arabic TUI",
         }
 
         # ── Core dependencies (always installed) ──
@@ -744,7 +815,7 @@ def register_direct_routes(self: Any) -> None:
             "trafilatura": "Web content extraction (clean text from URLs)",
             "markdown": "Markdown rendering for chat messages",
             "tenacity": "Retry logic with exponential backoff for LLM calls",
-            "networkx": "Graph algorithms for swarm DAG/topology validation",
+            "networkx": "Graph algorithms for swarm DAG/topology (+ legacy L2 import helpers)",
             "click": "CLI framework for the `kazma` command",
             "rich": "Beautiful terminal output (colors, tables, progress bars)",
             "google-cloud-aiplatform": "Google Vertex AI provider integration",
@@ -801,12 +872,15 @@ def register_direct_routes(self: Any) -> None:
             for name in group_data["packages"]:
                 info = _pkg_info(name)
                 info["group"] = group_name
+                info["description"] = EXTRA_PKG_DESCRIPTIONS.get(name, "")
                 pkg_list.append(info)
             n_total = len(pkg_list)
             n_ok = sum(1 for p in pkg_list if p["installed"])
             group_installed = n_total > 0 and n_ok == n_total
             extras_list.append({
                 "name": group_name,
+                "title": group_data.get("title") or group_name,
+                "priority": int(group_data.get("priority", 50)),
                 "description": group_data["description"],
                 "install_cmd": group_data["install_cmd"],
                 "installed": group_installed,
@@ -815,6 +889,52 @@ def register_direct_routes(self: Any) -> None:
                 "package_count": n_total,
                 "packages": pkg_list,
             })
+        extras_list.sort(key=lambda e: (e.get("priority", 50), e.get("name") or ""))
+
+        # Live memory health snapshot for the Packages tab Memory card.
+        memory_summary: dict = {
+            "status": "UNKNOWN",
+            "summary": "",
+            "headline": "",
+            "layers": {},
+            "issues": [],
+        }
+        try:
+            from kazma_core.memory.health import build_memory_health
+
+            mh = build_memory_health()
+            layers = {}
+            for c in mh.get("components") or []:
+                cid = c.get("id") or ""
+                if cid in (
+                    "embedder",
+                    "vector_memory",
+                    "layer_l1",
+                    "layer_l2",
+                    "layer_l3",
+                    "layer_l4",
+                    "pkg_chromadb",
+                    "pkg_st",
+                    "pkg_sqlite_vec",
+                    "per_turn_retrieval",
+                    "auto_store",
+                    "consolidation",
+                ):
+                    layers[cid] = {
+                        "ok": bool(c.get("ok")),
+                        "status": c.get("status"),
+                        "name": c.get("name"),
+                        "detail": c.get("detail"),
+                    }
+            memory_summary = {
+                "status": mh.get("status") or "UNKNOWN",
+                "summary": mh.get("summary") or "",
+                "headline": mh.get("headline") or "",
+                "layers": layers,
+                "issues": (mh.get("issues") or [])[:6],
+            }
+        except Exception as exc:
+            memory_summary["summary"] = f"health probe failed: {exc}"
 
         # Count total installed (from distributions, not just our deps)
         total_installed = len(all_dists)
@@ -826,6 +946,7 @@ def register_direct_routes(self: Any) -> None:
             "python_version": __import__("sys").version.split()[0],
             "db_backend": _db_backend,
             "db_url_set": bool(_db_url),
+            "memory": memory_summary,
         }
 
     @self.app.post("/api/system/memory/backup")

@@ -135,6 +135,7 @@ function settingsApp() {
         pkgPythonVer: '',
         pkgDbBackend: 'sqlite',
         pkgDbUrlSet: false,
+        pkgMemory: { status: '', summary: '', headline: '', layers: {}, issues: [] },
         pkgSearch: '',
         pkgLoading: false,
         pkgInstalling: '',
@@ -1763,9 +1764,41 @@ function settingsApp() {
                     this.pkgPythonVer = data.python_version || '';
                     this.pkgDbBackend = data.db_backend || 'sqlite';
                     this.pkgDbUrlSet = !!data.db_url_set;
+                    this.pkgMemory = data.memory || { status: '', summary: '', headline: '', layers: {}, issues: [] };
                 }
             } catch (e) { /* silent */ }
             this.pkgLoading = false;
+        },
+
+        get pkgMemoryLayerRows() {
+            const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
+            const order = [
+                ['embedder', 'Embedder'],
+                ['vector_memory', 'VectorMemory'],
+                ['layer_l1', 'L1 Chroma'],
+                ['layer_l2', 'L2 Graph'],
+                ['layer_l3', 'L3 FTS5'],
+                ['layer_l4', 'L4 sqlite-vec'],
+                ['pkg_chromadb', 'chromadb'],
+                ['pkg_st', 'sentence-transformers'],
+                ['pkg_sqlite_vec', 'sqlite-vec'],
+                ['per_turn_retrieval', 'Per-turn RAG'],
+                ['auto_store', 'Auto-store'],
+                ['consolidation', 'Consolidator'],
+            ];
+            const rows = [];
+            for (const [id, fallback] of order) {
+                const c = layers[id];
+                if (!c) continue;
+                rows.push({
+                    id,
+                    name: c.name || fallback,
+                    ok: !!c.ok,
+                    status: c.status || (c.ok ? 'ok' : 'error'),
+                    detail: c.detail || '',
+                });
+            }
+            return rows;
         },
 
         get filteredPkgCore() {

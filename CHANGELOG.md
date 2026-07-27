@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Settings Packages: Memory stack + rag L4 (2026-07-27)
+
+- **Packages tab:** live memory health card (layers L1–L4, embedder, consolidator);
+  `[rag]` extra lists **sqlite-vec** + clearer L1/L4 copy; priority sort; titles;
+  install button for **partial** extras; per-package tooltips.
+- API `/api/system/packages` returns `memory` summary from `build_memory_health()`.
+
 ## Unreleased — Memory remaining plan + docs refresh (2026-07-27)
 
 - **`docs/plans/MEMORY_REMAINING.md`** — done vs later backlog for memory work.
