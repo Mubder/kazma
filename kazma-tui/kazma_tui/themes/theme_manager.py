@@ -136,6 +136,28 @@ class ThemeManager:
     def language(self) -> str:
         return self._preferences.get("language", "en")
 
+    @property
+    def auto_scroll(self) -> bool:
+        """Chat/log auto-scroll preference (Settings panel)."""
+        return bool(self._preferences.get("auto_scroll", True))
+
+    @property
+    def animations_enabled(self) -> bool:
+        """UI animation preference (Settings panel)."""
+        return bool(self._preferences.get("animations_enabled", True))
+
+    @property
+    def font_size(self) -> str:
+        return str(self._preferences.get("font_size", "medium") or "medium")
+
+    def set_auto_scroll(self, enabled: bool) -> None:
+        self._preferences["auto_scroll"] = bool(enabled)
+        self.save()
+
+    def set_animations_enabled(self, enabled: bool) -> None:
+        self._preferences["animations_enabled"] = bool(enabled)
+        self.save()
+
     def load(self) -> None:
         try:
             if self.CONFIG_FILE.exists():
