@@ -59,8 +59,29 @@ Footer {
     border-top: solid $border;
 }
 
-/* ── Main tabs ──────────────────────────────────────────────────────── */
+/* ── Body: left rail + main column ──────────────────────────────────── */
 
+#body-row {
+    height: 1fr;
+    width: 1fr;
+}
+
+#main-column {
+    height: 1fr;
+    width: 1fr;
+}
+
+/* Hide top tab bar — navigation is the left rail */
+#main-tabs > ContentSwitcher {
+    height: 1fr;
+}
+
+#main-tabs > ContentTabs {
+    display: none;
+    height: 0;
+}
+
+/* Nested tabs (e.g. Swarm sub-tabs) still visible */
 TabbedContent {
     height: 1fr;
     background: $surface;

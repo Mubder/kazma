@@ -84,6 +84,21 @@ def _read_store_overlay() -> dict[str, Any]:
             val = store.get(f"memory.{key}")
             if val is not None:
                 out[key] = val
+        # Nested consolidation flags (TUI Settings Phase 3)
+        cons: dict[str, Any] = {}
+        for sub in (
+            "enabled",
+            "use_llm",
+            "min_user_chars",
+            "every_n_turns",
+            "skip_adapter_if_auto_stored",
+            "skip_llm_in_demo",
+        ):
+            val = store.get(f"memory.consolidation.{sub}")
+            if val is not None:
+                cons[sub] = val
+        if cons:
+            out["consolidation"] = cons
     except Exception:
         logger.debug("[memory.config] ConfigStore overlay failed", exc_info=True)
     return out
@@ -99,6 +114,22 @@ def _coerce(cfg: dict[str, Any]) -> dict[str, Any]:
                 out[bool_key] = v.strip().lower() in ("1", "true", "yes", "on")
             else:
                 out[bool_key] = bool(v)
+    cons = out.get("consolidation")
+    if isinstance(cons, dict):
+        c2 = dict(cons)
+        for bk in (
+            "enabled",
+            "use_llm",
+            "skip_adapter_if_auto_stored",
+            "skip_llm_in_demo",
+        ):
+            if bk in c2:
+                v = c2[bk]
+                if isinstance(v, str):
+                    c2[bk] = v.strip().lower() in ("1", "true", "yes", "on")
+                else:
+                    c2[bk] = bool(v)
+        out["consolidation"] = c2
     if "retrieval_top_k" in out:
         try:
             out["retrieval_top_k"] = max(1, int(out["retrieval_top_k"]))
@@ -119,10 +150,22 @@ def _coerce(cfg: dict[str, Any]) -> dict[str, Any]:
 def read_memory_cfg() -> dict[str, Any]:
     """Merged memory config: defaults ← yaml ← ConfigStore."""
     merged = dict(DEFAULT_MEMORY_CFG)
-    merged.update(_read_yaml_memory())
-    # embedding block may come from yaml only
+    # Deep-copy nested consolidation defaults
+    merged["consolidation"] = dict(DEFAULT_MEMORY_CFG.get("consolidation") or {})
+    yaml_block = _read_yaml_memory()
+    yaml_cons = yaml_block.pop("consolidation", None) if isinstance(yaml_block, dict) else None
+    merged.update(yaml_block)
+    if isinstance(yaml_cons, dict):
+        base = dict(merged.get("consolidation") or {})
+        base.update(yaml_cons)
+        merged["consolidation"] = base
     store_overlay = _read_store_overlay()
+    store_cons = store_overlay.pop("consolidation", None) if isinstance(store_overlay, dict) else None
     merged.update(store_overlay)
+    if isinstance(store_cons, dict):
+        base = dict(merged.get("consolidation") or {})
+        base.update(store_cons)
+        merged["consolidation"] = base
     return _coerce(merged)
 
 

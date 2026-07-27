@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — TUI Phase 3: nav rail, Memory tab, swarm sparklines (2026-07-27)
+
+- **NavRail** left chrome (hide top tabs); keys 1–7 / `m` for Memory.
+- **Memory tab** full health + L2 graph stats + component table.
+- **Swarm** live workers/active/recent sparklines.
+- **Settings** toggles: per-turn, auto-store, consolidator (+ use_llm);
+  ConfigStore nested `memory.consolidation.*` read in `memory.config`.
+
 ## Unreleased — TUI Phase 2: memory health + panels + themes (2026-07-27)
 
 - **MemoryHealthPanel** on Dashboard (live `build_memory_health`, L1–L4 chips).

@@ -4,7 +4,9 @@ A professional terminal-based **ops console** for the Kazma framework, built wit
 
 **TUI v2 shell (2026-07):** denser design tokens (aligned with kazma.ai), compact brand header, pill-style tabs, metric cards with borders, focused chat composer, status bar chrome.
 
-**Phase 2:** Dashboard **memory health** strip (L1–L4 + pipeline flags), Swarm/Files/Traces panel polish, light/monokai/high-contrast themes share the same shell CSS via `ThemeManager` + `KAZMA_SHELL_CSS`.
+**Phase 2:** Dashboard **memory health** strip; Swarm/Files/Traces polish; shared theme shell.
+
+**Phase 3:** Left **nav rail** (keys 1–7), dedicated **Memory** tab, Swarm live sparklines, Settings toggles for consolidator / per-turn / auto-store.
 
 ## Features
 

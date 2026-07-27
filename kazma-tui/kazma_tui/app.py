@@ -1,7 +1,7 @@
 """Kazma TUI — Professional terminal dashboard for the Kazma agent framework.
 
-Architecture (v2 shell):
-    KazmaHeader · Tabs (Dashboard | Chat | Files | Traces | Swarm | Settings)
+Architecture (v3 shell):
+    KazmaHeader · NavRail + Tabs (Dashboard | Memory | Chat | …)
     · StatusBar · Footer
 
 Visual system lives in ``theme.py`` (design tokens + global TCSS).
@@ -17,12 +17,15 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
 from kazma_tui.dashboard import MetricsDashboard
 from kazma_tui.files import FilesPanel
 from kazma_tui.header import KazmaHeader
+from kazma_tui.memory_panel import MemoryTab
+from kazma_tui.nav_rail import NAV_ITEMS, NavRail, NavSelected
 from kazma_tui.settings_panel import SettingsPanel
 from kazma_tui.swarm import SwarmPanel
 from kazma_tui.traces import TracesPanel
@@ -40,9 +43,11 @@ __all__ = ["KazmaTUI", "main"]
 
 logger = logging.getLogger(__name__)
 
+_TAB_ORDER = [tid for tid, _label, _key in NAV_ITEMS]
+
 
 class KazmaTUI(App[None]):
-    """Kazma Terminal Dashboard — professional ops console (v2 shell)."""
+    """Kazma Terminal Dashboard — professional ops console (v3 shell)."""
 
     TITLE = "Kazma"
     SUB_TITLE = "ops console"
@@ -63,11 +68,13 @@ class KazmaTUI(App[None]):
         Binding("ctrl+n", "next_tab", "Next Tab"),
         Binding("ctrl+b", "prev_tab", "Prev Tab"),
         Binding("1", "goto_tab('dashboard')", "Dashboard", show=False),
-        Binding("2", "goto_tab('chat')", "Chat", show=False),
-        Binding("3", "goto_tab('files')", "Files", show=False),
-        Binding("4", "goto_tab('traces')", "Traces", show=False),
-        Binding("5", "goto_tab('swarm')", "Swarm", show=False),
-        Binding("6", "goto_tab('settings')", "Settings", show=False),
+        Binding("2", "goto_tab('memory')", "Memory", show=False),
+        Binding("3", "goto_tab('chat')", "Chat", show=False),
+        Binding("4", "goto_tab('files')", "Files", show=False),
+        Binding("5", "goto_tab('traces')", "Traces", show=False),
+        Binding("6", "goto_tab('swarm')", "Swarm", show=False),
+        Binding("7", "goto_tab('settings')", "Settings", show=False),
+        Binding("m", "goto_tab('memory')", "Memory", show=False),
         # Help
         Binding("?", "help_screen", "Help", show=False),
         # Accessibility
@@ -88,19 +95,24 @@ class KazmaTUI(App[None]):
 
     def compose(self) -> ComposeResult:
         yield KazmaHeader(id="kazma-header")
-        with TabbedContent(initial="dashboard", id="main-tabs"):
-            with TabPane("Dashboard", id="dashboard"):
-                yield MetricsDashboard()
-            with TabPane("Chat", id="chat"):
-                yield ChatPanel()
-            with TabPane("Files", id="files"):
-                yield FilesPanel()
-            with TabPane("Traces", id="traces"):
-                yield TracesPanel()
-            with TabPane("Swarm", id="swarm"):
-                yield SwarmPanel()
-            with TabPane("Settings", id="settings"):
-                yield SettingsPanel()
+        with Horizontal(id="body-row"):
+            yield NavRail(id="nav-rail")
+            with Vertical(id="main-column"):
+                with TabbedContent(initial="dashboard", id="main-tabs"):
+                    with TabPane("Dashboard", id="dashboard"):
+                        yield MetricsDashboard()
+                    with TabPane("Memory", id="memory"):
+                        yield MemoryTab()
+                    with TabPane("Chat", id="chat"):
+                        yield ChatPanel()
+                    with TabPane("Files", id="files"):
+                        yield FilesPanel()
+                    with TabPane("Traces", id="traces"):
+                        yield TracesPanel()
+                    with TabPane("Swarm", id="swarm"):
+                        yield SwarmPanel()
+                    with TabPane("Settings", id="settings"):
+                        yield SettingsPanel()
         yield KazmaStatusBar(id="status-bar")
         yield Footer()
 
@@ -157,6 +169,17 @@ class KazmaTUI(App[None]):
 
         # Periodic background polling to check for pending HITL approvals (every 3.0s)
         self.set_interval(3.0, self._check_pending_approvals)
+
+        # Sync left rail highlight with initial tab
+        try:
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            self.query_one("#nav-rail", NavRail).set_active(tabs.active or "dashboard")
+        except Exception:
+            pass
+
+    def on_nav_selected(self, event: NavSelected) -> None:
+        """Left rail → switch main tab."""
+        self.action_goto_tab(event.tab_id)
 
     def _initialize_core(self) -> None:
         """Initialize ModelRegistry and SwarmEngine if not already done.
@@ -390,10 +413,19 @@ class KazmaTUI(App[None]):
                 logger.debug("Scroll bottom failed: %s", exc)
 
     def action_goto_tab(self, tab_id: str) -> None:
-        """Jump to a main tab by id (bindings 1–6)."""
+        """Jump to a main tab by id (bindings 1–7 / nav rail)."""
         try:
             tabs = self.query_one("#main-tabs", TabbedContent)
             tabs.active = tab_id
+            try:
+                self.query_one("#nav-rail", NavRail).set_active(tab_id)
+            except Exception:
+                pass
+            if tab_id == "chat":
+                try:
+                    self.query_one("#chat-input").focus()
+                except Exception:
+                    pass
         except Exception:
             logger.debug("goto_tab failed for %s", tab_id, exc_info=True)
 
@@ -402,10 +434,9 @@ class KazmaTUI(App[None]):
         try:
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
-            tab_order = ["dashboard", "chat", "files", "traces", "swarm", "settings"]
-            if current in tab_order:
-                next_idx = (tab_order.index(current) + 1) % len(tab_order)
-                tabs.active = tab_order[next_idx]
+            if current in _TAB_ORDER:
+                next_idx = (_TAB_ORDER.index(current) + 1) % len(_TAB_ORDER)
+                self.action_goto_tab(_TAB_ORDER[next_idx])
         except Exception as exc:
             logger.debug("Next tab switch failed: %s", exc)
 
@@ -414,10 +445,9 @@ class KazmaTUI(App[None]):
         try:
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
-            tab_order = ["dashboard", "chat", "files", "traces", "swarm", "settings"]
-            if current in tab_order:
-                prev_idx = (tab_order.index(current) - 1) % len(tab_order)
-                tabs.active = tab_order[prev_idx]
+            if current in _TAB_ORDER:
+                prev_idx = (_TAB_ORDER.index(current) - 1) % len(_TAB_ORDER)
+                self.action_goto_tab(_TAB_ORDER[prev_idx])
         except Exception as exc:
             logger.debug("Prev tab switch failed: %s", exc)
 
@@ -427,12 +457,13 @@ class KazmaTUI(App[None]):
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
             help_messages = {
-                "dashboard": "Dashboard: Live resource usage trend lines and agent framework health.",
-                "chat": "Chat: Type message, Ctrl+Enter send, /help commands",
-                "files": "Files: Browse workspace files, Click to open",
-                "traces": "Traces: Live log audit trail, filter by term, navigate with keys",
-                "swarm": "Swarm: Monitor workers, View task history",
-                "settings": "Settings: Configure model, provider, preferences",
+                "dashboard": "Dashboard: metrics + compact memory health. Keys 1–7 / left rail.",
+                "memory": "Memory: full stack health, L2 graph stats, component table. Press r via settings to save flags.",
+                "chat": "Chat: Type message, Enter send, / for commands, Ctrl+P palette",
+                "files": "Files: Browse workspace, e = open editor",
+                "traces": "Traces: Filter audit trail, select row for details",
+                "swarm": "Swarm: Workers, active tasks, history, topology + live sparklines",
+                "settings": "Settings: Feature toggles (memory, consolidator, HITL), themes",
             }
             msg = help_messages.get(current, "Press Ctrl+P for command palette")
             self.push_screen(Toast(msg, "info", duration=3.0))
