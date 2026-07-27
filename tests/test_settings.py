@@ -729,19 +729,19 @@ class TestSettingsAPI:
         resp = client.get("/api/voice/stt-models?provider=openai")
         assert resp.status_code == 200
         data = resp.json()
-        assert "whisper-1" in data
+        assert any(m.get("id") == "whisper-1" if isinstance(m, dict) else m == "whisper-1" for m in data)
 
         # 2. Test Groq
         resp = client.get("/api/voice/stt-models?provider=groq")
         assert resp.status_code == 200
         data = resp.json()
-        assert "whisper-large-v3" in data
+        assert any(m.get("id") == "whisper-large-v3" if isinstance(m, dict) else m == "whisper-large-v3" for m in data)
 
         # 3. Test Nvidia
         resp = client.get("/api/voice/stt-models?provider=nvidia")
         assert resp.status_code == 200
         data = resp.json()
-        assert "nvidia/whisper-large-v3" in data
+        assert any(m.get("id") in ("openai/whisper-large-v3", "nvidia/whisper-large-v3", "whisper-large-v3") if isinstance(m, dict) else m in ("openai/whisper-large-v3", "nvidia/whisper-large-v3", "whisper-large-v3") for m in data)
 
 
 

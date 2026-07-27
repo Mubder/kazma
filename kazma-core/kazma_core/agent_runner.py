@@ -926,6 +926,17 @@ class KazmaAgent:
         logger.warning("Graph produced no assistant response")
         return ""
 
+    def sync_active_model(self) -> None:
+        """Re-fetch active LLM client from ModelRegistry and reset cached graphs."""
+        from kazma_core.model_registry import get_model_registry
+
+        registry = get_model_registry()
+        self.llm = registry.get_client()
+        self.llm_config = self.llm.config
+        self._graph = None
+        self._streaming_graph = None
+        logger.info("[KazmaAgent] Active model synced to %s", getattr(self.llm, "model", "unknown"))
+
     async def shutdown(self) -> None:
         """Clean shutdown of the agent."""
         self._running = False

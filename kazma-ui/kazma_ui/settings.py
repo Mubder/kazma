@@ -678,6 +678,16 @@ class SettingsRouterBuilder:
                 registry.set_active_model(model)
                 # Also persist for gateways that read registry.active_chat_model
                 _get_sm()._cs.set("registry.active_chat_model", model, category="registry")
+
+                agent = getattr(self, "agent", None)
+                if agent is not None:
+                    if hasattr(agent, "sync_active_model"):
+                        agent.sync_active_model()
+                    elif hasattr(agent, "_streaming_graph"):
+                        agent._streaming_graph = None
+                        agent._graph = None
+                        if hasattr(agent, "llm"):
+                            agent.llm = registry.get_client()
             except Exception as exc:
                 logger.warning("[Settings] set_active_model failed: %s", exc)
             return {"active_model": model, "model": model, "status": "ok"}
