@@ -348,6 +348,9 @@
     currentMsgEl = null;
     tokenAccum = '';
     activeStream = null;
+    // WS path never hit SSE onDone → session list used to stay stale until F5.
+    // Refresh after every completed turn (debounced).
+    if (!showArchived) refreshSessionsSoon();
   }
 
   /**
@@ -722,6 +725,10 @@
       persistSessionId();
     }
 
+    // Sidebar: show this season immediately (before the server list round-trip).
+    // Critical for WS path which used to skip loadSessions entirely.
+    noteSessionActivity(text || content);
+
     currentMsgEl = null;
     tokenAccum = '';
 
@@ -837,10 +844,11 @@
         if (interrupted || _awaitingApproval) {
           activeStream = null;
           if (!_awaitingApproval) pauseForApproval(null);
+          // Still refresh list so a new season appears mid-HITL
+          if (showArchived) loadArchivedSessions(); else refreshSessionsSoon();
         } else {
-          endTurn();
+          endTurn(); // also refreshSessionsSoon
         }
-        if (showArchived) loadArchivedSessions(); else loadSessions();
       },
 
       onApprovalRequired: function(data) {
@@ -849,6 +857,7 @@
         activeTypingEl = null;
         pauseForApproval(data);
         renderHitlCard(data);
+        refreshSessionsSoon();
       },
 
       onError: function(msg) {
@@ -1227,14 +1236,123 @@
   }
 
   // ── Session management ────────────────────────────────
+  /** Debounced server re-fetch so rapid turns don't spam /api/chat/sessions. */
+  var _sessionsRefreshTimer = null;
+
   function loadSessions() {
     fetch('/api/chat/sessions')
       .then(function(r) { return r.json(); })
       .then(function(data) {
         sessions = data || [];
+        // Preserve optimistic active session if the server hasn't flushed it yet
+        // (race: first WS message still writing while we re-list).
+        if (chatSessionId) {
+          var found = sessions.some(function(s) { return s.session_id === chatSessionId; });
+          if (!found) {
+            var pending = _optimisticSessionStub(chatSessionId);
+            if (pending) sessions = [pending].concat(sessions);
+          }
+        }
         renderSessionList();
       })
       .catch(function() {});
+  }
+
+  function refreshSessionsSoon() {
+    if (_sessionsRefreshTimer) clearTimeout(_sessionsRefreshTimer);
+    _sessionsRefreshTimer = setTimeout(function() {
+      _sessionsRefreshTimer = null;
+      loadSessions();
+    }, 350);
+  }
+
+  /**
+   * Immediately put/update a session row in the sidebar without waiting for
+   * a full list fetch. Root cause of "new season missing until F5":
+   * WS chat path never called loadSessions(), and SSE only did on onDone.
+   */
+  function upsertSessionLocal(partial) {
+    if (!partial || !partial.session_id) return;
+    var sid = partial.session_id;
+    var now = new Date().toISOString();
+    var idx = -1;
+    for (var i = 0; i < sessions.length; i++) {
+      if (sessions[i].session_id === sid) { idx = i; break; }
+    }
+    if (idx >= 0) {
+      var prev = sessions[idx];
+      sessions[idx] = Object.assign({}, prev, partial, {
+        // Don't blank a good title with empty string
+        title: (partial.title != null && partial.title !== '')
+          ? partial.title
+          : (prev.title || ''),
+        updated_at: partial.updated_at || now,
+        message_count: partial.message_count != null
+          ? partial.message_count
+          : (prev.message_count || 0),
+      });
+    } else {
+      sessions.unshift({
+        session_id: sid,
+        title: partial.title || '',
+        message_count: partial.message_count != null ? partial.message_count : 0,
+        platform: partial.platform || 'web',
+        created_at: partial.created_at || now,
+        updated_at: partial.updated_at || now,
+        archived: false,
+        thread_id: partial.thread_id || '',
+        total_cost: partial.total_cost || 0,
+        total_tokens: partial.total_tokens || 0,
+      });
+    }
+    renderSessionList();
+  }
+
+  function _optimisticSessionStub(sid) {
+    if (!sid) return null;
+    // Prefer whatever we already know from the open transcript
+    var userCount = 0;
+    var firstUser = '';
+    try {
+      var userEls = messagesEl
+        ? messagesEl.querySelectorAll('.message-user .message-text')
+        : [];
+      userCount = userEls.length;
+      if (userEls.length) {
+        firstUser = (userEls[0].textContent || '').trim().slice(0, 60);
+      }
+    } catch (e) {}
+    if (userCount === 0 && !lastSentUserText) return null;
+    return {
+      session_id: sid,
+      title: firstUser || (lastSentUserText || '').trim().slice(0, 60) || 'New chat',
+      message_count: Math.max(userCount * 2, userCount || 1),
+      platform: 'web',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      archived: false,
+    };
+  }
+
+  function noteSessionActivity(userText) {
+    if (!chatSessionId) return;
+    var titleHint = (userText || lastSentUserText || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    var existing = null;
+    for (var i = 0; i < sessions.length; i++) {
+      if (sessions[i].session_id === chatSessionId) { existing = sessions[i]; break; }
+    }
+    var nextCount = existing
+      ? (existing.message_count || 0) + 1
+      : 1;
+    upsertSessionLocal({
+      session_id: chatSessionId,
+      title: (existing && existing.title) ? existing.title : (titleHint || 'New chat'),
+      message_count: nextCount,
+      platform: 'web',
+      updated_at: new Date().toISOString(),
+    });
+    // Authoritative sync shortly after server persists the turn
+    refreshSessionsSoon();
   }
 
   function relativeTime(isoStr) {
@@ -1562,7 +1680,12 @@
       } catch (e) {}
     }
 
+    // Re-render so the previous season stays visible and active highlight
+    // clears; the brand-new empty id is intentionally not listed until the
+    // first message (noteSessionActivity) — then it appears without F5.
     renderSessionList();
+    // Pull latest titles/counts for seasons that just finished on the server
+    refreshSessionsSoon();
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.focus();
@@ -1652,6 +1775,8 @@
     forceEndTurn: forceEndTurn,
     pauseForApproval: pauseForApproval,
     isGenerating: function() { return _isGenerating; },
+    refreshSessions: loadSessions,
+    refreshSessionsSoon: refreshSessionsSoon,
     getOrCreateSessionId: function() {
       if (!chatSessionId) {
         chatSessionId = generateSessionId();
