@@ -144,19 +144,24 @@ async def read_system_logs(lines: int = 100) -> str:
         lines = 200
 
     workspace = _get_workspace()
-    log_path = workspace / "out.log"
+    
+    # Check standard Kazma log file locations in precedence order
+    candidate_paths = [
+        Path.home() / ".kazma" / "kazma.log",
+        workspace / "kazma.log",
+        workspace / "kazma-data" / "logs" / "kazma.log",
+        workspace / "out.log",
+        workspace / "server.log",
+    ]
 
-    scope_err = _workspace_scope_error(log_path, str(log_path), "reads")
-    if scope_err:
-        return scope_err
+    log_path = None
+    for cand in candidate_paths:
+        if cand.exists():
+            log_path = cand
+            break
 
-    if not log_path.exists():
-        # Fallback: check if there is an alternative log file
-        alt_log = workspace / "server.log"
-        if alt_log.exists():
-            log_path = alt_log
-        else:
-            return f"Error: System log file not found in workspace root. (Expected: {log_path.name})"
+    if log_path is None:
+        return "Error: System log file not found. Checked ~/.kazma/kazma.log, workspace/kazma.log, kazma-data/logs/kazma.log, out.log."
 
     try:
         # Read the file's last lines safely

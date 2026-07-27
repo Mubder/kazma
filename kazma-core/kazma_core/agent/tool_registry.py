@@ -1109,6 +1109,24 @@ class LocalToolRegistry:
             _MISSING = object()
             val = store.get(key, _MISSING)
 
+            # Key alias fallback resolution (e.g. agent.model -> registry.active_model)
+            if val is _MISSING:
+                key_clean = (key or "").strip().lower()
+                aliases: dict[str, list[str]] = {
+                    "agent.model": ["registry.active_model", "registry.active_chat_model", "models.default", "llm.model"],
+                    "model": ["registry.active_model", "registry.active_chat_model", "models.default", "llm.model"],
+                    "active_model": ["registry.active_model", "registry.active_chat_model", "models.default"],
+                    "agent.active_model": ["registry.active_model", "registry.active_chat_model", "models.default"],
+                    "agent.provider": ["registry.active_provider", "llm.provider"],
+                    "provider": ["registry.active_provider", "llm.provider"],
+                    "active_provider": ["registry.active_provider", "llm.provider"],
+                }
+                for alt_key in aliases.get(key_clean, []):
+                    alt_val = store.get(alt_key, _MISSING)
+                    if alt_val is not _MISSING and alt_val is not None:
+                        val = alt_val
+                        break
+
             key_l = (key or "").lower()
             secret_markers = (
                 "api_key", "apikey", "token", "secret", "password",

@@ -156,3 +156,37 @@ class TestSqliteVecSchema:
         assert "vec0" in ddl
         assert "+doc_id TEXT" in ddl
         assert "INTEGER PRIMARY KEY" not in ddl
+
+
+class TestConfigReadAliases:
+    """Verify config_read resolves alias keys like agent.model and agent.provider."""
+
+    @pytest.mark.asyncio
+    async def test_config_read_agent_model_alias(self) -> None:
+        import json
+        from kazma_core.config_store import get_config_store
+        from kazma_core.agent.tool_registry import LocalToolRegistry
+
+        store = get_config_store()
+        store.set("registry.active_model", "deepseek-v4-flash", category="registry")
+
+        reg = LocalToolRegistry(include_builtins=True)
+        res_raw = await reg.execute("config_read", {"key": "agent.model"})
+        res = json.loads(res_raw["content"]) if isinstance(res_raw, dict) and "content" in res_raw else json.loads(res_raw)
+        assert res.get("status") == "set"
+        assert res.get("value") == "deepseek-v4-flash"
+
+
+class TestReadSystemLogsFallbacks:
+    """Verify read_system_logs finds logs in ~/.kazma/kazma.log or workspace."""
+
+    @pytest.mark.asyncio
+    async def test_read_system_logs_finds_file(self, tmp_path) -> None:
+        from kazma_skills.native.system_health_monitor.tools import read_system_logs
+
+        log_file = tmp_path / "kazma.log"
+        log_file.write_text("2026-07-28 [INFO] Test log line 1\n2026-07-28 [INFO] Test log line 2\n")
+
+        with patch("kazma_skills.native.system_health_monitor.tools._get_workspace", return_value=tmp_path):
+            res = await read_system_logs(lines=10)
+            assert "Test log line" in res
