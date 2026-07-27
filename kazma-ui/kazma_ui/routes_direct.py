@@ -719,64 +719,93 @@ def register_direct_routes(self: Any) -> None:
         return resp
 
     @self.app.get("/api/system/packages")
-    async def _get_packages():
+    async def _get_packages(request: Request):
         """List installed Python packages with metadata and extras status."""
         import importlib.metadata as ilm
+
+        lang = request.cookies.get("kazma-lang") or "en"
+        if lang not in ("ar", "en"):
+            lang = "en"
+
+        def _i18n(key: str, fallback: str) -> str:
+            try:
+                from kazma_ui.i18n import t as i18n_t
+
+                loc = i18n_t(key, lang=lang)
+                return loc if loc and loc != key else fallback
+            except Exception:
+                return fallback
 
         # ── Define the extras groups and their member packages ──
         # Keep package lists aligned with pyproject.toml optional-deps.
         EXTRA_GROUPS = {
             "rag": {
-                "title": "Memory & RAG",
+                "title": _i18n("packages.extra.rag.title", "Memory & RAG"),
                 "priority": 0,
-                "description": (
-                    "Full chat memory stack: L1 Chroma vectors (chromadb) + local MiniLM "
-                    "embeddings (sentence-transformers) + L4 sqlite-vec. Without this extra, "
-                    "per-turn RAG falls back to L3 FTS5 keyword search only; the L2 SQLite "
-                    "property graph still works (stdlib + networkx)."
+                "description": _i18n(
+                    "packages.extra.rag.desc",
+                    "Full chat memory stack: L1 Chroma + MiniLM + L4 sqlite-vec.",
                 ),
                 "packages": ["chromadb", "sentence-transformers", "sqlite-vec"],
                 "install_cmd": 'uv pip install -e ".[rag]"   # L1+L4 vectors + MiniLM embeddings',
             },
             "postgres": {
-                "title": "Postgres (multi-replica)",
+                "title": _i18n("packages.extra.postgres.title", "Postgres (multi-replica)"),
                 "priority": 1,
-                "description": "Multi-replica / SaaS shared state: ConfigStore, chat sessions, swarm tasks, and LangGraph checkpoints on Postgres (psycopg + langgraph-checkpoint-postgres). Set KAZMA_DATABASE_URL after install.",
+                "description": _i18n(
+                    "packages.extra.postgres.desc",
+                    "Multi-replica shared state on Postgres.",
+                ),
                 "packages": ["psycopg", "langgraph-checkpoint-postgres"],
                 "install_cmd": 'uv pip install -e ".[postgres]"   # then set KAZMA_DATABASE_URL + migrate',
             },
             "dev": {
-                "title": "Development",
+                "title": _i18n("packages.extra.dev.title", "Development"),
                 "priority": 10,
-                "description": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
+                "description": _i18n(
+                    "packages.extra.dev.desc",
+                    "Development tools — pytest, ruff, mypy, locust.",
+                ),
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
                 "install_cmd": 'uv pip install -e ".[dev]"   # additive — won\'t remove other extras',
             },
             "test": {
-                "title": "Test",
+                "title": _i18n("packages.extra.test.title", "Test"),
                 "priority": 11,
-                "description": "Test-specific dependencies (lighter than dev). Includes pytest + fakeredis for unit/integration tests.",
+                "description": _i18n(
+                    "packages.extra.test.desc",
+                    "Test-specific dependencies (lighter than dev).",
+                ),
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis"],
                 "install_cmd": 'uv pip install -e ".[test]"   # additive — won\'t remove other extras',
             },
             "tui": {
-                "title": "TUI dashboard",
+                "title": _i18n("packages.extra.tui.title", "TUI dashboard"),
                 "priority": 5,
-                "description": "Terminal dashboard UI (Textual) with RTL/bidirectional text rendering (python-bidi).",
+                "description": _i18n(
+                    "packages.extra.tui.desc",
+                    "Terminal dashboard UI (Textual) with RTL text.",
+                ),
                 "packages": ["textual", "python-bidi"],
                 "install_cmd": 'uv pip install -e ".[tui]"   # additive — won\'t remove other extras',
             },
             "observability": {
-                "title": "Observability",
+                "title": _i18n("packages.extra.observability.title", "Observability"),
                 "priority": 6,
-                "description": "Prometheus metrics export for monitoring Kazma in production (Grafana dashboards, alerting).",
+                "description": _i18n(
+                    "packages.extra.observability.desc",
+                    "Prometheus metrics export for production monitoring.",
+                ),
                 "packages": ["prometheus-client"],
                 "install_cmd": 'uv pip install -e ".[observability]"   # additive — won\'t remove other extras',
             },
             "web": {
-                "title": "Browser automation",
+                "title": _i18n("packages.extra.web.title", "Browser automation"),
                 "priority": 7,
-                "description": "Browser automation via Playwright. Used by the web crawler skill to render JavaScript-heavy pages.",
+                "description": _i18n(
+                    "packages.extra.web.desc",
+                    "Browser automation via Playwright for JS-heavy pages.",
+                ),
                 "packages": ["playwright"],
                 "install_cmd": 'uv pip install -e ".[web]"   # additive — won\'t remove other extras',
             },

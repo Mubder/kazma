@@ -1582,13 +1582,12 @@
         <div class="settings-group">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <div>
-                    <h3 style="margin:0;">Voice Subsystem</h3>
+                    <h3 style="margin:0;">{{ t('voice.title') }}</h3>
                     <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">
-                        Master switch for STT/TTS on Telegram, Discord, Slack, and Web.
-                        Turn <strong>off</strong> to stop all voice notes and transcription.
+                        {{ t('voice.master_help') }}
                     </p>
                 </div>
-                <label class="toggle" style="scale: 1.2;" title="Enable voice subsystem">
+                <label class="toggle" style="scale: 1.2;" title="{{ t('voice.title') }}">
                     <input type="checkbox" x-model="voiceForm.enabled" @change="saveVoiceSettings()">
                     <span class="toggle-slider"></span>
                 </label>
@@ -1602,14 +1601,12 @@
                 <!-- Platform auto voice-note replies (Telegram/Discord/Slack) -->
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; padding:12px 14px; background:var(--surface-raised, var(--boost, #161d27)); border:1px solid var(--border-subtle, var(--border)); border-radius:8px;">
                     <div style="flex:1; min-width:0;">
-                        <div style="font-weight:600; margin-bottom:4px;">Auto voice-note replies</div>
+                        <div style="font-weight:600; margin-bottom:4px;">{{ t('voice.tts_reply_title') }}</div>
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
-                            When <strong>on</strong>: if you send a voice note on Telegram/Discord/Slack,
-                            the agent also replies with a spoken voice note (after the text reply).
-                            When <strong>off</strong>: replies stay text-only; inbound STT still works.
+                            {{ t('voice.tts_reply_help') }}
                         </p>
                     </div>
-                    <label class="toggle" style="flex-shrink:0; scale: 1.1;" title="Toggle auto voice-note replies">
+                    <label class="toggle" style="flex-shrink:0; scale: 1.1;" title="{{ t('voice.tts_reply_title') }}">
                         <input type="checkbox" x-model="voiceForm.tts_reply" @change="saveVoiceSettings()">
                         <span class="toggle-slider"></span>
                     </label>
@@ -1620,11 +1617,11 @@
                     <div>
                         <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-mic"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                            Speech-to-Text (STT)
+                            {{ t('voice.stt') }}
                         </h4>
                         
                         <div class="form-group">
-                            <label>STT Provider</label>
+                            <label>{{ t('voice.stt_provider') }}</label>
                             <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings(); loadSttModels()">
                                 <template x-for="provider in voiceProviders.stt" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
@@ -1633,43 +1630,41 @@
                         </div>
 
                         <div class="form-group">
-                            <label>STT Model <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400">(loading…)</span></label>
+                            <label>{{ t('voice.stt_model') }} <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400">{{ t('voice.stt_model_loading') }}</span></label>
                             <select class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
                                 <template x-for="model in sttModelOptions" :key="model.id">
                                     <option :value="model.id" x-text="model.label"></option>
                                 </template>
-                                <option value="custom">Custom model ID...</option>
+                                <option value="custom">{{ t('voice.stt_model_custom') }}</option>
                             </select>
                             <p class="form-help" style="margin-top:4px" x-show="!sttModelOptions.length">
-                                No models loaded — pick Custom or change provider.
+                                {{ t('voice.stt_model_empty') }}
                             </p>
                             <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'">
-                                NVIDIA Whisper is a <strong>Speech NIM</strong> (self-hosted), not a chat model on integrate.api.nvidia.com.
-                                Set the ASR base URL below, or use <code>groq</code>/<code>openai</code> for cloud STT.
+                                {{ t('voice.stt_nvidia_help') }}
                             </p>
                         </div>
 
                         <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;">
-                            <label>Custom STT Model ID</label>
+                            <label>{{ t('voice.stt_custom_id') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
-                            <p class="form-help" style="margin-top:4px;">Type any specific custom transcription model name.</p>
+                            <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_custom_help') }}</p>
                         </div>
 
                         <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;">
-                            <label>NVIDIA ASR base URL (Speech NIM)</label>
+                            <label>{{ t('voice.stt_base_url') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
                                    placeholder="http://127.0.0.1:9000/v1"
                                    @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">
-                                OpenAI-compatible root of your Speech NIM (must expose <code>/v1/audio/transcriptions</code>).
-                                Do <em>not</em> use the LLM integrate.api.nvidia.com URL.
+                                {{ t('voice.stt_base_help') }}
                             </p>
                         </div>
 
                         <div class="form-group">
-                            <label>STT Language</label>
+                            <label>{{ t('voice.stt_language') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="auto or en, ar, fr..." @change="saveVoiceSettings()">
-                            <p class="form-help" style="margin-top:4px;">Use "auto" or ISO-639-1 format.</p>
+                            <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_language_help') }}</p>
                         </div>
                     </div>
 
@@ -1677,11 +1672,11 @@
                     <div>
                         <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-volume-2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-                            Text-to-Speech (TTS)
+                            {{ t('voice.tts') }}
                         </h4>
 
                         <div class="form-group">
-                            <label>TTS Provider</label>
+                            <label>{{ t('voice.tts_provider') }}</label>
                             <select class="form-select" x-model="voiceForm.tts_provider" @change="saveVoiceSettings(); loadVoiceModels()">
                                 <template x-for="provider in voiceProviders.tts" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
@@ -1690,29 +1685,29 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Voice Model / Voice ID</label>
+                            <label>{{ t('voice.tts_voice') }}</label>
                             <select class="form-select" x-model="ttsVoiceType" @change="onTtsVoiceTypeChange()">
                                 <template x-for="model in voiceModels" :key="model">
                                     <option :value="model" x-text="model"></option>
                                 </template>
-                                <option value="custom">Custom voice ID...</option>
+                                <option value="custom">{{ t('voice.tts_voice_custom') }}</option>
                             </select>
                         </div>
 
                         <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;">
-                            <label>Custom Voice ID</label>
+                            <label>{{ t('voice.tts_custom_id') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.tts_voice" placeholder="Enter custom voice ID" @change="saveVoiceSettings()">
-                            <p class="form-help" style="margin-top:4px;">e.g. provider voice ID, or a local file path.</p>
+                            <p class="form-help" style="margin-top:4px;">{{ t('voice.tts_custom_help') }}</p>
                         </div>
 
 
                         <div class="form-group">
-                            <label>Audio Format</label>
+                            <label>{{ t('voice.audio_format') }}</label>
                             <select class="form-select" x-model="voiceForm.tts_output_format" @change="saveVoiceSettings()">
-                                <option value="mp3">MP3 (standard)</option>
-                                <option value="wav">WAV (uncompressed)</option>
-                                <option value="opus">Opus (highly optimized)</option>
-                                <option value="flac">FLAC (lossless)</option>
+                                <option value="mp3">{{ t('voice.format_mp3') }}</option>
+                                <option value="wav">{{ t('voice.format_wav') }}</option>
+                                <option value="opus">{{ t('voice.format_opus') }}</option>
+                                <option value="flac">{{ t('voice.format_flac') }}</option>
                             </select>
                         </div>
                     </div>

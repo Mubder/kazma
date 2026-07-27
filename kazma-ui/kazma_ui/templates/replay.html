@@ -52,15 +52,15 @@
   <!-- ══ TAB: Diff ══ -->
   <div class="tab-panel" id="panel-diff" style="display:none;">
     <div class="card" style="padding:1.5rem;">
-      <p style="color:var(--text-muted);margin-bottom:1rem;">Compare two snapshots from the same thread to see how the conversation diverged.</p>
+      <p style="color:var(--text-muted);margin-bottom:1rem;">{{ t('replay.diff_desc') }}</p>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
-        <label>Iteration A:
+        <label>{{ t('replay.iteration_a') }}:
           <select id="replay-diff-a" class="form-select" style="min-width:100px;"></select>
         </label>
-        <label>Iteration B:
+        <label>{{ t('replay.iteration_b') }}:
           <select id="replay-diff-b" class="form-select" style="min-width:100px;"></select>
         </label>
-        <button class="btn btn-primary" onclick="KazmaReplay.compare()">Compare</button>
+        <button class="btn btn-primary" onclick="KazmaReplay.compare()">{{ t('replay.tab_diff') }}</button>
       </div>
       <div id="replay-diff-result"></div>
     </div>

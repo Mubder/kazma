@@ -145,17 +145,17 @@
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.vector_store') }}</div>
         <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">L1 Chroma</div>
+        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l1_chroma') }}</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.fts5_db') }}</div>
         <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">L3 BM25</div>
+        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l3_bm25') }}</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_graph_title') }}</div>
         <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">L2 graph</div>
+        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l2_graph') }}</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
@@ -198,7 +198,7 @@
             style="min-width:160px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.8rem;" />
           <button id="kg-search-btn" class="btn btn-sm btn-primary" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_search') }}</button>
           <button id="kg-refresh-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_graph_refresh') }}</button>
-          <button id="kg-export-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="Download graph JSON">Export</button>
+          <button id="kg-export-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="{{ t('dashboard.export') }}">{{ t('dashboard.export') }}</button>
           <button id="kg-clear-btn" class="btn btn-sm btn-danger" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_clear') }}</button>
         </div>
       </div>
@@ -422,7 +422,27 @@
     pipeConsolidate: "{{ t('dashboard.memory_pipe_consolidator') }}",
     groupFeatures: "{{ t('dashboard.memory_group_features') }}",
     groupLayers: "{{ t('dashboard.memory_group_layers') }}",
-    groupPackages: "{{ t('dashboard.memory_group_packages') }}"
+    groupPackages: "{{ t('dashboard.memory_group_packages') }}",
+    kpiL1: "{{ t('dashboard.kpi_l1_chroma') }}",
+    kpiL3: "{{ t('dashboard.kpi_l3_bm25') }}",
+    kpiL2: "{{ t('dashboard.kpi_l2_graph') }}",
+    kpiOk: "{{ t('dashboard.kpi_ok') }}",
+    noComponentData: "{{ t('dashboard.no_component_data') }}",
+    compNames: {
+      memory_enabled: "{{ t('dashboard.comp.memory_enabled') }}",
+      per_turn_retrieval: "{{ t('dashboard.comp.per_turn_retrieval') }}",
+      auto_store: "{{ t('dashboard.comp.auto_store') }}",
+      consolidation: "{{ t('dashboard.comp.consolidation') }}",
+      embedder: "{{ t('dashboard.comp.embedder') }}",
+      vector_memory: "{{ t('dashboard.comp.vector_memory') }}",
+      layer_l1: "{{ t('dashboard.comp.layer_l1') }}",
+      layer_l2: "{{ t('dashboard.comp.layer_l2') }}",
+      layer_l3: "{{ t('dashboard.comp.layer_l3') }}",
+      layer_l4: "{{ t('dashboard.comp.layer_l4') }}",
+      pkg_chromadb: "{{ t('dashboard.comp.pkg_chromadb') }}",
+      pkg_st: "{{ t('dashboard.comp.pkg_st') }}",
+      pkg_sqlite_vec: "{{ t('dashboard.comp.pkg_sqlite_vec') }}"
+    }
   };
 
   async function _loadSessions() {
@@ -600,7 +620,8 @@
     const s = _chipStyle(c.status || (c.ok ? 'ok' : 'error'));
     const statusLabel = (c.status || (c.ok ? 'ok' : 'error')).toUpperCase();
     const detail = (c.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const name = (c.name || c.id || 'component').replace(/</g, '&lt;');
+    const locName = (I18N.compNames && c.id && I18N.compNames[c.id]) || c.name || c.id || 'component';
+    const name = String(locName).replace(/</g, '&lt;');
     return (
       '<div style="padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
@@ -647,16 +668,20 @@
       var n = document.getElementById(id);
       if (n) n.textContent = text;
     };
+    var l1 = I18N.kpiL1 || 'L1 Chroma';
+    var l3 = I18N.kpiL3 || 'L3 BM25';
+    var l2 = I18N.kpiL2 || 'L2 graph';
+    var okLbl = I18N.kpiOk || 'OK';
     set('kpi-vector-count', data.vector_count != null ? String(data.vector_count) : '–');
-    set('kpi-vector-size', data.vector_size != null ? (formatBytes(data.vector_size) + ' · L1 Chroma') : 'L1 Chroma');
+    set('kpi-vector-size', data.vector_size != null ? (formatBytes(data.vector_size) + ' · ' + l1) : l1);
     set('kpi-fts-count', data.fts5_count != null ? String(data.fts5_count) : '–');
-    set('kpi-fts-size', data.fts5_size != null ? (formatBytes(data.fts5_size) + ' · L3 BM25') : 'L3 BM25');
+    set('kpi-fts-size', data.fts5_size != null ? (formatBytes(data.fts5_size) + ' · ' + l3) : l3);
     set('kpi-graph-nodes', g.nodes != null ? String(g.nodes) : '–');
-    set('kpi-graph-edges', (g.edges != null ? g.edges + ' edges' : 'L2 graph') + (g.backend ? ' · ' + g.backend : ''));
+    set('kpi-graph-edges', (g.edges != null ? g.edges + ' ' + (I18N.graphEdges || 'edges') : l2) + (g.backend ? ' · ' + g.backend : ''));
     var comps = Array.isArray(data.components) ? data.components : [];
     var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
-    set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' OK') : (data.summary || '–'));
-    set('graph-size-metric', g.nodes != null ? String(g.nodes) + ' nodes' : '–');
+    set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
+    set('graph-size-metric', g.nodes != null ? String(g.nodes) + ' ' + (I18N.graphNodes || 'nodes') : '–');
     set('graph-count-metric', (g.edges != null ? g.edges : 0) + ' ' + (I18N.graphEdges || 'edges'));
   }
 
@@ -675,7 +700,7 @@
     renderMemoryKpis(data);
 
     if (!components.length) {
-      grid.innerHTML = `<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">No component data yet.</div>`;
+      grid.innerHTML = '<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">' + (I18N.noComponentData || 'No component data yet.') + '</div>';
     } else {
       var groups = [
         { title: I18N.groupFeatures || 'Features', ids: ['memory_enabled', 'per_turn_retrieval', 'auto_store', 'consolidation'] },

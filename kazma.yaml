@@ -18,6 +18,7 @@ llm:
   output_cost_per_1m: 0.6
 mcp:
   servers:
+  # Real MCP only — do not commit stub echo/test servers (they cannot start).
   - name: filesystem
     transport: stdio
     command:
@@ -25,48 +26,7 @@ mcp:
     - -y
     - '@modelcontextprotocol/server-filesystem'
     - kazma-data/workspace
-  - name: test-server
-    transport: stdio
-    command:
-    - echo
-    url: ''
-    env: {}
     enabled: true
-    connected: false
-    tool_count: 0
-    tools: []
-  - name: dup
-    transport: stdio
-    command:
-    - echo
-    url: ''
-    env: {}
-    enabled: true
-    connected: false
-    tool_count: 0
-    tools: []
-  - name: sse-server
-    transport: sse
-    command: []
-    url: http://localhost:8080
-    env: {}
-    enabled: true
-    connected: false
-    tool_count: 0
-    tools: []
-  - name: test-mcp
-    transport: stdio
-    command:
-    - echo
-    - hello
-    url: ''
-    env: {}
-    enabled: true
-    connected: false
-    tool_count: 0
-    tools: []
-    trust: approval_required
-    auth: {}
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.
 

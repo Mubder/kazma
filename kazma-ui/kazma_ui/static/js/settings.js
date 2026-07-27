@@ -1773,27 +1773,33 @@ function settingsApp() {
 
         get pkgMemoryLayerRows() {
             const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
+            const t = (typeof this.t === 'function') ? this.t.bind(this) : (k) => k;
             const order = [
-                ['embedder', 'Embedder'],
-                ['vector_memory', 'VectorMemory'],
-                ['layer_l1', 'L1 Chroma'],
-                ['layer_l2', 'L2 Graph'],
-                ['layer_l3', 'L3 FTS5'],
-                ['layer_l4', 'L4 sqlite-vec'],
-                ['pkg_chromadb', 'chromadb'],
-                ['pkg_st', 'sentence-transformers'],
-                ['pkg_sqlite_vec', 'sqlite-vec'],
-                ['per_turn_retrieval', 'Per-turn RAG'],
-                ['auto_store', 'Auto-store'],
-                ['consolidation', 'Consolidator'],
+                ['embedder', 'packages.layer.embedder', 'Embedder'],
+                ['vector_memory', 'packages.layer.vector_memory', 'VectorMemory'],
+                ['layer_l1', 'packages.layer.layer_l1', 'L1 Chroma'],
+                ['layer_l2', 'packages.layer.layer_l2', 'L2 Graph'],
+                ['layer_l3', 'packages.layer.layer_l3', 'L3 FTS5'],
+                ['layer_l4', 'packages.layer.layer_l4', 'L4 sqlite-vec'],
+                ['pkg_chromadb', null, 'chromadb'],
+                ['pkg_st', null, 'sentence-transformers'],
+                ['pkg_sqlite_vec', null, 'sqlite-vec'],
+                ['per_turn_retrieval', 'packages.layer.per_turn_retrieval', 'Per-turn RAG'],
+                ['auto_store', 'packages.layer.auto_store', 'Auto-store'],
+                ['consolidation', 'packages.layer.consolidation', 'Consolidator'],
             ];
             const rows = [];
-            for (const [id, fallback] of order) {
+            for (const [id, i18nKey, fallback] of order) {
                 const c = layers[id];
                 if (!c) continue;
+                let name = fallback;
+                if (i18nKey) {
+                    const loc = t(i18nKey);
+                    if (loc && loc !== i18nKey) name = loc;
+                }
                 rows.push({
                     id,
-                    name: c.name || fallback,
+                    name: name || c.name || fallback,
                     ok: !!c.ok,
                     status: c.status || (c.ok ? 'ok' : 'error'),
                     detail: c.detail || '',

@@ -2534,14 +2534,20 @@ tbody tr:last-child td {
   flex-direction: row-reverse;
 }
 
-/* ── RTL: Chat messages ── */
+/* ── RTL: Chat layout mirrors English (Nav | Sessions | Chat)
+   In RTL flex, DOM order places the first child (sessions) at the
+   right edge next to the nav. Do NOT swap order — that put Chat
+   beside the nav and Sessions on the far left. */
+[dir="rtl"] .chat-container {
+  /* natural RTL flow: sessions (first) at right, chat (second) to its left */
+}
 [dir="rtl"] .chat-sidebar {
-  border-right: none;
-  border-left: 1px solid var(--border-subtle);
-  order: 2; /* move session list to the right in RTL */
+  border-left: none;
+  border-right: 1px solid var(--border-subtle); /* separator facing chat */
+  order: 0;
 }
 [dir="rtl"] .chat-main {
-  order: 1;
+  order: 0;
 }
 [dir="rtl"] .message {
   flex-direction: row-reverse;
