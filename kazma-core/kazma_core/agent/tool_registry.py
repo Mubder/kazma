@@ -1077,32 +1077,88 @@ class LocalToolRegistry:
         @self.register(
             description=(
                 "Read a configuration setting from the persistent settings store. "
-                "Use this to check current values of settings like allowed users, "
-                "tokens, or preferences."
+                "Returns a structured status so you can tell missing vs unset vs set: "
+                "status=missing (key never stored), unset (key present but empty), "
+                "set (has a value), or secret (value exists but is hidden). "
+                "Use for allowed users, agent.personality, agent.max_iterations, etc."
             ),
             category="system",
         )
         async def config_read(key: str) -> str:
+            import json as _json
+
             from kazma_core.config_store import get_config_store
 
+            if not key or not str(key).strip():
+                return _json.dumps(
+                    {
+                        "key": key or "",
+                        "status": "error",
+                        "value": None,
+                        "message": "No key provided.",
+                    },
+                    ensure_ascii=False,
+                )
+
             store = get_config_store()
-            val = store.get(key, "")
-            if not val:
-                return f"No value set for {key}"
-            # Never return secrets in plain text (prompt-injection exfil risk).
+            _MISSING = object()
+            val = store.get(key, _MISSING)
+
             key_l = (key or "").lower()
             secret_markers = (
                 "api_key", "apikey", "token", "secret", "password",
                 "passwd", "private_key", "credentials", "auth",
             )
-            if any(m in key_l for m in secret_markers):
-                return (
-                    f"{key} = [set]  (value hidden — secrets are not readable via tools)"
-                )
-            return f"{key} = {val}"
+            is_secret_key = any(m in key_l for m in secret_markers)
+
+            if val is _MISSING:
+                payload = {
+                    "key": key,
+                    "status": "missing",
+                    "value": None,
+                    "message": (
+                        f"Key '{key}' is not stored (not in ConfigStore/YAML). "
+                        "It may still have a code default when the app reads it."
+                    ),
+                }
+            elif val is None or val == "" or val == [] or val == {}:
+                payload = {
+                    "key": key,
+                    "status": "unset",
+                    "value": None,
+                    "message": f"Key '{key}' exists but has an empty value.",
+                }
+            elif is_secret_key:
+                payload = {
+                    "key": key,
+                    "status": "secret",
+                    "value": None,
+                    "message": (
+                        f"Key '{key}' is set (value hidden — secrets are not "
+                        "readable via tools). Change in Settings UI if needed."
+                    ),
+                }
+            else:
+                # Coerce non-string values for display
+                display = val if isinstance(val, (str, int, float, bool)) else str(val)
+                payload = {
+                    "key": key,
+                    "status": "set",
+                    "value": display,
+                    "message": f"{key} is set.",
+                }
+            return _json.dumps(payload, ensure_ascii=False)
 
         @self.register(
-            description="Execute a shell command and return stdout+stderr. Use with caution.",
+            description=(
+                "Execute a shell command (allowlisted binaries only) and return "
+                "stdout+stderr. Prefer native tools first: file_list/file_read/"
+                "file_search/file_write, git_status/git_*, python_exec/code_exec, "
+                "install_agent_skill. Do NOT use shell for: cd (not allowed — "
+                "cwd is already the workspace), cat/ls (use file_*), git "
+                "(use git tools), python/node/bash (use python_exec). "
+                "Multi-step shell needs absolute paths under the workspace."
+            ),
             category="system",
         )
         async def shell_exec(command: str, timeout: int = 30) -> str:
@@ -1186,6 +1242,26 @@ class LocalToolRegistry:
                             "e.g. install_agent_skill(source='shadcn/improve'). "
                             "Node/npm/npx are intentionally blocked; skill install "
                             "does not need them."
+                        )
+                    elif binary in ("cd", "pushd", "popd", "chdir"):
+                        hint = (
+                            "\n\n`cd` is not allowed (shell builtins). "
+                            "Commands already run with cwd = active workspace. "
+                            "Use absolute paths under the workspace, or native "
+                            "file_*/git_*/python_exec tools instead of multi-step shell."
+                        )
+                    elif binary in ("cat", "less", "more", "head", "tail") and "file_read" not in low:
+                        hint = (
+                            "\n\nPrefer file_read / file_list / file_search for workspace files."
+                        )
+                    elif binary == "git":
+                        hint = (
+                            "\n\nPrefer native git tools (git_status, etc.) when available."
+                        )
+                    elif binary in ("python", "python3", "node", "bash", "sh", "zsh"):
+                        hint = (
+                            "\n\nInterpreters are blocked in shell_exec. Use python_exec "
+                            "or code_exec for short scripts."
                         )
                     return (
                         f"Error: '{binary}' is not in the allowed binary list. "

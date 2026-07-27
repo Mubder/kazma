@@ -621,8 +621,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.save_agent": {"en": "Save Agent", "ar": "حفظ الوكيل"},
     "settings.max_tool_rounds": {"en": "Max tool rounds", "ar": "الحد الأقصى لجولات الأدوات"},
     "settings.max_tool_rounds_help": {
-        "en": "How many supervisor tool rounds (ReAct) are allowed per chat turn before Kazma must answer. Default 15. Raise for deep research (e.g. 25–40). Range 5–100. Higher values use more tokens and time.",
-        "ar": "كم جولة أدوات (ReAct) مسموحة لكل رسالة قبل أن يجب على كاظمه الإجابة. الافتراضي 15. ارفعها للبحث العميق (مثل 25–40). النطاق 5–100. القيم الأعلى تستهلك رموزًا ووقتًا أكثر.",
+        "en": "How many supervisor tool rounds (ReAct) are allowed per chat turn before Kazma must answer. Default 15 (Chat). Use Deep (30) or Research (40) for long audits/smoke. Range 5–100. Higher values use more tokens and time. Click Save Agent after choosing a preset.",
+        "ar": "كم جولة أدوات (ReAct) مسموحة لكل رسالة قبل أن يجب على كاظمه الإجابة. الافتراضي 15 (محادثة). استخدم عميق (30) أو بحث (40) للمهام الطويلة. النطاق 5–100. القيم الأعلى تستهلك رموزًا ووقتًا أكثر. احفظ إعدادات الوكيل بعد اختيار الإعداد المسبق.",
+    },
+    "settings.max_tool_rounds_presets": {
+        "en": "Depth presets",
+        "ar": "إعدادات مسبقة للعمق",
+    },
+    "settings.depth_chat": {
+        "en": "Chat · 15",
+        "ar": "محادثة · 15",
+    },
+    "settings.depth_deep": {
+        "en": "Deep · 30",
+        "ar": "عميق · 30",
+    },
+    "settings.depth_research": {
+        "en": "Research · 40",
+        "ar": "بحث · 40",
     },
     "settings.personality_templates": {"en": "Personality Templates", "ar": "قوالب الشخصية"},
     "settings.safety_hitl": {"en": "Safety (HITL)", "ar": "الأمان (الموافقة البشرية)"},

@@ -249,8 +249,21 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "- MCP `filesystem` tools rebind to the **global active** workspace on "
             "Switch Repo; they do **not** follow concurrent per-task scope — prefer "
             "`file_list` / `file_read` for multi-repo swarm work.",
+            "- Prefer `file_*` / `git_*` / `python_exec` over `shell_exec`. "
+            "Shell cwd is already this workspace — do not use `cd`.",
         ]
     )
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw_mi = get_config_store().get("agent.max_iterations", 15)
+        max_iter = max(5, min(100, int(raw_mi)))
+        lines.append(
+            f"- **Max tool rounds this process:** {max_iter} "
+            "(Settings → Agent; Chat≈15, Deep≈30, Research≈40)."
+        )
+    except Exception:
+        pass
     try:
         from kazma_core.workspace.binding import get_bound_mcp_root
 

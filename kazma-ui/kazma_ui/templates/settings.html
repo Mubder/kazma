@@ -494,6 +494,20 @@
                     <span style="font-size:0.78rem;color:var(--text-muted);"
                           x-text="(agent.max_iterations || 15) + ' / 100'"></span>
                 </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;" role="group" :aria-label="t('settings.max_tool_rounds_presets')">
+                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                            @click="agent.max_iterations = 15"
+                            :style="(agent.max_iterations || 15) === 15 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            x-text="t('settings.depth_chat')"></button>
+                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                            @click="agent.max_iterations = 30"
+                            :style="(agent.max_iterations || 15) === 30 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            x-text="t('settings.depth_deep')"></button>
+                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                            @click="agent.max_iterations = 40"
+                            :style="(agent.max_iterations || 15) === 40 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            x-text="t('settings.depth_research')"></button>
+                </div>
                 <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
                     {{ t('settings.max_tool_rounds_help') }}
                 </p>

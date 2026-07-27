@@ -106,6 +106,13 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 - **Install:** `uv sync` / `pip install -e ".[rag,dev]"`; Windows `setup.ps1`; Docker `docker compose up`.
 - **Portability:** same code on Windows/Linux/macOS/WSL; project DBs under `kazma-data/`.
 
+### Tool selection (avoid wasted rounds)
+- **Files:** `file_list`, `file_read`, `file_search`, `file_write` (not shell `ls`/`cat`/`cd`).
+- **Git:** native `git_*` tools when available (not raw `git` in shell unless needed).
+- **Code:** `python_exec` / `code_exec` (not `python`/`node`/`bash` in shell_exec).
+- **Shell:** allowlisted binaries only; **cwd is already the workspace** — `cd` is blocked. Use absolute paths under the workspace for multi-step shell.
+- **Deep work:** raise **Settings → Agent → Max tool rounds** (presets: Chat 15, Deep 30, Research 40) so long audits do not hit the cap mid-task.
+
 ### Danger tools (require approval unless YOLO)
 Typical list: `file_write`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, tools run with host power — be careful what you propose.
 
