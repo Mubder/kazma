@@ -68,12 +68,30 @@ class SafetyConfig(BaseModel):
     enabled: bool = Field(default=True)
     hitl: dict[str, Any] = Field(default_factory=lambda: {
         "enabled": True,
+        # Keep aligned with safety.hitl.CANONICAL_DANGER_TOOLS / kazma.yaml
         "require_approval_for": [
             "file_write",
             "file_delete",
             "shell_exec",
             "code_exec",
             "python_exec",
+            "schedule_task",
+            "cancel_scheduled",
+            "vault_retrieve",
+            "vault_delete",
+            "config_save",
+            "run_tests",
+            "git_commit",
+            "git_push_pull",
+            "github_create_pr",
+            "install_python_packages",
+            "install_npm_packages",
+            "install_agent_skill",
+            "uninstall_agent_skill",
+            "email_send",
+            "email_delete",
+            "email_categorize",
+            "browser_eval_js",
         ],
         "timeout_seconds": 300,
     })

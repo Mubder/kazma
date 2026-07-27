@@ -178,6 +178,18 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
         cs_auto_deny = cs.get("safety.auto_deny_on_timeout")
         if cs_auto_deny is not None:
             auto_deny_on_timeout = bool(cs_auto_deny)
+        # Settings UI "require_approval_for" → flat key safety.require_approval_for
+        # Without this, the Settings danger list is a dead control plane.
+        cs_require = cs.get("safety.require_approval_for")
+        if cs_require is not None:
+            if isinstance(cs_require, str):
+                parts = [p.strip() for p in cs_require.split(",") if p.strip()]
+                if parts:
+                    require_approval_for = set(parts)
+            elif isinstance(cs_require, (list, tuple, set)):
+                cleaned = {str(x).strip() for x in cs_require if str(x).strip()}
+                if cleaned:
+                    require_approval_for = cleaned
     except Exception:
         pass
 

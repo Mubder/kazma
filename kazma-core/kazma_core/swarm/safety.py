@@ -1,13 +1,16 @@
 """Swarm Safety Middleware — bus-gated HITL for tool execution.
 
-Intercepts SwarmEngine dispatches and blocks "danger"-tier tool calls
-until the operator approves through the SwarmMessageBus.  Extends the
-existing HITL tier system with bus integration and broader tool coverage.
+Intercepts SwarmEngine / LocalToolRegistry danger-tier tool calls until the
+operator approves through the SwarmMessageBus.
 
-Danger-tier tools now include:
-    file_write, file_delete, shell_exec, python_exec, code_exec,
-    spawn_agent, spawn_agents, sqlite_query (writes),
-    schedule_task, cancel_scheduled
+Danger list is **not** a separate SoT — it aliases
+:data:`kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS` (same list as graph HITL
+and ``kazma.yaml`` ``safety.hitl.require_approval_for``). Spawn tools are only
+gated if they appear on that list.
+
+Bus topology (app wiring): one adapter, or ``FanOutBusAdapter`` when multiple
+platforms are configured (first approval wins). NullBus is fail-closed for
+danger tools unless headless escape is enabled.
 """
 
 from __future__ import annotations

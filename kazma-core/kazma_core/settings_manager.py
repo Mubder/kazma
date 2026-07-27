@@ -331,10 +331,23 @@ class SettingsManager:
         self._cs.set("agent.personality", name, category="agent")
 
     def get_safety_settings(self) -> dict[str, Any]:
-        """Get HITL safety settings."""
+        """Get HITL safety settings.
+
+        Default ``require_approval_for`` mirrors
+        :data:`kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS` so the Settings
+        UI does not show a truncated 3-tool list that disagrees with runtime.
+        """
+        try:
+            from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+            _default_danger = list(CANONICAL_DANGER_TOOLS)
+        except Exception:
+            _default_danger = ["file_write", "file_delete", "shell_exec", "code_exec", "python_exec"]
         return {
             "hitl_enabled": self._cs.get("safety.hitl_enabled", True),
-            "require_approval_for": self._cs.get("safety.require_approval_for", ["file_write", "file_delete", "shell_exec"]),
+            "require_approval_for": self._cs.get(
+                "safety.require_approval_for", _default_danger
+            ),
             "approval_timeout": self._cs.get("safety.approval_timeout", 60),
             "auto_deny_on_timeout": self._cs.get("safety.auto_deny_on_timeout", True),
         }

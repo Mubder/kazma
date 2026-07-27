@@ -68,33 +68,42 @@ All packages are in scope. The four main packages:
 There are **three independent** HITL mechanisms. Breaking any one creates an
 unattended-danger-tool security gap:
 
-**A. Graph interrupt() — single-agent chat (Web/Telegram/Discord/Slack)**
+**A. Graph interrupt() — single-agent chat (Web SSE/WS + Telegram/Discord/Slack)**
 - `graph_builder.py:tool_worker_node` calls LangGraph `interrupt()` for danger tools
 - Gate is active ONLY when `hitl_config` is passed to `build_supervisor_graph()`
-- Two build sites must pass it: `agent_runner.get_streaming_graph()` AND
-  `app.py` startup recompile (~line 966). Omitting either = dormant gate.
-- Resume: `graph.ainvoke(Command(resume={"approved": bool}), config)` via
-  `POST /api/approve/{thread_id}` (web) or `/hitl approve|deny {thread_id}` (gateway)
+- Required build sites: `agent_runner.get_streaming_graph()`, `agent_runner._ensure_graph`,
+  and `app.py` startup recompile into `_graph_holder`. Omitting HITL on any site =
+  dormant gate on that path.
+- Resume: `graph.ainvoke(Command(resume=…), config)` via `POST /api/approve/{thread_id}`
+  (SSE), WS `approve_tool`, or gateway `/hitl approve|deny {thread_id}`
 - State persists in the checkpointer — paused turns survive restarts
-- Double-gating prevention: `_hitl_approved=True` flag in tool args skips the
-  bus check when the graph already approved via interrupt
+- Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
+  `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
 
-**B. Swarm bus — `/swarm` dispatch path**
+**B. Swarm bus — `/swarm` + IDE `LocalToolRegistry.execute` path**
 - `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
 - `check_sync()` is **fail-closed** (default): blocks danger tools when no real
   bus adapter is present. `allow_headless_danger=True` is the test/dev escape hatch
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
-- Only ONE adapter active at a time (bus singleton); priority Telegram > Discord > Slack
-- Approval buttons resolve via `handle_callback()` — called from each adapter's
-  inbound callback/interaction handler
+- App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
+  multiple are configured (first approval wins). NullBus = internal-only /
+  fail-closed danger
+- Approval buttons resolve via `handle_callback()` on each adapter
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
 - `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`
 
-**Danger tool lists differ by mechanism:**
-- Graph path: `kazma.yaml` `safety.hitl.require_approval_for` (file_write, file_delete, shell_exec, code_exec, python_exec)
-- Swarm bus: `safety.py:_EXTENDED_DANGER` (adds spawn_agent, spawn_agents, schedule_task, cancel_scheduled)
-- MCP tools: `classify_mcp_tool()` in `mcp/manager.py` — name-pattern matching (write/exec/delete → danger, read/list/get → safe, unknown → danger). Gate is in `UnifiedToolExecutor.execute()`.
+**Danger tool list SoT (must stay one list):**
+- **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
+- **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested)
+- **Settings UI / ConfigStore:** `safety.require_approval_for` — consumed by
+  `get_hitl_config()` (runtime override)
+- **Swarm bus:** `swarm/safety.py` `_EXTENDED_DANGER` is an **alias** of CANONICAL
+  (not a longer list — spawn tools only if on CANONICAL)
+- **MCP tools:** `classify_mcp_tool()` name patterns (write/exec/delete → danger).
+  Gate is in `UnifiedToolExecutor.execute()`
+
+**Diagnosis map (multi-path “X relates to Y”):** `docs/docs/ops/diagnosis-map.md`
 
 ### 8. ConfigStore Singleton + Atomicity (`kazma-core/kazma_core/config_store.py`)
 - Uses WAL + `busy_timeout=5000` (like all other SQLite stores)

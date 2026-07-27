@@ -33,4 +33,10 @@ That file is the engineering single source of truth for *how packages wire toget
 4. IDE mutations go through `LocalToolRegistry` (shared HITL).  
 5. ConfigStore via `get_config_store()` only.
 
-See also [Architecture](../guide/architecture) and repo root [`AGENTS.md`](https://github.com/kazma-ai/kazma/blob/main/AGENTS.md).
+## Multi-path diagnosis
+
+When one UI element is served by **several code paths** (SSE vs WS, three HITL gates, dual registries), use the operator-facing:
+
+**[Diagnosis map](../ops/diagnosis-map)** — symptom tables, “X is related to Y”, invariants, and drift tests.
+
+See also [Architecture](../guide/architecture) and repo root [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md).

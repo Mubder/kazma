@@ -2,8 +2,10 @@
 
 **Single source of truth for system architecture**  
 **Version:** 0.6.1+ (post production-readiness remediation)  
-**Date:** 2026-07-21  
-**Companion docs:** `docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/REMEDIATION_PLAN_2026-07-21.md`, `docs/ops/*`, `AGENTS.md`
+**Date:** 2026-07-21 (multi-path diagnosis map added 2026-07-27)  
+**Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
+`docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/REMEDIATION_PLAN_2026-07-21.md`,  
+`docs/ops/*`, `AGENTS.md`
 
 **Honesty note:** This map prioritizes **production-wired paths** and catalogs **all source modules** under main packages. Generated artifacts (`docs/node_modules`, `docs/build`, `__pycache__`, `.venv`) are excluded. Library-only modules are labeled **[LIBRARY]**.
 

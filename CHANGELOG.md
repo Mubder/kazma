@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Unreleased — Multi-path diagnosis map + HITL Settings wire-up (2026-07-27)
+
+- **Diagnosis map** (`docs/docs/ops/diagnosis-map.md`): symptom→files,
+  multi-path tables (SSE/WS, 3 HITL gates, graph build sites, workspace,
+  providers, config keys, tool stacks), and “X is related to Y” index for
+  agents and operators. Linked from intro, system-map, sidebars, AGENTS.md.
+- **Fix:** Settings `require_approval_for` now consumed by `get_hitl_config()`
+  (was a dead control plane). Settings defaults use full CANONICAL list.
+- **Docs truth:** AGENTS.md HITL §7 + swarm bus FanOut; `swarm/safety`
+  docstring no longer claims spawn-only extended list; config_schema HITL
+  defaults aligned with CANONICAL / kazma.yaml.
+
 ## Unreleased — SearXNG, hard-page recovery, workbench polish (2026-07-27)
 
 ### Search
