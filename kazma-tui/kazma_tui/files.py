@@ -23,10 +23,37 @@ class FilesPanel(VerticalScroll):
     """File browser: DirectoryTree left, Markdown/RichLog preview right."""
 
     DEFAULT_CSS = """
-    FilesPanel { height: 1fr; background: $surface; }
-    FilesPanel Horizontal { height: 1fr; }
-    FilesPanel DirectoryTree { width: 35%; border: solid $border; background: $panel; }
-    FilesPanel .preview { width: 1fr; border: solid $border; background: $panel; }
+    FilesPanel {
+        height: 1fr;
+        background: $surface;
+        padding: 0 1;
+    }
+    FilesPanel .section-label {
+        height: 1;
+        padding: 0 1 1 1;
+        color: $text-muted;
+    }
+    FilesPanel #open-editor {
+        margin: 0 1 1 1;
+        width: auto;
+        min-width: 20;
+    }
+    FilesPanel Horizontal {
+        height: 1fr;
+    }
+    FilesPanel DirectoryTree {
+        width: 35%;
+        border: tall $border;
+        background: $panel;
+        padding: 0 1;
+    }
+    FilesPanel .preview {
+        width: 1fr;
+        border: tall $border;
+        background: $panel;
+        padding: 1 2;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [

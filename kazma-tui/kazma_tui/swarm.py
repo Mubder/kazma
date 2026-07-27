@@ -45,7 +45,14 @@ def _worker_is_online(worker) -> bool:
 class WorkerTable(DataTable):
     """DataTable showing registered swarm workers."""
 
-    DEFAULT_CSS = """WorkerTable { height: 1fr; background: transparent; }"""
+    DEFAULT_CSS = """
+    WorkerTable {
+        height: 1fr;
+        background: $surface;
+        border: tall $border;
+        padding: 0 1;
+    }
+    """
 
     def on_mount(self) -> None:
         self.cursor_type = "row"
@@ -73,7 +80,14 @@ class WorkerTable(DataTable):
 class SwarmTasksTable(DataTable):
     """DataTable showing recent task history."""
 
-    DEFAULT_CSS = """SwarmTasksTable { height: 1fr; background: transparent; }"""
+    DEFAULT_CSS = """
+    SwarmTasksTable {
+        height: 1fr;
+        background: $surface;
+        border: tall $border;
+        padding: 0 1;
+    }
+    """
 
     def on_mount(self) -> None:
         self.cursor_type = "row"
@@ -123,7 +137,14 @@ class SwarmTasksTable(DataTable):
 class ActiveTasksLog(RichLog):
     """Log stream showing active/in-flight tasks."""
 
-    DEFAULT_CSS = """ActiveTasksLog { height: 1fr; background: transparent; border: none; }"""
+    DEFAULT_CSS = """
+    ActiveTasksLog {
+        height: 1fr;
+        background: $surface;
+        border: tall $border;
+        padding: 1 1;
+    }
+    """
 
     def __init__(self, **kwargs) -> None:
         super().__init__(markup=True, **kwargs)
@@ -143,7 +164,7 @@ class ActiveTasksLog(RichLog):
                 self.write("[dim]No active tasks[/]")
                 return
             for t in active:
-                self.write(f"[#22d3ee]●[/] {t.id[:12]} [{t.status}] {t.prompt[:60]}")
+                self.write(f"[$primary]●[/] {t.id[:12]} [{t.status}] {t.prompt[:60]}")
         except Exception as exc:
             logger.debug("Active tasks refresh failed: %s", exc)
 
@@ -158,7 +179,14 @@ class WorkerTree(Tree):
     def __init__(self) -> None:
         super().__init__("Workers")
 
-    DEFAULT_CSS = """WorkerTree { height: 1fr; background: transparent; }"""
+    DEFAULT_CSS = """
+    WorkerTree {
+        height: 1fr;
+        background: $surface;
+        border: tall $border;
+        padding: 0 1;
+    }
+    """
 
     def on_mount(self) -> None:
         self.show_root = False
@@ -192,12 +220,31 @@ class WorkerTree(Tree):
 class SwarmPanel(VerticalScroll):
     """Swarm tab: sub-tabs Workers, Active, History, Tree."""
 
-    DEFAULT_CSS = """SwarmPanel { height: 1fr; }"""
+    DEFAULT_CSS = """
+    SwarmPanel {
+        height: 1fr;
+        background: $surface;
+        padding: 0 1;
+    }
+    SwarmPanel .section-label {
+        height: 1;
+        color: $text-muted;
+        text-style: bold;
+        padding: 0 1 1 1;
+    }
+    SwarmPanel .swarm-banner {
+        height: 1;
+        color: $primary;
+        text-style: bold;
+        padding: 0 1 1 1;
+    }
+    """
 
     def compose(self) -> ComposeResult:
+        yield Static("  SWARM  ·  workers · tasks · topology", classes="swarm-banner")
         with TabbedContent(initial="workers"):
             with TabPane("Workers", id="workers"):
-                yield Static("Registered swarm workers", classes="section-label")
+                yield Static("Registered workers", classes="section-label")
                 yield WorkerTable()
             with TabPane("Active", id="active"):
                 yield Static("In-flight tasks", classes="section-label")

@@ -205,10 +205,13 @@ class MetricsDashboard(Widget):
     # ── Textual lifecycle ───────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        """Compose the dashboard as a 3x2 grid of MetricCard widgets."""
+        """Compose the dashboard: memory health + metric cards."""
         from textual.containers import Horizontal, Vertical
 
-        yield Static("  METRICS  ·  live · 2s refresh", classes="metrics-title")
+        from kazma_tui.memory_panel import MemoryHealthPanel
+
+        yield Static("  OPS DASHBOARD  ·  metrics + memory", classes="metrics-title")
+        yield MemoryHealthPanel(id="memory-health-panel")
         with Vertical(classes="metrics-grid"):
             with Horizontal(classes="metric-row"):
                 yield MetricCard(

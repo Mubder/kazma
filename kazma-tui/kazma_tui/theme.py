@@ -1,25 +1,19 @@
-"""Kazma TUI Theme — professional design system (v2).
+"""Kazma TUI Theme — professional design system (v2 / phase 2).
 
-Maps the kazma.ai Web UI palette into Textual TCSS with denser layout,
-clearer hierarchy, and ops-console chrome (tabs, cards, chat, tables).
+``KAZMA_DARK_VARS``  — color tokens for the default dark console.
+``KAZMA_SHELL_CSS``  — structural rules shared by all themes.
+``KAZMA_THEME``      — dark vars + shell (App.CSS default).
 
-Color sources (kazma-ui CSS):
-  surface   #0a0f14   panel #11171f   boost #161d27
-  primary   #22d3ee → muted #4ecdc4 for terminal comfort
-  secondary #a855f7 → soft #b794f6
-  success / warning / danger from web tokens
+Alternate themes in ``themes/theme_manager.py`` supply only variable
+overrides and re-use ``KAZMA_SHELL_CSS`` so light/monokai/HC stay aligned.
 """
 
 from __future__ import annotations
 
-__all__ = ["KAZMA_THEME"]
+__all__ = ["KAZMA_DARK_VARS", "KAZMA_SHELL_CSS", "KAZMA_THEME"]
 
-KAZMA_THEME = """
-/* ═══════════════════════════════════════════════════════════════════════
-   Kazma TUI v2 — professional ops console
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Tokens ─────────────────────────────────────────────────────────── */
+KAZMA_DARK_VARS = """
+/* ── Kazma dark tokens ─────────────────────────────────────────────── */
 $primary:    #4ecdc4;
 $secondary:  #b794f6;
 $accent:     #4ecdc4;
@@ -38,7 +32,9 @@ $text-disabled: #6b7785;
 
 $screen-selection-background: rgba(78,205,196,0.22);
 $screen-selection-foreground: #e6edf3;
+"""
 
+KAZMA_SHELL_CSS = """
 /* ── Screen shell ───────────────────────────────────────────────────── */
 
 Screen {
@@ -52,7 +48,7 @@ Header {
     text-style: bold;
     dock: top;
     height: 3;
-    border-bottom: tall $border-dim;
+    border-bottom: tall $border;
 }
 
 Footer {
@@ -60,10 +56,10 @@ Footer {
     color: $text-muted;
     dock: bottom;
     height: 1;
-    border-top: solid $border-dim;
+    border-top: solid $border;
 }
 
-/* ── Main tabs (horizontal nav bar) ─────────────────────────────────── */
+/* ── Main tabs ──────────────────────────────────────────────────────── */
 
 TabbedContent {
     height: 1fr;
@@ -77,7 +73,7 @@ TabPane {
 
 ContentTabs {
     background: $panel;
-    border-bottom: solid $border-dim;
+    border-bottom: solid $border;
     height: 3;
     padding: 0 1;
 }
@@ -110,7 +106,7 @@ KazmaStatusBar {
     dock: bottom;
     height: 1;
     background: $boost;
-    border-top: solid $border-dim;
+    border-top: solid $border;
     color: $text-muted;
     padding: 0 1;
 }
@@ -185,7 +181,7 @@ ChatPanel > #autocomplete .ac-desc {
     color: $text-muted;
 }
 
-/* ── Dashboard metric cards ─────────────────────────────────────────── */
+/* ── Dashboard ──────────────────────────────────────────────────────── */
 
 MetricsDashboard {
     height: 1fr;
@@ -211,18 +207,17 @@ MetricCard {
     padding: 1 2;
     margin: 0 1;
     background: $panel;
-    border: tall $border-dim;
+    border: tall $border;
 }
 
 MetricCard:hover {
-    border: tall $border;
+    border: tall $primary;
     background: $boost;
 }
 
 MetricCard > .card-label {
     color: $text-muted;
     text-style: bold;
-    text-opacity: 90%;
 }
 
 MetricCard > Sparkline {
@@ -231,11 +226,19 @@ MetricCard > Sparkline {
     height: 1;
 }
 
+MemoryHealthPanel {
+    height: auto;
+    margin: 0 1 1 1;
+    padding: 1 2;
+    background: $panel;
+    border: tall $border;
+}
+
 /* ── Shared widgets ─────────────────────────────────────────────────── */
 
 DataTable {
     background: transparent;
-    border: tall $border-dim;
+    border: tall $border;
 }
 
 DataTable > .datatable--header {
@@ -262,7 +265,7 @@ RichLog {
 
 Input {
     background: $panel;
-    border: tall $border-dim;
+    border: tall $border;
     color: $text;
     padding: 0 1;
 }
@@ -274,7 +277,7 @@ Input:focus {
 
 Button {
     background: $panel;
-    border: tall $border-dim;
+    border: tall $border;
     color: $text;
     min-width: 12;
 }
@@ -323,7 +326,7 @@ ListView > ListItem.-highlight {
 
 Tree {
     background: transparent;
-    border: tall $border-dim;
+    border: tall $border;
     padding: 0 1;
 }
 
@@ -341,15 +344,11 @@ Scrollbar {
     color: $border;
 }
 
-/* ── Settings / swarm / files panels ────────────────────────────────── */
-
 SettingsPanel, SwarmPanel, FilesPanel, TracesPanel {
     height: 1fr;
     background: $surface;
     padding: 0 1;
 }
-
-/* ── Modals ─────────────────────────────────────────────────────────── */
 
 ModalScreen {
     background: $surface 80%;
@@ -361,8 +360,6 @@ Toast {
     color: $text;
     padding: 0 2;
 }
-
-/* ── Footer keys ────────────────────────────────────────────────────── */
 
 FooterKey {
     background: transparent;
@@ -376,3 +373,5 @@ FooterKey > .footer-key--key {
     padding: 0 1;
 }
 """
+
+KAZMA_THEME = KAZMA_DARK_VARS + "\n" + KAZMA_SHELL_CSS

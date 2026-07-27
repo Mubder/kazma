@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased — TUI Phase 2: memory health + panels + themes (2026-07-27)
+
+- **MemoryHealthPanel** on Dashboard (live `build_memory_health`, L1–L4 chips).
+- **Swarm / Files / Traces** denser borders, banners, section labels.
+- **ThemeManager v2:** light / monokai / high-contrast reuse `KAZMA_SHELL_CSS`.
+
 ## Unreleased — TUI v2 professional shell (2026-07-27)
 
 - **Design system** in `kazma_tui/theme.py`: denser tokens, tall borders, boost

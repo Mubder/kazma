@@ -2,7 +2,9 @@
 
 A professional terminal-based **ops console** for the Kazma framework, built with [Textual](https://textual.textualize.io/).
 
-**TUI v2 shell (2026-07):** denser design tokens (aligned with kazma.ai), compact brand header, pill-style tabs, metric cards with borders, focused chat composer, status bar chrome. Visual system lives in `kazma_tui/theme.py`.
+**TUI v2 shell (2026-07):** denser design tokens (aligned with kazma.ai), compact brand header, pill-style tabs, metric cards with borders, focused chat composer, status bar chrome.
+
+**Phase 2:** Dashboard **memory health** strip (L1–L4 + pipeline flags), Swarm/Files/Traces panel polish, light/monokai/high-contrast themes share the same shell CSS via `ThemeManager` + `KAZMA_SHELL_CSS`.
 
 ## Features
 
