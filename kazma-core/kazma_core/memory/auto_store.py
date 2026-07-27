@@ -63,16 +63,11 @@ _MAX_TURN_CHARS = 600
 
 
 def _read_memory_cfg() -> dict[str, Any]:
+    """ConfigStore ← yaml defaults (single SoT)."""
     try:
-        from pathlib import Path
+        from kazma_core.memory.config import read_memory_cfg
 
-        import yaml
-
-        path = Path("kazma.yaml")
-        if path.exists():
-            with open(path, encoding="utf-8") as f:
-                full = yaml.safe_load(f) or {}
-            return dict((full.get("memory") or {}))
+        return read_memory_cfg()
     except Exception:
         logger.debug("[auto_store] config read failed", exc_info=True)
     return {}
@@ -80,19 +75,16 @@ def _read_memory_cfg() -> dict[str, Any]:
 
 def auto_store_enabled(cfg: dict[str, Any] | None = None) -> bool:
     """Return True when automatic memory writes are on (default True)."""
-    c = cfg if cfg is not None else _read_memory_cfg()
-    if not bool(c.get("enabled", True)):
-        return False
-    return bool(c.get("auto_store", True))
+    from kazma_core.memory.config import memory_auto_store_enabled
+
+    return memory_auto_store_enabled(cfg)
 
 
 def auto_store_mode(cfg: dict[str, Any] | None = None) -> str:
     """``durable`` | ``turns`` | ``both`` (default both)."""
-    c = cfg if cfg is not None else _read_memory_cfg()
-    mode = str(c.get("auto_store_mode", "both") or "both").strip().lower()
-    if mode not in ("durable", "turns", "both"):
-        return "both"
-    return mode
+    from kazma_core.memory.config import memory_auto_store_mode
+
+    return memory_auto_store_mode(cfg)
 
 
 def looks_durable(text: str) -> bool:
@@ -199,7 +191,13 @@ async def auto_store_from_messages(messages: list[dict[str, Any]]) -> dict[str, 
     Returns a small stats dict for logging/tests.
     """
     cfg = _read_memory_cfg()
-    stats: dict[str, Any] = {"enabled": False, "durable": 0, "turn": 0, "ids": []}
+    stats: dict[str, Any] = {
+        "enabled": False,
+        "durable": 0,
+        "turn": 0,
+        "ids": [],
+        "texts": [],  # for consolidator near-dup filtering
+    }
     if not auto_store_enabled(cfg):
         return stats
     stats["enabled"] = True
@@ -216,6 +214,7 @@ async def auto_store_from_messages(messages: list[dict[str, Any]]) -> dict[str, 
         if doc:
             stats["durable"] = 1
             stats["ids"].append(doc)
+            stats["texts"].append(user)
 
     if mode in ("turns", "both") and assistant and len(user) >= _MIN_DURABLE_LEN:
         # Compact turn snapshot so every real exchange is searchable later.
@@ -233,14 +232,17 @@ async def auto_store_from_messages(messages: list[dict[str, Any]]) -> dict[str, 
             if doc:
                 stats["turn"] = 1
                 stats["ids"].append(doc)
+                stats["texts"].append(turn_blob)
         elif mode == "both" and stats["durable"] and len(assistant) >= 40:
+            conf = f"Confirmed: {_clip(assistant, _MAX_TURN_CHARS)}"
             doc = await store_text(
-                f"Confirmed: {_clip(assistant, _MAX_TURN_CHARS)}",
+                conf,
                 metadata={"type": "turn_snapshot", "kind": "assistant_confirm"},
             )
             if doc:
                 stats["turn"] = 1
                 stats["ids"].append(doc)
+                stats["texts"].append(conf)
 
     if stats["durable"] or stats["turn"]:
         logger.info(

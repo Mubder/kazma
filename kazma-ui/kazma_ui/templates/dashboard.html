@@ -33,13 +33,17 @@
         </h2>
         <span class="hitl-approval-count badge badge-premium" style="display:none;font-size:0.7rem;min-width:20px;text-align:center;">0</span>
       </div>
-      <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('dashboard.hitl_description') }}</span>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button id="hitl-clear-all-btn" class="btn btn-sm btn-danger" style="display:none;font-size:0.75rem;padding:3px 10px;">{{ t('dashboard.clear_all') }}</button>
+        <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('dashboard.hitl_description') }}</span>
+      </div>
     </div>
     <div class="hitl-approval-list" style="padding:16px 20px;">
       <!-- Approval cards injected by hitl_approval.js -->
     </div>
     <div class="hitl-approval-empty" style="display:block;text-align:center;padding:24px 20px;color:var(--text-muted);">
-      <div style="display:flex;"><span x-html="KazmaIcons.check-circle({class:'icon-lg'})"></span></div>
+      {# data-icon avoids Alpine x-html rendering the literal "undefined" when icons load late #}
+      <div style="display:flex;justify-content:center;margin-bottom:8px;"><span class="ki icon-lg" data-icon="check-circle" aria-hidden="true"></span></div>
       <p style="margin:0;">{{ t('dashboard.no_pending_approvals') }}</p>
       <p style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">
         {{ t('dashboard.no_pending_approvals_hint') }}
@@ -117,26 +121,56 @@
 
   <!-- ── Memory & Governance ── -->
   <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
-    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;">
+    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;gap:12px;flex-wrap:wrap;">
       <span><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('dashboard.memory_governance') }}</span>
-      <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
-    </h3>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
-      <span style="font-size:0.85rem;color:var(--text-secondary);line-height:1.4;" id="memory-status-desc">
-        {{ t('dashboard.memory_desc_active') }}
+      <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
+        <button type="button" id="memory-refresh-btn" class="btn btn-sm" style="font-size:0.72rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="{{ t('dashboard.memory_refresh') }}">{{ t('dashboard.memory_refresh') }}</button>
       </span>
+    </h3>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.45;" id="memory-status-desc">
+          {{ t('dashboard.memory_desc_active') }}
+        </div>
+        <div id="memory-pipeline" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;"></div>
+      </div>
       <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
         {{ t('dashboard.install_ml') }}
       </button>
     </div>
 
-    <!-- Live component health board (green / yellow / red) -->
-    <div style="margin-top:14px;">
+    <!-- KPI strip: store sizes + graph -->
+    <div id="memory-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px;">
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.vector_store') }}</div>
+        <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l1_chroma') }}</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.fts5_db') }}</div>
+        <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l3_bm25') }}</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_graph_title') }}</div>
+        <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l2_graph') }}</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
+        <div id="kpi-health-summary" style="font-size:1.05rem;font-weight:700;margin-top:8px;font-family:var(--font-mono);">–</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.memory_components') }}</div>
+      </div>
+    </div>
+
+    <!-- Live component health board (grouped) -->
+    <div style="margin-top:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
         <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">{{ t('dashboard.memory_components') }}</span>
         <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
       </div>
-      <div id="memory-components-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;">
+      <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:14px;">
         <div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">
           {{ t('dashboard.memory_probing') }}
         </div>
@@ -144,8 +178,49 @@
       <div id="memory-issues-list" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.25);background:rgba(245,158,11,0.06);font-size:0.75rem;color:#fbbf24;line-height:1.45;"></div>
     </div>
 
+    <!-- Property graph explorer -->
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border-subtle);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">
+            {{ t('dashboard.memory_graph_title') }}
+          </div>
+          <div id="kg-stats-line" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);">–</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:0.68rem;color:var(--text-muted);">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(145,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_person') }}</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(280,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_chunk') }}</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(40,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_tag') }}</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsla(190,70%,55%,0.95);margin-right:4px;"></span>{{ t('dashboard.memory_legend_entity') }}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <input id="kg-search-input" type="search" placeholder="{{ t('dashboard.memory_graph_search_ph') }}"
+            style="min-width:160px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.8rem;" />
+          <button id="kg-search-btn" class="btn btn-sm btn-primary" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_search') }}</button>
+          <button id="kg-refresh-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_graph_refresh') }}</button>
+          <button id="kg-export-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="{{ t('dashboard.export') }}">{{ t('dashboard.export') }}</button>
+          <button id="kg-clear-btn" class="btn btn-sm btn-danger" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_clear') }}</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(220px,0.8fr);gap:12px;align-items:stretch;">
+        <div id="kg-canvas-wrap" style="position:relative;height:300px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
+          <canvas id="kg-canvas" width="800" height="300" style="width:100%;height:100%;display:block;cursor:crosshair;"></canvas>
+          <div id="kg-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:240px;padding:6px 10px;border-radius:6px;background:rgba(15,23,32,0.95);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.75rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,0.4);"></div>
+          <div id="kg-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">
+            {{ t('dashboard.memory_graph_empty') }}
+          </div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:300px;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">
+            {{ t('dashboard.memory_graph_nodes_list') }}
+          </div>
+          <div id="kg-results" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:260px;"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Expansion Deck Toggle -->
-    <div style="margin-top:12px;">
+    <div style="margin-top:14px;">
       <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
         <span id="deck-toggle-arrow"><span class="ki" data-icon="play" aria-hidden="true"></span></span> {{ t('dashboard.backup_maintenance') }}
       </button>
@@ -155,22 +230,22 @@
     <div id="maintenance-deck" style="display:none;margin-top:14px;padding-top:10px;animation: fadeIn 0.3s ease;">
       
       <!-- Metrics & Actions Grid -->
-      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px;">
-        <!-- FTS5 Metrics Card -->
+      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));gap:16px;margin-bottom:16px;">
         <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.fts5_db') }}</h4>
           <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="fts5-size-metric">–</div>
           <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 {{ t('dashboard.records') }}</span>
         </div>
-
-        <!-- Vector Metrics Card -->
         <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.vector_store') }}</h4>
           <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="vector-size-metric">–</div>
           <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 {{ t('dashboard.vectors') }}</span>
         </div>
-
-        <!-- Dynamic Actions Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.memory_graph_title') }}</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="graph-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="graph-count-metric">0 {{ t('dashboard.memory_graph_edges') }}</span>
+        </div>
         <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
@@ -336,7 +411,38 @@
     memoryDegraded: "{{ t('dashboard.memory_degraded') }}",
     memoryDescDegraded: "{{ t('dashboard.memory_desc_degraded') }}",
     installFailed: "{{ t('dashboard.install_failed') }}",
-    issuesHeading: "{{ t('dashboard.memory_issues') }}"
+    issuesHeading: "{{ t('dashboard.memory_issues') }}",
+    graphConfirmClear: "{{ t('dashboard.memory_graph_confirm_clear') }}",
+    graphCleared: "{{ t('dashboard.memory_graph_cleared') }}",
+    graphNodes: "{{ t('dashboard.memory_graph_nodes') }}",
+    graphEdges: "{{ t('dashboard.memory_graph_edges') }}",
+    pipeEnabled: "{{ t('dashboard.memory_pipe_enabled') }}",
+    pipePerTurn: "{{ t('dashboard.memory_pipe_per_turn') }}",
+    pipeAutoStore: "{{ t('dashboard.memory_pipe_auto_store') }}",
+    pipeConsolidate: "{{ t('dashboard.memory_pipe_consolidator') }}",
+    groupFeatures: "{{ t('dashboard.memory_group_features') }}",
+    groupLayers: "{{ t('dashboard.memory_group_layers') }}",
+    groupPackages: "{{ t('dashboard.memory_group_packages') }}",
+    kpiL1: "{{ t('dashboard.kpi_l1_chroma') }}",
+    kpiL3: "{{ t('dashboard.kpi_l3_bm25') }}",
+    kpiL2: "{{ t('dashboard.kpi_l2_graph') }}",
+    kpiOk: "{{ t('dashboard.kpi_ok') }}",
+    noComponentData: "{{ t('dashboard.no_component_data') }}",
+    compNames: {
+      memory_enabled: "{{ t('dashboard.comp.memory_enabled') }}",
+      per_turn_retrieval: "{{ t('dashboard.comp.per_turn_retrieval') }}",
+      auto_store: "{{ t('dashboard.comp.auto_store') }}",
+      consolidation: "{{ t('dashboard.comp.consolidation') }}",
+      embedder: "{{ t('dashboard.comp.embedder') }}",
+      vector_memory: "{{ t('dashboard.comp.vector_memory') }}",
+      layer_l1: "{{ t('dashboard.comp.layer_l1') }}",
+      layer_l2: "{{ t('dashboard.comp.layer_l2') }}",
+      layer_l3: "{{ t('dashboard.comp.layer_l3') }}",
+      layer_l4: "{{ t('dashboard.comp.layer_l4') }}",
+      pkg_chromadb: "{{ t('dashboard.comp.pkg_chromadb') }}",
+      pkg_st: "{{ t('dashboard.comp.pkg_st') }}",
+      pkg_sqlite_vec: "{{ t('dashboard.comp.pkg_sqlite_vec') }}"
+    }
   };
 
   async function _loadSessions() {
@@ -510,6 +616,75 @@
     };
   }
 
+  function _memCardHtml(c) {
+    const s = _chipStyle(c.status || (c.ok ? 'ok' : 'error'));
+    const statusLabel = (c.status || (c.ok ? 'ok' : 'error')).toUpperCase();
+    const detail = (c.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const locName = (I18N.compNames && c.id && I18N.compNames[c.id]) || c.name || c.id || 'component';
+    const name = String(locName).replace(/</g, '&lt;');
+    return (
+      '<div style="padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
+          '<span style="font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
+          '<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
+            '<span style="width:7px;height:7px;border-radius:50%;background:' + s.dot + ';box-shadow:0 0 6px ' + s.dot + ';"></span>' +
+            statusLabel +
+          '</span>' +
+        '</div>' +
+        '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);">' + detail + '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderMemoryPipeline(data) {
+    var el = document.getElementById('memory-pipeline');
+    if (!el) return;
+    var flags = data.flags || {};
+    var chips = [
+      { id: 'memory_enabled', label: I18N.pipeEnabled || 'Memory' },
+      { id: 'per_turn_retrieval', label: I18N.pipePerTurn || 'Per-turn RAG' },
+      { id: 'auto_store', label: I18N.pipeAutoStore || 'Auto-store' },
+      { id: 'consolidation', label: I18N.pipeConsolidate || 'Consolidator' },
+      { id: 'layer_l1', label: 'L1' },
+      { id: 'layer_l2', label: 'L2' },
+      { id: 'layer_l3', label: 'L3' },
+      { id: 'layer_l4', label: 'L4' },
+    ];
+    el.innerHTML = chips.map(function(ch) {
+      var f = flags[ch.id] || {};
+      var st = f.status || (f.ok ? 'ok' : 'off');
+      var s = _chipStyle(st);
+      return (
+        '<span title="' + String(f.detail || ch.label).replace(/"/g, '&quot;') + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
+          '<span style="width:6px;height:6px;border-radius:50%;background:' + s.dot + ';"></span>' + ch.label +
+        '</span>'
+      );
+    }).join('');
+  }
+
+  function renderMemoryKpis(data) {
+    var g = data.graph || {};
+    var set = function(id, text) {
+      var n = document.getElementById(id);
+      if (n) n.textContent = text;
+    };
+    var l1 = I18N.kpiL1 || 'L1 Chroma';
+    var l3 = I18N.kpiL3 || 'L3 BM25';
+    var l2 = I18N.kpiL2 || 'L2 graph';
+    var okLbl = I18N.kpiOk || 'OK';
+    set('kpi-vector-count', data.vector_count != null ? String(data.vector_count) : '–');
+    set('kpi-vector-size', data.vector_size != null ? (formatBytes(data.vector_size) + ' · ' + l1) : l1);
+    set('kpi-fts-count', data.fts5_count != null ? String(data.fts5_count) : '–');
+    set('kpi-fts-size', data.fts5_size != null ? (formatBytes(data.fts5_size) + ' · ' + l3) : l3);
+    set('kpi-graph-nodes', g.nodes != null ? String(g.nodes) : '–');
+    set('kpi-graph-edges', (g.edges != null ? g.edges + ' ' + (I18N.graphEdges || 'edges') : l2) + (g.backend ? ' · ' + g.backend : ''));
+    var comps = Array.isArray(data.components) ? data.components : [];
+    var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
+    set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
+    set('graph-size-metric', g.nodes != null ? String(g.nodes) + ' ' + (I18N.graphNodes || 'nodes') : '–');
+    set('graph-count-metric', (g.edges != null ? g.edges : 0) + ' ' + (I18N.graphEdges || 'edges'));
+  }
+
   function renderMemoryComponents(data) {
     const grid = document.getElementById('memory-components-grid');
     const summaryEl = document.getElementById('memory-health-summary');
@@ -521,27 +696,45 @@
       summaryEl.textContent = data.summary || (components.length ? `${components.filter(c => c.status === 'ok').length}/${components.length} OK` : '');
     }
 
+    renderMemoryPipeline(data);
+    renderMemoryKpis(data);
+
     if (!components.length) {
-      grid.innerHTML = `<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">No component data yet.</div>`;
+      grid.innerHTML = '<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">' + (I18N.noComponentData || 'No component data yet.') + '</div>';
     } else {
-      grid.innerHTML = components.map(function(c) {
-        const s = _chipStyle(c.status || (c.ok ? 'ok' : 'error'));
-        const statusLabel = (c.status || (c.ok ? 'ok' : 'error')).toUpperCase();
-        const detail = (c.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const name = (c.name || c.id || 'component').replace(/</g, '&lt;');
+      var groups = [
+        { title: I18N.groupFeatures || 'Features', ids: ['memory_enabled', 'per_turn_retrieval', 'auto_store', 'consolidation'] },
+        { title: I18N.groupLayers || 'Memory layers', ids: ['embedder', 'vector_memory', 'layer_l1', 'layer_l2', 'layer_l3', 'layer_l4'] },
+        { title: I18N.groupPackages || 'Packages & stores', ids: ['pkg_chromadb', 'pkg_st', 'pkg_sqlite_vec', 'pkg_psycopg', 'pkg_lg_pg', 'store_config', 'store_checkpoints'] },
+      ];
+      var byId = {};
+      components.forEach(function(c) { byId[c.id] = c; });
+      var used = {};
+      var html = groups.map(function(g) {
+        var cards = g.ids.map(function(id) { return byId[id]; }).filter(Boolean);
+        cards.forEach(function(c) { used[c.id] = true; });
+        if (!cards.length) return '';
         return (
-          '<div style="padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
-            '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
-              '<span style="font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
-              '<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
-                '<span style="width:7px;height:7px;border-radius:50%;background:' + s.dot + ';box-shadow:0 0 6px ' + s.dot + ';"></span>' +
-                statusLabel +
-              '</span>' +
+          '<div>' +
+            '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-bottom:6px;">' + g.title + '</div>' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">' +
+              cards.map(_memCardHtml).join('') +
             '</div>' +
-            '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);">' + detail + '</div>' +
           '</div>'
         );
       }).join('');
+      var rest = components.filter(function(c) { return !used[c.id]; });
+      if (rest.length) {
+        html += (
+          '<div>' +
+            '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-bottom:6px;">Other</div>' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">' +
+              rest.map(_memCardHtml).join('') +
+            '</div>' +
+          '</div>'
+        );
+      }
+      grid.innerHTML = html;
     }
 
     const issues = Array.isArray(data.issues) ? data.issues : [];
@@ -560,6 +753,304 @@
         issuesEl.innerHTML = '';
       }
     }
+  }
+
+  // ── Property graph (L2) explorer ─────────────────────────────────
+  var _kgData = { nodes: [], edges: [] };
+  var _kgAnim = null;
+  var _kgPts = []; // last layout for hover hit-testing
+  var _kgHoverBound = false;
+
+  function _kgEsc(s) {
+    return String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderKgList(nodes) {
+    var el = document.getElementById('kg-results');
+    if (!el) return;
+    if (!nodes || !nodes.length) {
+      el.innerHTML = '';
+      return;
+    }
+    var top = nodes.slice(0, 40);
+    el.innerHTML = top.map(function(n) {
+      var label = _kgEsc(n.label || n.id);
+      var group = _kgEsc(n.group || '');
+      var title = _kgEsc((n.title || '').slice(0, 160));
+      return (
+        '<div style="padding:6px 8px;border-bottom:1px solid var(--border-subtle);display:flex;gap:10px;align-items:flex-start;">' +
+          '<span style="flex:0 0 auto;font-size:0.65rem;padding:2px 6px;border-radius:4px;background:rgba(56,189,248,0.12);color:#38bdf8;font-weight:600;">' + group + '</span>' +
+          '<div style="min-width:0;">' +
+            '<div style="font-weight:600;color:var(--text-primary);">' + label + '</div>' +
+            (title ? '<div style="color:var(--text-muted);margin-top:2px;line-height:1.35;">' + title + '</div>' : '') +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function drawKgCanvas(nodes, edges) {
+    var canvas = document.getElementById('kg-canvas');
+    var empty = document.getElementById('kg-empty');
+    var wrap = document.getElementById('kg-canvas-wrap');
+    if (!canvas || !wrap) return;
+    var rect = wrap.getBoundingClientRect();
+    var w = Math.max(320, Math.floor(rect.width));
+    var h = 280;
+    canvas.width = w;
+    canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    if (!nodes || !nodes.length) {
+      if (empty) empty.style.display = 'flex';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    // Cap for layout readability
+    var maxN = 48;
+    var ns = nodes.slice(0, maxN);
+    var ids = {};
+    ns.forEach(function(n, i) { ids[n.id] = i; });
+    var es = (edges || []).filter(function(e) {
+      return ids[e.from] !== undefined && ids[e.to] !== undefined;
+    });
+
+    // Simple circle layout + light force iteration
+    var pts = ns.map(function(n, i) {
+      var ang = (i / Math.max(ns.length, 1)) * Math.PI * 2;
+      var r = Math.min(w, h) * 0.32;
+      return {
+        x: w / 2 + Math.cos(ang) * r,
+        y: h / 2 + Math.sin(ang) * r,
+        vx: 0, vy: 0,
+        id: n.id,
+        label: String(n.label || n.id || '').slice(0, 18),
+        fullLabel: String(n.label || n.id || ''),
+        title: String(n.title || ''),
+        group: n.group || 'entity',
+      };
+    });
+
+    function step() {
+      var i, j;
+      for (i = 0; i < pts.length; i++) {
+        for (j = i + 1; j < pts.length; j++) {
+          var dx = pts[i].x - pts[j].x;
+          var dy = pts[i].y - pts[j].y;
+          var d2 = dx * dx + dy * dy + 0.01;
+          var f = 400 / d2;
+          var d = Math.sqrt(d2);
+          pts[i].vx += (dx / d) * f;
+          pts[i].vy += (dy / d) * f;
+          pts[j].vx -= (dx / d) * f;
+          pts[j].vy -= (dy / d) * f;
+        }
+      }
+      es.forEach(function(e) {
+        var a = pts[ids[e.from]], b = pts[ids[e.to]];
+        if (!a || !b) return;
+        var dx = b.x - a.x, dy = b.y - a.y;
+        a.vx += dx * 0.002;
+        a.vy += dy * 0.002;
+        b.vx -= dx * 0.002;
+        b.vy -= dy * 0.002;
+      });
+      pts.forEach(function(p) {
+        p.x += p.vx * 0.08;
+        p.y += p.vy * 0.08;
+        p.vx *= 0.6;
+        p.vy *= 0.6;
+        p.x = Math.max(24, Math.min(w - 24, p.x));
+        p.y = Math.max(20, Math.min(h - 20, p.y));
+      });
+    }
+    for (var s = 0; s < 40; s++) step();
+
+    // edges — always draw relation labels (P3)
+    ctx.strokeStyle = 'rgba(148,163,184,0.4)';
+    ctx.lineWidth = 1.25;
+    es.forEach(function(e) {
+      var a = pts[ids[e.from]], b = pts[ids[e.to]];
+      if (!a || !b) return;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      var elabel = String(e.label || e.relation || 'related').slice(0, 18);
+      var mx = (a.x + b.x) / 2;
+      var my = (a.y + b.y) / 2;
+      ctx.save();
+      ctx.font = '10px var(--font-sans, sans-serif)';
+      var tw = ctx.measureText(elabel).width;
+      ctx.fillStyle = 'rgba(15,23,32,0.75)';
+      ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 14);
+      ctx.fillStyle = 'rgba(186,198,214,0.95)';
+      ctx.textAlign = 'center';
+      ctx.fillText(elabel, mx, my + 3);
+      ctx.restore();
+    });
+
+    // nodes
+    pts.forEach(function(p) {
+      var hue = 190;
+      if (p.group === 'memory_chunk') hue = 280;
+      else if (p.group === 'person' || p.group === 'user') hue = 145;
+      else if (p.group === 'tag') hue = 40;
+      ctx.beginPath();
+      ctx.fillStyle = 'hsla(' + hue + ',70%,55%,0.9)';
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(226,232,240,0.95)';
+      ctx.font = '11px var(--font-sans, sans-serif)';
+      ctx.textAlign = 'left';
+      ctx.fillText(p.label, p.x + 10, p.y + 4);
+    });
+
+    _kgPts = pts;
+    _wireKgHover(canvas, wrap);
+  }
+
+  function _wireKgHover(canvas, wrap) {
+    if (_kgHoverBound || !canvas || !wrap) return;
+    _kgHoverBound = true;
+    var tip = document.getElementById('kg-tooltip');
+    canvas.addEventListener('mousemove', function(ev) {
+      if (!tip || !_kgPts.length) return;
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = canvas.width / Math.max(rect.width, 1);
+      var scaleY = canvas.height / Math.max(rect.height, 1);
+      var mx = (ev.clientX - rect.left) * scaleX;
+      var my = (ev.clientY - rect.top) * scaleY;
+      var hit = null;
+      for (var i = 0; i < _kgPts.length; i++) {
+        var p = _kgPts[i];
+        var dx = p.x - mx, dy = p.y - my;
+        if (dx * dx + dy * dy <= 14 * 14) { hit = p; break; }
+      }
+      if (!hit) {
+        tip.style.display = 'none';
+        canvas.style.cursor = 'crosshair';
+        return;
+      }
+      canvas.style.cursor = 'pointer';
+      var html = '<strong>' + _kgEsc(hit.fullLabel || hit.label) + '</strong>';
+      if (hit.group) html += '<div style="color:var(--text-muted);margin-top:2px;">' + _kgEsc(hit.group) + '</div>';
+      if (hit.title) html += '<div style="margin-top:4px;">' + _kgEsc(hit.title.slice(0, 180)) + '</div>';
+      tip.innerHTML = html;
+      tip.style.display = 'block';
+      var wx = ev.clientX - wrap.getBoundingClientRect().left + 12;
+      var wy = ev.clientY - wrap.getBoundingClientRect().top + 12;
+      tip.style.left = Math.min(wx, wrap.clientWidth - 200) + 'px';
+      tip.style.top = Math.min(wy, wrap.clientHeight - 60) + 'px';
+    });
+    canvas.addEventListener('mouseleave', function() {
+      if (tip) tip.style.display = 'none';
+    });
+  }
+
+  async function loadKnowledgeGraph(q) {
+    try {
+      var url = '/api/memory/graph';
+      if (q) url += '?q=' + encodeURIComponent(q) + '&limit=60';
+      var resp = await fetch(url);
+      var data = await resp.json();
+      _kgData = data || { nodes: [], edges: [] };
+      var st = data.stats || {};
+      var line = document.getElementById('kg-stats-line');
+      if (line) {
+        line.textContent =
+          (st.nodes != null ? st.nodes : (_kgData.nodes || []).length) + ' ' + (I18N.graphNodes || 'nodes') +
+          ' · ' +
+          (st.edges != null ? st.edges : (_kgData.edges || []).length) + ' ' + (I18N.graphEdges || 'edges') +
+          (st.backend ? ' · ' + st.backend : '') +
+          (data.query ? ' · filter: ' + data.query : '');
+      }
+      drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
+      renderKgList(_kgData.nodes || []);
+    } catch (e) {
+      console.warn('kg load failed', e);
+    }
+  }
+
+  function wireKgControls() {
+    var searchBtn = document.getElementById('kg-search-btn');
+    var refreshBtn = document.getElementById('kg-refresh-btn');
+    var clearBtn = document.getElementById('kg-clear-btn');
+    var exportBtn = document.getElementById('kg-export-btn');
+    var input = document.getElementById('kg-search-input');
+    if (searchBtn) {
+      searchBtn.addEventListener('click', function() {
+        loadKnowledgeGraph(input ? input.value.trim() : '');
+      });
+    }
+    if (input) {
+      input.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') loadKnowledgeGraph(input.value.trim());
+      });
+    }
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function() {
+        if (input) input.value = '';
+        loadKnowledgeGraph('');
+      });
+    }
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async function() {
+        try {
+          var resp = await fetch('/api/memory/graph/export');
+          var data = await resp.json();
+          var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'kazma-knowledge-graph.json';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+          if (window.showToast) window.showToast('Graph exported', 'success');
+        } catch (e) {
+          if (window.showToast) window.showToast('Export failed: ' + e.message, 'error');
+        }
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async function() {
+        var ok = true;
+        if (window.kazmaConfirm) {
+          ok = await window.kazmaConfirm({
+            title: 'Clear graph',
+            message: I18N.graphConfirmClear || 'Clear the entire property graph?',
+            confirmText: 'Clear',
+            danger: true,
+          });
+        } else {
+          ok = window.confirm(I18N.graphConfirmClear || 'Clear graph?');
+        }
+        if (!ok) return;
+        try {
+          var resp = await fetch('/api/memory/graph/clear', { method: 'POST' });
+          var data = await resp.json();
+          if (window.showToast) {
+            window.showToast(I18N.graphCleared || 'Graph cleared', 'success');
+          }
+          loadKnowledgeGraph('');
+        } catch (e) {
+          if (window.showToast) window.showToast('Clear failed: ' + e.message, 'error');
+        }
+      });
+    }
+    loadKnowledgeGraph('');
+    window.addEventListener('resize', function() {
+      if (_kgData) drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireKgControls);
+  } else {
+    wireKgControls();
   }
 
   async function pollMemoryStatus() {
@@ -612,14 +1103,14 @@
       const ftsCountEl = document.getElementById('fts5-count-metric');
       if (ftsSizeEl && data.fts5_size !== undefined) {
         ftsSizeEl.textContent = formatBytes(data.fts5_size);
-        ftsCountEl.textContent = `${data.fts5_count || 0} ${I18N.records}`;
+        if (ftsCountEl) ftsCountEl.textContent = `${data.fts5_count || 0} ${I18N.records}`;
       }
 
       const vecSizeEl = document.getElementById('vector-size-metric');
       const vecCountEl = document.getElementById('vector-count-metric');
       if (vecSizeEl && data.vector_size !== undefined) {
         vecSizeEl.textContent = formatBytes(data.vector_size);
-        vecCountEl.textContent = `${data.vector_count || 0} ${I18N.vectors}`;
+        if (vecCountEl) vecCountEl.textContent = `${data.vector_count || 0} ${I18N.vectors}`;
       }
 
     } catch (e) {
@@ -627,15 +1118,24 @@
     }
   }
 
+  var memoryRefreshBtn = document.getElementById('memory-refresh-btn');
+  if (memoryRefreshBtn) {
+    memoryRefreshBtn.addEventListener('click', function() {
+      pollMemoryStatus();
+      if (typeof loadKnowledgeGraph === 'function') loadKnowledgeGraph('');
+    });
+  }
+
   if (installBtn) {
     installBtn.addEventListener('click', async function() {
       installBtn.disabled = true;
       installBtn.textContent = I18N.installing;
       try {
+        // Prefer full [rag] extra (chromadb + sentence-transformers + sqlite-vec)
         await fetch('/api/system/install', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ package_name: 'sentence-transformers' })
+          body: JSON.stringify({ extra: 'rag' })
         });
       } catch (e) {
         window.kazmaAlert({ title: 'Install failed', message: I18N.installFailed, variant: 'btn-danger' });

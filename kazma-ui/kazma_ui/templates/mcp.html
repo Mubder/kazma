@@ -69,9 +69,25 @@
     </div>
 
     <!-- Add Server Modal -->
-    <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none">
+    <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none" x-init="loadPresets()">
         <div class="modal">
             <h2>{{ t('mcp.modal_title') }}</h2>
+            {# Preset dropdown — one-click setup for known MCP servers.
+               Fetches GET /api/mcp/presets on modal open; selecting a preset
+               auto-fills name, transport, command, and env fields below. #}
+            <div class="form-group">
+                <label>{{ t('mcp.preset_label') }}</label>
+                <select x-model="selectedPreset" @change="applyPreset()" class="form-select">
+                    <option value="">{{ t('mcp.preset_none') }}</option>
+                    <template x-for="cat in presetCategories" :key="cat.name">
+                        <optgroup :label="cat.name">
+                            <template x-for="p in cat.presets" :key="p.id">
+                                <option :value="p.id" x-text="p.name + (p.certified ? ' ✓' : '')"></option>
+                            </template>
+                        </optgroup>
+                    </template>
+                </select>
+            </div>
             <div class="form-group">
                 <label>{{ t('mcp.field_name') }}</label>
                 <input type="text" x-model="newServer.name" class="form-input" placeholder="my-server">
@@ -87,8 +103,15 @@
                 <div>
                     <div class="form-group">
                         <label>{{ t('mcp.field_command') }}</label>
-                        <input type="text" x-model="newServer.commandStr" class="form-input" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                        <input type="text" x-model="newServer.commandStr" @input="onCommandInput()" class="form-input" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                        <p style="font-size:0.78rem;color:var(--text-secondary);margin:4px 0 0 0;">
+                            Paste the <strong>run</strong> command (usually <code>npx -y &lt;pkg&gt;</code>), not <code>npm install</code>.
+                            Common docs say <code>npm install</code> — Kazma auto-rewrites that to <code>npx -y</code>.
+                        </p>
                     </div>
+                    <template x-if="rewriteNotice">
+                        <div style="background:rgba(79,140,255,0.1);border-left:3px solid var(--primary);padding:8px 12px;margin:6px 0;border-radius:4px;font-size:0.82rem;color:var(--text-primary);" x-text="rewriteNotice"></div>
+                    </template>
                     <div class="form-group">
                         <label>{{ t('mcp.field_working_dir') }}</label>
                         <input type="text" x-model="newServer.working_dir" class="form-input" placeholder="/home/user">
@@ -108,15 +131,35 @@
                 </div>
             </template>
             <div class="form-group">
+                <label>{{ t('mcp.field_env')|default('Environment variables') }}</label>
+                <template x-for="(row, idx) in (newServer._envRows || [])" :key="idx">
+                    <div style="display:flex;gap:6px;margin-bottom:4px;">
+                        <input type="text" x-model="row.key" class="form-input" placeholder="API_KEY" style="flex:1;">
+                        <input type="text" x-model="row.value" class="form-input" placeholder="value" style="flex:2;">
+                        <button class="btn btn-secondary btn-sm" @click="removeEnvRow(idx)" title="Remove">×</button>
+                    </div>
+                </template>
+                <button class="btn btn-secondary btn-sm" @click="addEnvRow()">+ Add variable</button>
+                <p style="font-size:0.78rem;color:var(--text-secondary);margin:4px 0 0 0;">
+                    Most MCP servers need an API key — check the server's docs for the env var name.
+                </p>
+            </div>
+            <div class="form-group">
                 <label>{{ t('mcp.field_trust') }}</label>
                 <select x-model="newServer.trust" class="form-select">
                     <option value="approval_required">{{ t('mcp.trust_approval') }}</option>
                     <option value="trusted">{{ t('mcp.trust_trusted') }}</option>
                 </select>
             </div>
+            <template x-if="addError">
+                <div style="background:rgba(229,57,53,0.1);border-left:3px solid var(--danger,#e53935);padding:8px 12px;margin:6px 0;border-radius:4px;font-size:0.82rem;color:var(--text-primary);white-space:pre-wrap;font-family:var(--font-mono,monospace);" x-text="addError"></div>
+            </template>
             <div class="modal-actions">
-                <button class="btn btn-secondary" @click="showAddModal = false">{{ t('mcp.cancel') }}</button>
-                <button class="btn btn-primary" @click="addServer()">{{ t('mcp.add_server') }}</button>
+                <button class="btn btn-secondary" @click="showAddModal = false" :disabled="adding">{{ t('mcp.cancel') }}</button>
+                <button class="btn btn-primary" @click="addServer()" :disabled="adding">
+                    <span x-show="!adding">{{ t('mcp.add_server') }}</span>
+                    <span x-show="adding">Validating…</span>
+                </button>
             </div>
         </div>
     </div>

@@ -42,14 +42,23 @@ async def cancel_pending_hitl(
     config: dict[str, Any],
     *,
     reason: str = "superseded by new user message",
+    auto_deny: bool = False,
 ) -> bool:
-    """If HITL is pending, resume with deny so tool chains complete.
+    """Preserves pending HITL interrupts unless auto_deny is explicitly True.
 
+    Prevents dropping interrupted tool tasks when follow-up text is sent.
     Returns ``True`` if a cancel resume was performed.
     """
     if graph is None:
         return False
     if not await has_pending_hitl(graph, config):
+        return False
+
+    if not auto_deny:
+        logger.info(
+            "[hitl_supersede] HITL is pending for thread=%s. Preserving state (auto-deny disabled).",
+            (config.get("configurable") or {}).get("thread_id"),
+        )
         return False
 
     try:

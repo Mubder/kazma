@@ -23,6 +23,52 @@ logger = logging.getLogger(__name__)
 __all__ = ["create_mcp_router"]
 
 
+def _read_client_stderr(client: Any) -> str:
+    """Best-effort capture of an MCPClient subprocess's stderr.
+
+    Many MCP server failures (bad API key, missing dependency, install vs
+    run command) only surface in stderr — the handshake just times out
+    with no other signal. We read up to 2KB of whatever's buffered before
+    the caller tears the subprocess down, so the UI can show *why* a
+    server reported 0 tools instead of an opaque failure.
+
+    Cross-platform: reads in a worker thread with a 1s cap (select() is
+    unreliable on Windows pipes, so a thread is the portable way to do a
+    non-blocking read with a timeout).
+
+    Returns ``""`` when there's no subprocess (SSE transport) or the read
+    fails. Never raises — diagnostics must not break the test path.
+    """
+    try:
+        proc = getattr(client, "_process", None)
+        if proc is None or not hasattr(proc, "stderr") or proc.stderr is None:
+            return ""
+        import threading
+
+        result: dict[str, str] = {"data": ""}
+
+        def _read() -> None:
+            try:
+                data = (
+                    proc.stderr.read1(2048)
+                    if hasattr(proc.stderr, "read1")
+                    else proc.stderr.read(2048)
+                )
+                if isinstance(data, bytes):
+                    result["data"] = data.decode("utf-8", errors="replace")
+                elif data:
+                    result["data"] = str(data)
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_read, daemon=True)
+        t.start()
+        t.join(timeout=1.0)  # bounded — never block the test path
+        return result["data"]
+    except Exception:
+        return ""
+
+
 def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRouter:
     """Create the MCP management router."""
 
@@ -50,6 +96,22 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     async def api_list_servers() -> list[dict[str, Any]]:
         """List configured MCP servers."""
         return _get_configured_servers()
+
+    @router.get("/api/mcp/presets")
+    async def api_list_presets() -> dict[str, Any]:
+        """List available MCP server presets for the Add Server dropdown.
+
+        Returns presets grouped by category, so the UI can render optgroups:
+        ``{"ok": true, "categories": [{name, presets}, ...]}``
+        """
+        try:
+            from kazma_ui.mcp_presets import list_presets_grouped
+
+            categories = list_presets_grouped()
+            return {"ok": True, "categories": categories}
+        except Exception as exc:
+            logger.exception("[mcp_api] list_presets failed")
+            return {"ok": False, "error": str(exc), "categories": []}
 
     @router.post("/api/mcp/servers")
     async def api_add_server(req: MCPServerAddRequest) -> dict[str, str]:
@@ -109,7 +171,13 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
 
     @router.post("/api/mcp/servers/{name}/test")
     async def api_test_server(name: str) -> dict[str, Any]:
-        """Test an MCP server connection without permanently connecting."""
+        """Test an MCP server connection without permanently connecting.
+
+        Returns ``{success, tool_count, tools[], error, stderr}``. The
+        ``stderr`` field carries the subprocess's last stderr bytes so the
+        UI can surface *why* a 0-tools server failed (a long-standing
+        "saved silently, no idea why" complaint — surfaced now).
+        """
         from kazma_core.mcp_client import MCPClient, MCPServerConfig
 
         servers = agent.get_mcp_servers_config()
@@ -122,6 +190,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         if not server_cfg:
             return {"success": False, "error": f"Server '{name}' not found"}
 
+        client = MCPClient()
         try:
             config = MCPServerConfig(
                 name=server_cfg.get("name", name),
@@ -131,17 +200,68 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                 env=server_cfg.get("env", {}),
                 working_dir=server_cfg.get("working_dir"),
             )
-            client = MCPClient()
             await client.connect(config)
             tools = await client.list_tools()
+            # Capture stderr before disconnect tears down the subprocess.
+            stderr_text = _read_client_stderr(client)
             await client.disconnect()
             return {
                 "success": True,
                 "tool_count": len(tools),
                 "tools": [t.get("name", "") for t in tools[:10]],
+                "stderr": stderr_text,
             }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            stderr_text = _read_client_stderr(client)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            return {"success": False, "error": str(e), "stderr": stderr_text}
+
+    @router.post("/api/mcp/test-config")
+    async def api_test_config(server_cfg: dict[str, Any] = None) -> dict[str, Any]:
+        """Validate an MCP server config WITHOUT persisting it.
+
+        Used by the Add Server modal's "validate-before-save" flow: we test
+        the candidate config first and only POST to ``/servers`` (which
+        saves) if the test passes. This catches the common "install command
+        pasted instead of run command" mistake (now also auto-rewritten
+        client-side) plus missing-binary / bad-API-key / 0-tools cases
+        BEFORE the broken entry is written to ``kazma.yaml``.
+        """
+        from kazma_core.mcp_client import MCPClient, MCPServerConfig
+
+        if not server_cfg:
+            return {"success": False, "error": "Missing server config"}
+
+        client = MCPClient()
+        try:
+            config = MCPServerConfig(
+                name=server_cfg.get("name", "test"),
+                transport=server_cfg.get("transport", "stdio"),
+                command=server_cfg.get("command", []),
+                url=server_cfg.get("url", ""),
+                env=server_cfg.get("env", {}),
+                working_dir=server_cfg.get("working_dir"),
+            )
+            await client.connect(config)
+            tools = await client.list_tools()
+            stderr_text = _read_client_stderr(client)
+            await client.disconnect()
+            return {
+                "success": True,
+                "tool_count": len(tools),
+                "tools": [t.get("name", "") for t in tools[:10]],
+                "stderr": stderr_text,
+            }
+        except Exception as e:
+            stderr_text = _read_client_stderr(client)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            return {"success": False, "error": str(e), "stderr": stderr_text}
 
     @router.get("/api/mcp/servers/{name}/tools")
     async def api_server_tools(name: str) -> list[dict[str, str]]:

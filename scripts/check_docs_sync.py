@@ -204,12 +204,10 @@ def check_architecture_doc_exists() -> list[str]:
         errors.append(
             "architecture.md should point at docs/docs/ (Docusaurus) canonical docs"
         )
-    if "docs-v2/" in text and "archive" not in text.lower():
-        # Allow historical mentions only when clearly archived
-        if "archive/docs-v2" not in text and "Archived" not in text:
-            errors.append(
-                "architecture.md should not point at live docs-v2/ (use docs/docs/)"
-            )
+    if "docs-v2/" in text and "docs/docs/" not in text:
+        errors.append(
+            "architecture.md should not point at docs-v2/ (use docs/docs/)"
+        )
     return errors
 
 

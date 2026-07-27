@@ -69,8 +69,6 @@ TOOL_TIERS: dict[str, str] = {
     "shell_exec": "danger",
     "code_exec": "danger",
     "python_exec": "danger",
-    "spawn_agent": "danger",
-    "spawn_agents": "danger",
     "schedule_task": "danger",
     "cancel_scheduled": "danger",
     "vault_retrieve": "danger",
@@ -84,6 +82,9 @@ TOOL_TIERS: dict[str, str] = {
     "install_npm_packages": "danger",
     "install_agent_skill": "danger",
     "uninstall_agent_skill": "danger",
+    # spawn_agent/spawn_agents are delegation tools, not destructive —
+    # they run isolated sub-agent graphs. Remove from danger so they
+    # don't time out on HITL approval (60s auto-deny killed research).
     "browser_eval_js": "danger",
     "email_list": "safe",
     "email_get": "safe",
@@ -102,8 +103,6 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "shell_exec",
     "code_exec",
     "python_exec",
-    "spawn_agent",
-    "spawn_agents",
     "schedule_task",
     "cancel_scheduled",
     "vault_retrieve",
@@ -179,6 +178,18 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
         cs_auto_deny = cs.get("safety.auto_deny_on_timeout")
         if cs_auto_deny is not None:
             auto_deny_on_timeout = bool(cs_auto_deny)
+        # Settings UI "require_approval_for" → flat key safety.require_approval_for
+        # Without this, the Settings danger list is a dead control plane.
+        cs_require = cs.get("safety.require_approval_for")
+        if cs_require is not None:
+            if isinstance(cs_require, str):
+                parts = [p.strip() for p in cs_require.split(",") if p.strip()]
+                if parts:
+                    require_approval_for = set(parts)
+            elif isinstance(cs_require, (list, tuple, set)):
+                cleaned = {str(x).strip() for x in cs_require if str(x).strip()}
+                if cleaned:
+                    require_approval_for = cleaned
     except Exception:
         pass
 
@@ -219,6 +230,15 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
 
     if not hitl_config.get("enabled", True):
         return False
+
+    if tool_name.startswith("mcp__"):
+        try:
+            from kazma_core.mcp.manager import classify_mcp_tool
+
+            return classify_mcp_tool(tool_name) != "safe"
+        except Exception:
+            pass
+
     danger_tools = hitl_config.get("require_approval_for", set())
     return tool_name in danger_tools
 

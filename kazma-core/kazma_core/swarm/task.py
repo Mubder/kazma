@@ -236,6 +236,75 @@ class TaskResult(_JsonSerializable):
         return cls.from_dict(json.loads(payload))
 
 
+# ── Research comparison ─────────────────────────────────────────────
+
+
+def compare_task_results(a: TaskResult, b: TaskResult) -> dict[str, Any]:
+    """Diff two TaskResults for side-by-side research comparison.
+
+    Modeled on ``ReplayEngine.compare_replays()``. Returns a flat dict
+    with numeric deltas, boolean change flags, and a truncated text diff
+    of the aggregated outputs.
+
+    Args:
+        a: The first (earlier) task result.
+        b: The second (later) task result.
+
+    Returns:
+        Dict with cost/token/duration/worker deltas, ``output_changed``,
+        ``status_changed``, ``output_diff`` (truncated unified diff), and
+        ``identical``.
+    """
+    import difflib
+
+    def _output(tr: TaskResult) -> str:
+        return (
+            tr.aggregated_output
+            or tr.synthesized_output
+            or (tr.worker_results[0].output if tr.worker_results else "")
+            or ""
+        )
+
+    out_a = _output(a)
+    out_b = _output(b)
+
+    # Build a concise unified diff (first 80 lines).
+    diff_lines = list(
+        difflib.unified_diff(
+            out_a.splitlines(keepends=True),
+            out_b.splitlines(keepends=True),
+            fromfile="run_a",
+            tofile="run_b",
+            n=2,
+        )
+    )
+    output_diff = "".join(diff_lines[:80])
+    if len(diff_lines) > 80:
+        output_diff += f"\n... ({len(diff_lines) - 80} more diff lines)"
+
+    return {
+        "a_cost": a.total_cost,
+        "b_cost": b.total_cost,
+        "cost_delta": b.total_cost - a.total_cost,
+        "a_tokens": a.total_tokens,
+        "b_tokens": b.total_tokens,
+        "token_delta": b.total_tokens - a.total_tokens,
+        "a_duration": a.duration_seconds,
+        "b_duration": b.duration_seconds,
+        "duration_delta": b.duration_seconds - a.duration_seconds,
+        "a_worker_count": len(a.worker_results),
+        "b_worker_count": len(b.worker_results),
+        "worker_count_delta": len(b.worker_results) - len(a.worker_results),
+        "a_output_length": len(out_a),
+        "b_output_length": len(out_b),
+        "output_length_delta": len(out_b) - len(out_a),
+        "output_changed": out_a != out_b,
+        "status_changed": a.status != b.status,
+        "output_diff": output_diff,
+        "identical": a.to_dict() == b.to_dict(),
+    }
+
+
 @dataclass
 class SwarmTask(_JsonSerializable):
     """Definition of a swarm task handled by the orchestration engine."""

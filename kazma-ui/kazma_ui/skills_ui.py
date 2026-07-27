@@ -28,7 +28,24 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
     router = APIRouter(tags=["skills"])
 
-    async def _get_installed_skills() -> list[dict[str, Any]]:
+    def _localize_skill_desc(name: str, description: str, lang: str) -> str:
+        """Prefer skill.desc.{name} i18n when present."""
+        try:
+            from kazma_ui.i18n import t as i18n_t
+
+            for key in (
+                f"skill.desc.{name}",
+                f"skill.desc.{name.replace('_', '-')}",
+                f"skill.desc.{name.replace('-', '_')}",
+            ):
+                loc = i18n_t(key, lang=lang)
+                if loc and loc != key:
+                    return loc
+        except Exception:
+            pass
+        return description or ""
+
+    async def _get_installed_skills(lang: str = "en") -> list[dict[str, Any]]:
         """Get list of installed skills from native skills dir + hub.
 
         Only real skill bundles are shown — low-level built-in tools
@@ -67,11 +84,12 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     if name in seen_names:
                         continue
                     seen_names.add(name)
+                    raw_desc = manifest.get("description", "")
                     skills.append({
                         "id": f"native:{skill_dir.name}",
                         "name": name,
                         "version": manifest.get("version", "1.0.0"),
-                        "description": manifest.get("description", ""),
+                        "description": _localize_skill_desc(name, raw_desc, lang),
                         "author": manifest.get("author", "kazma"),
                         "enabled": True,
                         "security_score": manifest.get("security_score", 100),
@@ -100,7 +118,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     "id": f"kazma-hub://{m.data.get('author', '')}/{name}@{m.data.get('version', '')}",
                     "name": name,
                     "version": m.data.get("version", ""),
-                    "description": m.data.get("description", ""),
+                    "description": _localize_skill_desc(
+                        name, m.data.get("description", ""), lang
+                    ),
                     "author": m.data.get("author", ""),
                     "enabled": True,
                     "security_score": 100,
@@ -123,7 +143,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     "id": f"agent-skill:{skill.name}",
                     "name": skill.name,
                     "version": skill.version or "—",
-                    "description": skill.description,
+                    "description": _localize_skill_desc(
+                        skill.name, skill.description or "", lang
+                    ),
                     "author": skill.author or skill.source or "agent-skills",
                     "enabled": skill.enabled,
                     "security_score": 100,
@@ -161,10 +183,14 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             logger.warning("Failed to search hub: %s", e)
             return []
 
+    def _request_lang(request: Request) -> str:
+        lang = request.cookies.get("kazma-lang") or "en"
+        return lang if lang in ("ar", "en") else "en"
+
     @router.get("/skills", response_class=HTMLResponse)
     async def skills_page(request: Request) -> HTMLResponse:
         """Render the skills management page."""
-        installed = await _get_installed_skills()
+        installed = await _get_installed_skills(lang=_request_lang(request))
         return templates.TemplateResponse(
             request,
             "skills.html",
@@ -177,14 +203,23 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         )
 
     @router.get("/api/skills")
-    async def api_list_skills() -> list[dict[str, Any]]:
-        """List installed skills."""
-        return await _get_installed_skills()
+    async def api_list_skills(request: Request) -> list[dict[str, Any]]:
+        """List installed skills (descriptions localized to UI language)."""
+        return await _get_installed_skills(lang=_request_lang(request))
 
     @router.get("/api/skills/hub/search")
-    async def api_search_hub(q: str = "") -> list[dict[str, Any]]:
+    async def api_search_hub(request: Request, q: str = "") -> list[dict[str, Any]]:
         """Search the Kazma Hub."""
-        return await _search_hub(q)
+        results = await _search_hub(q)
+        lang = _request_lang(request)
+        for r in results:
+            if isinstance(r, dict):
+                r["description"] = _localize_skill_desc(
+                    str(r.get("name") or ""),
+                    str(r.get("description") or ""),
+                    lang,
+                )
+        return results
 
     @router.post("/api/skills/install")
     async def api_install_skill(req: SkillInstallRequest) -> dict[str, str]:

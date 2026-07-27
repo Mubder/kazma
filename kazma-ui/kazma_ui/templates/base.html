@@ -6,10 +6,15 @@
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
     <link rel="shortcut icon" href="/favicon.ico">
-    {# Arabic web font (Cairo) — loaded preconnect for performance. #}
+    {# Web fonts — loaded with preconnect for performance. Inter is the
+       primary English face (sharp at small sizes, tabular numerals);
+       Rubik is the Arabic face (shaping-correct, matches Latin Rubik
+       metrics for sync); Calibri + Cairo are fallbacks. All declared in
+       <head> so they load in parallel rather than waiting for the
+       kazma.css @import waterfall. #}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
     {% block head %}{% endblock %}
     {% block head_extra %}{% endblock %}
@@ -114,6 +119,12 @@
         };
     </script>
 
+    {# WebSocket auth token for browser WS connections (query param fallback) #}
+    {% set ws_token = ws_token() if ws_token is callable else ws_token %}
+    {% if ws_token %}
+    <meta name="kazma-ws-token" content="{{ ws_token }}">
+    {% endif %}
+
     {# ES module cache-bust: relative imports from app.js resolve to absolute
        /static/js/modules/* URLs; map them to versioned paths so nav.js edits
        are picked up without a hard empty-cache reload. #}
@@ -134,6 +145,8 @@
 
     {# SVG icon registry (global — loaded before page scripts) #}
     <script src="/static/js/icons.js?v={{ js_version() }}"></script>
+    {# Bidirectional text (mixed Arabic/English) — both LTR and RTL UI #}
+    <script src="/static/js/bidi.js?v={{ js_version() }}"></script>
 
     {# HTMX #}
     <script src="/static/js/htmx.min.js"></script>

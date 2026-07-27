@@ -37,28 +37,41 @@ class SettingsPanel(VerticalScroll):
     """
 
     DEFAULT_CSS = """
-    SettingsPanel { 
-        height: 1fr; 
-        background: $surface; 
+    SettingsPanel {
+        height: 1fr;
+        background: $surface;
         padding: 1 2;
     }
     SettingsPanel .settings-section {
         margin: 1 0;
-        padding: 1;
+        padding: 1 2;
         background: $panel;
-        border: solid $border;
+        border: tall $border;
     }
     SettingsPanel .settings-title {
         color: $primary;
         text-style: bold;
         margin-bottom: 1;
     }
+    SettingsPanel .settings-hint {
+        color: $text-muted;
+        margin-bottom: 1;
+        height: auto;
+    }
+    SettingsPanel .section-label {
+        color: $primary;
+        text-style: bold;
+        height: 1;
+        margin-bottom: 1;
+    }
     SettingsPanel .theme-buttons {
-        align: center middle;
+        align: left middle;
+        height: auto;
+        padding: 1 0;
     }
     SettingsPanel .theme-buttons Button {
-        margin: 0 1;
-        min-width: 15;
+        margin: 0 1 0 0;
+        min-width: 12;
     }
     """
 
@@ -68,6 +81,10 @@ class SettingsPanel(VerticalScroll):
 
     SETTINGS = [
         ("Enable RAG memory", "memory.enabled", True),
+        ("Per-turn memory retrieval", "memory.per_turn_retrieval", True),
+        ("Auto-store durable facts", "memory.auto_store", True),
+        ("Memory consolidator (librarian)", "memory.consolidation.enabled", True),
+        ("Consolidator use LLM", "memory.consolidation.use_llm", True),
         ("Enable auto-summarization", "context.auto_summarize", True),
         ("Enable cost breaker", "cost.breaker_enabled", True),
         ("Enable tracing", "tracing.enabled", False),
@@ -100,12 +117,17 @@ class SettingsPanel(VerticalScroll):
         for label, key, default in self.SETTINGS:
             self._last_saved[key] = self._read_config(key, default)
 
-        yield Static("Settings", classes="section-label")
+        yield Static("  SETTINGS  ·  features · memory · safety", classes="section-label")
 
         # Feature Toggles Section
         with Container(classes="settings-section"):
-            yield Static("Feature Toggles", classes="settings-title")
-            sel: SelectionList = SelectionList()
+            yield Static("Feature & memory toggles", classes="settings-title")
+            yield Static(
+                "[dim]Memory flags use ConfigStore (overrides kazma.yaml). "
+                "Consolidator writes facts + graph triples after turns.[/]",
+                classes="settings-hint",
+            )
+            sel: SelectionList = SelectionList(id="settings-toggles")
             for label, key, default in self.SETTINGS:
                 initial = self._read_config(key, default)
                 sel.add_option((label, key, initial))

@@ -15,29 +15,36 @@
   const POLL_INTERVAL_MS = 5000;
   const containerId = 'hitl-approvals-panel';
 
-  /**
-   * Build the headers for an approval/deny request.
-   * @returns {Object<string, string>}
-   */
+  function t(key, fallback) {
+    try {
+      if (typeof window.t === 'function') {
+        var v = window.t(key);
+        if (v && v !== key) return v;
+      }
+    } catch (e) { /* ignore */ }
+    return fallback || key;
+  }
+
+  function safeIcon(name) {
+    try {
+      if (window.KazmaIcons && typeof KazmaIcons.span === 'function') {
+        var html = KazmaIcons.span(name);
+        return (html && html !== 'undefined') ? html : '';
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+
   function approvalHeaders() {
     return { 'Content-Type': 'application/json' };
   }
 
-  /**
-   * Escape HTML to prevent injection from tool arguments.
-   * @param {string} text
-   * @returns {string}
-   */
   function escapeHtml(text) {
     var div = document.createElement('div');
-    div.textContent = String(text);
+    div.textContent = String(text == null ? '' : text);
     return div.innerHTML;
   }
 
-  /**
-   * Render the list of pending approvals into the panel.
-   * @param {Array<Object>} pending
-   */
   function renderApprovals(pending) {
     var panel = document.getElementById(containerId);
     if (!panel) return;
@@ -45,12 +52,20 @@
     var list = panel.querySelector('.hitl-approval-list');
     var badge = panel.querySelector('.hitl-approval-count');
     var empty = panel.querySelector('.hitl-approval-empty');
+    var clearBtn = document.getElementById('hitl-clear-all-btn');
 
     if (!list) return;
+
+    if (!Array.isArray(pending)) pending = [];
 
     if (badge) {
       badge.textContent = String(pending.length);
       badge.style.display = pending.length > 0 ? 'inline-block' : 'none';
+    }
+
+    if (clearBtn) {
+      clearBtn.style.display = pending.length > 0 ? 'inline-block' : 'none';
+      clearBtn.textContent = t('dashboard.clear_all', 'Clear All');
     }
 
     if (pending.length === 0) {
@@ -65,31 +80,37 @@
 
     list.innerHTML = pending.map(function (item) {
       var threadId = escapeHtml(item.thread_id || '');
-      var toolName = escapeHtml(item.tool_name || 'unknown');
-      var message = escapeHtml(item.message || '');
-      var argsStr = escapeHtml(JSON.stringify(item.arguments || {}, null, 2));
+      var toolName = escapeHtml(item.tool_name || item.tool || 'unknown');
+      if (toolName === 'undefined' || toolName === 'null') toolName = 'unknown';
+      var message = item.message != null ? String(item.message) : '';
+      if (message === 'undefined' || message === 'null') message = '';
+      message = escapeHtml(message);
+      var argsStr = escapeHtml(JSON.stringify(item.arguments || item.args || {}, null, 2));
+      var icon = safeIcon('wrench');
 
       return (
         '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
         '  <div class="hitl-approval-header">' +
         '    <span class="hitl-tool-name">' +
-        (window.KazmaIcons ? KazmaIcons.span('wrench') : '') + ' ' + toolName + '</span>' +
-        '    <span class="hitl-thread-id">' + threadId + '</span>' +
+        (icon ? icon + ' ' : '') + toolName + '</span>' +
+        (threadId
+          ? '    <span class="hitl-thread-id" title="thread">' + threadId + '</span>'
+          : '') +
         '  </div>' +
-        (message ? '<div class="hitl-approval-message">' + message + '</div>' : '') +
+        (message ? '<div class="hitl-approval-message" dir="auto">' + message + '</div>' : '') +
         '  <div class="hitl-approval-args"><pre>' + argsStr + '</pre></div>' +
         '  <div class="hitl-approval-actions">' +
         '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '" data-scope="once">' +
-        '      ' + (window.KazmaIcons ? KazmaIcons.span('check') : '') + ' Once' +
+        '      ' + safeIcon('check') + ' ' + t('dashboard.hitl_once', 'Once') +
         '    </button>' +
         '    <button class="btn btn-sm btn-primary hitl-approve-tool-btn" data-thread-id="' + threadId + '" data-scope="tool" data-tool="' + toolName + '">' +
-        '      Allow tool' +
+        '      ' + t('dashboard.hitl_allow_tool', 'Allow tool') +
         '    </button>' +
         '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
-        '      YOLO' +
+        '      ' + t('dashboard.hitl_yolo', 'YOLO') +
         '    </button>' +
         '    <button class="btn btn-sm btn-danger hitl-deny-btn" data-thread-id="' + threadId + '">' +
-        '      ' + (window.KazmaIcons ? KazmaIcons.span('x') : '') + ' Deny' +
+        '      ' + safeIcon('x') + ' ' + t('dashboard.hitl_deny', 'Deny') +
         '    </button>' +
         '    <span class="hitl-approval-status" style="display:none;"></span>' +
         '  </div>' +
@@ -97,7 +118,6 @@
       );
     }).join('');
 
-    // Wire up buttons
     list.querySelectorAll('.hitl-approve-btn, .hitl-approve-tool-btn, .hitl-approve-yolo-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         submitApproval(
@@ -116,12 +136,6 @@
     });
   }
 
-  /**
-   * Submit an approval or denial.
-   * @param {string} threadId
-   * @param {boolean} approve
-   * @param {HTMLElement} btn - the clicked button
-   */
   async function submitApproval(threadId, approve, btn, scope, tool) {
     var card = btn.closest('.hitl-approval-card');
     var statusEl = card ? card.querySelector('.hitl-approval-status') : null;
@@ -129,67 +143,113 @@
     scope = scope || 'once';
     tool = tool || '';
 
-    // Disable buttons while request is in-flight
     buttons.forEach(function (b) { b.disabled = true; });
     if (statusEl) {
-      statusEl.textContent = approve ? 'Approving…' : 'Denying…';
+      statusEl.textContent = approve
+        ? t('dashboard.hitl_approving', 'Approving…')
+        : t('dashboard.hitl_denying', 'Denying…');
       statusEl.style.display = 'inline-block';
     }
 
-    try {
-      var resp = await fetch('/api/approve/' + encodeURIComponent(threadId), {
-        method: 'POST',
-        headers: approvalHeaders(),
-        body: JSON.stringify({
-          action: approve ? 'approve' : 'deny',
-          scope: scope,
-          tool: tool,
-        }),
-        credentials: 'same-origin',
-      });
+    var payload = {
+      action: approve ? 'approve' : 'deny',
+      scope: scope,
+      tool: tool,
+    };
 
-      if (resp.status === 202) {
-        if (statusEl) {
-          if (window.KazmaIcons) {
-            statusEl.innerHTML = approve
-              ? (KazmaIcons.span('check') + ' Approved — agent resuming')
-              : (KazmaIcons.span('x') + ' Denied');
-          } else {
-            statusEl.textContent = approve ? 'Approved — agent resuming' : 'Denied';
+    var url = '/api/approve/' + encodeURIComponent(threadId);
+
+    if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+      window.KazmaApp.setIsThinking(
+        true,
+        approve
+          ? t('dashboard.hitl_running', 'Running approved tool…')
+          : t('dashboard.hitl_denying', 'Denying…')
+      );
+    }
+
+    var sseFn = (window.KazmaStream && (KazmaStream.ssePost || KazmaStream.sse));
+    if (!sseFn) {
+      if (statusEl) {
+        statusEl.style.display = 'inline';
+        statusEl.textContent = t('dashboard.hitl_stream_unavailable', 'Streaming unavailable');
+        statusEl.className = 'hitl-approval-status hitl-status-error';
+      }
+      if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+        window.KazmaApp.setIsThinking(false);
+      }
+      return;
+    }
+    sseFn(url, payload, {
+      onEvent: function(type, data) {
+        if (type === 'status' && data && data.content && statusEl) {
+          statusEl.textContent = data.content;
+          if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+            window.KazmaApp.setIsThinking(true, data.content);
           }
+        }
+      },
+      onToken: function(d) {
+        if (window.KazmaApp) {
+          if (window.KazmaApp.setIsThinking) window.KazmaApp.setIsThinking(false);
+          if (window.KazmaApp.appendToken && d && d.content) {
+            window.KazmaApp.appendToken(d.content);
+          }
+        }
+      },
+      onToolCall: function(d) {
+        if (window.KazmaApp) {
+          if (window.KazmaApp.setIsThinking) {
+            window.KazmaApp.setIsThinking(
+              true,
+              t('dashboard.hitl_executing', 'Executing tool: {name}…').replace(
+                '{name}',
+                (d && d.name) || 'tool'
+              )
+            );
+          }
+          if (window.KazmaApp.addToolCall) window.KazmaApp.addToolCall(d);
+        }
+      },
+      onDone: function(d) {
+        if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+          window.KazmaApp.setIsThinking(false);
+        }
+        if (statusEl) {
+          statusEl.textContent = approve
+            ? t('dashboard.hitl_approved', 'Approved — complete')
+            : t('dashboard.hitl_denied', 'Denied');
           statusEl.className = 'hitl-approval-status hitl-status-' + (approve ? 'ok' : 'denied');
         }
-        // Remove the card after a short delay
         setTimeout(function () {
           if (card) card.remove();
           refreshPending();
         }, 1500);
-      } else if (resp.status === 401) {
-        if (statusEl) {
-          statusEl.textContent = '⚠ Unauthorized (invalid secret)';
-          statusEl.className = 'hitl-approval-status hitl-status-error';
+      },
+      onError: function(err) {
+        if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+          window.KazmaApp.setIsThinking(false);
         }
-        buttons.forEach(function (b) { b.disabled = false; });
-      } else {
-        var data = await resp.json().catch(function () { return {}; });
         if (statusEl) {
-          statusEl.textContent = '⚠ Error: ' + (data.error || resp.statusText);
+          statusEl.innerHTML =
+            '⚠ ' + escapeHtml(err) +
+            ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
+            t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
           statusEl.className = 'hitl-approval-status hitl-status-error';
+          var dismissLink = statusEl.querySelector('.hitl-dismiss-link');
+          if (dismissLink) {
+            dismissLink.addEventListener('click', function(e) {
+              e.preventDefault();
+              if (card) card.remove();
+              refreshPending();
+            });
+          }
         }
         buttons.forEach(function (b) { b.disabled = false; });
       }
-    } catch (err) {
-      if (statusEl) {
-        statusEl.textContent = '⚠ Network error';
-        statusEl.className = 'hitl-approval-status hitl-status-error';
-      }
-      buttons.forEach(function (b) { b.disabled = false; });
-    }
+    });
   }
 
-  /**
-   * Fetch pending approvals from the API and re-render.
-   */
   async function refreshPending() {
     try {
       var resp = await fetch('/api/pending-approvals', { credentials: 'same-origin' });
@@ -201,33 +261,40 @@
     }
   }
 
-  /**
-   * Initialize the HITL approval panel: inject markup, poll, and
-   * listen for manual refresh requests.
-   */
   function initHitlApproval() {
-    // Only init once
+    var clearBtn = document.getElementById('hitl-clear-all-btn');
+    if (clearBtn && !clearBtn.dataset.wired) {
+      clearBtn.dataset.wired = 'true';
+      clearBtn.textContent = t('dashboard.clear_all', 'Clear All');
+      clearBtn.addEventListener('click', async function () {
+        if (!confirm(t('dashboard.clear_all_confirm', 'Clear all pending approvals?'))) return;
+        clearBtn.disabled = true;
+        try {
+          await fetch('/api/pending-approvals/clear', { method: 'POST', credentials: 'same-origin' });
+        } catch (e) {}
+        clearBtn.disabled = false;
+        refreshPending();
+      });
+    }
+
     if (document.getElementById(containerId)) {
       refreshPending();
+      setInterval(refreshPending, POLL_INTERVAL_MS);
+      window.KazmaHITL = { refresh: refreshPending };
       return;
     }
 
-    // The panel markup is already in the dashboard template; just wire polling.
     refreshPending();
     setInterval(refreshPending, POLL_INTERVAL_MS);
-
-    // Allow other scripts to trigger a manual refresh
     window.KazmaHITL = { refresh: refreshPending };
   }
 
-  // Initialize on DOMContentLoaded
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initHitlApproval);
   } else {
     initHitlApproval();
   }
 
-  // Expose for testing
   window.__hitl_approval__ = {
     renderApprovals: renderApprovals,
     refreshPending: refreshPending,

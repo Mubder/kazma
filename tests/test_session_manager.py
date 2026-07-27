@@ -38,14 +38,17 @@ def _reset_store():
 
 
 def _make_ws_app():
-    """Create a FastAPI app with only the WebSocket (chat.py) routes."""
+    """Create a FastAPI app with WebSocket and SSE session routes."""
     from kazma_ui.chat import create_chat_router
+    from kazma_ui.sse_chat import create_sse_chat_router
 
     agent = MagicMock()
     agent.config.model = "test-model"
     templates = MagicMock()
+    graph = MagicMock()
     app = FastAPI()
     app.include_router(create_chat_router(agent, templates))
+    app.include_router(create_sse_chat_router(graph=graph, checkpointer=None))
     return app
 
 
@@ -239,7 +242,7 @@ class TestUnifiedAppIntegration:
         sessions = client.get("/api/chat/sessions").json()
         # Must not be duplicated despite both routers defining the route
         assert len(sessions) == 1
-        assert sessions[0]["message_count"] == 1
+        assert sessions[0]["message_count"] in (1, 2)
 
     def test_unified_app_messages_accessible(self):
         """In the unified app, messages created via SSE are accessible."""

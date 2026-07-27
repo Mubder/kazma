@@ -25,7 +25,9 @@ from .hitl import (
 )
 from .commands import (
     _try_ide_command,
+    _try_kb_command,
     _try_model_command,
+    _try_research_command,
     _try_skill_command,
     _try_swarm_command,
     _build_slash_ctx,
@@ -354,7 +356,10 @@ def create_graph_handler(
         # ── Build platform-agnostic state ──────────────────────────
         state = await _build_initial_state(msg, _store)
 
-        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        config = {
+            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+            "recursion_limit": 100,
+        }
 
         # ── Interactive model selector (/models, /_models_provider, /_models_select) ──
         model_handled = await _try_model_command(msg, _store, manager, thread_id)
@@ -569,6 +574,32 @@ def create_graph_handler(
             ))
             return
 
+        # ── /replay <n>: Restore from a snapshot (rewind in-place) ──
+        replay_match = _extract_replay_command(msg.text)
+        if replay_match is not None:
+            replay_result = await _handle_replay(thread_id, config, replay_match)
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            replay_text, replay_ctx = _prepare_tg_outbound(msg, replay_result, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=replay_text,
+                context_metadata=replay_ctx,
+            ))
+            return
+
+        # ── /fork <n>: Branch from a snapshot into a new thread ────
+        fork_match = _extract_fork_command(msg.text)
+        if fork_match is not None:
+            fork_result = await _handle_fork(thread_id, config, fork_match, msg, _store, sender)
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            fork_text, fork_ctx = _prepare_tg_outbound(msg, fork_result, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=fork_text,
+                context_metadata=fork_ctx,
+            ))
+            return
+
         # ── Slash-command intercept (/model, /help, /reset, etc.) ──
         # Resolve common commands without an LLM call. This keeps
         # responses instant and saves tokens.
@@ -618,6 +649,22 @@ def create_graph_handler(
         )
         if ide_handled:
             return  # IDE command handled, skip graph
+
+        # ── Knowledge Library slash-command intercept ───────────────
+        # /kb list|add|crawl|search|status|delete manages Knowledge
+        # Libraries (ingested doc corpora used by the knowledge_search
+        # tool). Skip the graph on any /kb command.
+        kb_handled = await _try_kb_command(
+            msg, _store, manager, thread_id,
+        )
+        if kb_handled:
+            return  # /kb command handled, skip graph
+
+        research_handled = await _try_research_command(
+            msg, _store, manager, thread_id,
+        )
+        if research_handled:
+            return
 
         # ── Agent Skills slash-command intercept ──────────────────
         # /skill install|list|… installs SKILL.md skills without LLM thrash.
@@ -799,6 +846,37 @@ def create_graph_handler(
                     exc_info=True,
                 )
 
+            # ── Knowledge Library auto-inject (Phase 2) ────────────
+            # For libraries with ``auto_inject=1``, fold the top-k chunks
+            # relevant to this user message into the prompt — fenced as
+            # untrusted data (doc content may be adversarial).  Kill switch
+            # ``KAZMA_KB_AUTO_INJECT=0`` checked live inside the getter.
+            try:
+                from kazma_core.safety.prompt_fence import format_untrusted_block
+                from kazma_core.stores.knowledge_index import (
+                    get_knowledge_auto_inject_block,
+                )
+
+                kb_block = await get_knowledge_auto_inject_block(msg.text or "")
+                if kb_block:
+                    msgs = list(state.get("messages") or [])
+                    kb_sys = {
+                        "role": "system",
+                        "content": format_untrusted_block(kb_block, source="knowledge"),
+                    }
+                    insert_at = 0
+                    for i, m in enumerate(msgs):
+                        if isinstance(m, dict) and m.get("role") == "user":
+                            insert_at = i
+                            break
+                    msgs.insert(insert_at, kb_sys)
+                    state = {**state, "messages": msgs}
+            except Exception:
+                logger.debug(
+                    "[agent-handler] knowledge auto-inject skipped",
+                    exc_info=True,
+                )
+
             # ── Invoke graph ───────────────────────────────────────
             start = time.monotonic()
             try:
@@ -815,12 +893,19 @@ def create_graph_handler(
                     ctx = await _store.get(thread_id)
                     if not ctx:
                         ctx = msg.context_metadata
-                    prompt = _build_approval_prompt(hitl_payload, thread_id)
-                    # reply_markup travels inside context_metadata — the
-                    # Telegram adapter reads it from there.
+                    prompt = _build_approval_prompt(
+                        hitl_payload, thread_id, platform=msg.platform
+                    )
+                    # Interactive controls travel in context_metadata:
+                    # Telegram → reply_markup, Discord → components, Slack → blocks.
                     prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
                     if prompt.get("markup"):
-                        send_ctx["reply_markup"] = prompt["markup"]
+                        if msg.platform == "telegram":
+                            send_ctx["reply_markup"] = prompt["markup"]
+                        elif msg.platform == "discord":
+                            send_ctx["components"] = prompt["markup"]
+                        elif msg.platform == "slack":
+                            send_ctx["blocks"] = prompt["markup"]
                     await manager.send(
                         OutboundMessage(
                             target_id=_build_target_id(msg.platform, ctx),
@@ -924,7 +1009,13 @@ def create_graph_handler(
                 # so crash-recovery routing can rehydrate the platform context
                 # (chat_id, user_id) on the next inbound message. Stale
                 # entries are evicted lazily by TTL below.
-                ctx = await _store.get(thread_id)
+                ctx = dict(await _store.get(thread_id) or {})
+                # Turn-scoped voice flag: only this inbound may request TTS.
+                # Prefer live msg metadata over a sticky store value.
+                if msg.context_metadata.get("voice_transcribed"):
+                    ctx["voice_transcribed"] = True
+                else:
+                    ctx.pop("voice_transcribed", None)
 
                 # Convert Markdown → Telegram HTML so bold/code/etc. render
                 # instead of showing literal ** markers (which legacy Markdown
@@ -1071,6 +1162,137 @@ def create_graph_handler(
         except Exception as exc:
             logger.warning("[agent-handler] /edit failed: %s", exc, exc_info=True)
             return corrected_text, f"⚠️ Could not edit: {exc}"
+
+    # ── /replay <n> + /fork <n>: Time-travel restore + branch ────────
+
+    def _extract_replay_command(text: str | None) -> int | None:
+        """Extract the iteration from ``/replay <n>``.
+
+        Returns the int iteration, or None if the text isn't a numeric
+        /replay command. Bare ``/replay`` (no arg) and ``/replay list``
+        etc. return None (handled by the slash resolver).
+        """
+        if not text:
+            return None
+        parts = text.strip().split()
+        if len(parts) != 2 or parts[0].lower() != "/replay":
+            return None
+        try:
+            return int(parts[1])
+        except (ValueError, TypeError):
+            return None
+
+    def _extract_fork_command(text: str | None) -> int | None:
+        """Extract the iteration from ``/fork <n>``."""
+        if not text:
+            return None
+        parts = text.strip().split()
+        if parts[0].lower() != "/fork":
+            return None
+        if len(parts) < 2:
+            return 0  # bare /fork → show usage
+        try:
+            return int(parts[1])
+        except (ValueError, TypeError):
+            return None
+
+    async def _handle_replay(thread_id: str, config: dict[str, Any], iteration: int) -> str:
+        """Restore a snapshot in-place: rewind the live thread to *iteration*."""
+        try:
+            from kazma_core.time_travel import create_recorder, ReplayEngine
+
+            recorder = create_recorder()
+            engine = ReplayEngine(recorder)
+            state = engine.replay_from(thread_id, iteration)
+            if state is None:
+                return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
+
+            # Write the snapshot state back to the live thread checkpoint.
+            msg_count = len(state.get("messages", []))
+            model = state.get("last_model", "unknown")
+            await graph.aupdate_state(config, {"messages": state.get("messages", [])})
+            logger.info(
+                "[agent-handler] /replay restored thread=%s iter=%d msgs=%d",
+                thread_id, iteration, msg_count,
+            )
+            return (
+                f"🕰️ *Restored from iteration {iteration}.*\n\n"
+                f"The conversation has been rewound to that point.\n"
+                f"  Messages: {msg_count}\n"
+                f"  Model: {model}\n\n"
+                f"Your next message continues from here."
+            )
+        except Exception as exc:
+            logger.warning("[agent-handler] /replay failed: %s", exc, exc_info=True)
+            return f"⚠️ Could not replay iteration `{iteration}`: {exc}"
+
+    async def _handle_fork(
+        thread_id: str, config: dict[str, Any], iteration: int,
+        msg: Any, _store: Any, sender: str,
+    ) -> str:
+        """Fork from a snapshot into a NEW thread (original stays intact)."""
+        if iteration == 0:
+            return "✏️ *Usage:* `/fork <iteration>` — branches from that snapshot into a new thread.\n\nUse `/replay list` to see available iterations."
+
+        try:
+            import uuid
+
+            from kazma_core.time_travel import create_recorder, ReplayEngine
+
+            recorder = create_recorder()
+            engine = ReplayEngine(recorder)
+            state = engine.replay_from(thread_id, iteration)
+            if state is None:
+                return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
+
+            # Mint a new thread id (copy /new pattern).
+            new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
+
+            # Override thread identity in the state for the new branch.
+            state["thread_id"] = new_thread_id
+            gw = state.get("_gateway") or {}
+            gw["thread_id"] = new_thread_id
+            state["_gateway"] = gw
+
+            # Seed the new thread with the snapshot state.
+            new_config = {"configurable": {"thread_id": new_thread_id, "checkpoint_ns": ""}}
+            await graph.aupdate_state(new_config, {"messages": state.get("messages", [])})
+            logger.info("[agent-handler] /fork seeded new thread=%s from %s iter=%d", new_thread_id, thread_id, iteration)
+
+            # Copy platform context so the fork can route replies.
+            try:
+                src_ctx = await _store.get(thread_id)
+                if src_ctx:
+                    await _store.put(new_thread_id, src_ctx)
+            except Exception:
+                logger.debug("[agent-handler] /fork: could not copy session context", exc_info=True)
+
+            # Create a Web UI session for the fork (visible in the sidebar).
+            try:
+                from kazma_ui.session_manager import get_session_manager, ChatSession
+
+                web_store = get_session_manager()
+                username = msg.context_metadata.get("username") or "fork"
+                web_session = ChatSession(
+                    session_id=new_thread_id,
+                    thread_id=new_thread_id,
+                    title=f"Fork of {username} (iter {iteration})",
+                    messages=state.get("messages", []),
+                )
+                web_store.put(web_session)
+            except Exception:
+                logger.debug("[agent-handler] /fork: could not create Web UI session", exc_info=True)
+
+            msg_count = len(state.get("messages", []))
+            return (
+                f"🌿 *Forked from iteration {iteration} into a new thread.*\n\n"
+                f"  New thread: `{new_thread_id}`\n"
+                f"  Messages carried over: {msg_count}\n\n"
+                f"The original thread is unchanged. The fork is available in the Web UI sidebar."
+            )
+        except Exception as exc:
+            logger.warning("[agent-handler] /fork failed: %s", exc, exc_info=True)
+            return f"⚠️ Could not fork from iteration `{iteration}`: {exc}"
 
     # ── Register telegram backend with core's send_message dispatcher ──
     try:

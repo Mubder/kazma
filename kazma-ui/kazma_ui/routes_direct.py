@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Request, WebSocket
@@ -52,13 +53,31 @@ def register_direct_routes(self: Any) -> None:
         import glob as _glob_sys
         import os as _os_sys
 
-        paths = {
-            "kazma_home": str(_os_sys.path.expanduser("~/.kazma")),
-            "config_db": str(_os_sys.path.expanduser("~/.kazma/config.db")),
-            "config_yaml": next(iter(_glob_sys.glob(_os_sys.path.expanduser("~/.kazma/*.yaml"))), ""),
-            "pending_evolution": str(_os_sys.path.expanduser("~/.kazma/pending_evolution.json")),
-            "knowledge_graph": str(_os_sys.path.expanduser("kazma-data/knowledge_graph.json")),
-        }
+        try:
+            from kazma_core.paths import data_dir, settings_db, user_home
+
+            _home = user_home()
+            paths = {
+                "kazma_home": str(_home),
+                "config_db": settings_db(),
+                "config_yaml": next(iter(_glob_sys.glob(str(_home / "*.yaml"))), ""),
+                "pending_evolution": str(_home / "pending_evolution.json"),
+                "knowledge_graph": str(data_dir() / "knowledge_graph.db"),
+            }
+        except Exception:
+            paths = {
+                "kazma_home": str(_os_sys.path.expanduser("~/.kazma")),
+                "config_db": str(_os_sys.path.expanduser("~/.kazma/config.db")),
+                "config_yaml": next(
+                    iter(_glob_sys.glob(_os_sys.path.expanduser("~/.kazma/*.yaml"))), ""
+                ),
+                "pending_evolution": str(
+                    _os_sys.path.expanduser("~/.kazma/pending_evolution.json")
+                ),
+                "knowledge_graph": str(
+                    _os_sys.path.expanduser("kazma-data/knowledge_graph.json")
+                ),
+            }
         # Flush model registry cache
         try:
             import kazma_core.model_registry as _mr
@@ -89,14 +108,31 @@ def register_direct_routes(self: Any) -> None:
     async def _system_config_paths():
         import os as _osp
 
-        home = _osp.path.expanduser("~/.kazma")
+        try:
+            from kazma_core.paths import data_dir, settings_db, snapshots_db, user_home
+
+            home = str(user_home())
+            cfg = settings_db()
+            kg = str(data_dir() / "knowledge_graph.db")
+            snap = snapshots_db()
+            pending = str(user_home() / "pending_evolution.json")
+        except Exception:
+            home = _osp.path.expanduser("~/.kazma")
+            cfg = _osp.path.join(home, "config.db")
+            kg = _osp.path.expanduser("kazma-data/knowledge_graph.json")
+            snap = _osp.path.expanduser("kazma-data/snapshots.db")
+            pending = _osp.path.join(home, "pending_evolution.json")
         return {
             "kazma_home": home,
-            "config_db": _osp.path.join(home, "config.db") if _osp.path.exists(_osp.path.join(home, "config.db")) else "NOT FOUND",
-            "swarm_registry": _osp.path.expanduser("swarm_registry.json") if _osp.path.exists(_osp.path.expanduser("swarm_registry.json")) else "NOT FOUND",
-            "pending_evolution": _osp.path.join(home, "pending_evolution.json") if _osp.path.exists(_osp.path.join(home, "pending_evolution.json")) else "NOT FOUND",
-            "knowledge_graph": _osp.path.expanduser("kazma-data/knowledge_graph.json") if _osp.path.exists(_osp.path.expanduser("kazma-data/knowledge_graph.json")) else "NOT FOUND",
-            "snapshots_db": _osp.path.expanduser("kazma-data/snapshots.db") if _osp.path.exists(_osp.path.expanduser("kazma-data/snapshots.db")) else "NOT FOUND",
+            "config_db": cfg if _osp.path.exists(cfg) else "NOT FOUND",
+            "swarm_registry": (
+                _osp.path.expanduser("swarm_registry.json")
+                if _osp.path.exists(_osp.path.expanduser("swarm_registry.json"))
+                else "NOT FOUND"
+            ),
+            "pending_evolution": pending if _osp.path.exists(pending) else "NOT FOUND",
+            "knowledge_graph": kg if _osp.path.exists(kg) else "NOT FOUND",
+            "snapshots_db": snap if _osp.path.exists(snap) else "NOT FOUND",
         }
 
     @self.app.delete("/api/mcp/servers/{server_name}")
@@ -118,17 +154,84 @@ def register_direct_routes(self: Any) -> None:
         logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
         return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
 
-    import kazma_core.swarm.memory.graph as _kg_mod
-
     @self.app.get("/api/memory/graph")
-    async def _memory_graph():
-        kg = _kg_mod.KnowledgeGraph()
-        return kg.to_json()
+    async def _memory_graph(q: str = "", limit: int = 80):
+        """Full graph for vis (optional ``q`` filters to search hits + neighbors)."""
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        kg = get_knowledge_graph()
+        data = kg.to_json()
+        stats = kg.stats()
+        if q and q.strip():
+            hits = kg.search(q.strip(), limit=max(5, min(limit, 100)))
+            hit_ids = {h["id"] for h in hits}
+            # include 1-hop neighbors of hits
+            for hid in list(hit_ids):
+                for rel in kg.query_related(hid, depth=1) or []:
+                    hit_ids.add(rel["id"])
+            data["nodes"] = [n for n in data.get("nodes") or [] if n.get("id") in hit_ids]
+            data["edges"] = [
+                e
+                for e in data.get("edges") or []
+                if e.get("from") in hit_ids and e.get("to") in hit_ids
+            ]
+            data["query"] = q.strip()
+            data["hit_count"] = len(hits)
+        data["stats"] = stats
+        return data
 
     @self.app.get("/api/memory/graph/stats")
     async def _memory_graph_stats():
-        kg = _kg_mod.KnowledgeGraph()
-        return kg.stats()
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        return get_knowledge_graph().stats()
+
+    @self.app.get("/api/memory/graph/search")
+    async def _memory_graph_search(q: str = "", limit: int = 20):
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        if not (q or "").strip():
+            return {"results": [], "query": ""}
+        hits = get_knowledge_graph().search(q.strip(), limit=max(1, min(int(limit), 50)))
+        return {
+            "query": q.strip(),
+            "results": [
+                {
+                    "id": h.get("id"),
+                    "type": h.get("type"),
+                    "label": h.get("label") or h.get("id"),
+                    "content": (h.get("content") or "")[:300],
+                    "score": h.get("score"),
+                }
+                for h in hits
+            ],
+        }
+
+    @self.app.post("/api/memory/graph/clear")
+    async def _memory_graph_clear():
+        """Clear the property graph (destructive — operator confirmation in UI)."""
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        kg = get_knowledge_graph()
+        before = kg.stats()
+        kg.clear()
+        after = kg.stats()
+        return {
+            "ok": True,
+            "cleared_nodes": before.get("nodes", 0),
+            "cleared_edges": before.get("edges", 0),
+            "stats": after,
+        }
+
+    @self.app.get("/api/memory/graph/export")
+    async def _memory_graph_export():
+        """Export L2 property graph as JSON (nodes + edges + stats)."""
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        kg = get_knowledge_graph()
+        data = kg.to_json()
+        data["stats"] = kg.stats()
+        return data
 
     import kazma_core.time_travel as _tt_mod
 
@@ -178,20 +281,26 @@ def register_direct_routes(self: Any) -> None:
             try:
                 conn = sqlite3.connect(fts5_path)
                 cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
-                )
-                if cursor.fetchone():
-                    cursor.execute("SELECT COUNT(*) FROM memory_fts")
-                    fts5_count = cursor.fetchone()[0]
+                # Canonical L3 schema first; legacy memory_fts as fallback.
+                for table in ("memories", "memory_fts", "memory_fts_migrated"):
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=?",
+                        (table,),
+                    )
+                    if cursor.fetchone():
+                        try:
+                            cursor.execute(f"SELECT COUNT(*) FROM [{table}]")
+                            fts5_count = int(cursor.fetchone()[0] or 0)
+                            break
+                        except Exception:
+                            continue
                 conn.close()
             except Exception as _e:
                 logger.debug("fts5 count failed: %s", _e)
-                if "conn" in dir():
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+                try:
+                    conn.close()  # type: ignore[name-defined]
+                except Exception:
+                    pass
 
         vector_size = 0
         if vector_path.exists() and vector_path.is_dir():
@@ -203,13 +312,21 @@ def register_direct_routes(self: Any) -> None:
         from kazma_core.agent.tool_registry import get_vector_memory
 
         vm = get_vector_memory()
-        if vm and not getattr(vm, "degraded", False):
+        if vm is not None:
             try:
                 vector_count = vm.count
                 if callable(vector_count):
                     vector_count = vector_count()
             except Exception as _e:
                 logger.debug("vector count failed: %s", _e)
+
+        graph_stats: dict = {"nodes": 0, "edges": 0, "backend": "sqlite", "path": ""}
+        try:
+            from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+            graph_stats = get_knowledge_graph().stats()
+        except Exception as _e:
+            logger.debug("graph stats failed: %s", _e)
 
         # Per-component green/red board for Memory & Governance UI.
         health: dict = {"components": [], "issues": [], "summary": ""}
@@ -231,12 +348,37 @@ def register_direct_routes(self: Any) -> None:
                 "summary": "health probe failed",
             }
 
+        # Compact feature flags from health components for the KPI strip.
+        flags: dict = {}
+        for c in health.get("components") or []:
+            cid = c.get("id")
+            if cid in (
+                "memory_enabled",
+                "per_turn_retrieval",
+                "auto_store",
+                "consolidation",
+                "embedder",
+                "vector_memory",
+                "layer_l1",
+                "layer_l2",
+                "layer_l3",
+                "layer_l4",
+            ):
+                flags[cid] = {
+                    "ok": bool(c.get("ok")),
+                    "status": c.get("status"),
+                    "detail": c.get("detail"),
+                    "meta": c.get("meta") or {},
+                }
+
         return {
             "status": status,
             "fts5_size": fts5_size,
             "fts5_count": fts5_count,
             "vector_size": vector_size,
             "vector_count": vector_count,
+            "graph": graph_stats,
+            "flags": flags,
             "components": health.get("components", []),
             "issues": health.get("issues", []),
             "summary": health.get("summary", ""),
@@ -612,47 +754,108 @@ def register_direct_routes(self: Any) -> None:
         return resp
 
     @self.app.get("/api/system/packages")
-    async def _get_packages():
+    async def _get_packages(request: Request):
         """List installed Python packages with metadata and extras status."""
         import importlib.metadata as ilm
 
+        lang = request.cookies.get("kazma-lang") or "en"
+        if lang not in ("ar", "en"):
+            lang = "en"
+
+        def _i18n(key: str, fallback: str) -> str:
+            try:
+                from kazma_ui.i18n import t as i18n_t
+
+                loc = i18n_t(key, lang=lang)
+                return loc if loc and loc != key else fallback
+            except Exception:
+                return fallback
+
         # ── Define the extras groups and their member packages ──
+        # Keep package lists aligned with pyproject.toml optional-deps.
         EXTRA_GROUPS = {
             "rag": {
-                "description": "Vector memory (ChromaDB) + local embeddings (sentence-transformers). Without this, memory search falls back to FTS5 text-only search.",
-                "packages": ["chromadb", "sentence-transformers"],
-                "install_cmd": 'uv pip install -e ".[rag]"   # additive — won\'t remove other extras',
+                "title": _i18n("packages.extra.rag.title", "Memory & RAG"),
+                "priority": 0,
+                "description": _i18n(
+                    "packages.extra.rag.desc",
+                    "Full chat memory stack: L1 Chroma + MiniLM + L4 sqlite-vec.",
+                ),
+                "packages": ["chromadb", "sentence-transformers", "sqlite-vec"],
+                "install_cmd": 'uv pip install -e ".[rag]"   # L1+L4 vectors + MiniLM embeddings',
             },
             "postgres": {
-                "description": "Multi-replica / SaaS shared state: ConfigStore, chat sessions, swarm tasks, and LangGraph checkpoints on Postgres (psycopg + langgraph-checkpoint-postgres). Set KAZMA_DATABASE_URL after install.",
+                "title": _i18n("packages.extra.postgres.title", "Postgres (multi-replica)"),
+                "priority": 1,
+                "description": _i18n(
+                    "packages.extra.postgres.desc",
+                    "Multi-replica shared state on Postgres.",
+                ),
                 "packages": ["psycopg", "langgraph-checkpoint-postgres"],
                 "install_cmd": 'uv pip install -e ".[postgres]"   # then set KAZMA_DATABASE_URL + migrate',
             },
             "dev": {
-                "description": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
+                "title": _i18n("packages.extra.dev.title", "Development"),
+                "priority": 10,
+                "description": _i18n(
+                    "packages.extra.dev.desc",
+                    "Development tools — pytest, ruff, mypy, locust.",
+                ),
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
                 "install_cmd": 'uv pip install -e ".[dev]"   # additive — won\'t remove other extras',
             },
             "test": {
-                "description": "Test-specific dependencies (lighter than dev). Includes pytest + fakeredis for unit/integration tests.",
+                "title": _i18n("packages.extra.test.title", "Test"),
+                "priority": 11,
+                "description": _i18n(
+                    "packages.extra.test.desc",
+                    "Test-specific dependencies (lighter than dev).",
+                ),
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis"],
                 "install_cmd": 'uv pip install -e ".[test]"   # additive — won\'t remove other extras',
             },
             "tui": {
-                "description": "Terminal dashboard UI (Textual) with RTL/bidirectional text rendering (python-bidi).",
+                "title": _i18n("packages.extra.tui.title", "TUI dashboard"),
+                "priority": 5,
+                "description": _i18n(
+                    "packages.extra.tui.desc",
+                    "Terminal dashboard UI (Textual) with RTL text.",
+                ),
                 "packages": ["textual", "python-bidi"],
                 "install_cmd": 'uv pip install -e ".[tui]"   # additive — won\'t remove other extras',
             },
             "observability": {
-                "description": "Prometheus metrics export for monitoring Kazma in production (Grafana dashboards, alerting).",
+                "title": _i18n("packages.extra.observability.title", "Observability"),
+                "priority": 6,
+                "description": _i18n(
+                    "packages.extra.observability.desc",
+                    "Prometheus metrics export for production monitoring.",
+                ),
                 "packages": ["prometheus-client"],
                 "install_cmd": 'uv pip install -e ".[observability]"   # additive — won\'t remove other extras',
             },
             "web": {
-                "description": "Browser automation via Playwright. Used by the web crawler skill to render JavaScript-heavy pages.",
+                "title": _i18n("packages.extra.web.title", "Browser automation"),
+                "priority": 7,
+                "description": _i18n(
+                    "packages.extra.web.desc",
+                    "Browser automation via Playwright for JS-heavy pages.",
+                ),
                 "packages": ["playwright"],
                 "install_cmd": 'uv pip install -e ".[web]"   # additive — won\'t remove other extras',
             },
+        }
+
+        EXTRA_PKG_DESCRIPTIONS = {
+            "chromadb": "L1 semantic vector store (agent_memory collection)",
+            "sentence-transformers": "Local MiniLM embeddings (shared embedder singleton)",
+            "sqlite-vec": "L4 local vector tables for the unified memory adapter",
+            "psycopg": "Postgres driver for multi-replica ConfigStore / sessions",
+            "langgraph-checkpoint-postgres": "Shared LangGraph checkpoints across replicas",
+            "playwright": "Headless browser for JS-heavy crawl / research",
+            "prometheus-client": "Prometheus /metrics exposition",
+            "textual": "TUI framework for kazma-tui",
+            "python-bidi": "Bidirectional text for Arabic TUI",
         }
 
         # ── Core dependencies (always installed) ──
@@ -686,7 +889,7 @@ def register_direct_routes(self: Any) -> None:
             "trafilatura": "Web content extraction (clean text from URLs)",
             "markdown": "Markdown rendering for chat messages",
             "tenacity": "Retry logic with exponential backoff for LLM calls",
-            "networkx": "Graph algorithms for swarm DAG/topology validation",
+            "networkx": "Graph algorithms for swarm DAG/topology (+ legacy L2 import helpers)",
             "click": "CLI framework for the `kazma` command",
             "rich": "Beautiful terminal output (colors, tables, progress bars)",
             "google-cloud-aiplatform": "Google Vertex AI provider integration",
@@ -743,12 +946,15 @@ def register_direct_routes(self: Any) -> None:
             for name in group_data["packages"]:
                 info = _pkg_info(name)
                 info["group"] = group_name
+                info["description"] = EXTRA_PKG_DESCRIPTIONS.get(name, "")
                 pkg_list.append(info)
             n_total = len(pkg_list)
             n_ok = sum(1 for p in pkg_list if p["installed"])
             group_installed = n_total > 0 and n_ok == n_total
             extras_list.append({
                 "name": group_name,
+                "title": group_data.get("title") or group_name,
+                "priority": int(group_data.get("priority", 50)),
                 "description": group_data["description"],
                 "install_cmd": group_data["install_cmd"],
                 "installed": group_installed,
@@ -757,6 +963,52 @@ def register_direct_routes(self: Any) -> None:
                 "package_count": n_total,
                 "packages": pkg_list,
             })
+        extras_list.sort(key=lambda e: (e.get("priority", 50), e.get("name") or ""))
+
+        # Live memory health snapshot for the Packages tab Memory card.
+        memory_summary: dict = {
+            "status": "UNKNOWN",
+            "summary": "",
+            "headline": "",
+            "layers": {},
+            "issues": [],
+        }
+        try:
+            from kazma_core.memory.health import build_memory_health
+
+            mh = build_memory_health()
+            layers = {}
+            for c in mh.get("components") or []:
+                cid = c.get("id") or ""
+                if cid in (
+                    "embedder",
+                    "vector_memory",
+                    "layer_l1",
+                    "layer_l2",
+                    "layer_l3",
+                    "layer_l4",
+                    "pkg_chromadb",
+                    "pkg_st",
+                    "pkg_sqlite_vec",
+                    "per_turn_retrieval",
+                    "auto_store",
+                    "consolidation",
+                ):
+                    layers[cid] = {
+                        "ok": bool(c.get("ok")),
+                        "status": c.get("status"),
+                        "name": c.get("name"),
+                        "detail": c.get("detail"),
+                    }
+            memory_summary = {
+                "status": mh.get("status") or "UNKNOWN",
+                "summary": mh.get("summary") or "",
+                "headline": mh.get("headline") or "",
+                "layers": layers,
+                "issues": (mh.get("issues") or [])[:6],
+            }
+        except Exception as exc:
+            memory_summary["summary"] = f"health probe failed: {exc}"
 
         # Count total installed (from distributions, not just our deps)
         total_installed = len(all_dists)
@@ -768,6 +1020,7 @@ def register_direct_routes(self: Any) -> None:
             "python_version": __import__("sys").version.split()[0],
             "db_backend": _db_backend,
             "db_url_set": bool(_db_url),
+            "memory": memory_summary,
         }
 
     @self.app.post("/api/system/memory/backup")
@@ -885,6 +1138,39 @@ def register_direct_routes(self: Any) -> None:
             {
                 "config": self.agent.config,
                 "active_page": "ide",
+            },
+        )
+
+    @self.app.get("/replay", response_class=HTMLResponse)
+    async def replay_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "replay.html",
+            {
+                "config": self.agent.config,
+                "active_page": "replay",
+            },
+        )
+
+    @self.app.get("/research", response_class=HTMLResponse)
+    async def research_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "research.html",
+            {
+                "config": self.agent.config,
+                "active_page": "research",
+            },
+        )
+
+    @self.app.get("/knowledge", response_class=HTMLResponse)
+    async def knowledge_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "knowledge_base.html",
+            {
+                "config": self.agent.config,
+                "active_page": "knowledge",
             },
         )
 
@@ -1138,10 +1424,10 @@ def register_direct_routes(self: Any) -> None:
                     )
                     return _JSONResponse(
                         {
-                            "status": "noop",
+                            "status": "expired",
                             "thread_id": thread_id,
                             "content": "",
-                            "error": "No pending approval for this thread (already resumed or wrong thread_id).",
+                            "error": "No pending approval for this thread (already resumed or expired).",
                         },
                         status_code=409,
                     )
@@ -1211,147 +1497,90 @@ def register_direct_routes(self: Any) -> None:
             if isinstance(body.get("approved_ids"), list):
                 resume_value["approved_ids"] = body["approved_ids"]
 
-            # Thread id for requires_approval/grants during the resumed run
+            from fastapi.responses import StreamingResponse
+            from typing import AsyncGenerator
+            from kazma_ui.sse_chat import _stream_langgraph_events, _sse_frame
             from kazma_core.safety.hitl import (
                 reset_current_thread_id,
                 set_current_thread_id,
             )
 
-            _tid_token = set_current_thread_id(thread_id)
-            try:
-                result = await graph_ref.ainvoke(
-                    Command(resume=resume_value),
-                    config=config,
+            async def _approval_stream_generator() -> AsyncGenerator[str, None]:
+                status_msg = (
+                    "Executing approved tool..."
+                    if approved
+                    else "Continuing after denial..."
                 )
-            finally:
-                reset_current_thread_id(_tid_token)
+                yield _sse_frame("status", {"content": status_msg})
 
-            def _assistant_text(m: Any) -> str:
-                if isinstance(m, dict):
-                    role = m.get("role") or m.get("type")
-                    text = m.get("content")
-                else:
-                    role = getattr(m, "type", None) or getattr(m, "role", None)
-                    text = getattr(m, "content", None)
-                if role not in ("assistant", "ai"):
-                    return ""
-                if isinstance(text, list):
-                    parts: list[str] = []
-                    for block in text:
-                        if isinstance(block, str):
-                            parts.append(block)
-                        elif isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(str(block.get("text") or ""))
-                        else:
-                            t = getattr(block, "text", None)
-                            if t:
-                                parts.append(str(t))
-                    text = "".join(parts)
-                if text is None:
-                    return ""
-                s = str(text).strip()
-                return s
+                # Update checkpoint metadata with HITL resolution state
+                # This ensures the thread won't show up in pending approvals after this
+                _hitl_state = "approved" if approved else "denied"
+                _resolution_time = datetime.now(UTC).isoformat()
+                # Postgres jsonb_set needs JSON text ('"approved"'), not bare approved.
+                import json as _json
 
-            # Extract only *new* assistant text produced after resume.
-            content = ""
-            msgs: list[Any] = []
-            if isinstance(result, dict):
-                msgs = result.get("messages") or []
-            if not msgs:
+                _hitl_state_json = _json.dumps(_hitl_state)
+                _resolution_json = _json.dumps(_resolution_time)
+
                 try:
-                    post = await graph_ref.aget_state(config)
-                    vals = getattr(post, "values", None) or {}
-                    if isinstance(vals, dict):
-                        msgs = vals.get("messages") or []
-                except Exception:
-                    pass
-            if isinstance(msgs, list) and msgs:
-                new_msgs = msgs[pre_msg_count:] if pre_msg_count else msgs
-                # If pre_msg_count was 0 or wrong, still prefer trailing new AI text
-                candidates = [
-                    _assistant_text(m) for m in new_msgs if _assistant_text(m)
-                ]
-                if candidates:
-                    content = candidates[-1]
-                else:
-                    # Fallback: last assistant in full history that is *not*
-                    # identical to the last pre-resume assistant (avoid replay).
-                    pre_last = ""
-                    if pre_msg_count and pre_msg_count <= len(msgs):
-                        for m in reversed(msgs[:pre_msg_count]):
-                            t = _assistant_text(m)
-                            if t:
-                                pre_last = t
-                                break
-                    for m in reversed(msgs):
-                        t = _assistant_text(m)
-                        if t and t != pre_last:
-                            content = t
-                            break
+                    cp = _resolve_hitl_checkpointer()
+                    if cp is not None:
+                        conn = getattr(cp, "conn", None)
+                        if conn is not None:
+                            try:
+                                if hasattr(conn, "execute"):
+                                    # SQLite: plain strings become JSON strings
+                                    await conn.execute(
+                                        "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_state', ?) WHERE thread_id = ?",
+                                        (_hitl_state, thread_id),
+                                    )
+                                    await conn.execute(
+                                        "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_resolved_at', ?) WHERE thread_id = ?",
+                                        (_resolution_time, thread_id),
+                                    )
+                                    await conn.commit()
+                                elif hasattr(conn, "connection"):
+                                    # Postgres: jsonb_set requires a JSON document
+                                    async with conn.connection() as pg_conn:
+                                        async with pg_conn.cursor() as cur:
+                                            await cur.execute(
+                                                "UPDATE checkpoints SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{hitl_state}', %s::jsonb) WHERE thread_id = %s",
+                                                (_hitl_state_json, thread_id),
+                                            )
+                                            await cur.execute(
+                                                "UPDATE checkpoints SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{hitl_resolved_at}', %s::jsonb) WHERE thread_id = %s",
+                                                (_resolution_json, thread_id),
+                                            )
+                                            await pg_conn.commit()
+                            except Exception as e:
+                                logger.warning(
+                                    "[HITL] Failed to update checkpoint metadata for thread=%s: %s",
+                                    thread_id,
+                                    e,
+                                )
+                except Exception as e:
+                    logger.debug("[HITL] Could not update checkpoint metadata: %s", e)
 
-            # Detect a *new* HITL interrupt after resume (chain of danger tools).
-            next_approval: dict[str, Any] | None = None
-            try:
-                snapshot = await graph_ref.aget_state(config)
-                if snapshot and getattr(snapshot, "next", None):
-                    for task in getattr(snapshot, "tasks", []) or []:
-                        for intr in getattr(task, "interrupts", []) or []:
-                            payload = getattr(intr, "value", None)
-                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                                next_approval = {
-                                    "thread_id": thread_id,
-                                    "tool": payload.get("tool", ""),
-                                    "args": payload.get("args", {}),
-                                    "tools": payload.get("tools") or [],
-                                    "message": payload.get("message", ""),
-                                }
-                                break
-                        if next_approval:
-                            break
-            except Exception:
-                logger.debug("[HITL] post-resume interrupt probe failed", exc_info=True)
-
-            # If the turn finished with no new prose, give the UI a clear note
-            # instead of going silent (common after long shell_exec chains).
-            if approved and not content and not next_approval:
-                content = (
-                    "_Tools finished. The model did not return more text — "
-                    "ask a follow-up, or check tool results above._"
-                )
-            elif approved and not content and next_approval:
-                # Mid-chain: don't spam old text; optional quiet status
-                content = ""
-
-            # Persist *new* assistant text into SessionManager (not replays).
-            if content and not content.startswith("_Tools finished"):
+                _tid_token = set_current_thread_id(thread_id)
                 try:
-                    from kazma_ui.session_manager import get_session_manager
+                    async for frame in _stream_langgraph_events(
+                        graph_ref,
+                        Command(resume=resume_value),
+                        config=config,
+                    ):
+                        yield frame
+                finally:
+                    reset_current_thread_id(_tid_token)
 
-                    store = get_session_manager()
-                    sid = (body.get("session_id") or "").strip()
-                    sess = store.get(sid) if sid else None
-                    if sess is None:
-                        for s in store.list_all(include_archived=True):
-                            if s.thread_id == thread_id:
-                                sess = s
-                                break
-                    if sess is not None:
-                        sess.messages.append({"role": "assistant", "content": content})
-                        store.put(sess)
-                except Exception:
-                    logger.debug("[HITL] session persist after resume failed", exc_info=True)
-
-            payload_out: dict[str, Any] = {
-                "status": "approved" if approved else "denied",
-                "thread_id": thread_id,
-                "content": content,
-                "scope": scope,
-            }
-            if grant_info is not None:
-                payload_out["grant"] = grant_info
-            if next_approval:
-                payload_out["approval_required"] = next_approval
-            return _JSONResponse(payload_out, status_code=202)
+            return StreamingResponse(
+                _approval_stream_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         except Exception:
             logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
             return _JSONResponse({"error": "Internal error"}, status_code=500)
@@ -1373,6 +1602,22 @@ def register_direct_routes(self: Any) -> None:
         except Exception:
             logger.exception("[HITL] Failed to list pending approvals")
             return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
+
+    @self.app.post("/api/pending-approvals/clear")
+    @self.app.delete("/api/pending-approvals")
+    async def clear_pending_approvals_route() -> _JSONResponse:
+        from kazma_ui.hitl_approval import clear_pending_approvals
+
+        graph = _resolve_hitl_graph()
+        checkpointer = _resolve_hitl_checkpointer()
+        if checkpointer is None:
+            return _JSONResponse({"error": "Checkpointer not available"}, status_code=503)
+        try:
+            cleared = await clear_pending_approvals(graph, checkpointer)
+            return _JSONResponse({"status": "ok", "cleared": cleared})
+        except Exception:
+            logger.exception("[HITL] Failed to clear pending approvals")
+            return _JSONResponse({"error": "Internal error"}, status_code=500)
 
     @self.app.get("/api/status")
     async def get_status() -> dict[str, Any]:

@@ -1,5 +1,564 @@
 # CHANGELOG
 
+## Unreleased — Memory integrity: L3 ts/emb + L2 graph (solid write path) (2026-07-27)
+
+- **Root cause:** adapter L3 always wrote `timestamp=0` and never set
+  `embedding` BLOBs; L3 semantic search was gated on optional kwargs; graph
+  only grew when consolidator LLM ran. **Also:** legacy FTS5
+  `VALUES('delete',…)` UPDATE triggers raised `SQL logic error` on every
+  `memories` UPDATE — so even manual/backfill timestamp+embedding writes
+  could not land until triggers were reinstalled.
+- **L3 writes:** real unix timestamps + shared-embedder BLOB on every index
+  (`adapter`, `SQLiteMemoryBackend`, `FTS5Memory.add`).
+- **L3 hybrid search:** always cosine-merge BLOB vectors with FTS when any
+  embeddings exist; load sqlite-vec via official package path when present.
+- **L2 graph:** every store adds chunk + `user→has_memory` edge + heuristic
+  SPO triples (no LLM required).
+- **Backfill:** `kazma_core.memory.backfill` repairs legacy rows + seeds graph;
+  auto one-shot at UI boot (`memory.backfill_v2_done`); also via maintenance.
+- Tests: `test_memory_integrity_fix.py`.
+
+## Unreleased — Arabic CoT: plan RTL + HITL activity i18n (2026-07-27)
+
+- **Plan panel RTL** from the first paint in Arabic UI (`dir=rtl` / Arabic-dominant
+  plan text); CSS for plan items, labels, activity steps.
+- **Activity i18n:** localize HITL CoT lines that were still English —
+  Processing approval, Preparing to execute N tools, Resuming graph execution,
+  Running tool, Done/Failed — via `CHAT_I18N` + client-side EN→locale map.
+
+## Unreleased — Memory hygiene P1–P3 (optional) (2026-07-27)
+
+- **P1 sqlite_query authorizer:** allow safe read functions (`COUNT`, `LIKE`,
+  `substr`, `length`, datetime/json/FTS helpers). Function name is read from
+  authorizer `arg2` (SQLite zName2). Writes still denied.
+- **P2 legacy FTS:** empty `memory_fts` always retired (rename →
+  `memory_fts_migrated` or drop) so health scans no longer report a dead table
+  beside live `memories_fts`.
+- **P3 swarm L4:** after successful worker dispatch, index compact prompt+output
+  into L4 under the worker name (`worker` metadata / `worker_vectors_<name>`).
+- Tests: `kazma-core/tests/test_memory_p1_p2_p3.py`.
+
+## Unreleased — Memory polish P2–P7 (2026-07-27)
+
+- **P2 cost:** `skip_llm_if_auto_stored` (default true) skips consolidator LLM
+  when auto_store already wrote durable text; `skip_adapter_if_auto_stored`
+  now correctly skips adapter re-store (graph triples still land).
+- **P3 graph UI:** hover tooltips on canvas, always-on edge labels, **Export**
+  JSON (`GET /api/memory/graph/export`).
+- **P4 fence at inject:** per-turn RAG memories wrap in `format_untrusted_block`
+  and drop override-like hits.
+- **P5 Chroma:** shared `get_chroma_client()` for VectorMemory + L1 VectorStore.
+- **P6 L3 tenant:** hard `tenant_id = ?` filter (no NULL sharing when scoped).
+- **P7 tests:** `test_memory_polish_p2_p7.py` lightweight L2+L3+fence E2E.
+- Docs: `docs/plans/MEMORY_REMAINING.md` updated (P1–P7 done; S1–S4 remain).
+
+## Unreleased — TUI Phase 4 polish: collapsible nav, graph actions, density (2026-07-27)
+
+- **NavRail** collapse/expand (`[` key + footer button); auto-collapse under
+  width 100; key-only mode with tooltips on narrow terminals.
+- **Memory tab:** L2 graph **Search** (FTS) + **Clear** with ConfirmDialog.
+- **Chat / Files / Swarm** density pass — section banners, bordered logs,
+  consistent shell chrome.
+- **README** architecture tree and shortcuts updated for v3 shell.
+
+## Unreleased — TUI Phase 3: nav rail, Memory tab, swarm sparklines (2026-07-27)
+
+- **NavRail** left chrome (hide top tabs); keys 1–7 / `m` for Memory.
+- **Memory tab** full health + L2 graph stats + component table.
+- **Swarm** live workers/active/recent sparklines.
+- **Settings** toggles: per-turn, auto-store, consolidator (+ use_llm);
+  ConfigStore nested `memory.consolidation.*` read in `memory.config`.
+
+## Unreleased — TUI Phase 2: memory health + panels + themes (2026-07-27)
+
+- **MemoryHealthPanel** on Dashboard (live `build_memory_health`, L1–L4 chips).
+- **Swarm / Files / Traces** denser borders, banners, section labels.
+- **ThemeManager v2:** light / monokai / high-contrast reuse `KAZMA_SHELL_CSS`.
+
+## Unreleased — TUI v2 professional shell (2026-07-27)
+
+- **Design system** in `kazma_tui/theme.py`: denser tokens, tall borders, boost
+  surfaces, professional tab strip, shared widget polish.
+- **Shell:** `KazmaHeader` (brand · ready · provider/model), tab shortcuts 1–6,
+  subtitle "ops console".
+- **Dashboard / Chat / Settings / status / footer** CSS and layout density pass.
+
+## Unreleased — Settings Packages: Memory stack + rag L4 (2026-07-27)
+
+- **Packages tab:** live memory health card (layers L1–L4, embedder, consolidator);
+  `[rag]` extra lists **sqlite-vec** + clearer L1/L4 copy; priority sort; titles;
+  install button for **partial** extras; per-package tooltips.
+- API `/api/system/packages` returns `memory` summary from `build_memory_health()`.
+
+## Unreleased — Memory remaining plan + docs refresh (2026-07-27)
+
+- **`docs/plans/MEMORY_REMAINING.md`** — done vs later backlog for memory work.
+- **Docs:** rewrite [Memory & RAG](docs/docs/guide/memory-and-rag.md); update FAQ/architecture
+  already shipped; refresh configuration, diagnosis map, glossary, roadmap,
+  API routes, web-ui, disaster recovery, intro plans link.
+- **`research/`** — tracked with README (local smoke/KB artifacts).
+
+## Unreleased — Consolidator cost/fence/dedup + graph UI (2026-07-27)
+
+- **Cost:** `every_n_turns`, `skip_llm_in_demo` (DEMO_MODE), unified
+  `schedule_post_turn_memory` (auto_store → consolidator).
+- **Fence:** consolidator facts/triples run through `is_override_delta`.
+- **Dedup:** near-duplicate skip vs auto_store `texts` (Jaccard / containment).
+- **Graph UI:** Dashboard L2 explorer (canvas, search, refresh, clear);
+  APIs `GET /api/memory/graph?q=`, `/search`, `POST /clear`.
+
+## Unreleased — L2 property graph + LLM consolidator (2026-07-27)
+
+- **L2 full graph:** NetworkX JSON replaced by **SQLite property graph**
+  (`knowledge_graph.db`: nodes, edges, FTS5, multi-hop, `upsert_triple`).
+  Legacy `knowledge_graph.json` migrated once. Singleton via
+  `get_knowledge_graph()`; Dashboard `/api/memory/graph` uses it.
+- **Consolidator:** `memory/consolidator.py` extracts durable facts + SPO
+  triples after each turn (LLM + heuristic fallback) → adapter store + graph.
+  Config: `memory.consolidation.{enabled,use_llm,min_user_chars}`.
+- Adapter L2 query uses graph FTS + neighbor expansion.
+
+## Unreleased — Make Kazma Memory Great Again (2026-07-27)
+
+End-to-end strengthen of the existing 4-layer memory stack (no rewrite):
+
+- **Fail-closed store:** `UnifiedMemoryAdapter.store()` / `index()` only return a
+  durable id when L1, L3, or L4 confirmed a write; L2 alone is not enough.
+  `memory_store` tool no longer claims success with an empty id.
+- **Config SoT:** `kazma_core.memory.config` merges ConfigStore ← `kazma.yaml`;
+  per-turn RAG, auto-store, and health use it so TUI `memory.enabled` is real.
+- **FTS unify:** `FTS5Memory` writes the canonical `memories`/`memories_fts`
+  schema (same as L3); one-shot migrate of legacy `memory_fts`.
+- **Quality:** empty-content RRF hits dropped; L1 chunking on adapter index;
+  zero-vector embedder = health **error**.
+- **Docs:** FAQ, architecture, memory-and-rag corrected (auto recall + adapter
+  is the chat path).
+- **Tests:** `kazma-core/tests/test_memory_strengthen.py`.
+
+## Unreleased — Research panel papers list + chat logo (2026-07-27)
+
+- **Papers list:** scan all workspace candidates + ConfigStore index so
+  `/research deep` reports appear on the Research tab (not only swarm tasks).
+- **Paper file open** resolves across workspace roots.
+- **Chat avatar:** assistant messages use `/static/img/kazma-icon.png` instead of “K”.
+
+## Unreleased — UI i18n, bidi, HITL undefined, papers open (2026-07-27)
+
+- **Bidi:** `unicode-bidi: plaintext` + `dir=auto` for chat/tool/skill text so
+  mixed Arabic+English stays correct in **both** English and Arabic UI
+  (`bidi.js`, CSS, chat render hooks).
+- **Arabic UI:** HITL button labels, skills install strings, expanded
+  `tool.desc.*` AR for research/knowledge tools; settings tool cards use
+  localized desc when present.
+- **HITL dashboard:** fixed empty-state icon that rendered the literal
+  ``undefined``; safer tool_name/message; i18n for Clear All / Once / Deny.
+- **Research papers:** `GET /api/research/papers/file` serves workspace reports;
+  panel MD/DOCX links fixed.
+
+## Unreleased — Research Phase 3 polish (2026-07-27)
+
+- **WS `/research deep`** parity with SSE + gateway; stage progress events
+- **Parallel** search + acquire in `run_research_pipeline` (semaphore 4)
+- **DOCX export** optional (`export_docx` / `KAZMA_RESEARCH_EXPORT_DOCX`)
+- **Papers registry** + `GET /api/research/papers`; Research panel lists papers
+- **Smart KB inject** `KAZMA_KB_SMART_SEARCH=1` for technical queries
+- Smoke: `scripts/smoke_research_deep.py`
+
+## Unreleased — KB harden + deep research product (2026-07-27)
+
+Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
+
+### Knowledge Library
+- Re-ingest **purges** prior chunks per URL (no orphan indices) + Chroma delete
+- Chroma embed only for **changed** rows after upsert
+- Auto-inject: **tenant-scoped** + exclude **archived**
+- Refresh jobs **durable** (Web `kb_api` + gateway `/kb refresh`)
+- Shared Playwright browser per `ingest_site` job
+- FTS5 query sanitization (punctuation / operators)
+
+### Research depth
+- Research **protocol** in product knowledge + stronger tool descriptions
+- Soft graph **min-sources nudge** for deep intent (`research_policy.py`)
+- `web_search` default max_results **8**
+- Swarm auto-researcher full tool allowlist (save/digest/synthesize/pipeline)
+- Tools: `synthesize_from_digests`, `run_research_pipeline`
+- Slash: `/research deep <topic>` (Web SSE + gateway)
+- Reports under `research/reports/<slug>-<ts>/report.md`
+
+## Unreleased — Multi-path diagnosis map + HITL Settings wire-up (2026-07-27)
+
+- **Diagnosis map** (`docs/docs/ops/diagnosis-map.md`): symptom→files,
+  multi-path tables (SSE/WS, 3 HITL gates, graph build sites, workspace,
+  providers, config keys, tool stacks), and “X is related to Y” index for
+  agents and operators. Linked from intro, system-map, sidebars, AGENTS.md.
+- **Fix:** Settings `require_approval_for` now consumed by `get_hitl_config()`
+  (was a dead control plane). Settings defaults use full CANONICAL list.
+- **Docs truth:** AGENTS.md HITL §7 + swarm bus FanOut; `swarm/safety`
+  docstring no longer claims spawn-only extended list; config_schema HITL
+  defaults aligned with CANONICAL / kazma.yaml.
+
+## Unreleased — SearXNG, hard-page recovery, workbench polish (2026-07-27)
+
+### Search
+- **SearXNG multi-base discovery**: `KAZMA_SEARXNG_URL`, ConfigStore
+  `search.searxng_url`, localhost `:8088`/`:8080`, Docker DNS; last-good cache +
+  60s dead cooldown.
+- **Compose profile `search`**: `searxng/searxng` on host `8088` with
+  `deploy/searxng/settings.yml` (JSON format enabled).
+
+### Fetch / KB ingest
+- **Hard-page recovery** after bot walls / thin or empty extracts:
+  Firecrawl (key) → Jina (unless `KAZMA_JINA_READER=0`) → Playwright.
+  Shared by `read_url` and knowledge ingest via `_fetch_full_text`.
+- Jina: optional Bearer (`JINA_API_KEY` / `KAZMA_JINA_API_KEY`), markdown
+  return format; recovery-on by default (opt-out with `=0`).
+
+### Chat workbench
+- Elapsed timer, plan progress bar + active step, friendly tool labels,
+  source chips (`via searxng` / jina / …), activity auto-scroll.
+
+## Unreleased — Discord/Slack Telegram-depth voice path (2026-07-25)
+
+- **Shared voice SoT** (`voice_helpers`): 10MB size caps, language/provider
+  from ConfigStore, STT fallback chain, markdown strip for TTS, rich metadata
+  (`voice_transcribed`, `stt_provider`, `stt_language`, `voice_bytes`).
+- **`discord_stt` / `slack_stt`**: platform download/auth + upload; adapters
+  delegate `_maybe_transcribe_audio` / voice reply to the deep path.
+- **Telegram STT module** re-exports shared helpers for a single voice surface.
+
+## Unreleased — Discord/Slack Telegram-level UX modules (2026-07-25)
+
+- **Shared action vocabulary**: `platform_callbacks` + `platform_keyboards`
+  (HITL / model / personality IDs identical on TG/Discord/Slack).
+- **Discord modules**: `discord_parse`, `discord_callbacks`, `discord_keyboards`,
+  `discord_send` — adapter delegates; graph HITL sends components.
+- **Slack modules**: `slack_parse`, `slack_callbacks`, `slack_blocks`,
+  `slack_send` — Block Kit builders; graph HITL sends blocks.
+- **HITL handler** builds platform-native approval controls for all three.
+
+## Unreleased — remaining gaps phase 2: shared breakers, tenant MCP/cron, RO shell (2026-07-25)
+
+- **Shared circuit breakers**: ConfigStore dual-write when multi-user/prod
+  (`KAZMA_SHARED_BREAKERS`); wall-clock cooldown for multi-replica.
+- **Tenant MCP ConfigStore keys**: `tenant.<id>.mcp.servers` under isolation.
+- **Cron `tenant_id`**: stamped on schedule; list filtered in multi-user/prod.
+- **Shell mutate off** in multi-user/prod (`mkdir`/`cp`/`mv`/`touch`) unless
+  `KAZMA_SHELL_ALLOW_MUTATE=1` — prefer `file_write` tool.
+
+## Unreleased — remaining gaps: hard sandbox, tenant stores, replica affinity (2026-07-25)
+
+### Hard sandbox (post-HITL / host power)
+- **No host-local `python_exec`** when production or multi-user (Docker
+  required). Escape hatch: `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` (lab only).
+
+### Multi-tenant data plane
+- **TaskStore.list_tasks** auto-filters `metadata.tenant_id` in multi-user/prod
+  (`KAZMA_TENANT_FILTER=0` or `tenant_id=*` to opt out).
+- **Knowledge libraries** get `tenant_id` column; list/get scoped to current
+  tenant when multi-user/prod.
+
+### Multi-replica
+- **Affinity cookie** `kazma-replica` (`KAZMA_REPLICA_ID`) for LB sticky SSE.
+
+### Platform parity + UI
+- Slack bus `set_reaction` API.
+- Chat session delete surfaces non-OK HTTP status.
+
+## Unreleased — residual hardening: post-HITL, SaaS tenant, multi-replica, parity (2026-07-25)
+
+### Post-HITL host power
+- **Restricted PATH + which-only binaries** in production (`KAZMA_SHELL_STRICT`,
+  default on when `KAZMA_PRODUCTION=1`) via `safety/post_hitl.py`.
+- **Archives off in prod strict** (`tar`/`zip`) unless `KAZMA_SHELL_ALLOW_ARCHIVE=1`.
+- **Git denylist expanded**: reset/rebase/force/remote/submodule blocked.
+
+### Multi-tenant SaaS
+- **X-Tenant-ID ignored** when production *or* multi-user (not only prod).
+- **Opaque sessions forced** when multi-user is enabled.
+- Swarm tasks stamp `metadata.tenant_id` on dispatch.
+
+### Multi-replica
+- **`swarm/shared_approvals.py`**: durable ConfigStore wait for HITL bus
+  approvals; Telegram/Discord/Slack buses resolve across replicas.
+- Ops doc: `docs/docs/ops/multi-replica-and-saas.md`.
+
+### Discord/Slack parity
+- Discord bus gains `set_reaction` (Telegram-style status feedback API).
+- Shared approval path on all three platform buses.
+
+## Unreleased — UI abort polish + multi-bus fan-out + cache TTL read + OAuth start gate (2026-07-25)
+
+- **Chat Stop**: `abortGeneration` clears the typing indicator (AbortError never
+  fires `onDone`/`onError`); error path toasts when possible.
+- **Swarm bus multi-platform**: `FanOutBusAdapter` wires all configured
+  Telegram/Discord/Slack buses (not exclusive priority). Approvals: first yes
+  wins.
+- **Semantic cache**: TTL filter on **lookup** (not only write eviction).
+- **GitHub OAuth start**: removed from `ALWAYS_OPEN_PREFIXES` — requires auth
+  cookie/session; callback remains open.
+
+## Unreleased — OAuth Host harden + /knowledge gate + handoff breaker + docs (2026-07-25)
+
+- **GitHub OAuth**: redirect URI never uses client `Host` / `X-Forwarded-*`.
+  Prod requires `KAZMA_PUBLIC_URL`; dev uses `KAZMA_HOST`/`KAZMA_PORT` only.
+- **Auth shells**: `/knowledge` added to `SENSITIVE_PREFIXES` (admin HTML gate).
+- **Handoff breaker**: source circuit breaker records once in `_handle_handoff`
+  (removed pre-`record_success` in `worker_dispatch` that double-counted).
+- **Docs honesty**: delegation + `kazma-permissions.yaml` marked library-only /
+  not runtime-enforced (aligned with `UNWIRED_INVENTORY.md`).
+
+## Unreleased — Swarm admission + hop budget + durable KB jobs (2026-07-25)
+
+### Swarm reliability (audit M11 / M12 / M13)
+- **Global admission**: `SwarmEngine.dispatch` rejects new work when
+  `max_concurrent_tasks` (default 10, or `KAZMA_SWARM_MAX_ACTIVE`) is full —
+  returns `admission_denied` instead of unbounded `_active_tasks` growth.
+- **Shared concurrency cache**: broadcast / fan-out / consult use
+  `engine.get_bounded_concurrency` instead of private semaphores per call.
+- **Fallback hop budget**: `_visited` / `_depth` thread through
+  `_dispatch_worker_by_name` and `_execute_fallback_chain` so fallbacks
+  cannot reset cycle guards.
+
+### Knowledge Library jobs
+- **Durable crawl status**: `stores/kb_jobs.py` dual-writes job snapshots to
+  ConfigStore. Web + gateway crawls survive restart; incomplete jobs marked
+  `interrupted` on boot. Status endpoints fall back to durable store.
+
+## Unreleased — MCP dual-store unify + audit P0 fixes (2026-07-25)
+
+### MCP single source of truth
+- **Root cause fixed**: `/mcp` Add Server wrote only `kazma.yaml`; Settings
+  read only ConfigStore `mcp.servers` — so Settings Test said
+  "Server Playwright not found" for servers added from `/mcp`.
+- **New** `kazma_core/mcp_servers_store.py`: every list/add/delete/toggle
+  dual-writes ConfigStore + `kazma.yaml` and merges on read (ConfigStore
+  wins on name conflict). Both `KazmaAgent` and `MCPSettingsService` use it.
+- **Namespaced HITL classify**: `classify_mcp_tool` strips `mcp__server__`
+  and classifies the raw tool leaf only — server slugs like `get_status`
+  no longer bleach unknown tools to "safe" in non-prod.
+
+### Other audit P0 fixes
+- **`dispatch_swarm`**: registers bg tasks on `engine.register_task_handle`
+  so panel/API cancel actually stops chat-originated swarm work.
+- **IDE `run_file`**: no longer shells `python`/`node`/`bash` (blocked by
+  shell_exec allowlist). `.py` → `python_exec`; other interpreters return
+  a clear error instead of a post-HITL allowlist failure.
+
+## Unreleased — MCP overhaul + KB polish + logging + fonts + i18n (2026-07-25)
+
+### MCP subsystem — full overhaul
+- **Web boot wiring**: `connect_mcp_servers()` was only called on the CLI path,
+  never the web path — filesystem/Playwright MCP stayed dormant on the Web UI
+  (looked "dead"). Now connected at `app.py:_on_startup`.
+- **Add Server Phase 1A**: shlex-style command parsing (quoted args survive),
+  auto-rewrite of install commands (`npm install -g X` → `npx -y X`),
+  validate-before-save (tests connection, shows stderr on failure, doesn't
+  persist broken configs).
+- **Add Server Phase 1B — preset library**: one-click dropdown of 85+ known
+  MCP servers (filesystem, firecrawl, playwright, github, slack, databases,
+  ...) grouped by category. Auto-fills name, transport, command, and env var
+  keys. Sourced from `certified_servers.yaml` + 5 extras.
+- **Persistence**: `add_mcp_server` / `remove_mcp_server` now write back to
+  `kazma.yaml` atomically — servers survive restarts (was in-memory only).
+- **Tool namespacing**: MCP tools namespaced as `mcp__<server>__<tool>` to
+  prevent collisions with built-in tools. This was the root cause of the
+  "agent stopped talking" bug — Playwright MCP's `browser_click` collided
+  with the browser_automation skill's `browser_click`, DeepSeek rejected
+  all 127 tools with `400 Tool names must be unique`, Kazma stripped all
+  tools, and the model emitted raw markup as text.
+- **90s handshake timeout + stderr on failure**: `npx` cold starts that
+  fetch packages on first run no longer get killed mid-handshake. Failed
+  connections now surface the subprocess stderr so you see *why*.
+- **MCP presets endpoint** (`GET /api/mcp/presets`) added to
+  `ALWAYS_OPEN_PATHS` so it works without auth (read-only metadata).
+
+### Knowledge Library — polish
+- **Citation footer**: every KB-derived answer now appends
+  `📚 This data is from Knowledge "<library_id>"`. Applies to both the
+  `knowledge_search` tool path and the auto-inject path.
+- **Archive**: soft `archived` flag on libraries. Active/Archived tabs in
+  the UI. Archived libs stay searchable but hidden from the active list.
+  📦 Archive / ♻️ Restore buttons per library.
+- **Toast text**: post-crawl toast now formats from structured job fields
+  (`Crawl finished: 8/200 pages · 210 chunks`) instead of the raw internal
+  diagnostic string.
+- **Full-tree crawler improvements**: Firecrawl `/v1/map` as first
+  discovery tier (bypasses bot walls), parent-section re-map for leaf
+  pages, canonical URL de-dup, Jina seed-expand fallback, infra-URL
+  filtering, `tree` scope mode (default, cross-prefix doc trees),
+  `.gz` sitemap decompression, per-tier fetch error visibility, slug
+  library IDs, provenance `.md` saves.
+
+### Foundation
+- **Single-folder layout**: all Kazma state (skills, themes, logs) now lives
+  at `<repo>/.kazma/` (was `~/.kazma` — broke portability). One-time
+  migration of legacy `~/.kazma` on first boot. `KAZMA_USER_HOME` override.
+- **Real logging**: `logging_config.setup_logging()` configures a
+  `RotatingFileHandler` → `<repo>/.kazma/kazma.log` (10MB × 5) +
+  stdout handler. `KAZMA_LOG_LEVEL` env (default INFO); debug via env or
+  `kazma serve --debug`. Noisy libs pinned to WARNING. Idempotent.
+  Wired into all 3 entry points (CLI, web, standalone).
+
+### UI / i18n
+- **Arabic font → Rubik**: with Calibri + Cairo fallback. English-in-RTL
+  elements (code, metrics, English spans) scoped to Inter for visual sync.
+- **IDE Arabic**: nav + page title now `بيئة التطوير المتكاملة` (was
+  hardcoded "IDE").
+- **Agent-stopped-talking defense**: exception path in `sse_chat.py` now
+  emits a recoverable notice with thread_id instead of a blank bubble.
+  Client-side Retry button on empty turns.
+- **Language-switch guard**: warns before reloading if a crawl job is
+  in-flight (was silently orphaning the polling timer).
+- **Tests**: 55 KB tests + 20 MCP JS tests, all passing.
+
+## Unreleased — Knowledge Library + Research system + chat→swarm bridge + fixes (2026-07-25)
+
+### Knowledge Library (RAG over ingested docs)
+- **New subsystem**: point Kazma at a documentation root (e.g. the Meta
+  WhatsApp Cloud API) and it ingests the **whole doc tree** once — then the
+  agent reasons over the corpus and **cites sources** (URL + section header)
+  when you ask questions. RAG over a curated, updatable corpus; not live
+  scraping; not fine-tuning.
+- **Full-tree ingestion** (`kazma-core/kazma_core/stores/knowledge_ingest.py`):
+  sitemap-first discovery (robots.txt → `sitemap.xml`/`sitemap_index.xml`)
+  with path-prefix scoping (`/docs/whatsapp/overview` → `/docs/whatsapp/`),
+  BFS+Playwright fallback for SPA nav, and **Playwright full-DOM extraction
+  for tabbed/JS pages** so per-tab content isn't lost. Caps:
+  `KAZMA_KB_MAX_PAGES` (200/1000), `KAZMA_KB_MAX_DEPTH` (10),
+  `KAZMA_KB_DELAY_MS` (300), `KAZMA_KB_SCOPE_MODE` (`prefix` default).
+- **Hierarchy-aware chunker** (`stores/knowledge_chunker.py`): pure-stdlib
+  (no LangChain dep — the off-the-shelf `RecursiveCharacterTextSplitter`
+  approach silently splits oversized code blocks, which we rejected).
+  Splits on `#`–`####` with section breadcrumbs; **fenced code blocks are
+  atomic** regardless of size; backfills `total_chunks` + `content_hash`.
+- **Per-library retrieval** (`stores/knowledge_index.py`): dedicated
+  ChromaDB collection `kazma_kb_<id>` + dedicated FTS5 table + SQLite source
+  of truth, RRF-blended (k=60). **Hard isolation from chat memory**
+  (`agent_memory`) — the shared `UnifiedMemoryAdapter` was the wrong host
+  (leaks into chat recall, doesn't filter FTS5 by metadata, collides on
+  bare content-hash UIDs). True cross-library RRF via `search_all`.
+- **Agent tool** `knowledge_search(query, library="", top_k=5)`: cited
+  hits; empty `library` → cross-library RRF.
+- **`/kb` slash commands** (Telegram/Discord/Slack): `list`, `add`
+  (single page, sync), `crawl` (whole tree, background), `refresh`,
+  `search`, `status`, `delete`.
+- **`/knowledge` web page** + `/api/kb/*` router: add library, ingest
+  (page/site) with live job polling, in-page test search, chunk browser,
+  refresh, delete. Sidebar nav link. Uses unified
+  `window.showToast`/`window.kazmaConfirm` (no native dialogs).
+- **Auto-inject (Phase 2, opt-in)**: per-library toggle folds top-k chunks
+  for the user's latest message into the system prompt at the 3 injection
+  sites (`agent_runner`, `sse_chat`, gateway `graph.py`) — **fenced as
+  untrusted data** via `format_untrusted_block` so adversarial doc content
+  can't smuggle instructions. Live kill switch `KAZMA_KB_AUTO_INJECT=0`;
+  tunable `KAZMA_KB_AUTO_INJECT_TOP_K` (default 3).
+- **Provenance**: each ingested page saved as raw markdown under
+  `research/kb/<library_id>/` for re-debugging.
+- **Tests**: 39 new (`test_knowledge_chunker/store/index/ingest.py`) —
+  code-fence atomicity, library isolation, dedup, sitemap parsing,
+  path-prefix scoping, auto-inject kill switch + opt-in gating.
+- **Docs**: `docs/docs/guide/knowledge-library.md`.
+
+## Unreleased — Research system + chat→swarm bridge + fixes (2026-07-24)
+
+### Chat→Swarm bridge
+- **`dispatch_swarm`** tool: dispatches through `SwarmEngine.dispatch()` in the
+  background. Chat-triggered research is now a real Swarm task — visible in
+  the `/swarm` panel with workers, progress, cost, and persisted results.
+  Returns a task ID immediately; agent polls with `check_swarm_task`.
+- **`check_swarm_task`** tool: polls task status and returns the full result
+  (aggregated output + cost + duration) when complete.
+
+### Research Results system
+- **Research panel** (`/research`): browse all research outputs (prompt,
+  worker, cost, duration, full text), compare two runs side-by-side (metric
+  deltas + text diff), and export any result to DOCX/PDF/Markdown.
+- **Archive/Restore**: research results can be archived (hidden from the
+  active list) and restored. Uses `metadata.archived` flag (no schema
+  migration). Dedicated "Archived" tab with its own list, search, and
+  restore/delete buttons. `POST /api/research/tasks/{id}/archive` and
+  `/unarchive` endpoints.
+- **`compare_task_results()`**: diff function modeled on
+  `ReplayEngine.compare_replays` — cost/token/duration deltas + difflib text diff.
+- **`metadata_filter`** on `TaskStore.list_tasks`: SQLite `json_extract` +
+  Postgres `@>` JSONB — enables `?kind=research` filtering.
+- Tasks tagged with `metadata={"kind": "research"}` at dispatch time.
+
+### Chat UX
+- **Stop button**: send button transforms into a red pulsing Stop button
+  during generation. Click it or press Escape to abort the SSE stream.
+  Input field stays enabled while the agent works so the user can queue
+  their next message.
+- **Global dialog override**: `window.confirm`, `window.alert`, and
+  `window.prompt` are globally overridden to route through the styled
+  Kazma modal (Alpine-based). No more native browser dialogs anywhere.
+
+### HITL improvements
+- **Gateway timeout wiring**: `SwarmMessageBus.request_approval` now
+  forwards the configured timeout to Telegram/Discord/Slack bus adapters
+  (was hardcoded 60s — the timeout parameter was dead code).
+- **Expired approval UX**: stale approval cards resolve to HTTP 409
+  `status: "expired"` and the UI shows "Expired or already resumed" then
+  removes the card gracefully.
+- **Safe tool deferral**: safe tools in a batch with danger tools now
+  execute after the interrupt resumes, preventing potential double-execution
+  on checkpoint replay.
+
+### Fixes
+- **Session Management empty on Postgres**: `CheckpointManager.list_checkpoints`
+  was SQLite-only — the Postgres path (`AsyncPostgresSaver` with
+  `AsyncConnectionPool`) failed silently because `dict_row` returns dicts
+  not tuples (`row[0]` → `KeyError`). Added `_list_checkpoints_postgres`
+  with proper dict access + `%s` placeholders. Also fixed
+  `_try_decode_message_count`/`_try_decode_created_at` to accept
+  pre-deserialized JSONB dicts.
+- **`set_dashboard_context` global clobbering**: the second call (startup)
+  passed only `checkpoint_manager`, wiping `tracer`/`session_store`/
+  `cost_breaker` back to None. Fixed with a `_UNSET` sentinel.
+- **HITL pending-approvals on Postgres**: `_enumerate_thread_ids` used
+  tuple indexing on psycopg dict rows → `KeyError: 0`. Fixed to use
+  column-name access.
+- **`NameError: _resolve_llm_from_state`**: `respond_node` called an
+  undefined function when max-iterations forced a respond mid-tool-loop.
+  Fixed by passing `llm` from the `_respond` closure.
+- **Research delete on Postgres**: checked `_get_conn()` (SQLite) before
+  `_pg`, raising "SQLite connection requested while Postgres backend active".
+  Now checks `_pg` first.
+- **Arabic PDF font 404**: the Amiri download URL (aliftype/amiri GitHub)
+  returned 404. Switched to the Google Fonts mirror (google/fonts repo).
+- **Circuit breaker dead-loop**: tripped breaker routed to SUPERVISOR instead
+  of RESPOND → 10 wasted iterations, empty response. Now routes to RESPOND.
+  Also: empty search results no longer count as failures (only `is_error`);
+  threshold raised 2→3.
+- **Tool kwargs filter**: LLM-injected extra args (e.g. `raw`) that the
+  function doesn't accept caused `TypeError`. Now filtered via
+  `inspect.signature()` before calling.
+
+## Unreleased — Time Travel Replay (2026-07-23)
+
+Full time-travel replay system — snapshot every supervisor iteration, rewind,
+branch, compare, and browse a timeline in the Web UI.
+
+- **Snapshot recording**: `SnapshotRecorder` wired into all 3
+  `build_supervisor_graph` call sites (run/streaming/child) + app.py
+  recompile. Captures state after every supervisor iteration into
+  `kazma-data/snapshots.db` (SQLite WAL, LRU-capped at 50/thread).
+- **Slash commands**: `/replay list`, `/replay <n>` (restore in-place —
+  rewinds the live thread via `graph.aupdate_state`), `/replay compare <a>
+  <b>` (structured diff table), `/replay clear`, and `/fork <n>` (branch
+  from a snapshot into a NEW thread — original stays intact, new thread
+  seeded with snapshot state + session context + Web UI session).
+- **Web UI panel** (`/replay`): timeline browser with thread picker,
+  snapshot cards, message detail view, Restore/Fork buttons, Compare tab
+  with structured diff table, About tab, live SSE snapshot events.
+- **Live events**: `snapshot` SSE event emitted after each turn so the
+  timeline grows in real-time.
+- **API**: `/api/replay/{threads,snapshots,restore,fork,compare,clear}`.
+- **Config**: `time_travel: {enabled, max_snapshots, db_path}` in kazma.yaml.
+- Reconciled the `/replay` stub (was calling an invented API) to the real
+  `SnapshotRecorder`/`ReplayEngine` surface. Added clean public
+  `list_distinct_threads()` to both `SnapshotStore` and `SnapshotRecorder`.
+
 ## Unreleased — Capability expansion (2026-07-23)
 
 A cross-cutting expansion sprint closing the major horizontal and vertical

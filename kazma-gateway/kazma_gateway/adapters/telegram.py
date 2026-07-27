@@ -727,6 +727,7 @@ class TelegramAdapter(BaseAdapter):
         """
         out: dict[str, str | bool] = {
             "enabled": bool(self._voice_enabled),
+            "tts_reply": True,
             "stt_provider": self._voice_provider,
             "stt_language": self._stt_language,
             "tts_provider": self._tts_provider,
@@ -736,10 +737,20 @@ class TelegramAdapter(BaseAdapter):
         try:
             from kazma_core.config_store import get_config_store
 
+            def _as_bool(val: object, default: bool = False) -> bool:
+                if val is None:
+                    return default
+                if isinstance(val, bool):
+                    return val
+                return str(val).strip().lower() in ("1", "true", "yes", "on")
+
             cs = get_config_store()
             enabled = cs.get("voice.enabled")
             if enabled is not None:
-                out["enabled"] = str(enabled).lower() in ("1", "true", "yes", "on")
+                out["enabled"] = _as_bool(enabled, default=bool(out["enabled"]))
+            tts_reply = cs.get("voice.tts_reply")
+            if tts_reply is not None:
+                out["tts_reply"] = _as_bool(tts_reply, default=True)
             for key, attr in (
                 ("voice.stt_provider", "stt_provider"),
                 ("voice.stt_language", "stt_language"),
@@ -806,9 +817,11 @@ class TelegramAdapter(BaseAdapter):
         """Synthesize and send a voice reply after a text response.
 
         Strips markdown/HTML from the text before synthesis so the TTS
-        engine gets clean spoken text.
+        engine gets clean spoken text. Gated by ``voice.enabled`` and
+        ``voice.tts_reply`` (Settings → Voice).
         """
-        if not text or not self._live_voice_settings().get("enabled"):
+        cfg = self._live_voice_settings()
+        if not text or not cfg.get("enabled") or not cfg.get("tts_reply", True):
             return
         try:
             # Strip markdown/HTML for clean TTS input
@@ -1232,9 +1245,16 @@ class TelegramAdapter(BaseAdapter):
             # Send any media attachments (photos/documents/video) after text.
             for att in outbound.attachments:
                 await self._send_attachment(chat_id, att)
-            # Send TTS voice reply if original message was voice
-            if self._live_voice_settings().get("enabled") and outbound.context_metadata.get("voice_transcribed"):
-                asyncio.create_task(self._send_tts_reply(chat_id, outbound.text, original_msg_id))
+            # Send TTS voice reply only when this turn was voice + Settings allow it
+            try:
+                from kazma_gateway.adapters.voice_helpers import should_send_tts_reply
+
+                if should_send_tts_reply(outbound.context_metadata):
+                    asyncio.create_task(
+                        self._send_tts_reply(chat_id, outbound.text, original_msg_id)
+                    )
+            except Exception:
+                logger.debug("[telegram] TTS reply gate failed", exc_info=True)
             return True
         else:
             # React with ❌ on failure

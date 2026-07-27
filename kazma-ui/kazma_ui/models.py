@@ -252,6 +252,8 @@ class AgentConfigUpdate(BaseModel):
     language: str | None = None
     system_prompt: str | None = None
     personality: str | None = None
+    # Supervisor ReAct tool-round ceiling (5–100). Default in ConfigStore: 15.
+    max_iterations: int | None = Field(default=None, ge=5, le=100)
 
 
 class SafetySettingsUpdate(BaseModel):
@@ -386,6 +388,9 @@ class VoiceSettingsUpdate(BaseModel):
     """Update Voice Subsystem settings."""
 
     enabled: bool = False
+    # Auto voice-note replies on Telegram/Discord/Slack after a voice inbound.
+    # Independent of STT: leave enabled + tts_reply=false for listen-only.
+    tts_reply: bool = True
     stt_provider: str = "openai"
     stt_model: str = "default"
     stt_base_url: str = ""

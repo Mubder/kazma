@@ -5,6 +5,10 @@ sidebar_label: Troubleshooting
 description: Kazma Troubleshooting — code-audited reference (unified docs, v0.6.1+)
 ---
 > Practical fixes for the issues you will actually hit: provider limits, Windows/Docker specifics, SQLite concurrency, Arabic tokenization edge cases, and the known codebase gaps the audit uncovered. Every item is source-referenced.
+>
+> **Multi-path bugs** (same feature, several code paths): start with the
+> **[Diagnosis map](../ops/diagnosis-map)** — “symptom → first files” and
+> “X is related to Y” tables. Then return here for operational workarounds.
 
 ---
 

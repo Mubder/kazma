@@ -94,6 +94,9 @@ class SwarmConfig:
     enabled: bool = False
     group_chat_id: int = 0
     max_concurrent: int = 5
+    # Global in-flight task admission (audit M11) — separate from per-fanout
+    # max_concurrent which bounds workers *within* one task.
+    max_concurrent_tasks: int = 10
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     workers: list[WorkerConfig] = field(default_factory=list)
 
@@ -154,6 +157,9 @@ class SwarmConfig:
             enabled=data.get("enabled", False),
             group_chat_id=_resolve_chat_id(int(data.get("group_chat_id", 0))),
             max_concurrent=max(1, int(data.get("max_concurrent", 5))),
+            max_concurrent_tasks=max(
+                1, int(data.get("max_concurrent_tasks", 10))
+            ),
             orchestrator=orchestrator,
             workers=workers,
         )

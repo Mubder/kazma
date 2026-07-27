@@ -19,10 +19,12 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Understand the engine | [Architecture](guide/architecture) |
 | Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
 | Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) |
+| Debug multi-path bugs (“X related to Y”) | [Diagnosis map](ops/diagnosis-map) · [System map](reference/system-map) |
 | Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) |
 | Use built-in skills (browser, calendar, docs, …) | [Native skills](guide/native-skills) |
 | Send voice / images / documents | [Voice & media](guide/voice-and-media) |
 | Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
+| Ingest documentation into a knowledge corpus | [Knowledge Library](guide/knowledge-library) |
 | Web search / scrape / research | [Web research](guide/web-research) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 
@@ -50,8 +52,9 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 ### Ops (production)
 
-- [Production checklist](ops/production-checklist) · [Postgres & SaaS](ops/postgres-and-saas)
-- [Disaster recovery](ops/disaster-recovery) · [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
+- [Production checklist](ops/production-checklist) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
+- [Postgres & SaaS](ops/postgres-and-saas) · [Disaster recovery](ops/disaster-recovery)
+- [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
 - [Portability](ops/portability) · [WSL fixed access](ops/wsl-fixed-access)
 
 ### Skills · Security · Contributing
@@ -64,7 +67,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Path | Purpose |
 |------|---------|
 | `docs/audits/` | Security & architecture audits |
-| `docs/plans/` | Implementation plans (e.g. full email integration) |
+| `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md)) |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
 | `docs/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan |
 | `AGENTS.md` | Rules for coding agents working in the repo |

@@ -12,6 +12,21 @@ description: Kazma Swarm Orchestration — code-audited reference (unified docs,
 
 `SwarmEngine` (`kazma-core/kazma_core/swarm/engine.py:103`) is the central async orchestrator. A backward-compatible `SwarmManager` façade wraps it (`manager.py:17`, sharing `self._workers = self.engine._workers`).
 
+### 1.0 Platform bus (HITL / progress)
+
+Outbound swarm progress + danger-tool approvals go through `SwarmMessageBus`
+(`swarm/bus.py`). On Web boot (`app.py`):
+
+- Every configured platform adapter (Telegram / Discord / Slack) is collected.
+- **One** adapter → wired directly.
+- **Two or more** → wrapped in `FanOutBusAdapter` so stream/report/alert fan
+  out to all platforms, and `request_approval` returns True if **any**
+  platform approves (first yes wins).
+- None configured → `NullBusAdapter` (fail-closed for danger tools).
+
+Callback resolution still happens on each platform's own interaction handler
+(`handle_callback`). The bus singleton is process-local (not multi-replica).
+
 ### 1.1 Constructor
 
 ```python

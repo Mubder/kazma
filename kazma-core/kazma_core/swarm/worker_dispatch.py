@@ -24,6 +24,75 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _index_worker_l4_memory(
+    *,
+    worker_name: str,
+    prompt: str,
+    output: str,
+    task_id: str = "",
+) -> None:
+    """Best-effort L4 index for a completed swarm worker (P3).
+
+    Chat memory uses ``worker=default``; named workers only filled when they
+    store something — empty ``worker_vectors_Observer`` tables were expected
+    until a real task ran. Index a compact prompt+output snippet under the
+    worker name so subsequent L4 queries for that worker have content.
+    """
+    name = (worker_name or "default").strip() or "default"
+    body = (output or "").strip()
+    head = (prompt or "").strip()
+    if not body and not head:
+        return
+    # Keep snippets short — L4 side table already caps content.
+    snippet = ""
+    if head:
+        snippet += f"Task: {head[:600]}\n"
+    if body:
+        snippet += f"Result: {body[:2000]}"
+    snippet = snippet.strip()
+    if len(snippet) < 12:
+        return
+    import hashlib
+
+    doc_id = hashlib.sha256(
+        f"{name}:{task_id}:{snippet[:200]}".encode("utf-8", errors="ignore")
+    ).hexdigest()[:16]
+    meta = {
+        "worker": name,
+        "source": "swarm_worker",
+        "task_id": task_id or "",
+        "type": "swarm_result",
+    }
+    try:
+        from kazma_core.swarm.memory.adapter import get_adapter
+
+        adapter = get_adapter()
+        if adapter is not None and hasattr(adapter, "store"):
+            await adapter.store(snippet, metadata=meta)
+            return
+    except Exception:
+        logger.debug("[SwarmEngine] adapter L4 path failed for %s", name, exc_info=True)
+    # Direct L4 fallback if adapter unavailable
+    try:
+        from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
+
+        # Prefer the adapter's shared L4 instance when present
+        store = None
+        try:
+            from kazma_core.swarm.memory.adapter import get_adapter as _ga
+
+            ad = _ga()
+            store = getattr(ad, "_l4", None) if ad is not None else None
+        except Exception:
+            store = None
+        if store is None:
+            store = SQLiteVectorStore()
+        if store is not None and getattr(store, "available", True):
+            store.index(name, doc_id, snippet)
+    except Exception:
+        logger.debug("[SwarmEngine] direct L4 index failed for %s", name, exc_info=True)
+
+
 async def dispatch_worker(
     engine: "SwarmEngine",
     worker: SwarmWorker,
@@ -175,10 +244,10 @@ async def dispatch_worker(
             # End the dispatch span before handoff.
             if dispatch_span:
                 engine._tracing_emitter.end_span(dispatch_span, status="ok")
-            # Handoff path records on the target chain; release our probe flag.
-            breaker.record_success()
-            recorded = True
-            return await engine._handle_handoff(
+            # Do NOT record_success here — that double-counted the source
+            # breaker when _handle_handoff also record_* based on the target
+            # outcome (audit residual). Sole accounting lives in _handle_handoff.
+            results = await engine._handle_handoff(
                 handoff_req=handoff_req,
                 source_worker=worker,
                 prompt=prompt,
@@ -191,6 +260,8 @@ async def dispatch_worker(
                 _visited=_visited,
                 _depth=_depth + 1,
             )
+            recorded = True  # _handle_handoff always record_* or release_probe
+            return results
 
         worker_result = WorkerResult.from_dict(raw_result)
         if worker_result.duration_seconds <= 0:
@@ -209,8 +280,35 @@ async def dispatch_worker(
         else:
             breaker.record_failure()
         recorded = True
+        # Multi-replica: dual-write breaker state to ConfigStore
+        try:
+            if hasattr(engine, "_reliability") and hasattr(
+                engine._reliability, "note_breaker_outcome"
+            ):
+                engine._reliability.note_breaker_outcome(worker.name)
+            else:
+                breaker.persist_shared(worker.name)
+        except Exception:
+            pass
 
         worker.mark_completed(worker_result.status)
+
+        # P3: index successful worker output into L4 under this worker's
+        # table (worker_vectors_<name>) so swarm memory is not only "default".
+        if worker_result.status == "success" and (worker_result.output or prompt):
+            try:
+                await _index_worker_l4_memory(
+                    worker_name=getattr(worker, "name", "") or "default",
+                    prompt=prompt or "",
+                    output=str(worker_result.output or ""),
+                    task_id=getattr(context, "task_id", "") if context is not None else "",
+                )
+            except Exception:
+                logger.debug(
+                    "[SwarmEngine] L4 worker index skipped for %s",
+                    getattr(worker, "name", "?"),
+                    exc_info=True,
+                )
 
         # Emit worker_completed for observers (SSE etc.)
         output_preview = ""

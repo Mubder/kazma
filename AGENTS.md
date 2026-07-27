@@ -68,33 +68,42 @@ All packages are in scope. The four main packages:
 There are **three independent** HITL mechanisms. Breaking any one creates an
 unattended-danger-tool security gap:
 
-**A. Graph interrupt() — single-agent chat (Web/Telegram/Discord/Slack)**
+**A. Graph interrupt() — single-agent chat (Web SSE/WS + Telegram/Discord/Slack)**
 - `graph_builder.py:tool_worker_node` calls LangGraph `interrupt()` for danger tools
 - Gate is active ONLY when `hitl_config` is passed to `build_supervisor_graph()`
-- Two build sites must pass it: `agent_runner.get_streaming_graph()` AND
-  `app.py` startup recompile (~line 966). Omitting either = dormant gate.
-- Resume: `graph.ainvoke(Command(resume={"approved": bool}), config)` via
-  `POST /api/approve/{thread_id}` (web) or `/hitl approve|deny {thread_id}` (gateway)
+- Required build sites: `agent_runner.get_streaming_graph()`, `agent_runner._ensure_graph`,
+  and `app.py` startup recompile into `_graph_holder`. Omitting HITL on any site =
+  dormant gate on that path.
+- Resume: `graph.ainvoke(Command(resume=…), config)` via `POST /api/approve/{thread_id}`
+  (SSE), WS `approve_tool`, or gateway `/hitl approve|deny {thread_id}`
 - State persists in the checkpointer — paused turns survive restarts
-- Double-gating prevention: `_hitl_approved=True` flag in tool args skips the
-  bus check when the graph already approved via interrupt
+- Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
+  `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
 
-**B. Swarm bus — `/swarm` dispatch path**
+**B. Swarm bus — `/swarm` + IDE `LocalToolRegistry.execute` path**
 - `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
 - `check_sync()` is **fail-closed** (default): blocks danger tools when no real
   bus adapter is present. `allow_headless_danger=True` is the test/dev escape hatch
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
-- Only ONE adapter active at a time (bus singleton); priority Telegram > Discord > Slack
-- Approval buttons resolve via `handle_callback()` — called from each adapter's
-  inbound callback/interaction handler
+- App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
+  multiple are configured (first approval wins). NullBus = internal-only /
+  fail-closed danger
+- Approval buttons resolve via `handle_callback()` on each adapter
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
 - `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`
 
-**Danger tool lists differ by mechanism:**
-- Graph path: `kazma.yaml` `safety.hitl.require_approval_for` (file_write, file_delete, shell_exec, code_exec, python_exec)
-- Swarm bus: `safety.py:_EXTENDED_DANGER` (adds spawn_agent, spawn_agents, schedule_task, cancel_scheduled)
-- MCP tools: `classify_mcp_tool()` in `mcp/manager.py` — name-pattern matching (write/exec/delete → danger, read/list/get → safe, unknown → danger). Gate is in `UnifiedToolExecutor.execute()`.
+**Danger tool list SoT (must stay one list):**
+- **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
+- **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested)
+- **Settings UI / ConfigStore:** `safety.require_approval_for` — consumed by
+  `get_hitl_config()` (runtime override)
+- **Swarm bus:** `swarm/safety.py` `_EXTENDED_DANGER` is an **alias** of CANONICAL
+  (not a longer list — spawn tools only if on CANONICAL)
+- **MCP tools:** `classify_mcp_tool()` name patterns (write/exec/delete → danger).
+  Gate is in `UnifiedToolExecutor.execute()`
+
+**Diagnosis map (multi-path “X relates to Y”):** `docs/docs/ops/diagnosis-map.md`
 
 ### 8. ConfigStore Singleton + Atomicity (`kazma-core/kazma_core/config_store.py`)
 - Uses WAL + `busy_timeout=5000` (like all other SQLite stores)
@@ -127,18 +136,18 @@ The IDE is a transport-agnostic coding backend (Web, TUI, all chat platforms).
 It is the **single source of truth** for file/exec/git/swarm operations on a
 workspace. Three new modules; understanding their interaction is essential.
 
-**A. Workspace root resolution — TWO resolvers that MUST agree**
-- `file_write._get_workspace()` (`tools/file_write.py`) is used by ALL file
-  tools (`file_read`, `file_write`, `file_delete`, `file_list`, `file_search`).
-- `IdeService._resolve_workspace_root()` (`ide/service.py`) is used by the IDE
-  API + TUI.
-- **Resolution precedence (both must follow this):** per-task `workspace_scope`
-  ContextVar → `configure_workspace()` global → `KAZMA_WORKSPACE` env →
-  **active WorkspaceStore row** → `cwd/kazma-data/workspace` default.
-- `app.py` boot config (~line 250) calls `configure_workspace()` — it must
-  consult WorkspaceStore's active workspace, NOT just default to
-  `kazma-data/workspace`. Breaking this reintroduces the "reads outside
-  workspace" bug where repo files get rejected.
+**A. Workspace root resolution — ONE ladder (binding SoT)**
+- Public API: `kazma_core.workspace.binding.resolve_active_root()` (also
+  `file_write._get_workspace` / `configure_workspace` for compat).
+- Used by: all `file_*` tools, IdeService, workspace UI API, env_context.
+- **Resolution precedence:** per-task `workspace_scope` ContextVar →
+  **active WorkspaceStore row** → `configure_workspace()` pin →
+  `KAZMA_WORKSPACE` env → `{data_dir}/workspace` default sandbox.
+- **Binding bus:** `WorkspaceStore.set_active_workspace` →
+  `notify_root_changed(root)` → pin tools + MCP rebind for
+  `workspace_bound` servers (`${KAZMA_ACTIVE_WORKSPACE}` in command).
+- MCP filesystem must NOT stay on a static `kazma-data/workspace` fossil
+  after Switch Repo / clone.
 - Path-traversal protection: `IdeService.resolve()` does a string-level
   `normpath` `..` check + containment backstop (symlink/junction-aware).
 
@@ -227,6 +236,44 @@ them into every future system prompt. Two invariants must hold:
 - Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
   both the chat/supervisor path and the swarm worker path.
 
+### 12. Time Travel Replay (`kazma-core/kazma_core/time_travel.py`)
+
+The time-travel subsystem captures a snapshot of the full `SupervisorState`
+after every supervisor iteration and persists it to
+`kazma-data/snapshots.db` (SQLite WAL, LRU-capped per-thread at 50).
+
+**A. The recorder must be wired into ALL graph-build sites.**
+- `SnapshotRecorder` is created once per agent (`agent_runner.py` via
+  `create_recorder(config=...)`) and passed to `build_supervisor_graph(...,
+  snapshot_recorder=...)` at all 3 call sites: the run graph
+  (`_ensure_graph`), the streaming graph (`_ensure_streaming_graph`), and
+  child graphs (`build_child_graph`). The app.py post-startup recompile also
+  passes it. If any site omits the recorder, that path stops capturing
+  snapshots silently.
+
+**B. Capture hook lives in the supervisor node.**
+- `graph_builder.py:_supervisor` calls `snapshot_recorder.capture(merged)`
+  after each iteration and stamps `snapshot_id`/`snapshot_iteration` into
+  the result state. This is conditional on `snapshot_recorder is not None`.
+  The SSE path reads `snapshot_id` from the terminal graph state to emit a
+  `snapshot` SSE event (Part 6).
+
+**C. Restore vs Fork — in-place vs branch.**
+- `/replay <n>` (`_handle_replay` in `graph.py`): loads a snapshot via
+  `ReplayEngine.replay_from(thread_id, iteration)` and writes it back to the
+  SAME thread via `graph.aupdate_state(config, state)` — rewinding the live
+  conversation. Same pattern as `/undo`.
+- `/fork <n>` (`_handle_fork` in `graph.py`): loads the same snapshot but
+  writes it under a NEW `thread_id` (mints `gw-{platform}-{sender}-{uuid}`).
+  Also copies session context + creates a Web UI session. The original
+  thread is NOT modified. Do NOT overwrite `active_thread.{sender}` — the
+  user stays on the original; the fork appears in the Web UI sidebar.
+
+**D. The slash-command resolver returns `None` for `/replay <n>` and `/fork`.**
+- These fall through to the graph handler (like `/undo`/`/edit`) because they
+  need `graph.aupdate_state`. The resolver only handles read-only subcommands
+  (`list`, `compare`, `clear`) which don't need graph access.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -260,10 +307,12 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
+- `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (4-layer RRF, consolidator, graph)
+- `docs/plans/MEMORY_REMAINING.md` — Memory done vs later backlog
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
 - `docs/docs/reference/tools-catalog.md` — Built-in + native tools
 - `docs/docs/ops/production-checklist.md` — Production go-live checklist
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
 - `docs/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan
 - `CHANGELOG.md` — Sprint history
-- `archive/` — Retired docs trees (former `docs-v2`, legacy pages)
+- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees.

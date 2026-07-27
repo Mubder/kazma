@@ -115,6 +115,7 @@ class DiscordAdapter(BaseAdapter):
             queue:          The unified message bus.
             shutdown_event: Signals when to stop.
         """
+        self._queue = queue  # for interaction → synthetic slash enqueue
         self._http = httpx.AsyncClient(
             base_url=_DISCORD_API,
             timeout=httpx.Timeout(30.0, connect=5.0),
@@ -277,22 +278,25 @@ class DiscordAdapter(BaseAdapter):
             logger.exception("[discord] Heartbeat error")
 
     async def _handle_interaction(self, data: dict[str, Any]) -> None:
-        """Route a Discord component interaction (button press) to the bus.
+        """Route Discord component interactions via shared callback schemes.
 
-        When a HITL approval button is clicked, resolve the pending
-        asyncio.Event on the active DiscordBusAdapter and acknowledge
-        the interaction so Discord doesn't show "interaction failed".
+        Handles swarm HITL, dependency install, and graph-HITL button IDs
+        (``hitl:approve:…``) using :mod:`discord_callbacks`.
         """
+        from kazma_gateway.adapters.discord_callbacks import (
+            is_install_action,
+            package_from_install,
+            parse_custom_id,
+            route_swarm_bus,
+        )
+
         interaction_id = data.get("id", "")
         interaction_token = data.get("token", "")
         component_data = data.get("data", {})
         custom_id = component_data.get("custom_id", "")
+        action = parse_custom_id(custom_id)
 
-        if custom_id.startswith("install_dependency:") or custom_id.startswith("sys_install:"):
-            package_name = custom_id.split(":", 1)[1]
-            from kazma_core.system.runtime_manager import trigger_package_promotion
-            asyncio.create_task(trigger_package_promotion(package_name))
-            
+        async def _ack(payload: dict[str, Any]) -> None:
             try:
                 if not self._http:
                     self._http = httpx.AsyncClient(
@@ -300,154 +304,73 @@ class DiscordAdapter(BaseAdapter):
                         timeout=15.0,
                         headers={"Authorization": f"Bot {self._token}"},
                     )
-                
-                content = "[⏳ Installing package... please wait]" if custom_id.startswith("sys_install:") else "⏳ Installing ML dependencies in the background..."
-                
                 await self._http.post(
                     f"/interactions/{interaction_id}/{interaction_token}/callback",
-                    json={
-                        "type": 7,
-                        "data": {
-                            "content": content,
-                            "embeds": [],
-                            "components": []
-                        }
-                    },
+                    json=payload,
                 )
             except Exception as exc:
-                logger.warning("[discord] Failed to respond to dependency interaction: %s", exc)
+                logger.debug("[discord] Interaction ack failed: %s", exc)
+
+        if is_install_action(custom_id):
+            package_name = package_from_install(custom_id)
+            from kazma_core.system.runtime_manager import trigger_package_promotion
+
+            asyncio.create_task(trigger_package_promotion(package_name))
+            content = (
+                "[⏳ Installing package... please wait]"
+                if action.kind == "sys_install"
+                else "⏳ Installing ML dependencies in the background..."
+            )
+            await _ack(
+                {
+                    "type": 7,
+                    "data": {"content": content, "embeds": [], "components": []},
+                }
+            )
             return
 
-        if not custom_id.startswith(("swarm_approve_", "swarm_reject_")):
-            return  # not a swarm approval button
+        if action.kind == "swarm":
+            task_id = route_swarm_bus(custom_id)
+            if task_id is not None:
+                logger.info("[discord] Swarm approval resolved: %s", task_id)
+            await _ack({"type": 6})
+            return
 
-        task_id = None
-        try:
-            from kazma_core.swarm.bus import get_message_bus
-
-            from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
-
-            adapter = get_message_bus().adapter
-            if isinstance(adapter, DiscordBusAdapter):
-                task_id = adapter.handle_callback(custom_id)
-        except Exception as exc:
-            logger.warning("[discord] Swarm approval interaction failed: %s", exc)
-
-        if task_id is not None:
-            logger.info("[discord] Swarm approval resolved: %s", task_id)
-
-        # Acknowledge the interaction (type 6 = deferred update) so
-        # Discord doesn't mark it as failed. Best-effort — ignore errors.
-        try:
-            if not self._http:
-                self._http = httpx.AsyncClient(
-                    base_url=_DISCORD_API,
-                    timeout=15.0,
-                    headers={"Authorization": f"Bot {self._token}"},
+        # Graph HITL / personality / model pickers → synthetic slash into queue
+        if action.kind in ("hitl", "personality", "model_provider", "model_select") and action.text:
+            try:
+                user = data.get("member", {}).get("user") or data.get("user") or {}
+                channel_id = str(data.get("channel_id") or "")
+                msg = IncomingMessage(
+                    platform="discord",
+                    sender_id=f"discord:{channel_id}",
+                    text=action.text,
+                    context_metadata={
+                        "channel_id": channel_id,
+                        "user_id": str(user.get("id", "")),
+                        "username": user.get("username", ""),
+                        "interaction": True,
+                    },
                 )
-            await self._http.post(
-                f"/interactions/{interaction_id}/{interaction_token}/callback",
-                json={"type": 6},
-            )
-        except Exception as exc:
-            logger.debug("[discord] Interaction ack failed: %s", exc)
+                queue = getattr(self, "_queue", None) or getattr(self, "queue", None)
+                if queue is not None:
+                    queue.put_nowait(msg)
+            except Exception as exc:
+                logger.warning("[discord] Failed to enqueue interaction command: %s", exc)
+            await _ack({"type": 6})
+            return
+
+        # Unknown component — ignore
+        return
 
     def _parse_message(self, data: dict[str, Any] | None) -> IncomingMessage | None:
         """Parse a Discord MESSAGE_CREATE event into an IncomingMessage.
 
-        Captures any attachments (images/files) alongside the text. A message
-        with attachments but no text is still accepted so media-only uploads
-        reach the agent.
-
-        Args:
-            data: The MESSAGE_CREATE event data.
-
-        Returns:
-            IncomingMessage or None if not a valid message.
+        Delegates to :mod:`discord_parse` (Telegram-style pure helper module).
         """
-        if not data:
-            return None
+        from kazma_gateway.adapters.discord_parse import parse_message_create
 
-        # Skip bot messages
-        author = data.get("author", {})
-        if author.get("bot"):
-            return None
-
-        content = (data.get("content") or "").strip()
-        raw_attachments = data.get("attachments") or []
-        embeds = data.get("embeds") or []
-
-        # Accept if there is text OR any attachment. Media-only messages are
-        # common (e.g. uploading a screenshot), so don't require content.
-        if not content and not raw_attachments:
-            return None
-
-        channel_id = str(data.get("channel_id", ""))
-        if not channel_id:
-            return None
-
-        guild_id = data.get("guild_id")
-        user_id = str(author.get("id", ""))
-        username = author.get("username", "") or author.get("global_name", "") or f"discord_{user_id}"
-        message_id = str(data.get("id", ""))
-
-        attachments: list[Attachment] = []
-        for a in raw_attachments:
-            mime = (a.get("content_type") or "").lower()
-            if mime.startswith("image/"):
-                kind = "image"
-            elif mime.startswith("video/"):
-                kind = "video"
-            elif mime.startswith("audio/"):
-                kind = "audio"
-            else:
-                kind = "file"
-            attachments.append(
-                Attachment(
-                    kind=kind,
-                    mime=mime or "application/octet-stream",
-                    filename=a.get("filename", "") or f"discord_{a.get('id', 'file')}",
-                    url=a.get("url"),
-                    meta={
-                        "attachment_id": a.get("id"),
-                        "source": "discord",
-                        "width": a.get("width"),
-                        "height": a.get("height"),
-                    },
-                )
-            )
-        # Embeds with a single image (e.g. link previews) are treated as
-        # image attachments too, when the embed carries an image url.
-        for e in embeds:
-            img = e.get("image") or {}
-            url = img.get("url")
-            if url:
-                attachments.append(
-                    Attachment(
-                        kind="image",
-                        mime="image/png",
-                        filename="embed.png",
-                        url=url,
-                        meta={"source": "discord_embed"},
-                    )
-                )
-
-        text = content or (f"[{attachments[0].kind}]" if attachments else "")
-        return IncomingMessage(
-            platform="discord",
-            sender_id=f"discord:{channel_id}",
-            text=text,
-            attachments=attachments,
-            context_metadata={
-                "channel_id": channel_id,
-                "guild_id": str(guild_id) if guild_id else None,
-                "user_id": user_id,
-                "message_id": message_id,
-                "username": username,
-                "guild_name": data.get("guild_name"),
-                "media": bool(attachments),
-            },
-        )
+        return parse_message_create(data)
 
     # ── Typing indicator (fire-and-forget) ──────────────────────────
 
@@ -473,6 +396,8 @@ class DiscordAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
+        from kazma_gateway.adapters.discord_send import chunk_message, resolve_channel_id
+
         # Fire typing indicator before sending
         asyncio.create_task(self._trigger_typing(outbound.target_id))
         if not self._http:
@@ -483,26 +408,26 @@ class DiscordAdapter(BaseAdapter):
                 headers={"Authorization": f"Bot {self._token}"},
             )
 
-        # Resolve channel_id
-        channel_id = outbound.context_metadata.get("channel_id")
+        channel_id = resolve_channel_id(outbound.context_metadata, outbound.target_id)
         if not channel_id:
-            if ":" in outbound.target_id:
-                channel_id = outbound.target_id.split(":", 1)[1]
-            if not channel_id:
-                logger.error("[discord] No channel_id available for send()")
-                return False
+            logger.error("[discord] No channel_id available for send()")
+            return False
 
-        # Send with 429 retry — chunk long messages into 2000-char pieces
-        text = outbound.text
-        chunks = [text[i:i + 2000] for i in range(0, len(text), 2000)] if text else [""]
+        # Send with 429 retry — chunk long messages into Discord-safe pieces
+        chunks = chunk_message(outbound.text or "")
         all_sent = True
         for chunk in chunks:
             for attempt in range(_SEND_MAX_RETRIES):
                 try:
                     await self._rate_limiter.acquire()
+                    payload: dict[str, Any] = {"content": chunk}
+                    # Attach interactive components on the first chunk only
+                    comps = outbound.context_metadata.get("components")
+                    if comps and chunk is chunks[0]:
+                        payload["components"] = comps
                     resp = await self._http.post(
                         f"/channels/{channel_id}/messages",
-                        json={"content": chunk},
+                        json=payload,
                     )
 
                     if resp.status_code == 429:
@@ -542,66 +467,23 @@ class DiscordAdapter(BaseAdapter):
         return all_sent
 
     async def _send_voice_reply(self, channel_id: str, text: str) -> bool:
-        """Synthesize *text* and upload it as an audio attachment."""
-        try:
-            from kazma_gateway.adapters.voice_helpers import (
-                live_voice_settings,
-                synthesize_speech,
-            )
-
-            if not live_voice_settings().get("enabled") or not self._http:
-                return False
-            audio = await synthesize_speech(text)
-            if not audio:
-                return False
-            await self._rate_limiter.acquire()
-            resp = await self._http.post(
-                f"/channels/{channel_id}/messages",
-                data={"payload_json": json.dumps({"content": ""})},
-                files={"files[0]": ("reply.mp3", audio, "audio/mpeg")},
-            )
-            resp.raise_for_status()
-            logger.info("[discord] voice reply sent to %s (%d bytes)", channel_id, len(audio))
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[discord] voice reply failed: %s", type(exc).__name__)
+        """Synthesize *text* and upload it as an audio attachment (TG-depth path)."""
+        if not self._http:
             return False
+        from kazma_gateway.adapters.discord_stt import send_voice_reply
+
+        return await send_voice_reply(
+            http=self._http,
+            channel_id=channel_id,
+            text=text,
+            rate_limiter=self._rate_limiter,
+        )
 
     async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
-        """When voice is enabled, transcribe any audio attachment to text.
+        """Telegram-depth STT: size caps, language, provider, metadata tags."""
+        from kazma_gateway.adapters.discord_stt import transcribe_message
 
-        Downloads the audio (Discord exposes a URL) and replaces ``msg.text``
-        with the transcript, tagging ``voice_transcribed`` so the outbound
-        path can reply with TTS. No-op when voice is disabled or no audio is
-        present.
-        """
-        audio = next((a for a in msg.attachments if a.kind == "audio"), None)
-        if audio is None:
-            return msg
-        try:
-            from kazma_gateway.adapters.voice_helpers import (
-                live_voice_settings,
-                transcribe_audio,
-            )
-
-            if not live_voice_settings().get("enabled"):
-                return msg
-            data = audio.data
-            if data is None and audio.url:
-                resp = await self._http.get(audio.url, timeout=30.0)
-                resp.raise_for_status()
-                data = resp.content
-            if not data:
-                return msg
-            transcript = await transcribe_audio(data)
-            if transcript:
-                msg.text = transcript
-                msg.context_metadata["voice_transcribed"] = True
-                logger.info("[discord] transcribed audio (%d bytes) from %s",
-                            len(data), msg.context_metadata.get("channel_id"))
-        except Exception as exc:  # noqa: BLE001 — never drop a turn over STT
-            logger.warning("[discord] audio transcription failed: %s", type(exc).__name__)
-        return msg
+        return await transcribe_message(msg, http=self._http)
 
     async def _send_attachment(self, channel_id: str, att: Attachment) -> bool:
         """Upload one attachment to a Discord channel via multipart.
@@ -642,3 +524,30 @@ class DiscordAdapter(BaseAdapter):
         except Exception as exc:  # noqa: BLE001
             logger.warning("[discord] attachment send failed: %s", type(exc).__name__)
             return False
+
+    # ── Interactive builders (Telegram-parity static API) ───────────
+
+    @staticmethod
+    def build_approval_keyboard(request_id: str) -> list[dict[str, Any]]:
+        """Discord components for graph HITL (same IDs as Telegram)."""
+        from kazma_gateway.adapters.discord_keyboards import build_approval_components
+
+        return build_approval_components(request_id)
+
+    @staticmethod
+    def build_personality_keyboard(personalities: list[str]) -> list[dict[str, Any]]:
+        from kazma_gateway.adapters.discord_keyboards import build_personality_components
+
+        return build_personality_components(personalities)
+
+    @staticmethod
+    def build_provider_keyboard(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from kazma_gateway.adapters.discord_keyboards import build_provider_components
+
+        return build_provider_components(providers)
+
+    @staticmethod
+    def build_model_keyboard(provider_name: str, models: list[str]) -> list[dict[str, Any]]:
+        from kazma_gateway.adapters.discord_keyboards import build_model_components
+
+        return build_model_components(provider_name, models)

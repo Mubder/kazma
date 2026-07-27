@@ -48,7 +48,7 @@ function settingsApp() {
         profileName: '',
 
         // ── Agent Tab ──
-        agent: { name: 'kazma', language: 'ar', system_prompt: '', personality: 'default' },
+        agent: { name: 'kazma', language: 'ar', system_prompt: '', personality: 'default', max_iterations: 15 },
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
@@ -135,6 +135,7 @@ function settingsApp() {
         pkgPythonVer: '',
         pkgDbBackend: 'sqlite',
         pkgDbUrlSet: false,
+        pkgMemory: { status: '', summary: '', headline: '', layers: {}, issues: [] },
         pkgSearch: '',
         pkgLoading: false,
         pkgInstalling: '',
@@ -152,6 +153,7 @@ function settingsApp() {
         // ── Voice Tab ──
         voiceForm: {
             enabled: false,
+            tts_reply: true,
             stt_provider: 'openai',
             stt_model: 'default',
             stt_base_url: '',
@@ -206,16 +208,22 @@ function settingsApp() {
             this.loading = true;
             try {
                 // Load all settings in parallel
-                const [settings, providers, personalities, shortcuts] = await Promise.all([
+                const [settings, providers, personalities, shortcuts, agentCfg] = await Promise.all([
                     this._fetch('/api/settings'),
                     this._fetch('/api/settings/providers'),
                     this._fetch('/api/settings/agent/personalities'),
                     this._fetch('/api/settings/shortcuts'),
+                    this._fetch('/api/settings/agent'),
                 ]);
 
                 if (settings) {
                     if (settings.model) Object.assign(this.currentModel, settings.model);
-                    if (settings.agent) Object.assign(this.agent, settings.agent);
+                    // Prefer dedicated agent endpoint (clean keys); fall back to category bag
+                    if (agentCfg && typeof agentCfg === 'object') {
+                        Object.assign(this.agent, agentCfg);
+                    } else if (settings.agent) {
+                        Object.assign(this.agent, settings.agent);
+                    }
                     if (settings.connectors) Object.assign(this.connectors, settings.connectors);
                     if (settings.appearance) {
                         Object.assign(this.appearance, settings.appearance);
@@ -1517,7 +1525,7 @@ function settingsApp() {
         },
 
         async deletePlatformUser(username) {
-            if (!confirm('Delete user ' + username + '?')) return;
+            if (!await confirm('Delete user ' + username + '?')) return;
             try {
                 const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
                     method: 'DELETE',
@@ -1763,9 +1771,47 @@ function settingsApp() {
                     this.pkgPythonVer = data.python_version || '';
                     this.pkgDbBackend = data.db_backend || 'sqlite';
                     this.pkgDbUrlSet = !!data.db_url_set;
+                    this.pkgMemory = data.memory || { status: '', summary: '', headline: '', layers: {}, issues: [] };
                 }
             } catch (e) { /* silent */ }
             this.pkgLoading = false;
+        },
+
+        get pkgMemoryLayerRows() {
+            const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
+            const t = (typeof this.t === 'function') ? this.t.bind(this) : (k) => k;
+            const order = [
+                ['embedder', 'packages.layer.embedder', 'Embedder'],
+                ['vector_memory', 'packages.layer.vector_memory', 'VectorMemory'],
+                ['layer_l1', 'packages.layer.layer_l1', 'L1 Chroma'],
+                ['layer_l2', 'packages.layer.layer_l2', 'L2 Graph'],
+                ['layer_l3', 'packages.layer.layer_l3', 'L3 FTS5'],
+                ['layer_l4', 'packages.layer.layer_l4', 'L4 sqlite-vec'],
+                ['pkg_chromadb', null, 'chromadb'],
+                ['pkg_st', null, 'sentence-transformers'],
+                ['pkg_sqlite_vec', null, 'sqlite-vec'],
+                ['per_turn_retrieval', 'packages.layer.per_turn_retrieval', 'Per-turn RAG'],
+                ['auto_store', 'packages.layer.auto_store', 'Auto-store'],
+                ['consolidation', 'packages.layer.consolidation', 'Consolidator'],
+            ];
+            const rows = [];
+            for (const [id, i18nKey, fallback] of order) {
+                const c = layers[id];
+                if (!c) continue;
+                let name = fallback;
+                if (i18nKey) {
+                    const loc = t(i18nKey);
+                    if (loc && loc !== i18nKey) name = loc;
+                }
+                rows.push({
+                    id,
+                    name: name || c.name || fallback,
+                    ok: !!c.ok,
+                    status: c.status || (c.ok ? 'ok' : 'error'),
+                    detail: c.detail || '',
+                });
+            }
+            return rows;
         },
 
         get filteredPkgCore() {
@@ -1794,7 +1840,7 @@ function settingsApp() {
                     message: `Install the "${extraName}" extra into this Python environment? This runs uv/pip in the background.`,
                     confirmText: 'Install',
                 })
-                : confirm(`Install optional extra "${extraName}"?`);
+                : await confirm(`Install optional extra "${extraName}"?`);
             if (!ok) return;
 
             this.pkgInstalling = extraName;

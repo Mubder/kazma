@@ -777,6 +777,504 @@ async def _try_ide_command(
     return True
 
 
+# ── Knowledge Library commands ──────────────────────────────────────────────
+#
+# In-memory registry of background crawl jobs started from chat.  Each entry
+# is the latest ProgressUpdate yielded by ``ingest_site``.  The UI's
+# ``kb_api.py`` keeps its own separate registry; this one is purely so a
+# ``/kb status`` reply can read live progress for jobs kicked off from chat.
+import asyncio as _asyncio_kb  # module-private alias to avoid clashing below
+
+_kb_jobs: dict[str, dict[str, Any]] = {}
+
+
+async def _try_kb_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/kb`` Knowledge Library commands across all chat platforms.
+
+    Subcommands::
+
+        /kb                            — show help + library list
+        /kb list                       — list libraries (id, chunks, seed)
+        /kb add <id> <url>             — create-or-use library, ingest ONE page (sync)
+        /kb crawl <id> <url> [N]       — ingest the WHOLE doc tree (background job)
+        /kb refresh <id>               — re-crawl a library from its seed_url (background)
+        /kb search <id> <query>        — direct search (also useful w/o LLM)
+        /kb status <id>                — live progress of a running crawl/refresh
+        /kb delete <id>                — delete a library + all its chunks
+
+    Returns ``True`` if handled (so the caller skips the graph), else ``False``.
+    """
+    text = (msg.text or "").strip()
+    if not text.lower().startswith("/kb"):
+        return False
+
+    parts = text.split(None, 1)
+    body = parts[1].strip() if len(parts) > 1 else ""
+    tokens = body.split()
+    sub = tokens[0].lower() if tokens else ""
+
+    try:
+        from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
+        from kazma_core.stores.knowledge_index import get_knowledge_index
+
+        kb_store = get_knowledge_store()
+        kb_index = get_knowledge_index()
+    except Exception as exc:
+        logger.debug("[AgentHandler] Knowledge subsystem unavailable: %s", exc)
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "⚠️ Knowledge Library subsystem is unavailable in this deployment.",
+        )
+        return True
+
+    # ── Help / list ─────────────────────────────────────────────────
+    if sub in ("", "help", "list"):
+        libs = kb_store.list_libraries()
+        if not libs:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "📚 **Knowledge Library**\n\n"
+                "No libraries yet. Ingest one:\n"
+                "`/kb add <id> <url>` — single page\n"
+                "`/kb crawl <id> <url>` — whole doc tree\n\n"
+                "Example: `/kb crawl shipx_whatsapp "
+                "https://developers.facebook.com/docs/whatsapp/cloud-api`",
+            )
+            return True
+        lines = ["📚 **Knowledge Libraries**", ""]
+        for lib in libs:
+            lines.append(
+                f"• `{lib['id']}` — {lib['name']} "
+                f"({lib['chunk_count']} chunks)"
+            )
+            if lib.get("seed_url"):
+                lines.append(f"   seed: {lib['seed_url']}")
+        lines.append("")
+        lines.append(
+            "`/kb search <id> <query>` to consult one, or just ask me — "
+            "I'll use the `knowledge_search` tool automatically."
+        )
+        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        return True
+
+    # ── /kb add <id> <url>  (single page, synchronous) ──────────────
+    if sub == "add":
+        if len(tokens) < 3:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Usage: `/kb add <library_id> <url>`",
+            )
+            return True
+        lib_id = slugify_library_id(tokens[1])
+        url = tokens[2]
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"⏳ Ingesting page `{url}` into library `{lib_id}`…",
+        )
+        try:
+            from kazma_core.stores.knowledge_ingest import ingest_url
+
+            # Create-or-use the library.
+            if not kb_store.get_library(lib_id):
+                kb_store.create_library(lib_id, name=lib_id, seed_url=url)
+            result = await ingest_url(lib_id, url)
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"✅ Ingested 1 page into `{lib_id}`: "
+                f"{result.chunks_new} new chunks (+{result.chunks_skipped} deduped)."
+                + (f"\n⚠️ {len(result.errors)} error(s)." if result.errors else ""),
+            )
+        except Exception as exc:
+            logger.warning("[AgentHandler] /kb add failed: %s", exc)
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Ingest failed: {exc}",
+            )
+        return True
+
+    # ── /kb crawl <id> <url> [N]  (whole tree, background) ──────────
+    if sub == "crawl":
+        if len(tokens) < 3:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Usage: `/kb crawl <library_id> <url> [max_pages]`",
+            )
+            return True
+        lib_id = slugify_library_id(tokens[1])
+        url = tokens[2]
+        max_pages = None
+        if len(tokens) >= 4:
+            try:
+                max_pages = max(1, int(tokens[3]))
+            except ValueError:
+                pass
+
+        # Create-or-use the library.
+        if not kb_store.get_library(lib_id):
+            kb_store.create_library(lib_id, name=lib_id, seed_url=url)
+        else:
+            kb_store.update_library(lib_id, seed_url=url)
+
+        job_id = f"{lib_id}:{thread_id}"
+
+        def _kb_job_set(payload: dict[str, Any]) -> None:
+            """In-memory + durable ConfigStore snapshot (survives restart)."""
+            row = {
+                "library_id": lib_id,
+                "url": url,
+                **payload,
+            }
+            _kb_jobs[job_id] = row
+            try:
+                from kazma_core.stores.kb_jobs import upsert_job
+
+                upsert_job(job_id, **row)
+            except Exception as _kbj_exc:
+                logger.debug("[AgentHandler] durable kb job write failed: %s", _kbj_exc)
+
+        _kb_job_set({"phase": "starting", "message": "starting crawl"})
+
+        async def _run_crawl() -> None:
+            from kazma_core.stores.knowledge_ingest import ingest_site
+
+            final_msg = ""
+            try:
+                async for update in ingest_site(lib_id, url, max_pages=max_pages):
+                    _kb_job_set({
+                        "phase": update.phase,
+                        "discovered": update.discovered,
+                        "fetched": update.fetched,
+                        "ingested": update.ingested,
+                        "skipped": update.skipped,
+                        "failed": update.failed,
+                        "current_url": update.current_url,
+                        "message": update.message,
+                    })
+                    final_msg = update.message
+                from datetime import UTC, datetime as _dt
+
+                _kb_job_set({
+                    "phase": "done",
+                    "message": final_msg,
+                    "finished_at": _dt.now(UTC).isoformat(),
+                })
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"✅ Crawl complete for `{lib_id}`: {final_msg}",
+                )
+            except Exception as exc:
+                logger.warning("[AgentHandler] /kb crawl failed: %s", exc)
+                _kb_job_set({"phase": "error", "message": str(exc)})
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"⚠️ Crawl failed for `{lib_id}`: {exc}",
+                )
+
+        _asyncio_kb.create_task(_run_crawl())
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"🚀 Started crawl of `{url}` into library `{lib_id}` (background).\n"
+            f"Check progress: `/kb status {lib_id}`",
+        )
+        return True
+
+    # ── /kb refresh <id>  (re-crawl from seed_url, background) ──────
+    if sub == "refresh":
+        if len(tokens) < 2:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Usage: `/kb refresh <library_id>`",
+            )
+            return True
+        lib_id = slugify_library_id(tokens[1])
+        lib = kb_store.get_library(lib_id)
+        if not lib:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Library `{lib_id}` not found.",
+            )
+            return True
+        seed = lib.get("seed_url") or ""
+        if not seed:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Library `{lib_id}` has no seed_url to refresh from.",
+            )
+            return True
+        job_id = f"{lib_id}:{thread_id}:refresh"
+        row = {
+            "phase": "refreshing",
+            "library_id": lib_id,
+            "url": seed,
+            "kind": "refresh",
+            "message": f"refreshing {seed}",
+        }
+        _kb_jobs[job_id] = row
+        try:
+            from kazma_core.stores.kb_jobs import upsert_job
+
+            upsert_job(job_id, **row)
+        except Exception:
+            pass
+
+        async def _run_refresh() -> None:
+            from kazma_core.stores.knowledge_ingest import ingest_site
+
+            final_msg = ""
+            try:
+                async for update in ingest_site(lib_id, seed):
+                    snap = {
+                        "phase": update.phase,
+                        "library_id": lib_id,
+                        "url": seed,
+                        "kind": "refresh",
+                        "discovered": update.discovered,
+                        "fetched": update.fetched,
+                        "ingested": update.ingested,
+                        "skipped": update.skipped,
+                        "failed": update.failed,
+                        "current_url": update.current_url,
+                        "message": update.message,
+                    }
+                    _kb_jobs[job_id] = snap
+                    try:
+                        from kazma_core.stores.kb_jobs import upsert_job as _uj
+
+                        _uj(job_id, **snap)
+                    except Exception:
+                        pass
+                    final_msg = update.message
+                done = {
+                    "phase": "done",
+                    "library_id": lib_id,
+                    "url": seed,
+                    "kind": "refresh",
+                    "message": final_msg,
+                }
+                _kb_jobs[job_id] = done
+                try:
+                    from kazma_core.stores.kb_jobs import upsert_job as _uj2
+
+                    _uj2(job_id, **done)
+                except Exception:
+                    pass
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"✅ Refresh complete for `{lib_id}`: {final_msg}",
+                )
+            except Exception as exc:
+                logger.warning("[AgentHandler] /kb refresh failed: %s", exc)
+                err = {"phase": "error", "library_id": lib_id, "message": str(exc)}
+                _kb_jobs[job_id] = err
+                try:
+                    from kazma_core.stores.kb_jobs import upsert_job as _uj3
+
+                    _uj3(job_id, **err)
+                except Exception:
+                    pass
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"⚠️ Refresh failed for `{lib_id}`: {exc}",
+                )
+
+        _asyncio_kb.create_task(_run_refresh())
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"🔄 Refreshing `{lib_id}` from `{seed}` (background).\n"
+            f"Progress: `/kb status {lib_id}`",
+        )
+        return True
+
+    # ── /kb status <id> ─────────────────────────────────────────────
+    if sub == "status":
+        if len(tokens) < 2:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Usage: `/kb status <library_id>`",
+            )
+            return True
+        lib_id = slugify_library_id(tokens[1])
+        job = None
+        for jid, jv in _kb_jobs.items():
+            if jid.startswith(lib_id + ":"):
+                job = jv
+                break
+        if job is None:
+            try:
+                from kazma_core.stores.kb_jobs import list_jobs as _list_kb_jobs
+
+                for row in _list_kb_jobs(library_id=lib_id):
+                    job = row
+                    break
+            except Exception:
+                pass
+        if job is None:
+            lib = kb_store.get_library(lib_id)
+            if lib is None:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"⚠️ No library `{lib_id}` and no active job.",
+                )
+            else:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"📊 `{lib_id}`: {lib['chunk_count']} chunks "
+                    f"(no active crawl).",
+                )
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"📊 `{lib_id}` — {job.get('phase', '?')}\n"
+            f"{job.get('message', '')}\n"
+            f"discovered={job.get('discovered', 0)} "
+            f"fetched={job.get('fetched', 0)} "
+            f"ingested={job.get('ingested', 0)} "
+            f"failed={job.get('failed', 0)}\n"
+            + (f"current: {job.get('current_url', '')}" if job.get("current_url") else ""),
+        )
+        return True
+
+    # ── /kb search <id> <query> ─────────────────────────────────────
+    if sub == "search":
+        if len(tokens) < 3:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Usage: `/kb search <library_id> <query>`",
+            )
+            return True
+        lib_id = slugify_library_id(tokens[1])
+        query = " ".join(tokens[2:])
+        if not kb_store.get_library(lib_id):
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Library `{lib_id}` not found.",
+            )
+            return True
+        try:
+            hits = await kb_index.search(query, lib_id, top_k=3)
+        except Exception as exc:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Search failed: {exc}",
+            )
+            return True
+        if not hits:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"🔍 No hits in `{lib_id}` for: {query}",
+            )
+            return True
+        lines = [f"🔍 `{lib_id}` — {len(hits)} hit(s) for `{query}`", ""]
+        for i, h in enumerate(hits, start=1):
+            lines.append(
+                f"[{i}] score={h.score:.4f} — {h.source_url}"
+                + (f" ({h.section_header})" if h.section_header else "")
+            )
+            lines.append("```")
+            lines.append(h.content[:800] + ("…" if len(h.content) > 800 else ""))
+            lines.append("```")
+            lines.append("")
+        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        return True
+
+    # ── /kb delete <id> ─────────────────────────────────────────────
+    if sub == "delete":
+        if len(tokens) < 2:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Usage: `/kb delete <library_id>`",
+            )
+            return True
+        lib_id = slugify_library_id(tokens[1])
+        if not kb_store.get_library(lib_id):
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Library `{lib_id}` not found.",
+            )
+            return True
+        try:
+            kb_index.delete_library(lib_id)
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"🗑️ Deleted library `{lib_id}` and all its chunks.",
+            )
+        except Exception as exc:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Delete failed: {exc}",
+            )
+        return True
+
+    # Unknown subcommand.
+    await _send_model_reply(
+        msg, store, manager, thread_id,
+        f"⚠️ Unknown `/kb` subcommand `{sub}`. Send `/kb` for help.",
+    )
+    return True
+
+
+async def _try_research_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/research deep <topic>`` (and ``/research <topic>`` as deep)."""
+    text = (msg.text or "").strip()
+    low = text.lower()
+    if not low.startswith("/research"):
+        return False
+    parts = text.split(maxsplit=2)
+    if len(parts) == 1:
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "🔬 *Deep research*\n\n"
+            "`/research deep <topic>` — multi-query search, full-page acquire, "
+            "digest, LLM synthesis, report under `research/reports/`.\n\n"
+            "Also available as tool: `run_research_pipeline`.",
+        )
+        return True
+    # /research deep TOPIC  or  /research TOPIC
+    if parts[1].lower() in ("deep", "full", "paper", "comprehensive"):
+        topic = parts[2] if len(parts) > 2 else ""
+        depth = "deep"
+    else:
+        topic = text[len("/research") :].strip()
+        depth = "deep"
+    if not topic:
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "⚠️ Usage: `/research deep <topic>`",
+        )
+        return True
+    await _send_model_reply(
+        msg, store, manager, thread_id,
+        f"🔬 Starting deep research on: *{topic}*\nThis may take several minutes…",
+    )
+    try:
+        from kazma_core.tools.research_pipeline import run_research_pipeline
+
+        result = await run_research_pipeline(
+            topic, depth=depth, max_sources=8, export_docx=True
+        )
+        # Telegram-friendly length
+        if len(result) > 3500:
+            result = result[:3400] + "\n\n… (truncated — open the report file for full paper)"
+        await _send_model_reply(msg, store, manager, thread_id, result)
+    except Exception as exc:
+        logger.warning("[AgentHandler] /research failed: %s", exc)
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"⚠️ Research pipeline failed: {exc}",
+        )
+    return True
+
+
 async def _try_model_command(
     msg: IncomingMessage,
     store: SessionStore,

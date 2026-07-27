@@ -60,7 +60,9 @@ const sidebars = {
       label: 'Ops',
       items: [
         'ops/production-checklist',
+        'ops/diagnosis-map',
         'ops/postgres-and-saas',
+        'ops/multi-replica-and-saas',
         'ops/disaster-recovery',
         'ops/multi-region',
         'ops/oidc-setup',

@@ -326,6 +326,7 @@ class CircuitBreaker:
             logger.info("[CircuitBreaker] half-open probe succeeded, closing breaker")
             self._state = CircuitState.CLOSED
             self._opened_at = None
+            self._opened_at_wall = None  # type: ignore[attr-defined]
 
     def record_failure(self) -> None:
         """Record a failed dispatch.
@@ -340,6 +341,7 @@ class CircuitBreaker:
             logger.warning("[CircuitBreaker] half-open probe failed, re-opening breaker")
             self._state = CircuitState.OPEN
             self._opened_at = time.monotonic()
+            self._opened_at_wall = time.time()  # type: ignore[attr-defined]
             return
 
         self.consecutive_failures += 1
@@ -351,6 +353,7 @@ class CircuitBreaker:
             )
             self._state = CircuitState.OPEN
             self._opened_at = time.monotonic()
+            self._opened_at_wall = time.time()  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Manual reset
@@ -373,11 +376,13 @@ class CircuitBreaker:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable snapshot of this breaker."""
+        opened_wall = getattr(self, "_opened_at_wall", None)
         return {
             "state": self.state.value,
             "consecutive_failures": self.consecutive_failures,
             "failure_threshold": self.failure_threshold,
             "cooldown_seconds": self.cooldown_seconds,
+            "opened_at_wall": opened_wall,
         }
 
     @classmethod
@@ -394,9 +399,65 @@ class CircuitBreaker:
         except ValueError:
             breaker._state = CircuitState.CLOSED
         if breaker._state == CircuitState.OPEN:
-            import time as _time
-            breaker._opened_at = _time.monotonic()
+            # Prefer wall-clock so multi-replica cooldown is coherent
+            wall = data.get("opened_at_wall")
+            if wall is not None:
+                breaker._opened_at_wall = float(wall)
+                # Map remaining cooldown onto local monotonic clock
+                elapsed = max(0.0, time.time() - float(wall))
+                remaining = max(0.0, breaker.cooldown_seconds - elapsed)
+                breaker._opened_at = time.monotonic() - (
+                    breaker.cooldown_seconds - remaining
+                )
+            else:
+                breaker._opened_at = time.monotonic()
         return breaker
+
+    def persist_shared(self, worker_name: str) -> None:
+        """Write state to ConfigStore for multi-replica sharing (best-effort)."""
+        if not _shared_breakers_enabled():
+            return
+        try:
+            from kazma_core.config_store import get_config_store
+
+            get_config_store().set(
+                f"swarm.breaker.{worker_name}",
+                self.to_dict(),
+                category="swarm",
+            )
+        except Exception as exc:
+            logger.debug("[CircuitBreaker] persist_shared failed: %s", exc)
+
+    @classmethod
+    def load_shared(cls, worker_name: str) -> CircuitBreaker | None:
+        """Load shared state if present."""
+        if not _shared_breakers_enabled():
+            return None
+        try:
+            from kazma_core.config_store import get_config_store
+
+            raw = get_config_store().get(f"swarm.breaker.{worker_name}")
+            if isinstance(raw, dict) and raw:
+                return cls.from_dict(raw)
+        except Exception as exc:
+            logger.debug("[CircuitBreaker] load_shared failed: %s", exc)
+        return None
+
+
+def _shared_breakers_enabled() -> bool:
+    import os
+
+    raw = (os.environ.get("KAZMA_SHARED_BREAKERS") or "").strip().lower()
+    if raw in ("0", "false", "off", "no"):
+        return False
+    if raw in ("1", "true", "on", "yes"):
+        return True
+    try:
+        from kazma_core.tenant_isolation import multi_user_or_production
+
+        return multi_user_or_production()
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------

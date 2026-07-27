@@ -45,18 +45,24 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
     for intr in interrupts:
         value = getattr(intr, "value", None)
         if isinstance(value, dict) and value.get("type") == "hitl_approval":
+            tool = value.get("tool") or value.get("tool_name") or "unknown"
+            msg = value.get("message")
             return {
-                "tool_name": value.get("tool", "unknown"),
-                "arguments": value.get("args", value.get("arguments", {})),
-                "message": value.get("message", ""),
+                "tool_name": str(tool) if tool is not None else "unknown",
+                "arguments": value.get("args") or value.get("arguments") or {},
+                "message": "" if msg is None else str(msg),
             }
         # Fallback: some interrupt payloads may not carry the type tag but
         # still have tool/args keys
-        if isinstance(value, dict) and ("tool" in value or "args" in value):
+        if isinstance(value, dict) and (
+            "tool" in value or "tool_name" in value or "args" in value
+        ):
+            tool = value.get("tool") or value.get("tool_name") or "unknown"
+            msg = value.get("message")
             return {
-                "tool_name": value.get("tool", "unknown"),
-                "arguments": value.get("args", value.get("arguments", {})),
-                "message": value.get("message", ""),
+                "tool_name": str(tool) if tool is not None else "unknown",
+                "arguments": value.get("args") or value.get("arguments") or {},
+                "message": "" if msg is None else str(msg),
             }
     return None
 
@@ -73,13 +79,18 @@ async def _enumerate_thread_ids(conn: Any) -> list[str]:
     # Postgres pool: acquire a connection, run, release.
     if type(conn).__name__ == "AsyncConnectionPool" or hasattr(conn, "getconn"):
         async with conn.connection() as pg_conn:  # type: ignore[union-attr]
-            cursor = await pg_conn.execute(
-                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id IS NOT NULL"
-            )
-            if cursor is None:
-                return []
-            rows = await cursor.fetchall()
-            return [r[0] for r in rows if r[0]]
+            async with pg_conn.cursor() as cur:  # type: ignore[union-attr]
+                await cur.execute(
+                    "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id IS NOT NULL"
+                )
+                rows = await cur.fetchall()
+            # psycopg dict_row returns dicts; aiosqlite returns tuples.
+            result: list[str] = []
+            for r in rows:
+                tid = r["thread_id"] if isinstance(r, dict) else r[0]
+                if tid:
+                    result.append(tid)
+            return result
 
     # aiosqlite connection.
     cursor = await conn.execute(  # type: ignore[union-attr]
@@ -94,6 +105,9 @@ async def _get_pending_approvals(
     checkpointer: Any,
 ) -> list[dict[str, Any]]:
     """Scan all checkpointed threads and return those in an interrupt state.
+
+    ONLY returns threads that are ACTIVELY pending approval (hitl_state == 'pending_approval').
+    This prevents stale checkpoints from showing up in the dashboard after approval/deny.
 
     Args:
         graph:        Compiled LangGraph (Pregel) with an attached checkpointer.
@@ -125,8 +139,43 @@ async def _get_pending_approvals(
         logger.warning("[HITL] No DB connection available to enumerate threads")
         return []
 
+    # ── Filter by HITL state in metadata (if available) ────────────
+    # Try to get thread IDs with hitl_state == 'pending_approval' from DB
+    pending_thread_ids: list[str] = []
+    
+    # Check if connection supports direct metadata query
+    if conn is not None:
+        try:
+            # For SQLite (aiosqlite)
+            if hasattr(conn, 'execute'):
+                import json as _json
+                cursor = await conn.execute(
+                    "SELECT thread_id FROM checkpoints WHERE json_extract(metadata, '$.hitl_state') = ?",
+                    ("pending_approval",)
+                )
+                rows = await cursor.fetchall()
+                pending_thread_ids = [row[0] for row in rows if row[0]]
+            # For Postgres (psycopg)
+            elif hasattr(conn, 'connection'):
+                async with conn.connection() as pg_conn:
+                    async with pg_conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT thread_id FROM checkpoints WHERE metadata->>'hitl_state' = %s",
+                            ("pending_approval",)
+                        )
+                        rows = await cur.fetchall()
+                        pending_thread_ids = [row[0] for row in rows if row[0]]
+        except Exception as exc:
+            logger.debug("[HITL] Failed to query hitl_state from DB, falling back to graph scan: %s", exc)
+            # Fall back to scanning all threads
+            pending_thread_ids = thread_ids
+    
+    # If we couldn't query by state, use all thread IDs (backward compatibility)
+    if not pending_thread_ids:
+        pending_thread_ids = thread_ids
+
     approvals: list[dict[str, Any]] = []
-    for thread_id in thread_ids:
+    for thread_id in pending_thread_ids:
         config: dict[str, Any] = {
             "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
         }
@@ -155,8 +204,28 @@ async def _get_pending_approvals(
                         "message": info["message"],
                     }
                 )
+                # Only need one interrupt per thread
+                break
 
     return approvals
+
+
+async def clear_pending_approvals(graph: Any, checkpointer: Any) -> int:
+    """Clear/delete checkpoints for all threads currently in an interrupt state."""
+    pending = await _get_pending_approvals(graph, checkpointer)
+    cleared = 0
+    for item in pending:
+        thread_id = item.get("thread_id")
+        if thread_id:
+            try:
+                if hasattr(checkpointer, "adelete_thread"):
+                    await checkpointer.adelete_thread(thread_id)
+                elif hasattr(checkpointer, "_saver") and hasattr(checkpointer._saver, "adelete_thread"):
+                    await checkpointer._saver.adelete_thread(thread_id)
+                cleared += 1
+            except Exception as exc:
+                logger.warning("[HITL] Failed to delete checkpoint thread=%s: %s", thread_id, exc)
+    return cleared
 
 
 def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
@@ -185,6 +254,20 @@ def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
             logger.exception("[HITL] Failed to list pending approvals")
             return JSONResponse(
                 {"pending": [], "count": 0, "error": str(exc)},
+                status_code=500,
+            )
+
+    @router.post("/api/pending-approvals/clear")
+    @router.delete("/api/pending-approvals")
+    async def clear_pending_endpoint(request: Request) -> JSONResponse:
+        """Clear all pending approvals by deleting their interrupted checkpoints."""
+        try:
+            cleared = await clear_pending_approvals(graph, checkpointer)
+            return JSONResponse({"status": "ok", "cleared": cleared})
+        except Exception as exc:
+            logger.exception("[HITL] Failed to clear pending approvals")
+            return JSONResponse(
+                {"status": "error", "error": str(exc)},
                 status_code=500,
             )
 

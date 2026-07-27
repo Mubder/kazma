@@ -1,13 +1,25 @@
 # Kazma TUI
 
-A professional terminal-based dashboard for the Kazma framework, built with [Textual](https://textual.textualize.io/).
+A professional terminal-based **ops console** for the Kazma framework, built with [Textual](https://textual.textualize.io/).
+
+**Shell v3 (2026-07):** design tokens, left **nav rail** (expand/collapse), Memory tab, equal metric cards, denser Chat/Files/Swarm panels.
+
+| Phase | Shipped |
+|-------|---------|
+| v2 shell | Theme tokens, brand header, status bar, dense UI |
+| Phase 2 | Dashboard memory health strip; Swarm/Files/Traces polish; shared `KAZMA_SHELL_CSS` |
+| Phase 3 | Nav rail (1–7), Memory tab, Swarm sparklines, consolidator settings toggles |
+| Phase 4 polish | Collapsible nav (`[`), graph search/clear, panel density, README refresh |
 
 ## Features
 
-- **Metrics Dashboard** - Real-time display of CPU/Memory, RPM, latency, error rate, and active agents
-- **Chat Interface** - Interactive chat with command support (`/help`, `/clear`, `/quit`)
-- **ModelRegistry Integration** - Displays active provider and model from the centralized registry
-- **English-Only UI** - Clean, professional interface
+- **Metrics Dashboard** — CPU/RAM/VRAM, RPM, latency, errors, agents, memory health
+- **Memory tab** — L1–L4 health, graph stats, **search**, **clear** (confirm)
+- **Chat** — slash commands, autocomplete, streaming
+- **Files** — directory tree, preview, IDE editor
+- **Traces / Swarm** — call traces, workers, live sparklines
+- **Settings** — themes, memory pipeline toggles
+- **Nav rail** — full labels or key-only (narrow / `[` toggle)
 
 ## Installation
 
@@ -18,10 +30,8 @@ pip install -e kazma-tui/ -e kazma-core/
 ## Usage
 
 ```bash
-# Launch the TUI
 kazma-tui
-
-# Or via Python module
+# or
 python -m kazma_tui
 ```
 
@@ -29,9 +39,15 @@ python -m kazma_tui
 
 | Shortcut | Action |
 |----------|--------|
+| `1`–`7` | Dashboard · Memory · Chat · Files · Traces · Swarm · Settings |
+| `m` | Memory tab |
+| `[` | Collapse / expand left nav |
+| `Ctrl+N` / `Ctrl+B` | Next / previous tab |
+| `Ctrl+P` | Command palette |
+| `Ctrl+F` | Focus chat input |
 | `Ctrl+Q` | Quit |
-| `Tab` | Switch panels |
-| `Enter` | Send message |
+| `?` | Help |
+| `e` | Open selected file in editor (Files tab) |
 
 ## Chat Commands
 
@@ -39,47 +55,53 @@ python -m kazma_tui
 |---------|-------------|
 | `/help` | Show available commands |
 | `/clear` | Clear chat log |
+| `/model` | Show / switch model |
+| `/memory` | Memory store stats |
+| `/swarm` | Swarm dispatch / status |
 | `/quit` | Exit TUI |
 
 ## Architecture
 
 ```
 kazma-tui/kazma_tui/
-├── app.py          # Main Textual application
-├── dashboard.py    # Metrics dashboard (CPU, RAM, RPM, latency, error rate, agents)
-├── chat.py         # Chat interface with input and commands
-├── header.py       # Header with active provider/model from ModelRegistry
-├── footer.py       # Footer with keyboard shortcuts
-├── __init__.py     # Package initialization
-└── __main__.py     # CLI entry point
+├── app.py              # Main app (shell, bindings, HITL poll)
+├── theme.py            # Design tokens + shared shell CSS
+├── themes/
+│   └── theme_manager.py
+├── nav_rail.py         # Left rail (collapsible)
+├── header.py           # Brand · provider/model
+├── dashboard.py        # MetricCard grid + memory strip
+├── memory_panel.py     # MemoryHealthPanel + MemoryTab (graph search/clear)
+├── chat.py             # Streaming chat + slash autocomplete
+├── files.py            # DirectoryTree + preview
+├── editor.py           # Full-screen editor screen
+├── traces.py           # Trace table
+├── swarm.py            # Workers, tasks, sparklines
+├── settings_panel.py   # Theme + memory toggles
+├── footer.py
+└── widgets/            # status_bar, toast, confirm_dialog, sparklines, …
 ```
 
 ## Data Sources
 
-- **HardwareMonitor** (`kazma_core.telemetry`) - CPU/RAM/GPU stats
-- **MetricsCollector** (`kazma_core.swarm.metrics`) - Per-worker metrics (tokens, cost, latency)
-- **TraceStore** (`kazma_core.tracing`) - In-memory trace ring buffer (RPM, total calls)
-- **ModelRegistry** (`kazma_core.model_registry`) - Active provider/model info
+| Source | Package | Used for |
+|--------|---------|----------|
+| HardwareMonitor | `kazma_core.telemetry` | CPU/RAM/GPU |
+| MetricsCollector | `kazma_core.swarm.metrics` | Latency, tokens, cost |
+| TraceStore | `kazma_core.tracing` | RPM, call history |
+| ModelRegistry | `kazma_core.model_registry` | Active provider/model |
+| Knowledge graph | `kazma_core.swarm.memory.graph` | L2 search / clear / stats |
+| Memory health | `kazma_core.memory.health` | Stack status chips |
 
 ## Development
 
 ```bash
-# Run tests
 python -m pytest kazma-tui/kazma_tui_tests/ -v
-
-# Lint
 python -m ruff check kazma-tui/
-
-# Typecheck
 python -m mypy kazma-tui/kazma_tui/
 ```
 
 ## Tests
 
-191 tests covering:
-- Header/footer widget rendering
-- Dashboard metrics display and refresh
-- Chat input, messages, and commands
-- ModelRegistry integration
-- English-only validation
-- Read-only consumer validation
+Dashboard, chat, header, and panel unit tests under `kazma_tui_tests/`.
+English-only UI validation included.

@@ -107,6 +107,13 @@ Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `
 | `done` | Turn complete. | `tokens`, `cost_usd`, `duration_ms` |
 | `error` | Fatal error. | `message` |
 
+**HITL approval expiry**: if the user clicks Approve/Deny on a card that
+has already timed out or been resumed, `POST /api/approve/{thread_id}`
+returns **HTTP 409** with `{"status": "expired", "error": "No pending
+approval for this thread (already resumed or expired)."}`. The frontend
+(`hitl_approval.js`) detects this and transitions the card to
+"Expired or already resumed" then removes it.
+
 ### 3.1 Client-side example (JavaScript)
 
 ```javascript
@@ -243,18 +250,30 @@ httpx.post("http://127.0.0.1:8000/api/swarm/workers", json={
 })
 ```
 
-### 4.7 Tap the 4-layer memory adapter (advanced)
+### 4.7 Tap the 4-layer memory adapter
 
-The `UnifiedMemoryAdapter` (`swarm/memory/adapter.py`) is only used by `self_improvement.py` and `phonebook.py`. To use it elsewhere:
+The `UnifiedMemoryAdapter` is the **chat default** (per-turn RAG, tools, auto-store, compaction) and is also used by self-improvement / phonebook. Custom code:
 
 ```python
 from kazma_core.swarm.memory.adapter import get_adapter
 
 adapter = get_adapter()
-results = await adapter.query("your query", top_k=5)   # RRF-blended across 4 layers
+results = await adapter.query("your query", limit=5)   # RRF-blended across 4 layers
+doc_id = await adapter.store("User prefers dark mode", metadata={"source": "custom"})
+# doc_id is "" if no durable layer (L1/L3/L4) confirmed the write (fail-closed)
 ```
 
-Note: this is **not** wired into the chat agent by default — see [Memory & RAG](memory-and-rag).
+Property graph (L2):
+
+```python
+from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+kg = get_knowledge_graph()
+kg.upsert_triple("user", "prefers", "dark mode", fact="User prefers dark mode.")
+hits = kg.search("dark mode", limit=10)
+```
+
+See [Memory & RAG](memory-and-rag).
 
 ---
 
@@ -273,4 +292,4 @@ Note: this is **not** wired into the chat agent by default — see [Memory & RAG
 - **The WebSocket chat endpoint is dead** (410 Gone). All API consumers should use SSE.
 - **The SSE `approval_required` event** is the canonical way for frontends to surface HITL pauses; pair it with `POST /api/approve/\{thread_id\}`.
 - **`/api/approve` ownership enforcement** (403 on cross-user) means approval tokens are per-user — an admin can't approve another user's task without matching identity fields.
-- **The 4-layer memory adapter is an extension point, not a default** — calling `get_adapter()` from custom code is supported, but don't assume the chat agent already uses it.
+- **The 4-layer memory adapter is the chat default** — per-turn RAG, tools, auto-store, and compaction all use `get_adapter()`.

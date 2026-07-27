@@ -153,7 +153,7 @@ def _last_assistant_text(messages: list[Any] | None) -> str:
 
 async def _stream_langgraph_events(
     graph: Any,
-    input_state: dict[str, Any],
+    input_state: dict[str, Any] | Any,
     config: dict[str, Any],
 ) -> AsyncGenerator[str, None]:
     """Consume LangGraph astream_events and yield SSE frames.
@@ -167,9 +167,15 @@ async def _stream_langgraph_events(
       on_tool_end           → tool_result
       on_chain_end          → done (only from the respond node)
 
+    When *input_state* is a ``langgraph.types.Command`` (HITL resume path),
+    ``graph.ainvoke()`` is used instead of ``astream_events`` because the
+    custom LLMProvider does not emit ``on_chat_model_stream`` events, causing
+    ``astream_events`` to hang without producing any frames.  The post-stream
+    backfill logic still runs and surfaces assistant text from the checkpoint.
+
     Args:
-        graph: Compiled LangGraph app (must support astream_events).
-        input_state: The SupervisorState dict to feed into the graph.
+        graph: Compiled LangGraph app (must support astream_events/ainvoke).
+        input_state: The SupervisorState dict, or a Command for HITL resume.
         config: LangGraph config dict (thread_id, checkpoint_ns, etc.).
 
     Yields:
@@ -184,104 +190,142 @@ async def _stream_langgraph_events(
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
+    interrupted = False
+    thread_id = tid or ""
+    _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
 
     try:
         try:
-            async for event in graph.astream_events(input_state, config=config, version="v2"):
-                kind = event.get("event", "")
-                data = event.get("data", {})
-                name = event.get("name", "")
+            # ── Detect Command input (HITL resume path) ─────────────────
+            # When resuming from a HITL interrupt, input_state is a
+            # langgraph.types.Command object (not a state dict).  In that
+            # case astream_events(version="v2") hangs without producing any
+            # frames because Kazma's custom LLMProvider does not emit
+            # on_chat_model_stream events (see comment below).  The async-for
+            # loop never exhausts, so the post-stream backfill logic that
+            # reads graph.aget_state() is never reached — the SSE stream stays
+            # open with a fake "Thinking…" spinner.
+            #
+            # Fix: for Command inputs, use graph.ainvoke() which completes
+            # synchronously (stopping at any new interrupt), then fall through
+            # to the existing post-stream logic that backfills assistant text
+            # and detects chained HITL interrupts from the checkpoint.
+            from langgraph.types import Command as _Command
 
-                # ── on_chat_model_stream: LLM token delta ──────────────
-                if kind == "on_chat_model_stream":
-                    chunk = data.get("chunk")
-                    if chunk is not None:
-                        # chunk is an AIMessageChunk — extract content
-                        token_text = ""
-                        if hasattr(chunk, "content"):
-                            token_text = chunk.content or ""
-                        elif isinstance(chunk, dict):
-                            token_text = chunk.get("content", "")
+            _is_resume = isinstance(input_state, _Command)
 
-                        if token_text:
-                            content_acc += token_text
-                            yield _sse_frame("token", {"content": token_text})
+            if _is_resume:
+                logger.debug(
+                    "[SSE] HITL resume path — using ainvoke() for thread=%s",
+                    thread_id,
+                )
+                await graph.ainvoke(input_state, config)
+            else:
+                async for event in graph.astream_events(input_state, config=config, version="v2"):
+                    kind = event.get("event", "")
+                    data = event.get("data", {})
+                    name = event.get("name", "")
 
-                # ── on_chat_model_end: LLM finished — extract usage ────
-                elif kind == "on_chat_model_end":
-                    output = data.get("output", {})
-                    if hasattr(output, "usage_metadata"):
-                        usage = output.usage_metadata or {}
-                        total_tokens = usage.get("total_tokens", total_tokens)
-                    elif isinstance(output, dict):
-                        usage = output.get("usage", {})
-                        total_tokens = usage.get("total_tokens", total_tokens)
-                        # Some providers put cost in response_metadata
-                        meta = output.get("response_metadata", {})
-                        if "cost" in meta:
-                            total_cost += meta["cost"]
+                    # ── on_chat_model_stream: LLM token delta ──────────────
+                    if kind == "on_chat_model_stream":
+                        chunk = data.get("chunk")
+                        if chunk is not None:
+                            # chunk is an AIMessageChunk — extract content
+                            token_text = ""
+                            if hasattr(chunk, "content"):
+                                token_text = chunk.content or ""
+                            elif isinstance(chunk, dict):
+                                token_text = chunk.get("content", "")
 
-                # ── on_tool_start: tool execution beginning ────────────
-                elif kind == "on_tool_start":
-                    inputs = data.get("input", {})
-                    # data.input can be the raw args dict or nested
-                    if isinstance(inputs, dict) and "input" in inputs:
-                        inputs = inputs["input"]
-                    yield _sse_frame(
-                        "tool_call",
-                        {
-                            "tool_name": name,
-                            "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
-                            if isinstance(inputs, dict)
-                            else str(inputs)[:2000],
-                        },
-                    )
+                            if token_text:
+                                content_acc += token_text
+                                yield _sse_frame("token", {"content": token_text})
 
-                # ── on_tool_end: tool execution finished ───────────────
-                elif kind == "on_tool_end":
-                    output = data.get("output", "")
-                    if hasattr(output, "content"):
-                        output = output.content
-                    elif isinstance(output, dict):
-                        output = output.get("content", json.dumps(output, ensure_ascii=False))
-                    yield _sse_frame(
-                        "tool_result",
-                        {
-                            "tool_name": name,
-                            "result": str(output)[:5000],
-                        },
-                    )
+                    # ── on_chat_model_end: LLM finished — extract usage ────
+                    elif kind == "on_chat_model_end":
+                        output = data.get("output", {})
+                        if hasattr(output, "usage_metadata"):
+                            usage = output.usage_metadata or {}
+                            total_tokens = usage.get("total_tokens", total_tokens)
+                        elif isinstance(output, dict):
+                            usage = output.get("usage", {})
+                            total_tokens = usage.get("total_tokens", total_tokens)
+                            # Some providers put cost in response_metadata
+                            meta = output.get("response_metadata", {})
+                            if "cost" in meta:
+                                total_cost += meta["cost"]
 
-                # ── on_chain_end at graph terminal: graph finished ─────
-                # LangGraph 1.x emits the terminal on_chain_end with name
-                # "LangGraph"; older versions (and some test mocks) use
-                # "__end__".  Match both so the handler fires in production
-                # and in unit tests.
-                elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
-                    # Extract final state if available
-                    output = data.get("output", {})
-                    if isinstance(output, dict):
-                        # Pull cost/tokens from the final state
-                        final_cost = output.get("last_cost_usd", total_cost)
-                        final_tokens = output.get("last_tokens", total_tokens)
-                        if final_cost:
-                            total_cost = final_cost
-                        if final_tokens:
-                            total_tokens = final_tokens
+                    # ── on_tool_start: tool execution beginning ────────────
+                    elif kind == "on_tool_start":
+                        inputs = data.get("input", {})
+                        # data.input can be the raw args dict or nested
+                        if isinstance(inputs, dict) and "input" in inputs:
+                            inputs = inputs["input"]
+                        yield _sse_frame(
+                            "tool_call",
+                            {
+                                "tool_name": name,
+                                "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
+                                if isinstance(inputs, dict)
+                                else str(inputs)[:2000],
+                            },
+                        )
 
-                        # CRITICAL: LLMProvider uses custom httpx (not
-                        # BaseChatModel), so on_chat_model_stream never fires.
-                        # Surface final assistant text from graph state.
-                        if not content_acc:
-                            msg_content = _last_assistant_text(
-                                output.get("messages") or []
-                            )
-                            if msg_content:
-                                content_acc = msg_content
-                                yield _sse_frame(
-                                    "token",
-                                    {"content": msg_content},
+                    # ── on_tool_end: tool execution finished ───────────────
+                    elif kind == "on_tool_end":
+                        output = data.get("output", "")
+                        if hasattr(output, "content"):
+                            output = output.content
+                        elif isinstance(output, dict):
+                            output = output.get("content", json.dumps(output, ensure_ascii=False))
+                        yield _sse_frame(
+                            "tool_result",
+                            {
+                                "tool_name": name,
+                                "result": str(output)[:5000],
+                            },
+                        )
+
+                    # ── on_chain_end at graph terminal: graph finished ─────
+                    # LangGraph 1.x emits the terminal on_chain_end with name
+                    # "LangGraph"; older versions (and some test mocks) use
+                    # "__end__".  Match both so the handler fires in production
+                    # and in unit tests.
+                    elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
+                        # Extract final state if available
+                        output = data.get("output", {})
+                        if isinstance(output, dict):
+                            # Pull cost/tokens from the final state
+                            final_cost = output.get("last_cost_usd", total_cost)
+                            final_tokens = output.get("last_tokens", total_tokens)
+                            if final_cost:
+                                total_cost = final_cost
+                            if final_tokens:
+                                total_tokens = final_tokens
+
+                            # Time Travel: capture snapshot id/iteration if the
+                            # graph stamped one (snapshot_recorder is wired).
+                            _sid = output.get("snapshot_id")
+                            if _sid:
+                                _snapshot_info = {
+                                    "snapshot_id": _sid,
+                                    "iteration": output.get("snapshot_iteration", 0),
+                                    "model": output.get("last_model", ""),
+                                }
+
+                            # CRITICAL: LLMProvider uses custom httpx (not
+                            # BaseChatModel), so on_chat_model_stream never fires.
+                            # Surface final assistant text from graph state.
+                            if not content_acc:
+                                msg_content = _last_assistant_text(
+                                    output.get("messages") or []
                                 )
+                                if msg_content:
+                                    content_acc = msg_content
+                                    yield _sse_frame(
+                                        "token",
+                                        {"content": msg_content},
+                                    )
 
             # ── Post-stream: HITL + backfill assistant text ────────────
             # Custom LLM path never streams tokens. On HITL interrupt,
@@ -395,7 +439,8 @@ async def _stream_langgraph_events(
                     # Recover user text from input_state when available
                     umsg = ""
                     try:
-                        for m in reversed(list((input_state or {}).get("messages") or [])):
+                        _state_for_msgs = input_state if isinstance(input_state, dict) else {}
+                        for m in reversed(list((_state_for_msgs or {}).get("messages") or [])):
                             if isinstance(m, dict) and m.get("role") == "user":
                                 umsg = str(m.get("content") or "")
                                 break
@@ -421,12 +466,36 @@ async def _stream_langgraph_events(
                 },
             )
 
+            # Time Travel: notify the UI a snapshot was captured (live
+            # timeline growth). No-op if the replay panel isn't open.
+            if _snapshot_info:
+                yield _sse_frame("snapshot", _snapshot_info)
+
         except asyncio.CancelledError:
-            logger.warning("SSE stream cancelled by client disconnect")
-            yield _sse_frame("error", {"content": "Connection cancelled"})
+            logger.info("SSE stream cancelled by client disconnect (thread=%s)", thread_id)
+            raise
 
         except Exception as exc:
             logger.error("SSE stream error: %s", exc, exc_info=True)
+            # Layer 2 of the "agent stopped talking" defense: if the stream
+            # errored WITHOUT producing any assistant text (the classic
+            # "_No response received_" symptom), emit a recoverable notice
+            # BEFORE the raw error. The bare error frame used to leave the
+            # chat showing only a blank "K" bubble — the user thought the
+            # agent died. Now they get an explanation + the error inline.
+            if not content_acc and not interrupted:
+                recovery = (
+                    "⚠️ The agent hit an error before producing a reply. "
+                    "This is usually transient — please try again, or rephrase.\n\n"
+                    f"Detail: {sanitize_error(exc)}\n"
+                    f"Thread: `{thread_id}`"
+                )
+                content_acc = recovery
+                yield _sse_frame("token", {"content": recovery})
+                logger.warning(
+                    "[SSE] Empty turn recovered on exception — thread=%s tokens=%s",
+                    thread_id, total_tokens,
+                )
             yield _sse_frame("error", {"content": sanitize_error(exc)})
     finally:
         if token is not None:
@@ -601,6 +670,70 @@ def create_sse_chat_router(
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
+        # Deep research slash (runs pipeline, skips graph)
+        if raw_msg.lower().startswith("/research"):
+            from kazma_core.tools.research_pipeline import run_research_pipeline
+
+            parts = raw_msg.split(maxsplit=2)
+            if len(parts) == 1:
+                topic = ""
+                depth = "deep"
+            elif parts[1].lower() in ("deep", "full", "paper", "comprehensive"):
+                topic = parts[2] if len(parts) > 2 else ""
+                depth = "deep"
+            else:
+                topic = raw_msg[len("/research") :].strip()
+                depth = "deep"
+
+            async def _research_gen() -> AsyncGenerator[str, None]:
+                if not topic:
+                    yield _sse_frame(
+                        "token",
+                        {"content": "Usage: `/research deep <topic>`"},
+                    )
+                    yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
+                    return
+                yield _sse_frame(
+                    "token",
+                    {"content": f"🔬 Deep research starting: **{topic}**…\n\n"},
+                )
+                try:
+                    stages: list[str] = []
+
+                    async def _progress_sse(stage: str, message: str) -> None:
+                        stages.append(f"_{stage}: {message}_\n")
+
+                    out = await run_research_pipeline(
+                        topic,
+                        depth=depth,
+                        max_sources=8,
+                        progress_cb=_progress_sse,
+                        export_docx=True,
+                    )
+                    if stages:
+                        yield _sse_frame(
+                            "token",
+                            {"content": "\n".join(stages[-12:]) + "\n"},
+                        )
+                    yield _sse_frame("token", {"content": out})
+                    try:
+                        session.add_message("assistant", out)
+                        _get_store().put(session)
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    yield _sse_frame(
+                        "token",
+                        {"content": f"\nResearch failed: {exc}"},
+                    )
+                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 0})
+
+            return StreamingResponse(
+                _research_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
             from kazma_core.safety.yolo import (
                 YoloDisabledError,
@@ -762,6 +895,138 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
+        # ── Intercept /swarm <task> and /research <topic> ──────────
+        # These dispatch directly through SwarmEngine — bypassing the LLM's
+        # tool-call decision — so swarm research always works from chat.
+        # Match at start of line OR when embedded in Arabic text (e.g.
+        # "استخدم /research لعمل بحث عن...").
+        _lower = raw_msg.lower().strip()
+        _swarm_cmd = None
+        _swarm_text = ""
+        if _lower.startswith("/swarm ") or _lower == "/swarm":
+            _swarm_cmd = "swarm"
+            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
+        elif _lower.startswith("/research ") or _lower == "/research":
+            _swarm_cmd = "research"
+            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
+        elif "/research" in _lower:
+            # Embedded in Arabic/other text — extract the topic after /research.
+            # Use regex to handle Arabic ligatures/attachments before the command.
+            import re as _re
+            _m = _re.search(r'/research\s+(.*)', raw_msg, _re.DOTALL)
+            if _m:
+                _swarm_cmd = "research"
+                _swarm_text = _m.group(1).strip()
+                # Strip trailing /swarm or other trailing commands.
+                for _trailer in [" /swarm", "/swarm", " /research"]:
+                    if _swarm_text.lower().endswith(_trailer):
+                        _swarm_text = _swarm_text[:-len(_trailer)].strip()
+        elif "/swarm" in _lower and not _lower.startswith("/swarm"):
+            import re as _re
+            _m = _re.search(r'/swarm\s+(.*)', raw_msg, _re.DOTALL)
+            if _m:
+                _swarm_cmd = "swarm"
+                _swarm_text = _m.group(1).strip()
+
+        if _swarm_cmd:
+            _is_research = _swarm_cmd == "research"
+            _task_text = _swarm_text
+            if not _task_text:
+                _usage = (
+                    "🔍 *Usage:* `/research <topic>` — dispatches the swarm to research a topic.\n\n"
+                    "Example: `/research latest hair transplant techniques`"
+                ) if _is_research else (
+                    "🐝 *Usage:* `/swarm <task>` — dispatches a task to the swarm.\n\n"
+                    "Example: `/swarm analyze competitor pricing`"
+                )
+
+                async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
+                    yield _sse_frame("token", {"content": _usage})
+                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+
+                return StreamingResponse(
+                    _swarm_usage_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+
+            try:
+                import asyncio as _asyncio
+                from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
+
+                _engine = get_swarm_engine()
+                if _engine is None:
+                    raise RuntimeError("Swarm engine not initialized")
+
+                # Auto-register a researcher worker if none exist.
+                if not _engine.worker_names:
+                    from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+                    _profile = registry.get_active_profile() if registry else {}
+                    _engine.add_worker(WorkerConfig(
+                        name="researcher",
+                        type="in_process",
+                        model=_profile.get("model", ""),
+                        provider=_profile.get("provider", ""),
+                        role="researcher",
+                        system_prompt="You are a Researcher. Use web_search, read_url, and crawl_site to research thoroughly.",
+                        capabilities=WorkerCapabilities(
+                            role="researcher", expertise=["research"],
+                            tools=["web_search", "read_url", "crawl_site"],
+                        ),
+                    ))
+
+                _worker = _engine.worker_names[0]
+                _swarm_task = SwarmTask(
+                    prompt=_task_text,
+                    workers=[_worker],
+                    type=TaskType.DISPATCH,
+                    timeout=300.0,
+                    metadata={"source": "chat", "kind": "research" if _is_research else "swarm"},
+                )
+                logger.info("[SSE] /swarm dispatch: task=%s worker=%s", _swarm_task.id, _worker)
+
+                # Run dispatch in foreground (blocking) and stream the result.
+                async def _swarm_dispatch_gen() -> AsyncGenerator[str, None]:
+                    yield _sse_frame("token", {"content": f"🐝 Dispatching to swarm worker '{_worker}'...\n\n"})
+                    try:
+                        result = await _engine.dispatch(_swarm_task)
+                        _output = ""
+                        if result:
+                            _output = (
+                                result.aggregated_output
+                                or result.synthesized_output
+                                or (result.worker_results[0].output if result.worker_results else "")
+                                or "(no output)"
+                            )
+                            _cost = getattr(result, "total_cost", 0.0)
+                            _dur = getattr(result, "duration_seconds", 0.0)
+                            _output = f"✅ Swarm task complete (cost: ${_cost:.4f}, duration: {_dur:.1f}s)\n\n{_output}"
+                        else:
+                            _output = "⚠️ Swarm task returned no result."
+                    except Exception as exc:
+                        _output = f"⚠️ Swarm task failed: {exc}"
+                        logger.exception("[SSE] /swarm dispatch failed")
+                    yield _sse_frame("token", {"content": _output})
+                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+
+                return StreamingResponse(
+                    _swarm_dispatch_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            except Exception as exc:
+                logger.exception("[SSE] /swarm intercept failed")
+
+                async def _swarm_err_gen() -> AsyncGenerator[str, None]:
+                    yield _sse_frame("token", {"content": f"⚠️ Could not dispatch swarm: {exc}"})
+                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+
+                return StreamingResponse(
+                    _swarm_err_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+
         # ── Apply model from request body ──────────────────────────
         # The chat frontend sends the selected model so the server can
         # reconfigure the live LLM provider before streaming. We only
@@ -829,7 +1094,10 @@ def create_sse_chat_router(
             cost_breaker.record_user_interaction()
 
         # ── Persist UI projection (display only) ───────────────────
-        session.messages.append({"role": "user", "content": user_message})
+        from datetime import UTC, datetime as _dt
+
+        _ts = _dt.now(UTC).isoformat()
+        session.messages.append({"role": "user", "content": user_message, "ts": _ts})
         # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         try:
             _get_store().put(session)
@@ -842,6 +1110,7 @@ def create_sse_chat_router(
                 "thread_id": thread_id,
                 "checkpoint_ns": "",
             },
+            "recursion_limit": 100,
         }
 
         # ── Build agent messages from CHECKPOINTER (source of truth) ─
@@ -870,6 +1139,28 @@ def create_sse_chat_router(
                 )
         except Exception:
             logger.debug("[sse_chat] agent evolution inject skipped", exc_info=True)
+
+        # Knowledge Library auto-inject (Phase 2). For libraries with
+        # ``auto_inject=1``, fold the top-k chunks for this user message
+        # into the prompt — fenced as untrusted data so a malicious doc
+        # page can't smuggle instructions (AGENTS.md §11).  Kill switch
+        # ``KAZMA_KB_AUTO_INJECT=0`` is checked live inside the getter.
+        try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+            from kazma_core.stores.knowledge_index import (
+                get_knowledge_auto_inject_block,
+            )
+
+            kb_block = await get_knowledge_auto_inject_block(user_message)
+            if kb_block:
+                system_msgs.append(
+                    {
+                        "role": "system",
+                        "content": format_untrusted_block(kb_block, source="knowledge"),
+                    }
+                )
+        except Exception:
+            logger.debug("[sse_chat] knowledge auto-inject skipped", exc_info=True)
 
         try:
             from kazma_core.ide.env_context import build_env_context
@@ -980,6 +1271,10 @@ def create_sse_chat_router(
         # ── Stream the response ────────────────────────────────────
         async def _event_generator() -> AsyncGenerator[str, None]:
             content_acc = ""
+            # Track if we've started persisting assistant messages
+            assistant_message_started = False
+            # Temporary message dict for incremental persistence
+            temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
 
             try:
                 async for frame in _stream_langgraph_events(
@@ -991,20 +1286,47 @@ def create_sse_chat_router(
                     if frame.startswith("event: token\n"):
                         try:
                             data = json.loads(frame.split("data: ", 1)[1].split("\n\n")[0])
-                            content_acc += data.get("content", "")
+                            token_text = data.get("content", "")
+                            content_acc += token_text
+                            temp_assistant_msg["content"] += token_text
+                            
+                            # Persist incrementally every few tokens to prevent data loss
+                            if len(content_acc) % 50 == 0:  # Every ~50 characters
+                                if not assistant_message_started:
+                                    # Add to session messages
+                                    session.messages.append(temp_assistant_msg.copy())
+                                    assistant_message_started = True
+                                else:
+                                    # Update last message
+                                    if session.messages:
+                                        session.messages[-1]["content"] = temp_assistant_msg["content"]
+                                try:
+                                    _get_store().put(session)
+                                except Exception:
+                                    logger.debug(
+                                        "[SSE] failed to persist incremental assistant message for session=%s",
+                                        session_id
+                                    )
                         except (json.JSONDecodeError, IndexError):
                             pass
 
                     yield frame
 
-                # Store assistant response in session history + persist to disk.
+                # Store final assistant response in session history + persist to disk.
                 if content_acc:
-                    session.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": content_acc,
-                        }
-                    )
+                    _ats = _dt.now(UTC).isoformat()
+                    if assistant_message_started and session.messages:
+                        if session.messages[-1].get("role") == "assistant":
+                            session.messages[-1]["content"] = content_acc
+                            session.messages[-1].setdefault("ts", _ats)
+                    else:
+                        session.messages.append(
+                            {
+                                "role": "assistant",
+                                "content": content_acc,
+                                "ts": _ats,
+                            }
+                        )
                 try:
                     _get_store().put(session)
                 except Exception:
@@ -1018,9 +1340,20 @@ def create_sse_chat_router(
                 # lose the user message (and partial assistant text).
                 try:
                     if content_acc:
-                        session.messages.append(
-                            {"role": "assistant", "content": content_acc}
+                        # Check if we already have an assistant message
+                        has_assistant = any(
+                            msg.get("role") == "assistant" for msg in session.messages
                         )
+                        if not has_assistant:
+                            session.messages.append(
+                                {"role": "assistant", "content": content_acc}
+                            )
+                        else:
+                            # Update existing assistant message
+                            for msg in reversed(session.messages):
+                                if msg.get("role") == "assistant":
+                                    msg["content"] = content_acc
+                                    break
                     _get_store().put(session)
                 except Exception:
                     pass
@@ -1029,6 +1362,20 @@ def create_sse_chat_router(
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
                 try:
+                    if content_acc:
+                        # Ensure assistant message is persisted even on error
+                        has_assistant = any(
+                            msg.get("role") == "assistant" for msg in session.messages
+                        )
+                        if not has_assistant:
+                            session.messages.append(
+                                {"role": "assistant", "content": content_acc}
+                            )
+                        else:
+                            for msg in reversed(session.messages):
+                                if msg.get("role") == "assistant":
+                                    msg["content"] = content_acc
+                                    break
                     _get_store().put(session)
                 except Exception:
                     pass

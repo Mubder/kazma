@@ -373,8 +373,13 @@ def do_pip_update() -> bool:
 
 
 def _extras_file() -> Path:
-    """User-level file that survives git pull / stash (not in the repo)."""
-    return Path.home() / ".kazma" / "installed_extras.json"
+    """User-level file that survives git pull / stash (project-local home)."""
+    try:
+        from kazma_core.paths import installed_extras_path
+
+        return installed_extras_path()
+    except Exception:
+        return Path.home() / ".kazma" / "installed_extras.json"
 
 
 def load_persisted_extras() -> list[str]:

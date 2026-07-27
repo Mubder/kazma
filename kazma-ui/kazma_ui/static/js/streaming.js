@@ -84,6 +84,12 @@ var KazmaStream = (function() {
           case 'done':
             finishStream(data);
             break;
+          case 'snapshot':
+            // Time Travel: live snapshot captured — notify the replay panel.
+            if (window.KazmaReplay && window.KazmaReplay.onLiveSnapshot) {
+              window.KazmaReplay.onLiveSnapshot(data);
+            }
+            break;
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;
@@ -210,59 +216,108 @@ var KazmaStream = (function() {
 
     function render(text) {
       if (!text) return '';
-      var html = esc(text);
+      // Process line-oriented markdown first (headers, rules) so # markers
+      // never sit inside an LTR paragraph next to Arabic (bidi disaster).
+      var lines = String(text).replace(/\r\n/g, '\n').split('\n');
+      var blocks = [];
+      var para = [];
+      var inCode = false;
+      var codeLang = '';
+      var codeBuf = [];
 
-      // Fenced code blocks (```lang\ncode\n```)
-      html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
-        return '\n%%CODEBLOCK%%' + lang + '%%\n' + code + '\n%%ENDCODE%%\n';
-      });
+      function flushPara() {
+        if (!para.length) return;
+        var body = para.join('\n');
+        blocks.push({ type: 'p', text: body });
+        para = [];
+      }
 
-      // Bold, italic, strikethrough
-      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-      html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
-
-      // Inline code
-      html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-
-      // Markdown links — sanitize URL to prevent javascript: protocol XSS
-      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
-        var decodedUrl = url.replace(/&amp;/g, '&');
-        if (/^(https?:|mailto:)/i.test(decodedUrl)) {
-          return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var fence = line.match(/^```(\w*)\s*$/);
+        if (fence) {
+          if (inCode) {
+            blocks.push({ type: 'code', lang: codeLang, text: codeBuf.join('\n') });
+            codeBuf = [];
+            inCode = false;
+            codeLang = '';
+          } else {
+            flushPara();
+            inCode = true;
+            codeLang = fence[1] || '';
+          }
+          continue;
         }
-        // Relative paths like /workspace or /chat — keep in-app
-        if (/^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
-          return '<a href="' + esc(decodedUrl) + '">' + text + '</a>';
+        if (inCode) {
+          codeBuf.push(line);
+          continue;
         }
-        return '<span class="dead-link" title="Blocked URL">' + text + '</span>';
-      });
-
-      // Autolink bare URLs that were not already turned into <a href>
-      // (esc() turns & into &amp; so match the escaped form too).
-      html = html.replace(
-        /(^|[\s>(])((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?'")\]])/g,
-        function(_, pre, url) {
-          var href = url;
-          if (/^www\./i.test(href)) href = 'https://' + href;
-          // Decode &amp; back for the href attribute only
-          var rawHref = href.replace(/&amp;/g, '&');
-          if (!/^(https?:)/i.test(rawHref)) return pre + url;
-          return pre + '<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+        var hm = line.match(/^(#{1,6})\s+(.+)$/);
+        if (hm) {
+          flushPara();
+          blocks.push({ type: 'h', level: hm[1].length, text: hm[2] });
+          continue;
         }
-      );
+        if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) {
+          flushPara();
+          blocks.push({ type: 'hr' });
+          continue;
+        }
+        if (line.trim() === '') {
+          flushPara();
+          continue;
+        }
+        para.push(line);
+      }
+      if (inCode) {
+        blocks.push({ type: 'code', lang: codeLang, text: codeBuf.join('\n') });
+      }
+      flushPara();
 
-      // Line breaks
-      html = html.replace(/\n\n/g, '</p><p>');
-      html = html.replace(/\n/g, '<br>');
-      html = '<p>' + html + '</p>';
+      function inline(s) {
+        var html = esc(s);
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
+        html = html.replace(/`([^`]+)`/g, '<code class="inline-code" dir="ltr">$1</code>');
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
+          var decodedUrl = url.replace(/&amp;/g, '&');
+          if (/^(https?:|mailto:)/i.test(decodedUrl)) {
+            return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + text + '</a>';
+          }
+          if (/^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
+            return '<a href="' + esc(decodedUrl) + '">' + text + '</a>';
+          }
+          return '<span class="dead-link" title="Blocked URL">' + text + '</span>';
+        });
+        html = html.replace(
+          /(^|[\s>(])((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?'")\]])/g,
+          function(_, pre, url) {
+            var href = url;
+            if (/^www\./i.test(href)) href = 'https://' + href;
+            var rawHref = href.replace(/&amp;/g, '&');
+            if (!/^(https?:)/i.test(rawHref)) return pre + url;
+            return pre + '<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + url + '</a>';
+          }
+        );
+        return html;
+      }
 
-      // Restore code blocks
-      html = html.replace(/%%CODEBLOCK%%(\w*)%%\n([\s\S]*?)%%ENDCODE%%/g, function(_, lang, code) {
-        return codeBlock(lang || null, code);
-      });
-
-      return html;
+      var out = [];
+      for (var j = 0; j < blocks.length; j++) {
+        var b = blocks[j];
+        if (b.type === 'code') {
+          out.push(codeBlock(b.lang || null, b.text));
+        } else if (b.type === 'h') {
+          var tag = 'h' + Math.min(6, Math.max(1, b.level));
+          out.push('<' + tag + ' dir="auto">' + inline(b.text) + '</' + tag + '>');
+        } else if (b.type === 'hr') {
+          out.push('<hr>');
+        } else {
+          out.push('<p dir="auto">' + inline(b.text).replace(/\n/g, '<br>') + '</p>');
+        }
+      }
+      return out.join('\n');
     }
 
     return render;
@@ -361,8 +416,11 @@ var KazmaStream = (function() {
   }
 
   // ── Public API ────────────────────────────────────────
+  // `sse` is the canonical name; `ssePost` is kept as a stable alias —
+  // chat.js HITL cards and hitl_approval.js call ssePost and must not break.
   return {
     sse: ssePost,
+    ssePost: ssePost,
     ws: wsConnect,
     markdown: mdRender,
     copyCode: copyCode,

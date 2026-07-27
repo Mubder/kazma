@@ -92,7 +92,14 @@ class BadgeStats:
 class CertificationBadgeSystem:
     """Manages Kazma-Certified badges in the hub SQLite database."""
 
-    def __init__(self, db_path: str = "~/.kazma/hub/registry.db"):
+    def __init__(self, db_path: str | None = None):
+        if db_path is None:
+            try:
+                from kazma_core.paths import hub_registry_db
+
+                db_path = hub_registry_db()
+            except Exception:
+                db_path = "~/.kazma/hub/registry.db"
         self.db_path = str(Path(db_path).expanduser())
         # Ensure the badges table exists
         conn = sqlite3.connect(self.db_path)

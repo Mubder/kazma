@@ -18,38 +18,41 @@ llm:
   output_cost_per_1m: 0.6
 mcp:
   servers:
+  # Real MCP only — do not commit stub echo/test servers (they cannot start).
   - name: filesystem
     transport: stdio
+    # Rebind on Switch Repo / clone to the active workspace root.
+    workspace_bound: true
     command:
     - npx
     - -y
     - '@modelcontextprotocol/server-filesystem'
-    - kazma-data/workspace
-  ide_server:
+    - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
-    root: .
-    max_file_size: 1048576
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.
 
-  You are capable of understanding Arabic dialects including Kuwaiti/Gulf Arabic
-  when the user speaks Arabic, but your default response language is always
-  determined by the user''s input language.
+  You are capable of understanding Arabic dialects including Kuwaiti/Gulf Arabic when
+  the user speaks Arabic, but your default response language is always determined
+  by the user''s input language.
 
-  Be helpful, precise, and culturally aware. When users ask about Kazma itself,
-  teach them accurately: chat, IDE, swarm, settings, HITL, memory, tools, and
-  how to fix common errors. Prefer tools over guessing about the live workspace.
+  Be helpful, precise, and culturally aware. When users ask about Kazma itself, teach
+  them accurately: chat, IDE, swarm, settings, HITL, memory, tools, and how to fix
+  common errors. Prefer tools over guessing about the live workspace.
 
   When you don''t know something, say so honestly.
 
   When you have tools available, use them to accomplish tasks.
 
-  CRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user
-  writes in. Arabic input = Arabic output. English input = English output.
-  If they mix Arabic and English (code-switching), match their mixing pattern.
-  If the input is gibberish or unclear, respond in English. This rule OVERRIDES
-  all other instructions, personality settings, and cultural context.
-  NEVER switch languages unless explicitly asked.
+  TOOL SELECTION: Prefer native tools over shell_exec. Use file_list/file_read/
+  file_search/file_write for files; git tools for git; python_exec for short
+  scripts. shell_exec cwd is already the workspace — never use cd (blocked).
+
+  CRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user writes in.
+  Arabic input = Arabic output. English input = English output. If they mix Arabic
+  and English (code-switching), match their mixing pattern. If the input is gibberish
+  or unclear, respond in English. This rule OVERRIDES all other instructions, personality
+  settings, and cultural context. NEVER switch languages unless explicitly asked.
   When speaking Arabic, refer to yourself as كاظمه (or كاظمة) — never كازما.'
 storage:
   engine: sqlite
@@ -57,63 +60,46 @@ storage:
   vector_dim: 384
 memory:
   enabled: true
-  # Per-turn RAG: retrieve relevant memories on every user message (not just
-  # at context compaction). This is what makes the memory system useful.
   per_turn_retrieval: true
-  # Auto-store durable facts (and optional turn snapshots) at end of each
-  # turn so recall works without the LLM calling memory_store.
-  # mode: durable | turns | both
   auto_store: true
   auto_store_mode: both
   max_context_tokens: 128000
   retrieval_top_k: 5
   provenance: true
-  # Pluggable embedding backend. provider "local" uses sentence-transformers
-  # in-process (free, 384-dim). provider "openai-compatible" uses any
-  # OpenAI-compatible /embeddings endpoint (NVIDIA NIM, OpenAI, TEI).
-  # Default is local so memory works out of the box; set provider to
-  # openai-compatible + KAZMA_EMBED_API_KEY for NVIDIA NIM nv-embed-v1.
+  consolidation:
+    enabled: true
+    use_llm: true
+    min_user_chars: 24
+    every_n_turns: 1
+    skip_adapter_if_auto_stored: true
+    # Skip LLM extract when auto_store already vacuumed durable text this turn
+    skip_llm_if_auto_stored: true
+    skip_llm_in_demo: true
   embedding:
-    provider: local               # local | openai-compatible
-    model: all-MiniLM-L6-v2       # free local default (384-dim)
+    provider: local
+    model: all-MiniLM-L6-v2
     dim: 384
-    # Remote NIM example (uncomment + set key):
-    # provider: openai-compatible
-    # model: nvidia/nv-embed-v1
-    # dim: 4096
-    # base_url: https://integrate.api.nvidia.com/v1
-    # api_key_env: KAZMA_EMBED_API_KEY
     base_url: https://integrate.api.nvidia.com/v1
     api_key_env: KAZMA_EMBED_API_KEY
-# Bot commit identity — when enabled, Kazma's agent commits as a bot
-# (e.g. "Kazma Agent [bot]") instead of the local git user. Shows up in
-# the GitHub Contributors list with a [bot] label, like Dependabot.
-# For a custom logo/avatar, create a real GitHub App and add app_id +
-# app_private_key_path + app_installation_id + app_email below.
 git:
   bot_identity:
     enabled: true
-    name: "Kazma Agent"
-    email: "4310451+kazma-agent[bot]@users.noreply.github.com"
+    name: Kazma Agent
+    email: 4310451+kazma-agent[bot]@users.noreply.github.com
     app_id: 4310451
     app_private_key_path: .keys/kazma-app.pem
     app_installation_id: 146867168
-    app_email: "4310451+kazma-agent[bot]@users.noreply.github.com"
+    app_email: 4310451+kazma-agent[bot]@users.noreply.github.com
 skills:
   path: kazma-skills/manifests/
   auto_discover: true
 connectors:
   telegram:
     enabled: true
-    # token via TELEGRAM_BOT_TOKEN env var
   discord:
     enabled: false
-    # token via DISCORD_BOT_TOKEN env var
   slack:
     enabled: false
-    # bot_token via SLACK_BOT_TOKEN env var
-    # app_token via SLACK_APP_TOKEN env var
-
 gateway:
   rate_limits:
     telegram: 30
@@ -123,48 +109,44 @@ gateway:
     enabled: true
   voice:
     enabled: false
-    stt_provider: openai   # openai | groq | cohere | nvidia | faster-whisper
-    tts_provider: edgetts  # edgetts | openai | nvidia | kokoro | coqui
-    tts_voice: default     # provider-specific voice name
-    stt_language: auto     # auto or ISO-639-1 (en, ar, fr, etc.)
-    tts_output_format: mp3 # mp3 | wav | opus | flac
-
+    # When true (and enabled): voice inbound → TTS voice-note reply on platforms.
+    # Turn off in Settings → Voice for text-only replies while keeping STT.
+    tts_reply: true
+    stt_provider: openai
+    tts_provider: edgetts
+    tts_voice: default
+    stt_language: auto
+    tts_output_format: mp3
 safety:
   hitl:
     enabled: true
-    # Must match CANONICAL_DANGER_TOOLS in kazma_core.safety.hitl
-    # (parity enforced by tests/test_hitl_wiring.py).
     require_approval_for:
-      - file_write
-      - file_delete
-      - shell_exec
-      - code_exec
-      - python_exec
-      - spawn_agent
-      - spawn_agents
-      - schedule_task
-      - cancel_scheduled
-      - vault_retrieve
-      - vault_delete
-      - config_save
-      - run_tests
-      - git_commit
-      - git_push_pull
-      - github_create_pr
-      - install_python_packages
-      - install_npm_packages
-      - install_agent_skill
-      - uninstall_agent_skill
-      - email_send
-      - email_delete
-      - email_categorize
-      - browser_eval_js
+    - file_write
+    - file_delete
+    - shell_exec
+    - code_exec
+    - python_exec
+    - schedule_task
+    - cancel_scheduled
+    - vault_retrieve
+    - vault_delete
+    - config_save
+    - run_tests
+    - git_commit
+    - git_push_pull
+    - github_create_pr
+    - install_python_packages
+    - install_npm_packages
+    - install_agent_skill
+    - uninstall_agent_skill
+    - email_send
+    - email_delete
+    - email_categorize
+    - browser_eval_js
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
-
 ui:
   host: 127.0.0.1
-  # Default matches CLI `kazma serve` / AGENTS.md (override with KAZMA_PORT).
   port: 9090
   rtl: true
   title: Kazma Dashboard
@@ -175,56 +157,84 @@ logging:
     enabled: false
     public_key: ''
     secret_key: ''
-
 time_travel:
   enabled: true
   max_snapshots: 50
   db_path: kazma-data/snapshots.db
-
 swarm:
   enabled: true
-  # group_chat_id is read from the SWARM_CHAT_ID environment variable.
-  # Set it before starting the swarm, e.g.:  export SWARM_CHAT_ID=<your-chat-id>
   group_chat_id: 0
   orchestrator:
     name: Kazma Orchestrator
     profile: default
-  # Workers are created at runtime via the Web UI Swarm panel or the
-  # /api/swarm/workers API. No preset workers here — users add their own
-  # with the correct provider, model, and system prompt.
   workers: []
-
 pipelines:
   standard:
-    - name: researcher
-      role: researcher
-      worker_name: core
-      system_prompt: "You are a Researcher. Analyze the task broadly and provide comprehensive findings."
-      depends_on: []
-    - name: refiner
-      role: refiner
-      worker_name: bridge
-      system_prompt: "You are a Refiner — a middleman worker that intercepts raw, verbose output from a Researcher and condenses it into a clean, actionable payload for the Builder. Your job: 1. Strip hallucinations, fluff, and redundant explanations. 2. Extract only the core facts, code snippets, and decisions. 3. Format the output as a structured payload: - Key findings (3-5 bullet points) - Code snippets (if any) - Recommended next action (1 sentence) 4. Never add new information. Only distill what was provided. Output format:\n```\n## Key Findings\n- Point 1\n- Point 2\n\n## Code\n```python\n...\n```\n\n## Recommended Next Action\nOne sentence.\n```"
-      depends_on: ["researcher"]
-    - name: builder
-      role: builder
-      worker_name: core
-      system_prompt: "You are a Builder. Implement the solution based on the refined research."
-      depends_on: ["refiner"]
-    - name: validator
-      role: validator
-      worker_name: bridge
-      system_prompt: "You are a Validator. Check the Builder's output against the original task. Reject if wrong, approve if correct."
-      depends_on: ["builder"]
+  - name: researcher
+    role: researcher
+    worker_name: core
+    system_prompt: You are a Researcher. Analyze the task broadly and provide comprehensive
+      findings.
+    depends_on: []
+  - name: refiner
+    role: refiner
+    worker_name: bridge
+    system_prompt: 'You are a Refiner — a middleman worker that intercepts raw, verbose
+      output from a Researcher and condenses it into a clean, actionable payload for
+      the Builder. Your job: 1. Strip hallucinations, fluff, and redundant explanations.
+      2. Extract only the core facts, code snippets, and decisions. 3. Format the
+      output as a structured payload: - Key findings (3-5 bullet points) - Code snippets
+      (if any) - Recommended next action (1 sentence) 4. Never add new information.
+      Only distill what was provided. Output format:
 
+      ```
+
+      ## Key Findings
+
+      - Point 1
+
+      - Point 2
+
+
+      ## Code
+
+      ```python
+
+      ...
+
+      ```
+
+
+      ## Recommended Next Action
+
+      One sentence.
+
+      ```'
+    depends_on:
+    - researcher
+  - name: builder
+    role: builder
+    worker_name: core
+    system_prompt: You are a Builder. Implement the solution based on the refined
+      research.
+    depends_on:
+    - refiner
+  - name: validator
+    role: validator
+    worker_name: bridge
+    system_prompt: You are a Validator. Check the Builder's output against the original
+      task. Reject if wrong, approve if correct.
+    depends_on:
+    - builder
   quick:
-    - name: researcher
-      role: researcher
-      worker_name: core
-      system_prompt: "You are a Researcher. Provide a concise, actionable answer."
-      depends_on: []
-    - name: builder
-      role: builder
-      worker_name: core
-      system_prompt: "You are a Builder. Implement based on the research above."
-      depends_on: ["researcher"]
+  - name: researcher
+    role: researcher
+    worker_name: core
+    system_prompt: You are a Researcher. Provide a concise, actionable answer.
+    depends_on: []
+  - name: builder
+    role: builder
+    worker_name: core
+    system_prompt: You are a Builder. Implement based on the research above.
+    depends_on:
+    - researcher

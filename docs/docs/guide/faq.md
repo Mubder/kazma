@@ -12,7 +12,7 @@ description: Kazma FAQ — code-audited reference (unified docs, v0.6.1+)
 
 ### Is Kazma production-ready?
 
-The core agent, swarm orchestration, HITL gates, and gateways are implemented and internally consistent. Several memory/RAG features are only partially wired (see [Memory & RAG](memory-and-rag) and [Roadmap](roadmap-and-future)). Treat the safety layer as production-grade and the memory layer as opt-in/experimental.
+The core agent, swarm orchestration, HITL gates, gateways, and chat memory (4-layer adapter + per-turn RAG + auto-store) are implemented and wired. Install `pip install -e ".[rag]"` for full vector recall. Treat the safety layer as production-grade; memory is production-usable on single-node with health monitoring (see [Memory & RAG](memory-and-rag)).
 
 ### What language is the UI in by default?
 
@@ -73,15 +73,21 @@ Point the provider at Ollama (`http://127.0.0.1:11434/v1`) or LM Studio (`http:/
 
 ### Why doesn't my agent remember things?
 
-Memory retrieval is **not automatic**. The agent only retrieves when it calls `memory_search`. There's no injection and no short-term→permanent consolidation. See [Memory & RAG → Honest status](memory-and-rag#honest-status-notes).
+By default, memory **is** automatic:
+
+1. **Per-turn RAG** injects relevant past facts on every user message (`memory.per_turn_retrieval`).
+2. **Auto-store** writes durable user facts (and optional turn snapshots) after each reply (`memory.auto_store`).
+3. The LLM can also call `memory_store` / `memory_search` tools explicitly.
+
+If recall is empty: install the RAG extra (`pip install -e ".[rag]"`), confirm Dashboard memory health is `ACTIVE`, and ensure `memory.enabled` is true (TUI Settings or `kazma.yaml`). See [Memory & RAG](memory-and-rag).
 
 ### Is the "4-layer memory" real?
 
-The code exists (`swarm/memory/adapter.py`) and works, but it's only used by `self_improvement.py` and `phonebook.py` — **not** the chat agent. The chat path uses a single ChromaDB query behind an opt-in tool.
+**Yes.** `UnifiedMemoryAdapter` (Chroma L1 + graph L2 + FTS5 L3 + sqlite-vec L4, RRF-blended) is the **chat default** for per-turn RAG, tools, auto-store, and compaction — not only swarm helpers. L2 is structural (tags/snippets), not full semantic search.
 
 ### Do I need to install ChromaDB?
 
-Only for vector memory. Install with `pip install -e ".[rag]"`. Without it, `memory_search`/`memory_store` are unavailable.
+For full vector recall, yes: `pip install -e ".[rag]"` (chromadb + sentence-transformers + sqlite-vec). Without it, durable writes may still succeed via FTS5 L3 if `kazma-memory` is available; health will show which layers are up.
 
 ### Why is `tiktoken` mentioned if it's not a dependency?
 

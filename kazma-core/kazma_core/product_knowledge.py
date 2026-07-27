@@ -44,6 +44,12 @@ def identity_line() -> str:
 
 def build_product_knowledge() -> str:
     """Full product-knowledge block for the supervisor system prompt."""
+    try:
+        from kazma_core.agent.research_policy import RESEARCH_PROTOCOL
+
+        _research_block = RESEARCH_PROTOCOL
+    except Exception:
+        _research_block = ""
     return f"""{_KNOWLEDGE_MARKER}
 
 ### Identity & naming (CRITICAL)
@@ -77,7 +83,10 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### What you can do for the user
 1. **Chat & reason** — answer, plan, research with tools.
 2. **Code in the workspace** — `file_read` / `file_write` / `file_list` / `file_search`, `shell_exec`, `python_exec` / `code_exec` (HITL on writes/exec).
-3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file`; `crawl_site`; chunk/digest helpers. Optional Firecrawl/Jina.
+3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file`; `crawl_site`; chunk/digest; `synthesize_from_digests`; `run_research_pipeline` for deep/comprehensive papers. Optional Firecrawl/Jina. **Never answer “thorough research” from search snippets alone** — fetch ≥2 full sources, digest long pages, cite URLs. User can run `/research deep <topic>`.
+
+{_research_block}
+
 4. **Email** — native skill `email-manager`: `email_list`, `email_get`, `email_send`, `email_delete`, `email_categorize`, `email_analyze`. Providers: **sandbox** (no creds); **Gmail** OAuth (Gmail API, recommended) or IMAP/POP with app password; **Microsoft** Graph OAuth (browser or device code) or IMAP/POP; generic IMAP/POP. Connect in **Settings → Email** with mode switcher **OAuth | IMAP | POP**. Default `provider=auto`. Gmail normal passwords do not work on IMAP/POP (Google policy). OAuth needs Gmail API scopes (`gmail.modify`) on the Cloud consent screen + test user. **HITL** for send/delete/categorize. Never claim send without tool success.
 5. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
 6. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
@@ -91,11 +100,18 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.
 - **Reset conversation:** `/reset` (history only; memory DB not wiped).
 - **Swarm:** `/swarm` commands / Swarm panel; workers need models + roles configured.
-- **IDE:** open Web `/ide` or TUI editor; workspace root = active WorkspaceStore / `KAZMA_WORKSPACE` / `kazma-data/workspace`.
+- **IDE:** open Web `/ide` or TUI editor; workspace root = active WorkspaceStore / pin / `KAZMA_WORKSPACE` / project `kazma-data/workspace`. MCP filesystem rebinds to the same root on Switch Repo (`workspace_bound`). Clones go to `~/kazma-repos` (or `KAZMA_CLONE_DIR`).
 - **Switch model:** Settings UI or `set_active_model` path — **always change provider with model**.
 - **YOLO / unattended danger:** production disables YOLO unless explicitly allowed; prefer HITL.
 - **Install:** `uv sync` / `pip install -e ".[rag,dev]"`; Windows `setup.ps1`; Docker `docker compose up`.
 - **Portability:** same code on Windows/Linux/macOS/WSL; project DBs under `kazma-data/`.
+
+### Tool selection (avoid wasted rounds)
+- **Files:** `file_list`, `file_read`, `file_search`, `file_write` (not shell `ls`/`cat`/`cd`).
+- **Git:** native `git_*` tools when available (not raw `git` in shell unless needed).
+- **Code:** `python_exec` / `code_exec` (not `python`/`node`/`bash` in shell_exec).
+- **Shell:** allowlisted binaries only; **cwd is already the workspace** — `cd` is blocked. Use absolute paths under the workspace for multi-step shell.
+- **Deep work:** raise **Settings → Agent → Max tool rounds** (presets: Chat 15, Deep 30, Research 40) so long audits do not hit the cap mid-task.
 
 ### Danger tools (require approval unless YOLO)
 Typical list: `file_write`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, tools run with host power — be careful what you propose.

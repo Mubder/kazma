@@ -318,6 +318,34 @@ class KazmaAppBuilder:
                     if adapter is not None:
                         health = adapter.health()
                         logger.info("[VectorMemory] Adapter layers: %s", health)
+                    # One-shot integrity repair: zero timestamps / null L3
+                    # embeddings / empty graph (legacy write-path bugs).
+                    try:
+                        import threading
+                        from kazma_core.memory.backfill import maybe_auto_backfill
+
+                        def _bg_backfill() -> None:
+                            try:
+                                stats = maybe_auto_backfill(max_rows=500)
+                                if stats:
+                                    logger.info(
+                                        "[VectorMemory] Integrity backfill: %s", stats
+                                    )
+                            except Exception as bf_exc:
+                                logger.warning(
+                                    "[VectorMemory] Integrity backfill failed: %s",
+                                    bf_exc,
+                                )
+
+                        threading.Thread(
+                            target=_bg_backfill,
+                            name="kazma-memory-backfill",
+                            daemon=True,
+                        ).start()
+                    except Exception as bf_start:
+                        logger.debug(
+                            "[VectorMemory] Backfill schedule skipped: %s", bf_start
+                        )
                 except Exception as warm_exc:
                     logger.warning("[VectorMemory] Pre-warm skipped: %s", warm_exc)
             except Exception as e:
@@ -350,8 +378,20 @@ class KazmaAppBuilder:
                 except Exception:
                     pass
             if not _workspace_path:
-                _workspace_path = "kazma-data/workspace"
+                try:
+                    from kazma_core.workspace.binding import default_sandbox_root
+
+                    _workspace_path = str(default_sandbox_root())
+                except Exception:
+                    _workspace_path = "kazma-data/workspace"
             configure_workspace(workspace=_workspace_path)
+            # Fire binding bus so MCP (if already connected later) shares the root
+            try:
+                from kazma_core.workspace.binding import notify_root_changed
+
+                notify_root_changed(_workspace_path, reason="app_boot")
+            except Exception:
+                pass
             logger.info("[Workspace] Configured to %s", _workspace_path)
         except Exception as e:
             logger.warning("[Workspace] Failed to configure: %s", e)
@@ -383,9 +423,12 @@ class KazmaAppBuilder:
     def _setup_templates_and_middlewares(self) -> None:
         """Configure auth, CORS, language middleware, static files, and templates."""
         from kazma_ui.auth import create_auth_middleware, create_tenant_middleware
+        from kazma_ui.replica_affinity import create_replica_affinity_middleware
 
         self.app.middleware("http")(create_auth_middleware())
         self.app.middleware("http")(create_tenant_middleware())
+        # Sticky-session cookie for multi-replica LB (SSE / in-process state)
+        self.app.middleware("http")(create_replica_affinity_middleware())
 
         # CORS
         from fastapi.middleware.cors import CORSMiddleware
@@ -495,6 +538,11 @@ class KazmaAppBuilder:
             _STATIC_DIR / "js" / "modules" / "components.js",
             _STATIC_DIR / "js" / "modules" / "util.js",
             _STATIC_DIR / "js" / "icons.js",
+            # Chat/HITL transport — must bust cache when YOLO/stream fixes land
+            _STATIC_DIR / "js" / "chat.js",
+            _STATIC_DIR / "js" / "streaming.js",
+            _STATIC_DIR / "js" / "stores" / "agentStore.js",
+            _STATIC_DIR / "js" / "hitl_approval.js",
         )
 
         def _css_version() -> int:
@@ -514,6 +562,16 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["css_version"] = _css_version
         self.templates.env.globals["js_version"] = _js_version
+
+        # WebSocket token for browser WS connections (query param fallback)
+        # Browsers can't send custom headers on WebSocket handshake, so we inject
+        # the KAZMA_SECRET as a meta tag for the agentStore to pick up.
+        from kazma_ui.auth import get_kazma_secret as _get_kazma_secret
+
+        def _ws_token() -> str:
+            return _get_kazma_secret()
+
+        self.templates.env.globals["ws_token"] = _ws_token
 
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):
@@ -799,7 +857,6 @@ class KazmaAppBuilder:
                     from kazma_core.swarm.bus import get_message_bus
 
                     bus = get_message_bus()
-                    _bus_wired = False
                     # Never wire real platform adapters under pytest: tests
                     # call create_app() with the real kazma.yaml, which would
                     # wire a live TelegramBusAdapter and cause test dispatches
@@ -807,58 +864,82 @@ class KazmaAppBuilder:
                     # (the bus default) keeps swarm events in-process for tests.
                     import sys as _sys
                     _skip_real_adapters = "pytest" in _sys.modules
+                    _wired_adapters: list[Any] = []
 
-                    # TelegramBusAdapter
+                    # Collect every available platform bus (fan-out, not exclusive).
                     if not _skip_real_adapters and tg_adapter is not None and telegram_token:
                         try:
                             from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
-                            tg_bus = TelegramBusAdapter(
-                                bot_token=telegram_token,
-                                chat_id=self.config_store.get("connectors.telegram.swarm_chat_id", ""),
+                            _wired_adapters.append(
+                                TelegramBusAdapter(
+                                    bot_token=telegram_token,
+                                    chat_id=self.config_store.get(
+                                        "connectors.telegram.swarm_chat_id", ""
+                                    ),
+                                )
                             )
-                            bus.set_adapter(tg_bus)
-                            _bus_wired = True
-                            logger.info("[SwarmBus] TelegramBusAdapter wired — swarm events will appear in Telegram")
+                            logger.info(
+                                "[SwarmBus] TelegramBusAdapter ready"
+                            )
                         except ImportError:
                             logger.debug("[SwarmBus] TelegramBusAdapter not available")
                         except Exception as e:
-                            logger.warning("[SwarmBus] Failed to wire TelegramBusAdapter: %s", e)
+                            logger.warning("[SwarmBus] Failed to build TelegramBusAdapter: %s", e)
 
-                    # DiscordBusAdapter
-                    if not _bus_wired:
-                        _discord_tok = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
-                        _discord_chan = self.config_store.get("connectors.discord.swarm_channel_id", "")
-                        if not _skip_real_adapters and _discord_tok and _discord_chan:
-                            try:
-                                from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
+                    _discord_tok = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
+                    _discord_chan = self.config_store.get("connectors.discord.swarm_channel_id", "")
+                    if not _skip_real_adapters and _discord_tok and _discord_chan:
+                        try:
+                            from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
 
-                                bus.set_adapter(DiscordBusAdapter(bot_token=_discord_tok, channel_id=_discord_chan))
-                                _bus_wired = True
-                                logger.info("[SwarmBus] DiscordBusAdapter wired — swarm events will appear in Discord")
-                            except ImportError:
-                                logger.debug("[SwarmBus] DiscordBusAdapter not available")
-                            except Exception as e:
-                                logger.warning("[SwarmBus] Failed to wire DiscordBusAdapter: %s", e)
+                            _wired_adapters.append(
+                                DiscordBusAdapter(
+                                    bot_token=_discord_tok, channel_id=_discord_chan
+                                )
+                            )
+                            logger.info("[SwarmBus] DiscordBusAdapter ready")
+                        except ImportError:
+                            logger.debug("[SwarmBus] DiscordBusAdapter not available")
+                        except Exception as e:
+                            logger.warning("[SwarmBus] Failed to build DiscordBusAdapter: %s", e)
 
-                    # SlackBusAdapter
-                    if not _bus_wired:
-                        _slack_tok = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
-                        _slack_chan = self.config_store.get("connectors.slack.swarm_channel_id", "")
-                        if not _skip_real_adapters and _slack_tok and _slack_chan:
-                            try:
-                                from kazma_gateway.adapters.slack_bus import SlackBusAdapter
+                    _slack_tok = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
+                    _slack_chan = self.config_store.get("connectors.slack.swarm_channel_id", "")
+                    if not _skip_real_adapters and _slack_tok and _slack_chan:
+                        try:
+                            from kazma_gateway.adapters.slack_bus import SlackBusAdapter
 
-                                bus.set_adapter(SlackBusAdapter(bot_token=_slack_tok, channel_id=_slack_chan))
-                                _bus_wired = True
-                                logger.info("[SwarmBus] SlackBusAdapter wired — swarm events will appear in Slack")
-                            except ImportError:
-                                logger.debug("[SwarmBus] SlackBusAdapter not available")
-                            except Exception as e:
-                                logger.warning("[SwarmBus] Failed to wire SlackBusAdapter: %s", e)
+                            _wired_adapters.append(
+                                SlackBusAdapter(
+                                    bot_token=_slack_tok, channel_id=_slack_chan
+                                )
+                            )
+                            logger.info("[SwarmBus] SlackBusAdapter ready")
+                        except ImportError:
+                            logger.debug("[SwarmBus] SlackBusAdapter not available")
+                        except Exception as e:
+                            logger.warning("[SwarmBus] Failed to build SlackBusAdapter: %s", e)
 
-                    if not _bus_wired:
-                        logger.info("[SwarmBus] No platform adapter — swarm events stay internal (NullBusAdapter)")
+                    if len(_wired_adapters) == 1:
+                        bus.set_adapter(_wired_adapters[0])
+                        logger.info(
+                            "[SwarmBus] Single adapter wired: %s",
+                            type(_wired_adapters[0]).__name__,
+                        )
+                    elif len(_wired_adapters) > 1:
+                        from kazma_core.swarm.bus import FanOutBusAdapter
+
+                        bus.set_adapter(FanOutBusAdapter(_wired_adapters))
+                        logger.info(
+                            "[SwarmBus] FanOutBusAdapter wired with %d platforms: %s",
+                            len(_wired_adapters),
+                            ", ".join(type(a).__name__ for a in _wired_adapters),
+                        )
+                    else:
+                        logger.info(
+                            "[SwarmBus] No platform adapter — swarm events stay internal (NullBusAdapter)"
+                        )
                 except Exception as e:
                     logger.warning("[SwarmBus] Failed to initialize message bus: %s", e)
 
@@ -963,8 +1044,17 @@ class KazmaAppBuilder:
             )
             self.app.include_router(sse_router)
             logger.info("SSE chat router mounted at /api/chat/stream")
+
+            # ── WebSocket Chat Gateway ──
+            from kazma_ui.routes.ws_chat import create_ws_chat_router
+            ws_router = create_ws_chat_router(
+                graph_holder=self._graph_holder,
+                graph_getter=lambda: self.graph,
+            )
+            self.app.include_router(ws_router)
+            logger.info("WebSocket chat gateway router mounted at /ws/chat/{session_id}")
         except Exception as e:
-            logger.warning("SSE chat router failed to initialize: %s", e)
+            logger.warning("SSE/WS chat router failed to initialize: %s", e)
             self._init_errors.append({"subsystem": "sse_chat", "error": str(e)})
 
         # ── Chat attachment upload ──
@@ -1044,6 +1134,19 @@ class KazmaAppBuilder:
         self.app.include_router(ide_router)
         logger.info("IDE API router mounted at /api/ide/*")
 
+        # ── Knowledge Base API (delegates to KnowledgeStore / Index) ──
+        # Optional: guarded so a missing optional dep (chromadb, etc.) doesn't
+        # break the whole app — the page still renders, just empty.
+        try:
+            from kazma_ui.kb_api import create_kb_router
+
+            kb_router = create_kb_router()
+            self.app.include_router(kb_router)
+            logger.info("Knowledge Base API router mounted at /api/kb/*")
+        except Exception as e:
+            logger.warning("Knowledge Base API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "kb_api", "error": str(e)})
+
         # ── Email integration (status + Microsoft device OAuth) ──
         # Open router (GET / status / OAuth callbacks) + protected router
         # (state-mutating POSTs guarded by Origin + X-Requested-With check).
@@ -1100,6 +1203,23 @@ class KazmaAppBuilder:
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
         try:
+            # ── Connect MCP servers ────────────────────────────────────
+            # The CLI path (agent_runner.run_once/main) calls
+            # connect_mcp_servers() explicitly, but the web path was
+            # creating the agent in _setup_services() and never connecting
+            # its MCP servers — so the filesystem MCP (and any other
+            # kazma.yaml mcp.servers entry) stayed dormant on the web UI.
+            # Connect here, at the start of the async lifespan, so MCP
+            # tools are available before the first chat turn.
+            try:
+                mcp_tool_count = await self.agent.connect_mcp_servers()
+                if mcp_tool_count > 0:
+                    logger.info("[App] Connected %d MCP tool(s) from kazma.yaml", mcp_tool_count)
+                else:
+                    logger.info("[App] No MCP tools connected (no servers configured or all failed)")
+            except Exception as exc:
+                logger.warning("[App] MCP server connection failed at startup: %s", exc)
+
             from kazma_gateway.stores.checkpoint import create_checkpointer
 
             self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
@@ -1117,6 +1237,19 @@ class KazmaAppBuilder:
             if not recompile_hitl.get("enabled", True):
                 recompile_hitl = None
 
+            # Time Travel — reuse the agent's snapshot recorder so the SSE
+            # path captures snapshots too. Create lazily if the agent hasn't
+            # built its graph yet.
+            _recorder = getattr(self.agent, "_snapshot_recorder", None)
+            if _recorder is None:
+                try:
+                    from kazma_core.time_travel import create_recorder
+                    _recorder = create_recorder(config=self.config.raw)
+                    self.agent._snapshot_recorder = _recorder
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[App] snapshot recorder unavailable: %s", exc)
+            self._snapshot_recorder = _recorder
+
             recompiled = build_supervisor_graph(
                 llm=self.agent.llm,
                 system_prompt=self.agent.system_prompt,
@@ -1127,6 +1260,7 @@ class KazmaAppBuilder:
                 tracer=self.agent.tracer,
                 checkpointer=self._checkpointer,
                 hitl_config=recompile_hitl,
+                snapshot_recorder=_recorder,
             )
             self._graph_holder["graph"] = recompiled
             logger.info("[Checkpoint] Graph recompiled with checkpointer")
@@ -1134,6 +1268,30 @@ class KazmaAppBuilder:
             self._hitl_state["graph"] = recompiled
             self._hitl_state["checkpointer"] = self._checkpointer
             logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
+
+            # ── Time Travel: mount replay API + page route ──────────
+            if self._snapshot_recorder is not None:
+                try:
+                    from kazma_core.time_travel import ReplayEngine
+                    from kazma_ui.replay_routes import create_replay_router
+
+                    _replay_engine = ReplayEngine(self._snapshot_recorder)
+                    self.app.include_router(create_replay_router(
+                        recorder=self._snapshot_recorder,
+                        engine=_replay_engine,
+                        graph=recompiled,
+                    ))
+                    logger.info("[Replay] Time-travel API mounted at /api/replay/*")
+                except Exception as exc:
+                    logger.warning("[Replay] Failed to mount replay API: %s", exc)
+
+            # ── Research panel API ────────────────────────────────
+            try:
+                from kazma_ui.research_panel import create_research_router
+                self.app.include_router(create_research_router())
+                logger.info("[Research] API mounted at /api/research/*")
+            except Exception as exc:
+                logger.warning("[Research] Failed to mount research API: %s", exc)
 
             if self.gateway is not None:
                 from kazma_gateway.agent_handler import create_graph_handler
@@ -1267,7 +1425,17 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] Error closing http client during shutdown: %s", e)
 
-        # 6) Best-effort vector memory close
+        # 6) Best-effort vector memory close & SessionManager close
+        try:
+            from kazma_ui.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            if sm is not None and hasattr(sm, "close"):
+                sm.close()
+                logger.info("[app] SessionManager closed cleanly")
+        except Exception as e:
+            logger.debug("[app] SessionManager close: %s", e)
+
         try:
             from kazma_core.memory import vector_store as _vs
 

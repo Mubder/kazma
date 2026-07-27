@@ -27,14 +27,20 @@ ENV/
 .venv/
 .env/
 
-# IDE
+# IDE / local AI tooling (never commit)
 .vscode/
 .idea/
+.poolside/
+.zcode/
+.keys/
 *.swp
 *.swo
 
-# Logs
+# Logs (including accidental root server dumps)
 *.log
+server.log
+server*.log
+test_failures.log
 
 # OS
 .DS_Store
@@ -81,6 +87,7 @@ docs/build/
 
 # Runtime data (generated per-installation, never commit)
 kazma-data/
+.kazma/
 swarm_registry.json
 
 # Machine-local config overrides (never commit — use Settings UI or this file)
@@ -97,6 +104,5 @@ kazma.local.yaml
 # Kubernetes secrets (never commit credentials)
 kubernetes/*secrets*.yaml
 
-# ZCode internal artifacts
-.zcode/
-.keys/
+# Research / smoke scratch (not production)
+research/kb/

@@ -23,8 +23,6 @@ DANGER = {
     "shell_exec",
     "code_exec",
     "python_exec",
-    "spawn_agent",
-    "spawn_agents",
     "schedule_task",
     "cancel_scheduled",
     "vault_retrieve",

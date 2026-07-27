@@ -1,8 +1,7 @@
-"""Workspace API — File browser for the Kazma workspace directory.
+"""Workspace API — File browser for the active Kazma workspace.
 
-Provides read-only file browsing of the ``kazma-data/workspace`` directory
-so the Workspace tab is functional instead of showing hardcoded fallback
-data.
+Uses the same resolver as agent tools (``resolve_active_root``) so the
+Workspace tab, IDE, and file tools never disagree after Switch Repo.
 
 Endpoints:
   GET /api/workspace/files?path=<subdir>  — list files/dirs in workspace
@@ -17,7 +16,6 @@ Security:
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -28,68 +26,20 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["create_workspace_router"]
 
-# ── Workspace root resolution ──────────────────────────────────────────
-
-_DEFAULT_WORKSPACE_RELS = [
-    "kazma-data/workspace",
-    "data/workspace",
-]
-
 
 def _resolve_workspace_root() -> Path:
-    """Resolve the workspace root directory.
-
-    Order of precedence:
-      1. ``KAZMA_WORKSPACE`` env var (if set and non-empty).
-      2. Active Workspace from WorkspaceStore (if available).
-      3. ``workspace.selected_path`` from ConfigStore (if available).
-      4. ``kazma-data/workspace`` relative to CWD.
-      5. ``data/workspace`` relative to CWD.
-      6. Fallback: ``kazma-data/workspace`` (created on first list).
-
-    The directory is created if it does not yet exist so the UI always
-    has a valid, browsable location.
-    """
-    # 1. Active WorkspaceStore — Switch Repo / clone (must match agent tools)
+    """Resolve workspace root via the single binding SoT (tools + IDE + UI)."""
     try:
-        from kazma_core.stores import get_workspace_store
-        active_ws = get_workspace_store().get_active_workspace()
-        if active_ws and active_ws.get("root_path"):
-            return Path(active_ws["root_path"]).resolve()
-    except Exception as exc:
-        logger.debug("[workspace_api] WorkspaceStore lookup failed: %s", exc)
+        from kazma_core.workspace.binding import resolve_active_root
 
-    # 2. Env override only when no active workspace row exists
-    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
-    if env_ws:
-        root = Path(env_ws).expanduser().resolve()
+        root = resolve_active_root()
         root.mkdir(parents=True, exist_ok=True)
         return root
-
-    # 3. ConfigStore selected_path — only used when there is NO active
-    # workspace at all (e.g. a fresh install before any workspace switch).
-    try:
-        from kazma_core.config_store import get_config_store
-        cs_path = get_config_store().get("workspace.selected_path")
-        if cs_path:
-            root = Path(str(cs_path)).resolve()
-            if root.exists() and root.is_dir():
-                return root
     except Exception as exc:
-        logger.debug("[workspace_api] ConfigStore lookup failed: %s", exc)
-
-    # 4. Fall back to defaults relative to CWD
-    cwd = Path.cwd()
-    for rel in _DEFAULT_WORKSPACE_RELS:
-        candidate = (cwd / rel).resolve()
-        if candidate.exists():
-            root = candidate
-            break
-    else:
-        root = (cwd / "kazma-data" / "workspace").resolve()
-
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+        logger.debug("[workspace_api] resolve_active_root failed: %s", exc)
+        root = (Path.cwd() / "kazma-data" / "workspace").resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
 
 def _is_within_workspace(target: Path, workspace: Path) -> bool:

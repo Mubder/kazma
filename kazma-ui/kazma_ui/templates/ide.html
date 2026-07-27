@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "ide" %}
-{% block title %}IDE{% endblock %}
-{% block page_title %}IDE{% endblock %}
+{% block title %}Kazma — {{ t('ide.title') }}{% endblock %}
+{% block page_title %}{{ t('ide.title') }}{% endblock %}
 
 {% block head %}
   {# CodeMirror 5 from cdnjs — JS falls back to a <textarea> if these fail to load (offline). #}

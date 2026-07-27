@@ -27,7 +27,7 @@ Config format (from kazma.yaml ``mcp.servers``):
     servers:
       - name: "filesystem"
         transport: "stdio"
-        command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "kazma-data/workspace"]
+        command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "${KAZMA_ACTIVE_WORKSPACE}"]
       - name: "web-search"
         transport: "sse"
         url: "http://localhost:8080/sse"
@@ -72,7 +72,8 @@ _DANGER_KEYWORDS = (
 # Keywords that indicate a safe read-only tool (never requires approval).
 _SAFE_KEYWORDS = (
     "read", "list", "search", "get", "info", "status", "check",
-    "describe", "query", "count", "exists", "help",
+    "describe", "query", "count", "exists", "help", "tree",
+    "directory_tree", "file_tree", "find", "show", "cat", "view",
 )
 
 # Even with a "safe" verb, these substrings force danger (audit H6)
@@ -82,6 +83,21 @@ _SENSITIVE_READ_KEYWORDS = (
 )
 
 
+def _mcp_raw_tool_name(tool_name: str) -> str:
+    """Strip ``mcp__{server}__`` namespace so classification ignores server slugs.
+
+    Namespaced names like ``mcp__get_status_svc__frobnicate`` used to match
+    safe keywords in the *server* segment (``get``, ``status``) and skip
+    HITL in non-prod. Always classify the raw tool leaf only.
+    """
+    name = (tool_name or "").strip()
+    if name.lower().startswith("mcp__"):
+        parts = name.split("__", 2)
+        if len(parts) == 3 and parts[2]:
+            return parts[2]
+    return name
+
+
 def classify_mcp_tool(tool_name: str) -> str:
     """Classify an MCP tool by name pattern.
 
@@ -89,8 +105,11 @@ def classify_mcp_tool(tool_name: str) -> str:
         "danger" — tool name contains a danger keyword (write/exec/delete/etc.)
         "safe"   — tool name contains only safe keywords (read/list/get/etc.)
         "unknown" — neither pattern matches (treat as danger by default for safety)
+
+    Classification uses the **raw** tool name (after stripping
+    ``mcp__server__`` prefix) so server slugs cannot bleach unknown tools.
     """
-    name_lower = tool_name.lower()
+    name_lower = _mcp_raw_tool_name(tool_name).lower()
     has_danger = any(kw in name_lower for kw in _DANGER_KEYWORDS)
     has_sensitive_read = any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
     if has_danger or has_sensitive_read:
@@ -256,7 +275,7 @@ class AsyncMCPManager:
             if not handle.connected:
                 continue
             for tool in handle.tools:
-                name = tool.get("name", "")
+                raw_name = tool.get("name", "")
                 desc = tool.get("description", "")
                 input_schema = tool.get("inputSchema", {"type": "object", "properties": {}})
 
@@ -264,40 +283,60 @@ class AsyncMCPManager:
                 if "type" not in input_schema:
                     input_schema["type"] = "object"
 
+                # NAMESPACE the tool name as mcp__<server>__<tool> so it can
+                # never collide with a built-in tool (e.g. Playwright MCP's
+                # 'browser_click' vs the browser_automation skill's
+                # 'browser_click'). Without this, providers that require
+                # unique tool names (DeepSeek, OpenAI) reject the whole
+                # request with HTTP 400 'Tool names must be unique' and the
+                # agent loses ALL tools for the turn (the
+                # 'agent-stopped-talking' / raw-markup-in-reply symptom).
+                namespaced = f"mcp__{handle.name}__{raw_name}" if raw_name else raw_name
+
                 schemas.append(
                     {
                         "type": "function",
                         "function": {
-                            "name": name,
+                            "name": namespaced,
                             "description": desc,
                             "parameters": input_schema,
                         },
-                        "_mcp_server": handle.name,  # routing hint (stripped before sending to LLM)
+                        "_mcp_server": handle.name,        # routing hint (stripped before sending to LLM)
+                        "_mcp_raw_name": raw_name,          # original name for execution routing
                     }
                 )
         return schemas
 
     def get_tool_server_map(self) -> dict[str, str]:
-        """Return a mapping of tool_name → server_name for all MCP tools."""
+        """Return a mapping of namespaced_tool_name → server_name.
+
+        Keys are the ``mcp__<server>__<tool>`` form the LLM sees (matching
+        :meth:`get_all_tool_schemas`), so execute_mcp_tool can route a
+        model-emitted call back to the right server.
+        """
         mapping: dict[str, str] = {}
         for handle in self._servers.values():
             if not handle.connected:
                 continue
             for tool in handle.tools:
-                tool_name = tool.get("name", "")
-                if tool_name:
-                    mapping[tool_name] = handle.name
+                raw_name = tool.get("name", "")
+                if raw_name:
+                    namespaced = f"mcp__{handle.name}__{raw_name}"
+                    mapping[namespaced] = handle.name
         return mapping
 
     def get_clean_schemas(self) -> list[dict[str, Any]]:
-        """Return schemas with the internal ``_mcp_server`` key stripped.
+        """Return schemas with internal routing keys stripped.
 
-        This is what gets sent to the LLM — the ``_mcp_server`` hint is
-        only used internally for routing.
+        This is what gets sent to the LLM — the ``_mcp_server`` and
+        ``_mcp_raw_name`` hints are only used internally for routing.
+        The ``function.name`` stays in its namespaced ``mcp__<server>__<tool>``
+        form so it's unique across all servers + built-in tools.
         """
         schemas = self.get_all_tool_schemas()
         for s in schemas:
             s.pop("_mcp_server", None)
+            s.pop("_mcp_raw_name", None)
         return schemas
 
     # ── Tool execution ──────────────────────────────────────────────
@@ -312,7 +351,11 @@ class AsyncMCPManager:
 
         Args:
             server_name: The MCP server name (as configured).
-            tool_name: The tool name to call.
+            tool_name: The tool name to call. Accepts BOTH the namespaced
+                form (``mcp__<server>__<tool>``, what the LLM sees after
+                :meth:`get_all_tool_schemas` namespaces) and the raw form
+                (``<tool>``, what the server expects). The namespace prefix
+                is stripped before sending so the server recognises the call.
             arguments: Tool arguments.
 
         Returns:
@@ -325,9 +368,20 @@ class AsyncMCPManager:
                 "is_error": True,
             }
 
+        # Strip the mcp__<server>__ namespace prefix if present — the LLM
+        # emits the namespaced form (to avoid collisions), but the server
+        # only knows its own raw tool names.
+        raw_tool_name = tool_name
+        prefix = f"mcp__{server_name}__"
+        if tool_name.startswith(prefix):
+            raw_tool_name = tool_name[len(prefix):]
+        elif tool_name.startswith("mcp__"):
+            # Namespaced for a different server — strip just the last segment.
+            raw_tool_name = tool_name.split("__", 2)[-1] if "__" in tool_name else tool_name
+
         start = time.monotonic()
         try:
-            params: dict[str, Any] = {"name": tool_name, "arguments": arguments if arguments is not None else {}}
+            params: dict[str, Any] = {"name": raw_tool_name, "arguments": arguments if arguments is not None else {}}
 
             result = await self._send(handle, "tools/call", params)
 
@@ -357,22 +411,60 @@ class AsyncMCPManager:
                 duration_ms,
                 is_error,
             )
-            return {"content": content, "is_error": is_error}
+            try:
+                from kazma_core.agent.tool_loop_breaker import classify_mcp_error
+
+                outcome = classify_mcp_error(content, is_error=is_error).value
+            except Exception:
+                outcome = "hard" if is_error else "ok"
+            return {"content": content, "is_error": is_error, "outcome": outcome}
 
         except MCPBridgeError as exc:
             duration_ms = (time.monotonic() - start) * 1000
             logger.error("[MCP] Tool '%s' on '%s' failed (%.0fms): %s", tool_name, server_name, duration_ms, exc)
-            return {"content": f"MCP error: {exc}", "is_error": True}
+            exc_s = str(exc)
+            # Huge single-line JSON-RPC (directory_tree on monorepo) is a
+            # capacity issue, not tool death — guide the model to native tools.
+            if (
+                "chunk exceed" in exc_s.lower()
+                or "separator is not found" in exc_s.lower()
+            ):
+                return {
+                    "content": (
+                        f"MCP error: response too large for stdio framing "
+                        f"({raw_tool_name}). Prefer native file_list/file_search "
+                        f"on a shallow path instead of full-tree MCP calls. "
+                        f"Detail: {exc_s[:400]}"
+                    ),
+                    "is_error": True,
+                    "outcome": "policy",
+                }
+            return {"content": f"MCP error: {exc}", "is_error": True, "outcome": "hard"}
 
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             logger.error("[MCP] Tool '%s' on '%s' crashed (%.0fms): %s", tool_name, server_name, duration_ms, exc)
-            return {"content": f"Unexpected error: {exc}", "is_error": True}
+            return {"content": f"Unexpected error: {exc}", "is_error": True, "outcome": "hard"}
 
     # ── Introspection ───────────────────────────────────────────────
 
     def is_mcp_tool(self, tool_name: str) -> bool:
-        """Check if a tool name belongs to any connected MCP server."""
+        """Check if a tool name belongs to any connected MCP server.
+
+        Accepts both the namespaced form (``mcp__<server>__<tool>``, what
+        the LLM emits after :meth:`get_all_tool_schemas` namespaces) and
+        the raw form (``<tool>``).
+        """
+        # Fast path: namespaced form → split once, check the named server.
+        if tool_name.startswith("mcp__"):
+            parts = tool_name.split("__", 2)
+            if len(parts) == 3:
+                server, raw = parts[1], parts[2]
+                handle = self._servers.get(server)
+                if handle and handle.connected:
+                    return any(t.get("name") == raw for t in handle.tools)
+            return False
+        # Raw form → scan all servers.
         for handle in self._servers.values():
             if not handle.connected:
                 continue
@@ -382,7 +474,22 @@ class AsyncMCPManager:
         return False
 
     def get_server_for_tool(self, tool_name: str) -> str | None:
-        """Return the server name that owns a tool, or None."""
+        """Return the server name that owns a tool, or None.
+
+        Accepts both the namespaced form (``mcp__<server>__<tool>``) and
+        the raw form (``<tool>``).
+        """
+        # Fast path: namespaced form → the server is encoded in the name.
+        if tool_name.startswith("mcp__"):
+            parts = tool_name.split("__", 2)
+            if len(parts) == 3:
+                server, raw = parts[1], parts[2]
+                handle = self._servers.get(server)
+                if handle and handle.connected:
+                    if any(t.get("name") == raw for t in handle.tools):
+                        return handle.name
+            return None
+        # Raw form → scan all servers.
         for handle in self._servers.values():
             if not handle.connected:
                 continue
@@ -436,6 +543,19 @@ class AsyncMCPManager:
 
         logger.info("[MCP] Starting stdio server '%s': %s", name, command)
 
+        # MCP JSON-RPC is newline-delimited. A single tool result (e.g.
+        # filesystem directory_tree on a large monorepo) is often one giant
+        # JSON line. asyncio's default StreamReader limit is 64 KiB, which
+        # raises: "Separator is not found, and chunk exceed the limit" and
+        # poisons the pipe for all later calls. Raise the limit for MCP only.
+        try:
+            stdio_limit = int(
+                (os.environ.get("KAZMA_MCP_STDIO_LIMIT") or str(16 * 1024 * 1024)).strip()
+            )
+        except ValueError:
+            stdio_limit = 16 * 1024 * 1024
+        stdio_limit = max(256 * 1024, min(stdio_limit, 64 * 1024 * 1024))  # 256 KiB–64 MiB
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -444,6 +564,7 @@ class AsyncMCPManager:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=working_dir,
+                limit=stdio_limit,
             )
         except FileNotFoundError as exc:
             raise MCPBridgeError(f"Command not found: {command[0]}") from exc
@@ -457,7 +578,16 @@ class AsyncMCPManager:
             command=command,
         )
 
-        # MCP handshake
+        # MCP handshake.  The readline wait in ``_send`` defaults to 60s,
+        # which is too short for ``npx`` cold starts (npm fetch of a fresh
+        # package can take 30-90s on slow networks).  Allow a per-server
+        # override via ``cfg["timeout"]`` or the ``KAZMA_MCP_TIMEOUT_MS``
+        # env; default 90s for stdio.
+        handshake_timeout = float(
+            cfg.get("timeout")
+            or (os.environ.get("KAZMA_MCP_TIMEOUT_MS") or "90000")
+            and str(int(os.environ.get("KAZMA_MCP_TIMEOUT_MS") or 90000) / 1000.0)
+        )
         try:
             await self._send(
                 handle,
@@ -467,11 +597,32 @@ class AsyncMCPManager:
                     "capabilities": {"tools": {"listChanged": False}},
                     "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
                 },
+                timeout=handshake_timeout,
             )
             await self._notify(handle, "notifications/initialized", {})
+        except asyncio.TimeoutError:
+            # npx cold-start or server never replied.  Capture stderr so the
+            # user can see WHY (npm fetch failure / missing dependency /
+            # bad config) instead of an opaque empty error.
+            stderr_tail = await self._drain_stderr(handle, max_bytes=1024)
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            reason = "timed out waiting for initialize response"
+            if stderr_tail:
+                reason += f" — server stderr: {stderr_tail.strip()[:400]}"
+            raise MCPBridgeError(f"Handshake failed for '{name}': {reason}")
         except Exception as exc:
-            process.terminate()
-            raise MCPBridgeError(f"Handshake failed for '{name}': {exc}") from exc
+            stderr_tail = await self._drain_stderr(handle, max_bytes=1024)
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            msg = f"Handshake failed for '{name}': {exc}"
+            if stderr_tail:
+                msg += f" — server stderr: {stderr_tail.strip()[:400]}"
+            raise MCPBridgeError(msg) from exc
 
         # Discover tools
         result = await self._send(handle, "tools/list", {})
@@ -548,16 +699,64 @@ class AsyncMCPManager:
     # Internal: JSON-RPC transport
     # ════════════════════════════════════════════════════════════════
 
-    async def _send(self, handle: MCPServerHandle, method: str, params: dict[str, Any] | None = None) -> Any:
-        """Send a JSON-RPC request and return the result."""
+    async def _send(
+        self,
+        handle: MCPServerHandle,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> Any:
+        """Send a JSON-RPC request and return the result.
+
+        Args:
+            timeout: Optional per-call override (seconds) for the response
+                read.  Used by the stdio handshake to give ``npx`` cold
+                starts enough time to fetch the package before the default
+                read timeout fires.
+        """
         request = _jsonrpc_request(method, params)
         raw = json.dumps(request) + "\n"
 
         if handle.transport == "stdio":
-            return await self._send_stdio(handle, raw)
+            return await self._send_stdio(handle, raw, timeout=timeout)
         if handle.transport == "streamable_http":
             return await self._send_streamable_http(handle, raw)
         return await self._send_sse(handle, raw)
+
+    async def _drain_stderr(self, handle: MCPServerHandle, *, max_bytes: int = 2048) -> str:
+        """Best-effort non-blocking read of a stdio server's stderr.
+
+        Used by the handshake failure path so the user can see WHY an MCP
+        server didn't respond (npm fetch failure, missing dependency, bad
+        config, expired token) instead of an opaque empty error message.
+        Returns up to ``max_bytes`` of whatever is buffered.  Never raises.
+        """
+        proc = getattr(handle, "process", None)
+        if proc is None or not getattr(proc, "stderr", None):
+            return ""
+        try:
+            # Use asyncio.to_thread to avoid blocking the event loop
+            stderr = proc.stderr
+            read_result: dict[str, str] = {"data": ""}
+            
+            def _sync_read() -> None:
+                try:
+                    if hasattr(stderr, "read1"):
+                        data = stderr.read1(max_bytes)
+                    else:
+                        data = stderr.read(max_bytes)
+                    if isinstance(data, bytes):
+                        read_result["data"] = data.decode("utf-8", errors="replace")
+                    elif data:
+                        read_result["data"] = str(data)
+                except Exception:
+                    pass
+
+            await asyncio.to_thread(_sync_read)
+            return read_result["data"]
+        except Exception:
+            return ""
 
     async def _notify(self, handle: MCPServerHandle, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
@@ -583,8 +782,15 @@ class AsyncMCPManager:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[MCP] streamable_http notify failed for '%s': %s", handle.name, exc)
 
-    async def _send_stdio(self, handle: MCPServerHandle, raw: str) -> Any:
-        """Send a JSON-RPC message over stdio and read the response."""
+    async def _send_stdio(self, handle: MCPServerHandle, raw: str, *, timeout: float | None = None) -> Any:
+        """Send a JSON-RPC message over stdio and read the response.
+
+        Args:
+            timeout: Optional per-call read timeout (seconds). Defaults to
+                60s — the stdio handshake passes a longer value (90s by
+                default, ``KAZMA_MCP_TIMEOUT_MS``) so ``npx`` cold starts
+                that fetch packages on first run don't get killed mid-fetch.
+        """
         proc = handle.process
         if proc is None or proc.stdin is None or proc.stdout is None:
             raise MCPBridgeError(f"stdio process '{handle.name}' not running")
@@ -595,7 +801,30 @@ class AsyncMCPManager:
 
         # Read response (one line per JSON-RPC message)
         async with handle.read_lock:
-            line = await asyncio.wait_for(proc.stdout.readline(), timeout=60.0)
+            try:
+                line = await asyncio.wait_for(
+                    proc.stdout.readline(),
+                    timeout=timeout or 60.0,
+                )
+            except Exception as exc:
+                # On read error, attempt to dump stderr and re-raise with diagnostic
+                stderr_snippet = await self._drain_stderr(handle, max_bytes=2048)
+                exc_s = str(exc)
+                # Framing/limit failures leave stdout mid-message — mark dead so
+                # the next call reconnects instead of failing instantly at 0ms.
+                if (
+                    "chunk exceed" in exc_s.lower()
+                    or "separator is not found" in exc_s.lower()
+                ):
+                    handle.connected = False
+                    logger.error(
+                        "[MCP] stdio framing overflow for '%s' (raise KAZMA_MCP_STDIO_LIMIT "
+                        "or avoid huge directory_tree). Marking disconnected.",
+                        handle.name,
+                    )
+                raise MCPBridgeError(
+                    f"stdio read error for '{handle.name}': {exc}\nstderr: {stderr_snippet[:500]}"
+                ) from exc
 
         if not line:
             # Check if process died
@@ -795,6 +1024,8 @@ class UnifiedToolExecutor:
             mcp = AsyncMCPManager()
         self._local = local
         self._mcp = mcp
+        # Original configs (pre-rebind templates) for workspace rebind
+        self._server_configs: dict[str, dict[str, Any]] = {}
 
         if rbac is None:
             from kazma_core.rbac import RBACEngine
@@ -806,14 +1037,36 @@ class UnifiedToolExecutor:
     async def connect_server(self, server_config: dict[str, Any]) -> int:
         """Connect a single MCP server and register its tools.
 
-        Thin compatibility shim over ``AsyncMCPManager.connect_from_config``
-        so callers that previously used the old MCP-only ``ToolRegistry``
-        (e.g. ``KazmaAgent.connect_mcp_servers``, the MCP settings UI)
-        keep working through the unified executor.
+        Workspace-bound servers (filesystem MCP) have their allowed root
+        substituted to the active workspace before spawn. Templates are
+        stored so Switch Repo can rebind without losing the original shape.
         """
         if self._mcp is None:
             return 0
-        return await self._mcp.connect_from_config([server_config])
+
+        # Install rebind bus once (idempotent)
+        try:
+            from kazma_core.workspace.mcp_rebind import (
+                apply_workspace_to_server_config,
+                install_mcp_workspace_rebind,
+                is_workspace_bound_server,
+            )
+
+            install_mcp_workspace_rebind(self)
+            name = str(server_config.get("name") or "unnamed")
+            # Keep a template without a resolved absolute path for rebind
+            template = dict(server_config)
+            self._server_configs[name] = template
+            cfg = (
+                apply_workspace_to_server_config(template)
+                if is_workspace_bound_server(template)
+                else dict(server_config)
+            )
+        except Exception as exc:
+            logger.debug("[Unified] workspace MCP bind skipped: %s", exc)
+            cfg = dict(server_config)
+
+        return await self._mcp.connect_from_config([cfg])
 
     def list_servers(self) -> list[dict[str, Any]]:
         """Return status info for all managed MCP servers."""

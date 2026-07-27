@@ -28,7 +28,18 @@ _DEFAULT_TTL = 14 * 24 * 3600  # 14 days
 
 
 def use_opaque_sessions() -> bool:
-    """Opaque sessions are default-on; set KAZMA_OPAQUE_SESSIONS=0 to disable."""
+    """Opaque sessions are default-on; set KAZMA_OPAQUE_SESSIONS=0 to disable.
+
+    Multi-user mode always forces opaque sessions (cannot fall back to
+    raw ``kazma-secret`` cookie as the session identity).
+    """
+    try:
+        from kazma_core.security.platform_rbac import multi_user_enabled
+
+        if multi_user_enabled():
+            return True
+    except Exception:
+        pass
     raw = (os.environ.get("KAZMA_OPAQUE_SESSIONS") or "1").strip().lower()
     return raw not in ("0", "false", "off", "no")
 

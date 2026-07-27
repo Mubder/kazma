@@ -75,16 +75,21 @@ class FTS5LexicalStore:
         self,
         query: str,
         limit: int = 10,
+        tenant_id: str | None = None,
     ) -> list[tuple[str, float]]:
         """Full-text search with BM25 ranking.
 
         Returns list of (memory_id, bm25_score) tuples.
+        Passes *tenant_id* through for hard tenant isolation (P6).
         """
         backend = await self._ensure_backend()
         if backend is None:
             return []
         try:
-            results = await backend.search(query, limit=limit)
+            kwargs: dict[str, Any] = {}
+            if tenant_id is not None:
+                kwargs["tenant_id"] = tenant_id
+            results = await backend.search(query, limit=limit, **kwargs)
             scored: list[tuple[str, float]] = []
             for r in results:
                 rid = r.get("id", "")
@@ -128,34 +133,42 @@ class FTS5LexicalStore:
 
         Used by the UnifiedMemoryAdapter to populate the ``content`` field.
         """
+        texts = await self.get_texts([uid])
+        return texts.get(uid, "")
+
+    async def get_texts(self, ids: list[str]) -> dict[str, str]:
+        """Batch-fetch content for memory ids via a single SQL path.
+
+        NOTE: A previous duplicate ``get_texts`` overwrote this method and
+        called ``get_text`` → ``get_texts`` recursively, causing
+        ``RecursionError`` on every L3 hydrate (Adapter L3 query failed).
+        Keep **one** batch implementation only.
+        """
         backend = await self._ensure_backend()
-        if backend is None:
-            return ""
+        if backend is None or not ids:
+            return {}
         try:
             conn = backend._conn if hasattr(backend, "_conn") else None
             if conn is None:
-                return ""
-            row = await conn.execute(
-                "SELECT content FROM memories WHERE id = ?", (uid,)
-            )
-            r = await row.fetchone()
-            return r[0] if r else ""
+                return {}
+            out: dict[str, str] = {}
+            # Chunk IN queries
+            chunk = 80
+            for i in range(0, len(ids), chunk):
+                part = [str(x) for x in ids[i : i + chunk] if x]
+                if not part:
+                    continue
+                placeholders = ",".join("?" * len(part))
+                cur = await conn.execute(
+                    f"SELECT id, content FROM memories WHERE id IN ({placeholders})",
+                    part,
+                )
+                rows = await cur.fetchall()
+                for r in rows:
+                    out[str(r[0])] = r[1] or ""
+            return out
         except Exception:
-            return ""
-
-    async def get_texts(self, uids: list[str]) -> dict[str, str]:
-        """Batch fetch content text for multiple IDs."""
-        if not uids:
             return {}
-        backend = await self._ensure_backend()
-        if backend is None:
-            return {}
-        result: dict[str, str] = {}
-        for uid in uids:
-            text = await self.get_text(uid)
-            if text:
-                result[uid] = text
-        return result
 
     async def close(self) -> None:
         if self._backend is not None:

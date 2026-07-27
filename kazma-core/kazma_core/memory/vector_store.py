@@ -76,12 +76,12 @@ class VectorMemory:
         self._model_name = model_name
 
         try:
-            import chromadb
-            from chromadb.utils import embedding_functions
+            from kazma_core.memory.chroma_client import get_chroma_client
 
             Path(self._path).mkdir(parents=True, exist_ok=True)
 
-            self._client = chromadb.PersistentClient(path=self._path)
+            # P5: share PersistentClient with adapter L1 VectorStore
+            self._client = get_chroma_client(self._path)
             # Use the pluggable embedder via the shared factory. For local
             # sentence-transformers this delegates to ChromaDB's native
             # SentenceTransformerEmbeddingFunction (no double-load); for a
@@ -423,8 +423,16 @@ class VectorMemory:
         if client is not None:
             try:
                 # chromadb ≥0.5 may expose reset/heartbeat only
+                import chromadb
+                if hasattr(chromadb.api.client.SharedSystemClient, "clear_system_cache"):
+                    chromadb.api.client.SharedSystemClient.clear_system_cache()
                 if hasattr(client, "clear_system_cache"):
                     client.clear_system_cache()
             except Exception:
                 pass
+            
+            # Run gc.collect() to release sqlite file handles immediately on Windows
+            import gc
+            del client
+            gc.collect()
         logger.debug("[VectorMemory] closed path=%s", self._path)

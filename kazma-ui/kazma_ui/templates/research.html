@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% set active_page = "research" %}
+{% block title %}Kazma — {{ t('research.title') }}{% endblock %}
+{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>{{ t('research.title') }}{% endblock %}
+
+{% block content %}
+<div class="research-container" style="max-width:900px;margin:0 auto;padding:0 1rem;box-sizing:border-box;">
+
+  <div class="tabs" style="margin-bottom:0;">
+    <button class="tab active" data-tab="list" onclick="KazmaResearch.switchTab('list')">{{ t('research.tab_results') }}</button>
+    <button class="tab" data-tab="archived" onclick="KazmaResearch.switchTab('archived')">{{ t('research.tab_archived') }}</button>
+    <button class="tab" data-tab="compare" onclick="KazmaResearch.switchTab('compare')">{{ t('research.tab_compare') }}</button>
+    <button class="tab" data-tab="about" onclick="KazmaResearch.switchTab('about')">{{ t('research.tab_about') }}</button>
+  </div>
+
+  <!-- ══ TAB: Results List ══ -->
+  <div class="tab-panel" id="panel-list" style="display:block;">
+    <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
+      <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.search(event)">
+      <button class="btn btn-secondary" onclick="KazmaResearch.load()">{{ t('research.refresh') }}</button>
+    </div>
+    <div id="research-list" style="display:flex;flex-direction:column;gap:8px;max-width:100%;overflow:hidden;"></div>
+
+    <div id="research-detail" style="display:none;margin-top:1.5rem;">
+      <div class="card" style="padding:1rem;max-width:100%;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+            <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.backToList()" style="flex-shrink:0;">← Back</button>
+            <h3 style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="research-detail-title">Detail</h3>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('markdown')">MD</button>
+            <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('docx')">DOCX</button>
+            <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('pdf')">PDF</button>
+            <button class="btn btn-secondary btn-sm" id="detail-archive-btn" onclick="KazmaResearch.archiveCurrent()" title="{{ t('research.archive') }}" style="display:flex;align-items:center;padding:4px 8px;">
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="2" y="4" width="20" height="4" rx="1"/><path d="M4 8v10a2 2 0 002 2h12a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="detail-restore-btn" onclick="KazmaResearch.restoreCurrent()" title="{{ t('research.restore') }}" style="display:none;align-items:center;padding:4px 8px;">
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M3 12a9 9 0 109-9"/><polyline points="3 4 3 10 9 10"/></svg>
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="KazmaResearch.delAndBack()" style="flex-shrink:0;">×</button>
+          </div>
+        </div>
+        <div id="research-detail-meta" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;"></div>
+        <div id="research-detail-output" style="max-height:500px;overflow-y:auto;line-height:1.7;word-break:break-word;overflow-wrap:anywhere;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: Archived ══ -->
+  <div class="tab-panel" id="panel-archived" style="display:none;">
+    <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
+      <input type="text" id="research-archived-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.searchArchived(event)">
+      <button class="btn btn-secondary" onclick="KazmaResearch.loadArchived()">{{ t('research.refresh') }}</button>
+    </div>
+    <div id="research-archived-list" style="display:flex;flex-direction:column;gap:8px;max-width:100%;overflow:hidden;"></div>
+  </div>
+
+  <!-- ══ TAB: Compare ══ -->
+  <div class="tab-panel" id="panel-compare" style="display:none;">
+    <div class="card" style="padding:1.5rem;">
+      <p style="color:var(--text-muted);margin-bottom:1rem;">{{ t('research.compare_desc') }}</p>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <label>{{ t('research.run_a') }}:
+          <select id="research-cmp-a" class="form-select" style="min-width:200px;"></select>
+        </label>
+        <label>{{ t('research.run_b') }}:
+          <select id="research-cmp-b" class="form-select" style="min-width:200px;"></select>
+        </label>
+        <button class="btn btn-primary" onclick="KazmaResearch.compare()">{{ t('research.tab_compare') }}</button>
+      </div>
+      <div id="research-cmp-result"></div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: About ══ -->
+  <div class="tab-panel" id="panel-about" style="display:none;">
+    <div class="card" style="padding:1.5rem;line-height:1.7;">
+      <h3 style="margin-top:0;">{{ t('research.about_title') }}</h3>
+      <p>{{ t('research.about_desc') | safe }}</p>
+      <ul>
+        <li>{{ t('research.about_browse') | safe }}</li>
+        <li>{{ t('research.about_compare') | safe }}</li>
+        <li>{{ t('research.about_export') | safe }}</li>
+      </ul>
+      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('research.about_note') | safe }}</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/streaming.js"></script>
+<script>
+// Merge page keys into global i18n — do NOT wipe window.KAZMA_I18N from base.html
+window.KAZMA_I18N = Object.assign({}, window.KAZMA_I18N || {}, {
+  research_compare_desc: "{{ t('research.compare_desc') }}",
+  research_no_results: "{{ t('research.no_results') }}",
+  research_no_archived: "{{ t('research.no_archived') }}",
+  research_comparing: "{{ t('research.comparing') }}",
+  research_metric: "{{ t('research.metric') }}",
+  research_run_a: "{{ t('research.run_a') }}",
+  research_run_b: "{{ t('research.run_b') }}",
+  research_delta: "{{ t('research.delta') }}",
+  research_text_diff: "{{ t('research.text_diff') }}",
+  research_identical: "{{ t('research.identical') }}",
+  research_tab_results: "{{ t('research.tab_results') }}",
+  research_tab_archived: "{{ t('research.tab_archived') }}",
+  research_archived_msg: "{{ t('research.archived_msg') }}",
+  research_restored_msg: "{{ t('research.restored_msg') }}",
+  research_open_md: "{{ t('research.open_md') }}",
+});
+</script>
+<script src="/static/js/research.js?v={{ js_version() }}"></script>
+{% endblock %}

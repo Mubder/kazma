@@ -32,6 +32,24 @@ _PLATFORM_KEYS = frozenset(
     }
 )
 
+# Per-turn flags that must NOT stick across messages (session merge).
+# Without this, a single voice note sets voice_transcribed=True forever and
+# every later text reply gets an unwanted TTS voice note.
+_EPHEMERAL_CTX_KEYS = frozenset(
+    {
+        "voice_transcribed",
+        "voice_bytes",
+        "voice_filename",
+        "stt_provider",
+        "stt_language",
+        "media",
+        "tool_used",
+        "parse_mode",
+        "reply_markup",
+        "components",
+    }
+)
+
 
 def _resolve_thread(msg: IncomingMessage) -> str:
     """Resolve or generate a stable thread_id for a message.
@@ -137,7 +155,12 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
         existing = dict(await store.get(thread_id) or {})
     except Exception:
         existing = {}
-    persisted_ctx = {**existing, **dict(ctx)}
+    # Drop previous turn's ephemeral flags so they don't leak into this reply
+    # (e.g. voice_transcribed after a voice note → stuck TTS on all replies).
+    base = {
+        k: v for k, v in existing.items() if k not in _EPHEMERAL_CTX_KEYS
+    }
+    persisted_ctx = {**base, **dict(ctx)}
     persisted_ctx.setdefault("sender_id", msg.sender_id)
     await store.put(thread_id, persisted_ctx)
 

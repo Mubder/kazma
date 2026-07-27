@@ -60,6 +60,7 @@ class ScheduledJob:
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     next_run: str | None = None
     last_result: str | None = None
+    tenant_id: str = "default"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +73,7 @@ class ScheduledJob:
             "created_at": self.created_at,
             "next_run": self.next_run,
             "last_result": self.last_result[:200] if self.last_result else None,
+            "tenant_id": self.tenant_id,
         }
 
 
@@ -173,6 +175,14 @@ class SQLiteCronStore:
 
         await apply_sqlite_pragmas_async(self._db)
         await self._db.execute(_CREATE_TABLE)
+        # Idempotent tenant_id column for multi-tenant UI filtering
+        try:
+            await self._db.execute(
+                "ALTER TABLE cron_jobs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
         await self._db.commit()
         logger.info("[CronStore] Initialized at %s", self._db_path)
 
@@ -181,47 +191,67 @@ class SQLiteCronStore:
         if self._db is None:
             raise RuntimeError("CronDB not initialized")
         await self._db.execute(
-            "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, status, created_at, next_run) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, "
+            "status, created_at, next_run, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job.job_id, job.timing, job.prompt, job.platform, job.thread_id,
-             job.status.value, job.created_at, job.next_run),
+             job.status.value, job.created_at, job.next_run, job.tenant_id),
         )
         await self._db.commit()
 
+    def _row_to_job(self, row: Any) -> ScheduledJob:
+        tenant = "default"
+        if len(row) > 9 and row[9] is not None:
+            tenant = str(row[9])
+        return ScheduledJob(
+            job_id=row[0],
+            timing=row[1],
+            prompt=row[2],
+            platform=row[3],
+            thread_id=row[4],
+            status=JobStatus(row[5]),
+            created_at=row[6],
+            next_run=row[7],
+            last_result=row[8],
+            tenant_id=tenant,
+        )
+
     async def list_active(self) -> list[ScheduledJob]:
-        """List all pending/running jobs."""
+        """List all pending/running jobs (all tenants — executor path)."""
         if self._db is None:
             raise RuntimeError("CronDB not initialized")
         async with self._db.execute(
-            "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, next_run, last_result "
+            "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
+            "next_run, last_result, tenant_id "
             "FROM cron_jobs WHERE status IN ('pending', 'running')"
         ) as cursor:
             jobs = []
             async for row in cursor:
-                jobs.append(ScheduledJob(
-                    job_id=row[0], timing=row[1], prompt=row[2],
-                    platform=row[3], thread_id=row[4],
-                    status=JobStatus(row[5]), created_at=row[6],
-                    next_run=row[7], last_result=row[8],
-                ))
+                jobs.append(self._row_to_job(row))
             return jobs
 
-    async def list_all(self) -> list[ScheduledJob]:
-        """List all jobs regardless of status."""
+    async def list_all(self, *, tenant_id: str | None = None) -> list[ScheduledJob]:
+        """List jobs; optionally filter by tenant for multi-user UI."""
         if self._db is None:
             raise RuntimeError("CronDB not initialized")
-        async with self._db.execute(
-            "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, next_run, last_result "
-            "FROM cron_jobs ORDER BY created_at DESC"
-        ) as cursor:
+        if tenant_id:
+            sql = (
+                "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
+                "next_run, last_result, tenant_id "
+                "FROM cron_jobs WHERE tenant_id = ? ORDER BY created_at DESC"
+            )
+            args: tuple[Any, ...] = (tenant_id,)
+        else:
+            sql = (
+                "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
+                "next_run, last_result, tenant_id "
+                "FROM cron_jobs ORDER BY created_at DESC"
+            )
+            args = ()
+        async with self._db.execute(sql, args) as cursor:
             jobs = []
             async for row in cursor:
-                jobs.append(ScheduledJob(
-                    job_id=row[0], timing=row[1], prompt=row[2],
-                    platform=row[3], thread_id=row[4],
-                    status=JobStatus(row[5]), created_at=row[6],
-                    next_run=row[7], last_result=row[8],
-                ))
+                jobs.append(self._row_to_job(row))
             return jobs
 
     async def update_status(self, job_id: str, status: JobStatus) -> None:
@@ -375,6 +405,12 @@ class CronScheduler:
             Dict with job_id, timing, next_run.
         """
         next_run = parse_timing(timing)
+        try:
+            from kazma_core.tenant_isolation import require_tenant_id
+
+            tid = require_tenant_id()
+        except Exception:
+            tid = "default"
         job = ScheduledJob(
             job_id=f"cron-{uuid.uuid4().hex[:8]}",
             timing=timing,
@@ -382,19 +418,34 @@ class CronScheduler:
             platform=platform,
             thread_id=thread_id,
             next_run=next_run.isoformat(),
+            tenant_id=tid,
         )
         await self._store.insert(job)
-        logger.info("[CronScheduler] Scheduled %s for %s", job.job_id, job.next_run)
+        logger.info(
+            "[CronScheduler] Scheduled %s for %s tenant=%s",
+            job.job_id,
+            job.next_run,
+            tid,
+        )
         return {
             "job_id": job.job_id,
             "timing": timing,
             "next_run": job.next_run,
             "status": "scheduled",
+            "tenant_id": tid,
         }
 
     async def list_jobs(self) -> list[dict[str, Any]]:
-        """List all scheduled jobs."""
-        jobs = await self._store.list_all()
+        """List scheduled jobs (scoped to current tenant when multi-user/prod)."""
+        tenant_filter: str | None = None
+        try:
+            from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
+
+            if multi_user_or_production():
+                tenant_filter = require_tenant_id()
+        except Exception:
+            pass
+        jobs = await self._store.list_all(tenant_id=tenant_filter)
         return [j.to_dict() for j in jobs]
 
     async def cancel(self, job_id: str) -> dict[str, Any]:

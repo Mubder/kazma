@@ -236,9 +236,14 @@ class TestGatewaySmoke:
 
 
 class TestMCPSettingsService:
-    def test_add_get_delete_mcp_server(self) -> None:
+    def test_add_get_delete_mcp_server(self, tmp_path) -> None:
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import yaml
+
         store = MagicMock()
-        # Simulate empty then populated list
         store._servers: list = []
 
         def _get(key, default=None):
@@ -248,21 +253,35 @@ class TestMCPSettingsService:
 
         def _set(key, value, category="general"):
             if key == "mcp.servers":
-                import json
-
                 store._servers = json.loads(value) if isinstance(value, str) else value
 
         store.get.side_effect = _get
         store.set.side_effect = _set
 
-        svc = MCPSettingsService(store)
-        added = svc.add_mcp_server(
-            {"name": "local-fs", "transport": "stdio", "command": ["npx", "server"]}
+        yaml_path = Path(tmp_path) / "kazma.yaml"
+        yaml_path.write_text(
+            yaml.safe_dump({"mcp": {"servers": []}}),
+            encoding="utf-8",
         )
-        assert added["name"] == "local-fs"
-        assert len(svc.get_mcp_servers()) == 1
-        svc.delete_mcp_server("local-fs")
-        assert svc.get_mcp_servers() == []
+
+        with patch(
+            "kazma_core.config_store.get_config_store",
+            return_value=store,
+        ), patch(
+            "kazma_core.settings_mcp._agent_yaml_path",
+            return_value=str(yaml_path),
+        ), patch(
+            "kazma_core.settings_mcp._agent_config_raw",
+            return_value=None,
+        ):
+            svc = MCPSettingsService(store)
+            added = svc.add_mcp_server(
+                {"name": "local-fs", "transport": "stdio", "command": ["npx", "server"]}
+            )
+            assert added.get("name") == "local-fs"
+            assert len(svc.get_mcp_servers()) == 1
+            svc.delete_mcp_server("local-fs")
+            assert svc.get_mcp_servers() == []
 
 
 # ── tracing TraceStore ─────────────────────────────────────────────────

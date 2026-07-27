@@ -1,12 +1,15 @@
-"""Web search tool — SearXNG / DuckDuckGo / Bing search returning markdown.
+"""Web search tool — multi-backend search returning markdown.
 
-Resolution order:
-    1. SearXNG (if KAZMA_SEARXNG_URL set or localhost:8088 responds) — best free reliability
-    2. DuckDuckGo library (may rate-limit)
-    3. Bing HTML scrape (fragile last resort)
+Resolution order (each step continues on **empty results**, not only errors):
+    1. SearXNG — multi-base discovery (``KAZMA_SEARXNG_URL``, ConfigStore
+       ``search.searxng_url``, localhost:8088/8080, Docker service names)
+    2. DuckDuckGo (``duckduckgo_search`` / DDGS)
+    3. Bing HTML scrape
+    4. Wikipedia OpenSearch (last-resort for brand/entity queries)
 
 Not a paid search API (Tavily/Brave/Serper). For production reliability, run
-SearXNG and set ``KAZMA_SEARXNG_URL``. Kazma works without it.
+SearXNG: ``docker compose --profile search up -d searxng`` and set
+``KAZMA_SEARXNG_URL=http://127.0.0.1:8088``.
 
 Usage:
     from kazma_core.tools.web_search import web_search
@@ -18,16 +21,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import warnings
+from typing import Any
 
 __all__ = ["web_search"]
 
 # Overrides the invasive warnings.simplefilter("always") in duckduckgo_search library
 _original_warn = warnings.warn
+
+
 def _custom_warn(message, category=None, stacklevel=1, *args, **kwargs):
     msg_str = str(message)
     if "duckduckgo_search" in msg_str or "ddgs" in msg_str:
         return
     return _original_warn(message, category, stacklevel, *args, **kwargs)
+
+
 warnings.warn = _custom_warn
 
 logger = logging.getLogger(__name__)
@@ -36,100 +44,159 @@ logger = logging.getLogger(__name__)
 def _friendly_error(exc: Exception) -> str:
     """Map low-level exceptions to user-friendly messages."""
     if isinstance(exc, ConnectionError):
-        return "Error: Could not connect to search service. Check your internet connection."
+        return (
+            "Error: Could not connect to any search service. "
+            "Check internet connectivity, or set ``KAZMA_SEARXNG_URL`` to a local SearXNG."
+        )
     if isinstance(exc, TimeoutError):
-        return "Error: Search request timed out. Please try again."
+        return "Error: Search request timed out. Please try again or rephrase the query."
     if isinstance(exc, OSError):
         logger.debug("[web_search] Network error: %s", exc, exc_info=True)
-        return "Error: Network error occurred during search. Please check your connection."
+        return "Error: Network error during search. Check connection or try ``read_url`` on a known URL."
     logger.debug("[web_search] Search failed: %s", exc, exc_info=True)
-    return "Error: Search failed. Please try again."
+    return f"Error: Search failed ({type(exc).__name__}). Try rephrasing or use ``read_url``."
 
 
-def _searxng_search(query: str, max_results: int) -> list[dict[str, str]] | None:
-    """Try SearXNG search. Returns results or None if unavailable.
+# Cache which SearXNG base URL worked (or that none did) for a short TTL
+# so multi-query turns don't hammer dead localhost:8088 every time.
+_searxng_cache: dict[str, Any] = {"base": None, "dead_until": 0.0, "note": ""}
 
-    Reads KAZMA_SEARXNG_URL env var, or auto-detects localhost:8088.
-    """
+
+def _searxng_candidate_bases() -> list[str]:
+    """Ordered list of SearXNG base URLs to try."""
     import os
-    import urllib.parse
 
-    searxng_url = os.environ.get("KAZMA_SEARXNG_URL", "").strip()
-    if not searxng_url:
-        # Auto-detect: try localhost:8088 (common SearXNG port)
-        searxng_url = "http://localhost:8088"
-
+    bases: list[str] = []
+    explicit = (os.environ.get("KAZMA_SEARXNG_URL") or "").strip()
+    if explicit:
+        bases.append(explicit.rstrip("/"))
+    # ConfigStore override (settings UI / ops)
     try:
-        import httpx
+        from kazma_core.config_store import get_config_store
 
-        search_url = f"{searxng_url.rstrip('/')}/search"
-        params = {
-            "q": query,
-            "format": "json",
-            "categories": "general",
-            "language": "en",
-            "pageno": 1,
-        }
-        r = httpx.get(search_url, params=params, timeout=10, headers={"Accept": "application/json"})
-        if r.status_code != 200:
-            logger.debug("[web_search] SearXNG returned status %d", r.status_code)
-            return None
-
-        data = r.json()
-        raw_results = data.get("results", [])
-        if not raw_results:
-            logger.debug("[web_search] SearXNG returned no results")
-            return None
-
-        # Normalize to DDG-compatible format
-        normalized = []
-        for res in raw_results[:max_results]:
-            normalized.append({
-                "title": res.get("title", "Untitled"),
-                "href": res.get("url", ""),
-                "body": res.get("content", ""),
-            })
-
-        logger.info("[web_search] SearXNG search returned %d results.", len(normalized))
-        return normalized
-
-    except Exception as exc:
-        logger.debug("[web_search] SearXNG not available: %s", exc)
-        return None
+        cfg = get_config_store().get("search.searxng_url")
+        if cfg and str(cfg).strip():
+            bases.append(str(cfg).strip().rstrip("/"))
+    except Exception:
+        pass
+    # Common local / Docker locations
+    for b in (
+        "http://127.0.0.1:8088",
+        "http://localhost:8088",
+        "http://host.docker.internal:8088",
+        "http://searxng:8080",
+        "http://127.0.0.1:8080",
+    ):
+        if b not in bases:
+            bases.append(b)
+    # de-dupe preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for b in bases:
+        if b not in seen:
+            seen.add(b)
+            out.append(b)
+    return out
 
 
-def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
-    """Synchronous search — tries SearXNG → DuckDuckGo → Bing scraping.
+def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
+    """Try SearXNG across candidate bases. Returns (results|None, status_note)."""
+    import time as _time
 
-    Kept as a standalone module-level function so it is picklable and
-    easy to test in isolation. MUST be executed in a worker thread
-    because it performs blocking network I/O.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
+    import httpx
 
-    # 0. Try SearXNG first (if configured or auto-detected)
-    results = _searxng_search(query, max_results)
-    if results is not None:
-        return results
+    now = _time.time()
+    if _searxng_cache.get("dead_until", 0) > now and not _searxng_cache.get("base"):
+        return None, _searxng_cache.get("note") or "searxng:skipped (recently unavailable)"
 
-    # 1. Try DuckDuckGo
+    candidates = _searxng_candidate_bases()
+    # Prefer last known good base first
+    good = _searxng_cache.get("base")
+    if good and good in candidates:
+        candidates = [good] + [c for c in candidates if c != good]
+
+    last_note = "searxng:unavailable"
+    for base in candidates:
+        try:
+            search_url = f"{base}/search"
+            params = {
+                "q": query,
+                "format": "json",
+                "categories": "general",
+                "language": "all",
+                "pageno": 1,
+            }
+            r = httpx.get(
+                search_url,
+                params=params,
+                timeout=8.0,
+                headers={"Accept": "application/json", "User-Agent": "KazmaSearch/0.6"},
+            )
+            if r.status_code != 200:
+                last_note = f"searxng:http_{r.status_code}@{base}"
+                continue
+            data = r.json()
+            raw_results = data.get("results", [])
+            if not raw_results:
+                last_note = f"searxng:empty@{base}"
+                # empty is still a live instance — keep base cached
+                _searxng_cache["base"] = base
+                _searxng_cache["dead_until"] = 0.0
+                continue
+
+            normalized = []
+            for res in raw_results[:max_results]:
+                normalized.append(
+                    {
+                        "title": res.get("title", "Untitled"),
+                        "href": res.get("url", ""),
+                        "body": res.get("content", ""),
+                    }
+                )
+            _searxng_cache["base"] = base
+            _searxng_cache["dead_until"] = 0.0
+            _searxng_cache["note"] = f"searxng:ok@{base}"
+            logger.info(
+                "[web_search] SearXNG %s returned %d results", base, len(normalized)
+            )
+            return normalized, f"searxng:ok@{base}"
+        except Exception as exc:
+            last_note = f"searxng:unavailable@{base} ({type(exc).__name__})"
+            logger.debug("[web_search] SearXNG %s: %s", base, exc)
+            continue
+
+    # All candidates failed — cool down 60s
+    _searxng_cache["base"] = None
+    _searxng_cache["dead_until"] = now + 60.0
+    _searxng_cache["note"] = last_note
+    return None, last_note
+
+
+def _ddg_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
+    """DuckDuckGo text search. Empty list → try next backend (not a hard fail)."""
     try:
         from duckduckgo_search import DDGS
+
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
             if results:
-                logger.info("[web_search] DuckDuckGo search returned %d results.", len(results))
-                return results
+                logger.info("[web_search] DuckDuckGo returned %d results", len(results))
+                return results, "duckduckgo:ok"
+            logger.info("[web_search] DuckDuckGo returned 0 results for %r", query)
+            return None, "duckduckgo:empty"
     except Exception as exc:
-        logger.warning("[web_search] DuckDuckGo search failed or blocked, trying Bing fallback. Error: %s", exc)
+        logger.warning("[web_search] DuckDuckGo failed: %s", exc)
+        return None, f"duckduckgo:error ({type(exc).__name__})"
 
-    # 2. Fallback to Bing scraping
+
+def _bing_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
+    """Bing HTML scrape fallback."""
     try:
-        import httpx
-        from html.parser import HTMLParser
         import base64
         import urllib.parse
+        from html.parser import HTMLParser
+
+        import httpx
 
         headers = {
             "User-Agent": (
@@ -142,25 +209,22 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
         url = f"https://www.bing.com/search?q={urllib.parse.quote_plus(query)}"
         r = httpx.get(url, headers=headers, follow_redirects=True, timeout=10)
         if r.status_code != 200:
-            logger.warning("[web_search] Bing fallback returned status code %d", r.status_code)
-            return []
+            logger.warning("[web_search] Bing status %d", r.status_code)
+            return None, f"bing:http_{r.status_code}"
 
         def decode_bing_url(b_url: str) -> str:
-            if not b_url.startswith('http'):
+            if not b_url.startswith("http"):
                 return b_url
             parsed_url = urllib.parse.urlparse(b_url)
             q_params = urllib.parse.parse_qs(parsed_url.query)
-            u_param = q_params.get('u', [None])[0]
+            u_param = q_params.get("u", [None])[0]
             if u_param:
-                if u_param.startswith('a1'):
-                    b64_str = u_param[2:]
-                else:
-                    b64_str = u_param
-                # Add padding
-                padding = '=' * (4 - len(b64_str) % 4)
+                b64_str = u_param[2:] if u_param.startswith("a1") else u_param
+                padding = "=" * (4 - len(b64_str) % 4)
                 try:
-                    decoded = base64.b64decode(b64_str + padding).decode('utf-8', errors='ignore')
-                    return decoded
+                    return base64.b64decode(b64_str + padding).decode(
+                        "utf-8", errors="ignore"
+                    )
                 except Exception:
                     pass
             return b_url
@@ -168,118 +232,183 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
         class BingHTMLParser(HTMLParser):
             def __init__(self):
                 super().__init__()
-                self.results = []
-                self.current_result = None
+                self.results: list[dict[str, str]] = []
+                self.current_result: dict[str, str] | None = None
                 self.in_algo = False
                 self.in_h2 = False
                 self.in_snippet = False
                 self.in_a = False
                 self.depth_algo = 0
-                self.current_text = []
+                self.current_text: list[str] = []
 
             def handle_starttag(self, tag, attrs):
                 attrs_dict = dict(attrs)
-                class_val = attrs_dict.get('class', '')
-
+                class_val = attrs_dict.get("class", "")
                 if self.in_algo:
                     self.depth_algo += 1
-
-                if tag == 'li' and 'b_algo' in class_val.split():
+                if tag == "li" and "b_algo" in class_val.split():
                     self.in_algo = True
                     self.depth_algo = 0
-                    self.current_result = {'title': '', 'href': '', 'body': ''}
+                    self.current_result = {"title": "", "href": "", "body": ""}
                     self.results.append(self.current_result)
-
                 if self.in_algo:
-                    if tag == 'h2':
+                    if tag == "h2":
                         self.in_h2 = True
                         self.current_text = []
-                    elif tag == 'a' and self.in_h2:
+                    elif tag == "a" and self.in_h2:
                         self.in_a = True
-                        if 'href' in attrs_dict:
-                            self.current_result['href'] = attrs_dict['href']
-                    elif tag in ('p', 'div', 'span') and any(x in class_val for x in ('b_caption', 'b_linelimit', 'tab-content')):
+                        if "href" in attrs_dict and self.current_result is not None:
+                            self.current_result["href"] = attrs_dict["href"]
+                    elif tag in ("p", "div", "span") and any(
+                        x in class_val for x in ("b_caption", "b_linelimit", "tab-content")
+                    ):
                         self.in_snippet = True
                         self.current_text = []
 
             def handle_data(self, data):
-                if self.in_algo:
-                    if self.in_h2 or self.in_snippet:
-                        self.current_text.append(data)
+                if self.in_algo and (self.in_h2 or self.in_snippet):
+                    self.current_text.append(data)
 
             def handle_endtag(self, tag):
-                if self.in_algo:
-                    if tag == 'a' and self.in_a:
-                        self.in_a = False
-                    elif tag == 'h2' and self.in_h2:
-                        self.in_h2 = False
-                        if self.current_result:
-                            self.current_result['title'] = "".join(self.current_text).strip()
-                        self.current_text = []
-                    elif tag in ('p', 'div', 'span') and self.in_snippet:
-                        self.in_snippet = False
-                        if self.current_result:
-                            existing = self.current_result['body']
-                            new_text = "".join(self.current_text).strip()
-                            if new_text:
-                                self.current_result['body'] = (existing + " " + new_text).strip() if existing else new_text
-                        self.current_text = []
-
-                    if tag == 'li' and self.depth_algo == 0:
-                        self.in_algo = False
-                        self.current_result = None
-                    elif tag == 'li':
-                        self.depth_algo -= 1
+                if not self.in_algo:
+                    return
+                if tag == "a" and self.in_a:
+                    self.in_a = False
+                elif tag == "h2" and self.in_h2:
+                    self.in_h2 = False
+                    if self.current_result is not None:
+                        self.current_result["title"] = "".join(self.current_text).strip()
+                    self.current_text = []
+                elif tag in ("p", "div", "span") and self.in_snippet:
+                    self.in_snippet = False
+                    if self.current_result is not None:
+                        existing = self.current_result["body"]
+                        new_text = "".join(self.current_text).strip()
+                        if new_text:
+                            self.current_result["body"] = (
+                                (existing + " " + new_text).strip() if existing else new_text
+                            )
+                    self.current_text = []
+                if tag == "li" and self.depth_algo == 0:
+                    self.in_algo = False
+                    self.current_result = None
+                elif tag == "li":
+                    self.depth_algo -= 1
 
         parser = BingHTMLParser()
         parser.feed(r.text)
-
-        processed_results = []
+        processed: list[dict[str, str]] = []
         for res in parser.results:
-            if res.get('title') or res.get('href'):
-                real_url = decode_bing_url(res.get('href', ''))
-                processed_results.append({
-                    'title': res.get('title', 'Untitled'),
-                    'href': real_url,
-                    'body': res.get('body', '')
-                })
-
-        logger.info("[web_search] Bing fallback returned %d parsed results.", len(processed_results))
-        return processed_results[:max_results]
-
+            if res.get("title") or res.get("href"):
+                processed.append(
+                    {
+                        "title": res.get("title", "Untitled"),
+                        "href": decode_bing_url(res.get("href", "")),
+                        "body": res.get("body", ""),
+                    }
+                )
+        if not processed:
+            return None, "bing:empty"
+        logger.info("[web_search] Bing returned %d results", len(processed))
+        return processed[:max_results], "bing:ok"
     except Exception as exc:
-        logger.error("[web_search] Bing fallback search failed. Error: %s", exc)
-        raise
+        logger.error("[web_search] Bing failed: %s", exc)
+        return None, f"bing:error ({type(exc).__name__})"
 
 
-async def web_search(query: str, max_results: int = 5) -> str:
-    """Search the public web; return markdown titles, URLs, and snippets.
-
-    Prefers SearXNG when available, then DuckDuckGo, then Bing HTML.
-    Results can be empty under rate limits — not an anti-block guarantee.
-
-    Args:
-        query: Search query string.
-        max_results: Maximum number of results to return (default 5).
-
-    Returns:
-        Markdown-formatted search results, or an error message.
-    """
+def _wikipedia_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
+    """Wikipedia OpenSearch — useful when brand queries are soft-blocked by DDG/Bing."""
     try:
-        results = await asyncio.to_thread(_run_search, query, max_results)
-    except ConnectionError:
-        return _friendly_error(ConnectionError())
-    except TimeoutError:
-        return _friendly_error(TimeoutError())
-    except OSError as exc:
-        return _friendly_error(exc)
+        import httpx
+
+        r = httpx.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "opensearch",
+                "search": query,
+                "limit": max(1, min(max_results, 8)),
+                "namespace": 0,
+                "format": "json",
+            },
+            headers={
+                "User-Agent": "KazmaAgent/0.6 (web_search; +https://github.com/Mubder/kazma)",
+                "Accept": "application/json",
+            },
+            timeout=10,
+            follow_redirects=True,
+        )
+        if r.status_code != 200:
+            return None, f"wikipedia:http_{r.status_code}"
+        data = r.json()
+        # [query, titles[], descriptions[], urls[]]
+        if not isinstance(data, list) or len(data) < 4:
+            return None, "wikipedia:bad_shape"
+        titles, descs, urls = data[1], data[2], data[3]
+        if not titles:
+            return None, "wikipedia:empty"
+        out: list[dict[str, str]] = []
+        for i, title in enumerate(titles):
+            out.append(
+                {
+                    "title": str(title),
+                    "href": str(urls[i]) if i < len(urls) else "",
+                    "body": str(descs[i]) if i < len(descs) else "",
+                }
+            )
+        logger.info("[web_search] Wikipedia returned %d results", len(out))
+        return out, "wikipedia:ok"
     except Exception as exc:
-        return _friendly_error(exc)
+        logger.debug("[web_search] Wikipedia failed: %s", exc)
+        return None, f"wikipedia:error ({type(exc).__name__})"
 
-    if not results:
-        return f"No results found for: {query}"
 
-    lines: list[str] = [f"# Search results for: {query}\n"]
+def _run_search(query: str, max_results: int) -> tuple[list[dict[str, str]], list[str], str]:
+    """Run backend chain. Returns (results, attempt_notes, winning_backend).
+
+    Continues to the next backend when the current one is unavailable **or**
+    returns zero hits (rate-limit / soft-block on hot keywords).
+    """
+    attempts: list[str] = []
+    backends: list[tuple[str, Any]] = [
+        ("searxng", _searxng_search),
+        ("duckduckgo", _ddg_search),
+        ("bing", _bing_search),
+        ("wikipedia", _wikipedia_search),
+    ]
+    for name, fn in backends:
+        results, note = fn(query, max_results)
+        attempts.append(note)
+        if results:
+            return results, attempts, name
+    return [], attempts, ""
+
+
+def _format_empty(query: str, attempts: list[str]) -> str:
+    tried = ", ".join(attempts) if attempts else "(none)"
+    return (
+        f"No web results for: {query!r}\n\n"
+        f"**Backends tried:** {tried}\n\n"
+        "This is often **rate-limiting or soft bot-detection** on hot brand "
+        "keywords (not necessarily a Kazma bug). Try:\n"
+        "1. Rephrase (e.g. add a year or product name: `OpenAI API documentation`).\n"
+        "2. Use ``read_url`` on a known URL (docs site, Wikipedia).\n"
+        "3. Run a local SearXNG and set ``KAZMA_SEARXNG_URL`` for more reliable search.\n"
+    )
+
+
+def _format_results(
+    query: str,
+    results: list[dict[str, str]],
+    *,
+    backend: str,
+    attempts: list[str],
+) -> str:
+    lines: list[str] = [
+        f"# Search results for: {query}",
+        f"_Source: {backend}_"
+        + (f" (after: {', '.join(attempts[:-1])})" if len(attempts) > 1 else ""),
+        "",
+    ]
     for i, r in enumerate(results, 1):
         title = r.get("title", "Untitled")
         href = r.get("href", r.get("link", ""))
@@ -290,5 +419,41 @@ async def web_search(query: str, max_results: int = 5) -> str:
         if body:
             lines.append(body)
         lines.append("")
-
     return "\n".join(lines)
+
+
+async def web_search(query: str, max_results: int = 8) -> str:
+    """Search the public web; return markdown titles, URLs, and snippets.
+
+    Tries multiple backends and continues on empty results (not only errors).
+
+    Args:
+        query: Search query string.
+        max_results: Maximum number of results to return (default 8).
+
+    Returns:
+        Markdown-formatted search results, or a diagnostic empty/error message.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "Error: empty search query."
+    max_results = max(1, min(int(max_results or 8), 15))
+
+    try:
+        results, attempts, backend = await asyncio.to_thread(_run_search, q, max_results)
+    except ConnectionError:
+        return _friendly_error(ConnectionError())
+    except TimeoutError:
+        return _friendly_error(TimeoutError())
+    except OSError as exc:
+        return _friendly_error(exc)
+    except Exception as exc:
+        return _friendly_error(exc)
+
+    if not results:
+        logger.warning(
+            "[web_search] All backends empty for %r attempts=%s", q, attempts
+        )
+        return _format_empty(q, attempts)
+
+    return _format_results(q, results, backend=backend, attempts=attempts)

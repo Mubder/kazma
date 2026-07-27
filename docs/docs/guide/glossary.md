@@ -89,7 +89,7 @@ See *Authority*.
 A tool that requires HITL approval before execution. There are **three** lists (graph/swarm/MCP) — see [Security & Safety](security-and-safety#danger-tool-lists-three-of-them).
 
 **Delegation**
-Inter-agent task handoff with cryptographic integrity (Ed25519 signing, X25519+AES-256-GCM encryption) — `delegation/security.py`. Distinct from MCP and skills.
+Historical inter-agent task handoff with cryptographic integrity (Ed25519 / AES-GCM). **Library/archive only** as of 2026-07 — live multi-worker work uses SwarmEngine handoffs, not the delegation package. Distinct from MCP and skills.
 
 **DISPATCH**
 A swarm pattern: one worker handles a task.
@@ -196,7 +196,7 @@ The platform ID ↔ thread_id mapping (`gateway.py:185`). SQLite or in-memory. N
 A packaged, optionally-signed Python entry point + manifest registering one or more tools. Loaded from `kazma-skills/manifests/` or the Hub.
 
 **sqlite-vec**
-A SQLite extension for vector search, used by Layer 4 of the memory adapter. Not a declared dependency — present transitively via `langgraph-checkpoint-sqlite`.
+A SQLite extension for vector search, used by Layer 4 of the memory adapter. Declared in the `[rag]` optional extra (`sqlite-vec>=0.1.6`).
 
 **SwarmEngine**
 `swarm/engine.py:103` — the central async orchestrator for swarm workers.
@@ -222,7 +222,7 @@ The Textual terminal dashboard (`kazma-tui`), a read-mostly consumer of the core
 ## U
 
 **UnifiedMemoryAdapter**
-The 4-layer memory blender (`swarm/memory/adapter.py`): ChromaDB + NetworkX + FTS5 + sqlite-vec, RRF-fused. Only used by self-improvement and phonebook.
+The 4-layer memory blender (`swarm/memory/adapter.py`): ChromaDB + SQLite property graph + FTS5 + sqlite-vec, RRF-fused. **Chat default** (per-turn RAG, tools, auto-store, compaction) plus swarm helpers.
 
 **UnifiedRouter**
 The auto-routing engine for `workers=["auto"]` swarm dispatch.
@@ -232,7 +232,10 @@ The auto-routing engine for `workers=["auto"]` swarm dispatch.
 ## V
 
 **VectorMemory**
-The ChromaDB-backed memory used by the `memory_search`/`memory_store` tools (`memory/vector_store.py`). 384-d `all-MiniLM-L6-v2`.
+ChromaDB-backed memory singleton (`memory/vector_store.py`) for boot / health / tool fallback. Same `agent_memory` collection as adapter L1. 384-d default MiniLM.
+
+**Consolidator**
+Post-turn librarian (`memory/consolidator.py`): extracts durable facts + SPO triples (LLM + heuristic), prompt-fenced, deduped vs auto_store, writes adapter + L2 graph.
 
 ---
 

@@ -170,6 +170,16 @@ class TestSettingsManager:
         assert config["name"] == "test-agent"
         assert config["language"] == "en"
 
+    def test_max_iterations_clamped_and_persisted(self, sm):
+        """Max tool rounds (agent.max_iterations) clamps 5–100 and round-trips."""
+        sm.save_agent_config({"max_iterations": 30})
+        cfg = sm.get_agent_config()
+        assert cfg["max_iterations"] == 30
+        sm.save_agent_config({"max_iterations": 999})
+        assert sm.get_agent_config()["max_iterations"] == 100
+        sm.save_agent_config({"max_iterations": 1})
+        assert sm.get_agent_config()["max_iterations"] == 5
+
     def test_personalities_list(self, sm):
         """Returns personality templates."""
         personalities = sm.get_personalities()

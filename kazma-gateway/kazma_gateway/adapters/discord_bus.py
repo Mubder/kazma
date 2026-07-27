@@ -163,7 +163,9 @@ class DiscordBusAdapter(BusAdapter):
 
         await self._post_message(payload)
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(
+        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+    ) -> bool:
         """Post an approval card with buttons and await the response.
 
         Buttons carry ``custom_id`` = ``swarm_approve_{task_id}`` /
@@ -177,7 +179,7 @@ class DiscordBusAdapter(BusAdapter):
         )
         if approval.proposed_output:
             text += f"```\n{approval.proposed_output[:500]}\n```\n"
-        text += f"\n_(auto-reject in {int(_APPROVAL_TIMEOUT)}s)_"
+        text += f"\n_(auto-reject in {int(timeout)}s)_"
 
         # Discord components v2: a row with two buttons.
         components = [
@@ -203,13 +205,22 @@ class DiscordBusAdapter(BusAdapter):
         result = await self._post_message({"content": text[:2000], "components": components})
         msg_id = str(result.get("id", "")) if result else ""
 
+        from kazma_core.swarm import shared_approvals
+
+        shared_approvals.create_pending(
+            approval.task_id,
+            meta={"platform": "discord", "worker": approval.worker_name},
+        )
         event = asyncio.Event()
         self._pending_approvals[approval.task_id] = event
         if msg_id:
             self._pending_msg_ids[approval.task_id] = msg_id
         try:
-            await asyncio.wait_for(event.wait(), timeout=_APPROVAL_TIMEOUT)
-            approved = self._pending_results.get(approval.task_id, False)
+            approved = await shared_approvals.wait_for_resolution(
+                approval.task_id, timeout=timeout
+            )
+            if approval.task_id in self._pending_results:
+                approved = self._pending_results[approval.task_id]
         except TimeoutError:
             logger.warning("[DiscordBus] Approval timed out for task %s", approval.task_id)
             approved = False
@@ -228,16 +239,28 @@ class DiscordBusAdapter(BusAdapter):
     # ── Callback resolution ─────────────────────────────────────────
 
     def approve(self, task_id: str) -> None:
-        """Signal approval for a pending task."""
+        """Signal approval for a pending task (local + durable)."""
         if task_id in self._pending_approvals:
             self._pending_results[task_id] = True
             self._pending_approvals[task_id].set()
+        try:
+            from kazma_core.swarm.shared_approvals import resolve
+
+            resolve(task_id, True)
+        except Exception:
+            pass
 
     def reject(self, task_id: str) -> None:
-        """Signal rejection for a pending task."""
+        """Signal rejection for a pending task (local + durable)."""
         if task_id in self._pending_approvals:
             self._pending_results[task_id] = False
             self._pending_approvals[task_id].set()
+        try:
+            from kazma_core.swarm.shared_approvals import resolve
+
+            resolve(task_id, False)
+        except Exception:
+            pass
 
     def handle_callback(self, custom_id: str) -> str | None:
         """Parse a Discord component custom_id and resolve the approval.
@@ -262,6 +285,22 @@ class DiscordBusAdapter(BusAdapter):
     def pending_count(self) -> int:
         """Number of pending approval requests."""
         return len(self._pending_approvals)
+
+    async def set_reaction(self, message_id: str, emoji: str) -> None:
+        """Add a Unicode emoji reaction (Telegram parity for status feedback)."""
+        if not message_id or not emoji:
+            return
+        try:
+            http = await self._ensure_http()
+            # Discord wants URL-encoded emoji for custom; unicode is fine raw.
+            from urllib.parse import quote
+
+            enc = quote(emoji)
+            await http.put(
+                f"/channels/{self._channel_id}/messages/{message_id}/reactions/{enc}/@me"
+            )
+        except Exception as exc:
+            logger.debug("[DiscordBus] set_reaction failed: %s", exc)
 
     async def close(self) -> None:
         """Close the HTTP client."""

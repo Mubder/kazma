@@ -36,9 +36,9 @@
 
   <!-- ── Chat Main ── -->
   <main class="chat-main">
-    <!-- Model selector bar -->
+    <!-- Model selector bar & WebSocket connection status -->
     <div class="chat-model-bar">
-      {# Mobile sessions-toggle button (≤768px only — .hamburger-btn is display:none on desktop) #}
+      {# Mobile sessions-toggle button #}
       <button class="hamburger-btn" @click="toggleMobileChatSidebar()" aria-label="Sessions"
               style="margin-inline-end: 4px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -50,8 +50,19 @@
       <select id="model-selector" class="form-select" style="font-size:0.8rem;padding:4px 8px;max-width:280px;">
         <option value="">— loading models —</option>
       </select>
+
+      <!-- Active Node / WS Telemetry Badge -->
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" x-cloak>
+        <template x-if="$store.agent && $store.agent.activeNode">
+          <span class="badge badge-subtle" style="font-size:0.72rem;background:var(--bg-elevated);color:var(--accent);"
+                x-text="'Node: ' + $store.agent.activeNode"></span>
+        </template>
+        <span class="pulse-dot" :class="$store.agent && $store.agent.connectionStatus === 'connected' ? 'dot-online' : 'dot-offline'"
+              :title="'WS Status: ' + ($store.agent ? $store.agent.connectionStatus : 'disconnected')"></span>
+      </div>
     </div>
 
+    <!-- Chat Messages Transcript -->
     <div id="chat-messages" class="chat-messages">
       <div class="chat-welcome">
         <div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>
@@ -66,10 +77,32 @@
       </div>
     </div>
 
-    <!-- Typing Indicator -->
-    <div id="thinking-indicator" class="thinking-indicator" style="display:none;">
+    <!-- Reactive HITL Pending Approval Card -->
+    <div x-data x-cloak x-show="$store.agent && $store.agent.pendingApproval" class="hitl-approval-card" style="margin:12px 16px;">
+      <div class="hitl-approval-header">⚠ Approval Required</div>
+      <div class="hitl-approval-body">
+        <p><strong>Tool:</strong> <code x-text="$store.agent?.pendingApproval?.tool"></code></p>
+        <p x-show="$store.agent?.pendingApproval?.message" class="hitl-message" x-text="$store.agent?.pendingApproval?.message"></p>
+        <p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">
+          Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. <strong>YOLO</strong> skips all danger tools for this session.
+        </p>
+      </div>
+      <div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">
+        <button class="btn btn-sm btn-success" @click="$store.agent.submitApproval(true, 'once')">Approve once</button>
+        <button class="btn btn-sm btn-primary" @click="$store.agent.submitApproval(true, 'tool')">Allow tool (session)</button>
+        <button class="btn btn-sm btn-warning" @click="$store.agent.submitApproval(true, 'yolo')">YOLO session</button>
+        <button class="btn btn-sm btn-danger" @click="$store.agent.submitApproval(false, 'once')">Deny</button>
+      </div>
+    </div>
+
+    <!-- Live status strip (detailed steps live in the message progress panel) -->
+    <div id="thinking-indicator" class="thinking-indicator" x-data x-cloak
+         x-show="$store.agent && $store.agent.isThinking">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="thinking-text">{{ t('chat.thinking') }}</span>
+      <span class="thinking-text"
+            x-text="($store.agent && $store.agent.statusMessage) || '{{ t('chat.thinking') }}'"></span>
+      <span class="thinking-node" x-show="$store.agent && $store.agent.activeNode"
+            x-text="$store.agent && $store.agent.activeNode ? ('· ' + $store.agent.activeNode) : ''"></span>
     </div>
 
     <!-- Chat Input Area -->
@@ -123,7 +156,48 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/streaming.js"></script>
-<script src="/static/js/voice.js"></script>
-<script src="/static/js/chat.js"></script>
+<script>
+  /* Localized CoT / Activity strings for chat.js + agentStore.js */
+  window.CHAT_I18N = {
+    thinking: {{ t('chat.thinking') | tojson }},
+    writing_reply: {{ t('chat.writing_reply') | tojson }},
+    activity: {{ t('chat.activity') | tojson }},
+    working: {{ t('chat.working') | tojson }},
+    plan: {{ t('chat.plan') | tojson }},
+    step: {{ t('chat.step') | tojson }},
+    steps: {{ t('chat.steps') | tojson }},
+    done: {{ t('chat.done') | tojson }},
+    stopped: {{ t('chat.stopped') | tojson }},
+    running: {{ t('chat.running') | tojson }},
+    error: {{ t('chat.error') | tojson }},
+    waiting_approval: {{ t('chat.waiting_approval') | tojson }},
+    routing: {{ t('chat.routing') | tojson }},
+    routing_arrow: {{ t('chat.routing_arrow') | tojson }},
+    plan_locked: {{ t('chat.plan_locked') | tojson }},
+    plan_progress: {{ t('chat.plan_progress') | tojson }},
+    thinking_queue: {{ t('chat.thinking_queue') | tojson }},
+    type_message: {{ t('chat.type_message') | tojson }},
+    stop_generation: {{ t('chat.stop_generation') | tojson }},
+    yolo_running: {{ t('chat.yolo_running') | tojson }},
+    executing_approved: {{ t('chat.executing_approved') | tojson }},
+    denying_tool: {{ t('chat.denying_tool') | tojson }},
+    processing_approval: {{ t('chat.processing_approval') | tojson }},
+    resuming_execution: {{ t('chat.resuming_execution') | tojson }},
+    resuming_graph: {{ t('chat.resuming_graph') | tojson }},
+    preparing_tool: {{ t('chat.preparing_tool') | tojson }},
+    preparing_n_tools: {{ t('chat.preparing_n_tools') | tojson }},
+    running_tool: {{ t('chat.running_tool') | tojson }},
+    running_after_approval: {{ t('chat.running_after_approval') | tojson }},
+    continuing_after_deny: {{ t('chat.continuing_after_deny') | tojson }},
+    still_working_approval: {{ t('chat.still_working_approval') | tojson }},
+    approval_complete: {{ t('chat.approval_complete') | tojson }},
+    step_done: {{ t('chat.step_done') | tojson }},
+    step_failed: {{ t('chat.step_failed') | tojson }},
+    placeholder: {{ t('chat.placeholder') | tojson }}
+  };
+</script>
+<script src="/static/js/stores/agentStore.js?v={{ js_version() }}"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
+<script src="/static/js/voice.js?v={{ js_version() }}"></script>
+<script src="/static/js/chat.js?v={{ js_version() }}"></script>
 {% endblock %}

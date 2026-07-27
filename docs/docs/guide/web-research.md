@@ -76,6 +76,20 @@ read_url_to_file(url) → digest_research_file(path) → read_research_chunk for
 
 Saves under the workspace (default research subfolder) and returns a markdown index.
 
+## Stronger search (SearXNG)
+
+`web_search` tries **SearXNG first**, then DuckDuckGo → Bing → Wikipedia.
+
+| Setup | Command / env |
+|-------|----------------|
+| Compose profile | `docker compose --profile search up -d searxng` |
+| Host port | `http://127.0.0.1:8088` (maps container `8080`) |
+| Env | `KAZMA_SEARXNG_URL=http://127.0.0.1:8088` |
+| ConfigStore | key `search.searxng_url` (same purpose) |
+| Settings | `deploy/searxng/settings.yml` enables **JSON** format (required) |
+
+Kazma multi-base discovery also probes `localhost:8088`, `host.docker.internal:8088`, and `searxng:8080`. Live bases are cached briefly; dead hosts cool down ~60s.
+
 ## Optional harder fetch backends
 
 Not invincible against enterprise bot walls. Improves success rate:
@@ -83,11 +97,19 @@ Not invincible against enterprise bot walls. Improves success rate:
 | Env | Purpose |
 |-----|---------|
 | `KAZMA_FETCH_BACKEND` | `auto` \| `httpx` \| `jina` \| `firecrawl` |
-| `KAZMA_FIRECRAWL_API_KEY` | Firecrawl API key |
+| `KAZMA_FIRECRAWL_API_KEY` | Firecrawl API key (best quality on hard sites) |
 | `KAZMA_FIRECRAWL_URL` | Self-hosted Firecrawl base (optional) |
-| `KAZMA_JINA_READER` | `1` / `true` to try `r.jina.ai` |
+| `KAZMA_JINA_READER` | `1` = always try first; unset = **recovery only**; `0` = never |
+| `JINA_API_KEY` / `KAZMA_JINA_API_KEY` | Optional Jina auth (higher rate limits) |
 
-`auto`: Firecrawl (if key) → Jina (if enabled) → local httpx + Playwright fallback.
+**Fetch order**
+
+1. Optional pre-backends when opted in (Firecrawl key / `KAZMA_JINA_READER=1`).
+2. Local httpx + trafilatura.
+3. **Hard-page recovery** on bot walls / thin or empty extracts:  
+   Firecrawl (if key) → Jina (unless `KAZMA_JINA_READER=0`) → Playwright.
+
+Knowledge ingest (`knowledge_ingest_url` / site) reuses the same `_fetch_full_text` cascade.
 
 Playwright (optional install): `pip install 'kazma[web]'` and `playwright install chromium`.
 
@@ -100,13 +122,30 @@ Playwright (optional install): `pip install 'kazma[web]'` and `playwright instal
 - Digests are **extractive** (no nested LLM inside the tool); the chat model synthesizes the final report.  
 - HITL still applies to danger tools; research web tools are generally **read/safe** (writes go to workspace files via pathlib).
 
+## Modes: quick vs deep
+
+| Mode | How to trigger | Behavior |
+|------|----------------|----------|
+| **Quick** | “look up”, short questions | Free-form tools; 1–2 hops OK |
+| **Deep / paper** | “research thoroughly”, “comprehensive report”, **`/research deep <topic>`**, or tool `run_research_pipeline` | Multi-query search → full-page acquire → digests → **LLM synthesis** → report under `research/reports/` |
+
+The supervisor also has a **soft depth gate**: deep-worded requests that only ran `web_search` get one system nudge to fetch ≥2 full sources before concluding.
+
+### Synthesis tools
+
+| Tool | Role |
+|------|------|
+| `digest_research_file` | Extractive map of one file (no nested LLM) |
+| `synthesize_from_digests` | Cross-source LLM analysis |
+| `run_research_pipeline` | Full paper pipeline (search→acquire→digest→synthesize→save) |
+
 ## Recommended playbooks
 
 ### Single topic
 
-1. `web_search`  
-2. `read_url` or `read_url_to_file` on top results  
-3. `digest_research_file` on saved paths  
+1. `web_search` (≥2 queries for thorough work)  
+2. `read_url_to_file` on top results (≥2 sources)  
+3. `digest_research_file` then `synthesize_from_digests`  
 4. Answer with citations  
 
 ### Docs site
@@ -115,9 +154,25 @@ Playwright (optional install): `pip install 'kazma[web]'` and `playwright instal
 2. `digest_research_file` per saved path (or selective chunks)  
 3. Report  
 
+### Comprehensive paper
+
+```text
+/research deep <topic>
+# or
+run_research_pipeline(topic="...", depth="deep", max_sources=8)
+```
+
+Works on **Web SSE**, **WebSocket**, and **gateway** chat. Pipeline runs
+**parallel** search + acquire (semaphore 4), writes
+`research/reports/<slug>-<ts>/report.md`, optional DOCX
+(`export_docx=True` or `KAZMA_RESEARCH_EXPORT_DOCX=1`), and registers the run
+for the Research panel (`GET /api/research/papers`).
+
+Stage progress is streamed as tool/status events (WS) or italic stage lines (SSE).
+
 ### Swarm
 
-`/swarm research …` uses workers; still the same underlying tools when workers have them registered.
+`/swarm research …` / `dispatch_swarm` auto-researcher includes save/digest/pipeline tools.
 
 ## Related
 

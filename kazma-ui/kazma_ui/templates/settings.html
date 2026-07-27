@@ -485,6 +485,33 @@
                 <label>{{ t('settings.system_prompt') }}</label>
                 <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" :placeholder="t('settings.system_prompt_placeholder')"></textarea>
             </div>
+            <div class="form-group">
+                <label>{{ t('settings.max_tool_rounds') }}</label>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <input type="number" class="form-input" x-model.number="agent.max_iterations"
+                           min="5" max="100" step="1"
+                           style="max-width:120px;font-variant-numeric:tabular-nums;">
+                    <span style="font-size:0.78rem;color:var(--text-muted);"
+                          x-text="(agent.max_iterations || 15) + ' / 100'"></span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;" role="group" :aria-label="t('settings.max_tool_rounds_presets')">
+                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                            @click="agent.max_iterations = 15"
+                            :style="(agent.max_iterations || 15) === 15 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            x-text="t('settings.depth_chat')"></button>
+                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                            @click="agent.max_iterations = 30"
+                            :style="(agent.max_iterations || 15) === 30 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            x-text="t('settings.depth_deep')"></button>
+                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                            @click="agent.max_iterations = 40"
+                            :style="(agent.max_iterations || 15) === 40 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            x-text="t('settings.depth_research')"></button>
+                </div>
+                <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
+                    {{ t('settings.max_tool_rounds_help') }}
+                </p>
+            </div>
             <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_agent') }}'"></button>
         </div>
 
@@ -969,11 +996,11 @@
                             <span class="tool-name" x-text="tool.name"></span>
                             <span class="badge badge-basic" x-text="t('settings.category_' + (tool.category || 'general')) || tool.category" style="font-size:0.7rem"></span>
                             <span style="flex:1"></span>
-                            <span style="font-size:0.8rem;color:var(--text-muted)" x-text="t('tool.desc.' + tool.name) || tool.description || ''" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                            <span class="bidi-content" dir="auto" style="font-size:0.8rem;color:var(--text-muted);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="tool.description || ''"></span>
                         </div>
                         <!-- Expanded tool details -->
                         <div x-show="selectedTool === tool.name" x-transition style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle)">
-                            <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="t('tool.desc.' + tool.name) || tool.description || ''"></div>
+                            <div class="bidi-content" dir="auto" style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="tool.description || ''"></div>
                             <div x-show="tool.parameters" style="margin-bottom:8px">
                                 <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">{{ t('settings.parameters') }}</div>
                                 <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-primary);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>
@@ -1103,129 +1130,165 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 12: PACKAGES & DEPENDENCIES
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'packages'" x-transition>
+    <div x-show="tab === 'packages'" x-transition class="pkg-tab">
         <!-- Summary -->
-        <div class="settings-group" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-            <div>
+        <div class="settings-group pkg-summary">
+            <div class="pkg-summary-text">
                 <h3>{{ t('packages.title') }}</h3>
-                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">
+                <p class="pkg-muted">
                     <span x-text="pkgTotal"></span> {{ t('packages.installed') }} · Python <span x-text="pkgPythonVer"></span>
                 </p>
-                <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span style="color:var(--text-muted);">{{ t('packages.db_backend') }}:</span>
-                    <span class="badge" style="font-size:0.7rem;padding:3px 8px;border-radius:10px;"
+                <p class="pkg-backend-row">
+                    <span class="pkg-muted">{{ t('packages.db_backend') }}:</span>
+                    <span class="badge pkg-badge"
                           :class="pkgDbBackend === 'postgres' ? 'badge-success' : 'badge-secondary'"
                           x-text="pkgDbBackend === 'postgres' ? t('packages.db_postgres') : t('packages.db_sqlite')"></span>
-                    <span x-show="pkgDbBackend === 'postgres'" style="font-size:0.72rem;color:var(--text-muted);">KAZMA_DATABASE_URL set</span>
-                    <span x-show="pkgDbBackend !== 'postgres'" style="font-size:0.72rem;color:var(--text-muted);">Set KAZMA_DATABASE_URL + install <code style="font-size:0.7rem;">.[postgres]</code> for multi-replica</span>
                 </p>
             </div>
-            <div style="display:flex;gap:8px;">
-                <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">
-                    <div class="metric-value" style="font-size:1.5rem;" x-text="pkgExtras.filter(e => e.installed).length"></div>
-                    <div class="metric-label">{{ t('packages.extras_active') }}</div>
+            <div class="pkg-summary-metrics">
+                <div class="pkg-metric pkg-metric-ok">
+                    <div class="pkg-metric-value" x-text="pkgExtras.filter(e => e.installed).length"></div>
+                    <div class="pkg-metric-label">{{ t('packages.extras_active') }}</div>
                 </div>
-                <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">
-                    <div class="metric-value" style="font-size:1.5rem;" x-text="pkgExtras.filter(e => !e.installed).length"></div>
-                    <div class="metric-label">{{ t('packages.extras_missing') }}</div>
+                <div class="pkg-metric pkg-metric-warn">
+                    <div class="pkg-metric-value" x-text="pkgExtras.filter(e => !e.installed).length"></div>
+                    <div class="pkg-metric-label">{{ t('packages.extras_missing') }}</div>
                 </div>
             </div>
         </div>
 
-        <!-- Optional Dependencies -->
-        <div class="settings-group" style="padding:0;overflow:hidden;">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);">
-                <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.optional_deps') }}</h4>
+        <!-- Memory stack health (from live probe) -->
+        <div class="settings-group" x-show="pkgMemory && pkgMemory.status" x-cloak>
+            <div class="pkg-section-head">
+                <div class="pkg-section-head-text">
+                    <h4 class="pkg-h4">{{ t('packages.memory_stack') }}</h4>
+                    <p class="pkg-muted pkg-clamp-2" x-text="pkgMemory.headline || pkgMemory.summary || ''"></p>
+                </div>
+                <span class="badge pkg-badge"
+                      :class="{
+                        'badge-success': pkgMemory.status === 'ACTIVE',
+                        'badge-warning': pkgMemory.status === 'DEGRADED' || pkgMemory.status === 'INSTALLING',
+                        'badge-secondary': pkgMemory.status === 'DEMO' || pkgMemory.status === 'UNKNOWN'
+                      }"
+                      x-text="pkgMemory.status || '—'"></span>
             </div>
-            <div x-show="pkgLoading" style="padding:40px;text-align:center;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
-            <template x-for="extra in pkgExtras" :key="extra.name">
-                <div style="padding:14px 16px;border-bottom:1px solid var(--border-subtle);">
-                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;">
-                        <div style="flex:1;">
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                                <span style="font-size:0.88rem;font-weight:600;color:var(--text-primary);" x-text="extra.name"></span>
-                                <span class="badge"
-                                      :class="extra.installed ? 'badge-success' : (extra.partial ? 'badge-warning' : 'badge-warning')"
-                                      style="font-size:0.62rem;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;"
-                                      x-html="extra.installed
-                                        ? (KazmaIcons.get('check') + ' ' + t('packages.installed_badge'))
-                                        : (extra.partial
-                                          ? ('~ Partial (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
-                                          : (KazmaIcons.get('x') + ' ' + t('packages.missing_badge')))"></span>
-                            </div>
-                            <p style="margin:0;font-size:0.78rem;color:var(--text-secondary);line-height:1.5;" x-text="extra.description"></p>
+            <div class="pkg-layer-grid">
+                <template x-for="row in pkgMemoryLayerRows" :key="row.id">
+                    <div class="pkg-layer-card"
+                         :class="{
+                           'pkg-layer-ok': row.ok,
+                           'pkg-layer-warn': !row.ok && (row.status === 'warn' || row.status === 'off'),
+                           'pkg-layer-err': !row.ok && row.status !== 'warn' && row.status !== 'off'
+                         }">
+                        <div class="pkg-layer-top">
+                            <span class="pkg-layer-name" x-text="row.name"></span>
+                            <span class="pkg-layer-dot" aria-hidden="true"></span>
                         </div>
+                        <div class="pkg-layer-detail" x-text="row.detail || '—'"></div>
                     </div>
-                    <!-- Package chips -->
-                    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">
+                </template>
+            </div>
+            <div x-show="pkgMemory.issues && pkgMemory.issues.length" class="pkg-issues">
+                <div class="pkg-issues-title">{{ t('packages.memory_issues') }}</div>
+                <ul>
+                    <template x-for="(iss, idx) in (pkgMemory.issues || [])" :key="idx">
+                        <li x-text="iss"></li>
+                    </template>
+                </ul>
+            </div>
+            <p class="pkg-muted pkg-hint">
+                {{ t('packages.memory_hint') }}
+                <code>pip install -e ".[rag]"</code>
+            </p>
+        </div>
+
+        <!-- Optional Dependencies -->
+        <div class="settings-group pkg-panel">
+            <div class="pkg-panel-head">
+                <h4 class="pkg-h4">{{ t('packages.optional_deps') }}</h4>
+                <p class="pkg-muted">{{ t('packages.optional_deps_hint') }}</p>
+            </div>
+            <div x-show="pkgLoading" class="pkg-loading">{{ t('common.loading') }}</div>
+            <template x-for="extra in pkgExtras" :key="extra.name">
+                <div class="pkg-extra-row" :class="{ 'pkg-extra-rag': extra.name === 'rag', 'pkg-extra-installed': extra.installed }">
+                    <div class="pkg-extra-head">
+                        <div class="pkg-extra-titles">
+                            <span class="pkg-extra-title" x-text="extra.title || extra.name"></span>
+                            <span class="pkg-extra-slug" x-text="'[' + extra.name + ']'"></span>
+                            <span class="badge pkg-badge"
+                                  :class="extra.installed ? 'badge-success' : (extra.partial ? 'badge-warning' : 'badge-danger')"
+                                  x-text="extra.installed
+                                    ? t('packages.installed_badge')
+                                    : (extra.partial
+                                      ? (t('packages.partial_badge') + ' (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
+                                      : t('packages.missing_badge'))"></span>
+                        </div>
+                        <p class="pkg-extra-desc" x-text="extra.description"></p>
+                    </div>
+                    <div class="pkg-chips">
                         <template x-for="pkg in extra.packages" :key="pkg.name">
-                            <span style="font-family:var(--font-mono);font-size:0.7rem;padding:2px 7px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:var(--bg-elevated);"
-                                  :style="!pkg.installed ? 'opacity:0.5;border-style:dashed;' : ''"
-                                  :title="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' — not installed')"
+                            <span class="pkg-chip"
+                                  :class="{ 'pkg-chip-missing': !pkg.installed }"
+                                  :title="(pkg.description || '') + (pkg.installed ? (' · ' + pkg.name + ' ' + pkg.version) : (' · ' + pkg.name))"
                                   x-text="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' (missing)')"></span>
                         </template>
                     </div>
-                    <!-- Install command + one-click (only if not installed) -->
-                    <div x-show="!extra.installed" x-cloak
-                         style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                        <span style="color:var(--text-muted);">$</span>
-                        <code style="flex:1;color:var(--text-primary);min-width:120px;" x-text="extra.install_cmd"></code>
-                        <button class="btn btn-xs btn-secondary" @click="copyPkgCmd(extra.install_cmd)" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
-                        <button class="btn btn-xs btn-primary"
+                    <div x-show="!extra.installed" x-cloak class="pkg-install-bar">
+                        <span class="pkg-install-prompt">$</span>
+                        <code class="pkg-install-cmd" x-text="extra.install_cmd"></code>
+                        <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd(extra.install_cmd)">Copy</button>
+                        <button type="button" class="btn btn-xs btn-primary"
                                 @click="installExtra(extra.name)"
                                 :disabled="pkgInstalling === extra.name"
-                                style="font-size:0.62rem;padding:2px 8px;"
-                                x-text="pkgInstalling === extra.name ? t('packages.installing') : t('packages.install_btn')"></button>
+                                x-text="pkgInstalling === extra.name ? t('packages.installing') : (extra.partial ? t('packages.complete_install') : t('packages.install_btn'))"></button>
                     </div>
                 </div>
             </template>
-            <div x-show="pkgInstallMsg" x-cloak
-                 style="padding:10px 16px;font-size:0.78rem;border-top:1px solid var(--border-subtle);"
-                 :style="pkgInstallOk ? 'color:var(--success)' : 'color:var(--warning)'"
+            <div x-show="pkgInstallMsg" x-cloak class="pkg-install-msg"
+                 :class="pkgInstallOk ? 'pkg-install-ok' : 'pkg-install-err'"
                  x-text="pkgInstallMsg"></div>
         </div>
 
         <!-- Core Dependencies -->
-        <div class="settings-group" style="padding:0;overflow:hidden;">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-                <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.core_deps') }}</h4>
-                <span style="font-size:0.72rem;color:var(--text-muted);" x-text="'(' + pkgCore.length + ')'"></span>
+        <div class="settings-group pkg-panel">
+            <div class="pkg-panel-head pkg-panel-head-row">
+                <h4 class="pkg-h4">{{ t('packages.core_deps') }}</h4>
+                <span class="pkg-muted" x-text="'(' + pkgCore.length + ')'"></span>
             </div>
-            <div style="padding:8px 16px;border-bottom:1px solid var(--border-subtle);">
-                <input type="text" class="form-input" :placeholder="t('packages.search_ph')" x-model="pkgSearch"
-                       style="font-size:0.8rem;padding:6px 10px;width:100%;box-sizing:border-box;">
+            <div class="pkg-search-wrap">
+                <input type="text" class="form-input" :placeholder="t('packages.search_ph')" x-model="pkgSearch">
             </div>
-            <div style="max-height:400px;overflow-y:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
-                    <thead style="position:sticky;top:0;background:var(--bg-panel);z-index:1;">
-                        <tr style="border-bottom:1px solid var(--border-subtle);">
-                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_package') }}</th>
-                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_version') }}</th>
-                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_description') }}</th>
+            <div class="pkg-table-wrap">
+                <table class="pkg-table">
+                    <thead>
+                        <tr>
+                            <th>{{ t('packages.col_package') }}</th>
+                            <th>{{ t('packages.col_version') }}</th>
+                            <th>{{ t('packages.col_description') }}</th>
                         </tr>
                     </thead>
                     <tbody>
                         <template x-for="pkg in filteredPkgCore" :key="pkg.name">
-                            <tr style="border-bottom:1px solid var(--tint);">
-                                <td style="padding:5px 16px;font-family:var(--font-mono);font-weight:500;color:var(--accent);font-size:0.78rem;" x-text="pkg.name"></td>
-                                <td style="padding:5px 16px;font-family:var(--font-mono);color:var(--text-muted);font-size:0.72rem;" x-text="pkg.version"></td>
-                                <td style="padding:5px 16px;color:var(--text-secondary);font-size:0.76rem;" x-text="pkg.description"></td>
+                            <tr>
+                                <td class="pkg-td-name" x-text="pkg.name"></td>
+                                <td class="pkg-td-ver" x-text="pkg.version || '—'"></td>
+                                <td class="pkg-td-desc" :title="pkg.description || ''" x-text="pkg.description || '—'"></td>
                             </tr>
                         </template>
                     </tbody>
                 </table>
-                <div x-show="filteredPkgCore.length === 0 && !pkgLoading" x-cloak style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.8rem;">{{ t('packages.no_match') }}</div>
+                <div x-show="filteredPkgCore.length === 0 && !pkgLoading" x-cloak class="pkg-loading">{{ t('packages.no_match') }}</div>
             </div>
         </div>
 
         <!-- Install all -->
         <div class="settings-group">
-            <h4 style="margin:0 0 8px 0;font-size:0.88rem;font-weight:600;">{{ t('packages.install_all_title') }}</h4>
-            <p style="margin:0 0 10px 0;font-size:0.78rem;color:var(--text-muted);">{{ t('packages.install_all_desc') }}</p>
-            <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;">
-                <span style="color:var(--text-muted);">$</span>
-                <code style="flex:1;color:var(--text-primary);">uv sync --all-extras</code>
-                <button class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv sync --all-extras')" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
+            <h4 class="pkg-h4">{{ t('packages.install_all_title') }}</h4>
+            <p class="pkg-muted" style="margin:0 0 10px 0;">{{ t('packages.install_all_desc') }}</p>
+            <div class="pkg-install-bar">
+                <span class="pkg-install-prompt">$</span>
+                <code class="pkg-install-cmd">uv sync --all-extras</code>
+                <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv sync --all-extras')">Copy</button>
             </div>
         </div>
     </div>
@@ -1538,10 +1601,12 @@
         <div class="settings-group">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <div>
-                    <h3 style="margin:0;">Voice Subsystem</h3>
-                    <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">Configure speech-to-text (STT) and text-to-speech (TTS) engines.</p>
+                    <h3 style="margin:0;">{{ t('voice.title') }}</h3>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">
+                        {{ t('voice.master_help') }}
+                    </p>
                 </div>
-                <label class="toggle" style="scale: 1.2;">
+                <label class="toggle" style="scale: 1.2;" title="{{ t('voice.title') }}">
                     <input type="checkbox" x-model="voiceForm.enabled" @change="saveVoiceSettings()">
                     <span class="toggle-slider"></span>
                 </label>
@@ -1552,16 +1617,30 @@
 
                 <div style="height:1px; background:var(--border-subtle); margin:16px 0;"></div>
 
+                <!-- Platform auto voice-note replies (Telegram/Discord/Slack) -->
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; padding:12px 14px; background:var(--surface-raised, var(--boost, #161d27)); border:1px solid var(--border-subtle, var(--border)); border-radius:8px;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:600; margin-bottom:4px;">{{ t('voice.tts_reply_title') }}</div>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
+                            {{ t('voice.tts_reply_help') }}
+                        </p>
+                    </div>
+                    <label class="toggle" style="flex-shrink:0; scale: 1.1;" title="{{ t('voice.tts_reply_title') }}">
+                        <input type="checkbox" x-model="voiceForm.tts_reply" @change="saveVoiceSettings()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
                     <!-- Speech to Text (STT) Configuration -->
                     <div>
                         <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-mic"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                            Speech-to-Text (STT)
+                            {{ t('voice.stt') }}
                         </h4>
                         
                         <div class="form-group">
-                            <label>STT Provider</label>
+                            <label>{{ t('voice.stt_provider') }}</label>
                             <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings(); loadSttModels()">
                                 <template x-for="provider in voiceProviders.stt" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
@@ -1570,43 +1649,41 @@
                         </div>
 
                         <div class="form-group">
-                            <label>STT Model <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400">(loading…)</span></label>
+                            <label>{{ t('voice.stt_model') }} <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400">{{ t('voice.stt_model_loading') }}</span></label>
                             <select class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
                                 <template x-for="model in sttModelOptions" :key="model.id">
                                     <option :value="model.id" x-text="model.label"></option>
                                 </template>
-                                <option value="custom">Custom model ID...</option>
+                                <option value="custom">{{ t('voice.stt_model_custom') }}</option>
                             </select>
                             <p class="form-help" style="margin-top:4px" x-show="!sttModelOptions.length">
-                                No models loaded — pick Custom or change provider.
+                                {{ t('voice.stt_model_empty') }}
                             </p>
                             <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'">
-                                NVIDIA Whisper is a <strong>Speech NIM</strong> (self-hosted), not a chat model on integrate.api.nvidia.com.
-                                Set the ASR base URL below, or use <code>groq</code>/<code>openai</code> for cloud STT.
+                                {{ t('voice.stt_nvidia_help') }}
                             </p>
                         </div>
 
                         <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;">
-                            <label>Custom STT Model ID</label>
+                            <label>{{ t('voice.stt_custom_id') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
-                            <p class="form-help" style="margin-top:4px;">Type any specific custom transcription model name.</p>
+                            <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_custom_help') }}</p>
                         </div>
 
                         <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;">
-                            <label>NVIDIA ASR base URL (Speech NIM)</label>
+                            <label>{{ t('voice.stt_base_url') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
                                    placeholder="http://127.0.0.1:9000/v1"
                                    @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">
-                                OpenAI-compatible root of your Speech NIM (must expose <code>/v1/audio/transcriptions</code>).
-                                Do <em>not</em> use the LLM integrate.api.nvidia.com URL.
+                                {{ t('voice.stt_base_help') }}
                             </p>
                         </div>
 
                         <div class="form-group">
-                            <label>STT Language</label>
+                            <label>{{ t('voice.stt_language') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="auto or en, ar, fr..." @change="saveVoiceSettings()">
-                            <p class="form-help" style="margin-top:4px;">Use "auto" or ISO-639-1 format.</p>
+                            <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_language_help') }}</p>
                         </div>
                     </div>
 
@@ -1614,11 +1691,11 @@
                     <div>
                         <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-volume-2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-                            Text-to-Speech (TTS)
+                            {{ t('voice.tts') }}
                         </h4>
 
                         <div class="form-group">
-                            <label>TTS Provider</label>
+                            <label>{{ t('voice.tts_provider') }}</label>
                             <select class="form-select" x-model="voiceForm.tts_provider" @change="saveVoiceSettings(); loadVoiceModels()">
                                 <template x-for="provider in voiceProviders.tts" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
@@ -1627,29 +1704,29 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Voice Model / Voice ID</label>
+                            <label>{{ t('voice.tts_voice') }}</label>
                             <select class="form-select" x-model="ttsVoiceType" @change="onTtsVoiceTypeChange()">
                                 <template x-for="model in voiceModels" :key="model">
                                     <option :value="model" x-text="model"></option>
                                 </template>
-                                <option value="custom">Custom voice ID...</option>
+                                <option value="custom">{{ t('voice.tts_voice_custom') }}</option>
                             </select>
                         </div>
 
                         <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;">
-                            <label>Custom Voice ID</label>
+                            <label>{{ t('voice.tts_custom_id') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.tts_voice" placeholder="Enter custom voice ID" @change="saveVoiceSettings()">
-                            <p class="form-help" style="margin-top:4px;">e.g. provider voice ID, or a local file path.</p>
+                            <p class="form-help" style="margin-top:4px;">{{ t('voice.tts_custom_help') }}</p>
                         </div>
 
 
                         <div class="form-group">
-                            <label>Audio Format</label>
+                            <label>{{ t('voice.audio_format') }}</label>
                             <select class="form-select" x-model="voiceForm.tts_output_format" @change="saveVoiceSettings()">
-                                <option value="mp3">MP3 (standard)</option>
-                                <option value="wav">WAV (uncompressed)</option>
-                                <option value="opus">Opus (highly optimized)</option>
-                                <option value="flac">FLAC (lossless)</option>
+                                <option value="mp3">{{ t('voice.format_mp3') }}</option>
+                                <option value="wav">{{ t('voice.format_wav') }}</option>
+                                <option value="opus">{{ t('voice.format_opus') }}</option>
+                                <option value="flac">{{ t('voice.format_flac') }}</option>
                             </select>
                         </div>
                     </div>

@@ -24,11 +24,12 @@ class TracesPanel(Vertical):
     TracesPanel {
         height: 1fr;
         background: $surface;
+        padding: 0 1;
     }
 
     TracesPanel > .section-label {
         height: 1;
-        padding: 0 2;
+        padding: 0 1 1 1;
         color: $text-muted;
         text-style: bold;
     }
@@ -36,30 +37,32 @@ class TracesPanel(Vertical):
     TracesPanel > .toolbar {
         height: 3;
         layout: horizontal;
-        padding: 0 2;
+        padding: 0 1;
         background: $panel;
-        border-bottom: solid $border;
+        border: tall $border;
+        margin-bottom: 1;
         align: left middle;
     }
 
     TracesPanel > .toolbar > Input {
         width: 1fr;
-        height: 1;
-        background: $surface;
-        border: solid $border;
+        height: 3;
+        background: $boost;
+        border: tall $border;
         margin: 0 1 0 0;
     }
 
     TracesPanel > .toolbar > Input:focus {
-        border: solid $primary;
+        border: tall $primary;
     }
 
     TracesPanel > .toolbar > .stats-bar {
         width: auto;
-        min-width: 30;
+        min-width: 28;
         height: 1;
         content-align: right middle;
         color: $text-muted;
+        padding: 0 1;
     }
 
     TracesPanel Horizontal {
@@ -69,18 +72,20 @@ class TracesPanel(Vertical):
     TracesPanel DataTable {
         width: 55%;
         height: 1fr;
-        border-right: solid $border;
+        border: tall $border;
         background: $surface;
+        margin-right: 1;
     }
 
     TracesPanel DataTable:focus {
-        border: solid $primary;
+        border: tall $primary;
     }
 
     TracesPanel .details-pane {
         width: 45%;
         height: 1fr;
         background: $panel;
+        border: tall $border;
         padding: 1 2;
     }
     """
@@ -93,10 +98,10 @@ class TracesPanel(Vertical):
         self._selected_entry: Any = None
 
     def compose(self) -> ComposeResult:
-        yield Static("Traces", classes="section-label")
+        yield Static("  TRACES  ·  filter · inspect", classes="section-label")
         with Horizontal(classes="toolbar"):
-            yield Input(placeholder="🔍 Filter traces (text or regex)...", id="trace-search")
-            yield Static("Traces: 0 | Tokens: 0 | Cost: $0.00", id="trace-stats", classes="stats-bar")
+            yield Input(placeholder="Filter traces (text or regex)…", id="trace-search")
+            yield Static("0 traces · 0 tok · $0", id="trace-stats", classes="stats-bar")
 
         with Horizontal():
             table = DataTable(id="trace-table")

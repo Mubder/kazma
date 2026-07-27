@@ -217,7 +217,30 @@ mcp:
     max_file_size: 1048576
 ```
 
-### 5.4 IDE server
+### 5.4 Adding MCP servers via the Web UI
+
+The `/mcp` page provides a visual **Add Server** modal that replaces manual YAML editing. It has two modes:
+
+**Quick add (preset)** — a dropdown of 85+ known MCP servers grouped by category (Filesystem, Web, Database, Code, AI, Communication, etc.). Pick one and the form auto-fills the name, transport, command, and env var keys. You just fill in the API key value. Presets are loaded from `certified_servers.yaml` (81 servers) plus 5 extra high-value servers (firecrawl, playwright, sequential-thinking, memory, time).
+
+**Custom** — the same raw command form, with three safety nets:
+1. **shlex-style parsing** — quoted args with spaces survive (`npx -y foo "path/with spaces"`).
+2. **Auto-rewrite** — common install-command mistakes are detected and fixed:
+   - `npm install -g firecrawl-mcp` → `npx -y firecrawl-mcp`
+   - `pip install mcp-server` → `python -m mcp_server`
+   - `pipx install some-mcp` → `pipx run some-mcp`
+   A blue notice explains the rewrite so you know what changed.
+3. **Validate-before-save** — before persisting, the server connection is tested via `/api/mcp/test-config`. If it fails (spawn error, 0 tools, bad key), the error + subprocess stderr is shown inline and the server is **not saved**. No more "0 tools, no idea why."
+
+Servers added via the UI are persisted to `kazma.yaml` (atomic write) and survive restarts.
+
+### 5.5 Tool name namespacing
+
+MCP tool names are **namespaced** as `mcp__<server>__<tool>` before being sent to the LLM. This prevents collisions between MCP servers and built-in tools (e.g. the Playwright MCP's `browser_click` vs the browser_automation skill's `browser_click`). Without namespacing, providers that require unique tool names (DeepSeek, OpenAI) reject the entire request with `400 Tool names must be unique`, causing Kazma to strip ALL tools for the turn — the root cause of the "agent stopped talking" bug.
+
+The namespace prefix is transparently stripped when routing the tool call back to the originating MCP server (`execute_mcp_tool` handles both namespaced and raw forms).
+
+### 5.6 IDE server
 
 The in-process IDE/file MCP server (`mcp.ide_server`) exposes file read/write over the workspace root with a 1 MB per-file cap (`max_file_size`). Per audit reports, it is expected to require `_secret` matching `KAZMA_SECRET` via `hmac.compare_digest`; verify against `mcp_server.py` before relying on it.
 
@@ -275,21 +298,21 @@ This is by design — the LLM needs the value to make authenticated API calls. T
 
 ---
 
-## 7. Delegation (agent-to-agent) — separate crypto subsystem
+## 7. Delegation (agent-to-agent) — library only (not runtime)
 
-Distinct from skills and MCP, the **delegation** subsystem (`kazma_core/delegation/`) lets agents hand tasks to other agents with cryptographic integrity:
+> **Status (2026-07):** the multi-agent **delegation** package is **archived /
+> library-only**. Production multi-worker orchestration is **SwarmEngine**
+> (`kazma_core/swarm/*`). See `docs/audits/UNWIRED_INVENTORY.md`.
 
-| Primitive | Algorithm | Location |
-|---|---|---|
-| Signing | **Ed25519** (not HMAC) | `delegation/security.py:81-119` |
-| Encryption | **X25519 + AES-256-GCM** | `delegation/security.py:121-161` |
-| Wiring | requests signed on send, verified on receipt | `delegation/protocol.py:153` (sign), `:179-208` (verify, fail-closed) |
-
-This is the inter-agent delegation path — unrelated to MCP or skill signing.
+Historical code (Ed25519 + AES-GCM protocol) may still exist under
+`archive/delegation/` or as retained library modules for future product
+decisions — it is **not** wired into the default agent / swarm execute path.
+Do not configure production systems as if live cross-agent cryptographic
+delegation is active.
 
 ---
 
-## 7. Adding a new tool (extension point)
+## 8. Adding a new tool (extension point)
 
 The simplest extension is a registered tool function. Minimal pattern:
 

@@ -1,0 +1,34 @@
+# Minimal SearXNG settings for Kazma web_search.
+# JSON format MUST be enabled — Kazma queries /search?format=json.
+#
+# Docs: https://docs.searxng.org/admin/settings/settings.html
+use_default_settings: true
+
+general:
+  instance_name: "Kazma SearXNG"
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  # html required for the web UI; json required for Kazma tools
+  formats:
+    - html
+    - json
+
+server:
+  # Override via env SEARXNG_SECRET if you expose this instance publicly
+  secret_key: "change-me-in-production-use-long-random"
+  limiter: false
+  image_proxy: false
+  # Bind inside container; host maps 8088→8080 via compose
+  port: 8080
+  bind_address: "0.0.0.0"
+
+ui:
+  static_use_hash: true
+
+# Prefer engines that return stable JSON results; defaults are fine for most.
+# Rate-limit soft blocks on brand queries are handled by Kazma's multi-backend
+# failover (DDG → Bing → Wikipedia).

@@ -162,26 +162,31 @@ class TestCallbackRoutingIntegration:
         assert parse_callback_data("swarm_reject_task-1").kind == "swarm"
     
     def test_discord_adapter_routes_swarm_callbacks(self):
-        """DiscordAdapter._handle_interaction routes to bus."""
+        """DiscordAdapter._handle_interaction routes via discord_callbacks module."""
         from kazma_gateway.adapters.discord import DiscordAdapter
+        from kazma_gateway.adapters.discord_callbacks import route_swarm_bus
+        from kazma_gateway.adapters.platform_callbacks import parse_callback_data
         import inspect
-        
+
         src = inspect.getsource(DiscordAdapter._handle_interaction)
-        assert "swarm_approve_" in src
-        assert "swarm_reject_" in src
-        assert "get_message_bus" in src
-        assert "handle_callback" in src
-    
+        assert "route_swarm_bus" in src
+        assert "discord_callbacks" in src
+        assert parse_callback_data("swarm_approve_task-1").kind == "swarm"
+        assert parse_callback_data("swarm_reject_task-1").kind == "swarm"
+        assert callable(route_swarm_bus)
+
     def test_slack_adapter_routes_swarm_callbacks(self):
-        """SlackAdapter routes swarm_approve_/swarm_reject_ to bus."""
+        """SlackAdapter routes swarm approvals via slack_callbacks module."""
         from kazma_gateway.adapters.slack import SlackAdapter
+        from kazma_gateway.adapters.slack_callbacks import route_swarm_bus
+        from kazma_gateway.adapters.platform_callbacks import parse_callback_data
         import inspect
-        
+
         src = inspect.getsource(SlackAdapter)
-        assert "swarm_approve_" in src
-        assert "swarm_reject_" in src
-        assert "get_message_bus" in src
-        assert "handle_callback" in src
+        assert "slack_callbacks" in src
+        assert "route_swarm_bus" in src or "iter_block_actions" in src
+        assert parse_callback_data("swarm_approve_task-1").kind == "swarm"
+        assert callable(route_swarm_bus)
 
 
 if __name__ == "__main__":

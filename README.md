@@ -18,10 +18,13 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 - 🐝 **Swarm orchestration** — six patterns (dispatch, broadcast, pipeline, fan-out, consult, conditional) with circuit breakers, retries, and self-improvement
 - 💻 **IDE subsystem** — transport-agnostic coding backend (Web, TUI, all chat platforms): multi-tab editor, file-aware AI chat, `/ide` commands, per-task workspace targeting, GitHub clone-from-chat
 - 🔒 **Human-in-the-loop safety** — three independent HITL gates ensure dangerous tools never execute without approval
+- 🕰️ **Time-travel replay** — snapshot every supervisor iteration; restore (rewind) any conversation point, fork into a new thread without losing the original, compare runs, and browse a timeline in the Web UI
 - 🔑 **Encrypted secret vault** — AES-256-GCM encrypted storage for API keys and credentials
 - 🌐 **Any LLM provider** — OpenAI, Anthropic (native Messages API), Google Gemini, DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Azure OpenAI, AWS Bedrock, Ollama, LM Studio — via plain HTTP, no SDK lock-in
 - 🇸🇦 **Arabic-native** — custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol
 - 💾 **Memory & RAG** — ChromaDB vector memory with per-turn retrieval injection. **Pluggable embeddings** — local sentence-transformers or NVIDIA NIM / any OpenAI-compatible endpoint (config flip, no code change)
+- 📚 **Knowledge Library** — ingest whole documentation sites (WhatsApp API, Stripe, etc.) into a searchable RAG corpus with cited sources. Full-tree crawling (sitemap-first + Firecrawl), hierarchy-aware chunking (code-fence-atomic), per-library isolation, auto-inject, archive, and `/kb` slash commands on all platforms
+- 🔌 **MCP server marketplace** — one-click Add Server from 85+ preset MCP servers (filesystem, firecrawl, playwright, github, slack, databases, ...). Auto-rewrites install commands, validates before saving, namespaces tools to prevent collisions. Supports stdio, SSE, and Streamable HTTP transports
 - 📱 **Responsive web UI** — multi-tab code editor, AI chat, find/replace, unified dialog system — works on mobile with a slide-in nav drawer
 
 ---

@@ -100,6 +100,17 @@ def main() -> None:
 
 def _run_serve(port: int) -> None:
     """Start the Kazma WebUI server."""
+    # Initialise logging as the FIRST thing so every subsequent import
+    # (app factory, agent, MCP manager, KB subsystem) records to
+    # <repo>/.kazma/kazma.log. ``--debug`` is detected via KAZMA_LOG_LEVEL.
+    try:
+        from kazma_core.logging_config import setup_logging
+
+        setup_logging()
+    except Exception as _log_exc:
+        # Logging must never block boot.
+        print(f"[warn] logging setup failed: {_log_exc}", file=sys.stderr)
+
     try:
         import uvicorn
         from kazma_ui.app import create_app

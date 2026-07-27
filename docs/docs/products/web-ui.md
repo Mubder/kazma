@@ -24,9 +24,11 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Page | Path | Purpose |
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
-| Dashboard | `/dashboard` | Observability: cost, tokens, tool calls, cost breaker, uptime, traces |
+| Dashboard | `/dashboard` | Observability + **Memory & Governance** (health board, L2 property graph explorer, backups) |
 | Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`) |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
+| Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
+| Research | `/research` | Research results browser, archive/restore, side-by-side comparison, export to DOCX/PDF/Markdown |
 | IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
 
@@ -43,6 +45,14 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 | Uptime | TraceStore start time | Process lifetime of the store singleton. |
 
 `GET /api/dashboard/status` and WebSocket `/ws/dashboard` push numeric metrics (legacy string forms like `"$0.00"` / `"1,234"` are parsed safely in `dashboard.js`). Chat footer token/cost on a turn still comes from the SSE `done` event for that session.
+
+### Memory & Governance (Dashboard)
+
+- **Component health** from `build_memory_health()` (embedder, VectorMemory, L1–L4, consolidator, packages).
+- **Property graph (L2)** canvas: search, refresh, clear; APIs under `/api/memory/graph*`.
+- Backups/maintenance for FTS + vector stores.
+
+Full guide: [Memory & RAG](../guide/memory-and-rag). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 Research / scrape runs through **chat tools** (see [Web research](../guide/web-research)), not a separate dashboard action.
 
@@ -66,8 +76,20 @@ API: `/api/email/status`, OAuth start/callback, `POST /api/email/protocol/connec
 
 ## UI conventions
 
-- Dialogs: `window.kazmaConfirm` / `kazmaAlert` / `kazmaPrompt` (not `window.confirm`).  
-- Toasts: `window.showToast` / Alpine `$store.toast`.  
+- **Dialogs**: `window.confirm`, `window.alert`, and `window.prompt` are
+  **globally overridden** — every call (current and future) routes through
+  the styled Kazma modal (Alpine-based). Developers can still write
+  `if (!await confirm('Delete?'))` and get the branded dialog. The
+  `kazmaConfirm` / `kazmaAlert` / `kazmaPrompt` helpers remain available
+  for opts-based calls (title, danger, confirmText, etc.).
+- **Chat Stop button**: the send button transforms into a red pulsing Stop
+  button during generation. Click it or press **Escape** to abort the SSE
+  stream. The input field stays enabled so the user can type their next
+  message while the agent works.
+- **Toasts**: `window.showToast` / Alpine `$store.toast`.
+- **Research archive**: each research card has an archive button. Archived
+  items move to the "Archived" tab (with restore + delete). Uses the JSON
+  `metadata.archived` flag — no schema migration.
 - Soft-nav SPA may be feature-flagged off — full page loads are the reliable path.
 
 ## Related

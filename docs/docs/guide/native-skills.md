@@ -89,6 +89,14 @@ pip install -e ".[document]"   # reportlab, python-docx, openpyxl
 
 Each tool takes a title + sections (`[{heading, body}]`), or sheets for XLSX.
 
+**Arabic PDF fonts**: `generate_pdf` auto-registers an Arabic-capable font
+(Amiri) so Arabic text renders correctly with proper ligatures and
+right-to-left alignment. It checks system font paths first
+(`/usr/share/fonts/truetype/amiri/`, Noto Naskh/Sans Arabic), then falls
+back to downloading Amiri from the Google Fonts mirror
+(`raw.githubusercontent.com/google/fonts`). When an Arabic font is active,
+all styles (title, headings, body) use it with `TA_RIGHT` alignment.
+
 ---
 
 ## Image generation

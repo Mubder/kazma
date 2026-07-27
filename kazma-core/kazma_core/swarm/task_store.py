@@ -313,6 +313,7 @@ class TaskStore:
         task_type: str | None = None,
         worker: str | None = None,
         include_count: bool = False,
+        metadata_filter: dict[str, str] | None = None,
     ) -> list[SwarmTask] | tuple[list[SwarmTask], int]:
         """Return persisted tasks with optional filtering and pagination.
 
@@ -325,6 +326,9 @@ class TaskStore:
             task_type: Filter by task type (e.g. ``"consult"``).
             worker: Filter to tasks involving this worker name.
             include_count: If ``True``, return ``(tasks, total_count)``.
+            metadata_filter: Filter by metadata key-value pairs (e.g.
+                ``{"kind": "research"}``). Uses ``json_extract`` on SQLite
+                and ``@>`` JSONB containment on Postgres.
 
         Returns:
             A list of :class:`SwarmTask` objects, or a tuple of
@@ -333,6 +337,27 @@ class TaskStore:
         page = max(1, page)
         page_size = max(1, min(page_size, 100))
         offset = (page - 1) * page_size
+
+        # Multi-tenant hard filter: inject tenant_id unless caller opts out
+        # via metadata_filter={"tenant_id": "*"} or KAZMA_TENANT_FILTER=0.
+        metadata_filter = dict(metadata_filter or {})
+        try:
+            import os as _os_tf
+
+            filter_on = (_os_tf.environ.get("KAZMA_TENANT_FILTER") or "1").strip().lower() not in (
+                "0", "false", "off", "no",
+            )
+            if filter_on:
+                from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
+
+                if multi_user_or_production() and metadata_filter.get("tenant_id") != "*":
+                    metadata_filter.setdefault("tenant_id", require_tenant_id())
+                if metadata_filter.get("tenant_id") == "*":
+                    metadata_filter.pop("tenant_id", None)
+        except Exception:
+            pass
+        if not metadata_filter:
+            metadata_filter = None
 
         with self._lock:
             if self._pg:
@@ -349,6 +374,9 @@ class TaskStore:
                 if worker:
                     conditions.append("workers @> %s::jsonb")
                     params.append(json.dumps([worker]))
+                if metadata_filter:
+                    conditions.append("metadata @> %s::jsonb")
+                    params.append(json.dumps(metadata_filter))
                 where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
                 total = 0
                 if include_count:
@@ -381,6 +409,11 @@ class TaskStore:
                     "EXISTS (SELECT 1 FROM json_each(workers) WHERE value = ?)"
                 )
                 params.append(worker)
+            if metadata_filter:
+                for mkey, mval in metadata_filter.items():
+                    conditions.append("json_extract(metadata, ?) = ?")
+                    params.append(f"$.{mkey}")
+                    params.append(mval)
 
             where_clause = ""
             if conditions:

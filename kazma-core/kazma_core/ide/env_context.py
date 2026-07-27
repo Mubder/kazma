@@ -213,11 +213,65 @@ def build_env_context(workspace_id: str | None = None) -> str:
     slug = detect_repo_slug(root)
     branch = detect_branch(root)
 
+    # Runtime identity — stops the agent "diagnosing" that Kazma is offline
+    # while it is the process serving this chat (common smoke-test failure).
+    listen_hint = (
+        os.environ.get("KAZMA_PUBLIC_URL")
+        or os.environ.get("KAZMA_BASE_URL")
+        or ""
+    ).strip()
+    port_hint = (
+        os.environ.get("KAZMA_PORT")
+        or os.environ.get("PORT")
+        or "9090"
+    ).strip()
+
     lines: list[str] = [
-        "## Active Workspace (BINDING — not optional)",
-        f"- **Workspace name:** {ws_name}",
-        f"- **Workspace root:** `{root}`",
+        "## You are Kazma (this process)",
+        "- You **are** the Kazma agent for this deployment — not an external inspector.",
+        "- The web UI / API you serve is **already running in this process**.",
+        f"- Default local URL: `http://127.0.0.1:{port_hint}` (and `http://localhost:{port_hint}`).",
     ]
+    if listen_hint:
+        lines.append(f"- Public / configured base URL: `{listen_hint}`")
+    lines.extend(
+        [
+            "- Do **not** conclude the server is down just because `browser_navigate` "
+            "to ports 3000/8000 fails — those are often wrong ports.",
+            "- Prefer `file_*`, config tools, and in-app APIs over shell probes of "
+            "unrelated ports when verifying yourself.",
+            "",
+            "## Active Workspace (BINDING — not optional)",
+            f"- **Workspace name:** {ws_name}",
+            f"- **Workspace root:** `{root}`",
+            "- Native `file_*` / shell / git tools use this root (and per-task "
+            "`workspace_scope` when a swarm task targets another workspace).",
+            "- MCP `filesystem` tools rebind to the **global active** workspace on "
+            "Switch Repo; they do **not** follow concurrent per-task scope — prefer "
+            "`file_list` / `file_read` for multi-repo swarm work.",
+            "- Prefer `file_*` / `git_*` / `python_exec` over `shell_exec`. "
+            "Shell cwd is already this workspace — do not use `cd`.",
+        ]
+    )
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw_mi = get_config_store().get("agent.max_iterations", 15)
+        max_iter = max(5, min(100, int(raw_mi)))
+        lines.append(
+            f"- **Max tool rounds this process:** {max_iter} "
+            "(Settings → Agent; Chat≈15, Deep≈30, Research≈40)."
+        )
+    except Exception:
+        pass
+    try:
+        from kazma_core.workspace.binding import get_bound_mcp_root
+
+        mcp_root = get_bound_mcp_root()
+        if mcp_root is not None:
+            lines.append(f"- **MCP filesystem root (last bound):** `{mcp_root}`")
+    except Exception:
+        pass
     if ws_id:
         lines.append(f"- **Workspace id:** `{ws_id}`")
     if slug:
@@ -247,6 +301,21 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "you found. If it conflicts with the user's request, report the conflict.",
             "5. Never claim the folder *name* is the product if package metadata "
             "says otherwise — report both.",
+            "",
+            "### Visible work (UI workbench) — required for multi-step tasks",
+            "When you will use **2+ tools** (or any long mission), your **first** "
+            "assistant message content in that turn MUST open with a plan fence "
+            "(even if you also emit tool_calls in the same turn):",
+            "",
+            "```plan",
+            "- Inspect project identity",
+            "- Run the relevant tools",
+            "- Write findings / deliverable",
+            "```",
+            "",
+            "Rules: 3–7 bullets; concrete verbs; no empty plan. The UI pins this "
+            "above Activity (tools/status). After tools, give a clear final answer. "
+            "Prefer short narration of what you are checking (the workbench shows it).",
         ]
     )
 

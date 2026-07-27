@@ -14,6 +14,8 @@ import logging
 from typing import Any
 
 from kazma_core.state import AgentState
+from kazma_core.summarizer import _normalize_msg
+
 
 __all__ = ["CompactionEngine"]
 
@@ -79,7 +81,7 @@ class CompactionEngine:
         Returns:
             A new AgentState with compacted context.
         """
-        messages = state.get("messages", [])
+        messages = [_normalize_msg(m) for m in state.get("messages", [])]
         logger.info(
             "Compacting context with %d messages (%d tokens)",
             len(messages),
@@ -161,6 +163,7 @@ class CompactionEngine:
         Returns:
             A summary string under 2000 tokens.
         """
+        messages = [_normalize_msg(m) for m in messages]
         if not messages:
             return "[CONTEXT SUMMARY] No prior conversation history. [/CONTEXT SUMMARY]"
 

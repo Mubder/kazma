@@ -1,4 +1,9 @@
-"""Telegram voice STT helpers — extracted from telegram adapter (S5)."""
+"""Telegram voice STT helpers — extracted from telegram adapter (S5).
+
+Low-level provider calls remain here for direct tests; runtime Telegram
+path prefers ``kazma_core.voice.stt.transcribe`` (same as Discord/Slack via
+:mod:`voice_helpers`). Shared depth: size caps, language, ConfigStore keys.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +13,23 @@ from typing import Any
 
 import httpx
 
+from kazma_gateway.adapters.voice_helpers import (
+    MAX_VOICE_BYTES,
+    live_voice_settings,
+    prepare_tts_text,
+    synthesize_speech,
+    transcribe_audio,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "MAX_VOICE_BYTES",
     "detect_voice_message",
+    "live_voice_settings",
+    "prepare_tts_text",
+    "synthesize_speech",
+    "transcribe_audio",
     "transcribe_groq",
     "transcribe_openai",
 ]
@@ -23,7 +41,7 @@ def detect_voice_message(message: dict[str, Any]) -> bool:
 
 
 async def transcribe_openai(audio_bytes: bytes, api_key: str | None = None) -> str | None:
-    """Transcribe via OpenAI Whisper API."""
+    """Transcribe via OpenAI Whisper API (legacy direct helper)."""
     key = api_key or os.environ.get("OPENAI_API_KEY")
     if not key:
         logger.error("[telegram] No OpenAI API key for STT")
@@ -48,7 +66,7 @@ async def transcribe_openai(audio_bytes: bytes, api_key: str | None = None) -> s
 
 
 async def transcribe_groq(audio_bytes: bytes, api_key: str | None = None) -> str | None:
-    """Transcribe via Groq Whisper API."""
+    """Transcribe via Groq Whisper API (legacy direct helper)."""
     key = api_key or os.environ.get("GROQ_API_KEY")
     if not key:
         logger.error("[telegram] No Groq API key for STT")

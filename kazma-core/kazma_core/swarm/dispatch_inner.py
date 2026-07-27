@@ -110,11 +110,13 @@ async def dispatch_inner(
 
     if task.type == TaskType.FAN_OUT:
         try:
+            _mc = engine._resolve_max_concurrent(task)
             pattern_result = await execute_fan_out(
                 task,
                 dispatch_worker_by_name=engine._dispatch_worker_by_name,
                 aggregator=engine._result_aggregator,
-                max_concurrent=engine._resolve_max_concurrent(task),
+                max_concurrent=_mc,
+                concurrency=engine.get_bounded_concurrency(_mc),
             )
         except FanOutConfigurationError as exc:
             engine._tracing_emitter.record_exception(task_span, exc)
@@ -160,12 +162,14 @@ async def dispatch_inner(
 
     if task.type == TaskType.CONSULT:
         try:
+            _mc = engine._resolve_max_concurrent(task)
             consult_result = await execute_consult(
                 task,
                 resolve_worker=engine.get_worker,
                 dispatch_worker_by_name=engine._dispatch_worker_by_name,
                 aggregator=engine._result_aggregator,
-                max_concurrent=engine._resolve_max_concurrent(task),
+                max_concurrent=_mc,
+                concurrency=engine.get_bounded_concurrency(_mc),
             )
         except ConsultationConfigurationError as exc:
             engine._tracing_emitter.record_exception(task_span, exc)

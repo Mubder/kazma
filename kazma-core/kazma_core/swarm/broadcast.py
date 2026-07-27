@@ -13,7 +13,6 @@ from kazma_core.swarm.dispatch_helpers import (
     overall_status,
     resolve_max_concurrent,
 )
-from kazma_core.swarm.reliability import BoundedConcurrency
 from datetime import UTC, datetime
 
 from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus, WorkerResult
@@ -61,7 +60,8 @@ async def broadcast_task(engine: "SwarmEngine", task: SwarmTask) -> TaskResult:
     max_concurrent = resolve_max_concurrent(
         task, max(1, int(getattr(engine.config, "max_concurrent", 5) or 5))
     )
-    concurrency = BoundedConcurrency(max_concurrent=max_concurrent)
+    # Shared registry cache (audit M12) — do not allocate a private semaphore.
+    concurrency = engine.get_bounded_concurrency(max_concurrent)
 
     async def _dispatch_with_concurrency(name: str) -> WorkerResult:
         async with concurrency:

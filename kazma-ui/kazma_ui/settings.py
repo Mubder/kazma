@@ -147,6 +147,7 @@ class SettingsRouterBuilder:
                 "name": config_store.get("agent.name", agent.config.name),
                 "language": config_store.get("agent.language", agent.config.language),
                 "system_prompt": config_store.get("agent.system_prompt", agent.system_prompt),
+                "max_iterations": config_store.get("agent.max_iterations", 15),
             }
             connector_settings = {
                 "telegram_token": "***" if config_store.get("connectors.telegram.token", "") else "",
@@ -215,6 +216,11 @@ class SettingsRouterBuilder:
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 
+        @router.get("/api/settings/agent")
+        async def api_get_agent() -> dict[str, Any]:
+            """Get agent configuration (name, language, max tool rounds, …)."""
+            return _get_sm().get_agent_config()
+
         @router.put("/api/settings/agent")
         async def api_update_agent(req: AgentConfigUpdate) -> dict[str, str]:
             """Update agent configuration."""
@@ -249,8 +255,17 @@ class SettingsRouterBuilder:
                     return default
                 return str(v)
 
+            def _get_bool(key: str, default: bool = False) -> bool:
+                v = config_store.get(key)
+                if v is None:
+                    return default
+                if isinstance(v, bool):
+                    return v
+                return str(v).strip().lower() in ("1", "true", "yes", "on")
+
             return {
-                "enabled": bool(config_store.get("voice.enabled", False)),
+                "enabled": _get_bool("voice.enabled", False),
+                "tts_reply": _get_bool("voice.tts_reply", True),
                 "stt_provider": _get_val("voice.stt_provider", "openai"),
                 "stt_model": _get_val("voice.stt_model", "default"),
                 "stt_base_url": _get_val("voice.stt_base_url", ""),
@@ -264,6 +279,7 @@ class SettingsRouterBuilder:
         async def api_save_voice_settings(req: VoiceSettingsUpdate) -> dict[str, str]:
             """Save voice subsystem settings."""
             config_store.set("voice.enabled", req.enabled, category="voice")
+            config_store.set("voice.tts_reply", req.tts_reply, category="voice")
             config_store.set("voice.stt_provider", req.stt_provider, category="voice")
             config_store.set("voice.stt_model", req.stt_model, category="voice")
             config_store.set("voice.stt_base_url", req.stt_base_url or "", category="voice")
@@ -426,9 +442,25 @@ class SettingsRouterBuilder:
             return _get_sm().get_sessions()
 
         @router.get("/api/settings/tools")
-        async def api_get_tools() -> list[dict[str, Any]]:
-            """List all registered tools."""
-            return _get_sm().get_tool_registry()
+        async def api_get_tools(request: Request) -> list[dict[str, Any]]:
+            """List all registered tools with UI-language descriptions."""
+            tools = _get_sm().get_tool_registry()
+            lang = request.cookies.get("kazma-lang") or "en"
+            if lang not in ("ar", "en"):
+                lang = "en"
+            try:
+                from kazma_ui.i18n import t as i18n_t
+
+                for tool in tools:
+                    name = tool.get("name") or ""
+                    key = f"tool.desc.{name}"
+                    localized = i18n_t(key, lang=lang)
+                    if localized and localized != key:
+                        tool["description"] = localized
+                        tool["description_i18n"] = True
+            except Exception:
+                pass
+            return tools
 
         @router.put("/api/settings/tools/{tool_name}/toggle")
         async def api_toggle_tool(tool_name: str, req: dict[str, Any]) -> dict[str, str]:

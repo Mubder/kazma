@@ -233,13 +233,15 @@ class TelegramBusAdapter(BusAdapter):
 
         await self._post(payload)
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(
+        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+    ) -> bool:
         """Post an approval card with inline keyboard buttons.
 
         Buttons: ``[👍 Approve]`` ``[👎 Reject]``
 
         Waits for the callback query handler to call ``approve()``
-        or ``reject()``, or times out after 60s.
+        or ``reject()``, or times out after configurable timeout.
         """
         safe_name = _escape_md(approval.worker_name)
         safe_task = _escape_md(approval.task_description[:200])
@@ -256,7 +258,7 @@ class TelegramBusAdapter(BusAdapter):
         if safe_output:
             text += f"```\n{safe_output}\n```\n"
         text += "━━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"\\(auto\\-reject in {int(_APPROVAL_TIMEOUT)}s\\)"
+        text += f"\\(auto\\-reject in {int(timeout)}s\\)"
 
         # Inline keyboard
         reply_markup = {
@@ -279,12 +281,23 @@ class TelegramBusAdapter(BusAdapter):
             "reply_markup": reply_markup,
         })
 
-        # Wait for callback
+        # Wait for callback — shared store so multi-replica can resolve
+        from kazma_core.swarm import shared_approvals
+
+        shared_approvals.create_pending(
+            approval.task_id,
+            meta={"platform": "telegram", "worker": approval.worker_name},
+        )
+        # Keep local Event map for same-process fast path
         event = asyncio.Event()
         self._pending_approvals[approval.task_id] = event
         try:
-            await asyncio.wait_for(event.wait(), timeout=_APPROVAL_TIMEOUT)
-            approved = self._pending_results.get(approval.task_id, False)
+            approved = await shared_approvals.wait_for_resolution(
+                approval.task_id, timeout=timeout
+            )
+            # Mirror onto local maps if same process resolved via handle_callback
+            if approval.task_id in self._pending_results:
+                approved = self._pending_results[approval.task_id]
         except TimeoutError:
             logger.warning("[TelegramBus] Approval timed out for task %s", approval.task_id)
             approved = False
@@ -304,16 +317,28 @@ class TelegramBusAdapter(BusAdapter):
     # ── Callback handlers (called from telegram.py) ─────────────────
 
     def approve(self, task_id: str) -> None:
-        """Signal approval for a pending task."""
+        """Signal approval for a pending task (local + durable)."""
         if task_id in self._pending_approvals:
             self._pending_results[task_id] = True
             self._pending_approvals[task_id].set()
+        try:
+            from kazma_core.swarm.shared_approvals import resolve
+
+            resolve(task_id, True)
+        except Exception:
+            pass
 
     def reject(self, task_id: str) -> None:
-        """Signal rejection for a pending task."""
+        """Signal rejection for a pending task (local + durable)."""
         if task_id in self._pending_approvals:
             self._pending_results[task_id] = False
             self._pending_approvals[task_id].set()
+        try:
+            from kazma_core.swarm.shared_approvals import resolve
+
+            resolve(task_id, False)
+        except Exception:
+            pass
 
     def handle_callback(self, callback_data: str) -> str | None:
         """Parse a callback query and resolve the pending approval.

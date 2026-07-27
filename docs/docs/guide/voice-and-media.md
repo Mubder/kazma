@@ -14,8 +14,9 @@ the Web UI. This page covers how to enable and use voice and media.
 ## Voice (STT + TTS)
 
 Voice is a **single config block that controls all platforms**. When enabled,
-inbound audio is transcribed to text before reaching the agent, and the
-agent's reply is synthesized back to audio when the inbound turn was voice.
+inbound audio is transcribed to text before reaching the agent. Optional
+**auto voice-note replies** (`tts_reply`) synthesize the agent's reply back to
+audio **only when that inbound turn was voice** (not for plain text chats).
 
 ### Enable voice
 
@@ -26,12 +27,18 @@ Voice** tab (writes to ConfigStore, takes effect immediately):
 gateway:
   voice:
     enabled: true
+    tts_reply: true           # platform auto voice-note replies (toggle in UI)
     stt_provider: openai      # speech-to-text provider
     stt_language: auto        # auto-detect; or "ar", "en", ...
     tts_provider: edgetts     # text-to-speech provider
     tts_voice: default
     tts_output_format: mp3
 ```
+
+| Setting | Effect |
+|---|---|
+| **Voice subsystem** (`enabled`) | Master on/off for STT + TTS everywhere |
+| **Auto voice-note replies** (`tts_reply`) | Telegram/Discord/Slack: speak the reply after a voice inbound. Off = text-only replies; STT still works |
 
 The same keys are read live by all adapters (`voice_helpers.py`), so changing
 a setting in the UI affects Telegram, Discord, Slack, and Web at once.
@@ -60,10 +67,10 @@ a setting in the UI affects Telegram, Discord, Slack, and Web at once.
 
 | Platform | Inbound (you → agent) | Outbound (agent → you) |
 |---|---|---|
-| Telegram | Voice/audio note transcribed → text | TTS voice reply when your turn was voice |
-| Discord | Audio attachment transcribed → text | TTS voice reply (audio file upload) |
-| Slack | Audio file transcribed → text | TTS voice reply (file upload) |
-| Web UI | `POST /api/voice/stt` | `POST /api/voice/tts`, plus the real-time `/ws/voice` WebSocket for bidirectional streaming |
+| Telegram | Voice/audio note transcribed → text | TTS voice reply **only if** `tts_reply` and this turn was voice |
+| Discord | Audio attachment transcribed → text | Same gate; audio file upload |
+| Slack | Audio file transcribed → text | Same gate; file upload |
+| Web UI | `POST /api/voice/stt` | Explicit `POST /api/voice/tts` / live `/ws/voice` (not gated by platform `tts_reply`) |
 
 > If STT is not configured (no key / disabled), an inbound voice note returns
 > a friendly fallback message instead of failing silently.

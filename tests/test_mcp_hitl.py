@@ -52,6 +52,18 @@ class TestClassifyMcpTool:
         # "read_and_write" has "read" (safe) AND "write" (danger) → danger
         assert classify_mcp_tool("read_and_write") == "danger"
 
+    def test_namespaced_uses_raw_tool_leaf_only(self):
+        """Server slug must not bleach unknown tools via safe substrings.
+
+        ``mcp__get_status_svc__frobnicate`` used to classify as *safe*
+        because ``get``/``status`` appear in the server segment.
+        """
+        assert classify_mcp_tool("mcp__get_status_svc__frobnicate") == "unknown"
+        assert classify_mcp_tool("mcp__list_servers__frobnicate") == "unknown"
+        assert classify_mcp_tool("mcp__filesystem__write_file") == "danger"
+        assert classify_mcp_tool("mcp__filesystem__read_file") == "safe"
+        assert classify_mcp_tool("mcp__github__get_issue") == "safe"
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # UnifiedToolExecutor HITL gate

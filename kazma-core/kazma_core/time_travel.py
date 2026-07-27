@@ -193,6 +193,13 @@ class SnapshotStore:
         self._conn.commit()
         return cursor.rowcount
 
+    def list_distinct_threads(self) -> list[str]:
+        """Return all distinct thread_ids that have at least one snapshot."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT thread_id FROM snapshots ORDER BY thread_id"
+        ).fetchall()
+        return [r[0] for r in rows]
+
     def evict_beyond(self, thread_id: str, max_count: int) -> int:
         """Keep only the latest ``max_count`` snapshots for a thread.
 
@@ -389,6 +396,21 @@ class SnapshotRecorder:
             logger.debug("Failed to clear DB snapshots for thread %s: %s", thread_id, exc)
 
         return mem_count + db_count
+
+    def list_distinct_threads(self, *, db_path: str = DEFAULT_DB_PATH) -> list[str]:
+        """Return all distinct thread_ids that have at least one snapshot.
+
+        Merges in-memory and SQLite thread sets.
+        """
+        threads: set[str] = set()
+        for key in self._memory:
+            threads.add(key[0])
+        try:
+            store = self._get_store(db_path)
+            threads.update(store.list_distinct_threads())
+        except Exception as exc:
+            logger.debug("[SnapshotRecorder] list_distinct_threads DB failed: %s", exc)
+        return sorted(threads)
 
     def close(self) -> None:
         """Close the SQLite store if open."""

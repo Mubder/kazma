@@ -43,7 +43,10 @@ def vector_memory():
         pytest.skip("RAG test dependencies not installed (optional [rag] extra)")
     with tempfile.TemporaryDirectory() as tmpdir:
         mem = _build_vector_memory(path=tmpdir, collection_name="test_memory")
-        yield mem
+        try:
+            yield mem
+        finally:
+            mem.close()
 
 
 class TestVectorMemory:

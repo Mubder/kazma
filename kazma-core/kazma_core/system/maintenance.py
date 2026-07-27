@@ -16,7 +16,14 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
-__all__ = ["create_memory_backup", "get_memory_paths", "list_memory_backups", "restore_memory_backup", "run_memory_maintenance"]
+__all__ = [
+    "create_memory_backup",
+    "get_memory_paths",
+    "list_memory_backups",
+    "restore_memory_backup",
+    "run_memory_integrity_backfill",
+    "run_memory_maintenance",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +258,13 @@ async def restore_memory_backup(backup_name: str) -> dict[str, Any]:
         raise restore_err
 
 
+def run_memory_integrity_backfill(**kwargs: Any) -> dict[str, Any]:
+    """Repair L3 timestamps/embeddings and re-seed the knowledge graph."""
+    from kazma_core.memory.backfill import run_memory_integrity_backfill as _run
+
+    return _run(**kwargs)
+
+
 def run_memory_maintenance() -> dict[str, Any]:
     """Execute maintenance optimization (VACUUM and ANALYZE) on memory databases.
 
@@ -261,6 +275,13 @@ def run_memory_maintenance() -> dict[str, Any]:
     """
     fts5_path, vector_path, _ = get_memory_paths()
     details: dict[str, Any] = {}
+
+    # Integrity repair before VACUUM (so ANALYZE sees fixed rows)
+    try:
+        details["integrity"] = run_memory_integrity_backfill(force=False, encode=True)
+    except Exception as e:
+        logger.warning("[Maintenance] Integrity backfill skipped: %s", e)
+        details["integrity"] = {"status": "failed", "error": str(e)}
 
     # 1. Optimize Keyword Memory (SQLite FTS5)
     if fts5_path.exists():

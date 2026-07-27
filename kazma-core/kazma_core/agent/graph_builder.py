@@ -63,6 +63,7 @@ from kazma_core.time_travel import SnapshotRecorder
 
 from kazma_core.tracing import KazmaTracer
 from kazma_core.config_schema import TracingConfig
+from kazma_core.summarizer import _normalize_msg
 
 __all__ = ["TOOL_RESULT_MAX_CHARS", "build_supervisor_graph", "check_saturation_node", "respond_node", "sanitize_tool_chains", "summarize_node", "supervisor_node", "tool_worker_node", "truncate_tool_result"]
 
@@ -93,6 +94,8 @@ _RESEARCH_TOOL_NAMES = frozenset(
         "read_research_chunk",
         "summarize_research_file",
         "digest_research_file",
+        "synthesize_from_digests",
+        "run_research_pipeline",
         "web_search",
         "web_search_duckduckgo",
     }
@@ -138,7 +141,7 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
       - orphaned ``tool`` messages (no surviving matching assistant
         ``tool_calls``) are dropped.
     """
-    msgs = list(messages)
+    msgs = [_normalize_msg(m) for m in messages]
 
     # tool_call_id → indices of every tool response (ids can repeat across turns)
     response_indices: dict[str, list[int]] = {}
@@ -170,7 +173,8 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
             else:
                 dropped += len(m["tool_calls"])
                 content = m.get("content")
-                if isinstance(content, str) and content.strip():
+                has_text = bool(content.strip()) if isinstance(content, str) else bool(content)
+                if has_text:
                     out.append({k: v for k, v in m.items() if k != "tool_calls"})
                 # else: tool-calls-only message with no responses — drop
             continue
@@ -197,43 +201,58 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _rag_top_k() -> int:
-    """Read the per-turn retrieval top-k from kazma.yaml (default 5)."""
+    """Read per-turn retrieval top-k (ConfigStore ← yaml, default 5)."""
     try:
-        import yaml
-        from pathlib import Path
+        from kazma_core.memory.config import memory_retrieval_top_k
 
-        cfg_path = Path("kazma.yaml")
-        if cfg_path.exists():
-            with open(cfg_path) as f:
-                cfg = yaml.safe_load(f) or {}
-            return int(cfg.get("memory", {}).get("retrieval_top_k", 5))
+        return memory_retrieval_top_k()
     except Exception:
-        pass
-    return 5
+        return 5
 
 
 def _format_retrieved_memories(memories: list[dict[str, Any]]) -> str:
-    """Render retrieved memories as a compact system-message block.
+    """Render retrieved memories as a fenced untrusted system-message block.
 
-    Mirrors the compaction format (compaction.py:_build_compacted_system)
-    but for per-turn injection — a short "## Relevant context from memory"
-    block. Each memory is capped to keep the prompt lean.
+    Per-turn RAG hits come from conversation-derived stores (auto_store /
+    consolidator). Defense-in-depth (P4):
+    * drop rows that look like prompt-injection overrides
+    * wrap the rest in :func:`format_untrusted_block` so the model treats
+      them as observation data, not instructions
     """
     if not memories:
         return ""
-    parts = ["## Relevant context from memory"]
-    for i, mem in enumerate(memories, 1):
+    try:
+        from kazma_core.safety.prompt_fence import (
+            format_untrusted_block,
+            is_override_delta,
+        )
+    except Exception:  # pragma: no cover — fence always ship with core
+        format_untrusted_block = None  # type: ignore[assignment]
+        is_override_delta = None  # type: ignore[assignment]
+
+    lines: list[str] = []
+    for mem in memories:
         content = mem.get("content", mem.get("text", ""))
         if not content:
             continue
-        # Cap each memory at 300 chars so 5 memories ≤ ~1500 chars.
         text = str(content).strip()
+        if not text:
+            continue
+        if is_override_delta is not None and is_override_delta(text):
+            logger.warning(
+                "[graph_builder] dropped injection-like memory hit: %.80s", text
+            )
+            continue
+        # Cap each memory at 300 chars so 5 memories ≤ ~1500 chars.
         if len(text) > 300:
             text = text[:300] + "…"
-        parts.append(f"{i}. {text}")
-    if len(parts) == 1:
-        return ""  # all memories were empty
-    return "\n".join(parts)
+        lines.append(f"- {text}")
+    if not lines:
+        return ""
+    body = "## Relevant context from memory\n" + "\n".join(lines)
+    if format_untrusted_block is not None:
+        return format_untrusted_block(body, source="memory_rag")
+    return body
 
 
 def _ensure_personality(
@@ -251,7 +270,7 @@ def _ensure_personality(
     On subsequent calls (personality switch or re-entry), the old
     personality message is replaced in-place.
     """
-    msgs = list(messages)
+    msgs = [_normalize_msg(m) for m in messages]
 
     # Remove any old personality-tagged system message
     msgs = [m for m in msgs if _PERSONALITY_MARKER not in m.get("content", "")]
@@ -297,7 +316,7 @@ async def supervisor_node(
       4. Route: tool_calls → TOOL_WORKER, text → RESPOND.
     """
     iteration = state.get("iteration", 0)
-    messages = list(state.get("messages", []))
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
@@ -380,19 +399,12 @@ async def supervisor_node(
     # so it fires once per user turn (not per ReAct iteration). This is
     # the key difference from compaction-only retrieval — the agent now
     # has recall on EVERY turn, not just when the context window is full.
-    # Honours memory.per_turn_retrieval in kazma.yaml (default true).
+    # Honours memory.per_turn_retrieval via ConfigStore ← yaml (default true).
     _per_turn_on = True
     try:
-        import yaml
-        from pathlib import Path as _Path
+        from kazma_core.memory.config import memory_per_turn_enabled
 
-        _cfg_path = _Path("kazma.yaml")
-        if _cfg_path.exists():
-            with open(_cfg_path) as _f:
-                _mcfg = (yaml.safe_load(_f) or {}).get("memory", {}) or {}
-            _per_turn_on = bool(_mcfg.get("per_turn_retrieval", True))
-            if not bool(_mcfg.get("enabled", True)):
-                _per_turn_on = False
+        _per_turn_on = memory_per_turn_enabled()
     except Exception:
         pass
 
@@ -443,6 +455,21 @@ async def supervisor_node(
     # provider call forever. Sanitizing here also heals the thread: the
     # repaired list is what gets persisted by the return paths below.
     messages = sanitize_tool_chains(messages)
+
+    # Soft force-plan: on the first supervisor hop of a tool-capable turn,
+    # remind the model to open with a ```plan fence so the UI workbench
+    # can pin a checklist (providers rarely expose true chain-of-thought).
+    if iteration == 0 and tool_definitions:
+        _plan_nudge = (
+            "UI WORKBENCH: If you will call any tools this turn, put a short "
+            "```plan fence (3–7 bullets) in your content field before or "
+            "alongside tool_calls so the user sees your plan. Then use tools."
+        )
+        if not any(
+            m.get("role") == "system" and "UI WORKBENCH" in str(m.get("content", ""))
+            for m in messages
+        ):
+            messages.append({"role": "system", "content": _plan_nudge})
 
     start = time.monotonic()
     try:
@@ -561,6 +588,27 @@ async def supervisor_node(
             except Exception as nudge_exc:
                 logger.warning("[Supervisor] Nudge retry failed: %s", nudge_exc)
 
+        # Auto-continuation guard for multi-step goals/tasks
+        is_auto = state.get("auto_continue", False)
+        if not is_auto and content:
+            _content_lower = content.lower()
+            if any(marker in _content_lower for marker in ["now section", "proceeding to section", "next section", "proceeding with section"]):
+                is_auto = True
+
+        if is_auto and iteration + 1 < max_iter:
+            logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
+            assistant_msg = {"role": "assistant", "content": content}
+            continuation_msg = {"role": "user", "content": "Please proceed automatically with the remaining steps and complete the task."}
+            return {
+                **breaker_reset,
+                "messages": messages + [assistant_msg, continuation_msg],
+                "next_node": NodeName.SUPERVISOR,
+                "iteration": iteration + 1,
+                "last_model": response.model,
+                "last_tokens": response.usage.get("total_tokens", 0),
+                "last_cost_usd": response.cost_usd,
+            }
+
         # Pure text response → RESPOND
         assistant_msg = {"role": "assistant", "content": content or "I apologize, I couldn't generate a response. Please try rephrasing your question."}
         return {
@@ -637,7 +685,7 @@ async def tool_worker_node(
         return {"next_node": NodeName.SUPERVISOR}
 
     # ── Check Circuit Breaker ──────────────────────────────────────
-    breaker_tripped = state.get("circuit_breaker_tripped", False) or (state.get("consecutive_tool_failures", 0) >= 2)
+    breaker_tripped = state.get("circuit_breaker_tripped", False) or (state.get("consecutive_tool_failures", 0) >= 3)
     if breaker_tripped:
         logger.warning("[ToolWorker] Circuit breaker is active! Bypassing all execution.")
         results = [
@@ -651,7 +699,7 @@ async def tool_worker_node(
             for tc in pending
         ]
         # Build tool-role messages for the conversation
-        messages = list(state.get("messages", []))
+        messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages = [
             {
                 "role": "tool",
@@ -669,9 +717,9 @@ async def tool_worker_node(
             "tool_calls_pending": [],
             "tool_calls_done": list(results),
             "tool_results": cumulative,
-            "consecutive_tool_failures": state.get("consecutive_tool_failures", 0),
+            "consecutive_tool_failures": state.get("consecutive_tool_failures", 3),
             "circuit_breaker_tripped": True,
-            "next_node": NodeName.SUPERVISOR,
+            "next_node": NodeName.RESPOND,
         }
 
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
@@ -687,8 +735,25 @@ async def tool_worker_node(
         set_current_session_messages,
     )
 
-    session_messages = list(state.get("messages", []))
+    session_messages = [_normalize_msg(m) for m in state.get("messages", [])]
     _messages_token = set_current_session_messages(session_messages)
+
+    # ── Bind YOLO/HITL thread id from checkpointed state ────────────
+    # Transports (SSE/WS) set the ContextVar, but LangGraph node execution
+    # (or a missing transport bind) can leave it empty. state.thread_id is
+    # the durable identity used when enabling YOLO/tool grants — without
+    # this fallback, YOLO Session behaves like Approve once forever.
+    from kazma_core.safety.hitl import (
+        get_current_thread_id,
+        reset_current_thread_id,
+        set_current_thread_id,
+    )
+
+    _state_tid_token = None
+    if not get_current_thread_id():
+        _state_tid = state.get("thread_id")
+        if _state_tid:
+            _state_tid_token = set_current_thread_id(str(_state_tid))
 
     try:
         # ── HITL: separate safe and danger tools ──────────────────────
@@ -759,15 +824,12 @@ async def tool_worker_node(
                 duration_ms=0,
             )
 
-        # ── Execute safe tools in parallel ────────────────────────────
-        results: list[ToolResult] = []
-        if safe_tools:
-            results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
-
         # ── HITL: one combined interrupt for the whole danger batch ──
         # (stops N-click floods when the model emits several danger tools
         # in one turn). Scope grants (tool/yolo) are applied by /api/approve
         # *before* resume so later turns skip the gate entirely.
+        approved = False
+        approved_ids = None
         if danger_tools:
             tools_payload = [
                 {
@@ -798,18 +860,38 @@ async def tool_worker_node(
                 "message": message,
             }
 
-            # interrupt() pauses the graph — resumes when /api/approve calls
-            # graph.ainvoke(Command(resume=...), config)
-            approval = interrupt(approval_input)
+            # Defense-in-depth: requires_approval() already filtered YOLO/grants
+            # when splitting safe/danger above. Re-check here in case grants
+            # were applied mid-turn (e.g. YOLO enabled just before resume).
+            from kazma_core.safety.yolo import is_yolo_active
 
-            approved = isinstance(approval, dict) and approval.get("approved", False)
+            current_thread = get_current_thread_id() or state.get("thread_id") or ""
+            if current_thread and is_yolo_active(str(current_thread)):
+                logger.warning(
+                    "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",
+                    current_thread,
+                    len(danger_tools),
+                )
+                approved = True
+                approval = {"approved": True, "yolo": True}
+            else:
+                # interrupt() pauses the graph — resumes when /api/approve
+                # calls graph.ainvoke(Command(resume=...), config)
+                approval = interrupt(approval_input)
+                approved = isinstance(approval, dict) and approval.get("approved", False)
             # Optional selective ids; None/missing → all tools in the batch.
-            approved_ids = None
             if isinstance(approval, dict):
                 raw_ids = approval.get("approved_ids")
                 if isinstance(raw_ids, list):
                     approved_ids = {str(x) for x in raw_ids}
 
+        # ── Execute safe tools in parallel ────────────────────────────
+        results: list[ToolResult] = []
+        if safe_tools:
+            results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
+
+        # ── Execute/deny danger tools ─────────────────────────────────
+        if danger_tools:
             from kazma_core.agent.tool_registry import _hitl_approved_ctx
 
             for tc in danger_tools:
@@ -817,6 +899,7 @@ async def tool_worker_node(
                 allow = approved and (approved_ids is None or tc_id in approved_ids)
                 if allow:
                     logger.info("[ToolWorker] HITL approved: %s", tc["name"])
+                    consecutive_failures = 0
                     _token = _hitl_approved_ctx.set(True)
                     try:
                         results.append(await _exec_one(tc))
@@ -826,41 +909,23 @@ async def tool_worker_node(
                     logger.info("[ToolWorker] HITL denied: %s", tc["name"])
                     results.append(_denied_result(tc))
 
-        # ── Empty-Result Circuit Breaker ──────────────────────────────
-        consecutive_failures = state.get("consecutive_tool_failures", 0)
-        breaker_tripped_now = False
+        # ── Tool-loop breaker (typed outcomes, per-round credit) ─────
+        # Policy / HITL deny / empty results do not trip. Parallel hard
+        # errors in one batch credit +1 only (not +N). See tool_loop_breaker.
+        from kazma_core.agent.tool_loop_breaker import update_breaker
 
-        # We process results, but instead of appending a stray system message,
-        # we format the circuit breaker warning directly into the tool response
-        # so we don't violate the API schema (1 tool response per tool call).
-        for tr in results:
-            if breaker_tripped_now:
-                tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                tr["is_error"] = True
-                continue
-
-            content_str = str(tr.get("content", "")).strip()
-            is_empty_or_denied = (
-                not content_str or 
-                content_str == "[]" or 
-                "no results" in content_str.lower() or 
-                "denied by user" in content_str.lower() or
-                tr.get("is_error", False)
+        prev_failures = int(state.get("consecutive_tool_failures", 0) or 0)
+        breaker_state, results = update_breaker(prev_failures, list(results))
+        consecutive_failures = breaker_state.consecutive_hard_rounds
+        breaker_tripped_now = breaker_state.tripped
+        if breaker_tripped_now:
+            logger.warning(
+                "[ToolWorker] Circuit breaker tripped! %d consecutive hard tool rounds.",
+                consecutive_failures,
             )
-            
-            if is_empty_or_denied:
-                consecutive_failures += 1
-            else:
-                consecutive_failures = 0
-
-            if consecutive_failures >= 2:
-                logger.warning("[ToolWorker] Circuit breaker tripped! %d consecutive tool failures.", consecutive_failures)
-                tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                tr["is_error"] = True
-                breaker_tripped_now = True
 
         # Build tool-role messages for the conversation
-        messages = list(state.get("messages", []))
+        messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages: list[dict[str, Any]] = []
         for tr in results:
             tool_messages.append(
@@ -871,39 +936,84 @@ async def tool_worker_node(
                 }
             )
 
+        # Soft research-depth gate: deep intent + search-only → nudge once
+        try:
+            from kazma_core.agent.research_policy import should_nudge_more_sources
+
+            already = bool(state.get("_research_depth_nudged"))
+            turn_tools = [str(tc.get("name") or "") for tc in (safe_tools + danger_tools)]
+            # Include prior tool names this iteration chain from cumulative? use turn only
+            nudge = should_nudge_more_sources(
+                messages, turn_tools, already_nudged=already
+            )
+            if nudge:
+                tool_messages.append(
+                    {
+                        "role": "system",
+                        "content": nudge,
+                    }
+                )
+                # mark via state field below
+                state = {**state, "_research_depth_nudged": True}
+        except Exception:
+            pass
+
         # Merge into cumulative tool_results
         cumulative = dict(state.get("tool_results", {}))
         for tr in results:
             cumulative[tr["tool_call_id"]] = tr
 
-        return {
+        out: dict[str, Any] = {
             "messages": messages + tool_messages,
             "tool_calls_pending": [],  # all consumed
             "tool_calls_done": list(results),
             "tool_results": cumulative,
             "consecutive_tool_failures": consecutive_failures,
             "circuit_breaker_tripped": breaker_tripped_now,
-            "next_node": NodeName.SUPERVISOR,  # loop back
+            # If the breaker just tripped or max consecutive failures hit, force RESPOND
+            "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3) else NodeName.SUPERVISOR,
         }
+        if state.get("_research_depth_nudged"):
+            out["_research_depth_nudged"] = True
+        return out
     finally:
-        # Always restore the prior ContextVar value, even if a tool
-        # raised or the graph was interrupted by HITL.
+        # Always restore prior ContextVar values, even if a tool raised or
+        # the graph was interrupted by HITL.
         reset_current_session_messages(_messages_token)
-        if _graph_gate_token is not None:
-            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+        try:
+            if _graph_gate_token is not None:
+                from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
 
-            _graph_hitl_gate_ctx.reset(_graph_gate_token)
+                _graph_hitl_gate_ctx.reset(_graph_gate_token)
+        except NameError:
+            pass
+        if _state_tid_token is not None:
+            reset_current_thread_id(_state_tid_token)
 
 
-async def respond_node(state: SupervisorState) -> dict[str, Any]:
+async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:
     """Respond node — finalizes the turn.
 
     Extracts the last assistant message as the response and increments
     the iteration counter. Also schedules automatic long-term memory
     writes (durable facts / turn snapshots) so recall is not tool-only.
+
+    If the last message is a tool result (max-iterations forced respond
+    mid-tool-loop), makes a final LLM call to synthesize a text answer
+    from the collected tool results so the user gets a response.
+
+    Args:
+        state: The current supervisor state.
+        llm:   The LLMProvider for synthesizing a final answer when
+               max-iterations forces a respond mid-tool-loop. Optional
+               for backward compat (the synthesis step is skipped if None).
     """
-    messages = state.get("messages", [])
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
     iteration = state.get("iteration", 0) + 1
+
+    # Sanitize tool chains to remove any unhandled/dangling tool_calls
+    # (e.g. when max_iterations forced routing to respond before ToolWorker ran)
+    messages = sanitize_tool_chains(messages)
 
     logger.info(
         "[Respond] Finalizing turn (iteration=%d, messages=%d)",
@@ -911,14 +1021,137 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
         len(messages),
     )
 
-    # Auto-store durable user facts (and optional turn snapshots) so
-    # per-turn RAG has something to retrieve without requiring memory_store.
-    try:
-        from kazma_core.memory.auto_store import schedule_auto_store
+    # If max iterations forced us here mid-tool-loop, there is often no
+    # *final* user-visible answer after the last tool results.
+    #
+    # Bugs this guards against:
+    # 1. Early assistant chatter (pre-tool "ممتاز…") counted as final.
+    # 2. Sanitize strips dangling tool_calls from the last supervisor
+    #    turn, leaving a short preamble (~100 chars) that looked like a
+    #    final answer — smoke test "done" with no real reply (2026-07-27).
+    # Only treat **substantial** plain assistant text AFTER the last tool
+    # as a real final answer when max-iter forces stop.
+    _MIN_FINAL_CHARS_ON_MAX = 250
 
-        schedule_auto_store(messages)
+    def _final_assistant_text_after_tools(msgs: list[dict[str, Any]]) -> str:
+        last_tool_idx = -1
+        for i, m in enumerate(msgs):
+            if isinstance(m, dict) and m.get("role") in ("tool", "function"):
+                last_tool_idx = i
+        candidates: list[str] = []
+        scan = msgs if last_tool_idx < 0 else msgs[last_tool_idx + 1 :]
+        for m in scan:
+            if not isinstance(m, dict):
+                continue
+            if m.get("role") not in ("assistant", "ai"):
+                continue
+            if m.get("tool_calls"):
+                continue
+            content = m.get("content") or ""
+            if isinstance(content, str) and content.strip():
+                candidates.append(content.strip())
+        return candidates[-1] if candidates else ""
+
+    def _has_final_assistant_after_tools(
+        msgs: list[dict[str, Any]], *, min_chars: int = 1
+    ) -> bool:
+        text = _final_assistant_text_after_tools(msgs)
+        return len(text) >= min_chars
+
+    _last = messages[-1] if messages else {}
+    _last_role = _last.get("role") if isinstance(_last, dict) else None
+    _max_hit = iteration >= state.get("max_iterations", 15)
+    # Always synthesize when we stop on a tool result, or when there is no
+    # *substantial* plain assistant text after the last tool.
+    _final_text = _final_assistant_text_after_tools(messages)
+    _needs_synthesis = _max_hit and (
+        _last_role in ("tool", "function")
+        or len(_final_text) < _MIN_FINAL_CHARS_ON_MAX
+        or bool(isinstance(_last, dict) and _last.get("tool_calls"))
+    )
+    if _needs_synthesis:
+        _llm = llm or state.get("_llm")
+        if _llm is not None:
+            try:
+                _wrap_msg = {
+                    "role": "user",
+                    "content": (
+                        "You hit the tool-round limit. Based on ALL tool results "
+                        "above (including errors like unauthorized SQL functions), "
+                        "write the final answer to the user NOW. "
+                        "Do not call any more tools. Do not dig into source code. "
+                        "If checking memory: report which of memory_search / "
+                        "memory_store / layers worked or failed, and what needs "
+                        "attention. Match the user's language (Arabic if they wrote Arabic)."
+                    ),
+                }
+                _resp = await _llm.chat(messages + [_wrap_msg], tools=None)
+                _content = getattr(_resp, "content", "") or ""
+                if _content.strip():
+                    messages.append({"role": "assistant", "content": _content})
+                    logger.info(
+                        "[Respond] Synthesized final answer (%d chars) after max iterations",
+                        len(_content),
+                    )
+                else:
+                    logger.warning(
+                        "[Respond] Synthesis returned empty content "
+                        "(last_role=%s messages=%d) — injecting recovery notice",
+                        _last_role,
+                        len(messages),
+                    )
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": (
+                                "⚠️ I hit the tool-round limit while investigating and "
+                                "could not produce a summary. Please ask a narrower "
+                                "follow-up, or say “summarize what you found.”"
+                            ),
+                        }
+                    )
+            except Exception as exc:
+                logger.warning("[Respond] Could not synthesize final answer: %s", exc)
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "⚠️ I hit the tool-round limit and failed to summarize "
+                            f"({type(exc).__name__}). Please try again with a smaller ask."
+                        ),
+                    }
+                )
+        else:
+            logger.warning(
+                "[Respond] Max iterations with no assistant text and no LLM bound "
+                "(last_role=%s) — injecting recovery notice",
+                _last_role,
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        "⚠️ Turn stopped at the tool-round limit without a written "
+                        "answer. Please send another message to continue."
+                    ),
+                }
+            )
+    elif _max_hit:
+        logger.info(
+            "[Respond] Max iterations but substantial final text already present "
+            "(last_role=%s chars=%d) — skipping synthesis",
+            _last_role,
+            len(_final_text),
+        )
+
+    # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
+    # in one task so consolidator can dedup against auto_store texts.
+    try:
+        from kazma_core.memory.consolidator import schedule_post_turn_memory
+
+        schedule_post_turn_memory(messages)
     except Exception:
-        logger.debug("[Respond] auto_store schedule failed", exc_info=True)
+        logger.debug("[Respond] post_turn memory schedule failed", exc_info=True)
 
     return {
         "messages": messages,
@@ -936,7 +1169,7 @@ async def check_saturation_node(state: SupervisorState) -> dict[str, Any]:
     """
     from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
 
-    messages = state.get("messages", [])
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
     estimated = estimate_tokens(messages)
 
     if estimated > TOKEN_THRESHOLD:
@@ -959,7 +1192,7 @@ async def summarize_node(
     """Summarize the conversation and inject as a SystemMessage at position 0."""
     from kazma_core.summarizer import format_summary, get_summary, summarize
 
-    messages = list(state.get("messages", []))
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
     thread_id = state.get("thread_id", "")
 
     # Check if we already have a summary for this thread
@@ -1074,7 +1307,7 @@ def build_supervisor_graph(
         return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer, hitl_config=hitl_config)
 
     async def _respond(state: SupervisorState) -> dict[str, Any]:
-        return await respond_node(state)
+        return await respond_node(state, llm=llm)
 
     async def _check_saturation(state: SupervisorState) -> dict[str, Any]:
         return await check_saturation_node(state)
@@ -1087,11 +1320,24 @@ def build_supervisor_graph(
         """Route from Supervisor based on next_node field."""
         next_node = state.get("next_node", NodeName.RESPOND)
         iteration = state.get("iteration", 0)
-        max_iter = state.get("max_iterations", 10)
+        max_iter = state.get("max_iterations", 15)
 
         # Force respond on max iterations
         if iteration >= max_iter:
             logger.warning("[Router] Max iterations (%d) hit — forcing respond", max_iter)
+            # Inject a final instruction so the LLM synthesizes what it has
+            # instead of producing an empty response.
+            _msgs = state.get("messages", [])
+            _has_final = any(
+                isinstance(m, dict) and m.get("role") == "assistant" and (m.get("content") or "").strip()
+                and not m.get("tool_calls")
+                for m in _msgs[-3:]
+            )
+            if not _has_final:
+                # No recent text answer — the model was stuck in tool loops.
+                # We can't mutate state here (routing function), but the
+                # respond_node will handle synthesizing from tool results.
+                pass
             return NodeName.RESPOND
 
         if next_node == NodeName.TOOL_WORKER:
@@ -1099,8 +1345,11 @@ def build_supervisor_graph(
         return NodeName.RESPOND
 
     def _route_from_worker(state: SupervisorState) -> str:
-        """Route from Tool Worker — always back to Supervisor."""
-        return NodeName.SUPERVISOR
+        """Route from Tool Worker — respects next_node (e.g. RESPOND when circuit breaker trips)."""
+        next_n = state.get("next_node")
+        if next_n == NodeName.RESPOND or state.get("circuit_breaker_tripped") or (state.get("consecutive_tool_failures", 0) >= 3):
+            return NodeName.RESPOND
+        return state.get("next_node", NodeName.SUPERVISOR)
 
     def _route_from_saturation(state: SupervisorState) -> str:
         """Route from Check Saturation — to summarize if over threshold, else supervisor."""
@@ -1152,11 +1401,14 @@ def build_supervisor_graph(
         },
     )
 
-    # Tool Worker → Supervisor (loop back)
+    # Tool Worker → Supervisor / Respond (circuit breaker route)
     graph.add_conditional_edges(
         NodeName.TOOL_WORKER,
         _route_from_worker,
-        {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
+        {
+            NodeName.SUPERVISOR: NodeName.SUPERVISOR,
+            NodeName.RESPOND: NodeName.RESPOND,
+        },
     )
 
     # Respond → END

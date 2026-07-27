@@ -25,7 +25,7 @@
                     <h3>{{ skill.name }}</h3>
                     <span class="badge badge-{{ skill.certification_level }}">{{ skill.certification_level }}</span>
                 </div>
-                <p class="skill-desc">{{ skill.description }}</p>
+                <p class="skill-desc" dir="auto">{{ skill.description }}</p>
                 <div class="skill-meta">
                     <span>v{{ skill.version }}</span>
                     <span class="security-score">{{ skill.security_score }}/100</span>
@@ -52,20 +52,20 @@
     <!-- Hub Browse + Agent Skills install -->
     <div x-show="tab === 'hub'">
         <div class="settings-group" style="margin-bottom:1.25rem">
-            <h3>Install from agentskills.io / GitHub</h3>
+            <h3>{{ t('skills.install_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:0.75rem">
-                Paste <code>owner/repo</code> or a GitHub URL (e.g. <code>shadcn/improve</code>).
-                Uses the open <a href="https://agentskills.io/" target="_blank" rel="noopener">Agent Skills</a> format — no Node/npm required.
+                {{ t('skills.install_hint') }}
+                <a href="https://agentskills.io/" target="_blank" rel="noopener">Agent Skills</a>
             </p>
             <div class="form-row">
                 <div class="form-group" style="flex:1">
                     <input type="text" x-model="agentSkillSource" class="form-input"
-                           placeholder="shadcn/improve or https://github.com/shadcn/improve"
+                           placeholder="{{ t('skills.install_ph') }}"
                            @keydown.enter="installAgentSkill()">
                 </div>
                 <div class="form-group">
                     <button class="btn btn-primary" @click="installAgentSkill()" :disabled="installing">
-                        <span x-text="installing ? 'Installing…' : 'Install Skill'"></span>
+                        <span x-text="installing ? t('skills.installing') : t('skills.install_skill')"></span>
                     </button>
                 </div>
             </div>

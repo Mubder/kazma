@@ -11,13 +11,24 @@ telegram_bus.py) to keep kazma-core platform-neutral.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-__all__ = ["ApprovalRequest", "BusAdapter", "BusMessage", "NullBusAdapter", "SwarmMessageBus", "SwarmReport", "get_message_bus", "set_message_bus"]
+__all__ = [
+    "ApprovalRequest",
+    "BusAdapter",
+    "BusMessage",
+    "FanOutBusAdapter",
+    "NullBusAdapter",
+    "SwarmMessageBus",
+    "SwarmReport",
+    "get_message_bus",
+    "set_message_bus",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +141,87 @@ class NullBusAdapter(BusAdapter):
         pass
 
 
+class FanOutBusAdapter(BusAdapter):
+    """Fan outbound swarm events / HITL approvals to multiple platforms.
+
+    Previously only one of Telegram/Discord/Slack was wired (priority order).
+    With this adapter, every configured platform receives stream/report/alert
+    traffic, and ``request_approval`` returns True if **any** platform
+    approves (first yes wins; remaining waiters are cancelled).
+    """
+
+    def __init__(self, adapters: list[BusAdapter]) -> None:
+        self._adapters = [a for a in adapters if a is not None and not isinstance(a, NullBusAdapter)]
+        if not self._adapters:
+            raise ValueError("FanOutBusAdapter requires at least one real adapter")
+
+    @property
+    def adapters(self) -> list[BusAdapter]:
+        return list(self._adapters)
+
+    async def send(self, message: BusMessage) -> None:
+        await asyncio.gather(
+            *(a.send(message) for a in self._adapters),
+            return_exceptions=True,
+        )
+
+    async def send_report(self, report: SwarmReport) -> None:
+        await asyncio.gather(
+            *(a.send_report(report) for a in self._adapters),
+            return_exceptions=True,
+        )
+
+    async def request_approval(self, approval: ApprovalRequest) -> bool:
+        async def _one(adapter: BusAdapter) -> bool:
+            try:
+                return bool(await adapter.request_approval(approval))
+            except Exception as exc:
+                logger.debug(
+                    "[FanOutBus] approval on %s failed: %s",
+                    type(adapter).__name__,
+                    exc,
+                )
+                return False
+
+        tasks = [asyncio.create_task(_one(a)) for a in self._adapters]
+        pending: set[asyncio.Task[bool]] = set(tasks)
+        try:
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for d in done:
+                    try:
+                        if d.result():
+                            for p in pending:
+                                p.cancel()
+                            return True
+                    except Exception:
+                        continue
+            return False
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        await asyncio.gather(
+            *(
+                a.send_alert(title, subsystem, status, reason, callback_id, button_text)
+                for a in self._adapters
+            ),
+            return_exceptions=True,
+        )
+
+
 # ── Message Bus ────────────────────────────────────────────────────────────
 
 
@@ -233,7 +325,7 @@ class SwarmMessageBus:
         )
         try:
             return await asyncio.wait_for(
-                self._adapter.request_approval(approval),
+                self._adapter.request_approval(approval, timeout=timeout),
                 timeout=timeout,
             )
         except TimeoutError:

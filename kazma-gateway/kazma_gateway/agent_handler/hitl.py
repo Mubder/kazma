@@ -50,12 +50,16 @@ async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str
     return None
 
 
-def _build_approval_prompt(payload: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    """Build the approval prompt text + optional inline keyboard.
+def _build_approval_prompt(
+    payload: dict[str, Any],
+    thread_id: str,
+    *,
+    platform: str = "telegram",
+) -> dict[str, Any]:
+    """Build the approval prompt text + platform-specific interactive controls.
 
-    For Telegram the keyboard uses the ``hitl:`` vocabulary so the
-    existing callback handler produces a synthetic ``/hitl`` message.
-    Other platforms get a plain-text instruction with the thread_id.
+    All platforms share the ``hitl:approve|deny:<id>`` action vocabulary
+    (Telegram keyboards, Discord components, Slack Block Kit).
     """
     tool = payload.get("tool", "unknown")
     args = payload.get("args", {})
@@ -70,14 +74,28 @@ def _build_approval_prompt(payload: dict[str, Any], thread_id: str) -> dict[str,
         f"   or: hitl deny {thread_id}"
     )
     markup = None
+    plat = (platform or "telegram").lower()
     try:
-        from kazma_gateway.adapters.telegram import TelegramAdapter
+        if plat == "telegram":
+            from kazma_gateway.adapters.telegram import TelegramAdapter
 
-        markup = TelegramAdapter.build_approval_keyboard(thread_id)
+            markup = TelegramAdapter.build_approval_keyboard(thread_id)
+        elif plat == "discord":
+            from kazma_gateway.adapters.discord import DiscordAdapter
+
+            markup = DiscordAdapter.build_approval_keyboard(thread_id)
+        elif plat == "slack":
+            from kazma_gateway.adapters.slack import SlackAdapter
+
+            markup = SlackAdapter.build_approval_keyboard(thread_id)
     except Exception as exc:
-        logger.debug("TelegramAdapter approval keyboard build skipped or failed: %s", exc, exc_info=True)
-        # non-Telegram platforms — plain text fallback
-    return {"text": text, "markup": markup}
+        logger.debug(
+            "Approval keyboard build failed for platform=%s: %s",
+            plat,
+            exc,
+            exc_info=True,
+        )
+    return {"text": text, "markup": markup, "platform": plat}
 
 
 async def _handle_hitl_resume(
@@ -240,10 +258,17 @@ async def _handle_hitl_resume(
             )
 
         if chained is not None:
-            prompt = _build_approval_prompt(chained, target_thread)
+            prompt = _build_approval_prompt(
+                chained, target_thread, platform=msg.platform
+            )
             prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
             if prompt.get("markup"):
-                send_ctx["reply_markup"] = prompt["markup"]
+                if msg.platform == "telegram":
+                    send_ctx["reply_markup"] = prompt["markup"]
+                elif msg.platform == "discord":
+                    send_ctx["components"] = prompt["markup"]
+                elif msg.platform == "slack":
+                    send_ctx["blocks"] = prompt["markup"]
             await manager.send(
                 OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),

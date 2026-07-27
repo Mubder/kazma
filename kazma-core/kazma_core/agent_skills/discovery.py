@@ -88,10 +88,17 @@ def user_agent_skills_dir() -> Path:
     """Primary install target for Agent Skills (cross-client convention)."""
     # Prefer ~/.agents/skills for agentskills.io interoperability.
     agents = Path.home() / ".agents" / "skills"
-    kazma = Path.home() / ".kazma" / "agent-skills"
+    try:
+        from kazma_core.paths import agent_skills_dir
+
+        kazma = agent_skills_dir()
+    except Exception:
+        from kazma_core.paths import user_home
+
+        kazma = user_home() / "agent-skills"
+        kazma.mkdir(parents=True, exist_ok=True)
     # Create primary target on first use.
     agents.mkdir(parents=True, exist_ok=True)
-    kazma.mkdir(parents=True, exist_ok=True)
     return agents
 
 
@@ -108,7 +115,14 @@ def skill_base_dirs(
 
     # User-level (lowest precedence)
     dirs.append(("user", Path.home() / ".agents" / "skills"))
-    dirs.append(("user", Path.home() / ".kazma" / "agent-skills"))
+    try:
+        from kazma_core.paths import agent_skills_dir, legacy_user_home
+
+        dirs.append(("user", agent_skills_dir()))
+        # Legacy read fallback only (pre-project-local layout)
+        dirs.append(("user", legacy_user_home() / "agent-skills"))
+    except Exception:
+        dirs.append(("user", Path.home() / ".kazma" / "agent-skills"))
     # Claude/Cursor pragmatic compatibility
     dirs.append(("user", Path.home() / ".claude" / "skills"))
     dirs.append(("user", Path.home() / ".cursor" / "skills"))

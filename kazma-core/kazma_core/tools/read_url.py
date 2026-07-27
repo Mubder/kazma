@@ -2,8 +2,10 @@
 
 Tiered fetch (public web, not anti-bot invincible):
 
-    1. httpx fast path with browser-like UA + trafilatura extraction.
-    2. Playwright stealth when bot walls / thin JS shells (optional).
+    1. Optional pre-backends when opted in (Firecrawl key / ``KAZMA_JINA_READER=1``).
+    2. httpx fast path with browser-like UA + trafilatura extraction.
+    3. **Hard-page recovery** on bot walls / empty extracts:
+       Firecrawl (if key) → Jina Reader (unless ``KAZMA_JINA_READER=0``) → Playwright.
 
 Research features
 -----------------
@@ -14,7 +16,7 @@ Research features
 * **Chunks:** ``list_research_chunks`` / ``read_research_chunk`` /
   ``summarize_research_file`` for map-style research without flooding context.
 
-SSRF-safe (validate URL + redirects).
+SSRF-safe (validate URL + redirects). Knowledge ingest reuses ``_fetch_full_text``.
 """
 
 from __future__ import annotations
@@ -48,7 +50,9 @@ _HARD_MAX = 100_000  # single-window absolute ceiling
 _CACHE_MAX_ENTRIES = 32
 _CACHE_TTL_S = 900  # 15 minutes
 
-MIN_USEFUL_CHARS = 200
+# Short static pages (e.g. example.com) are often ~100–180 chars of real text.
+# 200 was too high and forced Playwright / false "bot wall" failures.
+MIN_USEFUL_CHARS = 80
 DEFAULT_CHUNK_SIZE = 4_000
 
 
@@ -169,31 +173,97 @@ def _friendly_error(exc: Exception, url: str = "") -> str:
 
 
 def _looks_like_bot_block(html: str, status_code: int) -> bool:
+    """True only for *HTML* challenge / hard-block pages — not short static sites.
+
+    Must NOT treat plain extracted text (or tiny legitimate pages like
+    example.com) as bot walls — that forced Playwright and failed ingests.
+    """
+    if not html:
+        return False
+    # Non-HTML extracts (markdown from Jina, already-plain text) are never
+    # Cloudflare challenges.
+    sample_head = html[:200].lstrip().lower()
+    looks_html = sample_head.startswith("<!doctype") or sample_head.startswith(
+        "<html"
+    ) or "<html" in html[:500].lower() or "<body" in html[:800].lower()
+
     if status_code in (403, 429, 503):
         html_lower = html[:5000].lower()
-        return any(marker in html_lower for marker in _BOT_DETECTION_MARKERS)
-    if len(html) < 3000:
-        html_lower = html.lower()
-        if any(
-            marker in html_lower
-            for marker in (
-                "cloudflare",
-                "checking your browser",
-                "cf-challenge",
-                "just a moment",
-                "please verify you are a human",
-            )
-        ):
+        if any(marker in html_lower for marker in _BOT_DETECTION_MARKERS):
             return True
+        # Hard deny without body
+        if status_code in (403, 429) and len(html) < 800:
+            return True
+        return False
+
+    if not looks_html:
+        return False
+
+    html_lower = html[:5000].lower()
+    # Strong challenge markers on short challenge pages only
+    strong = (
+        "checking your browser",
+        "cf-challenge",
+        "cf-browser-verification",
+        "just a moment",
+        "please verify you are a human",
+        "are you a robot",
+        "enable javascript and cookies",
+    )
+    if any(m in html_lower for m in strong):
+        return True
+    if "cloudflare" in html_lower and len(html) < 4000 and (
+        "challenge" in html_lower or "ray id" in html_lower
+    ):
+        return True
+    # Meta-style error stubs
+    if "<title>error</title>" in html_lower or "<title>403</title>" in html_lower:
+        return True
     return False
 
 
 def _looks_like_js_shell(html: str) -> bool:
     sample = html[:12000].lower()
-    return any(m in sample for m in _JS_SHELL_MARKERS)
+    # Require JS app markers AND little article-like content
+    if not any(m in sample for m in _JS_SHELL_MARKERS):
+        return False
+    # Plain sites with a root div + real paragraphs are not shells
+    if sample.count("<p") >= 2 or "<article" in sample:
+        return False
+    return True
+
+
+def _strip_html_fallback(html: str) -> str:
+    """stdlib-only extract when trafilatura is missing or returns nothing."""
+    # Drop script/style blocks first
+    cleaned = re.sub(
+        r"(?is)<(script|style|noscript|svg|iframe)[^>]*>.*?</\1>",
+        " ",
+        html,
+    )
+    # Prefer body if present
+    body_m = re.search(r"(?is)<body[^>]*>(.*)</body>", cleaned)
+    chunk = body_m.group(1) if body_m else cleaned
+    text = re.sub(r"(?is)<br\s*/?>", "\n", chunk)
+    text = re.sub(r"(?is)</(p|div|h[1-6]|li|tr|section|article)>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Unescape a few common entities
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+    )
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
 
 
 def _extract_text(html: str) -> str:
+    """Extract readable text; always try a plain-HTML fallback for static pages."""
+    text = ""
     try:
         import trafilatura
 
@@ -202,22 +272,42 @@ def _extract_text(html: str) -> str:
             include_links=True,
             include_tables=True,
             favor_recall=True,
-        )
+            include_comments=False,
+        ) or ""
     except ImportError:
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = re.sub(r"\s+", " ", text).strip()
+        text = ""
     except Exception:
-        text = html[:_HARD_MAX]
+        text = ""
 
-    return (text or "").strip()
+    text = (text or "").strip()
+    # Trafilatura often returns None/empty for minimal static pages (example.com).
+    # Fall back to a simple strip that still recovers title + body text.
+    if len(text) < MIN_USEFUL_CHARS:
+        fallback = _strip_html_fallback(html)
+        if len(fallback) > len(text):
+            text = fallback
+    return text[:_HARD_MAX].strip()
 
 
 def _is_thin_extraction(text: str, html: str) -> bool:
-    if not text or len(text) < MIN_USEFUL_CHARS:
-        if len(html) >= 500 or _looks_like_js_shell(html):
-            return True
-        if not text:
-            return True
+    """Whether Playwright is worth trying.
+
+    Short *but non-empty* extracts from small static HTML are OK (example.com).
+    Only treat as thin when empty, or tiny vs a large JS-heavy shell.
+    """
+    if not text or not text.strip():
+        return True
+    if len(text) >= MIN_USEFUL_CHARS:
+        return False
+    # Tiny extract: only escalate if the HTML looks like a SPA shell
+    if _looks_like_js_shell(html) and len(html) >= 500:
+        return True
+    # Small static document with some words — accept as not-thin
+    words = len(text.split())
+    if words >= 8:
+        return False
+    if len(html) >= 1500 and words < 5:
+        return True
     return False
 
 
@@ -326,8 +416,33 @@ async def _fetch_with_playwright(url: str) -> str | None:
         return None
 
 
+def _jina_hard_disabled() -> bool:
+    return (os.environ.get("KAZMA_JINA_READER") or "").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _jina_explicit_opt_in() -> bool:
+    return (os.environ.get("KAZMA_JINA_READER") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 async def _try_jina_reader(url: str) -> str | None:
-    """Optional Jina Reader proxy (``KAZMA_JINA_READER=1`` or backend=jina)."""
+    """Jina Reader proxy (``r.jina.ai``).
+
+    Used when explicitly enabled (``KAZMA_JINA_READER=1``), when
+    ``KAZMA_FETCH_BACKEND=jina``, or as a **last-resort recovery** after
+    local httpx/Playwright fail (unless hard-disabled with ``=0``).
+    """
+    if _jina_hard_disabled():
+        return None
     try:
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
@@ -335,53 +450,94 @@ async def _try_jina_reader(url: str) -> str | None:
         validate_url(url)
         # Proxy is public; still SSRF-check the *target* URL above.
         jina_url = f"https://r.jina.ai/{url}"
+        token = (os.environ.get("JINA_API_KEY") or os.environ.get("KAZMA_JINA_API_KEY") or "").strip()
+        headers = {
+            "Accept": "text/plain",
+            "User-Agent": _BROWSER_UA,
+            "X-Return-Format": "markdown",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-            r = await client.get(
-                jina_url,
-                headers={"Accept": "text/plain", "User-Agent": _BROWSER_UA},
-            )
+            r = await client.get(jina_url, headers=headers)
             if r.status_code == 200 and r.text and len(r.text.strip()) > 50:
                 logger.info("[read_url] Jina Reader ok for %s (%d chars)", url, len(r.text))
                 return r.text.strip()
+            logger.debug("[read_url] Jina status %s for %s", r.status_code, url)
     except Exception as exc:
         logger.debug("[read_url] Jina Reader failed: %s", exc)
     return None
 
 
 async def _try_firecrawl(url: str) -> str | None:
-    """Optional Firecrawl API when ``KAZMA_FIRECRAWL_API_KEY`` is set."""
+    """Optional Firecrawl API when ``KAZMA_FIRECRAWL_API_KEY`` is set.
+
+    Retries once on HTTP 429 / 502 / 503 with a short backoff — bulk KB
+    crawls of 200+ pages routinely trip Firecrawl rate limits mid-job.
+    """
     api_key = (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip()
     if not api_key:
         return None
     base = (os.environ.get("KAZMA_FIRECRAWL_URL") or "https://api.firecrawl.dev").rstrip("/")
     try:
+        import asyncio
+
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
 
         validate_url(url)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {"url": url, "formats": ["markdown", "html"]}
         async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(
-                f"{base}/v1/scrape",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"url": url, "formats": ["markdown", "html"]},
-            )
-            if r.status_code != 200:
-                logger.debug("[read_url] Firecrawl status %s", r.status_code)
+            last_status = 0
+            for attempt in range(3):
+                r = await client.post(
+                    f"{base}/v1/scrape",
+                    headers=headers,
+                    json=body,
+                )
+                last_status = r.status_code
+                if r.status_code in (429, 502, 503) and attempt < 2:
+                    # Honor Retry-After when present; otherwise exponential backoff.
+                    ra = r.headers.get("Retry-After")
+                    try:
+                        delay = float(ra) if ra else (1.5 * (attempt + 1))
+                    except ValueError:
+                        delay = 1.5 * (attempt + 1)
+                    delay = min(max(delay, 0.5), 20.0)
+                    logger.info(
+                        "[read_url] Firecrawl %s for %s — retry in %.1fs (attempt %d)",
+                        r.status_code, url, delay, attempt + 1,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                if r.status_code != 200:
+                    logger.debug(
+                        "[read_url] Firecrawl status %s for %s", r.status_code, url
+                    )
+                    return None
+                data = r.json()
+                payload = data.get("data") or data
+                text = (
+                    payload.get("markdown")
+                    or payload.get("content")
+                    or payload.get("text")
+                    or ""
+                )
+                if text and len(str(text).strip()) > 50:
+                    logger.info(
+                        "[read_url] Firecrawl ok for %s (%d chars)",
+                        url, len(str(text)),
+                    )
+                    return str(text).strip()
+                logger.debug(
+                    "[read_url] Firecrawl empty body for %s (status %s)",
+                    url, last_status,
+                )
                 return None
-            data = r.json()
-            payload = data.get("data") or data
-            text = (
-                payload.get("markdown")
-                or payload.get("content")
-                or payload.get("text")
-                or ""
-            )
-            if text and len(str(text).strip()) > 50:
-                logger.info("[read_url] Firecrawl ok for %s (%d chars)", url, len(str(text)))
-                return str(text).strip()
     except Exception as exc:
         logger.debug("[read_url] Firecrawl failed: %s", exc)
     return None
@@ -391,7 +547,8 @@ async def _fetch_via_optional_backends(url: str) -> str | None:
     """Try stronger optional backends before local httpx.
 
     ``KAZMA_FETCH_BACKEND``: auto | httpx | jina | firecrawl
-    - auto: firecrawl (if key) → jina (if KAZMA_JINA_READER=1) → None (caller uses httpx)
+    - auto: firecrawl (if key) → jina (if explicitly opted in) → None (caller uses httpx)
+    - Hard-site recovery after local failure uses :func:`_recover_hard_page`.
     """
     backend = (os.environ.get("KAZMA_FETCH_BACKEND") or "auto").strip().lower()
     if backend == "httpx":
@@ -400,15 +557,35 @@ async def _fetch_via_optional_backends(url: str) -> str | None:
         return await _try_firecrawl(url)
     if backend == "jina":
         return await _try_jina_reader(url)
-    # auto
+    # auto — only *opt-in* backends before the cheap httpx path
     if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
         text = await _try_firecrawl(url)
         if text:
             return text
-    if (os.environ.get("KAZMA_JINA_READER") or "").strip() in ("1", "true", "yes", "on"):
+    if _jina_explicit_opt_in():
         text = await _try_jina_reader(url)
         if text:
             return text
+    return None
+
+
+async def _recover_hard_page(url: str, *, why: str = "") -> str | None:
+    """Last-resort cascade for bot walls / empty extracts.
+
+    Order: Firecrawl (key) → Jina (unless hard-disabled) → Playwright.
+    """
+    logger.info("[read_url] Hard-page recovery for %s (%s)", url, why or "unspecified")
+    if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
+        text = await _try_firecrawl(url)
+        if text:
+            return text
+    if not _jina_hard_disabled():
+        text = await _try_jina_reader(url)
+        if text:
+            return text
+    text = await _fetch_with_playwright(url)
+    if text:
+        return text
     return None
 
 
@@ -478,33 +655,55 @@ async def _fetch_full_text(url: str) -> str:
 
             if _looks_like_bot_block(html, status_code):
                 logger.info(
-                    "[read_url] Bot detection on %s (status=%s), trying Playwright",
+                    "[read_url] Bot detection on %s (status=%s), hard-page recovery",
                     final_url,
                     status_code,
                 )
-                tried_playwright = True
-                pw_text = await _fetch_with_playwright(final_url)
-                if pw_text:
-                    _cache_put(url, pw_text)
-                    _cache_put(final_url, pw_text)
-                    return pw_text
+                tried_playwright = True  # recovery includes Playwright
+                recovered = await _recover_hard_page(
+                    final_url, why=f"bot_wall status={status_code}"
+                )
+                if recovered:
+                    _cache_put(url, recovered)
+                    _cache_put(final_url, recovered)
+                    return recovered
                 if status_code >= 400:
                     return (
                         f"Error: Server returned HTTP {status_code} for {final_url} "
                         "(bot protection or access denied). "
-                        "Install Playwright (`pip install 'kazma[web]'` + browsers) "
-                        "or try a different URL."
+                        "Recovery tried Firecrawl/Jina/Playwright. "
+                        "Set ``KAZMA_FIRECRAWL_API_KEY``, ensure Jina is not disabled "
+                        "(``KAZMA_JINA_READER=0``), or install Playwright "
+                        "(`pip install 'kazma[web]'` + browsers)."
                     )
 
             if status_code >= 400 and not _looks_like_bot_block(html, status_code):
                 try:
                     response.raise_for_status()
                 except Exception as exc:
+                    # Last chance: paid/proxy backends may still reach the page
+                    recovered = await _recover_hard_page(
+                        final_url, why=f"http_{status_code}"
+                    )
+                    if recovered:
+                        _cache_put(url, recovered)
+                        _cache_put(final_url, recovered)
+                        return recovered
                     return _friendly_error(exc, final_url)
 
     except ConnectionError:
+        recovered = await _recover_hard_page(final_url, why="connection_error")
+        if recovered:
+            _cache_put(url, recovered)
+            _cache_put(final_url, recovered)
+            return recovered
         return _friendly_error(ConnectionError(), final_url)
     except TimeoutError:
+        recovered = await _recover_hard_page(final_url, why="timeout")
+        if recovered:
+            _cache_put(url, recovered)
+            _cache_put(final_url, recovered)
+            return recovered
         return _friendly_error(TimeoutError(), final_url)
     except OSError as exc:
         return _friendly_error(exc, final_url)
@@ -513,24 +712,35 @@ async def _fetch_full_text(url: str) -> str:
 
     text = _extract_text(html)
 
+    # Escalate for true bot walls / empty SPA shells — not short static pages.
     if not tried_playwright and _should_try_playwright(html, status_code, extracted=text):
         logger.info(
-            "[read_url] Thin/empty extract or JS shell for %s (%d chars text / %d html), trying Playwright",
+            "[read_url] Thin/empty extract or JS shell for %s (%d chars text / %d html)",
             final_url,
             len(text),
             len(html),
         )
-        pw_text = await _fetch_with_playwright(final_url)
-        if pw_text:
-            _cache_put(url, pw_text)
-            _cache_put(final_url, pw_text)
-            return pw_text
+        recovered = await _recover_hard_page(
+            final_url, why=f"thin_extract text={len(text)} html={len(html)}"
+        )
+        if recovered and len(recovered) > len(text):
+            _cache_put(url, recovered)
+            _cache_put(final_url, recovered)
+            return recovered
 
     if not text:
+        if not tried_playwright:
+            recovered = await _recover_hard_page(final_url, why="empty_extract")
+            if recovered:
+                _cache_put(url, recovered)
+                _cache_put(final_url, recovered)
+                return recovered
         return (
             f"Error: Could not extract readable content from {final_url}. "
             "The page may be empty, require JavaScript, or block automated access. "
-            "Optional: `pip install 'kazma[web]'` and `playwright install chromium`."
+            "Tried hard-page recovery (Firecrawl/Jina/Playwright). "
+            "Set ``KAZMA_FIRECRAWL_API_KEY``, leave Jina enabled, "
+            "or `pip install 'kazma[web]'` + `playwright install chromium`."
         )
 
     _cache_put(url, text)

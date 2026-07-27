@@ -23,6 +23,28 @@ def test_looks_like_bot_block_clean_200() -> None:
     assert ru._looks_like_bot_block(html, 200) is False
 
 
+def test_looks_like_bot_block_ignores_plain_text_extract() -> None:
+    # knowledge_ingest used to run HTML bot heuristics on *extracted text*
+    plain = (
+        "Example Domain\n\nThis domain is for use in documentation examples "
+        "without needing permission. Avoid use in operations."
+    )
+    assert ru._looks_like_bot_block(plain, 200) is False
+
+
+def test_extract_text_recovers_example_domain_style_html() -> None:
+    html = """<!doctype html><html><head><title>Example Domain</title></head>
+    <body><div><h1>Example Domain</h1>
+    <p>This domain is for use in documentation examples without needing permission.
+    Avoid use in operations.</p>
+    <p><a href="https://www.iana.org/domains/example">More information...</a></p>
+    </div></body></html>"""
+    text = ru._extract_text(html)
+    assert "domain is for use" in text.lower() or "Example Domain" in text
+    assert len(text) >= 40
+    assert len(text.split()) >= 8
+
+
 def test_looks_like_js_shell() -> None:
     assert ru._looks_like_js_shell('<div id="root"></div><script src="app.js"></script>')
     assert not ru._looks_like_js_shell("<html><body><p>Plain article</p></body></html>")
@@ -34,6 +56,9 @@ def test_is_thin_extraction() -> None:
     assert ru._is_thin_extraction("short", big_shell) is True
     rich = "A" * 500
     assert ru._is_thin_extraction(rich, big_shell) is False
+    # Short static page with real words is NOT thin
+    static = "Example Domain This domain is for use in illustrative examples in documents."
+    assert ru._is_thin_extraction(static, "<html><body><h1>x</h1></body></html>") is False
 
 
 def test_should_try_playwright_for_thin() -> None:

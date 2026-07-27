@@ -95,18 +95,52 @@ def docker_available() -> bool:
     return _docker_available
 
 
+def _production_or_multi_user() -> bool:
+    if (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    ):
+        return True
+    try:
+        from kazma_core.security.platform_rbac import multi_user_enabled
+
+        return bool(multi_user_enabled())
+    except Exception:
+        return False
+
+
+def local_exec_forbidden() -> bool:
+    """True when host-local python_exec fallback is banned.
+
+    Production / multi-user always ban local fallback. Explicit
+    ``KAZMA_CODE_EXEC_DOCKER=force|required`` also bans fallback.
+    Lab opt-in: ``KAZMA_CODE_EXEC_ALLOW_LOCAL=1`` re-enables local even in
+    production (not recommended).
+    """
+    if (os.environ.get("KAZMA_CODE_EXEC_ALLOW_LOCAL") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    ):
+        return False
+    raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
+    if raw in ("force", "required", "1", "true", "on", "yes", "docker"):
+        return True
+    return _production_or_multi_user()
+
+
 def use_docker_jail() -> bool:
     """Whether python_exec should attempt a Docker jail.
 
     Env ``KAZMA_CODE_EXEC_DOCKER``:
-      - ``1`` / ``true`` / ``on``  → force Docker (error if unavailable)
-      - ``0`` / ``false`` / ``off`` → force local subprocess
-      - ``auto`` / unset           → Docker when CLI present
+      - ``1`` / ``true`` / ``on`` / ``force`` → force Docker
+      - ``0`` / ``false`` / ``off`` → force local subprocess (ignored when
+        production/multi-user forbids local)
+      - ``auto`` / unset → Docker when CLI present; production still prefers Docker
     """
+    if local_exec_forbidden():
+        return True
     raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "auto").strip().lower()
     if raw in ("0", "false", "off", "no", "local"):
         return False
-    if raw in ("1", "true", "on", "yes", "docker", "force"):
+    if raw in ("1", "true", "on", "yes", "docker", "force", "required"):
         return True
     return docker_available()
 
@@ -389,18 +423,13 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         except OSError:
             pass
 
-        prod = (os.environ.get("KAZMA_PRODUCTION") or "").lower() in (
-            "1", "true", "on", "yes",
-        )
-        forced = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").lower() in (
-            "1", "true", "on", "yes", "docker", "force", "required",
-        ) or prod
+        no_local = local_exec_forbidden()
 
         if use_docker_jail():
             try:
                 return await _run_docker_jail(code_file, tmp_dir, timeout)
             except Exception as exc:
-                if forced:
+                if no_local:
                     logger.error("[code_exec] Docker jail required but failed: %s", exc)
                     return f"[Exit code: 1]\nDocker jail failed: {exc}"
                 logger.warning(
@@ -409,10 +438,11 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
                 local = await _run_local_subprocess(code_file, tmp_dir, timeout)
                 return f"[sandbox: local-fallback reason={exc}]\n{local}"
 
-        if forced:
+        if no_local:
             return (
                 "[Exit code: 1]\nDocker jail required "
-                "(KAZMA_PRODUCTION or KAZMA_CODE_EXEC_DOCKER=force) but Docker is unavailable."
+                "(KAZMA_PRODUCTION / multi-user / KAZMA_CODE_EXEC_DOCKER=force) "
+                "but Docker is unavailable. Host-local python_exec is disabled."
             )
 
         return await _run_local_subprocess(code_file, tmp_dir, timeout)

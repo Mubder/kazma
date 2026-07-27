@@ -290,18 +290,32 @@ class SettingsManager:
 
     def get_agent_config(self) -> dict[str, Any]:
         """Get current agent settings."""
+        raw_max = self._cs.get("agent.max_iterations", 15)
+        try:
+            max_iter = int(raw_max)
+        except (TypeError, ValueError):
+            max_iter = 15
+        max_iter = max(5, min(100, max_iter))
         return {
             "name": self._cs.get("agent.name", "kazma"),
             "language": self._cs.get("agent.language", "ar"),
             "system_prompt": self._cs.get("agent.system_prompt", ""),
             "personality": self._cs.get("agent.personality", "default"),
+            # ReAct tool-round ceiling (supervisor loop)
+            "max_iterations": max_iter,
         }
 
     def save_agent_config(self, data: dict[str, Any]) -> None:
         """Save agent configuration."""
         for key, value in data.items():
-            if value is not None:
-                self._cs.set(f"agent.{key}", value, category="agent")
+            if value is None:
+                continue
+            if key == "max_iterations":
+                try:
+                    value = max(5, min(100, int(value)))
+                except (TypeError, ValueError):
+                    value = 15
+            self._cs.set(f"agent.{key}", value, category="agent")
 
     def get_personalities(self) -> list[dict[str, Any]]:
         """List available personality templates."""
@@ -331,10 +345,23 @@ class SettingsManager:
         self._cs.set("agent.personality", name, category="agent")
 
     def get_safety_settings(self) -> dict[str, Any]:
-        """Get HITL safety settings."""
+        """Get HITL safety settings.
+
+        Default ``require_approval_for`` mirrors
+        :data:`kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS` so the Settings
+        UI does not show a truncated 3-tool list that disagrees with runtime.
+        """
+        try:
+            from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+            _default_danger = list(CANONICAL_DANGER_TOOLS)
+        except Exception:
+            _default_danger = ["file_write", "file_delete", "shell_exec", "code_exec", "python_exec"]
         return {
             "hitl_enabled": self._cs.get("safety.hitl_enabled", True),
-            "require_approval_for": self._cs.get("safety.require_approval_for", ["file_write", "file_delete", "shell_exec"]),
+            "require_approval_for": self._cs.get(
+                "safety.require_approval_for", _default_danger
+            ),
             "approval_timeout": self._cs.get("safety.approval_timeout", 60),
             "auto_deny_on_timeout": self._cs.get("safety.auto_deny_on_timeout", True),
         }
@@ -501,10 +528,19 @@ class SettingsManager:
         """List installed skills from the filesystem."""
         skills: list[dict[str, Any]] = []
         # Check skill directories
-        skill_dirs = [
-            Path.home() / ".kazma" / "skills",
-            Path("skills"),
-        ]
+        try:
+            from kazma_core.paths import installed_skills_dir, legacy_user_home
+
+            skill_dirs = [
+                installed_skills_dir(),
+                legacy_user_home() / "skills",
+                Path("skills"),
+            ]
+        except Exception:
+            skill_dirs = [
+                Path.home() / ".kazma" / "skills",
+                Path("skills"),
+            ]
         for skill_dir in skill_dirs:
             if not skill_dir.exists():
                 continue

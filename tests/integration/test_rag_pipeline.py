@@ -44,7 +44,10 @@ def vector_memory():
         pytest.skip("RAG test dependencies not installed (optional [rag] extra)")
     with tempfile.TemporaryDirectory() as tmpdir:
         vm = _build_vector_memory(path=tmpdir, collection_name="test_rag")
-        yield vm
+        try:
+            yield vm
+        finally:
+            vm.close()
 
 
 class TestRAGPipeline:
@@ -143,8 +146,11 @@ class TestRAGPipeline:
                 collection_name=os.environ["KAZMA_VECTOR_COLLECTION"],
                 model_name=os.environ["KAZMA_VECTOR_MODEL"],
             )
-            vm.add("test fact")
-            assert vm.count >= 1
+            try:
+                vm.add("test fact")
+                assert vm.count >= 1
+            finally:
+                vm.close()
 
             del os.environ["KAZMA_VECTOR_PATH"]
             del os.environ["KAZMA_VECTOR_COLLECTION"]

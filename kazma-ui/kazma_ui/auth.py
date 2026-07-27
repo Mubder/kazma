@@ -181,6 +181,9 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/pipelines",
     "/cron",
     "/observability",
+    "/replay",
+    "/research",
+    "/knowledge",  # Knowledge Library admin shell (audit residual)
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
@@ -194,6 +197,10 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/status",
     "/api/telemetry",
     "/favicon.ico",
+    # MCP preset catalog — read-only metadata (server names + npx commands),
+    # no secrets or user data. Open so the Add Server dropdown works without
+    # a stale-auth 401 on first page load / localhost probes.
+    "/api/mcp/presets",
     # Explicit auth bootstrap (remote clients cannot use loopback auto-cookie)
     "/login",
     "/api/auth/login",
@@ -207,8 +214,11 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
 #  cannot carry the X-Kazma-Secret header, e.g. the GitHub OAuth callback
 #  which GitHub redirects to with only a ?code= query param).
 ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
+    # Callbacks are browser redirects with ?code= only (no secret header).
     "/api/github/oauth/callback",
-    "/api/github/oauth/start",
+    # /api/github/oauth/start is intentionally *not* open: starting OAuth
+    # requires an authenticated session/cookie (audit residual — unauth start
+    # could write oauth_state into ConfigStore).
     # Email OAuth: Google/Microsoft redirect with ?code= only (no secret header)
     "/api/email/oauth/gmail/callback",
     "/api/email/oauth/microsoft/callback",
@@ -391,22 +401,45 @@ def is_authenticated(request: Request, expected_secret: str = "") -> bool:
 
 
 def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> bool:
-    """Auth for WebSocket handshakes (cookies/headers only — no middleware path).
+    """Auth for WebSocket handshakes (cookies/headers/query/loopback/private LAN).
 
-    Accepts the same credentials as HTTP:
+    Accepts the same credentials as HTTP, plus query parameter token:
       1. ``X-Kazma-Secret`` header
       2. ``Authorization: Bearer …``
-      3. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
-      4. ``kazma-secret`` legacy cookie
-
-    Without this, browsers that only hold ``kazma-session`` get HTTP 200 on
-    ``/api/*`` but WebSocket ``/ws/dashboard`` 403 (legacy secret-cookie only).
+      3. ``?token=…`` query parameter (for browser WS connections that can't set headers)
+      4. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
+      5. ``kazma-secret`` legacy cookie
+      6. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
+      7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only)
     """
     expected = expected_secret or get_kazma_secret()
+
+    # Dev bypass for local testing — never enable in production
+    if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+
     if not expected:
         return True
 
-    provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
+    # Loopback peers (always allowed for single-operator local use)
+    if _is_loopback_client(websocket):
+        return True
+
+    # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
+    if _is_private_lan_client(websocket) and _trust_lan_enabled():
+        return True
+
+    # Query parameter token (browser WebSocket can't set headers)
+    provided = ""
+    try:
+        query_params = websocket.query_params
+        if query_params:
+            provided = (query_params.get("token") or "").strip()
+    except Exception:
+        pass
+
+    if not provided:
+        provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
     if not provided:
         auth = (websocket.headers.get("authorization") or "").strip()
         if auth.lower().startswith("bearer "):
@@ -417,9 +450,10 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
             try:
                 from kazma_core.security.web_sessions import validate_session
 
-                return bool(validate_session(sess))
+                if validate_session(sess):
+                    return True
             except Exception:
-                return False
+                pass
     if not provided:
         provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
     if not provided:
@@ -668,19 +702,21 @@ def extract_tenant_from_jwt(token: str) -> str | None:
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts tenant id and propagates it.
 
-    Production (``KAZMA_PRODUCTION=1``): client-supplied ``X-Tenant-ID`` header
-    and cookies are **ignored** unless a verified JWT is present (audit H11).
-    Single-tenant default is ``default``.
+    Production **or** multi-user mode: client-supplied ``X-Tenant-ID`` header
+    and cookies are **ignored** unless a verified JWT / opaque principal is
+    present (audit H11 + SaaS residual). Single-tenant default is ``default``.
     """
     from kazma_core.tenant_context import set_current_tenant_id, reset_current_tenant_id
+    from kazma_core.tenant_isolation import (
+        client_tenant_spoof_allowed,
+        principal_tenant_id,
+    )
 
     async def tenant_middleware(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        )
+        allow_spoof = client_tenant_spoof_allowed()
         tenant_id: str | None = None
 
         # Always try verified JWT first
@@ -695,8 +731,16 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     if tenant_id:
                         break
 
-        # Spoofable header/cookie only outside production
-        if not tenant_id and not prod:
+        # Opaque session / principal may carry tenant (multi-user)
+        if not tenant_id:
+            try:
+                principal = get_request_principal(request)
+                tenant_id = principal_tenant_id(principal)
+            except Exception:
+                pass
+
+        # Spoofable header/cookie only in single-tenant non-prod labs
+        if not tenant_id and allow_spoof:
             tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("x-tenant-id")
             if not tenant_id:
                 tenant_id = (
@@ -704,8 +748,11 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     or request.cookies.get("x-tenant-id")
                     or request.cookies.get("tenant_id")
                 )
-        elif not tenant_id and prod:
-            # Single-tenant default — never trust client header
+        elif not tenant_id:
+            # Hardened mode — never trust client header
+            tenant_id = "default"
+
+        if not tenant_id:
             tenant_id = "default"
 
         if tenant_id:
@@ -714,7 +761,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         token = set_current_tenant_id(tenant_id)
         try:
             response = await call_next(request)
-            if tenant_id and not prod:
+            if tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
                     response.set_cookie(
                         key="X-Tenant-ID",

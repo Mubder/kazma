@@ -187,7 +187,7 @@ class InProcessWorker(SwarmWorker):
         """
         import json as _json
 
-        MAX_ITERATIONS = 15
+        MAX_ITERATIONS = 20
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
         
@@ -222,6 +222,11 @@ class InProcessWorker(SwarmWorker):
 
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
+
+            # Override the LLM timeout for swarm workers — research tasks
+            # generate long outputs that need more than the default 60s.
+            if hasattr(provider, "config") and hasattr(provider.config, "timeout"):
+                provider.config.timeout = 180.0  # 3 minutes per LLM call
 
             # ── Tool definitions ──────────────────────────────────────
             tool_defs: list[dict[str, Any]] = []
@@ -315,11 +320,30 @@ class InProcessWorker(SwarmWorker):
             _consecutive_tool_failures = 0
 
             for iteration in range(1, MAX_ITERATIONS + 1):
-                response = await provider.chat(
-                    messages,
-                    tools=tool_defs if tool_defs else None,
-                    model=self.model or None,
-                )
+                # Retry the LLM call on transient network errors (timeouts,
+                # connection resets) — common with long research outputs.
+                response = None
+                for _attempt in range(3):
+                    try:
+                        response = await provider.chat(
+                            messages,
+                            tools=tool_defs if tool_defs else None,
+                            model=self.model or None,
+                        )
+                        break
+                    except Exception as _llm_exc:
+                        if _attempt < 2:
+                            logger.warning(
+                                "[InProcessWorker:%s] LLM call failed (attempt %d/3): %s — retrying",
+                                self.name, _attempt + 1, type(_llm_exc).__name__,
+                            )
+                            import asyncio as _aio
+                            await _aio.sleep(2 * (_attempt + 1))  # 2s, 4s backoff
+                        else:
+                            raise  # exhausted retries
+
+                if response is None:
+                    raise RuntimeError("LLM returned no response after retries")
 
                 # Accumulate token/cost across all iterations.
                 # Sum ONLY prompt_tokens + completion_tokens — NOT
@@ -364,7 +388,12 @@ class InProcessWorker(SwarmWorker):
                 }
                 messages.append(assistant_msg)
 
-                # Execute each tool call and append the result.
+                # Execute each tool call; score breaker once per round (batch).
+                from kazma_core.agent.tool_loop_breaker import update_breaker
+
+                batch_results: list[dict[str, Any]] = []
+                batch_meta: list[tuple[Any, dict[str, Any]]] = []
+
                 for tc in response.tool_calls:
                     if _circuit_breaker_tripped:
                         logger.warning(
@@ -372,7 +401,7 @@ class InProcessWorker(SwarmWorker):
                             self.name, tc.name
                         )
                         result = {
-                            "content": "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now.",
+                            "content": "SYSTEM OVERRIDE: Tool blocked due to consecutive hard tool failures. Synthesize final answer now.",
                             "is_error": True,
                         }
                     else:
@@ -393,7 +422,12 @@ class InProcessWorker(SwarmWorker):
                                 f"Please either try a different search query variation, use an alternative tool, "
                                 f"or formulate your final response using available knowledge."
                             )
-                            result = {"content": result_content, "is_error": True}
+                            # Loop intercept is policy/control, not tool death
+                            result = {
+                                "content": result_content,
+                                "is_error": True,
+                                "outcome": "policy",
+                            }
                         else:
                             # 2. Fresh Tool Execution
                             if tool_registry is None:
@@ -404,7 +438,6 @@ class InProcessWorker(SwarmWorker):
                             else:
                                 try:
                                     result = await tool_registry.execute(tc.name, tc.arguments)
-                                    # Record result content for deduplication
                                     executed_tools[tc_key] = result.get("content", "")
                                 except Exception:
                                     logger.exception(
@@ -416,32 +449,28 @@ class InProcessWorker(SwarmWorker):
                                         "is_error": True,
                                     }
 
-                        # 3. Universal Empty-Result Circuit Breaker
-                        content_str = str(result.get("content", "")).strip()
-                        is_empty_or_denied = (
-                            not content_str or 
-                            content_str == "[]" or 
-                            "no results" in content_str.lower() or 
-                            "denied by user" in content_str.lower() or
-                            result.get("is_error", False)
+                    batch_results.append(result)
+                    batch_meta.append((tc, result))
+
+                # 3. Typed breaker — max +1 hard credit per iteration batch
+                if batch_results and not _circuit_breaker_tripped:
+                    bstate, stamped = update_breaker(
+                        _consecutive_tool_failures, batch_results
+                    )
+                    _consecutive_tool_failures = bstate.consecutive_hard_rounds
+                    if bstate.tripped:
+                        logger.warning(
+                            "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive hard rounds.",
+                            self.name,
+                            _consecutive_tool_failures,
                         )
-                        
-                        if is_empty_or_denied:
-                            _consecutive_tool_failures += 1
-                        else:
-                            _consecutive_tool_failures = 0
+                        _circuit_breaker_tripped = True
+                    batch_results = stamped
+                    batch_meta = [
+                        (tc, stamped[i]) for i, (tc, _) in enumerate(batch_meta)
+                    ]
 
-                        if _consecutive_tool_failures >= 2:
-                            logger.warning(
-                                "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive tool failures for %s.",
-                                self.name, _consecutive_tool_failures, tc.name
-                            )
-                            result["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                            result["is_error"] = True
-                            _circuit_breaker_tripped = True
-                            # We do NOT break here. The tool loop must continue to process
-                            # remaining tool calls in the batch to avoid HTTP 400 errors.
-
+                for tc, result in batch_meta:
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -449,12 +478,17 @@ class InProcessWorker(SwarmWorker):
                     })
 
             else:
-                # Iteration limit exhausted — return the last response we got.
-                final_output = (
-                    response.content
-                    if hasattr(response, "content") and response.content
-                    else "Max tool-use iterations reached without a final answer."
-                )
+                # Iteration limit exhausted — make one final LLM call WITHOUT
+                # tools to force a text answer from whatever was collected.
+                logger.info("[InProcessWorker:%s] Max iterations hit — forcing final synthesis", self.name)
+                try:
+                    _final_msgs = list(messages) + [{"role": "user", "content": "Provide your complete final answer now based on all the research above. Do not call any tools. Write the full report."}]
+                    _final_resp = await provider.chat(_final_msgs, tools=None, model=self.model or None)
+                    final_output = _final_resp.content or last_content or "Max tool-use iterations reached without a final answer."
+                    total_tokens += int(getattr(_final_resp, "usage", {}).get("prompt_tokens", 0)) + int(getattr(_final_resp, "usage", {}).get("completion_tokens", 0))
+                    total_cost += getattr(_final_resp, "cost_usd", 0.0) or 0.0
+                except Exception:
+                    final_output = last_content or "Max tool-use iterations reached without a final answer."
 
             return {
                 "worker": self.name,

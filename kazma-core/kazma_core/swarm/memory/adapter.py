@@ -8,8 +8,13 @@ Architecture:
     query("fix auth bug")
     → asyncio.gather(L1.query(), L2.query(), L3.query(), L4.query())
     → RRF blending (k=60)
-    → dedup by content hash
+    → drop empty-content hits
     → top-N results
+
+``store()`` / ``index()`` are **fail-closed**: they only return a document
+id when at least one durable layer (L1 Chroma, L3 FTS5, or L4 sqlite-vec)
+confirmed a write. L2 graph alone is structural and does not count as
+durable recall storage.
 """
 
 from __future__ import annotations
@@ -26,6 +31,8 @@ __all__ = ["MemoryHit", "UnifiedMemoryAdapter", "get_adapter", "set_adapter"]
 logger = logging.getLogger(__name__)
 
 _RRF_K = 60  # smoothing constant
+_CHUNK_SIZE = 2000
+_CHUNK_OVERLAP = 200
 
 
 @dataclass(slots=True)
@@ -129,19 +136,29 @@ class UnifiedMemoryAdapter:
         if not all_results:
             return []
 
-        # RRF blending
-        blended = self._rrf_blend(all_results, limit)
+        # RRF blending — over-fetch so empty-content drops still fill top-N
+        blended = self._rrf_blend(all_results, limit * 3)
 
-        # Convert to MemoryHit objects
+        # Convert to MemoryHit objects; drop empty content (L2 noise, failed
+        # get_documents, etc.) so chat injection never shows blank rows.
         hits: list[MemoryHit] = []
         for uid, score, content, source, metadata in blended:
+            body = (content or "").strip()
+            if not body:
+                # L2 structural hits may only have metadata.content
+                if isinstance(metadata, dict):
+                    body = str(metadata.get("content") or "").strip()
+            if not body:
+                continue
             hits.append(MemoryHit(
                 id=uid,
-                content=content or "",
+                content=body,
                 score=score,
                 source_layer=source or "unknown",
                 metadata=metadata or {},
             ))
+            if len(hits) >= limit:
+                break
         return hits
 
     # ── Per-layer query helpers ─────────────────────────────────────────
@@ -162,29 +179,56 @@ class UnifiedMemoryAdapter:
             return []
 
     async def _query_l2(self, text: str, tags: list[str] | None, limit: int) -> list[tuple[str, float, str, str, dict]]:
-        """Knowledge Graph structural query."""
+        """Property-graph query: FTS + multi-hop neighbors + type/tag lookup."""
         try:
             tenant_id = self._get_tenant_id()
             results: list[tuple[str, float, str, str, dict]] = []
-            words = text.lower().split()
-            for tag in (tags or []) + words:
-                entities = self._l2.query_by_type(tag)
-                if entities:
-                    for e in entities[:limit]:
-                        # Tenant isolation: skip entities belonging to a different tenant
-                        if tenant_id and e.get("properties", {}).get("tenant_id") not in (None, tenant_id):
-                            continue
-                        results.append(
-                            (e["id"], 0.9, str(e.get("properties", {})), "L2:graph", {})
-                        )
-                related = self._l2.query_related(tag, depth=2)
-                if related:
-                    for r in related[:limit]:
-                        if tenant_id and r.get("properties", {}).get("tenant_id") not in (None, tenant_id):
-                            continue
-                        results.append(
-                            (r["id"], 0.7 / r.get("depth", 1), "", "L2:graph", r)
-                        )
+            seen: set[str] = set()
+
+            def _accept(ent: dict, base_score: float) -> None:
+                eid = str(ent.get("id") or "")
+                if not eid or eid in seen:
+                    return
+                props = ent.get("properties") if isinstance(ent.get("properties"), dict) else {}
+                if tenant_id and props.get("tenant_id") not in (None, tenant_id):
+                    if ent.get("tenant_id") not in (None, tenant_id):
+                        return
+                content = str(
+                    ent.get("content")
+                    or props.get("content")
+                    or ent.get("label")
+                    or ""
+                ).strip()
+                if not content:
+                    return
+                seen.add(eid)
+                meta = dict(props)
+                meta.setdefault("entity_type", ent.get("type") or "")
+                if ent.get("relation"):
+                    meta["relation"] = ent["relation"]
+                results.append((eid, base_score, content, "L2:graph", meta))
+
+            # Primary: FTS over the SQLite property graph
+            if hasattr(self._l2, "search"):
+                for ent in self._l2.search(text, limit=limit * 2, tenant_id=tenant_id) or []:
+                    score = float(ent.get("score") or 0.9)
+                    _accept(ent, max(score, 0.5))
+
+            # Multi-hop expansion from FTS seeds / tags
+            seeds = list(seen)[:5]
+            for tag in list(tags or []):
+                seeds.append(str(tag))
+            for seed in seeds:
+                for r in self._l2.query_related(seed, depth=2) or []:
+                    depth = max(int(r.get("depth", 1)), 1)
+                    _accept(r, 0.75 / depth)
+
+            # Type lookup for explicit tags
+            for tag in tags or []:
+                for e in self._l2.query_by_type(str(tag)) or []:
+                    _accept(e, 0.85)
+
+            results.sort(key=lambda x: x[1], reverse=True)
             return results[:limit]
         except Exception as exc:
             logger.warning("[Adapter] L2 query failed: %s", exc)
@@ -193,27 +237,29 @@ class UnifiedMemoryAdapter:
     async def _query_l3(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
         """FTS5 lexical query — fetches document content by ID after scoring.
 
-        Applies tenant isolation via post-filter on metadata when
-        ``tenant_id`` is set in context.
+        Hard tenant isolation (P6): when ``tenant_id`` is set in context it is
+        pushed into the backend search so only that tenant's rows return.
         """
         try:
             tenant_id = self._get_tenant_id()
-            results = await self._l3.lexical_search(text, limit=limit * 2)  # fetch extra for filtering
+            # Prefer signature that accepts tenant_id; fall back for stubs.
+            try:
+                results = await self._l3.lexical_search(
+                    text, limit=limit * 2, tenant_id=tenant_id
+                )
+            except TypeError:
+                results = await self._l3.lexical_search(text, limit=limit * 2)
             if not results:
                 return []
-            # Fetch document text for the scored IDs
             ids = [r[0] for r in results]
             texts = await self._l3.get_texts(ids) if hasattr(self._l3, "get_texts") else {}
-            # Post-filter by tenant if needed
             out: list[tuple[str, float, str, str, dict]] = []
             for r in results:
                 uid = r[0]
+                meta: dict[str, Any] = {}
                 if tenant_id:
-                    # Check metadata for tenant — try to parse it from stored text
-                    content = texts.get(uid, "")
-                    # If we can't determine tenant from metadata, include it
-                    # (safe default: don't over-filter)
-                out.append((uid, float(r[1]), texts.get(uid, ""), "L3:fts5", {}))
+                    meta["tenant_id"] = tenant_id
+                out.append((uid, float(r[1]), texts.get(uid, ""), "L3:fts5", meta))
                 if len(out) >= limit:
                     break
             return out
@@ -309,56 +355,250 @@ class UnifiedMemoryAdapter:
         except Exception:
             return None
 
+    @staticmethod
+    def _doc_id(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _chunk_text(text: str, chunk_size: int = _CHUNK_SIZE, overlap: int = _CHUNK_OVERLAP) -> list[str]:
+        """Split long text into overlapping chunks (matches VectorMemory policy)."""
+        if len(text) <= chunk_size:
+            return [text]
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            if end < len(text):
+                boundary = text.rfind("\n", start, end)
+                if boundary > start + chunk_size // 2:
+                    end = boundary
+            piece = text[start:end].strip()
+            if piece:
+                chunks.append(piece)
+            start = end - overlap
+            if start < 0:
+                start = 0
+            if end >= len(text):
+                break
+        return chunks or [text[:chunk_size]]
+
     async def index(
         self,
         text: str,
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
-    ) -> None:
-        """Index content across all available layers (async parallel)."""
-        meta = metadata or {}
+    ) -> dict[str, Any]:
+        """Index content across all available layers (async parallel).
+
+        Returns a result dict::
+
+            {"id": str, "durable_ok": bool, "layers": {"l1": bool, ...}}
+
+        ``durable_ok`` is True only when L1, L3, or L4 confirmed a write.
+        """
+        body = (text or "").strip()
+        uid = self._doc_id(body) if body else ""
+        result: dict[str, Any] = {
+            "id": uid,
+            "durable_ok": False,
+            "layers": {"l1": False, "l2": False, "l3": False, "l4": False},
+        }
+        if not body:
+            return result
+
+        meta = dict(metadata or {})
         tenant_id = self._get_tenant_id()
         if tenant_id:
             meta["tenant_id"] = tenant_id
-        tasks = []
 
-        # L1 — ChromaDB
+        tasks: list[tuple[str, Any]] = []
+
         if self._l1 and getattr(self._l1, "available", False):
-            tasks.append(self._index_l1(text, meta))
-
-        # L2 — Knowledge Graph
+            tasks.append(("l1", self._index_l1(body, meta, uid)))
         if self._l2 and getattr(self._l2, "available", False):
-            tasks.append(self._index_l2(text, meta, tags))
-
-        # L3 — FTS5
+            tasks.append(("l2", self._index_l2(body, meta, tags, uid)))
         if self._l3:
-            tasks.append(self._index_l3(text, meta))
-
-        # L4 — sqlite-vec
+            tasks.append(("l3", self._index_l3(body, meta, uid)))
         if self._l4 and getattr(self._l4, "available", False):
-            tasks.append(self._index_l4(text, meta))
+            tasks.append(("l4", self._index_l4(body, meta, uid)))
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        if not tasks:
+            logger.warning("[Adapter] index skipped — no layers available")
+            return result
 
-    async def _index_l1(self, text: str, meta: dict) -> None:
-        uid = hashlib.sha256(text.encode()).hexdigest()[:16]
-        self._l1.index(uid, text, meta)
+        outcomes = await asyncio.gather(
+            *(t[1] for t in tasks), return_exceptions=True
+        )
+        for (layer, _), outcome in zip(tasks, outcomes):
+            ok = False
+            if isinstance(outcome, Exception):
+                logger.warning("[Adapter] %s index failed: %s", layer, outcome)
+            else:
+                ok = bool(outcome)
+            result["layers"][layer] = ok
 
-    async def _index_l2(self, text: str, meta: dict, tags: list[str] | None) -> None:
-        uid = hashlib.sha256(text.encode()).hexdigest()[:16]
-        self._l2.add_entity(uid, "memory_chunk", {"content": text[:200], **meta})
-        for tag in (tags or []):
-            self._l2.add_relation(uid, tag, "tagged")
+        durable = bool(
+            result["layers"]["l1"]
+            or result["layers"]["l3"]
+            or result["layers"]["l4"]
+        )
+        result["durable_ok"] = durable
+        if not durable:
+            logger.warning(
+                "[Adapter] index wrote no durable layer (l1/l3/l4) for id=%s layers=%s",
+                uid,
+                result["layers"],
+            )
+        return result
 
-    async def _index_l3(self, text: str, meta: dict) -> None:
-        uid = hashlib.sha256(text.encode()).hexdigest()[:16]
-        await self._l3.index({"id": uid, "content": text, "metadata": meta, "timestamp": 0, "source": "memory"})
+    async def _index_l1(self, text: str, meta: dict, uid: str) -> bool:
+        """Index into Chroma with chunking for long documents."""
+        try:
+            chunks = self._chunk_text(text)
+            any_ok = False
+            for i, chunk in enumerate(chunks):
+                if len(chunks) == 1:
+                    cid = uid
+                    chunk_meta = dict(meta)
+                else:
+                    cid = hashlib.sha256(f"{uid}:{i}".encode()).hexdigest()[:16]
+                    chunk_meta = {
+                        **meta,
+                        "chunk_index": i,
+                        "chunk_total": len(chunks),
+                        "parent_id": uid,
+                    }
+                if self._l1.index(cid, chunk, chunk_meta):
+                    any_ok = True
+            return any_ok
+        except Exception as exc:
+            logger.warning("[Adapter] L1 index failed: %s", exc)
+            return False
 
-    async def _index_l4(self, text: str, meta: dict) -> None:
-        uid = hashlib.sha256(text.encode()).hexdigest()[:16]
-        worker = meta.get("worker", "default")
-        self._l4.index(worker, uid, text)
+    async def _index_l2(self, text: str, meta: dict, tags: list[str] | None, uid: str) -> bool:
+        """Structural index: memory chunk + user hub + tags + heuristic SPO."""
+        try:
+            # Only JSON-safe scalar props on the graph (avoid nested blobs)
+            safe_meta: dict[str, Any] = {}
+            for k, v in (meta or {}).items():
+                if k in ("content", "label"):
+                    continue
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    safe_meta[str(k)] = v
+                else:
+                    safe_meta[str(k)] = str(v)[:200]
+
+            self._l2.add_entity(
+                uid,
+                "memory_chunk",
+                {
+                    "content": text[:2000],
+                    "label": (text[:80] if text else uid),
+                    **safe_meta,
+                },
+            )
+            # Link chunk to user hub
+            if hasattr(self._l2, "add_relation"):
+                try:
+                    self._l2.add_entity(
+                        "user", "person", {"label": "user", "content": "chat user"}
+                    )
+                    self._l2.add_relation(
+                        "user",
+                        uid,
+                        "has_memory",
+                        {"source": str(meta.get("source", "memory") or "memory")},
+                    )
+                except Exception:
+                    logger.debug("[Adapter] L2 user hub link failed", exc_info=True)
+
+            for tag in tags or []:
+                t = str(tag).strip()
+                if not t:
+                    continue
+                self._l2.add_entity(t, "tag", {"label": t, "content": t})
+                self._l2.add_relation(uid, t, "tagged")
+
+            # Heuristic SPO so L2 is not empty when consolidator LLM is skipped
+            try:
+                self._index_l2_heuristic_triples(text)
+            except Exception:
+                logger.debug("[Adapter] L2 heuristic triples failed", exc_info=True)
+
+            return True
+        except Exception as exc:
+            logger.warning("[Adapter] L2 index failed: %s", exc)
+            return False
+
+    def _index_l2_heuristic_triples(self, text: str) -> None:
+        """Promote durable cues into graph triples on every store (no LLM)."""
+        if not self._l2 or not hasattr(self._l2, "upsert_triple"):
+            return
+        body = (text or "").strip()
+        if len(body) < 8:
+            return
+        try:
+            from kazma_core.memory.consolidator import extract_heuristic
+
+            extracted = extract_heuristic(body, "")
+        except Exception:
+            return
+        for t in extracted.get("triples") or []:
+            if not isinstance(t, dict):
+                continue
+            s = str(t.get("subject") or "").strip()
+            p = str(t.get("predicate") or "").strip()
+            o = str(t.get("object") or "").strip()
+            if not (s and p and o):
+                continue
+            fact = f"{s} {p} {o}"
+            try:
+                self._l2.upsert_triple(
+                    s,
+                    p,
+                    o,
+                    fact=fact[:240],
+                    extra={"source": "adapter_heuristic"},
+                )
+            except Exception:
+                logger.debug("[Adapter] upsert_triple failed for %s-%s-%s", s, p, o)
+
+    async def _index_l3(self, text: str, meta: dict, uid: str) -> bool:
+        """Lexical + optional embedding BLOB into memory.db (real timestamps)."""
+        try:
+            from kazma_core.swarm.memory.embedder import (
+                encode_text_to_blob,
+                resolve_unix_timestamp,
+            )
+
+            ts = resolve_unix_timestamp(meta)
+            # Stamp metadata so consumers that only read JSON still see time
+            meta_out = dict(meta or {})
+            meta_out.setdefault("timestamp", ts)
+            # Encode off the event loop (local MiniLM can be multi-second first load)
+            emb_blob = await asyncio.to_thread(encode_text_to_blob, text)
+
+            doc: dict[str, Any] = {
+                "id": uid,
+                "content": text,
+                "metadata": meta_out,
+                "timestamp": ts,
+                "source": str(meta_out.get("source", "memory") or "memory"),
+                "embedding": emb_blob,
+            }
+            doc_id = await self._l3.index(doc)
+            return bool(doc_id)
+        except Exception as exc:
+            logger.warning("[Adapter] L3 index failed: %s", exc)
+            return False
+
+    async def _index_l4(self, text: str, meta: dict, uid: str) -> bool:
+        try:
+            worker = meta.get("worker", "default")
+            return bool(self._l4.index(worker, uid, text))
+        except Exception as exc:
+            logger.warning("[Adapter] L4 index failed: %s", exc)
+            return False
 
 
     # ── Soul Evolution logging ─────────────────────────────────────────
@@ -430,16 +670,22 @@ class UnifiedMemoryAdapter:
         ]
 
     async def store(self, text: str, metadata: dict[str, Any] | None = None) -> str:
-        """Store content across all available layers (chat compatibility wrapper).
+        """Store content across durable layers. Fail-closed.
 
-        Delegates to index() with extracted tags from metadata.
+        Returns the document id only when L1, L3, or L4 confirmed a write.
+        Returns ``""`` if nothing durable was persisted (so tools never lie
+        about a successful store).
         """
         try:
-            # Extract tags if present for L2/L4 indexing
-            tags = metadata.get("tags", None) if isinstance(metadata, dict) else None
-            await self.index(text, metadata=metadata, tags=tags)
-            import hashlib
-            return hashlib.sha256(text.encode()).hexdigest()[:16]
+            tags = None
+            if isinstance(metadata, dict):
+                raw_tags = metadata.get("tags")
+                if isinstance(raw_tags, list):
+                    tags = [str(t) for t in raw_tags]
+            result = await self.index(text, metadata=metadata, tags=tags)
+            if result.get("durable_ok"):
+                return str(result.get("id") or "")
+            return ""
         except Exception:
             logger.exception("UnifiedMemoryAdapter.store failed")
             return ""
@@ -501,8 +747,8 @@ def get_adapter() -> UnifiedMemoryAdapter | None:
     except Exception:
         chroma = None
     try:
-        from kazma_core.swarm.memory.graph import KnowledgeGraph
-        graph = KnowledgeGraph()
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+        graph = get_knowledge_graph()
     except Exception:
         graph = None
     try:

@@ -29,18 +29,21 @@ class KazmaFooter(Footer):
     KazmaFooter {
         dock: bottom;
         height: 1;
-        background: $primary 18%;
-        color: $primary;
+        background: $panel;
+        color: $text-muted;
+        border-top: solid $border;
     }
 
     FooterKey {
-        background: $primary 10%;
-        color: $text;
+        background: transparent;
+        color: $text-muted;
     }
 
     FooterKey > .footer-key--key {
         color: $primary;
         text-style: bold;
+        background: $primary 12%;
+        padding: 0 1;
     }
     """
 

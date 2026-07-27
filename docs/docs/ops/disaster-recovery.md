@@ -23,7 +23,7 @@ description: Disaster Recovery — production ops
 | LangGraph checkpoints | `kazma-data/checkpoints.db` | High — conversation continuity |
 | Chat sessions | `kazma-data/chat_sessions.db` (or configured path) | High |
 | Swarm tasks | `kazma-data/swarm_tasks.db` | Medium–High |
-| Memory / vectors | `kazma-data/vector*`, `memory.db` | Medium |
+| Memory / vectors / graph | `kazma-data/vector_memory/`, `memory.db`, `vector.db`, `knowledge_graph.db` | Medium |
 | Cron jobs | `kazma-data/cron.db` | Medium |
 | Opaque web sessions | ConfigStore / Postgres | Low (users re-login) |
 

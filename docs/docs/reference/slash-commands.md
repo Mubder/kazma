@@ -98,16 +98,24 @@ The corrected response text goes here.
 
 ### `/replay`
 
-Time-travel debugging: list snapshots, replay from a specific iteration, compare two runs, or clear snapshot history.
+Time-travel debugging: list snapshots, restore from a specific iteration, compare two runs, or clear snapshot history. Snapshots are captured after every supervisor iteration automatically.
 
 Sub-commands:
 
 | Command | Description |
 |:---|:---|
 | `/replay list` | Show all snapshots for the current thread |
-| `/replay <N>` | Replay from iteration N |
-| `/replay compare <A> <B>` | Diff two replay runs |
+| `/replay <N>` | **Restore** — rewind the live thread to iteration N (later turns are lost; use `/fork` to preserve them) |
+| `/replay compare <A> <B>` | Diff two snapshots (messages, cost, model, routing) |
 | `/replay clear` | Purge all snapshots for this thread |
+
+### `/fork`
+
+Branch from a snapshot into a **new thread** — the original stays intact.
+
+| Command | Description |
+|:---|:---|
+| `/fork <N>` | Fork from iteration N into a new thread (seeded with the snapshot state + session context; appears in the Web UI sidebar) |
 
 **Usage:**
 ```
@@ -135,8 +143,7 @@ Sub-commands:
 🗑️ Cleared 5 snapshot(s) for this thread.
 ```
 
-**Dependency:** Requires `kazma_core.time_travel.ReplayEngine`. If not available:
-```
+**Dependency:** The `SnapshotRecorder` is wired into all graph-build sites by default (enabled via `time_travel.enabled: true` in `kazma.yaml`). If disabled:
 ⏳ Time travel not yet available.
 ```
 

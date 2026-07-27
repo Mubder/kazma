@@ -60,6 +60,10 @@ __all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "get_vector_me
 
 logger = logging.getLogger(__name__)
 
+# Strong references for background dispatch tasks so the GC doesn't
+# kill them before they complete (and persist to TaskStore).
+_pending_dispatch_tasks: set = set()
+
 #: ContextVar set by the graph's interrupt() gate after HITL approval.
 #: This is the ONLY trusted source for the "already approved" flag —
 #: the ``_hitl_approved`` key in LLM-supplied tool arguments is always
@@ -110,13 +114,14 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     Agent Skills directories so skill resources load on demand.
     """
     try:
-        from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _get_workspace
+        from kazma_core.tools.file_write import _get_workspace
+        from kazma_core.workspace.binding import allow_absolute_paths
     except (ImportError, OSError):
         return f"Safety: workspace module unavailable — {op} denied. Path: {path}"
-    
+
     workspace = _get_workspace().resolve()
     resolved_p = p.expanduser().resolve()
-    if not _ALLOW_ABSOLUTE:
+    if not allow_absolute_paths():
         try:
             resolved_p.relative_to(workspace)
         except ValueError:
@@ -477,12 +482,31 @@ class LocalToolRegistry:
 
         for attempt in range(1, max_attempts + 1):
             try:
+                # Filter arguments to only those the function accepts. The LLM
+                # sometimes injects extra keys (e.g. "raw") that aren't in the
+                # function signature, causing TypeError on **kwargs splat.
+                import inspect as _inspect
+                try:
+                    sig = _inspect.signature(tool.func)
+                    valid_params = {
+                        k: v for k, v in arguments.items()
+                        if k in sig.parameters
+                    }
+                    if len(valid_params) < len(arguments):
+                        dropped = set(arguments) - set(valid_params)
+                        logger.debug(
+                            "Tool '%s': dropped unexpected args: %s",
+                            tool_name, dropped,
+                        )
+                except (ValueError, TypeError):
+                    valid_params = arguments
+
                 if tool.is_async:
-                    result = await tool.func(**arguments)
+                    result = await tool.func(**valid_params)
                 else:
                     # Run sync functions in a thread pool
                     loop = asyncio.get_running_loop()
-                    result = await loop.run_in_executor(None, lambda: tool.func(**arguments))
+                    result = await loop.run_in_executor(None, lambda: tool.func(**valid_params))
 
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.info("Tool '%s' executed in %.0fms", tool_name, duration_ms)
@@ -714,21 +738,292 @@ class LocalToolRegistry:
             except json.JSONDecodeError:
                 meta = {"raw": metadata}
             # Route through the unified adapter so stored memories are visible
-            # to per-turn RAG retrieval. Falls back to VectorMemory.
+            # to per-turn RAG retrieval. Fail-closed: never claim success
+            # without a durable layer write. Falls back to VectorMemory.
             try:
                 from kazma_core.swarm.memory.adapter import get_adapter
 
                 adapter = get_adapter()
                 if adapter is not None:
                     doc_id = await adapter.store(text, metadata=meta)
-                    return f"Stored memory (id={doc_id})"
+                    if doc_id:
+                        return f"Stored memory (id={doc_id})"
+                    # Adapter present but no durable write — try VectorMemory
+                    # before reporting failure (covers partial layer outages).
             except Exception:
                 pass
             mem = get_vector_memory()
             if mem is None:
-                return "Error: memory not initialized. RAG not available."
-            doc_id = mem.add(text=text, metadata=meta)
-            return f"Stored memory (id={doc_id})"
+                return (
+                    "Error: memory store failed — no durable layer available "
+                    "(install chromadb/sentence-transformers via pip install -e '.[rag]', "
+                    "or check L3 FTS / L4 sqlite-vec health)."
+                )
+            try:
+                doc_id = mem.add(text=text, metadata=meta)
+                if doc_id:
+                    return f"Stored memory (id={doc_id})"
+            except Exception as exc:
+                return f"Error: memory store failed — {exc}"
+            return "Error: memory store failed — write returned empty id."
+
+        @self.register(
+            description=(
+                "List Knowledge Libraries (documentation corpora) available for "
+                "knowledge_search. Shows id, name, chunk_count, seed_url."
+            ),
+            category="knowledge",
+        )
+        async def knowledge_list_libraries() -> str:
+            try:
+                from kazma_core.stores.knowledge import get_knowledge_store
+
+                libs = get_knowledge_store().list_libraries()
+                if not libs:
+                    return (
+                        "No knowledge libraries yet. Create one with "
+                        "knowledge_create_library, then knowledge_ingest_url."
+                    )
+                lines = [f"# Knowledge libraries ({len(libs)})"]
+                for lib in libs:
+                    lines.append(
+                        f"- **{lib.get('id')}** — {lib.get('name') or '(unnamed)'} "
+                        f"({lib.get('chunk_count', 0)} chunks)"
+                        + (
+                            f" seed={lib.get('seed_url')}"
+                            if lib.get("seed_url")
+                            else ""
+                        )
+                    )
+                return "\n".join(lines)
+            except Exception as exc:
+                return f"Error: list libraries failed — {exc}"
+
+        @self.register(
+            description=(
+                "Create a Knowledge Library (empty corpus) for documentation RAG. "
+                "library_id should be a short slug (e.g. smoke_realwork_kb). "
+                "Then call knowledge_ingest_url to add pages. Search with knowledge_search."
+            ),
+            category="knowledge",
+        )
+        async def knowledge_create_library(
+            library_id: str,
+            name: str = "",
+            description: str = "",
+            seed_url: str = "",
+        ) -> str:
+            try:
+                from kazma_core.stores.knowledge import get_knowledge_store
+
+                store = get_knowledge_store()
+                lib_id = (library_id or "").strip()
+                if not lib_id:
+                    return "Error: library_id is required."
+                display = (name or "").strip() or lib_id.replace("_", " ").replace("-", " ")
+                existing = store.get_library(lib_id)
+                if existing:
+                    return (
+                        f"Library already exists: id={existing.get('id')} "
+                        f"name={existing.get('name')!r} "
+                        f"chunks={existing.get('chunk_count', 0)}. "
+                        "Use knowledge_ingest_url to add pages."
+                    )
+                created = store.create_library(
+                    lib_id,
+                    display,
+                    description=description or "",
+                    seed_url=seed_url or "",
+                )
+                return (
+                    f"Created knowledge library id={created.get('id')} "
+                    f"name={created.get('name')!r}. "
+                    "Next: knowledge_ingest_url(library_id, url)."
+                )
+            except Exception as exc:
+                return f"Error: create library failed — {exc}"
+
+        @self.register(
+            description=(
+                "Ingest a single documentation page URL into a Knowledge Library "
+                "(fetch → chunk → index). Creates the library if missing. "
+                "For multi-page trees prefer knowledge_ingest_site with a small max_pages. "
+                "Then knowledge_search to retrieve. SSRF-safe (blocks private IPs)."
+            ),
+            category="knowledge",
+        )
+        async def knowledge_ingest_url(
+            library_id: str,
+            url: str,
+            document_title: str = "",
+            name: str = "",
+        ) -> str:
+            try:
+                from kazma_core.stores.knowledge import get_knowledge_store
+                from kazma_core.stores.knowledge_ingest import ingest_url
+
+                store = get_knowledge_store()
+                lib_id = (library_id or "").strip()
+                page = (url or "").strip()
+                if not lib_id or not page:
+                    return "Error: library_id and url are required."
+                if not store.get_library(lib_id):
+                    display = (name or "").strip() or lib_id.replace("_", " ")
+                    store.create_library(
+                        lib_id, display, description="auto-created by knowledge_ingest_url", seed_url=page
+                    )
+                result = await ingest_url(
+                    lib_id, page, document_title=(document_title or "").strip()
+                )
+                lib = store.get_library(lib_id) or {}
+                if result.pages_failed and not result.chunks_new:
+                    err = "; ".join(result.errors[:3]) if result.errors else "fetch failed"
+                    return f"Error: ingest failed for {page!r} — {err}"
+                return (
+                    f"Ingested page into library '{lib_id}': "
+                    f"fetched={result.pages_fetched} failed={result.pages_failed} "
+                    f"chunks_new={result.chunks_new} chunks_skipped={result.chunks_skipped}. "
+                    f"Library total chunks={lib.get('chunk_count', '?')}. "
+                    f"Search with knowledge_search(query, library={lib_id!r})."
+                )
+            except Exception as exc:
+                return f"Error: knowledge_ingest_url failed — {exc}"
+
+        @self.register(
+            description=(
+                "Ingest a small documentation site tree into a Knowledge Library "
+                "(sitemap/BFS discover + fetch + chunk + index). Caps max_pages "
+                "(default 5, hard max 15) so agent turns stay bounded. "
+                "Creates the library if missing. Prefer knowledge_ingest_url for one page."
+            ),
+            category="knowledge",
+        )
+        async def knowledge_ingest_site(
+            library_id: str,
+            seed_url: str,
+            max_pages: int = 5,
+            name: str = "",
+        ) -> str:
+            try:
+                from kazma_core.stores.knowledge import get_knowledge_store
+                from kazma_core.stores.knowledge_ingest import ingest_site
+
+                store = get_knowledge_store()
+                lib_id = (library_id or "").strip()
+                seed = (seed_url or "").strip()
+                if not lib_id or not seed:
+                    return "Error: library_id and seed_url are required."
+                cap = max(1, min(int(max_pages or 5), 15))
+                if not store.get_library(lib_id):
+                    display = (name or "").strip() or lib_id.replace("_", " ")
+                    store.create_library(
+                        lib_id,
+                        display,
+                        description="auto-created by knowledge_ingest_site",
+                        seed_url=seed,
+                    )
+                final_msg = ""
+                last = None
+                async for upd in ingest_site(lib_id, seed, max_pages=cap):
+                    last = upd
+                    final_msg = getattr(upd, "message", "") or final_msg
+                lib = store.get_library(lib_id) or {}
+                discovered = getattr(last, "discovered", 0) if last else 0
+                fetched = getattr(last, "fetched", 0) if last else 0
+                failed = getattr(last, "failed", 0) if last else 0
+                chunks_new = getattr(last, "ingested", 0) if last else 0
+                return (
+                    f"Site ingest finished for library '{lib_id}' (max_pages={cap}). "
+                    f"discovered={discovered} fetched={fetched} failed={failed} "
+                    f"chunks_indexed≈{chunks_new}. "
+                    f"Library total chunks={lib.get('chunk_count', '?')}. "
+                    f"Last: {final_msg or 'done'}. "
+                    f"Search with knowledge_search(query, library={lib_id!r})."
+                )
+            except Exception as exc:
+                return f"Error: knowledge_ingest_site failed — {exc}"
+
+        @self.register(
+            description=(
+                "Search an ingested Knowledge Library (documentation corpus) for "
+                "technical reference material — API endpoints, parameters, error codes, "
+                "configuration, examples. Use this when the user asks about a documented "
+                "system (e.g. the WhatsApp Cloud API) and you need authoritative info with "
+                "sources. Each hit includes the source URL and section so you can cite it. "
+                "Leave `library` empty to search across all libraries. "
+                "If none exist, create with knowledge_create_library + knowledge_ingest_url."
+            ),
+            category="knowledge",
+        )
+        async def knowledge_search(query: str, library: str = "", top_k: int = 5) -> str:
+            # Knowledge Libraries are a managed RAG corpus, decoupled from
+            # chat memory.  See `kazma_core/stores/knowledge_index.py`.
+            try:
+                from kazma_core.stores.knowledge import get_knowledge_store
+                from kazma_core.stores.knowledge_index import get_knowledge_index
+
+                store = get_knowledge_store()
+                index = get_knowledge_index()
+
+                # Pick target library/libraries.
+                lib_id = (library or "").strip()
+                if lib_id:
+                    if not store.get_library(lib_id):
+                        return (
+                            f"Error: knowledge library '{lib_id}' not found. "
+                            "Create it with knowledge_create_library or "
+                            "knowledge_ingest_url (auto-creates)."
+                        )
+                    hits = await index.search(query, lib_id, top_k=top_k)
+                else:
+                    libs = store.list_libraries()
+                    if not libs:
+                        return (
+                            "No knowledge libraries have been ingested yet. "
+                            "Create one: knowledge_create_library(id, name), then "
+                            "knowledge_ingest_url(id, url). Or use the /knowledge UI / /kb add."
+                        )
+                    # True cross-library RRF: pool raw per-layer results from
+                    # every library into one fused ranking (not flatten+sort,
+                    # which would double-count RRF contributions).
+                    hits = await index.search_all(
+                        query, [l["id"] for l in libs], top_k=top_k,
+                    )
+
+                if not hits:
+                    scope = f"library '{lib_id}'" if lib_id else "any library"
+                    return f"No knowledge hits in {scope} for: {query!r}"
+
+                lines = [f"# Knowledge search — {len(hits)} hit(s)"]
+                for i, h in enumerate(hits, start=1):
+                    cite = f"{h.source_url}"
+                    if h.section_header:
+                        cite += f" — {h.section_header}"
+                    lines.append(f"\n## [{i}] score={h.score:.4f} — {cite}")
+                    if h.document_title:
+                        lines.append(f"*(page: {h.document_title})*")
+                    lines.append(h.content)
+                # Citation directive: the user wants every KB-derived answer
+                # to carry a visible footer naming the source library, so they
+                # can tell where the information came from. Per-item libraries
+                # vary when searching across libraries; collect the unique set.
+                cited_libs = sorted({h.library_id for h in hits})
+                if len(cited_libs) == 1:
+                    lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
+                else:
+                    lib_footer = (
+                        "📚 This data is from Knowledge libraries: "
+                        + ", ".join(f'"{l}"' for l in cited_libs) + "."
+                    )
+                lines.append(
+                    "\n---\n"
+                    + lib_footer + "\n"
+                    "You MUST include this footer verbatim at the end of any answer "
+                    "that uses the material above."
+                )
+                return "\n".join(lines)
+            except Exception as exc:
+                return f"Error: knowledge search failed — {exc}"
 
         @self.register(
             description="Get the current date, time, and timezone in ISO-8601 format.",
@@ -782,32 +1077,88 @@ class LocalToolRegistry:
         @self.register(
             description=(
                 "Read a configuration setting from the persistent settings store. "
-                "Use this to check current values of settings like allowed users, "
-                "tokens, or preferences."
+                "Returns a structured status so you can tell missing vs unset vs set: "
+                "status=missing (key never stored), unset (key present but empty), "
+                "set (has a value), or secret (value exists but is hidden). "
+                "Use for allowed users, agent.personality, agent.max_iterations, etc."
             ),
             category="system",
         )
         async def config_read(key: str) -> str:
+            import json as _json
+
             from kazma_core.config_store import get_config_store
 
+            if not key or not str(key).strip():
+                return _json.dumps(
+                    {
+                        "key": key or "",
+                        "status": "error",
+                        "value": None,
+                        "message": "No key provided.",
+                    },
+                    ensure_ascii=False,
+                )
+
             store = get_config_store()
-            val = store.get(key, "")
-            if not val:
-                return f"No value set for {key}"
-            # Never return secrets in plain text (prompt-injection exfil risk).
+            _MISSING = object()
+            val = store.get(key, _MISSING)
+
             key_l = (key or "").lower()
             secret_markers = (
                 "api_key", "apikey", "token", "secret", "password",
                 "passwd", "private_key", "credentials", "auth",
             )
-            if any(m in key_l for m in secret_markers):
-                return (
-                    f"{key} = [set]  (value hidden — secrets are not readable via tools)"
-                )
-            return f"{key} = {val}"
+            is_secret_key = any(m in key_l for m in secret_markers)
+
+            if val is _MISSING:
+                payload = {
+                    "key": key,
+                    "status": "missing",
+                    "value": None,
+                    "message": (
+                        f"Key '{key}' is not stored (not in ConfigStore/YAML). "
+                        "It may still have a code default when the app reads it."
+                    ),
+                }
+            elif val is None or val == "" or val == [] or val == {}:
+                payload = {
+                    "key": key,
+                    "status": "unset",
+                    "value": None,
+                    "message": f"Key '{key}' exists but has an empty value.",
+                }
+            elif is_secret_key:
+                payload = {
+                    "key": key,
+                    "status": "secret",
+                    "value": None,
+                    "message": (
+                        f"Key '{key}' is set (value hidden — secrets are not "
+                        "readable via tools). Change in Settings UI if needed."
+                    ),
+                }
+            else:
+                # Coerce non-string values for display
+                display = val if isinstance(val, (str, int, float, bool)) else str(val)
+                payload = {
+                    "key": key,
+                    "status": "set",
+                    "value": display,
+                    "message": f"{key} is set.",
+                }
+            return _json.dumps(payload, ensure_ascii=False)
 
         @self.register(
-            description="Execute a shell command and return stdout+stderr. Use with caution.",
+            description=(
+                "Execute a shell command (allowlisted binaries only) and return "
+                "stdout+stderr. Prefer native tools first: file_list/file_read/"
+                "file_search/file_write, git_status/git_*, python_exec/code_exec, "
+                "install_agent_skill. Do NOT use shell for: cd (not allowed — "
+                "cwd is already the workspace), cat/ls (use file_*), git "
+                "(use git tools), python/node/bash (use python_exec). "
+                "Multi-step shell needs absolute paths under the workspace."
+            ),
             category="system",
         )
         async def shell_exec(command: str, timeout: int = 30) -> str:
@@ -832,6 +1183,14 @@ class LocalToolRegistry:
             # even after a single HITL approval. Use python_exec / code_exec
             # for code. Aligns with swarm ShellTool._READ_ONLY_COMMANDS.
             # NO network tools (curl, wget), NO container runtimes (docker).
+            from kazma_core.safety.post_hitl import (
+                production_archive_allowed,
+                resolve_shell_binary,
+                restricted_child_env,
+                shell_mutate_allowed,
+                shell_strict_mode,
+            )
+
             _SAFE_BINARIES = {
                 # Read-only system (no `env` — dumps secrets after one HITL)
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
@@ -839,16 +1198,21 @@ class LocalToolRegistry:
                 "df", "du", "free", "uptime", "uname", "hostname",
                 # Build tools (no shell interpreters)
                 "git", "uv", "pytest", "ruff", "mypy",
-                # Archive
-                "tar", "gzip", "gunzip", "zip", "unzip",
                 # Text processing (read-only) — no `ps` (env leak on some OS)
                 "jq", "tr", "cut",
-                # File ops (write — HITL-gated via safety layer)
-                "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",
                 # Note: `kazma` / `ps` removed from prod allowlist (audit H4)
             }
+            # File ops: off in multi-user/prod unless KAZMA_SHELL_ALLOW_MUTATE=1
+            if shell_mutate_allowed():
+                _SAFE_BINARIES |= {"mkdir", "cp", "mv", "touch"}
+            # Archives: disabled by default in production strict mode
+            # (tar/zip can write outside cwd via absolute entries).
+            if production_archive_allowed():
+                _SAFE_BINARIES |= {
+                    "tar", "gzip", "gunzip", "zip", "unzip",
+                }
             # Dev-only extras when not in production
             import os as _os_bin
             if (_os_bin.environ.get("KAZMA_PRODUCTION") or "").lower() not in (
@@ -879,6 +1243,26 @@ class LocalToolRegistry:
                             "Node/npm/npx are intentionally blocked; skill install "
                             "does not need them."
                         )
+                    elif binary in ("cd", "pushd", "popd", "chdir"):
+                        hint = (
+                            "\n\n`cd` is not allowed (shell builtins). "
+                            "Commands already run with cwd = active workspace. "
+                            "Use absolute paths under the workspace, or native "
+                            "file_*/git_*/python_exec tools instead of multi-step shell."
+                        )
+                    elif binary in ("cat", "less", "more", "head", "tail") and "file_read" not in low:
+                        hint = (
+                            "\n\nPrefer file_read / file_list / file_search for workspace files."
+                        )
+                    elif binary == "git":
+                        hint = (
+                            "\n\nPrefer native git tools (git_status, etc.) when available."
+                        )
+                    elif binary in ("python", "python3", "node", "bash", "sh", "zsh"):
+                        hint = (
+                            "\n\nInterpreters are blocked in shell_exec. Use python_exec "
+                            "or code_exec for short scripts."
+                        )
                     return (
                         f"Error: '{binary}' is not in the allowed binary list. "
                         f"Allowed: {', '.join(sorted(_SAFE_BINARIES))}"
@@ -890,6 +1274,20 @@ class LocalToolRegistry:
                 from kazma_core.tools.file_write import _get_workspace
                 cwd = _get_workspace()
                 cwd_s = str(cwd)
+
+                # Resolve binary under restricted PATH (post-HITL hardening)
+                child_env = restricted_child_env(cwd=cwd_s)
+                if shell_strict_mode():
+                    resolved = resolve_shell_binary(
+                        args[0], restricted_path=child_env.get("PATH", "")
+                    )
+                    if not resolved:
+                        return (
+                            f"Error: could not resolve '{args[0]}' under restricted PATH. "
+                            "Post-HITL shell only runs system/build tools on the "
+                            "allowlist (set KAZMA_SHELL_STRICT=0 to relax in lab)."
+                        )
+                    args = [resolved, *args[1:]]
 
                 # Reject absolute paths outside workspace (audit H4)
                 for a in args[1:]:
@@ -907,10 +1305,12 @@ class LocalToolRegistry:
                     try:
                         import os as _os
 
-                        cand = _os.path.normpath(
+                        cand = _os.path.realpath(
                             a if _os.path.isabs(a) else _os.path.join(cwd_s, a)
                         )
-                        root_n = _os.path.normpath(cwd_s)
+                        root_n = _os.path.realpath(cwd_s)
+                        if _os.name == "nt":
+                            cand, root_n = cand.lower(), root_n.lower()
                         if cand != root_n and not cand.startswith(root_n + _os.sep):
                             return (
                                 f"Error: path '{a}' is outside the workspace "
@@ -919,39 +1319,28 @@ class LocalToolRegistry:
                     except Exception:
                         pass
 
-                # git subcommand denylist (destructive / credential)
+                # git subcommand denylist (destructive / credential / rewrite)
                 if binary == "git" and len(args) > 1:
                     sub = args[1].lstrip("-")
                     blocked_git = {
                         "push", "credential", "credential-manager",
                         "credential-store", "credential-cache",
+                        "reset", "rebase", "filter-branch", "filter-repo",
+                        "remote", "submodule",
                     }
                     joined = " ".join(args[1:]).lower()
-                    if sub in blocked_git or "config --global" in joined or "clean -fd" in joined:
+                    if (
+                        sub in blocked_git
+                        or "config --global" in joined
+                        or "clean -fd" in joined
+                        or " push " in f" {joined} "
+                        or "--force" in joined
+                        or " -f " in f" {joined} "
+                    ):
                         return (
                             f"Error: git subcommand/args not allowed: {' '.join(args[1:])}. "
-                            "push/credential/global config/clean -fd are blocked."
+                            "push/force/credential/reset/rebase/global config/clean -fd are blocked."
                         )
-
-                # Scrub parent env so API keys are not inherited (audit H4)
-                import os as _os_env
-
-                child_env = {
-                    "PATH": _os_env.environ.get("PATH", ""),
-                    "LANG": _os_env.environ.get("LANG", "C.UTF-8"),
-                    "LC_ALL": _os_env.environ.get("LC_ALL", "C.UTF-8"),
-                    "HOME": cwd_s,
-                    "USERPROFILE": cwd_s,
-                    "TMPDIR": cwd_s,
-                    "TEMP": cwd_s,
-                    "TMP": cwd_s,
-                    "SYSTEMROOT": _os_env.environ.get("SYSTEMROOT", ""),
-                    "COMSPEC": _os_env.environ.get("COMSPEC", ""),
-                    "PATHEXT": _os_env.environ.get("PATHEXT", ""),
-                    "WINDIR": _os_env.environ.get("WINDIR", ""),
-                }
-                # Drop empty Windows-only keys on POSIX
-                child_env = {k: v for k, v in child_env.items() if v}
 
                 # Run process asynchronously with timeout and restricted context
                 proc = await asyncio.create_subprocess_exec(
@@ -963,13 +1352,38 @@ class LocalToolRegistry:
                     env=child_env,
                 )
                 
+                # Bounded stream reader to cap memory allocations for large outputs
+                async def _read_stream_capped(stream: asyncio.StreamReader | None, limit: int) -> bytes:
+                    if stream is None:
+                        return b""
+                    buf = bytearray()
+                    while len(buf) < limit:
+                        chunk = await stream.read(min(4096, limit - len(buf)))
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                    return bytes(buf)
+
                 try:
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                    async def _communicate_capped():
+                        so_task = asyncio.create_task(_read_stream_capped(proc.stdout, 20_000))
+                        se_task = asyncio.create_task(_read_stream_capped(proc.stderr, 10_000))
+                        so, se = await asyncio.gather(so_task, se_task)
+                        await proc.wait()
+                        return so, se
+
+                    stdout, stderr = await asyncio.wait_for(_communicate_capped(), timeout=timeout)
                 except asyncio.TimeoutError:
                     try:
                         proc.kill()
+                        await proc.wait()
                     except ProcessLookupError:
                         pass
+                    finally:
+                        if proc.stdout:
+                            proc.stdout.close()
+                        if proc.stderr:
+                            proc.stderr.close()
                     return f"Error: Command timed out after {timeout}s"
 
                 output = stdout.decode("utf-8", errors="replace")
@@ -1049,6 +1463,172 @@ class LocalToolRegistry:
                 indent=2,
             )
 
+        # ── Swarm dispatch (visible in /swarm panel) ──────────────
+        @self.register(
+            description=(
+                "Dispatch a research or analysis task to the Swarm engine. "
+                "The task appears in the Swarm panel (/swarm) with full worker "
+                "progress, results, cost, and traceability. Returns a task ID "
+                "immediately — use check_swarm_task to retrieve the result when "
+                "ready. Use this instead of spawn_agent when you want the work "
+                "to be visible and traceable in the panel."
+            ),
+            category="swarm",
+        )
+        async def dispatch_swarm(
+            prompt: str,
+            worker: str = "auto",
+            context: str = "",
+        ) -> str:
+            import asyncio as _asyncio
+
+            from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
+
+            engine = get_swarm_engine()
+            if engine is None:
+                return (
+                    "Error: Swarm engine not initialized. "
+                    "Configure swarm workers in kazma.yaml."
+                )
+
+            # Auto-register a default "researcher" worker if none exist, so
+            # dispatch_swarm works out of the box without manual setup.
+            if not engine.worker_names:
+                try:
+                    from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+                    from kazma_core.model_registry import get_model_registry
+
+                    reg = get_model_registry()
+                    profile = reg.get_active_profile()
+                    engine.add_worker(WorkerConfig(
+                        name="researcher",
+                        type="in_process",
+                        model=profile.get("model", ""),
+                        provider=profile.get("provider", ""),
+                        role="researcher",
+                        system_prompt=(
+                            "You are a Researcher worker. Follow the research protocol: "
+                            "≥2 search queries, ≥2 full sources via read_url_to_file, "
+                            "digest long pages, then structured findings with URL citations. "
+                            "For comprehensive papers use run_research_pipeline. "
+                            "Never conclude from search snippets alone."
+                        ),
+                        capabilities=WorkerCapabilities(
+                            role="researcher",
+                            expertise=["research", "analysis", "writing"],
+                            tools=[
+                                "web_search",
+                                "read_url",
+                                "read_url_to_file",
+                                "crawl_site",
+                                "list_research_chunks",
+                                "read_research_chunk",
+                                "summarize_research_file",
+                                "digest_research_file",
+                                "synthesize_from_digests",
+                                "run_research_pipeline",
+                                "file_write",
+                            ],
+                        ),
+                    ))
+                    logger.info("[dispatch_swarm] Auto-registered 'researcher' worker")
+                except Exception as exc:
+                    return (
+                        f"Error: No swarm workers registered and could not "
+                        f"auto-create one: {exc}. Add workers in the Swarm "
+                        f"panel or kazma.yaml."
+                    )
+
+            # Resolve "auto" to the first available worker.
+            if worker == "auto":
+                worker = engine.worker_names[0] if engine.worker_names else "researcher"
+
+            task = SwarmTask(
+                prompt=prompt,
+                workers=[worker],
+                type=TaskType.DISPATCH,
+                context=context,
+                timeout=300.0,
+                metadata={"source": "chat", "kind": "research"},
+            )
+            # Dispatch in the background so the tool returns immediately.
+            # Register on engine._task_handles so cancel_task / panel Stop
+            # can cancel the live asyncio work (not just mark maps cancelled).
+            _bg_task = _asyncio.create_task(engine.dispatch(task))
+            _pending_dispatch_tasks.add(_bg_task)
+            try:
+                engine.register_task_handle(task.id, _bg_task)
+            except Exception as reg_exc:
+                logger.debug(
+                    "[dispatch_swarm] register_task_handle failed: %s", reg_exc
+                )
+
+            def _cleanup_handle(
+                h: Any, tid: str = task.id, eng: Any = engine
+            ) -> None:
+                _pending_dispatch_tasks.discard(h)
+                try:
+                    if eng is not None and hasattr(eng, "unregister_task_handle"):
+                        eng.unregister_task_handle(tid)
+                except Exception:
+                    pass
+
+            _bg_task.add_done_callback(_cleanup_handle)
+            return (
+                f"Swarm task dispatched to worker '{worker}' "
+                f"(id: {task.id}). It's visible in the Swarm panel. "
+                f"Use check_swarm_task('{task.id}') to get the result."
+            )
+
+        @self.register(
+            description=(
+                "Check the status and result of a dispatched Swarm task. "
+                "Returns the full result when the task is complete, or a "
+                "status message if still running. Poll this every few seconds "
+                "until you get a completed result."
+            ),
+            category="swarm",
+        )
+        async def check_swarm_task(task_id: str) -> str:
+            from kazma_core.swarm import get_swarm_engine
+
+            engine = get_swarm_engine()
+            # Check in-memory active tasks first, then TaskStore (persisted).
+            task = None
+            if engine:
+                task = engine.get_active_task(task_id)
+            if task is None and engine and getattr(engine, "_task_store", None):
+                task = engine._task_store.get_task(task_id)
+            if task is None:
+                return f"Task {task_id} not found."
+
+            status_str = str(task.status).lower().replace("taskstatus.", "")
+            if status_str in ("running", "pending"):
+                return (
+                    f"Task {task_id} is still {status_str}. "
+                    f"Check again in a moment."
+                )
+
+            result = task.result
+            if result and result.error:
+                return f"Task {task_id} failed: {result.error}"
+            if result:
+                output = (
+                    result.aggregated_output
+                    or result.synthesized_output
+                    or ""
+                )
+                if not output and result.worker_results:
+                    output = result.worker_results[0].output
+                cost = getattr(result, "total_cost", 0.0)
+                duration = getattr(result, "duration_seconds", 0.0)
+                return (
+                    f"Task {task_id} completed.\n"
+                    f"Cost: ${cost:.4f}\n"
+                    f"Duration: {duration:.1f}s\n\n"
+                    f"{output}"
+                )
+            return f"Task {task_id} status: {status_str} (no result yet)."
 
 
         # ── Code execution tool ───────────────────────────────────
@@ -1091,8 +1671,10 @@ class LocalToolRegistry:
                 web_search,
                 description=(
                     "Search the public web (SearXNG if configured, else DuckDuckGo, "
-                    "Bing HTML last). Returns markdown titles/URLs/snippets. "
-                    "Not guaranteed against rate limits; prefer KAZMA_SEARXNG_URL for reliability."
+                    "Bing HTML last). Returns markdown titles/URLs/**snippets only**. "
+                    "For thorough research: run ≥2 queries, then fetch full pages with "
+                    "read_url_to_file / read_url — do not answer from snippets alone. "
+                    "Prefer KAZMA_SEARXNG_URL. Args: query, max_results=8."
                 ),
                 category="search",
             )
@@ -1114,9 +1696,8 @@ class LocalToolRegistry:
                 read_url,
                 description=(
                     "Fetch one public URL; text window (default ~16k, KAZMA_READ_URL_MAX_CHARS). "
-                    "Args: url, offset=0, max_chars=None. Optional backends: "
-                    "KAZMA_FIRECRAWL_API_KEY, KAZMA_JINA_READER=1, KAZMA_FETCH_BACKEND. "
-                    "Full page: read_url_to_file; multi-page: crawl_site; long digest: digest_research_file."
+                    "Args: url, offset=0, max_chars=None. Hard sites: Firecrawl/Jina recovery. "
+                    "For research: prefer read_url_to_file then digest_research_file; multi-page: crawl_site."
                 ),
                 category="search",
             )
@@ -1124,8 +1705,9 @@ class LocalToolRegistry:
                 "read_url_to_file",
                 read_url_to_file,
                 description=(
-                    "Fetch URL and save FULL extract anywhere under the workspace "
-                    "(default folder KAZMA_RESEARCH_DIR=research). Args: url, path=workspace-relative."
+                    "Fetch URL and save FULL extract under the workspace "
+                    "(default research/). Preferred for multi-source research so you can "
+                    "digest later. Args: url, path=workspace-relative."
                 ),
                 category="search",
             )
@@ -1161,13 +1743,46 @@ class LocalToolRegistry:
                 digest_research_file,
                 description=(
                     "Walk ALL chunks in-tool and return one bounded extractive digest "
-                    "(default ~12k via KAZMA_RESEARCH_DIGEST_MAX). Context-safe for long files. "
-                    "Args: path, chunk_size=4000, max_output_chars=12000."
+                    "(default ~12k). Not LLM analysis — use synthesize_from_digests for "
+                    "cross-source analysis. Args: path, chunk_size=4000, max_output_chars=12000."
                 ),
                 category="search",
             )
         except ImportError:
             logger.debug("read_url / research tools not available (missing trafilatura)")
+
+        try:
+            from kazma_core.tools.research_synthesize import synthesize_from_digests
+
+            self.register_function(
+                "synthesize_from_digests",
+                synthesize_from_digests,
+                description=(
+                    "LLM multi-source synthesis from saved research files/digests. "
+                    "Args: paths (list or comma-separated), question, outline='', max_chars=20000. "
+                    "Use after acquiring ≥2 sources via read_url_to_file."
+                ),
+                category="search",
+            )
+        except ImportError:
+            logger.debug("synthesize_from_digests not available")
+
+        try:
+            from kazma_core.tools.research_pipeline import run_research_pipeline
+
+            self.register_function(
+                "run_research_pipeline",
+                run_research_pipeline,
+                description=(
+                    "Deep research paper mode: multi-query search → parallel acquire → "
+                    "digest → LLM synthesis → research/reports/.../report.md (+ optional DOCX). "
+                    "Args: topic, depth='deep'|'standard', max_sources=8, language=''. "
+                    "Use for comprehensive/thorough research or a full report."
+                ),
+                category="search",
+            )
+        except ImportError:
+            logger.debug("run_research_pipeline not available")
 
         try:
             from kazma_core.tools.web_research import crawl_site
@@ -1177,9 +1792,9 @@ class LocalToolRegistry:
                 crawl_site,
                 description=(
                     "Bounded multi-page crawl (same-domain by default). "
-                    "Args: start_url, max_pages=8 (hard max 50), max_depth=2, same_domain_only=True, "
-                    "delay_ms=300, save=True, path_prefix=optional. Saves pages under workspace; "
-                    "returns markdown index. SSRF-safe; not unlimited spidering."
+                    "Args: start_url, max_pages=8 (hard max 50; use 12–20 for deep docs), "
+                    "max_depth=2, same_domain_only=True, delay_ms=300, save=True. "
+                    "Saves pages under workspace; returns markdown index. SSRF-safe."
                 ),
                 category="search",
             )

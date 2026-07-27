@@ -129,6 +129,9 @@ class KazmaAgent:
         self._checkpoint_conn: aiosqlite.Connection | None = None
         self._thread_id: str = ""
 
+        # Time Travel — snapshot recorder (lazy-init in _ensure_graph).
+        self._snapshot_recorder: Any = None
+
         # Streaming graph for SSE path (built lazily, cached).
         # Separate from _graph which includes a checkpointer for run().
         self._streaming_graph: Any = None
@@ -273,6 +276,24 @@ class KazmaAgent:
         except Exception:
             logger.debug("[agent_runner] agent evolution injection skipped", exc_info=True)
 
+        # Knowledge Library auto-inject (kill-switch + per-library opt-in
+        # checked live in the per-turn path; init-time this is a no-op since
+        # there is no user message to retrieve against).  See AGENTS.md §11.
+        try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+            from kazma_core.stores.knowledge_index import (
+                get_knowledge_auto_inject_block_sync,
+            )
+
+            kb_block = get_knowledge_auto_inject_block_sync("")
+            fenced = format_untrusted_block(kb_block, source="knowledge")
+            if fenced and fenced not in self.system_prompt:
+                self.system_prompt = (
+                    self.system_prompt.rstrip() + "\n\n" + fenced
+                )
+        except Exception:
+            logger.debug("[agent_runner] knowledge auto-inject skipped", exc_info=True)
+
         # Universal language directive — injected LAST so it's the final
         # instruction the model sees, after all cultural context. This
         # prevents Arabic cultural context from biasing the model to
@@ -304,6 +325,15 @@ class KazmaAgent:
             "determined by the user's input language. "
             "\n\nBe helpful, precise, and culturally aware. Teach users how to use Kazma "
             "(chat, IDE, swarm, settings, HITL, memory) when they ask about the product. "
+            "\n\nTOOL SELECTION: Prefer native tools over shell_exec. "
+            "Use file_list/file_read/file_search/file_write for files; git_* for git; "
+            "python_exec/code_exec for short scripts; install_agent_skill for skills. "
+            "shell_exec runs with cwd already set to the active workspace — do not use "
+            "cd (blocked). For multi-step shell, use absolute paths under the workspace. "
+            "\n\nCRITICAL SYSTEM RULE: If you receive a tool_error or a rejection notification "
+            "from a tool execution (e.g. 'SYSTEM OVERRIDE: Tool blocked...'), you MUST IMMEDIATELY "
+            "stop issuing further tool calls. Synthesize a final text answer explaining the blockage "
+            "or error to the user, and ask for their guidance before continuing."
             "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user "
             "writes in. Arabic input = Arabic output. English input = English output. "
             "If they mix, match their pattern. If the input is gibberish or unclear, "
@@ -426,42 +456,31 @@ class KazmaAgent:
 
     # ── MCP server config management ───────────────────────────────
 
+    def _mcp_yaml_path(self) -> str:
+        """Resolve the shipped kazma.yaml path for dual-write persistence."""
+        return str(getattr(self.config, "config_path", None) or CONFIG_FILE)
+
     def get_mcp_servers_config(self) -> list[dict[str, Any]]:
-        """Return the MCP server configurations from both YAML and ConfigStore.
+        """Return MCP server configs from the unified dual store.
 
-        Merges servers from kazma.yaml (config.raw) and ConfigStore (SQLite)
-        by server name. YAML servers are checked first, then DB servers that
-        aren't already in the YAML list are appended. This ensures both
-        config sources contribute to the live server set.
+        Merges ``kazma.yaml`` + agent ``config.raw`` + ConfigStore via
+        :mod:`kazma_core.mcp_servers_store` (ConfigStore wins on name
+        conflict). Both the ``/mcp`` page and Settings use this SoT.
         """
-        # YAML servers
+        from kazma_core.mcp_servers_store import list_mcp_servers
+
         yaml_servers = list(self.config.raw.get("mcp", {}).get("servers", []))
-        yaml_names = {s.get("name") for s in yaml_servers}
-
-        # ConfigStore servers (added via Settings UI / mcp_ui)
-        try:
-            from kazma_core.config_store import get_config_store
-
-            cs = get_config_store()
-            db_servers = cs.get("mcp.servers", [])
-            if isinstance(db_servers, str):
-                import json
-                db_servers = json.loads(db_servers)
-            if isinstance(db_servers, list):
-                for s in db_servers:
-                    if isinstance(s, dict) and s.get("name") not in yaml_names:
-                        yaml_servers.append(s)
-        except Exception as _e:
-            logger.debug("[Agent] ConfigStore MCP servers not available, using YAML only: %s", _e)  # fire-and-forget fallback is ok
-
-        return yaml_servers
+        return list_mcp_servers(
+            yaml_servers=yaml_servers,
+            yaml_path=self._mcp_yaml_path(),
+        )
 
     def get_mcp_servers(self) -> list[dict[str, Any]]:
         """Return enriched MCP server info (config + connection status + tools).
 
         This is the public replacement for iterating ``agent.config.raw``
         and calling ``agent.tools.is_server_connected()`` in UI code.
-        Reads from the merged YAML + ConfigStore config.
+        Reads from the unified YAML + ConfigStore SoT.
         """
         servers = self.get_mcp_servers_config()
         result: list[dict[str, Any]] = []
@@ -504,11 +523,22 @@ class KazmaAgent:
         env: dict[str, str] | None = None,
         working_dir: str | None = None,
     ) -> dict[str, str]:
-        """Add an MCP server to the in-memory configuration.
+        """Add an MCP server and dual-write ConfigStore + kazma.yaml.
 
         Returns ``{"status": "ok"}`` on success or
-        ``{"status": "error", "error": "..."}`` if a duplicate name exists.
+        ``{"status": "error", "error": "..."}`` if a duplicate name exists
+        or persistence fails.
         """
+        from kazma_core.mcp_servers_store import list_mcp_servers, upsert_mcp_server
+
+        # Duplicate check against the merged view (not just config.raw).
+        existing = list_mcp_servers(
+            yaml_servers=self.config.raw.get("mcp", {}).get("servers", []),
+            yaml_path=self._mcp_yaml_path(),
+        )
+        if any(s.get("name") == name for s in existing):
+            return {"status": "error", "error": f"Server '{name}' already exists"}
+
         new_server: dict[str, Any] = {"name": name, "transport": transport}
         if transport == "stdio":
             new_server["command"] = command or []
@@ -519,25 +549,59 @@ class KazmaAgent:
         if env:
             new_server["env"] = env
 
-        mcp_section = self.config.raw.setdefault("mcp", {})
-        servers_list = mcp_section.setdefault("servers", [])
-
-        for s in servers_list:
-            if s.get("name") == name:
-                return {"status": "error", "error": f"Server '{name}' already exists"}
-
-        servers_list.append(new_server)
+        try:
+            upsert_mcp_server(
+                new_server,
+                config_raw=self.config.raw,
+                yaml_path=self._mcp_yaml_path(),
+                replace=False,
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+        except Exception as exc:
+            logger.warning("[MCP] dual-write failed for add: %s", exc)
+            return {"status": "error", "error": f"Persist failed: {exc}"}
         return {"status": "ok"}
 
     def remove_mcp_server(self, name: str) -> dict[str, str]:
-        """Remove an MCP server from the in-memory configuration.
+        """Remove an MCP server from ConfigStore + yaml + config.raw.
 
-        Returns ``{"status": "ok"}``. Does NOT raise if the server was absent.
+        Returns ``{"status": "ok"}`` on success or
+        ``{"status": "error", "error": "..."}`` if persistence fails. Does
+        NOT raise if the server was absent (idempotent removal).
         """
-        mcp_section = self.config.raw.get("mcp", {})
-        servers = mcp_section.get("servers", [])
-        mcp_section["servers"] = [s for s in servers if s.get("name") != name]
+        from kazma_core.mcp_servers_store import delete_mcp_server
+
+        try:
+            delete_mcp_server(
+                name,
+                config_raw=self.config.raw,
+                yaml_path=self._mcp_yaml_path(),
+            )
+        except Exception as exc:
+            logger.warning("[MCP] dual-write failed for remove: %s", exc)
+            return {"status": "error", "error": f"Removed in-memory but not persisted: {exc}"}
         return {"status": "ok"}
+
+    def _persist_mcp_servers(self) -> str | None:
+        """Write the current ``mcp.servers`` list to ConfigStore + kazma.yaml.
+
+        Kept for callers that mutate ``config.raw`` then flush. Prefer
+        :meth:`add_mcp_server` / :meth:`remove_mcp_server` which dual-write
+        via :mod:`kazma_core.mcp_servers_store`.
+        """
+        from kazma_core.mcp_servers_store import sync_mcp_servers
+
+        servers = list(self.config.raw.get("mcp", {}).get("servers", []))
+        try:
+            return sync_mcp_servers(
+                servers,
+                config_raw=self.config.raw,
+                yaml_path=self._mcp_yaml_path(),
+            )
+        except Exception as exc:
+            logger.warning("[MCP] dual persist failed: %s", exc)
+            return str(exc)
 
     # ── LLM config ─────────────────────────────────────────────────
 
@@ -659,6 +723,7 @@ class KazmaAgent:
             authority=self.authority,
             tracer=self.tracer,
             hitl_config=streaming_hitl,
+            snapshot_recorder=self._snapshot_recorder,
         )
         return self._streaming_graph
 
@@ -699,6 +764,7 @@ class KazmaAgent:
             tracer=self.tracer,
             hitl_config=hitl,
             checkpointer=None,
+            snapshot_recorder=self._snapshot_recorder,
         )
 
     async def _ensure_graph(self) -> Any:
@@ -749,6 +815,15 @@ class KazmaAgent:
         from kazma_core.safety.hitl import get_hitl_config
         hitl_config = get_hitl_config(self.config.raw)
 
+        # Time Travel — create the snapshot recorder once (honors kazma.yaml
+        # time_travel.enabled / max_snapshots / db_path).
+        if self._snapshot_recorder is None:
+            try:
+                from kazma_core.time_travel import create_recorder
+                self._snapshot_recorder = create_recorder(config=self.config.raw)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Snapshot recorder unavailable: %s", exc)
+
         self._graph = build_supervisor_graph(
             llm=self.llm,
             system_prompt=self.system_prompt,
@@ -759,6 +834,7 @@ class KazmaAgent:
             tracer=self.tracer,
             checkpointer=self._checkpointer,
             hitl_config=hitl_config,
+            snapshot_recorder=self._snapshot_recorder,
         )
         logger.info("KazmaAgent run path bound to supervisor graph")
         return self._graph
@@ -798,7 +874,10 @@ class KazmaAgent:
 
         graph_state = initial_supervisor_state(thread_id=self._thread_id)
         graph_state["messages"] = messages
-        config = {"configurable": {"thread_id": self._thread_id}}
+        config = {
+            "configurable": {"thread_id": self._thread_id},
+            "recursion_limit": 100,
+        }
 
         from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
 
@@ -853,6 +932,13 @@ class KazmaAgent:
         await self.tools.disconnect_all()
         await self.llm.close()
         self.tracer.shutdown()
+        # Time Travel — close the snapshot recorder's SQLite handle.
+        if self._snapshot_recorder is not None:
+            try:
+                self._snapshot_recorder.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Error closing snapshot recorder: %s", e)
+            self._snapshot_recorder = None
         if self._checkpoint_conn is not None:
             try:
                 await self._checkpoint_conn.close()
@@ -908,6 +994,15 @@ async def run_agent(
 
 async def main() -> None:
     """Entry point for running Kazma as a standalone agent."""
+    # Initialise logging before any subsystem boots so every log line lands
+    # in <repo>/.kazma/kazma.log. Idempotent + safe; --debug via env.
+    try:
+        from kazma_core.logging_config import setup_logging
+
+        setup_logging()
+    except Exception:
+        pass  # Logging must never block boot.
+
     config = load_config()
     agent = KazmaAgent(config)
 

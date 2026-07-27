@@ -42,6 +42,8 @@ def _build_client():
     """Build a FastAPI TestClient with the swarm router for testing."""
     app = FastAPI()
     templates = Jinja2Templates(directory="kazma-ui/kazma_ui/templates")
+    templates.env.globals["css_version"] = lambda: "test"
+    templates.env.globals["js_version"] = lambda: "test"
 
     from kazma_ui.swarm_panel import _reset_swarm_state, create_swarm_router
 
