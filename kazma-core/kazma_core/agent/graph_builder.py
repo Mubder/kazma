@@ -989,27 +989,95 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         len(messages),
     )
 
-    # If max iterations forced us here mid-tool-loop, the last message is
-    # a tool result, not an assistant text. Synthesize a final answer.
+    # If max iterations forced us here mid-tool-loop, there is often no
+    # user-visible assistant *text* (only tool_calls / tool results). The Web
+    # YOLO resume path uses ainvoke without streaming, so missing synthesis
+    # leaves the UI stuck on the pre-HITL sentence forever.
+    def _has_user_visible_assistant_text(msgs: list[dict[str, Any]]) -> bool:
+        for m in reversed(msgs):
+            if not isinstance(m, dict):
+                continue
+            role = m.get("role")
+            if role not in ("assistant", "ai"):
+                continue
+            content = m.get("content") or ""
+            if isinstance(content, str) and content.strip() and not m.get("tool_calls"):
+                return True
+        return False
+
     _last = messages[-1] if messages else {}
     _last_role = _last.get("role") if isinstance(_last, dict) else None
     _max_hit = iteration >= state.get("max_iterations", 15)
-    if _max_hit and _last_role in ("tool", "assistant") and not (
-        isinstance(_last, dict) and _last.get("role") == "assistant"
-        and (_last.get("content") or "").strip() and not _last.get("tool_calls")
-    ):
-        # Inject a "wrap up" instruction and call the LLM for a final answer.
+    _needs_synthesis = _max_hit and not _has_user_visible_assistant_text(messages)
+    if _needs_synthesis:
         _llm = llm or state.get("_llm")
         if _llm is not None:
             try:
-                _wrap_msg = {"role": "user", "content": "Based on the tool results above, provide your final answer to the user now. Do not call any more tools."}
+                _wrap_msg = {
+                    "role": "user",
+                    "content": (
+                        "Based on the tool results above, provide your final answer "
+                        "to the user now. Do not call any more tools. Be concrete "
+                        "about what you found or what failed."
+                    ),
+                }
                 _resp = await _llm.chat(messages + [_wrap_msg], tools=None)
                 _content = getattr(_resp, "content", "") or ""
                 if _content.strip():
                     messages.append({"role": "assistant", "content": _content})
-                    logger.info("[Respond] Synthesized final answer (%d chars) after max iterations", len(_content))
+                    logger.info(
+                        "[Respond] Synthesized final answer (%d chars) after max iterations",
+                        len(_content),
+                    )
+                else:
+                    logger.warning(
+                        "[Respond] Synthesis returned empty content "
+                        "(last_role=%s messages=%d) — injecting recovery notice",
+                        _last_role,
+                        len(messages),
+                    )
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": (
+                                "⚠️ I hit the tool-round limit while investigating and "
+                                "could not produce a summary. Please ask a narrower "
+                                "follow-up, or say “summarize what you found.”"
+                            ),
+                        }
+                    )
             except Exception as exc:
                 logger.warning("[Respond] Could not synthesize final answer: %s", exc)
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "⚠️ I hit the tool-round limit and failed to summarize "
+                            f"({type(exc).__name__}). Please try again with a smaller ask."
+                        ),
+                    }
+                )
+        else:
+            logger.warning(
+                "[Respond] Max iterations with no assistant text and no LLM bound "
+                "(last_role=%s) — injecting recovery notice",
+                _last_role,
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        "⚠️ Turn stopped at the tool-round limit without a written "
+                        "answer. Please send another message to continue."
+                    ),
+                }
+            )
+    elif _max_hit:
+        logger.info(
+            "[Respond] Max iterations but assistant text already present "
+            "(last_role=%s) — skipping synthesis",
+            _last_role,
+        )
 
     # Auto-store durable user facts (and optional turn snapshots) so
     # per-turn RAG has something to retrieve without requiring memory_store.

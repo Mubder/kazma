@@ -454,6 +454,11 @@ class KazmaAppBuilder:
             _STATIC_DIR / "js" / "modules" / "components.js",
             _STATIC_DIR / "js" / "modules" / "util.js",
             _STATIC_DIR / "js" / "icons.js",
+            # Chat/HITL transport — must bust cache when YOLO/stream fixes land
+            _STATIC_DIR / "js" / "chat.js",
+            _STATIC_DIR / "js" / "streaming.js",
+            _STATIC_DIR / "js" / "stores" / "agentStore.js",
+            _STATIC_DIR / "js" / "hitl_approval.js",
         )
 
         def _css_version() -> int:

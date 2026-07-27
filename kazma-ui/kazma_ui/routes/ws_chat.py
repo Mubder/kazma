@@ -599,6 +599,10 @@ def create_ws_chat_router(
 
                             _hitl_state = "approved" if approved else "denied"
                             _resolution_time = datetime.now(UTC).isoformat()
+                            # Postgres jsonb_set requires a *JSON* value, not a
+                            # bare string token (error: Token "approved" is invalid).
+                            _hitl_state_json = json.dumps(_hitl_state)
+                            _resolution_json = json.dumps(_resolution_time)
                             try:
                                 cp = getattr(graph_inst, "checkpointer", None)
                                 if cp is not None:
@@ -606,6 +610,7 @@ def create_ws_chat_router(
                                     if conn is not None:
                                         try:
                                             if hasattr(conn, "execute"):
+                                                # SQLite: plain strings become JSON strings
                                                 await conn.execute(
                                                     "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_state', ?) WHERE thread_id = ?",
                                                     (_hitl_state, target_thread_id),
@@ -616,15 +621,16 @@ def create_ws_chat_router(
                                                 )
                                                 await conn.commit()
                                             elif hasattr(conn, "connection"):
+                                                # Postgres: jsonb_set requires a JSON document
                                                 async with conn.connection() as pg_conn:
                                                     async with pg_conn.cursor() as cur:
                                                         await cur.execute(
-                                                            "UPDATE checkpoints SET metadata = jsonb_set(metadata, '{hitl_state}', %s) WHERE thread_id = %s",
-                                                            (_hitl_state, target_thread_id),
+                                                            "UPDATE checkpoints SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{hitl_state}', %s::jsonb) WHERE thread_id = %s",
+                                                            (_hitl_state_json, target_thread_id),
                                                         )
                                                         await cur.execute(
-                                                            "UPDATE checkpoints SET metadata = jsonb_set(metadata, '{hitl_resolved_at}', %s) WHERE thread_id = %s",
-                                                            (_resolution_time, target_thread_id),
+                                                            "UPDATE checkpoints SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{hitl_resolved_at}', %s::jsonb) WHERE thread_id = %s",
+                                                            (_resolution_json, target_thread_id),
                                                         )
                                                         await pg_conn.commit()
                                         except Exception as e:
@@ -645,20 +651,64 @@ def create_ws_chat_router(
                                     scope=scope,
                                 )
                             )
+                            await websocket.send_json(
+                                TelemetryEvent(
+                                    type="status_update",
+                                    data={
+                                        "status": "thinking",
+                                        "message": (
+                                            f"Running after {scope} approval…"
+                                            if approved
+                                            else "Continuing after deny…"
+                                        ),
+                                        "active_node": "ToolWorker",
+                                    },
+                                    thread_id=target_thread_id,
+                                ).to_dict()
+                            )
 
-                            # CRITICAL: use ainvoke for Command resume — same
-                            # fix as sse_chat._stream_langgraph_events. Custom
-                            # LLMProvider does not emit on_chat_model_stream, so
-                            # astream_events(Command) can hang forever and leave
-                            # the Stop button stuck + YOLO never re-checked.
-                            logger.debug(
+                            # CRITICAL: ainvoke for Command resume (custom LLM
+                            # has no on_chat_model_stream; astream_events can hang).
+                            # Heartbeat so the UI is not silent for multi-minute
+                            # YOLO tool loops (user thought the agent "stopped").
+                            logger.info(
                                 "[WS-Chat] HITL resume via ainvoke thread=%s scope=%s",
                                 target_thread_id,
                                 scope,
                             )
-                            await graph_inst.ainvoke(resume_command, approve_config)
+                            resume_task = asyncio.create_task(
+                                graph_inst.ainvoke(resume_command, approve_config)
+                            )
+                            heartbeat_n = 0
+                            while not resume_task.done():
+                                try:
+                                    await asyncio.wait_for(
+                                        asyncio.shield(resume_task), timeout=4.0
+                                    )
+                                except asyncio.TimeoutError:
+                                    heartbeat_n += 1
+                                    try:
+                                        await websocket.send_json(
+                                            TelemetryEvent(
+                                                type="status_update",
+                                                data={
+                                                    "status": "thinking",
+                                                    "message": (
+                                                        f"Still working after approval "
+                                                        f"({heartbeat_n * 4}s)…"
+                                                    ),
+                                                    "active_node": "ToolWorker",
+                                                },
+                                                thread_id=target_thread_id,
+                                            ).to_dict()
+                                        )
+                                    except Exception:
+                                        # Client gone — keep graph running so
+                                        # checkpoint/session can still be updated.
+                                        pass
+                            await resume_task  # re-raise graph errors
 
-                            # Surface assistant text (no token stream on ainvoke)
+                            # Surface assistant text (no live token stream on ainvoke)
                             await _backfill_assistant_text_if_needed(
                                 graph_inst,
                                 approve_config,
@@ -666,12 +716,48 @@ def create_ws_chat_router(
                                 target_thread_id,
                                 pre_msg_count,
                             )
-                            await _persist_final_assistant_message(
+                            final_text = await _persist_final_assistant_message(
                                 graph_inst,
                                 approve_config,
                                 session_id,
                                 pre_msg_count=pre_msg_count,
                             )
+                            # Guarantee the user sees *something* after YOLO/approve.
+                            # Empty backfill is the root of "only saw pre-HITL line".
+                            if not (final_text or "").strip():
+                                recovery = (
+                                    "⚠️ Approved tools finished, but no final summary "
+                                    "was produced (often max tool rounds). "
+                                    "Ask me to summarize what I found, or retry with "
+                                    "a narrower question."
+                                )
+                                try:
+                                    await websocket.send_json(
+                                        TelemetryEvent(
+                                            type="llm_delta",
+                                            data={"content": recovery},
+                                            thread_id=target_thread_id,
+                                        ).to_dict()
+                                    )
+                                except Exception:
+                                    pass
+                                await _persist_final_assistant_message(
+                                    graph_inst,
+                                    approve_config,
+                                    session_id,
+                                    pre_msg_count=pre_msg_count,
+                                    prefer_text=recovery,
+                                )
+                                logger.warning(
+                                    "[WS-Chat] Empty post-approve turn thread=%s — recovery notice sent",
+                                    target_thread_id,
+                                )
+                            else:
+                                logger.info(
+                                    "[WS-Chat] Post-approve text delivered thread=%s chars=%d",
+                                    target_thread_id,
+                                    len(final_text),
+                                )
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, approve_config, websocket, target_thread_id
