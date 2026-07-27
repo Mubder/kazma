@@ -201,19 +201,13 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _rag_top_k() -> int:
-    """Read the per-turn retrieval top-k from kazma.yaml (default 5)."""
+    """Read per-turn retrieval top-k (ConfigStore ← yaml, default 5)."""
     try:
-        import yaml
-        from pathlib import Path
+        from kazma_core.memory.config import memory_retrieval_top_k
 
-        cfg_path = Path("kazma.yaml")
-        if cfg_path.exists():
-            with open(cfg_path) as f:
-                cfg = yaml.safe_load(f) or {}
-            return int(cfg.get("memory", {}).get("retrieval_top_k", 5))
+        return memory_retrieval_top_k()
     except Exception:
-        pass
-    return 5
+        return 5
 
 
 def _format_retrieved_memories(memories: list[dict[str, Any]]) -> str:
@@ -384,19 +378,12 @@ async def supervisor_node(
     # so it fires once per user turn (not per ReAct iteration). This is
     # the key difference from compaction-only retrieval — the agent now
     # has recall on EVERY turn, not just when the context window is full.
-    # Honours memory.per_turn_retrieval in kazma.yaml (default true).
+    # Honours memory.per_turn_retrieval via ConfigStore ← yaml (default true).
     _per_turn_on = True
     try:
-        import yaml
-        from pathlib import Path as _Path
+        from kazma_core.memory.config import memory_per_turn_enabled
 
-        _cfg_path = _Path("kazma.yaml")
-        if _cfg_path.exists():
-            with open(_cfg_path) as _f:
-                _mcfg = (yaml.safe_load(_f) or {}).get("memory", {}) or {}
-            _per_turn_on = bool(_mcfg.get("per_turn_retrieval", True))
-            if not bool(_mcfg.get("enabled", True)):
-                _per_turn_on = False
+        _per_turn_on = memory_per_turn_enabled()
     except Exception:
         pass
 
@@ -1121,14 +1108,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             _last_role,
         )
 
-    # Auto-store durable user facts (and optional turn snapshots) so
-    # per-turn RAG has something to retrieve without requiring memory_store.
+    # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
+    # in one task so consolidator can dedup against auto_store texts.
     try:
-        from kazma_core.memory.auto_store import schedule_auto_store
+        from kazma_core.memory.consolidator import schedule_post_turn_memory
 
-        schedule_auto_store(messages)
+        schedule_post_turn_memory(messages)
     except Exception:
-        logger.debug("[Respond] auto_store schedule failed", exc_info=True)
+        logger.debug("[Respond] post_turn memory schedule failed", exc_info=True)
 
     return {
         "messages": messages,

@@ -737,21 +737,34 @@ class LocalToolRegistry:
             except json.JSONDecodeError:
                 meta = {"raw": metadata}
             # Route through the unified adapter so stored memories are visible
-            # to per-turn RAG retrieval. Falls back to VectorMemory.
+            # to per-turn RAG retrieval. Fail-closed: never claim success
+            # without a durable layer write. Falls back to VectorMemory.
             try:
                 from kazma_core.swarm.memory.adapter import get_adapter
 
                 adapter = get_adapter()
                 if adapter is not None:
                     doc_id = await adapter.store(text, metadata=meta)
-                    return f"Stored memory (id={doc_id})"
+                    if doc_id:
+                        return f"Stored memory (id={doc_id})"
+                    # Adapter present but no durable write — try VectorMemory
+                    # before reporting failure (covers partial layer outages).
             except Exception:
                 pass
             mem = get_vector_memory()
             if mem is None:
-                return "Error: memory not initialized. RAG not available."
-            doc_id = mem.add(text=text, metadata=meta)
-            return f"Stored memory (id={doc_id})"
+                return (
+                    "Error: memory store failed — no durable layer available "
+                    "(install chromadb/sentence-transformers via pip install -e '.[rag]', "
+                    "or check L3 FTS / L4 sqlite-vec health)."
+                )
+            try:
+                doc_id = mem.add(text=text, metadata=meta)
+                if doc_id:
+                    return f"Stored memory (id={doc_id})"
+            except Exception as exc:
+                return f"Error: memory store failed — {exc}"
+            return "Error: memory store failed — write returned empty id."
 
         @self.register(
             description=(

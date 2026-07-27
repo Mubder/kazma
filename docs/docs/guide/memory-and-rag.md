@@ -14,39 +14,27 @@ Kazma's memory system was overhauled to close every gap the audit found. The arc
 
 ```mermaid
 flowchart TB
-    subgraph "Chat Path — Memory Injection (ACTIVE)"
+    subgraph "Chat path (ACTIVE)"
         UV[User message]
-        SUP[Supervisor Node]
-        AUTH{ContextAuthority<br/>≥80% tokens?}
+        SUP[Supervisor / per-turn RAG]
+        AS[auto_store after reply]
         COMP[CompactionEngine]
-        ASYNC[AsyncMemoryAdapter]
-        VM[(VectorMemory<br/>ChromaDB / FTS5)]
-        AUTH -->|yes| COMP
-        COMP -->|retrieve_memories| ASYNC
-        ASYNC -->|search n_results=| VM
-        COMP -->|inject ## Relevant Memories| FRESH[Fresh system message]
-        COMP -->|summary + memories| FRESH
+        TOOLS[memory_store / memory_search]
+        ADAPT[UnifiedMemoryAdapter RRF]
+        L1[L1 Chroma agent_memory]
+        L2[L2 NetworkX structural]
+        L3[L3 FTS5 memories]
+        L4[L4 sqlite-vec]
+        SUP --> ADAPT
+        AS --> ADAPT
+        COMP --> ADAPT
+        TOOLS --> ADAPT
+        ADAPT --> L1 & L2 & L3 & L4
     end
-    
-    subgraph "Chat Path — LLM Tools (ACTIVE)"
-        LLM[LLM / Supervisor]
-        MS[memory_search tool]
-        MST[memory_store tool]
-        MS --> VM
-        MST --> VM
-        LLM -.->|chooses to call| MS & MST
-    end
-    
-    subgraph "Swarm Path — 4-layer adapter (ACTIVE)"
-        ADAPT[UnifiedMemoryAdapter]
-        L1[L1: ChromaDB VectorStore]
-        L2[L2: NetworkX graph]
-        L3[L3: FTS5 lexical]
-        L4[L4: sqlite-vec]
-        ADAPT -->|RRF blend| L1 & L2 & L3 & L4
-        SI[self_improvement.py]
-        PB[phonebook.py]
-        SI & PB --> ADAPT
+
+    subgraph "Fallback"
+        VM[VectorMemory singleton<br/>same Chroma collection]
+        TOOLS -.->|if adapter fails| VM
     end
 ```
 
@@ -289,25 +277,33 @@ Goal of compaction: free context window while keeping task goal, key decisions, 
 
 ## 7. Honest status notes (updated) {#honest-status-notes}
 
-These are the items that remain as design decisions or future work (all the bugs are fixed):
+### What works today (default install with `.[rag]`)
 
-1. **Short-term→permanent consolidation is still explicit-only.** There is no background process that promotes conversation fragments to vector memory. Permanent memory is written only when (a) the LLM calls `memory_store`, or (b) **auto-store during compaction** (NEW — saves summaries to memory). This is a deliberate design choice — automatic promotion without LLM curation risks storing noise.
+1. **Per-turn RAG** — every user turn injects top-k memories (`memory.per_turn_retrieval`, default on).
+2. **Auto-store** — durable-fact heuristics + optional turn snapshots after each reply (`memory.auto_store`, mode `both` by default).
+3. **Tools** — `memory_store` / `memory_search` go through `UnifiedMemoryAdapter` first (same store as per-turn).
+4. **Fail-closed store** — `adapter.store()` returns an empty id unless L1, L3, or L4 confirmed a write (no fake “Stored memory” ids).
+5. **One FTS schema** — `memories` / `memories_fts` shared by L3 and VectorMemory degrade path; legacy `memory_fts` is migrated once.
+6. **Config SoT** — `memory.*` flags: ConfigStore overlays `kazma.yaml` (`kazma_core.memory.config`). TUI “Enable RAG” is real.
+7. **Knowledge Library** is isolated (`kazma_kb_*`) — not chat memory.
 
-2. **`checkpoint_manager` is still not passed** to `create_authority()`. The pre-compaction checkpoint save is skipped. The LLM summarise + memory retrieval + injection all work; only the checkpoint step is inert. This is low-risk because the LangGraph checkpointer already persists conversation state independently.
+### L2 property graph + consolidator (2026-07)
 
-3. **Chat agent now uses UnifiedMemoryAdapter** (via `AsyncMemoryAdapter`). The chat path gets the same 4-layer RRF memory as Swarm, fixing the earlier divergence. The `VectorMemory` singleton still serves as the primary write target.
+- **L2** is a **SQLite property graph** (`kazma-data/knowledge_graph.db`): nodes, directed edges, FTS5, multi-hop BFS. Legacy NetworkX JSON is migrated once.
+- **Consolidator** (`memory/consolidator.py`): after each turn, extracts durable facts + subject–predicate–object triples (LLM with heuristic fallback) and writes clean text to L1/L3/L4 plus triples to L2. Gated by `memory.consolidation.enabled` (default on).
+- API: `GET /api/memory/graph`, `GET /api/memory/graph/stats` use the process singleton.
 
-4. **`sqlite-vec` is not a declared dependency.** It appears in `uv.lock` only as a transitive dependency of `langgraph-checkpoint-sqlite`. Available at runtime as a side effect.
+### Remaining design limits (not bugs)
 
-5. **No automatic rate-limit handling for memory operations.** If ChromaDB is slow under load, there's no backpressure mechanism. The `AsyncMemoryAdapter` runs in a thread executor, so it won't block the event loop, but very large collections could be slow to search.
-
-6. **Dead KG code removed.** The old `KazmaKG` class and `KnowledgeGraphAdapter` were deleted (~1,000 lines). The Swarm continues to use its dedicated `KnowledgeGraph` class in `swarm/memory/graph.py`.
+1. **`checkpoint_manager` is still not passed** to `create_authority()` — pre-compaction checkpoint save is skipped; LangGraph checkpointer already persists turns.
+2. **Multi-replica shared memory** is not provided — Chroma/FTS/sqlite-vec/graph are local files; use Postgres for config/sessions only unless you add a remote vector backend.
+3. **No automatic rate-limit / backpressure** for huge Chroma collections under load.
+4. **Neo4j / remote graph** is not required for single-node — SQLite property graph is the supported SoT.
 
 ---
 
 ## Documentation Audit Notes
 
-- **All 8 previously-documented gaps are closed** (memory overhaul Phases 1–4).  
-- Subsystems serve different consumers (chat / swarm / FTS5) — not broken duplicates.  
-- `storage.vector_dim: 1536` vs actual 384-d embedding size remains cosmetic drift.  
+- **2026-07 strengthen:** fail-closed store, FTS unify, ConfigStore SoT, empty-hit filter, docs/FAQ corrected.  
+- Chat path = UnifiedMemoryAdapter (not VectorMemory-only tools).  
 - Archived long-form compaction essay: `archive/docs-loose/compaction.md` (folded into §6).  

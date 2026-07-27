@@ -148,6 +148,32 @@
       <div id="memory-issues-list" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.25);background:rgba(245,158,11,0.06);font-size:0.75rem;color:#fbbf24;line-height:1.45;"></div>
     </div>
 
+    <!-- Property graph explorer -->
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">
+            {{ t('dashboard.memory_graph_title') }}
+          </div>
+          <div id="kg-stats-line" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);">–</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <input id="kg-search-input" type="search" placeholder="{{ t('dashboard.memory_graph_search_ph') }}"
+            style="min-width:160px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.8rem;" />
+          <button id="kg-search-btn" class="btn btn-sm btn-primary" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_search') }}</button>
+          <button id="kg-refresh-btn" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_graph_refresh') }}</button>
+          <button id="kg-clear-btn" class="btn btn-sm btn-danger" style="font-size:0.78rem;padding:6px 12px;">{{ t('dashboard.memory_graph_clear') }}</button>
+        </div>
+      </div>
+      <div id="kg-canvas-wrap" style="position:relative;height:280px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
+        <canvas id="kg-canvas" width="800" height="280" style="width:100%;height:100%;display:block;"></canvas>
+        <div id="kg-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">
+          {{ t('dashboard.memory_graph_empty') }}
+        </div>
+      </div>
+      <div id="kg-results" style="margin-top:10px;max-height:160px;overflow-y:auto;font-size:0.78rem;"></div>
+    </div>
+
     <!-- Expansion Deck Toggle -->
     <div style="margin-top:12px;">
       <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
@@ -340,7 +366,11 @@
     memoryDegraded: "{{ t('dashboard.memory_degraded') }}",
     memoryDescDegraded: "{{ t('dashboard.memory_desc_degraded') }}",
     installFailed: "{{ t('dashboard.install_failed') }}",
-    issuesHeading: "{{ t('dashboard.memory_issues') }}"
+    issuesHeading: "{{ t('dashboard.memory_issues') }}",
+    graphConfirmClear: "{{ t('dashboard.memory_graph_confirm_clear') }}",
+    graphCleared: "{{ t('dashboard.memory_graph_cleared') }}",
+    graphNodes: "{{ t('dashboard.memory_graph_nodes') }}",
+    graphEdges: "{{ t('dashboard.memory_graph_edges') }}"
   };
 
   async function _loadSessions() {
@@ -564,6 +594,230 @@
         issuesEl.innerHTML = '';
       }
     }
+  }
+
+  // ── Property graph (L2) explorer ─────────────────────────────────
+  var _kgData = { nodes: [], edges: [] };
+  var _kgAnim = null;
+
+  function _kgEsc(s) {
+    return String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderKgList(nodes) {
+    var el = document.getElementById('kg-results');
+    if (!el) return;
+    if (!nodes || !nodes.length) {
+      el.innerHTML = '';
+      return;
+    }
+    var top = nodes.slice(0, 40);
+    el.innerHTML = top.map(function(n) {
+      var label = _kgEsc(n.label || n.id);
+      var group = _kgEsc(n.group || '');
+      var title = _kgEsc((n.title || '').slice(0, 160));
+      return (
+        '<div style="padding:6px 8px;border-bottom:1px solid var(--border-subtle);display:flex;gap:10px;align-items:flex-start;">' +
+          '<span style="flex:0 0 auto;font-size:0.65rem;padding:2px 6px;border-radius:4px;background:rgba(56,189,248,0.12);color:#38bdf8;font-weight:600;">' + group + '</span>' +
+          '<div style="min-width:0;">' +
+            '<div style="font-weight:600;color:var(--text-primary);">' + label + '</div>' +
+            (title ? '<div style="color:var(--text-muted);margin-top:2px;line-height:1.35;">' + title + '</div>' : '') +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function drawKgCanvas(nodes, edges) {
+    var canvas = document.getElementById('kg-canvas');
+    var empty = document.getElementById('kg-empty');
+    var wrap = document.getElementById('kg-canvas-wrap');
+    if (!canvas || !wrap) return;
+    var rect = wrap.getBoundingClientRect();
+    var w = Math.max(320, Math.floor(rect.width));
+    var h = 280;
+    canvas.width = w;
+    canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    if (!nodes || !nodes.length) {
+      if (empty) empty.style.display = 'flex';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    // Cap for layout readability
+    var maxN = 48;
+    var ns = nodes.slice(0, maxN);
+    var ids = {};
+    ns.forEach(function(n, i) { ids[n.id] = i; });
+    var es = (edges || []).filter(function(e) {
+      return ids[e.from] !== undefined && ids[e.to] !== undefined;
+    });
+
+    // Simple circle layout + light force iteration
+    var pts = ns.map(function(n, i) {
+      var ang = (i / Math.max(ns.length, 1)) * Math.PI * 2;
+      var r = Math.min(w, h) * 0.32;
+      return {
+        x: w / 2 + Math.cos(ang) * r,
+        y: h / 2 + Math.sin(ang) * r,
+        vx: 0, vy: 0,
+        label: String(n.label || n.id || '').slice(0, 18),
+        group: n.group || 'entity',
+      };
+    });
+
+    function step() {
+      var i, j;
+      for (i = 0; i < pts.length; i++) {
+        for (j = i + 1; j < pts.length; j++) {
+          var dx = pts[i].x - pts[j].x;
+          var dy = pts[i].y - pts[j].y;
+          var d2 = dx * dx + dy * dy + 0.01;
+          var f = 400 / d2;
+          var d = Math.sqrt(d2);
+          pts[i].vx += (dx / d) * f;
+          pts[i].vy += (dy / d) * f;
+          pts[j].vx -= (dx / d) * f;
+          pts[j].vy -= (dy / d) * f;
+        }
+      }
+      es.forEach(function(e) {
+        var a = pts[ids[e.from]], b = pts[ids[e.to]];
+        if (!a || !b) return;
+        var dx = b.x - a.x, dy = b.y - a.y;
+        a.vx += dx * 0.002;
+        a.vy += dy * 0.002;
+        b.vx -= dx * 0.002;
+        b.vy -= dy * 0.002;
+      });
+      pts.forEach(function(p) {
+        p.x += p.vx * 0.08;
+        p.y += p.vy * 0.08;
+        p.vx *= 0.6;
+        p.vy *= 0.6;
+        p.x = Math.max(24, Math.min(w - 24, p.x));
+        p.y = Math.max(20, Math.min(h - 20, p.y));
+      });
+    }
+    for (var s = 0; s < 40; s++) step();
+
+    // edges
+    ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+    ctx.lineWidth = 1;
+    es.forEach(function(e) {
+      var a = pts[ids[e.from]], b = pts[ids[e.to]];
+      if (!a || !b) return;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      if (e.label) {
+        ctx.fillStyle = 'rgba(148,163,184,0.7)';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(String(e.label).slice(0, 16), (a.x + b.x) / 2, (a.y + b.y) / 2);
+      }
+    });
+
+    // nodes
+    pts.forEach(function(p) {
+      var hue = 190;
+      if (p.group === 'memory_chunk') hue = 280;
+      else if (p.group === 'person' || p.group === 'user') hue = 145;
+      else if (p.group === 'tag') hue = 40;
+      ctx.beginPath();
+      ctx.fillStyle = 'hsla(' + hue + ',70%,55%,0.9)';
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(226,232,240,0.95)';
+      ctx.font = '11px var(--font-sans, sans-serif)';
+      ctx.fillText(p.label, p.x + 10, p.y + 4);
+    });
+  }
+
+  async function loadKnowledgeGraph(q) {
+    try {
+      var url = '/api/memory/graph';
+      if (q) url += '?q=' + encodeURIComponent(q) + '&limit=60';
+      var resp = await fetch(url);
+      var data = await resp.json();
+      _kgData = data || { nodes: [], edges: [] };
+      var st = data.stats || {};
+      var line = document.getElementById('kg-stats-line');
+      if (line) {
+        line.textContent =
+          (st.nodes != null ? st.nodes : (_kgData.nodes || []).length) + ' ' + (I18N.graphNodes || 'nodes') +
+          ' · ' +
+          (st.edges != null ? st.edges : (_kgData.edges || []).length) + ' ' + (I18N.graphEdges || 'edges') +
+          (st.backend ? ' · ' + st.backend : '') +
+          (data.query ? ' · filter: ' + data.query : '');
+      }
+      drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
+      renderKgList(_kgData.nodes || []);
+    } catch (e) {
+      console.warn('kg load failed', e);
+    }
+  }
+
+  function wireKgControls() {
+    var searchBtn = document.getElementById('kg-search-btn');
+    var refreshBtn = document.getElementById('kg-refresh-btn');
+    var clearBtn = document.getElementById('kg-clear-btn');
+    var input = document.getElementById('kg-search-input');
+    if (searchBtn) {
+      searchBtn.addEventListener('click', function() {
+        loadKnowledgeGraph(input ? input.value.trim() : '');
+      });
+    }
+    if (input) {
+      input.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') loadKnowledgeGraph(input.value.trim());
+      });
+    }
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function() {
+        if (input) input.value = '';
+        loadKnowledgeGraph('');
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async function() {
+        var ok = true;
+        if (window.kazmaConfirm) {
+          ok = await window.kazmaConfirm({
+            title: 'Clear graph',
+            message: I18N.graphConfirmClear || 'Clear the entire property graph?',
+            confirmText: 'Clear',
+            danger: true,
+          });
+        } else {
+          ok = window.confirm(I18N.graphConfirmClear || 'Clear graph?');
+        }
+        if (!ok) return;
+        try {
+          var resp = await fetch('/api/memory/graph/clear', { method: 'POST' });
+          var data = await resp.json();
+          if (window.showToast) {
+            window.showToast(I18N.graphCleared || 'Graph cleared', 'success');
+          }
+          loadKnowledgeGraph('');
+        } catch (e) {
+          if (window.showToast) window.showToast('Clear failed: ' + e.message, 'error');
+        }
+      });
+    }
+    loadKnowledgeGraph('');
+    window.addEventListener('resize', function() {
+      if (_kgData) drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireKgControls);
+  } else {
+    wireKgControls();
   }
 
   async function pollMemoryStatus() {

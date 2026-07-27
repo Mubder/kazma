@@ -1251,6 +1251,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.memory_components": {"en": "Component health", "ar": "صحة المكوّنات"},
     "dashboard.memory_probing": {"en": "Probing memory subsystems…", "ar": "جارٍ فحص أنظمة الذاكرة…"},
     "dashboard.memory_issues": {"en": "Needs attention", "ar": "يحتاج انتباهًا"},
+    "dashboard.memory_graph_title": {"en": "Property graph (L2)", "ar": "رسم العلاقات (L2)"},
+    "dashboard.memory_graph_search": {"en": "Search", "ar": "بحث"},
+    "dashboard.memory_graph_search_ph": {"en": "Search nodes…", "ar": "ابحث في العقد…"},
+    "dashboard.memory_graph_refresh": {"en": "Refresh", "ar": "تحديث"},
+    "dashboard.memory_graph_clear": {"en": "Clear graph", "ar": "مسح الرسم"},
+    "dashboard.memory_graph_empty": {
+        "en": "No graph nodes yet. Chat with durable facts or consolidation will populate L2.",
+        "ar": "لا توجد عقد بعد. الذكريات الدائمة أو الدمج سيملآن الطبقة الثانية.",
+    },
+    "dashboard.memory_graph_confirm_clear": {
+        "en": "Clear the entire property graph? This cannot be undone.",
+        "ar": "مسح رسم العلاقات بالكامل؟ لا يمكن التراجع.",
+    },
+    "dashboard.memory_graph_cleared": {"en": "Graph cleared", "ar": "تم مسح الرسم"},
+    "dashboard.memory_graph_nodes": {"en": "nodes", "ar": "عقدة"},
+    "dashboard.memory_graph_edges": {"en": "edges", "ar": "حافة"},
 
     # ── Workspace page ───────────────────────────────────────────────
     "workspace.title": {"en": "Kazma — Workspace", "ar": "كاظمه — مساحة العمل"},

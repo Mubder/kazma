@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Unreleased — Consolidator cost/fence/dedup + graph UI (2026-07-27)
+
+- **Cost:** `every_n_turns`, `skip_llm_in_demo` (DEMO_MODE), unified
+  `schedule_post_turn_memory` (auto_store → consolidator).
+- **Fence:** consolidator facts/triples run through `is_override_delta`.
+- **Dedup:** near-duplicate skip vs auto_store `texts` (Jaccard / containment).
+- **Graph UI:** Dashboard L2 explorer (canvas, search, refresh, clear);
+  APIs `GET /api/memory/graph?q=`, `/search`, `POST /clear`.
+
+## Unreleased — L2 property graph + LLM consolidator (2026-07-27)
+
+- **L2 full graph:** NetworkX JSON replaced by **SQLite property graph**
+  (`knowledge_graph.db`: nodes, edges, FTS5, multi-hop, `upsert_triple`).
+  Legacy `knowledge_graph.json` migrated once. Singleton via
+  `get_knowledge_graph()`; Dashboard `/api/memory/graph` uses it.
+- **Consolidator:** `memory/consolidator.py` extracts durable facts + SPO
+  triples after each turn (LLM + heuristic fallback) → adapter store + graph.
+  Config: `memory.consolidation.{enabled,use_llm,min_user_chars}`.
+- Adapter L2 query uses graph FTS + neighbor expansion.
+
+## Unreleased — Make Kazma Memory Great Again (2026-07-27)
+
+End-to-end strengthen of the existing 4-layer memory stack (no rewrite):
+
+- **Fail-closed store:** `UnifiedMemoryAdapter.store()` / `index()` only return a
+  durable id when L1, L3, or L4 confirmed a write; L2 alone is not enough.
+  `memory_store` tool no longer claims success with an empty id.
+- **Config SoT:** `kazma_core.memory.config` merges ConfigStore ← `kazma.yaml`;
+  per-turn RAG, auto-store, and health use it so TUI `memory.enabled` is real.
+- **FTS unify:** `FTS5Memory` writes the canonical `memories`/`memories_fts`
+  schema (same as L3); one-shot migrate of legacy `memory_fts`.
+- **Quality:** empty-content RRF hits dropped; L1 chunking on adapter index;
+  zero-vector embedder = health **error**.
+- **Docs:** FAQ, architecture, memory-and-rag corrected (auto recall + adapter
+  is the chat path).
+- **Tests:** `kazma-core/tests/test_memory_strengthen.py`.
+
 ## Unreleased — Research panel papers list + chat logo (2026-07-27)
 
 - **Papers list:** scan all workspace candidates + ConfigStore index so

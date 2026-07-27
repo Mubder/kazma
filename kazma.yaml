@@ -100,6 +100,13 @@ memory:
   max_context_tokens: 128000
   retrieval_top_k: 5
   provenance: true
+  consolidation:
+    enabled: true
+    use_llm: true
+    min_user_chars: 24
+    every_n_turns: 1
+    skip_adapter_if_auto_stored: true
+    skip_llm_in_demo: true
   embedding:
     provider: local
     model: all-MiniLM-L6-v2

@@ -18,15 +18,9 @@ logger = logging.getLogger(__name__)
 
 def _read_memory_cfg() -> dict[str, Any]:
     try:
-        from pathlib import Path
+        from kazma_core.memory.config import read_memory_cfg
 
-        import yaml
-
-        path = Path("kazma.yaml")
-        if path.exists():
-            with open(path, encoding="utf-8") as f:
-                full = yaml.safe_load(f) or {}
-            return dict((full.get("memory") or {}))
+        return read_memory_cfg()
     except Exception:
         logger.debug("[memory.health] config read failed", exc_info=True)
     return {}
@@ -73,13 +67,13 @@ def build_memory_health() -> dict[str, Any]:
         components.append(_comp(
             "memory_enabled", "Memory system",
             ok=True, status="ok",
-            detail="memory.enabled=true in config.",
+            detail="memory.enabled=true (ConfigStore ← kazma.yaml).",
         ))
     else:
         components.append(_comp(
             "memory_enabled", "Memory system",
             ok=False, status="off",
-            detail="memory.enabled=false in kazma.yaml — turn it on to use RAG.",
+            detail="memory.enabled=false — set via TUI/Settings or kazma.yaml to use RAG.",
         ))
 
     components.append(_comp(
@@ -141,10 +135,12 @@ def build_memory_health() -> dict[str, Any]:
                 emb_status = "ok"
                 emb_detail = f"{type(emb).__name__} ready (model={model}, dim={dim})."
             elif sample and not nonzero:
-                emb_status = "warn"
+                emb_ok = False
+                emb_status = "error"
                 emb_detail = (
-                    "Embedder returns zero vectors — recall quality is degraded. "
-                    "Remote endpoint may be failing; check API key / network."
+                    "Embedder returns zero vectors — vector recall is broken. "
+                    "Remote endpoint may be failing; check API key / network, "
+                    "or switch memory.embedding.provider to local."
                 )
             else:
                 emb_status = "error"
@@ -246,10 +242,10 @@ def build_memory_health() -> dict[str, Any]:
         ),
         (
             "layer_l2",
-            "L2 Knowledge graph",
+            "L2 Property graph",
             layers.get("graph"),
-            "Structural / tag relations for swarm + self-improvement.",
-            "Knowledge graph unavailable (NetworkX init failed).",
+            "SQLite property graph (nodes/edges/FTS + multi-hop).",
+            "Knowledge graph unavailable (SQLite graph init failed).",
         ),
         (
             "layer_l3",
@@ -267,12 +263,49 @@ def build_memory_health() -> dict[str, Any]:
         ),
     ]
     for id_, name, up, ok_msg, bad_msg in layer_specs:
+        meta: dict[str, Any] = {}
+        detail = ok_msg if up else bad_msg
+        if id_ == "layer_l2" and up:
+            try:
+                from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+                st = get_knowledge_graph().stats()
+                meta = {"nodes": st.get("nodes", 0), "edges": st.get("edges", 0), "backend": st.get("backend")}
+                detail = (
+                    f"SQLite property graph ({st.get('nodes', 0)} nodes, "
+                    f"{st.get('edges', 0)} edges)."
+                )
+            except Exception:
+                pass
         components.append(_comp(
             id_, name,
             ok=bool(up),
             status="ok" if up else "error",
-            detail=ok_msg if up else bad_msg,
+            detail=detail,
+            meta=meta,
         ))
+
+    # Consolidation flag
+    cons = cfg.get("consolidation") if isinstance(cfg.get("consolidation"), dict) else {}
+    cons_on = bool(cons.get("enabled", cfg.get("consolidation_enabled", True))) and mem_enabled
+    every_n = cons.get("every_n_turns", 1)
+    components.append(_comp(
+        "consolidation",
+        "LLM consolidator",
+        ok=cons_on,
+        status="ok" if cons_on else "off",
+        detail=(
+            f"Post-turn librarian (every_n={every_n}, fence+dedup on). "
+            "LLM with heuristic fallback → facts + graph triples."
+            if cons_on
+            else "Disabled (memory.consolidation.enabled=false)."
+        ),
+        meta={
+            "use_llm": bool(cons.get("use_llm", True)),
+            "every_n_turns": every_n,
+            "skip_llm_in_demo": bool(cons.get("skip_llm_in_demo", True)),
+        },
+    ))
 
     # ── Package presence (actionable install hints) ───────────────────
     def _has_mod(name: str) -> bool:

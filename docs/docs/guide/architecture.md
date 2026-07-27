@@ -252,15 +252,18 @@ Handoffs between workers are guarded against infinite recursion: `MAX_HANDOFF_DE
 
 ## 7. The memory subsystems (overview)
 
-Kazma contains **three memory subsystems**, each serving a distinct consumer. After the July 2026 memory overhaul, all three are correctly wired and active:
+Kazma's chat memory is unified under **`UnifiedMemoryAdapter`** (4-layer RRF). Supporting pieces:
 
 | Subsystem | Backing | Used by | Status |
 |---|---|---|---|
-| **VectorMemory** (RAG) | ChromaDB, `all-MiniLM-L6-v2` (384-d) | Chat agent (LLM tools + **compaction injection**) | ✅ Active — compaction now retrieves + injects memories |
-| **SQLiteMemoryBackend** (FTS5) | SQLite + FTS5 + cosine vector search | 4-layer adapter's L3 | ✅ Active — bugs fixed (Arabic tokenization, `distance()`, vec detection) |
-| **UnifiedMemoryAdapter** (4-layer RRF) | ChromaDB + NetworkX + FTS5 + sqlite-vec | Swarm: `self_improvement.py` + `phonebook.py` | ✅ Active — L1 import typo fixed, caller bug fixed |
+| **UnifiedMemoryAdapter** | L1 Chroma + L2 graph + L3 FTS5 + L4 sqlite-vec | Chat (per-turn RAG, tools, auto-store, compaction) + swarm helpers | ✅ **Chat default** — fail-closed durable writes |
+| **L2 Property graph** | SQLite `knowledge_graph.db` (nodes/edges/FTS) | RRF + consolidator triples + Dashboard graph API | ✅ Replaced NetworkX JSON |
+| **Consolidator** | LLM + heuristic SPO extract | Post-turn → clean facts + graph edges | ✅ `memory.consolidation.*` |
+| **VectorMemory** | Chroma `agent_memory` (+ FTS5 degrade) | Boot singleton / tool fallback / health count | ✅ Same collection as L1 |
+| **SQLiteMemoryBackend / FTS5Memory** | `memories` + `memories_fts` in `memory.db` | Adapter L3 + VectorMemory degrade path | ✅ **One FTS schema** |
+| **Knowledge Library** | Per-lib `kazma_kb_*` Chroma + SQLite chunks | Docs RAG (`knowledge_*` tools) | ✅ Isolated from chat memory |
 
-Full details in [Memory & RAG](memory-and-rag).
+Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.config`). Full details in [Memory & RAG](memory-and-rag).
 
 ---
 
@@ -328,7 +331,7 @@ PRAGMA synchronous=NORMAL;     -- WAL-safe, faster than FULL
 
 ## Documentation Audit Notes
 
-- **Premise corrected:** Older docs placed the "4-layer memory" claim in AGENTS.md. It actually originates in `README.md` and `swarm/memory/__init__.py`. The 4 layers all exist as code but the adapter is **not** wired into the chat agent (see [Memory & RAG](memory-and-rag)).
+- **Memory (2026-07 strengthen):** The 4-layer adapter **is** the chat path (per-turn, tools, auto-store, compaction). Earlier notes claiming it was swarm-only are obsolete.
 - **Build-site line numbers refreshed:** AGENTS.md cited "app.py ~line 966" for the startup recompile. The real site is `kazma-ui/kazma_ui/app.py:741-751` inside `_on_startup()` (line 721). `graph_builder.py:966` is an unrelated `aiosqlite.connect`.
 - **`agent_handler` is a package, not a file:** The gateway's `agent_handler.py` was decomposed into the `agent_handler/` package (`store.py`, `graph.py`, `commands.py`, …).
 - **`UnifiedModelRegistry`** is just an alias for `ModelRegistry` (`model_registry.py:950`).

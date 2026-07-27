@@ -17,6 +17,7 @@ def test_build_memory_health_shape():
         "memory_enabled",
         "per_turn_retrieval",
         "auto_store",
+        "consolidation",
         "embedder",
         "vector_memory",
         "layer_l1",

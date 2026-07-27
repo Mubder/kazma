@@ -119,17 +119,74 @@ def register_direct_routes(self: Any) -> None:
         logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
         return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
 
-    import kazma_core.swarm.memory.graph as _kg_mod
-
     @self.app.get("/api/memory/graph")
-    async def _memory_graph():
-        kg = _kg_mod.KnowledgeGraph()
-        return kg.to_json()
+    async def _memory_graph(q: str = "", limit: int = 80):
+        """Full graph for vis (optional ``q`` filters to search hits + neighbors)."""
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        kg = get_knowledge_graph()
+        data = kg.to_json()
+        stats = kg.stats()
+        if q and q.strip():
+            hits = kg.search(q.strip(), limit=max(5, min(limit, 100)))
+            hit_ids = {h["id"] for h in hits}
+            # include 1-hop neighbors of hits
+            for hid in list(hit_ids):
+                for rel in kg.query_related(hid, depth=1) or []:
+                    hit_ids.add(rel["id"])
+            data["nodes"] = [n for n in data.get("nodes") or [] if n.get("id") in hit_ids]
+            data["edges"] = [
+                e
+                for e in data.get("edges") or []
+                if e.get("from") in hit_ids and e.get("to") in hit_ids
+            ]
+            data["query"] = q.strip()
+            data["hit_count"] = len(hits)
+        data["stats"] = stats
+        return data
 
     @self.app.get("/api/memory/graph/stats")
     async def _memory_graph_stats():
-        kg = _kg_mod.KnowledgeGraph()
-        return kg.stats()
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        return get_knowledge_graph().stats()
+
+    @self.app.get("/api/memory/graph/search")
+    async def _memory_graph_search(q: str = "", limit: int = 20):
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        if not (q or "").strip():
+            return {"results": [], "query": ""}
+        hits = get_knowledge_graph().search(q.strip(), limit=max(1, min(int(limit), 50)))
+        return {
+            "query": q.strip(),
+            "results": [
+                {
+                    "id": h.get("id"),
+                    "type": h.get("type"),
+                    "label": h.get("label") or h.get("id"),
+                    "content": (h.get("content") or "")[:300],
+                    "score": h.get("score"),
+                }
+                for h in hits
+            ],
+        }
+
+    @self.app.post("/api/memory/graph/clear")
+    async def _memory_graph_clear():
+        """Clear the property graph (destructive — operator confirmation in UI)."""
+        from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+        kg = get_knowledge_graph()
+        before = kg.stats()
+        kg.clear()
+        after = kg.stats()
+        return {
+            "ok": True,
+            "cleared_nodes": before.get("nodes", 0),
+            "cleared_edges": before.get("edges", 0),
+            "stats": after,
+        }
 
     import kazma_core.time_travel as _tt_mod
 
