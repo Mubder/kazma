@@ -1,7 +1,7 @@
 """Memory health widgets for the TUI (Web Memory & Governance parity).
 
 * :class:`MemoryHealthPanel` — compact strip for Dashboard
-* :class:`MemoryTab` — full Memory tab with components + graph stats
+* :class:`MemoryTab` — full Memory tab with components, graph search, clear
 """
 
 from __future__ import annotations
@@ -12,7 +12,9 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import DataTable, Static
+from textual.widgets import Button, DataTable, Input, Static
+
+from kazma_tui.widgets.confirm_dialog import ConfirmDialog
 
 __all__ = ["MemoryHealthPanel", "MemoryTab"]
 
@@ -185,7 +187,7 @@ class MemoryHealthPanel(Widget):
 
 
 class MemoryTab(VerticalScroll):
-    """Full Memory tab: status, chips, component table, graph stats."""
+    """Full Memory tab: status, chips, component table, graph search + clear."""
 
     DEFAULT_CSS = """
     MemoryTab {
@@ -234,19 +236,61 @@ class MemoryTab(VerticalScroll):
     MemoryTab .mem-chip.-off { color: $text-disabled; }
     MemoryTab #mem-components-table {
         height: auto;
-        max-height: 18;
+        max-height: 14;
         border: tall $border;
     }
     MemoryTab #mem-graph-stats {
         height: auto;
         color: $text;
+        margin-bottom: 1;
+    }
+    MemoryTab .mem-graph-actions {
+        height: 3;
+        layout: horizontal;
+        margin-bottom: 1;
+        align: left middle;
+    }
+    MemoryTab #mem-graph-search {
+        width: 1fr;
+        min-width: 16;
+        height: 3;
+        margin: 0 1 0 0;
+        background: $boost;
+        border: tall $border;
+    }
+    MemoryTab #mem-graph-search:focus {
+        border: tall $primary;
+    }
+    MemoryTab #mem-graph-search-btn,
+    MemoryTab #mem-graph-clear-btn {
+        width: auto;
+        min-width: 10;
+        height: 3;
+        margin: 0 1 0 0;
+    }
+    MemoryTab #mem-graph-clear-btn {
+        border: tall $error;
+        color: $error;
+    }
+    MemoryTab #mem-graph-results {
+        height: auto;
+        max-height: 12;
+        border: tall $border;
+    }
+    MemoryTab #mem-graph-msg {
+        height: auto;
+        color: $text-muted;
+        margin-top: 1;
     }
     """
 
     REFRESH_INTERVAL = 5.0
 
     def compose(self) -> ComposeResult:
-        yield Static("  MEMORY  ·  stack health · graph · components", classes="mem-banner")
+        yield Static(
+            "  MEMORY  ·  stack health · graph search · components",
+            classes="mem-banner",
+        )
         with Vertical(classes="mem-section"):
             yield Static("STATUS", classes="mem-section-title")
             yield Static("[dim]probing…[/]", id="mem-tab-status")
@@ -260,6 +304,18 @@ class MemoryTab(VerticalScroll):
         with Vertical(classes="mem-section"):
             yield Static("GRAPH (L2)", classes="mem-section-title")
             yield Static("[dim]—[/]", id="mem-graph-stats")
+            with Horizontal(classes="mem-graph-actions"):
+                yield Input(
+                    placeholder="Search graph (entity / fact)…",
+                    id="mem-graph-search",
+                )
+                yield Button("Search", id="mem-graph-search-btn", variant="primary")
+                yield Button("Clear", id="mem-graph-clear-btn")
+            yield DataTable(id="mem-graph-results")
+            yield Static(
+                "[dim]Search L2 property graph · Clear wipes all nodes/edges[/]",
+                id="mem-graph-msg",
+            )
         with Vertical(classes="mem-section"):
             yield Static("COMPONENTS", classes="mem-section-title")
             table = DataTable(id="mem-components-table")
@@ -269,11 +325,150 @@ class MemoryTab(VerticalScroll):
         table = self.query_one("#mem-components-table", DataTable)
         table.cursor_type = "row"
         table.add_columns("Component", "Status", "Detail")
+
+        results = self.query_one("#mem-graph-results", DataTable)
+        results.cursor_type = "row"
+        results.add_columns("Type", "Label", "Score", "Content")
+
         self._refresh()
         self.set_interval(self.REFRESH_INTERVAL, self._refresh)
 
     def on_show(self) -> None:
         self._refresh()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "mem-graph-search-btn":
+            self._run_graph_search()
+            event.stop()
+        elif bid == "mem-graph-clear-btn":
+            self._confirm_clear_graph()
+            event.stop()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "mem-graph-search":
+            self._run_graph_search()
+            event.stop()
+
+    def _run_graph_search(self) -> None:
+        """Search the L2 knowledge graph and fill results table."""
+        try:
+            q = self.query_one("#mem-graph-search", Input).value.strip()
+        except Exception:
+            q = ""
+        table = self.query_one("#mem-graph-results", DataTable)
+        table.clear()
+        if not q:
+            try:
+                self.query_one("#mem-graph-msg", Static).update(
+                    "[dim]Enter a search query and press Search or Enter.[/]"
+                )
+            except Exception:
+                pass
+            return
+        try:
+            from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+            hits = get_knowledge_graph().search(q, limit=20)
+        except Exception as exc:
+            logger.debug("graph search failed: %s", exc)
+            try:
+                self.query_one("#mem-graph-msg", Static).update(
+                    f"[bold $error]Search failed[/]  [dim]{exc}[/]"
+                )
+            except Exception:
+                pass
+            return
+
+        if not hits:
+            try:
+                self.query_one("#mem-graph-msg", Static).update(
+                    f"[dim]No graph hits for[/] [bold]{q[:40]}[/]"
+                )
+            except Exception:
+                pass
+            return
+
+        for h in hits:
+            etype = str(h.get("entity_type") or h.get("type") or "?")[:16]
+            label = str(h.get("label") or h.get("id") or "?")[:36]
+            score = h.get("score")
+            score_s = f"{float(score):.2f}" if score is not None else "—"
+            content = str(h.get("content") or "")[:64]
+            table.add_row(etype, label, score_s, content)
+        try:
+            self.query_one("#mem-graph-msg", Static).update(
+                f"[bold $success]{len(hits)}[/] hit(s) for [bold]{q[:40]}[/]"
+            )
+        except Exception:
+            pass
+
+    def _confirm_clear_graph(self) -> None:
+        """Confirm then wipe L2 graph."""
+        dialog = ConfirmDialog(
+            message=(
+                "Delete ALL nodes and edges from the L2 knowledge graph?\n"
+                "This cannot be undone."
+            ),
+            title="Clear Knowledge Graph",
+            confirm_text="Clear graph",
+            cancel_text="Cancel",
+            is_destructive=True,
+        )
+
+        def on_result(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            try:
+                from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+                get_knowledge_graph().clear()
+                self._refresh_graph_stats()
+                try:
+                    self.query_one("#mem-graph-results", DataTable).clear()
+                    self.query_one("#mem-graph-msg", Static).update(
+                        "[bold $warning]Graph cleared.[/]"
+                    )
+                except Exception:
+                    pass
+                try:
+                    from kazma_tui.widgets.toast import Toast
+
+                    self.app.push_screen(
+                        Toast("Knowledge graph cleared", "success", duration=2.0)
+                    )
+                except Exception:
+                    pass
+            except Exception as exc:
+                logger.exception("graph clear failed")
+                try:
+                    self.query_one("#mem-graph-msg", Static).update(
+                        f"[bold $error]Clear failed[/]  [dim]{exc}[/]"
+                    )
+                except Exception:
+                    pass
+
+        self.app.push_screen(dialog, on_result)
+
+    def _refresh_graph_stats(self) -> None:
+        try:
+            from kazma_core.swarm.memory.graph import get_knowledge_graph
+
+            st = get_knowledge_graph().stats()
+            gline = (
+                f"nodes [bold]{st.get('nodes', 0)}[/]  ·  "
+                f"edges [bold]{st.get('edges', 0)}[/]  ·  "
+                f"[dim]{st.get('backend', 'sqlite')}[/]  "
+                f"[dim]{str(st.get('path', ''))[:48]}[/]"
+            )
+            self.query_one("#mem-graph-stats", Static).update(gline)
+        except Exception as exc:
+            try:
+                self.query_one("#mem-graph-stats", Static).update(
+                    f"[dim]graph unavailable: {exc}[/]"
+                )
+            except Exception:
+                pass
 
     def _refresh(self) -> None:
         try:
@@ -322,27 +517,8 @@ class MemoryTab(VerticalScroll):
             except Exception:
                 pass
 
-        # Graph stats
-        try:
-            from kazma_core.swarm.memory.graph import get_knowledge_graph
+        self._refresh_graph_stats()
 
-            st = get_knowledge_graph().stats()
-            gline = (
-                f"nodes [bold]{st.get('nodes', 0)}[/]  ·  "
-                f"edges [bold]{st.get('edges', 0)}[/]  ·  "
-                f"[dim]{st.get('backend', 'sqlite')}[/]  "
-                f"[dim]{str(st.get('path', ''))[:48]}[/]"
-            )
-            self.query_one("#mem-graph-stats", Static).update(gline)
-        except Exception as exc:
-            try:
-                self.query_one("#mem-graph-stats", Static).update(
-                    f"[dim]graph unavailable: {exc}[/]"
-                )
-            except Exception:
-                pass
-
-        # Component table
         try:
             table = self.query_one("#mem-components-table", DataTable)
             table.clear()

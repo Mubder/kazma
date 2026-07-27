@@ -75,6 +75,7 @@ class KazmaTUI(App[None]):
         Binding("6", "goto_tab('swarm')", "Swarm", show=False),
         Binding("7", "goto_tab('settings')", "Settings", show=False),
         Binding("m", "goto_tab('memory')", "Memory", show=False),
+        Binding("bracketleft", "toggle_nav", "Nav", show=True),
         # Help
         Binding("?", "help_screen", "Help", show=False),
         # Accessibility
@@ -92,6 +93,8 @@ class KazmaTUI(App[None]):
         self._high_contrast: Optional[HighContrastMode] = None
         self._status_bar: Optional[KazmaStatusBar] = None
         self._shown_approvals: set[str] = set()
+        # When True, user manually toggled the nav rail — skip auto collapse.
+        self._nav_user_set: bool = False
 
     def compose(self) -> ComposeResult:
         yield KazmaHeader(id="kazma-header")
@@ -180,6 +183,29 @@ class KazmaTUI(App[None]):
     def on_nav_selected(self, event: NavSelected) -> None:
         """Left rail → switch main tab."""
         self.action_goto_tab(event.tab_id)
+
+    def action_toggle_nav(self) -> None:
+        """Collapse / expand the left nav rail (``[`` key)."""
+        try:
+            rail = self.query_one("#nav-rail", NavRail)
+            rail.toggle()
+            self._nav_user_set = True
+        except Exception:
+            pass
+
+    def on_resize(self, event) -> None:  # type: ignore[no-untyped-def]
+        """Auto-collapse nav on narrow terminals unless user overrode it."""
+        if self._nav_user_set:
+            return
+        try:
+            rail = self.query_one("#nav-rail", NavRail)
+            width = getattr(event.size, "width", None) or self.size.width
+            if width < 100 and not rail.collapsed:
+                rail.collapsed = True
+            elif width >= 120 and rail.collapsed:
+                rail.collapsed = False
+        except Exception:
+            pass
 
     def _initialize_core(self) -> None:
         """Initialize ModelRegistry and SwarmEngine if not already done.

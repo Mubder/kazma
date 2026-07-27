@@ -1,15 +1,20 @@
-"""Left navigation rail for the TUI (hides top tabs chrome)."""
+"""Left navigation rail for the TUI (hides top tabs chrome).
+
+Supports expanded (full labels) and collapsed (key-only) modes for narrow
+terminals. Toggle with ``[`` or the rail footer button.
+"""
 
 from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.message import Message
+from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Button, Static
 
-__all__ = ["NavRail", "NavSelected"]
+__all__ = ["NavRail", "NavSelected", "NAV_ITEMS"]
 
-# (tab_id, full label, key hint) — labels must fit width 20 with key prefix
+# (tab_id, full label, key hint)
 NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("dashboard", "Dashboard", "1"),
     ("memory", "Memory", "2"),
@@ -19,6 +24,9 @@ NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("swarm", "Swarm", "6"),
     ("settings", "Settings", "7"),
 )
+
+_WIDTH_EXPANDED = 20
+_WIDTH_COLLAPSED = 5
 
 
 class NavSelected(Message):
@@ -30,7 +38,9 @@ class NavSelected(Message):
 
 
 class NavRail(Widget):
-    """Vertical nav: keys 1–7 map to main tabs. Full labels always visible."""
+    """Vertical nav: keys 1–7 map to main tabs. Collapsible for narrow terminals."""
+
+    collapsed: reactive[bool] = reactive(False)
 
     DEFAULT_CSS = """
     NavRail {
@@ -41,6 +51,9 @@ class NavRail(Widget):
         padding: 1 0 0 0;
         height: 1fr;
         layout: vertical;
+    }
+    NavRail.-collapsed {
+        width: 5;
     }
     NavRail .nav-brand {
         height: 3;
@@ -56,7 +69,7 @@ class NavRail(Widget):
         min-width: 1;
         max-width: 100%;
         height: 3;
-        margin: 0 0 0 0;
+        margin: 0;
         padding: 0 1;
         border: none;
         border-left: solid transparent;
@@ -64,6 +77,11 @@ class NavRail(Widget):
         color: $text-muted;
         text-align: left;
         content-align: left middle;
+    }
+    NavRail.-collapsed .nav-btn {
+        padding: 0;
+        content-align: center middle;
+        text-align: center;
     }
     NavRail .nav-btn:hover {
         background: $boost;
@@ -76,28 +94,85 @@ class NavRail(Widget):
         text-style: bold;
         border-left: solid $primary;
     }
-    NavRail .nav-key {
-        color: $text-disabled;
-        text-style: none;
+    NavRail .nav-collapse {
+        dock: bottom;
+        width: 100%;
+        min-width: 1;
+        height: 3;
+        margin: 0;
+        padding: 0;
+        border: none;
+        border-top: solid $border;
+        background: $boost;
+        color: $text-muted;
+        text-align: center;
+        content-align: center middle;
+    }
+    NavRail .nav-collapse:hover {
+        color: $primary;
+        background: $primary 10%;
     }
     """
 
     def compose(self) -> ComposeResult:
-        yield Static("KAZMA", classes="nav-brand")
+        yield Static("KAZMA", classes="nav-brand", id="nav-brand")
         for tab_id, label, key in NAV_ITEMS:
-            # Key + full label — width 20 fits " 7  Settings" cleanly
             yield Button(
                 f" {key}  {label}",
                 id=f"nav-{tab_id}",
                 classes="nav-btn",
             )
+        yield Button(" « ", id="nav-collapse", classes="nav-collapse")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
+        if bid == "nav-collapse":
+            self.toggle()
+            event.stop()
+            return
         if bid.startswith("nav-"):
             tab_id = bid[4:]
             self.set_active(tab_id)
             self.post_message(NavSelected(tab_id))
+
+    def toggle(self) -> None:
+        """Flip expanded / collapsed rail."""
+        self.collapsed = not self.collapsed
+
+    def watch_collapsed(self, collapsed: bool) -> None:
+        """Apply CSS class and refresh button labels when mode changes."""
+        self.set_class(collapsed, "-collapsed")
+        self.styles.width = _WIDTH_COLLAPSED if collapsed else _WIDTH_EXPANDED
+        self._refresh_labels()
+
+    def _refresh_labels(self) -> None:
+        """Update brand + nav button text for current mode."""
+        try:
+            brand = self.query_one("#nav-brand", Static)
+            brand.update("K" if self.collapsed else "KAZMA")
+        except Exception:
+            pass
+        for tab_id, label, key in NAV_ITEMS:
+            try:
+                btn = self.query_one(f"#nav-{tab_id}", Button)
+                if self.collapsed:
+                    btn.label = f"{key}"
+                    btn.tooltip = label
+                else:
+                    btn.label = f" {key}  {label}"
+                    btn.tooltip = None
+            except Exception:
+                pass
+        try:
+            toggle = self.query_one("#nav-collapse", Button)
+            if self.collapsed:
+                toggle.label = " » "
+                toggle.tooltip = "Expand nav ([)"
+            else:
+                toggle.label = " « "
+                toggle.tooltip = "Collapse nav ([)"
+        except Exception:
+            pass
 
     def set_active(self, tab_id: str) -> None:
         for tid, _label, _key in NAV_ITEMS:

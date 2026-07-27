@@ -232,7 +232,7 @@ class SwarmPanel(VerticalScroll):
         height: 1;
         color: $text-muted;
         text-style: bold;
-        padding: 0 1 1 1;
+        padding: 0 0 1 0;
     }
     SwarmPanel .swarm-banner {
         height: 1;
@@ -261,6 +261,22 @@ class SwarmPanel(VerticalScroll):
         color: $primary;
         text-style: bold;
         height: 1;
+    }
+    SwarmPanel TabbedContent {
+        height: 1fr;
+        background: $surface;
+    }
+    SwarmPanel ContentTabs {
+        background: $panel;
+        border-bottom: solid $border;
+        height: 3;
+    }
+    SwarmPanel WorkerTable,
+    SwarmPanel SwarmTasksTable,
+    SwarmPanel ActiveTasksLog,
+    SwarmPanel WorkerTree {
+        border: tall $border;
+        background: $panel;
     }
     """
 

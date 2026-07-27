@@ -261,13 +261,17 @@ MetricCard > Sparkline {
     height: 1;
 }
 
-/* Left nav rail — full labels, equal-width strip */
+/* Left nav rail — full labels; .-collapsed for key-only narrow mode */
 NavRail {
     dock: left;
     width: 20;
     background: $panel;
     border-right: solid $border;
     height: 1fr;
+}
+
+NavRail.-collapsed {
+    width: 5;
 }
 
 NavRail .nav-brand {
@@ -292,6 +296,12 @@ NavRail .nav-btn {
     text-align: left;
 }
 
+NavRail.-collapsed .nav-btn {
+    padding: 0;
+    text-align: center;
+    content-align: center middle;
+}
+
 NavRail .nav-btn:hover {
     background: $boost;
     color: $text;
@@ -303,6 +313,23 @@ NavRail .nav-btn.-active {
     color: $primary;
     text-style: bold;
     border-left: solid $primary;
+}
+
+NavRail .nav-collapse {
+    dock: bottom;
+    width: 100%;
+    min-width: 1;
+    height: 3;
+    border: none;
+    border-top: solid $border;
+    background: $boost;
+    color: $text-muted;
+}
+
+/* Panel banners (Chat / Files / Swarm / Memory) */
+.chat-banner, .files-banner, .swarm-banner, .mem-banner, .metrics-title {
+    color: $primary;
+    text-style: bold;
 }
 
 MemoryHealthPanel {

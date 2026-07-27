@@ -52,23 +52,31 @@ class ChatPanel(Vertical):
         height: 1fr;
         border: none;
         background: $surface;
-        padding: 0;
+        padding: 0 1;
+    }
+    ChatPanel .chat-banner {
+        height: 1;
+        color: $primary;
+        text-style: bold;
+        padding: 0 1 1 1;
     }
     ChatPanel > RichLog {
         height: 1fr;
         background: $surface;
-        border: none;
+        border: tall $border;
         padding: 1 2;
+        scrollbar-color: $border $panel;
+        scrollbar-color-hover: $primary 50%;
     }
     ChatPanel > ProgressBar {
         height: 1;
-        margin: 0 2;
+        margin: 0 1;
         color: $primary;
     }
     ChatPanel > Input {
         dock: bottom;
         height: 3;
-        margin: 0 1 1 1;
+        margin: 0 0 1 0;
         background: $panel;
         border: tall $border;
         color: $text;
@@ -119,6 +127,10 @@ class ChatPanel(Vertical):
         self._ac_suppress: bool = False
 
     def compose(self) -> ComposeResult:
+        yield Static(
+            "  CHAT  ·  / for commands  ·  Ctrl+P palette",
+            classes="chat-banner",
+        )
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
         yield Input(placeholder="Message  ·  / for commands  ·  Ctrl+P palette", id="chat-input")

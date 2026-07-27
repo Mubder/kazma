@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — TUI Phase 4 polish: collapsible nav, graph actions, density (2026-07-27)
+
+- **NavRail** collapse/expand (`[` key + footer button); auto-collapse under
+  width 100; key-only mode with tooltips on narrow terminals.
+- **Memory tab:** L2 graph **Search** (FTS) + **Clear** with ConfirmDialog.
+- **Chat / Files / Swarm** density pass — section banners, bordered logs,
+  consistent shell chrome.
+- **README** architecture tree and shortcuts updated for v3 shell.
+
 ## Unreleased — TUI Phase 3: nav rail, Memory tab, swarm sparklines (2026-07-27)
 
 - **NavRail** left chrome (hide top tabs); keys 1–7 / `m` for Memory.
