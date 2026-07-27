@@ -1259,7 +1259,9 @@ async def _try_research_command(
     try:
         from kazma_core.tools.research_pipeline import run_research_pipeline
 
-        result = await run_research_pipeline(topic, depth=depth, max_sources=8)
+        result = await run_research_pipeline(
+            topic, depth=depth, max_sources=8, export_docx=True
+        )
         # Telegram-friendly length
         if len(result) > 3500:
             result = result[:3400] + "\n\n… (truncated — open the report file for full paper)"

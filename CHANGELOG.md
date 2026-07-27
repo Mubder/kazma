@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Research Phase 3 polish (2026-07-27)
+
+- **WS `/research deep`** parity with SSE + gateway; stage progress events
+- **Parallel** search + acquire in `run_research_pipeline` (semaphore 4)
+- **DOCX export** optional (`export_docx` / `KAZMA_RESEARCH_EXPORT_DOCX`)
+- **Papers registry** + `GET /api/research/papers`; Research panel lists papers
+- **Smart KB inject** `KAZMA_KB_SMART_SEARCH=1` for technical queries
+- Smoke: `scripts/smoke_research_deep.py`
+
 ## Unreleased — KB harden + deep research product (2026-07-27)
 
 Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:

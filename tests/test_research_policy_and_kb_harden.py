@@ -128,3 +128,27 @@ async def test_synthesize_paths_validation():
     assert out.startswith("Error:")
     out2 = await synthesize_from_digests("nope.md", "")
     assert "question" in out2.lower() or out2.startswith("Error:")
+
+
+def test_kb_smart_search_flag(monkeypatch):
+    from kazma_core.stores import knowledge_index as ki
+
+    monkeypatch.delenv("KAZMA_KB_SMART_SEARCH", raising=False)
+    monkeypatch.setattr(
+        "kazma_core.config_store.get_config_store",
+        lambda: type("C", (), {"get": lambda self, k, d=None: None})(),
+    )
+    assert ki.kb_smart_search_enabled() is False
+    monkeypatch.setenv("KAZMA_KB_SMART_SEARCH", "1")
+    assert ki.kb_smart_search_enabled() is True
+    assert ki._looks_technical("How do I configure the REST API endpoint?")
+    assert not ki._looks_technical("hi")
+
+
+def test_list_research_papers_empty_ok(tmp_path, monkeypatch):
+    from kazma_core.tools import research_pipeline as rp
+
+    monkeypatch.setattr(rp, "_get_ws_root", lambda: tmp_path)
+    (tmp_path / "research" / "reports").mkdir(parents=True)
+    papers = rp.list_research_papers(limit=10)
+    assert papers == []

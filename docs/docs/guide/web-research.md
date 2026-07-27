@@ -162,6 +162,14 @@ The supervisor also has a **soft depth gate**: deep-worded requests that only ra
 run_research_pipeline(topic="...", depth="deep", max_sources=8)
 ```
 
+Works on **Web SSE**, **WebSocket**, and **gateway** chat. Pipeline runs
+**parallel** search + acquire (semaphore 4), writes
+`research/reports/<slug>-<ts>/report.md`, optional DOCX
+(`export_docx=True` or `KAZMA_RESEARCH_EXPORT_DOCX=1`), and registers the run
+for the Research panel (`GET /api/research/papers`).
+
+Stage progress is streamed as tool/status events (WS) or italic stage lines (SSE).
+
 ### Swarm
 
 `/swarm research …` / `dispatch_swarm` auto-researcher includes save/digest/pipeline tools.

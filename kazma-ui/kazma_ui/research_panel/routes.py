@@ -7,6 +7,7 @@ time (by the ``dispatch_swarm`` tool).
 Routes:
   GET  /api/research/tasks           — list research tasks (filtered)
   GET  /api/research/tasks/{id}      — single research result detail
+  GET  /api/research/papers          — deep research pipeline paper runs
   POST /api/research/compare         — compare two research runs
   POST /api/research/{id}/export     — export to DOCX/PDF/Markdown
   GET  /api/research/download        — download an exported file
@@ -102,6 +103,18 @@ async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
 def create_research_router() -> APIRouter:
     """Create the research API router."""
     router = APIRouter(tags=["research"])
+
+    @router.get("/api/research/papers")
+    async def list_papers(limit: int = 50) -> JSONResponse:
+        """List deep research pipeline paper runs (report.md under research/reports/)."""
+        try:
+            from kazma_core.tools.research_pipeline import list_research_papers
+
+            papers = list_research_papers(limit=limit)
+            return JSONResponse({"ok": True, "papers": papers, "count": len(papers)})
+        except Exception as exc:
+            logger.exception("[research] list papers failed")
+            return JSONResponse({"ok": False, "error": str(exc), "papers": []}, status_code=500)
 
     @router.get("/api/research/tasks")
     async def list_research(

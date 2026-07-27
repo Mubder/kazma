@@ -698,9 +698,23 @@ def create_sse_chat_router(
                     {"content": f"🔬 Deep research starting: **{topic}**…\n\n"},
                 )
                 try:
+                    stages: list[str] = []
+
+                    async def _progress_sse(stage: str, message: str) -> None:
+                        stages.append(f"_{stage}: {message}_\n")
+
                     out = await run_research_pipeline(
-                        topic, depth=depth, max_sources=8
+                        topic,
+                        depth=depth,
+                        max_sources=8,
+                        progress_cb=_progress_sse,
+                        export_docx=True,
                     )
+                    if stages:
+                        yield _sse_frame(
+                            "token",
+                            {"content": "\n".join(stages[-12:]) + "\n"},
+                        )
                     yield _sse_frame("token", {"content": out})
                     try:
                         session.add_message("assistant", out)

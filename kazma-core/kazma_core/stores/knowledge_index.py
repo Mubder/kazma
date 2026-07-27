@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,6 +50,7 @@ __all__ = [
     "get_knowledge_auto_inject_block",
     "get_knowledge_index",
     "kb_auto_inject_enabled",
+    "kb_smart_search_enabled",
     "reset_knowledge_index",
 ]
 
@@ -495,6 +497,46 @@ def kb_auto_inject_enabled() -> bool:
     return raw not in ("0", "false", "no", "off", "disabled")
 
 
+def kb_smart_search_enabled() -> bool:
+    """When true, inject from **all active libraries with chunks** (not only
+    ``auto_inject=1``), if the user message looks technical / doc-related.
+
+    Env: ``KAZMA_KB_SMART_SEARCH=1`` or ConfigStore ``knowledge.smart_search``.
+    Still respects the global kill switch and tenant/archive filters.
+    """
+    raw = (os.environ.get("KAZMA_KB_SMART_SEARCH") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    try:
+        from kazma_core.config_store import get_config_store
+
+        v = get_config_store().get("knowledge.smart_search")
+        if v is not None:
+            return bool(v)
+    except Exception:
+        pass
+    return False
+
+
+_TECHNICAL_RE = re.compile(
+    r"\b("
+    r"api|sdk|endpoint|webhook|oauth|jwt|http|rest|graphql|"
+    r"how\s+do\s+i|how\s+to|documentation|docs|configure|"
+    r"error|exception|parameter|payload|schema|tutorial|"
+    r"install|authenticate|authorization|rate\s*limit"
+    r")\b",
+    re.I,
+)
+
+
+def _looks_technical(msg: str) -> bool:
+    if not msg or len(msg.strip()) < 8:
+        return False
+    return bool(_TECHNICAL_RE.search(msg))
+
+
 # Per-injection top-k.  Keeps the prompt footprint bounded; 3 chunks of
 # ≤4000 chars each ≈ ≤3k tokens worst case.  Tunable via env.
 def _auto_inject_top_k() -> int:
@@ -527,11 +569,22 @@ async def get_knowledge_auto_inject_block(user_message: str) -> str:
     try:
         store = get_knowledge_store()
         libs = store.list_auto_inject_libraries()
+        # Smart search: also consult active libraries with chunks when the
+        # question looks technical (opt-in via KAZMA_KB_SMART_SEARCH).
+        if kb_smart_search_enabled() and _looks_technical(msg):
+            active = store.list_libraries(include_archived=False)
+            by_id = {l["id"]: l for l in libs}
+            for lib in active:
+                if int(lib.get("chunk_count") or 0) <= 0:
+                    continue
+                by_id.setdefault(lib["id"], lib)
+            libs = list(by_id.values())
         if not libs:
             return ""
         index = get_knowledge_index()
-        # Cross-library RRF across the opted-in libraries only.
-        hits = await index.search_all(msg, [l["id"] for l in libs], top_k=_auto_inject_top_k())
+        hits = await index.search_all(
+            msg, [l["id"] for l in libs], top_k=_auto_inject_top_k()
+        )
         if not hits:
             return ""
     except Exception:

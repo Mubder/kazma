@@ -1684,10 +1684,10 @@ class LocalToolRegistry:
                 "run_research_pipeline",
                 run_research_pipeline,
                 description=(
-                    "Deep research paper mode: multi-query search → acquire full pages → "
-                    "digest → LLM synthesis → write research/reports/.../report.md. "
+                    "Deep research paper mode: multi-query search → parallel acquire → "
+                    "digest → LLM synthesis → research/reports/.../report.md (+ optional DOCX). "
                     "Args: topic, depth='deep'|'standard', max_sources=8, language=''. "
-                    "Use when user wants comprehensive/thorough research or a full report."
+                    "Use for comprehensive/thorough research or a full report."
                 ),
                 category="search",
             )

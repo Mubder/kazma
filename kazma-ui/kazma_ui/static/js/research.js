@@ -64,14 +64,36 @@
     },
 
     load: function () {
-      fetch('/api/research/tasks?page=1&page_size=50&archived=false', { credentials: 'same-origin' })
-        .then(function (r) { return r.ok ? r.json() : { tasks: [], count: 0 }; })
-        .then(function (data) {
-          allTasks = data.tasks || [];
-          renderList(allTasks);
-          populateCompareDropdowns(allTasks);
-        })
-        .catch(function () { /* silent — retry on poll */ });
+      Promise.all([
+        fetch('/api/research/tasks?page=1&page_size=50&archived=false', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { tasks: [] }; })
+          .catch(function () { return { tasks: [] }; }),
+        fetch('/api/research/papers?limit=30', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { papers: [] }; })
+          .catch(function () { return { papers: [] }; }),
+      ]).then(function (pair) {
+        var data = pair[0] || {};
+        var papers = (pair[1] && pair[1].papers) || [];
+        var paperTasks = papers.map(function (p) {
+          return {
+            id: 'paper:' + (p.id || p.report_path),
+            prompt: '[Paper] ' + (p.topic || p.report_path || 'report'),
+            status: 'paper',
+            workers: ['research_pipeline'],
+            cost: 0,
+            duration: p.elapsed_seconds || 0,
+            created_at: p.created_at,
+            completed_at: p.created_at,
+            report_path: p.report_path,
+            docx_path: p.docx_path,
+            sources: p.sources,
+            metadata: { kind: 'research_paper' },
+          };
+        });
+        allTasks = paperTasks.concat(data.tasks || []);
+        renderList(allTasks);
+        populateCompareDropdowns(data.tasks || []);
+      });
     },
 
     loadArchived: function () {
@@ -333,20 +355,31 @@
       return;
     }
     el.innerHTML = tasks.map(function (t) {
-      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
+      var isPaper = t.status === 'paper' || (t.id && String(t.id).indexOf('paper:') === 0);
+      var meta = isPaper
+        ? ('pipeline · ' + (t.sources != null ? t.sources + ' sources · ' : '') +
+           (t.report_path ? esc(t.report_path) + ' · ' : '') + timeAgo(t.created_at))
+        : ('<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
+           '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
+           '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
+           '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>');
+      var actions = isPaper
+        ? (t.report_path
+          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/ide/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="Open report">MD</a>'
+          : '')
+        : ('<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
+           '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>');
+      var onclick = isPaper ? '' : ' onclick="KazmaResearch.viewDetail(\'' + t.id + '\')"';
+      return '<div class="card" style="padding:12px 16px;cursor:' + (isPaper ? 'default' : 'pointer') + ';max-width:100%;overflow:hidden;box-sizing:border-box;"' + onclick + '>' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
             '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
-              '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
-              '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
-              '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
-              '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>' +
+              meta +
             '</div>' +
           '</div>' +
           '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
-          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>' +
+          actions +
         '</div>' +
       '</div>';
     }).join('');

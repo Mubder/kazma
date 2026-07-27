@@ -321,6 +321,109 @@ def create_ws_chat_router(
                     except Exception as exc:
                         logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
 
+                    # ── /research deep (parity with SSE + gateway) ─────
+                    if text.lower().startswith("/research"):
+                        parts = text.split(maxsplit=2)
+                        if len(parts) == 1:
+                            topic, depth = "", "deep"
+                        elif parts[1].lower() in (
+                            "deep", "full", "paper", "comprehensive"
+                        ):
+                            topic = parts[2] if len(parts) > 2 else ""
+                            depth = "deep"
+                        else:
+                            topic = text[len("/research") :].strip()
+                            depth = "deep"
+
+                        async def _ws_research() -> None:
+                            try:
+                                if not topic:
+                                    await websocket.send_json(
+                                        TelemetryEvent(
+                                            type="llm_delta",
+                                            data={
+                                                "content": "Usage: `/research deep <topic>`"
+                                            },
+                                            thread_id=thread_id,
+                                        ).to_dict()
+                                    )
+                                    return
+
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="llm_delta",
+                                        data={
+                                            "content": (
+                                                f"🔬 Deep research starting: **{topic}**…\n\n"
+                                            )
+                                        },
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+
+                                from kazma_core.tools.research_pipeline import (
+                                    run_research_pipeline,
+                                )
+
+                                async def _progress(stage: str, message: str) -> None:
+                                    await websocket.send_json(
+                                        TelemetryEvent(
+                                            type="tool_start",
+                                            data={
+                                                "tool_name": f"research:{stage}",
+                                                "inputs": message[:200],
+                                            },
+                                            thread_id=thread_id,
+                                        ).to_dict()
+                                    )
+
+                                out = await run_research_pipeline(
+                                    topic,
+                                    depth=depth,
+                                    max_sources=8,
+                                    progress_cb=_progress,
+                                    export_docx=True,
+                                )
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="llm_delta",
+                                        data={"content": out},
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+                                try:
+                                    session.add_message("assistant", out)
+                                    get_session_manager().put(session)
+                                except Exception:
+                                    pass
+                            except Exception as exc:
+                                logger.exception("[WS-Chat] /research failed")
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="graph_error",
+                                        data={"message": f"Research failed: {exc}"},
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+                            finally:
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="idle",
+                                        data={},
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="stream_end",
+                                        data={},
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+
+                        await _ws_research()
+                        continue
+
                     from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.agent.state import initial_supervisor_state
                     from kazma_core.ide.env_context import build_env_context

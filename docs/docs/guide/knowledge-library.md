@@ -39,6 +39,12 @@ Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZM
 
 **Auto-inject** only includes **non-archived** libraries for the **current tenant** (when multi-user/prod tenant filter is on).
 
+**Smart search (optional):** set `KAZMA_KB_SMART_SEARCH=1` (or ConfigStore
+`knowledge.smart_search=true`) to also retrieve from **active libraries with
+chunks** when the user message looks technical (API/docs/how-to), even if
+per-library auto-inject is off. Kill switch `KAZMA_KB_AUTO_INJECT=0` still
+disables all injection.
+
 ## Use it
 
 ### From the Web UI

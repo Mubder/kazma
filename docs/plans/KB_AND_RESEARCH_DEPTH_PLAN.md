@@ -1,6 +1,6 @@
 # Plan: Knowledge Library hardening + Research depth product
 
-**Status:** Implemented on `main` (2026-07-27) — Phase 0–2 core landed; optional Phase 3 polish remains  
+**Status:** Implemented on `main` (2026-07-27) — Phases 0–3 landed (core + polish)  
 **Scope:** Knowledge Base (managed docs RAG) + live web research tools + “comprehensive research paper” orchestration  
 **Related:**  
 - [Knowledge Library guide](../docs/guide/knowledge-library.md)  
