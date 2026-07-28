@@ -543,35 +543,58 @@ class SessionManager:
                     )
 
     def _hydrate_from_checkpoints_db(self) -> None:
-        """Auto-discover platform gateway sessions (gw-*) from checkpoints.db."""
+        """Auto-discover platform gateway sessions (gw-*) from checkpoints (Postgres or SQLite)."""
         try:
-            from kazma_core.paths import checkpoints_db
-            cp_path = checkpoints_db()
-            if not os.path.exists(cp_path):
-                return
-            conn = sqlite3.connect(cp_path)
-            cursor = conn.execute(
-                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'gw-%'"
-            )
-            rows = cursor.fetchall()
-            for (thread_id,) in rows:
-                if not thread_id:
-                    continue
+            thread_ids: set[str] = set()
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+                try:
+                    rows = get_pool().execute(
+                        "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'gw-%'"
+                    )
+                    for r in rows:
+                        tid = r.get("thread_id") if isinstance(r, dict) else (r[0] if r else None)
+                        if tid:
+                            thread_ids.add(str(tid))
+                except Exception as pg_exc:
+                    logger.debug("[SessionManager] Postgres checkpoint query skipped: %s", pg_exc)
+            else:
+                from kazma_core.paths import checkpoints_db
+                cp_path = checkpoints_db()
+                if os.path.exists(cp_path):
+                    conn = sqlite3.connect(cp_path)
+                    cursor = conn.execute(
+                        "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'gw-%'"
+                    )
+                    for (tid,) in cursor.fetchall():
+                        if tid:
+                            thread_ids.add(str(tid))
+                    conn.close()
+
+            for thread_id in thread_ids:
                 if any(s.session_id == thread_id for s in self._sessions.values()):
                     continue
-                plat = "Telegram" if "telegram" in thread_id else ("Discord" if "discord" in thread_id else "Gateway")
+                tid_low = thread_id.lower()
+                if "telegram" in tid_low:
+                    plat = "Telegram"
+                elif "discord" in tid_low:
+                    plat = "Discord"
+                elif "slack" in tid_low:
+                    plat = "Slack"
+                else:
+                    plat = "Gateway"
+
                 sess = ChatSession(
                     session_id=thread_id,
                     thread_id=thread_id,
                     tenant_id="default",
-                    title=f"{plat} · Linked",
+                    title=f"{plat} · Session",
                 )
                 key = f"default:{thread_id}"
                 self._sessions[key] = sess
                 self._upsert_db(sess)
-            conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[SessionManager] _hydrate_from_checkpoints_db skipped: %s", exc)
 
     def list_all(self, include_archived: bool = False) -> list[ChatSession]:
         """Return sessions for the current tenant + platform gateway sessions, newest-first.

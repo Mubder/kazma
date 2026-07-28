@@ -877,6 +877,14 @@ def create_graph_handler(
                     exc_info=True,
                 )
 
+            # Sync turn start to Web UI so the session appears immediately in sidebar
+            _sync_platform_session_to_web(
+                thread_id,
+                msg.platform,
+                msg.context_metadata,
+                list(state.get("messages") or []),
+            )
+
             # ── Invoke graph ───────────────────────────────────────
             start = time.monotonic()
             try:
