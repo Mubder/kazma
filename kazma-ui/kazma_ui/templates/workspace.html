@@ -165,6 +165,8 @@
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
         <button class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
         <button class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── GitHub App Config Modal ── -->
