@@ -90,25 +90,27 @@ class ChatSession:
         """Return a serializable summary used by the session-list API."""
         platform = "web"
         sid = self.session_id or ""
-        if sid.startswith("gw-telegram"):
+        t_low = (self.title or "").lower()
+        if sid.startswith("gw-telegram") or "telegram" in t_low:
             platform = "telegram"
-        elif sid.startswith("gw-discord"):
+        elif sid.startswith("gw-discord") or "discord" in t_low:
             platform = "discord"
-        elif sid.startswith("gw-slack"):
+        elif sid.startswith("gw-slack") or "slack" in t_low:
             platform = "slack"
         elif sid.startswith("gw-"):
             platform = "gateway"
+
         return {
             "session_id": self.session_id,
+            "platform": platform,
             "message_count": len(self.messages),
             "created_at": self.created_at,
             "updated_at": self.updated_at or self.created_at,
-            "title": self.title or "",
-            "archived": self.archived,
+            "title": self.title or f"{platform.capitalize()} Session",
+            "archived": bool(self.archived),
             "total_cost": self.total_cost,
             "total_tokens": self.total_tokens,
-            "thread_id": self.thread_id,
-            "platform": platform,
+            "thread_id": self.thread_id or self.session_id,
         }
 
     def auto_title(self) -> str:
@@ -540,6 +542,37 @@ class SessionManager:
                         (session_id,),
                     )
 
+    def _hydrate_from_checkpoints_db(self) -> None:
+        """Auto-discover platform gateway sessions (gw-*) from checkpoints.db."""
+        try:
+            from kazma_core.paths import checkpoints_db
+            cp_path = checkpoints_db()
+            if not os.path.exists(cp_path):
+                return
+            conn = sqlite3.connect(cp_path)
+            cursor = conn.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'gw-%'"
+            )
+            rows = cursor.fetchall()
+            for (thread_id,) in rows:
+                if not thread_id:
+                    continue
+                if any(s.session_id == thread_id for s in self._sessions.values()):
+                    continue
+                plat = "Telegram" if "telegram" in thread_id else ("Discord" if "discord" in thread_id else "Gateway")
+                sess = ChatSession(
+                    session_id=thread_id,
+                    thread_id=thread_id,
+                    tenant_id="default",
+                    title=f"{plat} · Linked",
+                )
+                key = f"default:{thread_id}"
+                self._sessions[key] = sess
+                self._upsert_db(sess)
+            conn.close()
+        except Exception:
+            pass
+
     def list_all(self, include_archived: bool = False) -> list[ChatSession]:
         """Return sessions for the current tenant + platform gateway sessions, newest-first.
 
@@ -547,6 +580,7 @@ class SessionManager:
         Pass ``include_archived=True`` to get everything (for the archive view).
         """
         with self._lock:
+            self._hydrate_from_checkpoints_db()
             tenant_id = get_current_tenant_id() or "default"
             sessions: list[ChatSession] = []
             seen_sids: set[str] = set()
@@ -677,7 +711,11 @@ def get_session_manager() -> SessionManager:
     """
     global _session_manager
     if _session_manager is None:
-        db_path = "kazma-data/chat_sessions.db"
+        try:
+            from kazma_core.paths import data_dir
+            db_path = str(data_dir() / "chat_sessions.db")
+        except Exception:
+            db_path = "kazma-data/chat_sessions.db"
         if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
             db_path = "kazma-data/chat_sessions_test.db"
         _session_manager = SessionManager(db_path=db_path)
@@ -693,7 +731,11 @@ def reset_session_manager() -> SessionManager:
         except Exception as exc:
             logging.getLogger(__name__).debug("session manager close: %s", exc)
 
-    db_path = "kazma-data/chat_sessions.db"
+    try:
+        from kazma_core.paths import data_dir
+        db_path = str(data_dir() / "chat_sessions.db")
+    except Exception:
+        db_path = "kazma-data/chat_sessions.db"
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
         db_path = "kazma-data/chat_sessions_test.db"
         if os.path.exists(db_path):
