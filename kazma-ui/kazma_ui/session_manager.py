@@ -462,10 +462,18 @@ class SessionManager:
             if session is not None:
                 self._sessions.move_to_end(key)
                 return session
+
+            # Cross-tenant fallback for gateway/platform sessions or default tenant
+            for k, sess in self._sessions.items():
+                if sess.session_id == session_id:
+                    self._sessions.move_to_end(k)
+                    return sess
+
             loaded = self._load_one_from_db(tenant_id, session_id)
+            if loaded is None and tenant_id != "default":
+                loaded = self._load_one_from_db("default", session_id)
             if loaded is not None:
-                self._sessions[key] = loaded
-                self._sessions.move_to_end(key)
+                self._sessions[f"{loaded.tenant_id}:{loaded.session_id}"] = loaded
                 return loaded
             return None
 
@@ -494,7 +502,7 @@ class SessionManager:
     def put(self, session: ChatSession) -> None:
         """Insert or replace a session in the store."""
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = session.tenant_id or get_current_tenant_id() or "default"
             session.tenant_id = tenant_id
             session.updated_at = datetime.now(UTC).isoformat()
 
@@ -512,7 +520,8 @@ class SessionManager:
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if not found."""
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            session = self.get(session_id)
+            tenant_id = session.tenant_id if session else (get_current_tenant_id() or "default")
             key = f"{tenant_id}:{session_id}"
             self._sessions.pop(key, None)
 
@@ -520,30 +529,40 @@ class SessionManager:
                 from kazma_core.db.pg_helpers import get_pool
 
                 get_pool().execute(
-                    "DELETE FROM kazma_chat_sessions WHERE tenant_id = %s AND session_id = %s",
-                    (tenant_id, session_id),
+                    "DELETE FROM kazma_chat_sessions WHERE session_id = %s",
+                    (session_id,),
                 )
             else:
                 assert self._conn is not None
                 with self._conn:
                     self._conn.execute(
-                        "DELETE FROM sessions WHERE tenant_id = ? AND session_id = ?",
-                        (tenant_id, session_id),
+                        "DELETE FROM sessions WHERE session_id = ?",
+                        (session_id,),
                     )
 
     def list_all(self, include_archived: bool = False) -> list[ChatSession]:
-        """Return sessions for the current tenant, newest-first.
+        """Return sessions for the current tenant + platform gateway sessions, newest-first.
 
         Archived sessions are excluded by default (they clutter the sidebar).
         Pass ``include_archived=True`` to get everything (for the archive view).
         """
         with self._lock:
             tenant_id = get_current_tenant_id() or "default"
-            sessions = [
-                sess for key, sess in self._sessions.items()
-                if key.startswith(f"{tenant_id}:")
-                and (include_archived or not sess.archived)
-            ]
+            sessions: list[ChatSession] = []
+            seen_sids: set[str] = set()
+
+            for key, sess in self._sessions.items():
+                if sess.session_id in seen_sids:
+                    continue
+                # Include current tenant, platform gateway (gw-*), or default tenant sessions
+                if (
+                    key.startswith(f"{tenant_id}:")
+                    or sess.session_id.startswith("gw-")
+                    or key.startswith("default:")
+                ) and (include_archived or not sess.archived):
+                    sessions.append(sess)
+                    seen_sids.add(sess.session_id)
+
             # Sort by updated_at descending (newest activity first).
             # Fall back to created_at for old sessions without updated_at.
             sessions.sort(
@@ -555,9 +574,7 @@ class SessionManager:
     def rename(self, session_id: str, title: str) -> ChatSession | None:
         """Set a custom title on a session. Returns the session or None."""
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
-            key = f"{tenant_id}:{session_id}"
-            session = self._sessions.get(key)
+            session = self.get(session_id)
             if session is None:
                 return None
             session.title = title.strip()[:120]
@@ -567,9 +584,7 @@ class SessionManager:
     def set_archived(self, session_id: str, archived: bool) -> ChatSession | None:
         """Archive or unarchive a session. Returns the session or None."""
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
-            key = f"{tenant_id}:{session_id}"
-            session = self._sessions.get(key)
+            session = self.get(session_id)
             if session is None:
                 return None
             session.archived = archived
