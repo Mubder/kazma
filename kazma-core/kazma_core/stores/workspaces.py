@@ -93,21 +93,29 @@ class WorkspaceStore:
             conn.executescript(_SCHEMA)
             self._migrate_repo_columns(conn)
 
-            # Boot-time: empty store seeds the default sandbox under
-            # project data_dir (not monorepo CWD) so native tools + MCP
-            # filesystem share one root on first boot.
+            # Boot-time: seed workspace store with current project CWD or default sandbox
             try:
                 row = conn.execute("SELECT COUNT(*) as count FROM workspaces").fetchone()
-                if row and row["count"] == 0:
-                    ws_id = str(uuid.uuid4())
-                    name = "Default Workspace"
-                    try:
-                        from kazma_core.workspace.binding import default_sandbox_root
+                cwd = Path.cwd().resolve()
+                try:
+                    from kazma_core.workspace.binding import default_sandbox_root
 
-                        root_path = str(default_sandbox_root())
-                    except Exception:
-                        root_path = str((Path.cwd() / "kazma-data" / "workspace").resolve())
+                    sandbox = default_sandbox_root().resolve()
+                except Exception:
+                    sandbox = (cwd / "kazma-data" / "workspace").resolve()
+
+                if row and row["count"] == 0:
+                    # Prefer CWD if CWD is a real project directory (contains files or .git)
+                    if cwd != sandbox and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
+                        ws_id = str(uuid.uuid4())
+                        name = cwd.name or "Project Workspace"
+                        root_path = str(cwd)
+                    else:
+                        ws_id = str(uuid.uuid4())
+                        name = "Default Workspace"
+                        root_path = str(sandbox)
                         Path(root_path).mkdir(parents=True, exist_ok=True)
+
                     created_at = datetime.now(UTC).isoformat()
 
                     conn.execute("BEGIN")
@@ -116,7 +124,25 @@ class WorkspaceStore:
                         (ws_id, name, root_path, created_at),
                     )
                     conn.execute("COMMIT")
-                    logger.info("[WorkspaceStore] Initialized Default Workspace at %s", root_path)
+                    logger.info("[WorkspaceStore] Initialized active workspace '%s' at %s", name, root_path)
+
+                # If store only has a blank Default Workspace sandbox and CWD is a real project, auto-register CWD
+                else:
+                    rows = conn.execute("SELECT id, name, root_path FROM workspaces").fetchall()
+                    if len(rows) == 1 and rows[0]["name"] == "Default Workspace":
+                        sandbox_path = Path(rows[0]["root_path"]).resolve()
+                        if cwd != sandbox_path and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
+                            ws_id = str(uuid.uuid4())
+                            name = cwd.name or "Project Workspace"
+                            created_at = datetime.now(UTC).isoformat()
+                            conn.execute("BEGIN")
+                            conn.execute("UPDATE workspaces SET is_active = 0 WHERE id = ?", (rows[0]["id"],))
+                            conn.execute(
+                                "INSERT INTO workspaces (id, name, root_path, created_at, is_active) VALUES (?, ?, ?, ?, 1)",
+                                (ws_id, name, str(cwd), created_at),
+                            )
+                            conn.execute("COMMIT")
+                            logger.info("[WorkspaceStore] Auto-registered active workspace '%s' at %s", name, cwd)
             except Exception as exc:
                 try:
                     conn.execute("ROLLBACK")
