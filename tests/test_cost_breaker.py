@@ -117,6 +117,16 @@ class TestShouldHalt:
         breaker.record_user_interaction()
         assert breaker.should_halt() is False
 
+    def test_disabled_breaker(self, monkeypatch):
+        breaker = CostCircuitBreaker(max_cost=0.0)
+        breaker.record_cost(100.0)
+        assert breaker.should_halt() is False
+
+        monkeypatch.setenv("KAZMA_DISABLE_COST_BREAKER", "1")
+        breaker2 = CostCircuitBreaker(max_cost=0.10, silence_window_seconds=0)
+        breaker2.record_cost(10.0)
+        assert breaker2.should_halt() is False
+
 
 class TestReset:
     """Test breaker reset."""

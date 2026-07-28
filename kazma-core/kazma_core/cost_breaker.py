@@ -123,7 +123,12 @@ class CostCircuitBreaker:
         The breaker trips only when BOTH conditions are met:
         1. current_cost >= max_cost
         2. time since last_user_interaction >= silence_window_seconds
+
+        If max_cost <= 0 or KAZMA_DISABLE_COST_BREAKER=1, the cost breaker is disabled.
         """
+        if self.max_cost <= 0 or os.getenv("KAZMA_DISABLE_COST_BREAKER", "0") == "1":
+            return False
+
         if self._halted:
             return True
 
