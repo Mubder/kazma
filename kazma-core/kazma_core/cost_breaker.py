@@ -12,6 +12,12 @@ import os
 import time
 from dataclasses import dataclass, field
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 __all__ = ["CostCircuitBreaker", "DEFAULT_MAX_COST", "DEFAULT_SILENCE_WINDOW_SECONDS", "create_cost_breaker"]
 
 logger = logging.getLogger(__name__)
