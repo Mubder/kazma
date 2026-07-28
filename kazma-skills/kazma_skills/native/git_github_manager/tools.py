@@ -77,8 +77,12 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         return f"Error committing changes: {e}"
 
 
-async def git_push_pull(action: str = "pull") -> str:
-    """Synchronize local branch changes by executing git pull or git push."""
+async def git_push_pull(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
+    """Synchronize local branch changes by executing git pull or git push.
+
+    When pushing a new branch without upstream tracking, automatically passes
+    ``--set-upstream <remote> <branch>``.
+    """
     cwd = _get_workspace()
     if action not in ("push", "pull"):
         return "Invalid action. Use 'push' or 'pull'."
@@ -98,6 +102,29 @@ async def git_push_pull(action: str = "pull") -> str:
 
     cmd.append(action)
 
+    if action == "push":
+        # Resolve active branch if not explicitly given
+        target_branch = branch
+        if not target_branch:
+            try:
+                b_res = subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True, timeout=5)
+                target_branch = b_res.stdout.strip()
+            except Exception:
+                target_branch = ""
+
+        # Check if upstream tracking branch exists
+        has_upstream = False
+        try:
+            u_res = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, capture_output=True, text=True, timeout=5)
+            has_upstream = (u_res.returncode == 0 and bool(u_res.stdout.strip()))
+        except Exception:
+            has_upstream = False
+
+        if not has_upstream and target_branch:
+            cmd.extend(["--set-upstream", remote, target_branch])
+        elif target_branch and branch:
+            cmd.extend([remote, target_branch])
+
     try:
         res = subprocess.run(
             cmd,
@@ -111,16 +138,29 @@ async def git_push_pull(action: str = "pull") -> str:
         return f"Error running git {action}: {e}"
 
 
-async def github_create_pr(title: str, body: str, head: str, base: str = "main") -> str:
-    """Create a new Pull Request on the GitHub repository.
+async def git_checkout(branch: str, create: bool = False) -> str:
+    """Switch branches or create a new branch locally."""
+    cwd = _get_workspace()
+    cmd = ["git", "checkout", "-b", branch] if create else ["git", "checkout", branch]
+    try:
+        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
+        return res.stdout.strip() or res.stderr.strip()
+    except Exception as e:
+        return f"Error running git checkout: {e}"
 
-    Uses the shared ``GitHubClient`` when available (so OAuth tokens saved
-    via the Web UI are visible — they were previously invisible to this
-    tool, which only read ``$GITHUB_TOKEN``). Falls back to a direct
-    ``httpx`` call using the env-var token in headless/core-only deployments.
-    The repo is inferred from the workspace's ``origin`` remote (matching
-    the gateway's ``resolve_repo``).
-    """
+
+async def git_merge(source_branch: str) -> str:
+    """Merge a branch into the currently active local branch."""
+    cwd = _get_workspace()
+    try:
+        res = subprocess.run(["git", "merge", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
+        return res.stdout.strip() or res.stderr.strip()
+    except Exception as e:
+        return f"Error merging branch {source_branch}: {e}"
+
+
+async def github_create_pr(title: str, body: str, head: str, base: str = "main") -> str:
+    """Create a new Pull Request on the GitHub repository."""
     owner_repo = _resolve_owner_repo()
     if isinstance(owner_repo, str):
         return owner_repo  # error message
@@ -155,6 +195,124 @@ async def github_create_pr(title: str, body: str, head: str, base: str = "main")
             return f"Failed to create PR (status {r.status_code}): {r.text}"
     except Exception as e:
         return f"Error creating Pull Request: {e}"
+
+
+async def github_merge_pr(number: int, commit_title: str | None = None, merge_method: str = "squash") -> str:
+    """Merge an open Pull Request on GitHub."""
+    owner_repo = _resolve_owner_repo()
+    if isinstance(owner_repo, str):
+        return owner_repo
+
+    owner, repo = owner_repo
+    client = _get_shared_client()
+    payload: dict[str, Any] = {"merge_method": merge_method}
+    if commit_title:
+        payload["commit_title"] = commit_title
+
+    if client is not None:
+        try:
+            async with client as gh:
+                data = await gh.request(
+                    "PUT", f"/repos/{owner}/{repo}/pulls/{number}/merge",
+                    json=payload,
+                )
+            if data.get("merged"):
+                return f"Successfully merged PR #{number}: {data.get('message', 'Merged')}"
+            return f"Failed to merge PR #{number}: {data.get('message', 'Unknown error')}"
+        except Exception as e:
+            return f"Error merging PR #{number}: {e}"
+
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        return "Error: No GitHub token configured."
+    try:
+        async with httpx.AsyncClient() as http:
+            r = await http.put(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}/merge",
+                json=payload,
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return f"Successfully merged PR #{number}: {data.get('message', 'Merged')}"
+            return f"Failed to merge PR #{number} (status {r.status_code}): {r.text}"
+    except Exception as e:
+        return f"Error merging PR #{number}: {e}"
+
+
+async def github_create_issue(title: str, body: str, labels: list[str] | None = None) -> str:
+    """Create a new Issue on GitHub."""
+    owner_repo = _resolve_owner_repo()
+    if isinstance(owner_repo, str):
+        return owner_repo
+
+    owner, repo = owner_repo
+    client = _get_shared_client()
+    payload = {"title": title, "body": body}
+    if labels:
+        payload["labels"] = labels
+
+    if client is not None:
+        try:
+            async with client as gh:
+                data = await gh.request("POST", f"/repos/{owner}/{repo}/issues", json=payload)
+            return f"Successfully created Issue #{data.get('number')}: {data.get('html_url')}"
+        except Exception as e:
+            return f"Error creating issue: {e}"
+
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        return "Error: No GitHub token configured."
+    try:
+        async with httpx.AsyncClient() as http:
+            r = await http.post(
+                f"https://api.github.com/repos/{owner}/{repo}/issues",
+                json=payload,
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"},
+            )
+            if r.status_code == 201:
+                data = r.json()
+                return f"Successfully created Issue #{data.get('number')}: {data.get('html_url')}"
+            return f"Failed to create issue (status {r.status_code}): {r.text}"
+    except Exception as e:
+        return f"Error creating issue: {e}"
+
+
+async def github_comment_issue(number: int, body: str) -> str:
+    """Post a comment on a GitHub Issue or Pull Request."""
+    owner_repo = _resolve_owner_repo()
+    if isinstance(owner_repo, str):
+        return owner_repo
+
+    owner, repo = owner_repo
+    client = _get_shared_client()
+    if client is not None:
+        try:
+            async with client as gh:
+                data = await gh.request(
+                    "POST", f"/repos/{owner}/{repo}/issues/{number}/comments",
+                    json={"body": body},
+                )
+            return f"Successfully posted comment on #{number}: {data.get('html_url')}"
+        except Exception as e:
+            return f"Error posting comment: {e}"
+
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        return "Error: No GitHub token configured."
+    try:
+        async with httpx.AsyncClient() as http:
+            r = await http.post(
+                f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments",
+                json={"body": body},
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"},
+            )
+            if r.status_code == 201:
+                data = r.json()
+                return f"Successfully posted comment on #{number}: {data.get('html_url')}"
+            return f"Failed to post comment (status {r.status_code}): {r.text}"
+    except Exception as e:
+        return f"Error posting comment: {e}"
 
 
 async def github_list_issues(repo: str | None = None, state: str = "open") -> str:

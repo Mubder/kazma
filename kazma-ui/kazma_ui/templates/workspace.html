@@ -165,6 +165,48 @@
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
         <button class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
         <button class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
+  </div>
+
+  <!-- ── GitHub App Config Modal ── -->
+  <div x-show="showAppModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
+    <div class="card" style="max-width:520px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> Configure GitHub App</h3>
+        <button class="btn-icon" @click="showAppModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">App ID *</label>
+            <input type="text" class="form-input" placeholder="e.g. 1234567" x-model="githubAppId" style="width:100%;font-size:0.8rem;">
+          </div>
+          <div>
+            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Installation ID *</label>
+            <input type="text" class="form-input" placeholder="e.g. 891011" x-model="githubAppInstallationId" style="width:100%;font-size:0.8rem;">
+          </div>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">App Slug / Name (Optional)</label>
+          <input type="text" class="form-input" placeholder="e.g. kazma-agent" x-model="githubAppSlug" style="width:100%;font-size:0.8rem;">
+          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">Used to auto-derive commit bot email: <code>AppID+AppSlug[bot]@users.noreply.github.com</code></p>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Private Key (PEM format)</label>
+          <textarea class="form-input" placeholder="-----BEGIN RSA PRIVATE KEY-----..." x-model="githubAppPrivateKey" rows="4" style="width:100%;font-family:var(--font-mono);font-size:0.7rem;"></textarea>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">OR Private Key File Path</label>
+          <input type="text" class="form-input" placeholder="e.g. C:\keys\kazma-app.private-key.pem" x-model="githubAppPrivateKeyPath" style="width:100%;font-size:0.8rem;font-family:var(--font-mono);">
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+        <button class="btn btn-secondary" @click="showAppModal = false">Cancel</button>
+        <button class="btn btn-primary" @click="saveGitHubApp()" :disabled="!githubAppId.trim() || !githubAppInstallationId.trim()">Save GitHub App</button>
       </div>
     </div>
   </div>
@@ -522,6 +564,9 @@
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_offline') }}</h4>
         <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+          <button class="btn btn-xs btn-primary" @click="showAppModal = true">
+            <span class="ki" data-icon="github" aria-hidden="true"></span> Configure App
+          </button>
           <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
             <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.configure_pat') }}
           </button>
@@ -680,6 +725,12 @@ function workspaceApp() {
     ghError: '',
     showPatModal: false,
     githubPat: '',
+    showAppModal: false,
+    githubAppId: '',
+    githubAppInstallationId: '',
+    githubAppSlug: '',
+    githubAppPrivateKey: '',
+    githubAppPrivateKeyPath: '',
     // OAuth + tabbed read-only views
     // Use get ghAuthenticated() — OAuth connected OR valid PAT/env token.
     ghOAuthConnected: false,
@@ -1115,8 +1166,6 @@ function workspaceApp() {
     },
 
     async ghOpenPr(number) {
-      // Fetch PR detail and surface it via a toast for now (rich detail
-      // panel can be layered on later without changing the data path).
       try {
         const resp = await fetch('/api/github/pulls/' + number);
         if (!resp.ok) return;
@@ -1124,7 +1173,31 @@ function workspaceApp() {
         if (pr.error) { KazmaStream.toast(pr.error, 'error', 3000); return; }
         const lines = [`#${pr.number} ${pr.title}`, `${pr.additions || 0} additions / ${pr.deletions || 0} deletions across ${pr.changed_files || 0} files`, `State: ${pr.merged ? 'merged' : pr.state}${pr.draft ? ' (draft)' : ''}${pr.mergeable_state ? ' / ' + pr.mergeable_state : ''}`];
         if (pr.reviews && pr.reviews.length) lines.push('Reviews: ' + pr.reviews.map(r => `${r.user}=${r.state}`).join(', '));
-        showModal({ title: 'Pull Request #' + number, body: '<pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body || '(no description)').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).slice(0, 1200) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions: [{ label: 'Open on GitHub', variant: 'btn-primary', handler: () => window.open(pr.html_url, '_blank') }, { label: 'Close', variant: 'btn-secondary' }] });
+        
+        const actions = [{ label: 'Open on GitHub', variant: 'btn-primary', handler: () => window.open(pr.html_url, '_blank') }];
+        if (pr.state === 'open' && !pr.merged) {
+          actions.push({
+            label: 'Merge PR',
+            variant: 'btn-success',
+            handler: async () => {
+              if (confirm(`Merge PR #${pr.number} (${pr.title})?`)) {
+                try {
+                  const mResp = await fetch(`/api/github/pulls/${pr.number}/merge`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({merge_method: 'squash'}) });
+                  const mData = await mResp.json();
+                  if (mData.merged) {
+                    KazmaStream.toast(`PR #${pr.number} merged successfully!`, 'success', 3000);
+                    this.ghLoadTab('pulls');
+                  } else {
+                    KazmaStream.toast(mData.message || mData.error || 'Failed to merge PR', 'error', 3000);
+                  }
+                } catch(e) { KazmaStream.toast(e.message, 'error', 3000); }
+              }
+            }
+          });
+        }
+        actions.push({ label: 'Close', variant: 'btn-secondary' });
+
+        showModal({ title: 'Pull Request #' + number, body: '<pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body || '(no description)').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).slice(0, 1200) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions });
       } catch (e) { /* non-fatal */ }
     },
 
@@ -1251,6 +1324,35 @@ function workspaceApp() {
         }
       } catch (e) {
         KazmaStream.toast(t('workspace.toast_token_save_failed', {detail: e.message}), 'error', 3000);
+      }
+    },
+
+    async saveGitHubApp() {
+      if (!this.githubAppId || !this.githubAppInstallationId) return;
+      try {
+        const resp = await fetch('/api/github/app/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            app_id: this.githubAppId.trim(),
+            app_installation_id: this.githubAppInstallationId.trim(),
+            app_slug: this.githubAppSlug.trim(),
+            app_private_key: this.githubAppPrivateKey.trim(),
+            app_private_key_path: this.githubAppPrivateKeyPath.trim()
+          })
+        });
+        if (resp.ok) {
+          KazmaStream.toast('GitHub App configured successfully!', 'success', 2500);
+          this.showAppModal = false;
+          this.ghHasToken = true;
+          this.ghTokenValid = true;
+          await this.loadGitHubStatus();
+        } else {
+          const err = await resp.json();
+          KazmaStream.toast(err.detail || 'Failed to save App config', 'error', 3000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Error saving App config: ' + e.message, 'error', 3000);
       }
     },
 

@@ -135,6 +135,7 @@ safety:
     - git_commit
     - git_push_pull
     - github_create_pr
+    - github_merge_pr
     - install_python_packages
     - install_npm_packages
     - install_agent_skill

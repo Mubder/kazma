@@ -25,15 +25,36 @@ tools:
     category: "git"
     prompt_chain:
       - "قم بمزامنة الفرع المحلي مع الفرع البعيد"
+  git_checkout:
+    arabic_name: "تبديل الفرع"
+    description: "Switch branches or create a new branch locally."
+    category: "git"
+  git_merge:
+    arabic_name: "دمج الفروع"
+    description: "Merge a branch into the currently active local branch."
+    category: "git"
   github_create_pr:
     arabic_name: "إنشاء طلب سحب"
     description: "Create a new Pull Request on the GitHub repository using GitHub APIs."
     category: "git"
     prompt_chain:
       - "أنشئ طلب سحب جديد في جيت هاب"
+  github_merge_pr:
+    arabic_name: "دمج طلب السحب"
+    description: "Merge an open Pull Request on GitHub using GitHub APIs."
+    category: "git"
+  github_create_issue:
+    arabic_name: "إنشاء مشكلة جيت هاب"
+    description: "Create a new Issue on the remote GitHub repository."
+    category: "git"
+  github_comment_issue:
+    arabic_name: "التعليق على مشكلة"
+    description: "Post a comment on a GitHub Issue or Pull Request."
+    category: "git"
   github_list_issues:
     arabic_name: "عرض مشاكل جيت هاب"
     description: "Retrieve and view list of issues currently open on the remote repository."
     category: "git"
     prompt_chain:
       - "اعرض قائمة المشاكل المفتوحة لمتابعتها"
+

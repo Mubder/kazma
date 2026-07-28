@@ -42,7 +42,10 @@ _DEFAULT_BOT_EMAIL = "kazma-agent[bot]@users.noreply.github.com"
 
 
 def _read_config() -> dict[str, Any]:
-    """Read the ``git.bot_identity`` block from ``kazma.yaml``."""
+    """Read the ``git.bot_identity`` and GitHub App credentials from ConfigStore, kazma.yaml, and env vars."""
+    merged: dict[str, Any] = {}
+
+    # 1. Start with kazma.yaml defaults
     try:
         import yaml
 
@@ -50,10 +53,59 @@ def _read_config() -> dict[str, Any]:
         if cfg_path.exists():
             with open(cfg_path) as f:
                 full = yaml.safe_load(f) or {}
-            return full.get("git", {}).get("bot_identity", {}) or {}
+            merged.update(full.get("git", {}).get("bot_identity", {}) or {})
     except Exception:
         pass
-    return {}
+
+    # 2. Merge from ConfigStore singleton
+    try:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+        app_id = store.get("connectors.github.app_id")
+        if app_id:
+            merged["app_id"] = app_id
+        app_inst = store.get("connectors.github.app_installation_id")
+        if app_inst:
+            merged["app_installation_id"] = app_inst
+        app_slug = store.get("connectors.github.app_slug")
+        if app_slug:
+            merged["app_slug"] = app_slug
+        app_key = store.get("connectors.github.app_private_key")
+        if app_key:
+            merged["app_private_key"] = app_key
+        app_key_path = store.get("connectors.github.app_private_key_path")
+        if app_key_path:
+            merged["app_private_key_path"] = app_key_path
+
+        bot_enabled = store.get("git.bot_identity.enabled")
+        if bot_enabled is not None:
+            merged["enabled"] = bool(bot_enabled)
+        bot_name = store.get("git.bot_identity.name")
+        if bot_name:
+            merged["name"] = bot_name
+        bot_email = store.get("git.bot_identity.email")
+        if bot_email:
+            merged["email"] = bot_email
+    except Exception:
+        pass
+
+    # 3. Environment variable overrides
+    if os.environ.get("KAZMA_GITHUB_APP_ID"):
+        merged["app_id"] = os.environ["KAZMA_GITHUB_APP_ID"]
+    if os.environ.get("KAZMA_GITHUB_APP_INSTALLATION_ID"):
+        merged["app_installation_id"] = os.environ["KAZMA_GITHUB_APP_INSTALLATION_ID"]
+    if os.environ.get("KAZMA_GITHUB_APP_SLUG"):
+        merged["app_slug"] = os.environ["KAZMA_GITHUB_APP_SLUG"]
+    if os.environ.get("KAZMA_GITHUB_APP_PRIVATE_KEY"):
+        merged["app_private_key"] = os.environ["KAZMA_GITHUB_APP_PRIVATE_KEY"]
+    if os.environ.get("KAZMA_GITHUB_APP_PRIVATE_KEY_PATH"):
+        merged["app_private_key_path"] = os.environ["KAZMA_GITHUB_APP_PRIVATE_KEY_PATH"]
+
+    if merged.get("app_id") and merged.get("app_installation_id"):
+        merged["enabled"] = True
+
+    return merged
 
 
 def get_bot_identity() -> dict[str, str] | None:
@@ -81,8 +133,7 @@ def get_bot_identity() -> dict[str, str] | None:
         or cfg.get("email", _DEFAULT_BOT_EMAIL)
     )
 
-    # GitHub App path: if app_id + private key are configured, try to
-    # resolve the app's true bot email (which carries the custom logo).
+    # GitHub App path: resolve the app's true bot email (which carries the custom logo/avatar).
     app_email = _try_app_email(cfg)
     if app_email:
         email = app_email
@@ -109,52 +160,49 @@ def get_commit_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-# ── GitHub App token path (future-ready, inert until credentials set) ────
+# ── GitHub App token path ──────────────────────────────────────────────────
 
 
-# Cache the minted token + its expiry so we don't re-mint on every commit.
+# Cache the minted token + its expiry so we don't re-mint on every commit/call.
 _app_token_cache: dict[str, Any] = {"token": None, "expires": 0}
 
 
 def _try_app_email(cfg: dict[str, Any]) -> str | None:
     """If a GitHub App is configured, return its true bot email.
 
-    The real GitHub App bot email is ``{app_id}+{slug}[bot]@users.noreply.github.com``.
-    We can't know the slug without an API call, so we use the configured
-    email as a fallback (the user sets it to their app's actual email).
-
-    Returns None if no app is configured or the key file is missing.
+    The real GitHub App bot email format on GitHub is:
+    ``{app_id}+{slug}[bot]@users.noreply.github.com``.
     """
+    if cfg.get("app_email"):
+        return str(cfg["app_email"])
     app_id = cfg.get("app_id")
-    key_path = cfg.get("app_private_key_path")
-    if not app_id or not key_path:
-        return None
-    if not Path(key_path).exists():
-        logger.debug("[git_identity] app_private_key_path %s not found", key_path)
-        return None
-    # The app's bot email should be configured by the user in the `email`
-    # field — we just confirm the app credentials exist so the caller knows
-    # the app path is active. The email itself comes from config.
-    return cfg.get("app_email")  # e.g. "123456+kazma-agent[bot]@users.noreply..."
+    app_slug = cfg.get("app_slug")
+    if app_id and app_slug:
+        return f"{app_id}+{app_slug}[bot]@users.noreply.github.com"
+    elif app_id:
+        return f"{app_id}+kazma-agent[bot]@users.noreply.github.com"
+    return None
 
 
 def get_app_installation_token() -> str | None:
-    """Mint a GitHub App installation token (for API auth, not just commits).
+    """Mint a GitHub App installation token (for API auth and Git operations).
 
-    Uses the private key to sign a JWT, exchanges it for an installation
-    access token via the GitHub API. Cached until 5 min before expiry.
-
-    Returns None if no app is configured or minting fails.
+    Uses the private key (file path or direct PEM string) to sign a JWT, then
+    exchanges it for an installation access token via GitHub API.
+    Cached until 5 min before expiry.
     """
     cfg = _read_config()
     app_id = cfg.get("app_id")
-    key_path = cfg.get("app_private_key_path")
     installation_id = cfg.get("app_installation_id")
+    key_path = cfg.get("app_private_key_path")
+    key_str = cfg.get("app_private_key")
 
-    if not app_id or not key_path or not installation_id:
+    if not app_id or not installation_id:
+        return None
+    if not key_str and not key_path:
         return None
 
-    # Check cache.
+    # Check cache
     if _app_token_cache["token"] and time.time() < _app_token_cache["expires"]:
         return _app_token_cache["token"]
 
@@ -163,8 +211,15 @@ def get_app_installation_token() -> str | None:
         import jwt
         from pathlib import Path
 
-        # Read the private key.
-        private_key = Path(key_path).read_bytes()
+        # Read the private key bytes
+        private_key_bytes: bytes
+        if key_str:
+            private_key_bytes = key_str.encode("utf-8") if isinstance(key_str, str) else key_str
+        elif key_path and Path(key_path).exists():
+            private_key_bytes = Path(key_path).read_bytes()
+        else:
+            logger.debug("[git_identity] App private key not found at path %s", key_path)
+            return None
 
         # Create the JWT (valid for 10 min, per GitHub's limit).
         now = int(time.time())
@@ -173,7 +228,7 @@ def get_app_installation_token() -> str | None:
             "exp": now + 600,
             "iss": str(app_id),
         }
-        app_jwt = jwt.encode(payload, private_key, algorithm="RS256")
+        app_jwt = jwt.encode(payload, private_key_bytes, algorithm="RS256")
 
         # Exchange for installation token.
         with httpx.Client(timeout=15.0) as client:
@@ -188,13 +243,12 @@ def get_app_installation_token() -> str | None:
             resp.raise_for_status()
             data = resp.json()
             token = data.get("token")
-            expires_at = data.get("expires_at")
 
         if token:
             # Cache for 50 minutes (tokens are valid for 1 hour).
             _app_token_cache["token"] = token
             _app_token_cache["expires"] = now + 3000
-            logger.info("[git_identity] Minted GitHub App installation token")
+            logger.info("[git_identity] Minted GitHub App installation token for App ID %s", app_id)
             return token
     except ImportError:
         logger.debug("[git_identity] PyJWT/httpx not installed — app token unavailable")
@@ -202,3 +256,4 @@ def get_app_installation_token() -> str | None:
         logger.warning("[git_identity] App token minting failed: %s", exc)
 
     return None
+

@@ -87,6 +87,14 @@ def save_github_token_to_env(token: str) -> None:
         logger.error("[github] Failed to write to .env file: %s", exc)
 
 
+class AppConfigSaveRequest(BaseModel):
+    app_id: str
+    app_installation_id: str
+    app_slug: str = ""
+    app_private_key: str = ""
+    app_private_key_path: str = ""
+
+
 @router.post("/token")
 async def save_token(body: TokenSaveRequest) -> JSONResponse:
     """Save the GitHub PAT token to SQLite (settings.db) and .env file."""
@@ -106,6 +114,32 @@ async def save_token(body: TokenSaveRequest) -> JSONResponse:
     save_github_token_to_env(token)
 
     return JSONResponse({"status": "ok", "message": "GitHub token successfully configured and synchronized."})
+
+
+@router.post("/app/config")
+async def save_app_config(body: AppConfigSaveRequest) -> JSONResponse:
+    """Save GitHub App credentials to ConfigStore."""
+    app_id = body.app_id.strip()
+    app_inst = body.app_installation_id.strip()
+    if not app_id or not app_inst:
+        raise HTTPException(status_code=422, detail="app_id and app_installation_id are required.")
+
+    try:
+        from kazma_core.config_store import get_config_store
+        store = get_config_store()
+        store.batch_set([
+            ("connectors.github.app_id", app_id, "connectors"),
+            ("connectors.github.app_installation_id", app_inst, "connectors"),
+            ("connectors.github.app_slug", body.app_slug.strip(), "connectors"),
+            ("connectors.github.app_private_key", body.app_private_key.strip(), "connectors"),
+            ("connectors.github.app_private_key_path", body.app_private_key_path.strip(), "connectors"),
+            ("git.bot_identity.enabled", "true", "git"),
+        ])
+        return JSONResponse({"status": "ok", "message": "GitHub App credentials configured successfully."})
+    except Exception as exc:
+        logger.error("[github/app/config] Failed to write to ConfigStore: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to save GitHub App configuration: {exc}") from exc
+
 
 
 @router.get("/status")
@@ -695,6 +729,63 @@ async def get_pull(number: int) -> JSONResponse:
         return JSONResponse(result)
     except Exception as exc:
         logger.warning("[github/pulls/%s] failed: %s", number, exc)
+        return _gh_error_response(exc)
+
+
+class MergePRRequest(BaseModel):
+    commit_title: str | None = None
+    merge_method: str = "squash"
+
+
+@router.put("/pulls/{number}/merge")
+async def merge_pull(number: int, body: MergePRRequest) -> JSONResponse:
+    """Merge an open Pull Request."""
+    from kazma_gateway.routers.github_client import GitHubClient
+
+    owner_repo = await _resolve_owner_repo()
+    if isinstance(owner_repo, JSONResponse):
+        return owner_repo
+    owner, repo = owner_repo
+
+    payload: dict[str, Any] = {"merge_method": body.merge_method}
+    if body.commit_title:
+        payload["commit_title"] = body.commit_title
+
+    try:
+        async with GitHubClient() as gh:
+            res = await gh.put(f"/repos/{owner}/{repo}/pulls/{number}/merge", json=payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        logger.warning("[github/pulls/%s/merge] failed: %s", number, exc)
+        return _gh_error_response(exc)
+
+
+class CreateIssueRequest(BaseModel):
+    title: str
+    body: str = ""
+    labels: list[str] = []
+
+
+@router.post("/issues")
+async def create_issue(body: CreateIssueRequest) -> JSONResponse:
+    """Create a new Issue on GitHub."""
+    from kazma_gateway.routers.github_client import GitHubClient
+
+    owner_repo = await _resolve_owner_repo()
+    if isinstance(owner_repo, JSONResponse):
+        return owner_repo
+    owner, repo = owner_repo
+
+    payload: dict[str, Any] = {"title": body.title, "body": body.body}
+    if body.labels:
+        payload["labels"] = body.labels
+
+    try:
+        async with GitHubClient() as gh:
+            res = await gh.post(f"/repos/{owner}/{repo}/issues", json=payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        logger.warning("[github/issues] create failed: %s", exc)
         return _gh_error_response(exc)
 
 

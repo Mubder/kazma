@@ -77,7 +77,7 @@ class GitHubError(Exception):
 
 
 def get_github_token() -> str:
-    """Return the configured GitHub token (OAuth → PAT → env). Empty if unset."""
+    """Return the configured GitHub token (OAuth → PAT → GitHub App → env). Empty if unset."""
     try:
         from kazma_core.config_store import get_config_store
 
@@ -92,7 +92,18 @@ def get_github_token() -> str:
     except Exception:
         logger.debug("[github] ConfigStore token lookup failed", exc_info=True)
 
+    # GitHub App installation token fallback
+    try:
+        from kazma_core.git_identity import get_app_installation_token
+
+        app_token = get_app_installation_token()
+        if app_token:
+            return app_token
+    except Exception:
+        logger.debug("[github] GitHub App token lookup failed", exc_info=True)
+
     return os.environ.get("GITHUB_TOKEN", "") or os.environ.get("GITHUB_PAT", "")
+
 
 
 def parse_github_slug(url: str) -> tuple[str, str] | None:
