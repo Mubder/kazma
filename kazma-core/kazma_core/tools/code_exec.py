@@ -311,10 +311,16 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
         "PYTHONDONTWRITEBYTECODE": "1",
     }
 
+    try:
+        ws = _fw._get_workspace()
+        exec_cwd = str(ws) if ws and ws.exists() else tmp_dir
+    except Exception:
+        exec_cwd = tmp_dir
+
     subprocess_kwargs: dict[str, Any] = {
         "stdout": asyncio.subprocess.PIPE,
         "stderr": asyncio.subprocess.PIPE,
-        "cwd": tmp_dir,
+        "cwd": exec_cwd,
         "env": child_env,
     }
     if _IS_UNIX:
@@ -359,6 +365,15 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     # Mount work dir read-only; use tmpfs for /tmp. No network. Memory capped.
     # --rm cleans up; --user avoids root when possible (numeric nobody).
     work_mount = f"{tmp_dir}:/work:ro"
+    mount_args = ["-v", work_mount]
+    try:
+        ws = _fw._get_workspace()
+        if ws and ws.exists():
+            ws_path = str(ws.resolve())
+            mount_args.extend(["-v", f"{ws_path}:{ws_path}:ro"])
+    except Exception:
+        pass
+
     cmd = [
         docker, "run", "--rm",
         "--network", "none",
@@ -369,7 +384,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         "--read-only",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
         "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=16m",
-        "-v", work_mount,
+        *mount_args,
         "-w", "/work",
         "--user", "65534:65534",  # nobody
         image,

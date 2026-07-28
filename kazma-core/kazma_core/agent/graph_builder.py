@@ -78,11 +78,11 @@ _PERSONALITY_MARKER = "[KAZMA_PERSONALITY]"
 
 # Default cap for ordinary tools (env-overridable).
 TOOL_RESULT_MAX_CHARS = int(
-    os.environ.get("KAZMA_TOOL_RESULT_MAX_CHARS", "4000") or "4000"
+    os.environ.get("KAZMA_TOOL_RESULT_MAX_CHARS", "100000") or "100000"
 )
-# Higher cap for research / web-read tools so long pages can reach the model.
+# Higher cap for research, file-read, and MCP tools so long files reach the model.
 TOOL_RESULT_RESEARCH_MAX_CHARS = int(
-    os.environ.get("KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS", "16000") or "16000"
+    os.environ.get("KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS", "200000") or "200000"
 )
 _RESEARCH_TOOL_NAMES = frozenset(
     {
@@ -98,6 +98,20 @@ _RESEARCH_TOOL_NAMES = frozenset(
         "run_research_pipeline",
         "web_search",
         "web_search_duckduckgo",
+        # File & code tools
+        "file_read",
+        "file_view",
+        "read_file_part",
+        "shell_exec",
+        "python_exec",
+        "run",
+        "run_file",
+        # MCP filesystem tools
+        "mcp__filesystem__read_text_file",
+        "mcp__filesystem__read_multiple_files",
+        "mcp__filesystem__read_file",
+        "mcp__filesystem__directory_tree",
+        "mcp__filesystem__list_directory",
     }
 )
 
@@ -110,16 +124,23 @@ def truncate_tool_result(
 ) -> str:
     """Truncate tool result content with a truncation marker.
 
-    Research tools (``read_url``, chunk tools, …) use a higher default cap
-    (``KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS``, default 16000) so paging and
-    research workflows are not cut to 4k after a successful scrape.
+    File and research tools use a higher default cap (200,000 chars)
+    so full files and long pages reach the model. Set env variable
+    KAZMA_TOOL_RESULT_MAX_CHARS=0 or <= 0 for unlimited output.
     """
+    if TOOL_RESULT_MAX_CHARS <= 0 or os.environ.get("KAZMA_NO_TRUNCATE") == "1":
+        return content
+
     if max_chars is None:
-        if tool_name and tool_name in _RESEARCH_TOOL_NAMES:
-            max_chars = max(4000, min(100_000, TOOL_RESULT_RESEARCH_MAX_CHARS))
+        if tool_name and (
+            tool_name in _RESEARCH_TOOL_NAMES
+            or "file" in tool_name.lower()
+            or "read" in tool_name.lower()
+        ):
+            max_chars = max(1000, TOOL_RESULT_RESEARCH_MAX_CHARS)
         else:
-            max_chars = max(500, min(100_000, TOOL_RESULT_MAX_CHARS))
-    if len(content) > max_chars:
+            max_chars = max(500, TOOL_RESULT_MAX_CHARS)
+    if max_chars > 0 and len(content) > max_chars:
         original_len = len(content)
         return content[:max_chars] + f"\n[truncated {original_len - max_chars} chars]"
     return content

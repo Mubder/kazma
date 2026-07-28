@@ -583,22 +583,28 @@ class LocalToolRegistry:
         """Register the core built-in tools."""
 
         @self.register(
-            description="Read a file from the local filesystem. Returns the file contents as text.",
+            description=(
+                "Read a file from the local filesystem. Returns line-numbered text. "
+                "Supports line range slicing via start_line/end_line or offset/limit."
+            ),
             category="filesystem",
         )
-        async def file_read(path: str, encoding: str = "utf-8") -> str:
-            p = Path(path).expanduser().resolve()
-            if not p.exists():
-                return f"Error: File not found: {path}"
-            if not p.is_file():
-                return f"Error: Not a file: {path}"
-            # Workspace scoping — block reads outside workspace (fail-closed)
-            scope_err = _workspace_scope_error(p, path, "reads")
-            if scope_err:
-                return scope_err
-            if p.stat().st_size > 1_000_000:  # 1MB cap
-                return f"Error: File too large ({p.stat().st_size} bytes). Max 1MB."
-            return p.read_text(encoding=encoding)
+        async def file_read(
+            path: str,
+            offset: int = 0,
+            limit: int = 2000,
+            start_line: int | None = None,
+            end_line: int | None = None,
+            encoding: str = "utf-8",
+        ) -> str:
+            from kazma_core.tools.file_read import file_read as _fr_tool
+
+            if start_line is not None:
+                offset = start_line
+            if end_line is not None:
+                start = start_line if start_line is not None else offset
+                limit = max(1, end_line - start + 1)
+            return await _fr_tool(path, offset=offset, limit=limit)
 
         @self.register(
             description="Write content to a local file. Creates parent directories if needed. Overwrites existing content.",
@@ -1377,15 +1383,26 @@ class LocalToolRegistry:
                             "push/force/credential/reset/rebase/global config/clean -fd are blocked."
                         )
 
-                # Run process asynchronously with timeout and restricted context
-                proc = await asyncio.create_subprocess_exec(
-                    args[0],
-                    *args[1:],
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=child_env,
-                )
+                # Check if command uses shell pipelines or metacharacters (| && ; > <)
+                has_pipe = any(op in command for op in ("|", "&&", ";", ">", "<"))
+
+                if has_pipe:
+                    proc = await asyncio.create_subprocess_shell(
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=cwd,
+                        env=child_env,
+                    )
+                else:
+                    proc = await asyncio.create_subprocess_exec(
+                        args[0],
+                        *args[1:],
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=cwd,
+                        env=child_env,
+                    )
                 
                 # Bounded stream reader to cap memory allocations for large outputs
                 async def _read_stream_capped(stream: asyncio.StreamReader | None, limit: int) -> bytes:
