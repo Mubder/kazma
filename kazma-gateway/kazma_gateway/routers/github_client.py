@@ -96,11 +96,11 @@ def get_github_token() -> str:
 
 
 def parse_github_slug(url: str) -> tuple[str, str] | None:
-    """Parse a GitHub remote URL (HTTPS or SSH) into an (owner, repo) tuple."""
+    """Parse a GitHub remote URL (HTTPS, SSH, or authenticated) into an (owner, repo) tuple."""
     url = (url or "").strip()
     if not url:
         return None
-    pattern = r"(?:https://github\.com/|git@github\.com:)([^/]+)/([^/\.]+?)(?:\.git)?$"
+    pattern = r"github\.com[:/]([^/]+)/([^/\.]+?)(?:\.git)?$"
     match = re.search(pattern, url)
     if match:
         return match.group(1), match.group(2)

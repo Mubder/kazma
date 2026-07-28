@@ -38,13 +38,11 @@ class TokenSaveRequest(BaseModel):
 
 
 def parse_github_slug(url: str) -> tuple[str, str] | None:
-    """Parse a GitHub remote URL (HTTPS or SSH) into an (owner, repo) tuple."""
+    """Parse a GitHub remote URL (HTTPS, SSH, or authenticated) into an (owner, repo) tuple."""
     url = url.strip()
     if not url:
         return None
-    # Matches HTTPS: https://github.com/owner/repo.git or https://github.com/owner/repo
-    # Matches SSH: git@github.com:owner/repo.git or git@github.com:owner/repo
-    pattern = r"(?:https://github\.com/|git@github\.com:)([^/]+)/([^/\.]+?)(?:\.git)?$"
+    pattern = r"github\.com[:/]([^/]+)/([^/\.]+?)(?:\.git)?$"
     match = re.search(pattern, url)
     if match:
         owner, repo = match.groups()

@@ -82,13 +82,29 @@ async def git_push_pull(action: str = "pull") -> str:
     cwd = _get_workspace()
     if action not in ("push", "pull"):
         return "Invalid action. Use 'push' or 'pull'."
+
+    cmd = ["git"]
+    token = ""
+    try:
+        from kazma_gateway.routers.github_client import get_github_token
+        token = get_github_token()
+    except Exception:
+        token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
+
+    if token:
+        import base64
+        auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        cmd.extend(["-c", f"http.extraheader=Authorization: Basic {auth_b64}"])
+
+    cmd.append(action)
+
     try:
         res = subprocess.run(
-            ["git", action],
+            cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=30,
         )
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:

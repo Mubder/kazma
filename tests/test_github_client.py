@@ -45,6 +45,16 @@ class TestSlugParsing(unittest.TestCase):
     def test_https_no_git_suffix(self):
         self.assertEqual(parse_github_slug("https://github.com/Mubder/kazma"), ("Mubder", "kazma"))
 
+    def test_authenticated_https(self):
+        self.assertEqual(
+            parse_github_slug("https://oauth2:mock_oauth_token_12345@github.com/Mubder/ShipX.git"),
+            ("Mubder", "ShipX"),
+        )
+        self.assertEqual(
+            parse_github_slug("https://x-access-token:mock_pat_token_67890@github.com/Mubder/ShipX"),
+            ("Mubder", "ShipX"),
+        )
+
     def test_ssh(self):
         self.assertEqual(parse_github_slug("git@github.com:Mubder/kazma.git"), ("Mubder", "kazma"))
 
