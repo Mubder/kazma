@@ -346,23 +346,41 @@
               {{ t('workspace.gh_rate_limited') }}
             </span>
           </template>
-          <!-- Connect when not authenticated; Disconnect only clears OAuth (PAT stays until replaced) -->
-          <button x-show="!ghAuthenticated" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
-            <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.gh_connect') }}
-          </button>
+          <!-- Connect options when not authenticated -->
+          <div x-show="!ghAuthenticated" style="display:flex;align-items:center;gap:6px;">
+            <button class="btn btn-xs btn-primary" @click="showAppModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+              <span class="ki" data-icon="github" aria-hidden="true"></span> Configure App
+            </button>
+            <button class="btn btn-xs btn-secondary" @click="showPatModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+              <span class="ki" data-icon="key" aria-hidden="true"></span> PAT
+            </button>
+            <button class="btn btn-xs btn-secondary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+              OAuth
+            </button>
+          </div>
           <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
             {{ t('workspace.gh_disconnect') }}
           </button>
         </div>
       </div>
 
-      <!-- Not authenticated (only after status has been checked) — PAT alone counts as connected -->
+      <!-- Not authenticated (only after status has been checked) -->
       <div x-show="ghIsGitHub && ghOAuthChecked && !ghAuthenticated" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="font-size:1.5rem;margin-bottom:8px;"><span class="ki" data-icon="lock" aria-hidden="true"></span></div>
-        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_connect_heading') }}</h4>
-        <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">{{ t('workspace.gh_connect_body') }} <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
-        <button class="btn btn-sm btn-primary" @click="connectGitHub()" style="font-size:0.8rem;"><span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.gh_connect_with') }}</button>
-        <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:10px;">{{ t('workspace.gh_oauth_note') }}</p>
+        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">Authenticate GitHub Connection</h4>
+        <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">Connect Kazma to <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span> to view live pull requests, issues, commits, and workflow runs.</p>
+        <div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-primary" @click="showAppModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
+            <span class="ki" data-icon="github" aria-hidden="true"></span> Configure GitHub App (Bot)
+          </button>
+          <button class="btn btn-sm btn-secondary" @click="showPatModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
+            <span class="ki" data-icon="key" aria-hidden="true"></span> Enter PAT
+          </button>
+          <button class="btn btn-sm btn-secondary" @click="connectGitHub()" style="font-size:0.8rem;">
+            Connect via OAuth
+          </button>
+        </div>
+        <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:12px;">{{ t('workspace.gh_oauth_note') }}</p>
       </div>
 
       <!-- Main GitHub Card Body — OAuth *or* valid PAT/env token -->
