@@ -320,7 +320,7 @@ async def supervisor_node(
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
-    # ── Reset tool circuit breaker on new user turn ────────────────
+    # ── Reset tool circuit breaker and cost breaker timer on new user turn ──
     # The breaker trips after 2 consecutive empty/failed tool results.
     # Without this reset, the breaker stays tripped permanently across
     # all subsequent turns (state persists in the checkpointer).
@@ -329,6 +329,8 @@ async def supervisor_node(
         if state.get("circuit_breaker_tripped", False) or state.get("consecutive_tool_failures", 0) > 0:
             logger.info("[Supervisor] Resetting tool circuit breaker for new turn")
         breaker_reset = {"circuit_breaker_tripped": False, "consecutive_tool_failures": 0}
+        if cost_breaker and hasattr(cost_breaker, "record_user_interaction"):
+            cost_breaker.record_user_interaction()
 
     # ── Cost breaker gate ──────────────────────────────────────────
     if cost_breaker.should_halt():

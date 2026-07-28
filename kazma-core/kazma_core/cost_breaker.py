@@ -16,9 +16,43 @@ __all__ = ["CostCircuitBreaker", "DEFAULT_MAX_COST", "DEFAULT_SILENCE_WINDOW_SEC
 
 logger = logging.getLogger(__name__)
 
-# Default: $0.50 max cost, 5 minute user silence window
-DEFAULT_MAX_COST = 0.50
-DEFAULT_SILENCE_WINDOW_SECONDS = 300  # 5 minutes
+# Default: $5.00 max cost, 15 minute user silence window
+DEFAULT_MAX_COST = 5.00
+DEFAULT_SILENCE_WINDOW_SECONDS = 900  # 15 minutes
+
+
+def _get_default_max_cost() -> float:
+    env_val = os.getenv("KAZMA_MAX_COST")
+    if env_val:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    try:
+        from kazma_core.config_store import get_config_store
+        val = get_config_store().get("safety.max_cost")
+        if val is not None:
+            return float(val)
+    except Exception:
+        pass
+    return DEFAULT_MAX_COST
+
+
+def _get_default_silence_window() -> float:
+    env_val = os.getenv("KAZMA_SILENCE_WINDOW")
+    if env_val:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    try:
+        from kazma_core.config_store import get_config_store
+        val = get_config_store().get("safety.silence_window")
+        if val is not None:
+            return float(val)
+    except Exception:
+        pass
+    return DEFAULT_SILENCE_WINDOW_SECONDS
 
 
 @dataclass
@@ -41,10 +75,8 @@ class CostCircuitBreaker:
         _halted: Whether the breaker has tripped.
     """
 
-    max_cost: float = field(default_factory=lambda: float(os.getenv("KAZMA_MAX_COST", str(DEFAULT_MAX_COST))))
-    silence_window_seconds: float = field(
-        default_factory=lambda: float(os.getenv("KAZMA_SILENCE_WINDOW", str(DEFAULT_SILENCE_WINDOW_SECONDS)))
-    )
+    max_cost: float = field(default_factory=_get_default_max_cost)
+    silence_window_seconds: float = field(default_factory=_get_default_silence_window)
     current_cost: float = 0.0
     last_user_interaction: float = field(default_factory=time.time)
     _halted: bool = field(default=False, init=False, repr=False)
