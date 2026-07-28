@@ -499,12 +499,29 @@ async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
 
 @router.post("/oauth/revoke")
 async def oauth_revoke() -> JSONResponse:
-    """Disconnect: clear the stored OAuth token (does not revoke at GitHub)."""
+    """Disconnect: clear all stored GitHub credentials (OAuth, PAT, App credentials)."""
     from kazma_gateway.routers.github_client import clear_oauth_token
 
     clear_oauth_token()
-    logger.info("[github/oauth] OAuth token cleared (disconnected)")
-    return JSONResponse({"status": "ok", "connected": False})
+
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().batch_set([
+            ("connectors.github.token", "", "connectors"),
+            ("connectors.github.app_id", "", "connectors"),
+            ("connectors.github.app_installation_id", "", "connectors"),
+            ("connectors.github.app_slug", "", "connectors"),
+            ("connectors.github.app_private_key", "", "connectors"),
+            ("connectors.github.app_private_key_path", "", "connectors"),
+            ("git.bot_identity.enabled", "false", "git"),
+        ])
+    except Exception:
+        logger.exception("[github/oauth] failed to clear GitHub App credentials")
+
+    logger.info("[github/oauth] All GitHub credentials and tokens cleared (disconnected)")
+    return JSONResponse({"status": "ok", "connected": False, "has_token": False})
+
 
 
 def _oauth_setup_page(request: Request) -> HTMLResponseType:

@@ -350,7 +350,7 @@
           <button x-show="!ghAuthenticated" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
             <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.gh_connect') }}
           </button>
-          <button x-show="ghOAuthConnected" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
             {{ t('workspace.gh_disconnect') }}
           </button>
         </div>
@@ -1142,9 +1142,13 @@ function workspaceApp() {
         const resp = await fetch('/api/github/oauth/revoke', { method: 'POST' });
         if (resp.ok) {
           this.ghOAuthConnected = false;
+          this.ghHasToken = false;
+          this.ghTokenValid = false;
           this.ghActiveTab = 'overview';
           this.ghPrs = []; this.ghIssues = []; this.ghCommits = []; this.ghWorkflows = []; this.ghReleases = [];
           KazmaStream.toast(t('workspace.toast_gh_disconnected'), 'info', 2000);
+          await this.loadOAuthStatus();
+          await this.loadGitHubStatus();
         }
       } catch (e) {
         KazmaStream.toast(t('workspace.toast_disconnect_failed', {msg: e.message}), 'error', 3000);
