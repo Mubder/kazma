@@ -83,13 +83,9 @@ memory:
     api_key_env: KAZMA_EMBED_API_KEY
 git:
   bot_identity:
-    enabled: true
+    enabled: false
     name: Kazma Agent
-    email: 4310451+kazma-agent[bot]@users.noreply.github.com
-    app_id: 4310451
-    app_private_key_path: .keys/kazma-app.pem
-    app_installation_id: 146867168
-    app_email: 4310451+kazma-agent[bot]@users.noreply.github.com
+    email: kazma-agent[bot]@users.noreply.github.com
 skills:
   path: kazma-skills/manifests/
   auto_discover: true
