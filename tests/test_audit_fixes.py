@@ -240,3 +240,21 @@ class TestWSChatConnectHitlScan:
             assert len(approval_calls) >= 1
             assert approval_calls[0].get("data", {}).get("tool") == "file_delete"
 
+
+class TestCostBreakerUserInteraction:
+    """Verify CostCircuitBreaker unhalts and refreshes budget on user interaction."""
+
+    def test_record_user_interaction_unhalts_and_refreshes(self) -> None:
+        from kazma_core.cost_breaker import CostCircuitBreaker
+
+        breaker = CostCircuitBreaker(max_cost=0.50, silence_window_seconds=300)
+        breaker.record_cost(0.60)
+        breaker.last_user_interaction = 0.0  # long ago
+        assert breaker.should_halt() is True
+
+        breaker.record_user_interaction()
+        assert breaker.is_halted is False
+        assert breaker.should_halt() is False
+        assert breaker.current_cost == 0.0
+
+

@@ -69,6 +69,8 @@ def create_ws_chat_router(
     graph: Any = None,
     graph_holder: dict[str, Any] | None = None,
     graph_getter: Callable[[], Any] | None = None,
+    agent_getter: Callable[[], Any] | None = None,
+    cost_breaker_getter: Callable[[], Any] | None = None,
 ) -> APIRouter:
     """Factory to build the WebSocket chat gateway router."""
     router = APIRouter(tags=["ws-chat"])
@@ -84,6 +86,27 @@ def create_ws_chat_router(
         if graph_holder and graph_holder.get("graph"):
             return graph_holder.get("graph")
         return graph
+
+    def _get_cost_breaker() -> Any:
+        if cost_breaker_getter:
+            try:
+                cb = cost_breaker_getter()
+                if cb:
+                    return cb
+            except Exception:
+                pass
+        if agent_getter:
+            try:
+                a = agent_getter()
+                if a and hasattr(a, "cost_breaker"):
+                    return a.cost_breaker
+            except Exception:
+                pass
+        if graph_holder and graph_holder.get("agent"):
+            a = graph_holder.get("agent")
+            if hasattr(a, "cost_breaker"):
+                return a.cost_breaker
+        return None
 
     def _get_session_and_thread(session_id: str) -> tuple[Any, str]:
         store = get_session_manager()
@@ -323,6 +346,14 @@ def create_ws_chat_router(
                     text = payload.get("text", "").strip()
                     if not text:
                         continue
+
+                    # Record user interaction on cost circuit breaker to un-halt budget
+                    try:
+                        cb = _get_cost_breaker()
+                        if cb:
+                            cb.record_user_interaction()
+                    except Exception as cb_err:
+                        logger.debug("[WS-Chat] cost_breaker record_user_interaction failed: %s", cb_err)
 
                     # Record user message in SessionStore
                     try:

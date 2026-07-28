@@ -79,10 +79,11 @@ class CostCircuitBreaker:
         actively engaged.
         """
         self.last_user_interaction = time.time()
-        # If user interacts while halted, un-halt (user override)
+        # If user interacts while halted, un-halt and refresh budget
         if self._halted:
-            logger.info("User interaction while halted — resetting breaker")
+            logger.info("User interaction while halted — resetting cost breaker")
             self._halted = False
+            self.current_cost = 0.0
 
     def should_halt(self) -> bool:
         """Return True if cost exceeded AND no user interaction for silence window.
