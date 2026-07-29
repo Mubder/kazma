@@ -132,10 +132,14 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         elif target_branch:
             cmd.extend([remote, target_branch])
 
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
     try:
         res = subprocess.run(
             cmd,
             cwd=cwd,
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,
@@ -146,10 +150,10 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
             pull_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}", "pull", "--rebase", remote, target_branch or "main"]
-            subprocess.run(pull_cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
+            subprocess.run(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
 
             # Retry push
-            retry_res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
+            retry_res = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
             return retry_res.stdout.strip() or retry_res.stderr.strip()
 
         return output
