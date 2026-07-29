@@ -144,51 +144,51 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         except Exception:
             has_upstream = False
 
-    # Retrieve and rewrite the remote URL to inject the token directly
+    # Retrieve the remote URL (used to push the URL directly so the auth
+    # http.extraheader applies to exactly this target — see auth note below).
     try:
         remote_res = subprocess.run(["git", "config", "--get", f"remote.{remote}.url"], cwd=cwd, capture_output=True, text=True, timeout=5)
         remote_url = remote_res.stdout.strip()
     except Exception:
         remote_url = ""
 
-    auth_url = ""
-    if remote_url:
-        if remote_url.startswith("https://"):
-            auth_url = remote_url.replace("https://", f"https://x-access-token:{token}@")
-        elif remote_url.startswith("git@github.com:"):
-            slug = remote_url.split("git@github.com:")[-1]
-            auth_url = f"https://x-access-token:{token}@github.com/{slug}"
-
-    if auth_url:
-        # Override the remote URL dynamically for this execution only
-        cmd.extend(["-c", "credential.helper=", "-c", f"remote.{remote}.url={auth_url}"])
-    else:
-        # Fallback to extraheader if we couldn't resolve the remote
-        import base64
-        auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-        auth_header = f"Authorization: Basic {auth_b64}"
-        cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
+    # ── Auth: Authorization: Basic via http.extraheader ──
+    # The App installation token (ghs_*) authenticates git HTTPS as
+    #   Authorization: Basic base64("x-access-token:<token>")
+    # sent on EVERY request via http.extraheader. We do NOT embed the token in
+    # the URL (https://x-access-token:TOKEN@host/...) because, on Windows git
+    # (schannel), the URL userinfo is dropped on the initial unauthenticated
+    # /info/refs probe and never re-attached — that request is sent with NO
+    # Authorization header, gets 401, and git never recovers (confirmed via
+    # GIT_CURL_VERBOSE). http.extraheader attaches the header from the first
+    # request, so it works cross-platform.
+    import base64
+    auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    auth_header = f"Authorization: Basic {auth_b64}"
+    cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
 
     cmd.append(action)
 
     if action == "push":
+        # Push the URL directly when resolved (extraheader auth applies to it).
+        push_target = remote_url if remote_url else remote
         if not has_upstream and target_branch:
+            # --set-upstream needs the named remote, not a URL; use remote name
+            # (extraheader still authenticates the underlying request).
             cmd.extend(["--set-upstream", remote, target_branch])
         elif target_branch:
-            cmd.extend([remote, target_branch])
+            cmd.extend([push_target, target_branch])
 
     env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
-    # Critical: the auth token is embedded in the remote URL
-    # (https://x-access-token:TOKEN@github.com/...). A globally-configured
-    # credential helper (Git Credential Manager, osxkeychain, wincred, etc.)
-    # intercepts the request and substitutes its OWN stored credential,
-    # silently replacing the App installation token — which git then rejects
-    # with "Invalid username or token". Passing -c credential.helper= only
-    # APPENDS an empty helper; it does NOT clear the global/system one. The
-    # only reliable way to disable ALL helpers for this one subprocess is to
-    # point the global & system config files at /dev/null so the helper list
-    # is empty and the URL-embedded token is the sole credential.
+    # The App token is sent via http.extraheader. A globally-configured
+    # credential helper (Git Credential Manager, osxkeychain, wincred) would
+    # intercept the request and substitute its OWN stored credential, silently
+    # replacing the App token — which git rejects with "Invalid username or
+    # token". Passing -c credential.helper= only APPENDS an empty helper; it
+    # does NOT clear the global/system one. The only reliable way to disable
+    # ALL helpers for this subprocess is to point the global & system config
+    # files at /dev/null so the http.extraheader credential is the sole auth.
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
 
@@ -242,12 +242,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         silently NOT contacting GitHub — so we query the live remote ref.
         """
         try:
-            ls_cmd = ["git", "-c", "credential.helper="]
-            if auth_url:
-                ls_cmd.extend(["-c", f"remote.{remote}.url={auth_url}"])
-            else:
-                ls_cmd.extend(["-c", f"http.extraheader={auth_header}"])
-            ls_cmd.extend(["ls-remote", remote, ref])
+            ls_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
+            ls_target = remote_url if remote_url else remote
+            ls_cmd.extend(["ls-remote", ls_target, ref])
             r = subprocess.run(
                 ls_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=20
             )
@@ -274,7 +271,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             Handles the rebuild + single retry shared by the exit-nonzero path
             and the verify-mismatch path.
             """
-            nonlocal token, auth_url
+            nonlocal token, auth_header
             token_prefix = (token[:4] + "***") if token else "none"
             logger.info(
                 "[git_push_pull] Push auth failure — clearing token cache and re-minting for a single retry"
@@ -293,28 +290,21 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             if not (fresh and fresh != token):
                 return None  # No fresh token available; caller reports prev_output.
 
-            # Rebuild cmd / auth_url with the fresh token.
+            # Rebuild the http.extraheader auth with the fresh token.
             token = fresh
-            if remote_url:
-                if remote_url.startswith("https://"):
-                    auth_url = remote_url.replace("https://", f"https://x-access-token:{token}@")
-                elif remote_url.startswith("git@github.com:"):
-                    slug = remote_url.split("git@github.com:")[-1]
-                    auth_url = f"https://x-access-token:{token}@github.com/{slug}"
-            new_cmd = ["git", "-c", "credential.helper="]
-            if auth_url:
-                new_cmd.extend(["-c", f"remote.{remote}.url={auth_url}"])
-            else:
-                import base64 as _b64
-                fresh_b64 = _b64.b64encode(f"x-access-token:{token}".encode()).decode()
-                new_cmd.extend(["-c", f"http.extraheader=Authorization: Basic {fresh_b64}"])
+            import base64 as _b64
+            fresh_b64 = _b64.b64encode(f"x-access-token:{token}".encode()).decode()
+            auth_header = f"Authorization: Basic {fresh_b64}"
+            new_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
             new_cmd.append(action)
-            if not has_upstream and target_branch:
-                new_cmd.extend(["--set-upstream", remote, target_branch])
-            elif target_branch:
-                new_cmd.extend([remote, target_branch])
+            if action == "push":
+                push_target = remote_url if remote_url else remote
+                if not has_upstream and target_branch:
+                    new_cmd.extend(["--set-upstream", remote, target_branch])
+                elif target_branch:
+                    new_cmd.extend([push_target, target_branch])
             # Rebuild cmd in place so _run() uses the fresh-token command, and
-            # _remote_has_commit() uses the fresh auth_url too.
+            # _remote_has_commit() uses the fresh auth_header too.
             cmd[:] = new_cmd
 
             return _run()[1]
@@ -404,11 +394,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
 
-            pull_cmd = ["git"]
-            if auth_url:
-                pull_cmd.extend(["-c", "credential.helper=", "-c", f"remote.{remote}.url={auth_url}"])
-            else:
-                pull_cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
+            pull_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
             pull_cmd.extend(["pull", "--rebase", remote, target_branch or "main"])
 
             subprocess.run(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
