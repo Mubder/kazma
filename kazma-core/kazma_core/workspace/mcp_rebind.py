@@ -237,9 +237,16 @@ def _collect_bound_server_configs(ex: Any) -> list[tuple[str, dict[str, Any]]]:
 
 
 def _on_root_changed(root: Path, reason: str) -> Any:
-    """Sync callback registered on the binding bus; schedules async rebind."""
+    """Sync callback registered on the binding bus; returns an awaitable rebind.
+
+    Returns the bare :func:`rebind_workspace_mcp_servers` coroutine so
+    :func:`notify_root_changed` can schedule it uniformly via its own
+    ``create_task`` path. We intentionally do **not** pre-schedule a Task here
+    — returning an already-scheduled Task would make the dispatcher try to
+    wrap the Task in another task (``"a coroutine was expected, got <Task>"``).
+    """
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         logger.debug(
             "[MCP-Rebind] root changed to %s (%s) but no event loop for rebind",
@@ -249,8 +256,8 @@ def _on_root_changed(root: Path, reason: str) -> Any:
         set_bound_mcp_root(root)
         return None
 
-    return loop.create_task(
-        rebind_workspace_mcp_servers(root, reason=reason, executor=_executor_ref)
+    return rebind_workspace_mcp_servers(
+        root, reason=reason, executor=_executor_ref
     )
 
 
