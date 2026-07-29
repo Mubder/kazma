@@ -33,7 +33,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["get_app_installation_token", "get_bot_identity", "get_commit_env"]
+__all__ = [
+    "get_app_installation_token",
+    "mint_app_installation_token",
+    "invalidate_app_token_cache",
+    "get_bot_identity",
+    "get_commit_env",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -167,14 +173,105 @@ def get_commit_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
 _app_token_cache: dict[str, Any] = {"token": None, "expires": 0}
 
 
+def invalidate_app_token_cache() -> None:
+    """Clear the cached GitHub App installation token.
+
+    Call this when a token is known to be dead (e.g. a push rejected with a
+    401 / "invalid_grant") so the next call re-mints a fresh one instead of
+    reusing the revoked ``ghs_*`` token. Safe to call unconditionally — it is
+    a no-op when the cache is already empty.
+    """
+    if _app_token_cache["token"]:
+        logger.info("[git_identity] Invalidating stale cached App installation token")
+    _app_token_cache["token"] = None
+    _app_token_cache["expires"] = 0
+
+
 def _try_app_email(cfg: dict[str, Any]) -> str | None:
     """If a GitHub App is configured, return its true bot email.
 
     The real GitHub App bot email format on GitHub is:
     ``{bot_user_id}+{slug}[bot]@users.noreply.github.com``.
+
+    Resolution order:
+      1. Explicit ``app_email`` override in config (manual escape hatch).
+      2. Auto-derived from ``app_slug`` by looking up the App bot's numeric
+         user id via the GitHub ``/users/{slug}[bot]`` API (cached 24h).
+         This produces the avatar-linked email without the user having to
+         hand-craft it. Note: the bot *user id* is NOT the App id — using
+         the App id does not link the avatar.
     """
     if cfg.get("app_email"):
         return str(cfg["app_email"])
+    app_slug = cfg.get("app_slug")
+    if app_slug:
+        bot_user_id = _fetch_bot_user_id(str(app_slug))
+        if bot_user_id:
+            return f"{bot_user_id}+{app_slug}[bot]@users.noreply.github.com"
+    return None
+
+
+# Cache the App bot's numeric user id (stable for an App's lifetime).
+# {"slug": {"id": int, "expires": float}}
+_bot_user_id_cache: dict[str, dict[str, Any]] = {}
+
+
+def _fetch_bot_user_id(app_slug: str) -> int | None:
+    """Look up a GitHub App bot's numeric user id from its slug.
+
+    Queries ``GET https://api.github.com/users/{slug}[bot]`` and returns the
+    numeric ``id`` field. Cached per-slug for 24 hours (the bot user id is
+    stable for the App's lifetime, so re-querying adds latency for nothing).
+
+    Returns ``None`` if the lookup fails (network error, unknown slug, or
+    ``httpx`` not installed). The caller treats ``None`` as "fall back to a
+    non-avatar email".
+    """
+    app_slug = (app_slug or "").strip()
+    if not app_slug:
+        return None
+
+    cached = _bot_user_id_cache.get(app_slug)
+    if cached and time.time() < cached.get("expires", 0):
+        return cached.get("id")
+
+    try:
+        import httpx
+
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                f"https://api.github.com/users/{app_slug}[bot]",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "User-Agent": "kazma-agent",
+                },
+            )
+            if resp.status_code != 200:
+                logger.debug(
+                    "[git_identity] Bot user id lookup for %r failed HTTP %s",
+                    app_slug,
+                    resp.status_code,
+                )
+                return None
+            data = resp.json()
+            bot_id = data.get("id")
+            if isinstance(bot_id, int):
+                _bot_user_id_cache[app_slug] = {
+                    "id": bot_id,
+                    "expires": time.time() + 86400,  # 24h
+                }
+                logger.info(
+                    "[git_identity] Resolved GitHub App bot user id for %r -> %s",
+                    app_slug,
+                    bot_id,
+                )
+                return bot_id
+    except ImportError:
+        logger.debug("[git_identity] httpx not installed — bot user id lookup unavailable")
+    except Exception as exc:
+        logger.debug("[git_identity] Bot user id lookup failed: %s", exc)
+
     return None
 
 
@@ -221,6 +318,18 @@ def get_app_installation_token() -> str | None:
     exchanges it for an installation access token via GitHub API.
     Cached until 5 min before expiry.
     """
+    return mint_app_installation_token(force=False)
+
+
+def mint_app_installation_token(force: bool = False) -> str | None:
+    """Mint a GitHub App installation token, optionally bypassing the cache.
+
+    When ``force=True`` the cached token is ignored (and overwritten) so a
+    freshly minted token is always returned — use this after
+    :func:`invalidate_app_token_cache` or directly when a previous token is
+    known to be revoked/expired. Otherwise behaves like
+    :func:`get_app_installation_token` (cached for ~50 min).
+    """
     cfg = _read_config()
     app_id = str(cfg.get("app_id") or "").strip()
     installation_id = str(cfg.get("app_installation_id") or "").strip()
@@ -232,8 +341,8 @@ def get_app_installation_token() -> str | None:
     if not key_str and not key_path:
         return None
 
-    # Check cache
-    if _app_token_cache["token"] and time.time() < _app_token_cache["expires"]:
+    # Check cache (unless caller forced a fresh mint).
+    if not force and _app_token_cache["token"] and time.time() < _app_token_cache["expires"]:
         return _app_token_cache["token"]
 
     try:
