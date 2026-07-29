@@ -28,7 +28,16 @@ __all__ = ["WorkspaceStore", "get_workspace_store", "reset_workspace_store"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/settings.db"
+def _get_default_db_path() -> str:
+    try:
+        from kazma_core.paths import settings_db
+
+        return settings_db()
+    except Exception:
+        return str((Path.cwd() / "kazma-data" / "settings.db").resolve())
+
+
+_DEFAULT_DB = _get_default_db_path()
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS workspaces (

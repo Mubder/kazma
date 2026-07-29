@@ -96,16 +96,22 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
     except Exception:
         token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
 
-    if token:
-        import base64
-        auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-        cmd.extend(["-c", f"http.extraheader=Authorization: Basic {auth_b64}"])
+    if not token:
+        return "Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI."
 
+    import base64
+    if token.startswith("ghs_") or token.startswith("ghp_") or token.startswith("github_pat_"):
+        auth_header = f"Authorization: Bearer {token}"
+    else:
+        auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        auth_header = f"Authorization: Basic {auth_b64}"
+
+    cmd.extend(["-c", f"http.extraheader={auth_header}"])
     cmd.append(action)
 
+    target_branch = branch
     if action == "push":
         # Resolve active branch if not explicitly given
-        target_branch = branch
         if not target_branch:
             try:
                 b_res = subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True, timeout=5)
@@ -134,7 +140,19 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
             text=True,
             timeout=30,
         )
-        return res.stdout.strip() or res.stderr.strip()
+        output = res.stdout.strip() or res.stderr.strip()
+
+        # Self-healing: if push rejected because remote is ahead, auto-rebase and retry push!
+        if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
+            logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
+            pull_cmd = ["git", "-c", f"http.extraheader={auth_header}", "pull", "--rebase", remote, target_branch or "main"]
+            subprocess.run(pull_cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
+
+            # Retry push
+            retry_res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
+            return retry_res.stdout.strip() or retry_res.stderr.strip()
+
+        return output
     except Exception as e:
         return f"Error running git {action}: {e}"
 
