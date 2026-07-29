@@ -192,7 +192,7 @@
         <div>
           <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">App Slug / Name (Optional)</label>
           <input type="text" class="form-input" placeholder="e.g. kazma-agent" x-model="githubAppSlug" style="width:100%;font-size:0.8rem;">
-          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">Used to auto-derive commit bot email: <code>AppID+AppSlug[bot]@users.noreply.github.com</code></p>
+          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">The bot's username on GitHub, e.g. <code>kazma-agent</code>. Used to auto-derive the avatar-linked commit email <code>&lt;bot_user_id&gt;+&lt;slug&gt;[bot]@users.noreply.github.com</code> by looking up the App's bot user id. Leaving this blank falls back to a no-avatar default email.</p>
         </div>
 
         <div>
