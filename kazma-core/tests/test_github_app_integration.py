@@ -158,16 +158,18 @@ async def test_git_push_pull_retries_on_auth_failure_after_re_mint():
     """
     from kazma_skills.native.git_github_manager.tools import git_push_pull
 
-    # First get_github_token → stale token; second (during retry) → fresh token.
+    # Token resolution for git now prefers get_app_installation_token. First
+    # call (initial resolution) → stale token; the retry path calls
+    # mint_app_installation_token(force=True) → fresh token.
     token_seq = {"calls": 0}
 
-    def fake_get_token():
+    def fake_app_token():
         token_seq["calls"] += 1
         return "ghs_stale_dead_token" if token_seq["calls"] == 1 else "ghs_fresh_token"
 
     with patch("subprocess.run") as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
-         patch("kazma_gateway.routers.github_client.get_github_token", side_effect=fake_get_token), \
+         patch("kazma_core.git_identity.get_app_installation_token", side_effect=fake_app_token), \
          patch("kazma_core.git_identity.invalidate_app_token_cache") as mock_invalidate, \
          patch("kazma_core.git_identity.mint_app_installation_token", return_value="ghs_fresh_token") as mock_mint:
 
@@ -182,9 +184,9 @@ async def test_git_push_pull_retries_on_auth_failure_after_re_mint():
 
         res = await git_push_pull(action="push")
 
-        # Recovery happened: cache invalidated + fresh token minted.
+        # Recovery happened: cache invalidated + fresh token force-minted.
         mock_invalidate.assert_called_once()
-        mock_mint.assert_called_once_with(force=True)
+        mock_mint.assert_called_with(force=True)
         # The retry succeeded, so the success output is returned (no diagnostic header).
         assert "main -> main" in res
         assert "Auth failed" not in res

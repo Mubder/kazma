@@ -98,11 +98,27 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
     cmd = ["git"]
     token = ""
+    # ── Token resolution for GIT operations (push/pull) ──
+    # Prefer the GitHub App installation token (ghs_*): it is the credential
+    # designed for git HTTPS operations (sent as x-access-token:<token>@) and
+    # carries the App's granted permissions. OAuth/PAT tokens resolved via
+    # get_github_token() take precedence there (for the REST API), but a stale
+    # gho_ OAuth or ghp_ PAT would shadow the working App token here and get
+    # rejected by git as "Invalid username or token" — even though the App
+    # token works. So: App token first for git, then OAuth/PAT fallback.
     try:
-        from kazma_gateway.routers.github_client import get_github_token
-        token = get_github_token()
+        from kazma_core.git_identity import get_app_installation_token
+
+        token = get_app_installation_token() or ""
     except Exception:
-        token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
+        token = ""
+    if not token:
+        try:
+            from kazma_gateway.routers.github_client import get_github_token
+
+            token = get_github_token()
+        except Exception:
+            token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
 
     if not token:
         return "Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI."
