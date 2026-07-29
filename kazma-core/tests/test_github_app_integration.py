@@ -96,6 +96,59 @@ async def test_git_push_pull_upstream():
 
 
 @pytest.mark.asyncio
+async def test_git_push_delegates_to_push_path():
+    """git_push() (no action arg) runs the PUSH path, not pull.
+
+    Regression for the loop bug: the merged git_push_pull defaulted to
+    action='pull', so the agent ran pull when it meant push. The explicit
+    git_push tool must hit push semantics without an action argument.
+    """
+    from kazma_skills.native.git_github_manager.tools import git_push
+
+    with patch("subprocess.run") as mock_run, \
+         patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
+
+        mock_b = MagicMock(returncode=0, stdout="main\n")
+        mock_u = MagicMock(returncode=0, stdout="origin/main\n")  # has upstream
+        mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
+        mock_push = MagicMock(returncode=0, stdout="   abc..def  main -> main\n", stderr="")
+
+        mock_run.side_effect = [mock_b, mock_u, mock_url, mock_push]
+
+        res = await git_push()  # NO action argument — must push, not pull
+
+        # The executed git command must be a PUSH (action=push in the log line,
+        # and the push refspec 'main -> main' in output), never a pull.
+        push_cmd = mock_run.call_args_list[3][0][0]
+        assert "push" in push_cmd, f"expected push in git command, got: {push_cmd}"
+        assert "main -> main" in res
+
+
+@pytest.mark.asyncio
+async def test_git_pull_delegates_to_pull_path():
+    """git_pull() runs the PULL path (never push)."""
+    from kazma_skills.native.git_github_manager.tools import git_pull
+
+    with patch("subprocess.run") as mock_run, \
+         patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
+
+        # pull has no upstream/branch checks — single subprocess.run (remote-url
+        # lookup is skipped for pull since target_branch logic is push-only).
+        mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
+        mock_pull = MagicMock(returncode=0, stdout="Already up to date.", stderr="")
+
+        mock_run.side_effect = [mock_url, mock_pull]
+
+        res = await git_pull()
+
+        pull_cmd = mock_run.call_args_list[1][0][0]
+        assert "pull" in pull_cmd, f"expected pull in git command, got: {pull_cmd}"
+        assert "Already up to date" in res
+
+
+@pytest.mark.asyncio
 async def test_git_push_pull_retries_on_auth_failure_after_re_mint():
     """Verify a push that fails on a dead cached ghs_* token retries after a fresh re-mint.
 

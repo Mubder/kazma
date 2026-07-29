@@ -19,12 +19,18 @@ tools:
     prompt_chain:
       - "أضف الملفات المعدلة"
       - "قم بتأكيد التغييرات مع رسالة مناسبة بالعربية أو الإنجليزية"
-  git_push_pull:
-    arabic_name: "مزامنة التغييرات"
-    description: "Synchronize local branch changes by executing git pull or git push."
+  git_push:
+    arabic_name: "دفع التغييرات"
+    description: "Push (upload) local commits to the remote repository on GitHub. Use this to publish local commits."
     category: "git"
     prompt_chain:
-      - "قم بمزامنة الفرع المحلي مع الفرع البعيد"
+      - "ادفع التغييرات المحلية إلى المستودع البعيد على GitHub"
+  git_pull:
+    arabic_name: "سحب التغييرات"
+    description: "Pull (fetch and merge) the latest changes FROM the remote GitHub repository into the local branch. Does NOT push anything."
+    category: "git"
+    prompt_chain:
+      - "اسحب آخر التغييرات من المستودع البعيد إلى الفرع المحلي"
   git_checkout:
     arabic_name: "تبديل الفرع"
     description: "Switch branches or create a new branch locally."

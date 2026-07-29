@@ -1225,6 +1225,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tool.desc.git_status": {"en": "Get git repository status and branch.", "ar": "الحصول على حالة مستودع Git والفرع."},
     "tool.desc.git_commit": {"en": "Commit files with a message.", "ar": "تثبيت الملفات برسالة."},
     "tool.desc.git_push_pull": {"en": "Sync local branch via git pull/push.", "ar": "مزامنة الفرع المحلي عبر git pull/push."},
+    "tool.desc.git_push": {"en": "Push (upload) local commits to GitHub.", "ar": "دفع التغييرات المحلية إلى GitHub."},
+    "tool.desc.git_pull": {"en": "Pull (fetch and merge) remote changes into local branch.", "ar": "سحب التغييرات البعيدة إلى الفرع المحلي."},
     "tool.desc.github_create_pr": {"en": "Create a Pull Request on GitHub.", "ar": "إنشاء طلب سحب على GitHub."},
     "tool.desc.github_list_issues": {"en": "List open issues on the repository.", "ar": "سرد المشاكل المفتوحة في المستودع."},
     "tool.desc.get_system_stats": {"en": "Fetch CPU, RAM, and Disk utilization.", "ar": "الحصول على استخدام المعالج والذاكرة والقرص."},

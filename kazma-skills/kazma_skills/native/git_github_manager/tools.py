@@ -81,10 +81,14 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         return f"Error committing changes: {e}"
 
 
-async def git_push_pull(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
+async def _git_sync(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
     """Synchronize local branch changes by executing git pull or git push.
 
-    :param action: Must be 'push' or 'pull'. Set action='push' to push local commits to GitHub.
+    Internal implementation shared by :func:`git_push` and :func:`git_pull`.
+    Prefer those explicit tools — calling this with the wrong/default action
+    is exactly the footgun the split avoids.
+
+    :param action: Must be 'push' or 'pull'.
     :param branch: Branch name to push or pull (e.g. 'main'). Auto-detected if omitted.
     :param remote: Remote name (default 'origin').
     """
@@ -395,6 +399,50 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         if token:
             err_msg = err_msg.replace(token, "[REDACTED_TOKEN]")
         return f"Error running git {action}: {err_msg}"
+
+
+async def git_push(branch: str | None = None, remote: str = "origin") -> str:
+    """Push local commits to the remote repository on GitHub.
+
+    Use this to publish local commits to GitHub. Uploads the current branch's
+    commits to the named remote (default origin). If the branch has no upstream
+    tracking, ``--set-upstream`` is added automatically.
+
+    :param branch: Branch to push (e.g. 'main'). Auto-detected from the current
+        branch if omitted.
+    :param remote: Remote name (default 'origin').
+    """
+    return await _git_sync(action="push", branch=branch, remote=remote)
+
+
+async def git_pull(branch: str | None = None, remote: str = "origin") -> str:
+    """Fetch and merge remote changes into the local branch.
+
+    Use this to pull the latest changes FROM GitHub into the local branch. This
+    does NOT push anything — call :func:`git_push` to publish local commits.
+
+    :param branch: Branch to pull (e.g. 'main'). Auto-detected from the current
+        branch if omitted.
+    :param remote: Remote name (default 'origin').
+    """
+    return await _git_sync(action="pull", branch=branch, remote=remote)
+
+
+async def git_push_pull(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
+    """Synchronize local branch changes by executing git pull or git push.
+
+    .. deprecated::
+        Use the explicit :func:`git_push` or :func:`git_pull` tools instead.
+        This merged tool defaults to ``action="pull"``, which previously caused
+        the agent to run *pull* when it meant *push*. Kept for backward
+        compatibility with direct callers/tests only — it is NOT exposed to the
+        agent via the skill manifest.
+
+    :param action: Must be 'push' or 'pull'. Set action='push' to push local commits to GitHub.
+    :param branch: Branch name to push or pull (e.g. 'main'). Auto-detected if omitted.
+    :param remote: Remote name (default 'origin').
+    """
+    return await _git_sync(action=action, branch=branch, remote=remote)
 
 
 async def git_checkout(branch: str, create: bool = False) -> str:
