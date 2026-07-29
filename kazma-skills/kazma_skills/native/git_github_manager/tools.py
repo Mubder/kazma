@@ -103,12 +103,8 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
     if not token:
         return "Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI."
 
-    import base64
-    auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    auth_header = f"Authorization: Basic {auth_b64}"
-
-    cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
-    cmd.append(action)
+    # Strip token in case of whitespace/newlines from .env or db
+    token = token.strip()
 
     target_branch = branch
     if action == "push":
@@ -128,6 +124,34 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         except Exception:
             has_upstream = False
 
+    # Retrieve and rewrite the remote URL to inject the token directly
+    try:
+        remote_res = subprocess.run(["git", "config", "--get", f"remote.{remote}.url"], cwd=cwd, capture_output=True, text=True, timeout=5)
+        remote_url = remote_res.stdout.strip()
+    except Exception:
+        remote_url = ""
+
+    auth_url = ""
+    if remote_url:
+        if remote_url.startswith("https://"):
+            auth_url = remote_url.replace("https://", f"https://x-access-token:{token}@")
+        elif remote_url.startswith("git@github.com:"):
+            slug = remote_url.split("git@github.com:")[-1]
+            auth_url = f"https://x-access-token:{token}@github.com/{slug}"
+
+    if auth_url:
+        # Override the remote URL dynamically for this execution only
+        cmd.extend(["-c", "credential.helper=", "-c", f"remote.{remote}.url={auth_url}"])
+    else:
+        # Fallback to extraheader if we couldn't resolve the remote
+        import base64
+        auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        auth_header = f"Authorization: Basic {auth_b64}"
+        cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
+
+    cmd.append(action)
+
+    if action == "push":
         if not has_upstream and target_branch:
             cmd.extend(["--set-upstream", remote, target_branch])
         elif target_branch:
@@ -146,20 +170,47 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
             timeout=30,
         )
         output = res.stdout.strip() or res.stderr.strip()
+        if token:
+            output = output.replace(token, "[REDACTED_TOKEN]")
+
+        # Diagnostic header if push fails
+        if res.returncode != 0:
+            token_prefix = f"{token[:4]}***" if token else "none"
+            diag = f"[Kazma] Auth failed or rejected. (Used token prefix: {token_prefix}). Ensure token/app is valid.\n"
+            return diag + output
 
         # Self-healing: if push rejected because remote is ahead, auto-rebase and retry push!
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
-            pull_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}", "pull", "--rebase", remote, target_branch or "main"]
+            
+            pull_cmd = ["git"]
+            if auth_url:
+                pull_cmd.extend(["-c", "credential.helper=", "-c", f"remote.{remote}.url={auth_url}"])
+            else:
+                pull_cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
+            pull_cmd.extend(["pull", "--rebase", remote, target_branch or "main"])
+            
             subprocess.run(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
 
             # Retry push
             retry_res = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
-            return retry_res.stdout.strip() or retry_res.stderr.strip()
+            retry_output = retry_res.stdout.strip() or retry_res.stderr.strip()
+            if token:
+                retry_output = retry_output.replace(token, "[REDACTED_TOKEN]")
+            
+            if retry_res.returncode != 0:
+                token_prefix = f"{token[:4]}***" if token else "none"
+                diag = f"[Kazma] Auth failed or rejected after rebase. (Used token prefix: {token_prefix}).\n"
+                return diag + retry_output
+                
+            return retry_output
 
         return output
     except Exception as e:
-        return f"Error running git {action}: {e}"
+        err_msg = str(e)
+        if token:
+            err_msg = err_msg.replace(token, "[REDACTED_TOKEN]")
+        return f"Error running git {action}: {err_msg}"
 
 
 async def git_checkout(branch: str, create: bool = False) -> str:
