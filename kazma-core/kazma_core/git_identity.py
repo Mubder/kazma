@@ -211,35 +211,47 @@ def get_app_installation_token() -> str | None:
         import jwt
         from pathlib import Path
 
-        # Read the private key bytes
+        # Read and normalize the private key bytes
         private_key_bytes: bytes
         if key_str:
-            private_key_bytes = key_str.encode("utf-8") if isinstance(key_str, str) else key_str
+            k = key_str if isinstance(key_str, str) else key_str.decode("utf-8", errors="replace")
+            if "\\n" in k and "\n" not in k:
+                k = k.replace("\\n", "\n")
+            private_key_bytes = k.strip().encode("utf-8")
         elif key_path and Path(key_path).exists():
             private_key_bytes = Path(key_path).read_bytes()
         else:
             logger.debug("[git_identity] App private key not found at path %s", key_path)
             return None
 
-        # Create the JWT (valid for 10 min, per GitHub's limit).
+        # Create the JWT (valid for 10 min; iat backdated 120s for clock skew tolerance).
         now = int(time.time())
+        clean_app_id = str(app_id).strip()
         payload = {
-            "iat": now - 60,
+            "iat": now - 120,
             "exp": now + 600,
-            "iss": str(app_id),
+            "iss": int(clean_app_id) if clean_app_id.isdigit() else clean_app_id,
         }
         app_jwt = jwt.encode(payload, private_key_bytes, algorithm="RS256")
+
+        clean_inst_id = str(installation_id).strip()
 
         # Exchange for installation token.
         with httpx.Client(timeout=15.0) as client:
             resp = client.post(
-                f"https://api.github.com/app/installations/{installation_id}/access_tokens",
+                f"https://api.github.com/app/installations/{clean_inst_id}/access_tokens",
                 headers={
                     "Authorization": f"Bearer {app_jwt}",
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
             )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "[git_identity] GitHub App token exchange failed HTTP %s: %s",
+                    resp.status_code,
+                    resp.text[:500],
+                )
             resp.raise_for_status()
             data = resp.json()
             token = data.get("token")
