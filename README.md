@@ -289,3 +289,4 @@ See [Development](docs/docs/guide/development.md) and [CONTRIBUTING.md](CONTRIBU
 MIT — see [LICENSE](LICENSE).
 
 <!-- Verified GitHub App Bot Sync -->
+<!-- Bot avatar check 2026-07-29T14:18:55.441261+00:00 -->
