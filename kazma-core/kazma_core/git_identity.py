@@ -179,9 +179,39 @@ def _try_app_email(cfg: dict[str, Any]) -> str | None:
     app_slug = cfg.get("app_slug")
     if app_id and app_slug:
         return f"{app_id}+{app_slug}[bot]@users.noreply.github.com"
-    elif app_id:
-        return f"{app_id}+kazma-agent[bot]@users.noreply.github.com"
     return None
+
+
+def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
+    """Create a signed RS256 JWT with integer `iss` claim required by GitHub App API.
+
+    PyJWT forces `iss` to be a `str`, causing GitHub API to reject the token with
+    `'Issuer' claim ('iss') must be an Integer`. We construct the JWT with
+    cryptography + json to preserve integer `iss`.
+    """
+    import base64
+    import json
+    import time
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    now = int(time.time())
+    clean_app_id = int("".join(c for c in str(app_id) if c.isdigit()))
+
+    header = {"alg": "RS256", "typ": "JWT"}
+    payload = {
+        "iat": now - 120,
+        "exp": now + 600,
+        "iss": clean_app_id,  # Integer claim required by GitHub REST API
+    }
+
+    def _b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
+
+    sig_input = f"{_b64url(json.dumps(header).encode('utf-8'))}.{_b64url(json.dumps(payload).encode('utf-8'))}".encode("utf-8")
+    key = serialization.load_pem_private_key(private_key_bytes, password=None)
+    sig = key.sign(sig_input, padding.PKCS1v15(), hashes.SHA256())
+    return f"{sig_input.decode('utf-8')}.{_b64url(sig)}"
 
 
 def get_app_installation_token() -> str | None:
@@ -226,15 +256,8 @@ def get_app_installation_token() -> str | None:
                 logger.debug("[git_identity] App private key not found at path %s (expanded: %s)", key_path, kp)
                 return None
 
-        # Create the JWT (valid for 10 min; iat backdated 120s for clock skew tolerance).
-        now = int(time.time())
-        clean_app_id = str(app_id).strip()
-        payload = {
-            "iat": now - 120,
-            "exp": now + 600,
-            "iss": int(clean_app_id) if clean_app_id.isdigit() else clean_app_id,
-        }
-        app_jwt = jwt.encode(payload, private_key_bytes, algorithm="RS256")
+        # Create the JWT with integer `iss` claim required by GitHub App API
+        app_jwt = _mint_github_jwt(app_id, private_key_bytes)
 
         clean_inst_id = str(installation_id).strip()
 
