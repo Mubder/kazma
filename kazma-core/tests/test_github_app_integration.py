@@ -138,6 +138,90 @@ async def test_git_push_pull_retries_on_auth_failure_after_re_mint():
 
 
 @pytest.mark.asyncio
+async def test_git_push_pull_detects_false_up_to_date():
+    """Verify a push that returns exit-0 'up to date' but didn't land is caught.
+
+    Regression for the masking bug: some auth failures make `git push origin main`
+    print 'Everything up-to-date' with exit 0 while the commit never reaches
+    GitHub. The tool must verify via ls-remote and treat the mismatch as an
+    auth failure (attempting a token refresh), NOT report success.
+    """
+    from kazma_skills.native.git_github_manager.tools import git_push_pull
+
+    token_seq = {"calls": 0}
+
+    def fake_get_token():
+        token_seq["calls"] += 1
+        return "ghs_stale_dead_token" if token_seq["calls"] == 1 else "ghs_fresh_token"
+
+    HEAD_SHA = "abc123def456"
+
+    with patch("subprocess.run") as mock_run, \
+         patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_gateway.routers.github_client.get_github_token", side_effect=fake_get_token), \
+         patch("kazma_core.git_identity.invalidate_app_token_cache"), \
+         patch("kazma_core.git_identity.mint_app_installation_token", return_value="ghs_fresh_token"):
+
+        # Call order: branch, upstream, remote-url, PUSH(no-op up-to-date),
+        # rev-parse HEAD, rev-list ahead count, ls-remote verify (FAILS: remote
+        # doesn't have HEAD), then retry PUSH, then post-refresh ls-remote verify.
+        mock_b = MagicMock(returncode=0, stdout="main\n")
+        mock_u = MagicMock(returncode=0, stdout="origin/main\n")
+        mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
+        # Push says up-to-date, exit 0 — the masking lie.
+        mock_push_noop = MagicMock(returncode=0, stdout="Everything up-to-date", stderr="")
+        mock_head = MagicMock(returncode=0, stdout=HEAD_SHA + "\n")
+        mock_ahead = MagicMock(returncode=0, stdout="1\n")  # 1 commit ahead
+        # ls-remote: remote does NOT contain HEAD → verify fails.
+        mock_ls_fail = MagicMock(returncode=0, stdout="999000111222\trefs/heads/main\n")
+        # Retry push after token refresh — still doesn't land (App revoked).
+        mock_push_retry = MagicMock(returncode=0, stdout="Everything up-to-date", stderr="")
+        # Post-refresh ls-remote verify: still missing HEAD.
+        mock_ls_retry_fail = MagicMock(returncode=0, stdout="999000111222\trefs/heads/main\n")
+
+        mock_run.side_effect = [
+            mock_b, mock_u, mock_url, mock_push_noop,
+            mock_head, mock_ahead, mock_ls_fail,
+            mock_push_retry, mock_ls_retry_fail,
+        ]
+
+        res = await git_push_pull(action="push")
+
+        # Must NOT claim success — the commit did not reach GitHub.
+        assert "did not reach GitHub" in res or "Auth failed" in res
+        # Must have attempted a token refresh (recovery path triggered).
+        # The diagnostic explains the false-up-to-date masking.
+        assert "up to date" in res.lower() or "token" in res.lower()
+
+
+@pytest.mark.asyncio
+async def test_git_push_pull_up_to_date_when_truly_in_sync():
+    """A genuine up-to-date (local == remote) push is NOT flagged as a failure."""
+    from kazma_skills.native.git_github_manager.tools import git_push_pull
+
+    HEAD_SHA = "abc123def456"
+
+    with patch("subprocess.run") as mock_run, \
+         patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghs_good_token"):
+
+        mock_b = MagicMock(returncode=0, stdout="main\n")
+        mock_u = MagicMock(returncode=0, stdout="origin/main\n")
+        mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
+        mock_push_ok = MagicMock(returncode=0, stdout="Everything up-to-date", stderr="")
+        # Not ahead (0 commits) → verify step is skipped entirely.
+        mock_head = MagicMock(returncode=0, stdout=HEAD_SHA + "\n")
+        mock_ahead_zero = MagicMock(returncode=0, stdout="0\n")
+
+        mock_run.side_effect = [mock_b, mock_u, mock_url, mock_push_ok]
+
+        res = await git_push_pull(action="push")
+        # No verification error — genuinely in sync.
+        assert "did not reach GitHub" not in res
+        assert "Everything up-to-date" in res
+
+
+@pytest.mark.asyncio
 async def test_github_merge_pr():
     """Verify github_merge_pr tool sends PUT to pulls/{number}/merge."""
     from kazma_skills.native.git_github_manager.tools import github_merge_pr

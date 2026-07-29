@@ -171,6 +171,8 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
                 "invalid username or password",
                 "permission denied",
                 "403",  # GH returns 403 for invalid installation tokens on push
+                "401",
+                "bad credentials",
                 "remote: invalid",
                 "support for password",
             )
@@ -180,68 +182,191 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         r = subprocess.run(
             cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30
         )
-        out = r.stdout.strip() or r.stderr.strip()
+        # Capture BOTH streams — git often puts the real auth error on stderr
+        # while stdout holds the benign "Already up to date" / refspec summary.
+        stdout = r.stdout.strip()
+        stderr = r.stderr.strip()
+        out = (stdout + ("\n" + stderr if stderr else "")) if stderr else (stdout or stderr)
         if token:
             out = out.replace(token, "[REDACTED_TOKEN]")
+        # Verbose diagnostic: log exit code + token prefix + tail so the NEXT
+        # failure shows exactly what git/GitHub returned (HTTP 401/403, etc.).
+        token_prefix = (token[:4] + "***") if token else "none"
+        logger.info(
+            "[git_push_pull] action=%s returncode=%d token=%s stdout_tail=%r stderr_tail=%r",
+            action,
+            r.returncode,
+            token_prefix,
+            stdout[-200:],
+            stderr[-200:],
+        )
         return r.returncode, out
+
+    def _remote_has_commit(ref: str, sha: str) -> bool:
+        """Verify the remote actually points at *sha* (don't trust local exit codes).
+
+        Some auth failures make ``git push origin main`` print a benign
+        "Everything up-to-date" / "Already up to date" with exit 0 while
+        silently NOT contacting GitHub — so we query the live remote ref.
+        """
+        try:
+            ls_cmd = ["git", "-c", "credential.helper="]
+            if auth_url:
+                ls_cmd.extend(["-c", f"remote.{remote}.url={auth_url}"])
+            else:
+                ls_cmd.extend(["-c", f"http.extraheader={auth_header}"])
+            ls_cmd.extend(["ls-remote", remote, ref])
+            r = subprocess.run(
+                ls_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=20
+            )
+            out = r.stdout.strip()
+            logger.info(
+                "[git_push_pull] verify ls-remote %s returncode=%d out_tail=%r",
+                ref,
+                r.returncode,
+                out[-200:],
+            )
+            # ls-remote output: "<sha>\t<ref>"
+            return r.returncode == 0 and sha in out and bool(out)
+        except Exception as exc:
+            logger.warning("[git_push_pull] verify ls-remote failed: %s", exc)
+            return False
 
     try:
         returncode, output = _run()
 
-        # Diagnostic header if push fails
-        if returncode != 0:
-            token_prefix = f"{token[:4]}***" if token else "none"
+        def _refresh_and_retry(prev_output: str) -> str | None:
+            """Clear token cache, mint a fresh token, rebuild cmd, retry once.
 
-            # Self-healing for expired/revoked GitHub App installation tokens:
-            # a cached ghs_* token may be dead even though our local TTL says
-            # it's valid. Invalidate the cache, mint a fresh token, rebuild the
-            # auth URL, and retry the push exactly once.
-            if action == "push" and _looks_like_auth_failure(output):
-                logger.info(
-                    "[git_push_pull] Push auth failure — clearing token cache and re-minting for a single retry"
+            Returns the retry output string if a retry happened, else None.
+            Handles the rebuild + single retry shared by the exit-nonzero path
+            and the verify-mismatch path.
+            """
+            nonlocal token, auth_url
+            token_prefix = (token[:4] + "***") if token else "none"
+            logger.info(
+                "[git_push_pull] Push auth failure — clearing token cache and re-minting for a single retry"
+            )
+            try:
+                from kazma_core.git_identity import (
+                    invalidate_app_token_cache,
+                    mint_app_installation_token,
                 )
-                try:
-                    from kazma_core.git_identity import (
-                        invalidate_app_token_cache,
-                        mint_app_installation_token,
-                    )
 
-                    invalidate_app_token_cache()
-                    fresh = mint_app_installation_token(force=True)
-                except Exception:
-                    fresh = None
+                invalidate_app_token_cache()
+                fresh = mint_app_installation_token(force=True)
+            except Exception:
+                fresh = None
 
-                if fresh and fresh != token:
-                    # Rebuild cmd / auth_url with the fresh token, then retry.
-                    token = fresh
-                    if auth_url:
-                        fresh_auth_url = remote_url.replace(
-                            "https://", f"https://x-access-token:{token}@"
-                        ) if remote_url.startswith("https://") else auth_url
-                        if remote_url.startswith("git@github.com:"):
-                            slug = remote_url.split("git@github.com:")[-1]
-                            fresh_auth_url = f"https://x-access-token:{token}@github.com/{slug}"
-                        cmd = ["git", "-c", "credential.helper=", "-c", f"remote.{remote}.url={fresh_auth_url}"]
-                    else:
-                        import base64 as _b64
-                        fresh_b64 = _b64.b64encode(f"x-access-token:{token}".encode()).decode()
-                        cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader=Authorization: Basic {fresh_b64}"]
-                    cmd.append(action)
-                    if not has_upstream and target_branch:
-                        cmd.extend(["--set-upstream", remote, target_branch])
-                    elif target_branch:
-                        cmd.extend([remote, target_branch])
+            if not (fresh and fresh != token):
+                return None  # No fresh token available; caller reports prev_output.
 
-                    rc2, out2 = _run()
-                    if rc2 == 0:
-                        return out2
-                    if token:
-                        out2 = out2.replace(token, "[REDACTED_TOKEN]")
-                    diag = f"[Kazma] Auth failed or rejected after token refresh. (Used token prefix: {token_prefix}). Ensure token/app is valid.\n"
-                    return diag + out2
+            # Rebuild cmd / auth_url with the fresh token.
+            token = fresh
+            if remote_url:
+                if remote_url.startswith("https://"):
+                    auth_url = remote_url.replace("https://", f"https://x-access-token:{token}@")
+                elif remote_url.startswith("git@github.com:"):
+                    slug = remote_url.split("git@github.com:")[-1]
+                    auth_url = f"https://x-access-token:{token}@github.com/{slug}"
+            new_cmd = ["git", "-c", "credential.helper="]
+            if auth_url:
+                new_cmd.extend(["-c", f"remote.{remote}.url={auth_url}"])
+            else:
+                import base64 as _b64
+                fresh_b64 = _b64.b64encode(f"x-access-token:{token}".encode()).decode()
+                new_cmd.extend(["-c", f"http.extraheader=Authorization: Basic {fresh_b64}"])
+            new_cmd.append(action)
+            if not has_upstream and target_branch:
+                new_cmd.extend(["--set-upstream", remote, target_branch])
+            elif target_branch:
+                new_cmd.extend([remote, target_branch])
+            # Rebuild cmd in place so _run() uses the fresh-token command, and
+            # _remote_has_commit() uses the fresh auth_url too.
+            cmd[:] = new_cmd
+
+            return _run()[1]
+
+        token_prefix = (token[:4] + "***") if token else "none"
+
+        # ── Path 1: explicit failure (non-zero exit) ──
+        if returncode != 0:
+            if action == "push" and _looks_like_auth_failure(output):
+                retried = _refresh_and_retry(output)
+                if retried is not None:
+                    # Verify the retry actually landed.
+                    if target_branch:
+                        try:
+                            head_sha = subprocess.run(
+                                ["git", "rev-parse", "HEAD"], cwd=cwd,
+                                capture_output=True, text=True, timeout=5,
+                            ).stdout.strip()
+                            if head_sha and _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
+                                return retried
+                        except Exception:
+                            pass
+                    return retried
+                diag = f"[Kazma] Auth failed or rejected. (Used token prefix: {token_prefix}). Ensure token/app is valid.\n"
+                return diag + output
 
             diag = f"[Kazma] Auth failed or rejected. (Used token prefix: {token_prefix}). Ensure token/app is valid.\n"
             return diag + output
+
+        # ── Path 2: push reported success — VERIFY it actually landed ──
+        # Some auth failures make `git push origin main` print a benign
+        # "Everything up-to-date" / "Already up to date" with exit 0 while
+        # silently NOT contacting GitHub (the commit never reaches the remote).
+        # We confirm the remote ref actually points at HEAD; if it doesn't AND
+        # local is ahead, the push was a no-op and we treat it as an auth fail.
+        if action == "push" and target_branch:
+            looks_noop = ("up-to-date" in output.lower()) or ("already up to date" in output.lower())
+            try:
+                head_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"], cwd=cwd,
+                    capture_output=True, text=True, timeout=5,
+                ).stdout.strip()
+                ahead = subprocess.run(
+                    ["git", "rev-list", "--count", f"origin/{target_branch}..HEAD"],
+                    cwd=cwd, capture_output=True, text=True, timeout=5,
+                ).stdout.strip()
+            except Exception:
+                head_sha, ahead = "", ""
+            ahead_n = 0
+            try:
+                ahead_n = int(ahead) if ahead else 0
+            except ValueError:
+                ahead_n = 0
+
+            if looks_noop and ahead_n > 0 and head_sha:
+                # Local is ahead but push said "up to date" — verify the remote.
+                if not _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
+                    logger.warning(
+                        "[git_push_pull] Push reported up-to-date but HEAD is %d commit(s) "
+                        "ahead and remote does NOT have %s — treating as auth failure",
+                        ahead_n,
+                        head_sha[:8],
+                    )
+                    synthetic = (
+                        "[Kazma] Push reported 'up to date' but the commit did not reach GitHub "
+                        "(local is ahead, remote unchanged). This is usually an auth/token failure "
+                        "that git surfaced as a no-op. Attempting token refresh...\n"
+                    )
+                    retried = _refresh_and_retry(synthetic)
+                    if retried is not None:
+                        # Verify the retry landed.
+                        if _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
+                            return retried
+                        diag = (
+                            "[Kazma] Auth failed or rejected after token refresh. "
+                            f"(Used token prefix: {token_prefix}). The commit still did not reach GitHub. "
+                            "Ensure token/app is valid and the App is installed on the repo.\n"
+                        )
+                        return diag + retried
+                    diag = (
+                        "[Kazma] Push did not reach GitHub and no fresh token could be minted. "
+                        f"(Used token prefix: {token_prefix}). Ensure token/app is valid.\n"
+                    )
+                    return diag + synthetic + output
 
         # Self-healing: if push rejected because remote is ahead, auto-rebase and retry push!
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
@@ -259,7 +384,6 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
             # Retry push
             rc2, out2 = _run()
             if rc2 != 0:
-                token_prefix = f"{token[:4]}***" if token else "none"
                 diag = f"[Kazma] Auth failed or rejected after rebase. (Used token prefix: {token_prefix}).\n"
                 return diag + out2
 
