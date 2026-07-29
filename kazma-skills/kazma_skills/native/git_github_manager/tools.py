@@ -80,8 +80,9 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
 async def git_push_pull(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
     """Synchronize local branch changes by executing git pull or git push.
 
-    When pushing a new branch without upstream tracking, automatically passes
-    ``--set-upstream <remote> <branch>``.
+    :param action: Must be 'push' or 'pull'. Set action='push' to push local commits to GitHub.
+    :param branch: Branch name to push or pull (e.g. 'main'). Auto-detected if omitted.
+    :param remote: Remote name (default 'origin').
     """
     cwd = _get_workspace()
     if action not in ("push", "pull"):
@@ -122,7 +123,7 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
 
         if not has_upstream and target_branch:
             cmd.extend(["--set-upstream", remote, target_branch])
-        elif target_branch and branch:
+        elif target_branch:
             cmd.extend([remote, target_branch])
 
     try:
