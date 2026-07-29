@@ -195,8 +195,11 @@ def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
 
-    now = int(time.time())
-    clean_app_id = int("".join(c for c in str(app_id) if c.isdigit()))
+    digits = "".join(c for c in str(app_id) if c.isdigit())
+    if not digits:
+        logger.warning("[git_identity] Cannot mint JWT: App ID contains no digits (%r)", app_id)
+        return ""
+    clean_app_id = int(digits)
 
     header = {"alg": "RS256", "typ": "JWT"}
     payload = {
@@ -222,10 +225,10 @@ def get_app_installation_token() -> str | None:
     Cached until 5 min before expiry.
     """
     cfg = _read_config()
-    app_id = cfg.get("app_id")
-    installation_id = cfg.get("app_installation_id")
-    key_path = cfg.get("app_private_key_path")
-    key_str = cfg.get("app_private_key")
+    app_id = str(cfg.get("app_id") or "").strip()
+    installation_id = str(cfg.get("app_installation_id") or "").strip()
+    key_path = str(cfg.get("app_private_key_path") or "").strip()
+    key_str = str(cfg.get("app_private_key") or "").strip()
 
     if not app_id or not installation_id:
         return None
@@ -258,6 +261,8 @@ def get_app_installation_token() -> str | None:
 
         # Create the JWT with integer `iss` claim required by GitHub App API
         app_jwt = _mint_github_jwt(app_id, private_key_bytes)
+        if not app_jwt:
+            return None
 
         clean_inst_id = str(installation_id).strip()
 
