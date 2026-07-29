@@ -1,7 +1,8 @@
-"""Kazma — Autonomous AI agent framework.
+import os
 
-Agent loop, tool registry, policy engine, and event bus.
-"""
+# Disable interactive terminal credential prompts across all Git operations
+os.environ["GIT_TERMINAL_PROMPT"] = "0"
+os.environ["GIT_ASKPASS"] = "echo"
 
 from kazma_core.audit_logger import AuditEntry, AuditLogger
 from kazma_core.authorization_flow import (

@@ -9,6 +9,10 @@ import subprocess
 import httpx
 from kazma_core.tools.file_write import _get_workspace
 
+# Disable interactive terminal credential prompts across all Git sub-processes
+os.environ["GIT_TERMINAL_PROMPT"] = "0"
+os.environ["GIT_ASKPASS"] = "echo"
+
 logger = logging.getLogger(__name__)
 
 
