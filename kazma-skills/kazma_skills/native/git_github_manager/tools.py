@@ -179,6 +179,18 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
     env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # Critical: the auth token is embedded in the remote URL
+    # (https://x-access-token:TOKEN@github.com/...). A globally-configured
+    # credential helper (Git Credential Manager, osxkeychain, wincred, etc.)
+    # intercepts the request and substitutes its OWN stored credential,
+    # silently replacing the App installation token — which git then rejects
+    # with "Invalid username or token". Passing -c credential.helper= only
+    # APPENDS an empty helper; it does NOT clear the global/system one. The
+    # only reliable way to disable ALL helpers for this one subprocess is to
+    # point the global & system config files at /dev/null so the helper list
+    # is empty and the URL-embedded token is the sole credential.
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
 
     def _looks_like_auth_failure(text: str) -> bool:
         t = text.lower()
