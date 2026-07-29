@@ -218,11 +218,13 @@ def get_app_installation_token() -> str | None:
             if "\\n" in k and "\n" not in k:
                 k = k.replace("\\n", "\n")
             private_key_bytes = k.strip().encode("utf-8")
-        elif key_path and Path(key_path).exists():
-            private_key_bytes = Path(key_path).read_bytes()
-        else:
-            logger.debug("[git_identity] App private key not found at path %s", key_path)
-            return None
+        elif key_path:
+            kp = Path(key_path).expanduser()
+            if kp.exists():
+                private_key_bytes = kp.read_bytes()
+            else:
+                logger.debug("[git_identity] App private key not found at path %s (expanded: %s)", key_path, kp)
+                return None
 
         # Create the JWT (valid for 10 min; iat backdated 120s for clock skew tolerance).
         now = int(time.time())
