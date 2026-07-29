@@ -100,12 +100,11 @@
      chain (Microsoft Office font, missing on Linux/WSL — the silent
      fall-through caused the "glitchy" rendering).
 
-     Arabic (RTL): Cairo primary, Calibri kept in the chain (renders well
-     on Windows where it's installed; harmless fall-through elsewhere).
+     Arabic (RTL): Rubik primary, Cairo/Calibri in the chain.
      Arabic text uses NORMAL feature shaping — Inter's OpenType features
      (cv01/ss03) break Arabic ligature shaping, so they are scoped to LTR
      only via [dir="ltr"] below, NOT applied globally on body. */
-  --font-sans: 'Inter', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter', 'Rubik', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-arabic: 'Rubik', 'Calibri', 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   /* Inter-only OpenType features.  Applied to LTR text ONLY (see body
