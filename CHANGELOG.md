@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — GitHub App integration verified (2026-07-27)
+
+- **GitHub App bot** can create issues, list PRs/issues, manage branches, and
+  commit via the Kazma agent runtime.
+- Push of new branches requires manual `git push -u` until upstream tracking is
+  established; main-branch pushes via `git_push_pull` work when an upstream
+  already exists (e.g. `origin/main`).
+- Verified via `test/github-app-verify` branch and Issue
+  [#64](https://github.com/Mubder/kazma/issues/64).
+
 ## Unreleased — Memory integrity: L3 ts/emb + L2 graph (solid write path) (2026-07-27)
 
 - **Root cause:** adapter L3 always wrote `timestamp=0` and never set
