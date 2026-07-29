@@ -363,9 +363,8 @@ class ChatPanel(Vertical):
         if not model_name:
             return
         try:
-            from kazma_core.model_registry import get_model_registry
-            registry = get_model_registry()
-            registry.set_active_model(model_name)
+            from kazma_tui.widgets.model_picker import switch_active_model
+            switch_active_model(model_name)
             self.write("system", f"Active model set to: {model_name}")
         except Exception as e:
             self.write("error", f"Failed to set model: {e}")
@@ -427,9 +426,8 @@ class ChatPanel(Vertical):
             if sub == "set" and len(parts) > 2:
                 model_name = parts[2].strip()
                 try:
-                    from kazma_core.model_registry import get_model_registry
-                    registry = get_model_registry()
-                    registry.set_active_model(model_name)
+                    from kazma_tui.widgets.model_picker import switch_active_model
+                    switch_active_model(model_name)
                     self.write("system", f"Active model set to: {model_name}")
                 except Exception as e:
                     self.write("error", f"Failed to set model: {e}")

@@ -20,15 +20,19 @@ from kazma_core.agent.graph_builder import (
 
 
 def test_format_memories_renders_block():
-    """Memories render as a numbered '## Relevant context from memory' block."""
+    """Memories render as a '## Relevant context from memory' block (dash-prefixed list).
+
+    The block is wrapped in a prompt fence for defence-in-depth, so we check
+    the header and each memory entry appear somewhere inside the output.
+    """
     mems = [
         {"content": "User prefers concise answers."},
         {"content": "Project uses Python 3.12."},
     ]
     block = _format_retrieved_memories(mems)
     assert "## Relevant context from memory" in block
-    assert "1. User prefers concise answers." in block
-    assert "2. Project uses Python 3.12." in block
+    assert "- User prefers concise answers." in block
+    assert "- Project uses Python 3.12." in block
 
 
 def test_format_memories_empty_returns_empty():
@@ -36,12 +40,19 @@ def test_format_memories_empty_returns_empty():
 
 
 def test_format_memories_caps_long_entries():
-    """Each memory is capped to avoid blowing up the context window."""
+    """Each memory is capped to avoid blowing up the context window.
+
+    The block is wrapped in a prompt fence (~330 chars overhead), so the
+    total length can exceed the per-entry cap but the truncation marker
+    must be present.
+    """
     long = "x" * 1000
     block = _format_retrieved_memories([{"content": long}])
     # Should be truncated with ellipsis.
     assert "…" in block
-    assert len(block) < 400
+    # 300-char cap per entry + ~330-char fence overhead + ~70 chars for
+    # headers/separators → well under 700 chars.
+    assert len(block) < 700
 
 
 def test_format_memories_skips_empty_content():

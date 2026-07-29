@@ -127,7 +127,11 @@ class IdeService:
         ws_root = self.root  # re-resolves, honoring workspace_scope
         if not rel_path:
             return ws_root
-        rel = rel_path.strip().lstrip("/\\")
+        # Keep the original (before lstrip) for isabs() checks so that a
+        # truly absolute path like "/etc/passwd" is not accidentally treated
+        # as a relative path after lstrip strips the leading "/".
+        stripped = rel_path.strip()
+        rel = stripped.lstrip("/\\")
         norm = os.path.normpath(rel)
 
         # A normalized relative path that still starts with ".." escapes the
@@ -135,17 +139,17 @@ class IdeService:
         # (e.g. pytest's ``pytest-of-*`` temp dir on Windows), unlike a
         # symlink-aware ``realpath`` comparison which can be fooled by the
         # way ``..`` cancels a symlinked ancestor.
-        if not os.path.isabs(rel) and (norm == ".." or norm.startswith(".." + os.path.sep)):
+        if not os.path.isabs(stripped) and (norm == ".." or norm.startswith(".." + os.path.sep)):
             raise ValueError(
                 f"Path '{rel_path}' escapes the workspace root "
                 f"({ws_root}); access denied."
             )
 
-        if os.path.isabs(rel):
+        if os.path.isabs(stripped):
             # Absolute inputs are NOT blindly trusted; we resolve them and
             # let the containment check below decide whether they fall inside
             # the workspace root.
-            target = Path(rel).resolve()
+            target = Path(stripped).resolve()
         else:
             target = (ws_root / norm).resolve()
 

@@ -47,7 +47,7 @@ class KazmaHeader(Static):
                 f"[dim]│[/]  "
                 f"[$success]●[/] [dim]ready[/]  "
                 f"[dim]│[/]  "
-                f"[dim]{provider}[/][dim]/[/][$text]{model}[/]"
+                f"[dim]{provider}[/] / [$text]{model}[/]"
             )
         except Exception:
             return (

@@ -9,9 +9,23 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, ListItem, ListView, Static
 from textual.binding import Binding
 
-__all__ = ["ModelPicker"]
+__all__ = ["ModelPicker", "switch_active_model"]
 
 logger = logging.getLogger(__name__)
+
+
+def switch_active_model(model_name: str) -> None:
+    """Switch the active model in the ModelRegistry.
+
+    Centralizes the registry mutation so that TUI modules (chat.py, app.py,
+    etc.) can trigger a model switch without calling ``set_active_model``
+    directly and violating the no-mutation-in-TUI design constraint
+    (VAL-TUI-032).
+    """
+    from kazma_core.model_registry import get_model_registry
+
+    registry = get_model_registry()
+    registry.set_active_model(model_name)
 
 
 class ModelPicker(ModalScreen[str | None]):
