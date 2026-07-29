@@ -276,39 +276,27 @@ def _fetch_bot_user_id(app_slug: str) -> int | None:
 
 
 def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
-    """Create a signed RS256 JWT with integer `iss` claim required by GitHub App API.
+    """Create a signed RS256 JWT for GitHub App authentication.
 
-    PyJWT forces `iss` to be a `str`, causing GitHub API to reject the token with
-    `'Issuer' claim ('iss') must be an Integer`. We construct the JWT with
-    cryptography + json to preserve integer `iss`.
+    GitHub's JWT spec for Apps
+    (https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app)
+    requires:
+      * ``iss`` — the App's ID or client ID, as a **string**
+      * ``iat`` — issued-at, seconds since epoch
+      * ``exp`` — expiry, at most 10 minutes after ``iat``
+      * algorithm RS256, signed with the App's private key
+
+    Uses standard :func:`jwt.encode` (PyJWT ≥ 2.0 returns ``str`` for RS256).
     """
-    import base64
-    import json
-    import time
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding
+    import jwt
 
     now = int(time.time())
-    digits = "".join(c for c in str(app_id) if c.isdigit())
-    if not digits:
-        logger.warning("[git_identity] Cannot mint JWT: App ID contains no digits (%r)", app_id)
-        return ""
-    clean_app_id = int(digits)
-
-    header = {"alg": "RS256", "typ": "JWT"}
     payload = {
-        "iat": now - 120,
-        "exp": now + 600,
-        "iss": clean_app_id,  # Integer claim required by GitHub REST API
+        "iat": now - 60,       # 60s in the past to tolerate clock drift
+        "exp": now + 600,      # 10-minute max lifetime
+        "iss": str(app_id),    # App ID / client ID as a string (per GitHub docs)
     }
-
-    def _b64url(data: bytes) -> str:
-        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
-
-    sig_input = f"{_b64url(json.dumps(header).encode('utf-8'))}.{_b64url(json.dumps(payload).encode('utf-8'))}".encode("utf-8")
-    key = serialization.load_pem_private_key(private_key_bytes, password=None)
-    sig = key.sign(sig_input, padding.PKCS1v15(), hashes.SHA256())
-    return f"{sig_input.decode('utf-8')}.{_b64url(sig)}"
+    return jwt.encode(payload, private_key_bytes, algorithm="RS256")
 
 
 def get_app_installation_token() -> str | None:
@@ -316,7 +304,7 @@ def get_app_installation_token() -> str | None:
 
     Uses the private key (file path or direct PEM string) to sign a JWT, then
     exchanges it for an installation access token via GitHub API.
-    Cached until 5 min before expiry.
+    Cached for 50 minutes (tokens live 1 hour).
     """
     return mint_app_installation_token(force=False)
 

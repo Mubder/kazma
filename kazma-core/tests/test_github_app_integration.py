@@ -319,3 +319,109 @@ async def test_github_create_issue():
             "/repos/owner/repo/issues",
             json={"title": "Bug in auth", "body": "Description", "labels": ["bug"]}
         )
+
+
+# ── JWT minting safety tests ──────────────────────────────────────────────
+# These pin the behaviour of the App-installation-token JWT so a refactor of
+# _mint_github_jwt (e.g. switching to standard jwt.encode) cannot silently
+# break the token exchange. They use a freshly generated RSA key (no real
+# GitHub credential) and mock the network call.
+
+
+def _gen_test_private_key() -> str:
+    """Generate a throwaway RSA private key for JWT tests (PEM string)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ).decode("utf-8")
+
+
+def test_app_jwt_has_valid_claims_and_signature():
+    """The minted JWT must have iss/iat/exp claims and a verifiable RS256 signature.
+
+    This is the safety net for any JWT-builder refactor: whatever mechanism
+    builds the JWT, the output must decode to the expected claims and verify
+    against the App's private key.
+    """
+    import base64
+    import json
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    from kazma_core.git_identity import _mint_github_jwt
+
+    pem = _gen_test_private_key()
+    key_bytes = pem.encode("utf-8")
+    app_id = "4310451"
+
+    jwt_str = _mint_github_jwt(app_id, key_bytes)
+    assert jwt_str, "JWT must be non-empty"
+    assert jwt_str.count(".") == 2, "JWT must have 3 dot-separated parts"
+
+    # Decode header + payload (no verification yet).
+    parts = jwt_str.split(".")
+    payload_b = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+    payload = json.loads(payload_b)
+    assert "iss" in payload, "iss claim must be present"
+    assert "iat" in payload, "iat claim must be present"
+    assert "exp" in payload, "exp claim must be present"
+    assert payload["exp"] > payload["iat"], "exp must be after iat"
+
+    # Verify the RS256 signature against the public key.
+    sig = base64.urlsafe_b64decode(parts[2] + "=" * (-len(parts[2]) % 4))
+    signing_input = f"{parts[0]}.{parts[1]}".encode("utf-8")
+    pub = serialization.load_pem_private_key(key_bytes, password=None).public_key()
+    pub.verify(sig, signing_input, padding.PKCS1v15(), hashes.SHA256())  # raises if invalid
+
+
+def test_mint_app_installation_token_exchanges_jwt_for_ghs_token():
+    """The full mint flow must POST the JWT and return the installation token.
+
+    Pins the contract: a valid JWT goes in the Authorization header, GitHub
+    returns a ghs_ token, and it gets cached. Mocks the network so no real
+    GitHub call is made.
+    """
+    from kazma_core.git_identity import mint_app_installation_token, _app_token_cache
+
+    pem = _gen_test_private_key()
+    cfg = {
+        "app_id": "4310451",
+        "app_installation_id": "149841589",
+        "app_private_key": pem,
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 201
+    mock_resp.json.return_value = {"token": "ghs_test_installation_token"}
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.text = ""
+
+    with patch("kazma_core.git_identity._read_config", return_value=cfg), \
+         patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__.return_value = False
+        mock_client.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        # Clear cache so force isn't needed.
+        _app_token_cache["token"] = None
+        _app_token_cache["expires"] = 0
+
+        token = mint_app_installation_token(force=True)
+
+    assert token == "ghs_test_installation_token", "must return the token from the API"
+    # Verify the POST hit the right endpoint with a Bearer JWT.
+    mock_client.post.assert_called_once()
+    call_url = mock_client.post.call_args[0][0]
+    assert "/access_tokens" in call_url, "must POST to the access_tokens endpoint"
+    auth_header = mock_client.post.call_args[1]["headers"]["Authorization"]
+    assert auth_header.startswith("Bearer "), "must send the JWT as a Bearer token"
+    assert auth_header.count(".") == 2, "the Bearer value must be a JWT"
+
