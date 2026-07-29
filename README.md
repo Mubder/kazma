@@ -287,3 +287,5 @@ See [Development](docs/docs/guide/development.md) and [CONTRIBUTING.md](CONTRIBU
 ## 📜 License
 
 MIT — see [LICENSE](LICENSE).
+
+<!-- Verified GitHub App Bot Sync -->
