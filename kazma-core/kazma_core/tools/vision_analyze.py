@@ -230,17 +230,29 @@ def _build_vision_messages(
 
 
 def _get_llm_provider():
-    """Return an LLM provider from the global registry.
+    """Return a vision-capable LLM provider, or ``None`` with a reason.
 
-    Returns None if the registry is not initialized or the provider module
-    is unavailable.
+    Selection order (see :mod:`kazma_core.vision_capability`):
+
+    1. The *active* model if it is vision-capable.
+    2. Any other configured, vision-capable model (one-off client; the
+       active profile is not changed).
+    3. ``None`` — no vision model available; the caller surfaces a clear,
+       actionable error *before* making any API call.
+
+    Returns ``(provider, model_id, reason)``. When ``provider`` is ``None``
+    the reason explains why (``"no-vision-model"``, ``"registry-unavailable"``).
     """
     try:
         from kazma_core.model_registry import get_model_registry
+        from kazma_core.vision_capability import get_vision_client
+
         registry = get_model_registry()
-        return registry.get_client()
-    except Exception:
-        return None
+        provider, model_id, reason = get_vision_client(registry)
+        return provider, model_id, reason
+    except Exception as exc:  # noqa: BLE001 — registry/imports are best-effort
+        logger.debug("[vision_analyze] provider lookup failed: %s", exc)
+        return None, None, "registry-unavailable"
 
 
 # ── Main entry point ───────────────────────────────────────────────────
@@ -297,12 +309,31 @@ async def analyze_image(
     data_uri = _build_data_uri(image_bytes, mime)
 
     # ── Get LLM provider ───────────────────────────────────────────
-    provider = _get_llm_provider()
+    provider, chosen_model, reason = _get_llm_provider()
     if provider is None:
+        # Fail BEFORE making any API call. Give a clear, actionable message
+        # so the agent/user knows exactly what to fix instead of a cryptic
+        # "400 unknown variant image_url" from the active text-only model.
+        if reason == "no-vision-model":
+            # chosen_model holds the active model id in the no-vision-model
+            # case (returned by get_vision_client). Use it directly rather
+            # than re-querying the registry.
+            active_note = f" (active model: {chosen_model})" if chosen_model else ""
+            return (
+                "Error: Image analysis needs a vision-capable model, but the active"
+                f" model{active_note} cannot process images, and no vision-capable "
+                "model is configured. Add one in Settings > Models (e.g. gpt-4o, "
+                "gpt-4o-mini, Gemini, or Claude 3.5 Sonnet) and it will be used "
+                "automatically."
+            )
         return (
             "Error: Vision analysis unavailable — LLM provider module not found. "
             "Ensure kazma_core.llm_provider is installed."
         )
+
+    logger.info(
+        "[vision_analyze] using model=%s (reason=%s)", chosen_model, reason
+    )
 
     # ── Call the vision model ──────────────────────────────────────
     messages = _build_vision_messages(data_uri, question)

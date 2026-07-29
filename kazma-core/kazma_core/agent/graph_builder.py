@@ -592,6 +592,7 @@ async def supervisor_node(
     start = time.monotonic()
     try:
         from kazma_core.retry import friendly_llm_error, load_retry_config
+        from kazma_core.llm_provider import LLMError
 
         cfg = load_retry_config()
         retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)
@@ -602,6 +603,7 @@ async def supervisor_node(
                 httpx.TimeoutException,
                 httpx.ConnectError,
                 httpx.RemoteProtocolError,
+                httpx.ReadError,
             )
         except ImportError:
             pass
@@ -635,6 +637,29 @@ async def supervisor_node(
                         await asyncio.sleep(wait_time)
                     else:
                         raise
+                except LLMError as exc:
+                    # ``llm.chat`` wraps every failure in LLMError. Only
+                    # transient errors (network blips, 429) are worth
+                    # retrying; permanent 4xx content/schema errors fail
+                    # fast so we don't waste attempts that cannot succeed.
+                    is_transient = bool(getattr(exc, "transient", False))
+                    last_exc = exc
+                    _llm_attempts = attempt
+                    if is_transient and attempt < cfg["max_attempts"]:
+                        wait_time = min(cfg["min_wait"] * (2 ** (attempt - 1)), cfg["max_wait"])
+                        logger.warning(
+                            "[Supervisor] LLM call attempt %d/%d failed (transient): %s "
+                            "(retrying in %ds)",
+                            attempt,
+                            cfg["max_attempts"],
+                            exc,
+                            wait_time,
+                        )
+                        import asyncio
+
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
             raise last_exc  # type: ignore[misc]
 
         response = await _call_llm_with_retry()
@@ -643,10 +668,23 @@ async def supervisor_node(
         from kazma_core.retry import friendly_llm_error
 
         error_content = friendly_llm_error(exc)
+        # Surface an HONEST failure rather than disguising it as a normal
+        # assistant reply. ``turn_failed`` tells respond_node to skip
+        # synthesis (no fabricated final answer over the broken turn) — the
+        # user gets a clear error they can act on (the "model stopped
+        # thinking" symptom's real cause).
         return {
             **breaker_reset,
             "next_node": NodeName.RESPOND,
-            "messages": messages + [{"role": "assistant", "content": error_content}],
+            "turn_failed": True,
+            "error_message": error_content,
+            "messages": messages
+            + [
+                {
+                    "role": "assistant",
+                    "content": error_content,
+                }
+            ],
         }
 
     duration_ms = (time.monotonic() - start) * 1000
@@ -1187,6 +1225,19 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         or len(_final_text) < _MIN_FINAL_CHARS_ON_MAX
         or bool(isinstance(_last, dict) and _last.get("tool_calls"))
     )
+    # If the supervisor's LLM call failed (after retries), the assistant
+    # message above is an honest error notice, NOT a real answer. Never
+    # synthesize a plausible-looking final answer over a broken turn — that
+    # was the root cause of the "model stopped thinking" symptom. Surface
+    # the error and end the turn.
+    if state.get("turn_failed"):
+        logger.info(
+            "[Respond] Turn failed (turn_failed=True) — skipping synthesis, "
+            "surfacing honest error (iteration=%d messages=%d)",
+            iteration,
+            len(messages),
+        )
+        _needs_synthesis = False
     if _needs_synthesis:
         _llm = llm or state.get("_llm")
         if _llm is not None:

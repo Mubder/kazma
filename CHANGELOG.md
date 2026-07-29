@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Unreleased — Stop "silent finalization on LLM failure" + vision routing (2026-07-30)
+
+Two intertwined bug fixes, both root-caused from server logs.
+
+- **"Model stopped thinking" (silent forced-finalization).** When an LLM
+  call failed after retries, the supervisor disguised the failure as a
+  normal assistant reply and `respond_node` synthesized a plausible-looking
+  final answer over the broken turn — so to the user it looked like the
+  model gave up mid-task (recoverable only by nudging "What?").
+  - **Root cause:** `llm_provider.chat()` wrapped every failure in
+    `LLMError`, but the supervisor's retry tuple only watched for raw httpx
+    exceptions that never arrived — so zero retries actually ran — and the
+    catch-all appended a fake assistant message with no error state.
+  - **Fix:** `LLMError` now carries a `transient` flag (True for
+    network/`ReadError`/429; False for 4xx/schema). The supervisor retries
+    only transient errors; on exhaustion it sets `SupervisorState.turn_failed`
+    + `error_message` with an honest `⚠️` notice. `respond_node` skips
+    synthesis when `turn_failed` — the user gets a clear error, never a
+    fabricated answer. `httpx.ReadError` (mid-stream drops) is now caught
+    and classified transient.
+- **Images routed to text-only models (`image_url` 400).** No per-model
+  vision metadata existed, so `analyze_image` (and chat-attached images)
+  always used the active model. DeepSeek (`deepseek-v4-pro`) is text-only
+  and rejected the `image_url` part with `400 unknown variant 'image_url'`,
+  which then cascaded into the silent-finalization bug above.
+  - **Fix:** new `kazma_core/vision_capability.py` classifier
+    (`is_text_only`/`is_vision_capable`; allow/deny lists, unknown models
+    fail-open). `analyze_image` auto-selects a configured vision model if
+    the active one is text-only, else fails clearly BEFORE any API call
+    telling the user what to add. `build_user_content()` downgrades
+    chat-attached images to a `[Attached: … — use file_read to open: …]`
+    file stub for text-only models. Extend the vision allow-list at runtime
+    via the `KAZMA_VISION_MODELS` env var.
+- Tests: `kazma-core/tests/test_vision_and_failure_handling.py` (16 cases).
+  Existing `test_max_iter_synthesis.py` still green (the `turn_failed`
+  guard only fires when explicitly set).
+
 ## Unreleased — GitHub App integration verified (2026-07-27)
 
 - **GitHub App bot** can create issues, list PRs/issues, manage branches, and

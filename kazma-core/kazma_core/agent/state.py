@@ -133,6 +133,19 @@ class SupervisorState(TypedDict, total=False):
     auto_continue: bool
     """Flag indicating whether the supervisor should auto-continue turns for multi-step goals."""
 
+    # ── Turn failure ────────────────────────────────────────────────
+    turn_failed: bool
+    """Set when the supervisor's LLM call failed (after retries) and could not produce a real answer.
+
+    When True, ``respond_node`` MUST NOT synthesize a plausible-looking
+    final answer over the failure — it must surface the honest error so the
+    user knows the turn broke rather than mistaking a fabricated answer for
+    a real result (the "model stopped thinking" symptom).
+    """
+
+    error_message: str
+    """Human-readable message describing the failure when ``turn_failed`` is True."""
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 

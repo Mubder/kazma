@@ -175,21 +175,50 @@ def _extract_http_status_code(exc: Exception) -> int | None:
 
 
 def friendly_llm_error(exc: Exception) -> str:
-    """Map LLM call failures to user-friendly messages after retries exhausted."""
+    """Map LLM call failures to user-friendly messages after retries exhausted.
+
+    Prefixed with ``⚠️`` so a failure is never mistaken for a normal model
+    reply. Honors the ``transient`` flag on :class:`LLMError` to give an
+    actionable hint: transient failures invite a retry, permanent failures
+    point at the underlying cause.
+    """
     status_code = _extract_http_status_code(exc)
     if status_code in (401, 403):
         return (
-            "The model request was rejected due to an invalid or missing API key. "
+            "⚠️ The model request was rejected due to an invalid or missing API key. "
             "Go to Settings > Models/Providers and update your credentials."
         )
-    if isinstance(exc, (ConnectionError, TimeoutError, asyncio.TimeoutError)):
-        return "The model service is unavailable. Please try again in a moment."
+
+    is_transient = bool(getattr(exc, "transient", False))
+    # Inspect the cause chain too — some LLMErrors wrap a network exception.
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if not is_transient and cause is not None:
+        is_transient = bool(getattr(cause, "transient", False)) or isinstance(
+            cause, (ConnectionError, TimeoutError, asyncio.TimeoutError)
+        )
+
+    if isinstance(exc, (ConnectionError, TimeoutError, asyncio.TimeoutError)) or is_transient:
+        return (
+            "⚠️ I lost the connection to the model mid-turn (it was retried "
+            "automatically but kept failing). Please send your message again — "
+            "transient network/rate-limit blips usually clear on the next turn."
+        )
     exc_name = type(exc).__name__
     if "ConnectError" in exc_name or "TimeoutException" in exc_name:
-        return "The model service is unavailable. Please try again in a moment."
-    if "RemoteProtocolError" in exc_name:
-        return "The model service returned an unexpected response. Please try again."
-    return f"An error occurred while contacting the model: {exc}"
+        return (
+            "⚠️ The model service is unavailable. Please try again in a moment."
+        )
+    if "RemoteProtocolError" in exc_name or "ReadError" in exc_name:
+        return (
+            "⚠️ The connection to the model dropped mid-response. Please try again."
+        )
+    # Permanent content/schema error — surface a short reason so the user
+    # can act (e.g. switch model, drop an attachment, fix config).
+    msg = str(exc)
+    # Trim very long provider error bodies for readability.
+    if len(msg) > 240:
+        msg = msg[:240] + "…"
+    return f"⚠️ The model rejected the request: {msg}"
 
 
 def friendly_tool_error(exc: Exception) -> str:

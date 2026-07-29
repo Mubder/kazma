@@ -46,6 +46,39 @@ All packages are in scope. The four main packages:
 - The code retries without tools automatically when this is detected
 - Never remove the `status_code == 404 and "function" in detail.lower()` branch
 
+**LLM error classification — `transient` flag (do not flatten):**
+- `LLMError(..., transient=True/False)` classifies every failure raised by
+  `LLMProvider.chat()`. Transient = network (Connect/Timeout/**ReadError**/
+  RemoteProtocol) + 429; permanent = 4xx content/schema + UnicodeEncode.
+- The supervisor retry loop (`graph_builder.py:_call_llm_with_retry`) ONLY
+  retries `LLMError` when `transient` is True — permanent errors fail fast.
+  `httpx.ReadError` (mid-stream drops) MUST stay transient, or
+  "stopped-thinking" forced-finalization returns.
+- `friendly_llm_error()` prefixes all messages with `⚠️` and gives an
+  actionable hint — never change it to return a bare string, or failures
+  get mistaken for normal model replies again.
+
+**Turn-failure surfacing — never synthesize over a broken turn:**
+- When the supervisor's LLM call fails after retries, it sets
+  `SupervisorState.turn_failed=True` + `error_message` (NOT a fake answer).
+- `respond_node` checks `state.get("turn_failed")` and MUST skip its
+  synthesis LLM call when True — synthesizing a plausible answer over a
+  failed turn was the root cause of the "model stopped thinking" symptom.
+- Keep the `turn_failed` guard in `respond_node` and the `transient` flag
+  on `LLMError`; removing either reintroduces silent forced-finalization.
+
+**Vision capability routing (`kazma-core/kazma_core/vision_capability.py`):**
+- `is_text_only(model)` / `is_vision_capable(model)` classify by allow/deny
+  lists (deny wins; unknown models are NOT downgraded — fail-open).
+- `analyze_image` (`tools/vision_analyze.py`) uses the active model if
+  vision-capable, else auto-selects a configured vision model via
+  `get_vision_client(registry)` (one-off client, no active-profile change),
+  else returns a clear actionable error BEFORE any API call.
+- `build_user_content()` (`gateway/agent_handler/attachments.py`) takes
+  `vision_capable` and, for text-only models, downgrades chat images to the
+  `[Attached: … — use file_read to open: …]` stub instead of `image_url`
+  (text-only providers like DeepSeek reject `image_url` with a 400).
+
 ### 4. Swarm Handoff Cycle Detection (`kazma-core/kazma_core/swarm/engine.py`)
 - `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`

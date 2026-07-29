@@ -59,9 +59,29 @@ def _persist_attachment(attachment: "Attachment") -> str:
     return str(dest.resolve())
 
 
+def _resolve_active_model_vision_capable() -> bool:
+    """Best-effort: is the active model vision-capable?
+
+    Returns ``True`` (fail-open, inline images as before) on any error so
+    that an inability to read the registry never silently drops images.
+    """
+    try:
+        from kazma_core.model_registry import get_model_registry
+        from kazma_core.vision_capability import active_model_is_vision_capable
+
+        return active_model_is_vision_capable(get_model_registry())
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        logger.debug(
+            "[attachments] could not resolve active model vision capability: %s",
+            exc,
+        )
+        return True  # fail-open
+
+
 def build_user_content(
     text: str,
     attachments: list["Attachment"] | None,
+    vision_capable: bool | None = None,
 ) -> str | list[dict[str, Any]]:
     """Build the OpenAI ``content`` for a user turn.
 
@@ -72,9 +92,22 @@ def build_user_content(
     Non-inlinable attachments (documents, audio, over-cap images) are
     persisted and folded into the text portion as ``[Attached: <path>]``
     stubs so the agent can fetch them with ``file_read``.
+
+    ``vision_capable`` controls whether inlinable images are actually
+    inlined as ``image_url`` blocks. When the active model is text-only
+    (e.g. DeepSeek) passing ``vision_capable=False`` forces images down
+    the persist-and-stub path so the provider never receives an
+    ``image_url`` part it would reject with a 400. When ``None`` (default),
+    the active model is looked up best-effort via
+    :func:`kazma_core.vision_capability.active_model_is_vision_capable`;
+    on any error, behavior defaults to inlining (fail-open).
     """
     if not attachments:
         return text
+
+    # Resolve the active model's vision capability if the caller didn't.
+    if vision_capable is None:
+        vision_capable = _resolve_active_model_vision_capable()
 
     blocks: list[dict[str, Any]] = []
     text_parts: list[str] = [text] if text else []
@@ -105,6 +138,16 @@ def build_user_content(
             and data is not None
             and len(data) <= MAX_INLINE_BYTES
         )
+        # A text-only model cannot consume an image_url content part —
+        # force the image down the persist-and-stub path (file_read) so
+        # the provider receives plain text and never 400s on `image_url`.
+        if is_inlinable_image and not vision_capable:
+            is_inlinable_image = False
+            logger.info(
+                "[attachments] active model is text-only — downgrading "
+                "image %s to file reference (no image_url)",
+                att.filename or att.url,
+            )
 
         if is_inlinable_image and data is not None:
             data_uri = (

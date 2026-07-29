@@ -384,7 +384,8 @@ class LLMProvider:
                 else:
                     # All retries exhausted with 429
                     raise LLMError(
-                        f"LLM rate-limited after 3 retries: {detail[:300]}"
+                        f"LLM rate-limited after 3 retries: {detail[:300]}",
+                        transient=True,
                     ) from e
 
             # ── Tool-definition fallback ────────────────────────────────
@@ -424,7 +425,8 @@ class LLMProvider:
                         logger.debug("Failed to read retry error body: %s", _e)
                         retry_detail = ""
                     raise LLMError(
-                        f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}"
+                        f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}",
+                        transient=False,
                     ) from retry_err
                 duration_ms = (time.monotonic() - start) * 1000
                 response = self._parse_response(data, duration_ms)
@@ -459,7 +461,8 @@ class LLMProvider:
                     ) from e
             else:
                 raise LLMError(
-                    f"LLM call failed (HTTP {status_code}): {detail[:300]}"
+                    f"LLM call failed (HTTP {status_code}): {detail[:300]}",
+                    transient=False,
                 ) from e
         except LLMError:
             # Already a structured LLM error — re-raise without wrapping
@@ -467,7 +470,22 @@ class LLMProvider:
             raise
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             logger.error("LLM call failed (network): %s", e)
-            raise LLMError(f"LLM call failed (network): {e}") from e
+            raise LLMError(
+                f"LLM call failed (network): {e}", transient=True
+            ) from e
+        except httpx.ReadError as e:
+            # Mid-stream response drop (connection reset while reading the
+            # response body). Transient — retrying may succeed.
+            logger.error("LLM call failed (network read): %s", e)
+            raise LLMError(
+                f"LLM call failed (network): {e}", transient=True
+            ) from e
+        except httpx.RemoteProtocolError as e:
+            # Server closed the connection unexpectedly. Transient.
+            logger.error("LLM call failed (network): %s", e)
+            raise LLMError(
+                f"LLM call failed (network): {e}", transient=True
+            ) from e
         except UnicodeEncodeError as e:
             # Non-ASCII in a header value (e.g. API key) — httpx fails to
             # encode the request. Surface a clear, actionable message.
@@ -475,7 +493,8 @@ class LLMProvider:
             raise LLMError(
                 "The model request could not be encoded. Check that your API key "
                 "and model name contain only standard (ASCII) characters — "
-                "remove any Arabic or other non-English text from Settings."
+                "remove any Arabic or other non-English text from Settings.",
+                transient=False,
             ) from e
         except Exception as e:
             logger.error("LLM call failed: %s", e, exc_info=True)
@@ -613,4 +632,20 @@ class LLMProvider:
 
 
 class LLMError(Exception):
-    """Raised when an LLM API call fails."""
+    """Raised when an LLM API call fails.
+
+    The ``transient`` flag classifies a failure so callers (notably the
+    supervisor retry loop) can decide whether a retry is worthwhile:
+
+    * ``transient=True`` — network blips, timeouts, mid-stream read errors,
+      rate-limiting (429). Retrying may succeed.
+    * ``transient=False`` — 4xx content/auth/schema errors. Retrying with
+      the same request will fail identically; fail fast instead.
+
+    Defaults to ``False`` (fail-closed: unknown errors are NOT retried) so
+    that pre-existing ``LLMError(...)`` call sites keep their old behavior.
+    """
+
+    def __init__(self, *args: Any, transient: bool = False) -> None:
+        super().__init__(*args)
+        self.transient = bool(transient)
