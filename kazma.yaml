@@ -85,7 +85,7 @@ git:
   bot_identity:
     enabled: false
     name: Kazma Agent
-    email: kazma-agent[bot]@users.noreply.github.com
+    email: 305657551+kazma-agent[bot]@users.noreply.github.com
 skills:
   path: kazma-skills/manifests/
   auto_discover: true

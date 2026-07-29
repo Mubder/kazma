@@ -171,14 +171,10 @@ def _try_app_email(cfg: dict[str, Any]) -> str | None:
     """If a GitHub App is configured, return its true bot email.
 
     The real GitHub App bot email format on GitHub is:
-    ``{app_id}+{slug}[bot]@users.noreply.github.com``.
+    ``{bot_user_id}+{slug}[bot]@users.noreply.github.com``.
     """
     if cfg.get("app_email"):
         return str(cfg["app_email"])
-    app_id = cfg.get("app_id")
-    app_slug = cfg.get("app_slug")
-    if app_id and app_slug:
-        return f"{app_id}+{app_slug}[bot]@users.noreply.github.com"
     return None
 
 
