@@ -140,9 +140,14 @@ def get_bot_identity() -> dict[str, str] | None:
     )
 
     # GitHub App path: resolve the app's true bot email (which carries the custom logo/avatar).
+    # Only use auto-derived email when NO explicit email is configured —
+    # otherwise a mismatched app_slug would silently overwrite a correct
+    # explicit override with a wrong-cased auto-derived email, causing 404s.
     app_email = _try_app_email(cfg)
     if app_email:
-        email = app_email
+        explicit = os.environ.get("KAZMA_BOT_EMAIL", "") or cfg.get("email", "")
+        if not explicit:
+            email = app_email
 
     return {"name": name, "email": email}
 
