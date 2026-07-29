@@ -48,7 +48,7 @@ Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkp
 ### 🌐 Multi-Platform
 Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph supervisor. Platform IDs never enter LangGraph state.
 
-### 🇸🇦 Arabic-Native
+### 📜 Arabic-Native
 Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol. Built in Kuwait, for the world.
 
 ### 🔌 Rich Ecosystem
@@ -59,6 +59,7 @@ Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultura
 - **Time-Travel Replay** — Snapshot every iteration; restore, fork, and compare conversation paths
 - **Encrypted Vault** — AES-256-GCM storage for API keys and credentials
 - **Browser, Calendar & Documents** — Playwright automation, Google/Outlook calendar, PDF/DOCX/XLSX generation
+- **Deep Research** — Multi-query web search → parallel acquire → digest → LLM synthesis with DOCX export
 
 ---
 
