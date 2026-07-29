@@ -106,7 +106,7 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
         auth_header = f"Authorization: Basic {auth_b64}"
 
-    cmd.extend(["-c", f"http.extraheader={auth_header}"])
+    cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
     cmd.append(action)
 
     target_branch = branch
@@ -145,7 +145,7 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         # Self-healing: if push rejected because remote is ahead, auto-rebase and retry push!
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
-            pull_cmd = ["git", "-c", f"http.extraheader={auth_header}", "pull", "--rebase", remote, target_branch or "main"]
+            pull_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}", "pull", "--rebase", remote, target_branch or "main"]
             subprocess.run(pull_cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
 
             # Retry push
