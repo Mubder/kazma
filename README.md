@@ -135,7 +135,7 @@ kazma-tui
 |---------|----------------|-----|
 | **ERR_CONNECTION_RESET** on `:9090` (Windows / WSL) | Stale **portproxy** or WSL IP changed; or Kazma not on `0.0.0.0` | After reboot: Admin `.\scripts\wsl_fixed_access.ps1` + WSL `./scripts/start-web.sh` → **http://127.0.0.1:9090/** ([WSL fixed access](docs/docs/ops/wsl-fixed-access.md)) |
 | Connection refused | Server not running / wrong port | Start `kazma serve` and use the printed URL |
-| Instant exit: “old hardcoded default” secret | `KAZMA_SECRET=kazma-local-dev-secret` | Unset it or set a new random secret |
+| Instant exit: "old hardcoded default" secret | `KAZMA_SECRET=kazma-local-dev-secret` | Unset it or set a new random secret |
 | Instant exit: non-loopback needs secret | `KAZMA_HOST=0.0.0.0` without secret | Set `KAZMA_SECRET` or use `KAZMA_HOST=127.0.0.1` |
 
 Confirm what is listening:
@@ -290,3 +290,4 @@ MIT — see [LICENSE](LICENSE).
 
 <!-- Verified GitHub App Bot Sync -->
 <!-- Bot avatar check 2026-07-29T14:18:55.441261+00:00 -->
+<!-- Bot avatar check 2026-07-29T14:33:37.705976+00:00 -->
