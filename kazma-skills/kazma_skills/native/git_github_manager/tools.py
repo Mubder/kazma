@@ -104,11 +104,8 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
         return "Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI."
 
     import base64
-    if token.startswith("ghs_") or token.startswith("ghp_") or token.startswith("github_pat_"):
-        auth_header = f"Authorization: Bearer {token}"
-    else:
-        auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-        auth_header = f"Authorization: Basic {auth_b64}"
+    auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    auth_header = f"Authorization: Basic {auth_b64}"
 
     cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
     cmd.append(action)
