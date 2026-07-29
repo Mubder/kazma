@@ -290,7 +290,7 @@ def get_app_installation_token() -> str | None:
         if token:
             # Cache for 50 minutes (tokens are valid for 1 hour).
             _app_token_cache["token"] = token
-            _app_token_cache["expires"] = now + 3000
+            _app_token_cache["expires"] = time.time() + 3000
             logger.info("[git_identity] Minted GitHub App installation token for App ID %s", app_id)
             return token
     except ImportError:
