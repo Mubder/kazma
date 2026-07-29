@@ -102,7 +102,7 @@ class TestExtractInterruptInfo:
                 "type": "hitl_approval",
                 "tool": "file_write",
                 "args": {"path": "/tmp/test.txt", "content": "hello"},
-                "message": "Agent wants to run: file_write(...)",
+                "message": "Agent wants to run: file_write(path=/tmp/test.txt, content=<5 chars>)",
             })
         ])
         result = _extract_interrupt_info(task)

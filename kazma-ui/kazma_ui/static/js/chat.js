@@ -1627,7 +1627,7 @@
         (tools.length <= 1
           ? '<p><strong>Args:</strong> <code>' + escapeHtml(truncateStr(JSON.stringify(data.args || {}), 300)) + '</code></p>'
           : toolsHtml) +
-        '<p class="hitl-message">' + escapeHtml(data.message || '') + '</p>' +
+        '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
           '<strong>YOLO</strong> skips all danger tools (TTL). Or type <code>/yolo</code> anytime.' +

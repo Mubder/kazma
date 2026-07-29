@@ -217,6 +217,101 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# HITL approval summary (compact, never dumps large blob args verbatim)
+# ══════════════════════════════════════════════════════════════════════════
+
+# Keys that typically carry large file/document BODIES. Showing these in the
+# approval card is what produced the giant "file_write({...whole README...})"
+# prompts. We summarise them as a length hint instead. Note: command/query/sql
+# are intentionally NOT here — they are the exact content the user must see to
+# approve a shell/db tool, so they're shown (truncated) via the hint path.
+_HITL_BLOB_KEYS = frozenset(
+    {
+        "content", "code", "text", "source", "body", "data",
+        "patch", "diff", "payload", "image", "images", "base64",
+    }
+)
+
+# High-signal keys shown up-front (path/command/repo/branch/branch_name/etc.).
+_HITL_HINT_KEYS = (
+    "path", "file_path", "filename", "file", "directory", "dir",
+    "repo", "repository", "owner",
+    "branch", "branch_name", "head", "base",
+    "message", "commit_message",
+    "action", "subaction", "mode",
+    "url", "endpoint",
+    "name", "key",
+)
+
+
+def _summarize_args_for_hitl(args: Any, *, max_len: int = 240) -> str:
+    """Render tool arguments as a short, approval-card-friendly summary.
+
+    Large blob keys (``content``/``code``/``text``/…) are replaced by a
+    ``<{len} chars>`` placeholder so a ``file_write`` of an entire README
+    doesn't blow up the HITL card. High-signal keys (path/command/repo/…)
+    are shown first. Anything else is shown as ``key=value`` truncated to
+    ``max_len`` total.
+    """
+    if not args:
+        return ""
+    if not isinstance(args, dict):
+        # Non-dict args (e.g. a bare string): truncate in place.
+        s = str(args)
+        return s if len(s) <= max_len else s[: max_len - 1] + "…"
+
+    hints: list[str] = []
+    rest: list[str] = []
+    for k, v in args.items():
+        # Normalise values to a compact string form.
+        if isinstance(v, str):
+            val = v
+        else:
+            try:
+                val = json.dumps(v, default=str, ensure_ascii=False)
+            except Exception:
+                val = str(v)
+        # Mask blob fields entirely — only their length is useful in a prompt.
+        if k in _HITL_BLOB_KEYS:
+            val = f"<{len(val)} chars>" if val else "<empty>"
+        rest.append(f"{k}={val}")
+    # Promote high-signal keys to the front for at-a-glance readability.
+    promoted = [k for k in _HITL_HINT_KEYS if k in args]
+    promoted_set = set(promoted)
+    ordered = [f"{k}={_compact_value(k, args[k])}" for k in promoted]
+    ordered += [item for item in rest if not item.split("=", 1)[0] in promoted_set]
+    summary = ", ".join(ordered)
+    return summary if len(summary) <= max_len else summary[: max_len - 1] + "…"
+
+
+def _compact_value(key: str, value: Any) -> str:
+    """Compact a single hint value for the HITL summary (masks blob keys)."""
+    if key in _HITL_BLOB_KEYS:
+        if isinstance(value, str):
+            return f"<{len(value)} chars>" if value else "<empty>"
+        return "<blob>"
+    if isinstance(value, str):
+        return value if len(value) <= 80 else value[:79] + "…"
+    try:
+        s = json.dumps(value, default=str, ensure_ascii=False)
+    except Exception:
+        s = str(value)
+    return s if len(s) <= 80 else s[:79] + "…"
+
+
+def _format_hitl_message(tool: str, args: Any) -> str:
+    """Build the single-line ``Agent wants to run: <tool>(...)`` summary.
+
+    Kept compact (≈240 chars of args) so the approval card never shows the
+    full body of e.g. a ``file_write`` ``content`` blob.
+    """
+    summary = _summarize_args_for_hitl(args)
+    if summary:
+        return f"Agent wants to run: {tool}({summary})"
+    return f"Agent wants to run: {tool}()"
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Per-turn memory retrieval (RAG) helpers
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -864,7 +959,7 @@ async def tool_worker_node(
             ]
             if len(danger_tools) == 1:
                 tc0 = danger_tools[0]
-                message = f"Agent wants to run: {tc0['name']}({tc0.get('arguments') or {}})"
+                message = _format_hitl_message(tc0["name"], tc0.get("arguments") or {})
                 primary_tool = tc0["name"]
                 primary_args = tc0.get("arguments") or {}
             else:

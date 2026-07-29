@@ -332,7 +332,7 @@ class TestApprovalPrompt:
             "type": "hitl_approval",
             "tool": "shell_exec",
             "args": {"command": "rm -rf /tmp/test"},
-            "message": "Agent wants to run: shell_exec",
+            "message": "Agent wants to run: shell_exec(command=rm -rf /tmp/test)",
         }
         prompt = _build_approval_prompt(payload, "thread-123")
         assert "shell_exec" in prompt["text"]
@@ -446,7 +446,7 @@ class TestSseApprovalFrame:
                 "type": "hitl_approval",
                 "tool": "shell_exec",
                 "args": {"command": "rm -rf /tmp"},
-                "message": "Agent wants to run: shell_exec",
+                "message": "Agent wants to run: shell_exec(command=rm -rf /tmp)",
             })])],
         )
         graph = _MockGraph(snapshot)
