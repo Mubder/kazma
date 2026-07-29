@@ -369,6 +369,15 @@
         <div style="font-size:1.5rem;margin-bottom:8px;"><span class="ki" data-icon="lock" aria-hidden="true"></span></div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">Authenticate GitHub Connection</h4>
         <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">Connect Kazma to <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span> to view live pull requests, issues, commits, and workflow runs.</p>
+        
+        <!-- Surface API / App errors prominently on the unauthenticated card -->
+        <div x-show="ghError" x-cloak style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:left;word-break:break-word;display:flex;align-items:start;gap:8px;">
+          <span style="color:#ef4444;font-size:1rem;flex-shrink:0;"><span class="ki" data-icon="x-circle" aria-hidden="true"></span></span>
+          <div style="flex:1;">
+            <div style="font-weight:600;margin-bottom:2px;color:#ef4444;">GitHub Connection Error</div>
+            <div x-text="ghError" style="font-family:var(--font-mono);font-size:0.75rem;opacity:0.95;"></div>
+          </div>
+        </div>
         <div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;">
           <button class="btn btn-sm btn-primary" @click="showAppModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
             <span class="ki" data-icon="github" aria-hidden="true"></span> Configure GitHub App (Bot)

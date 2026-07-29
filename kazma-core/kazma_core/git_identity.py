@@ -195,6 +195,7 @@ def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
 
+    now = int(time.time())
     digits = "".join(c for c in str(app_id) if c.isdigit())
     if not digits:
         logger.warning("[git_identity] Cannot mint JWT: App ID contains no digits (%r)", app_id)
