@@ -307,6 +307,57 @@ after every supervisor iteration and persists it to
   need `graph.aupdate_state`. The resolver only handles read-only subcommands
   (`list`, `compare`, `clear`) which don't need graph access.
 
+### 13. Proxy Provider Addon (`kazma-core/kazma_core/proxy/`)
+
+An opt-in, pluggable scraping proxy so `read_url` / `crawl_site` / `web_search`
+route through a residential rotating proxy (anyip.io first). Bulletproofs
+scraping against IP blocks/rate limits. **Disabled by default** — non-users see
+zero change.
+
+- **`get_proxy_provider()` (`registry.py`) re-reads `proxy.provider` LIVE on
+  every fetch** (mirrors HITL's `get_hitl_config`). A Settings change takes
+  effect without a restart. Default is `NullProvider` (direct, no proxy). It
+  never raises — on any error it returns `NullProvider`, so scrapers stay working.
+- **`get_scraping_client()` (`client.py`) is the single injection point.** The
+  scraper builds its `httpx.AsyncClient` via this factory, not `httpx.AsyncClient`
+  directly. It injects `proxy=` when configured + rotates UA from
+  `USER_AGENT_POOL`. Adding a new fetch path = use this factory.
+- **Scraping-scoped ONLY.** The proxy is never applied to LLM API calls — those
+  use the separate `http_pool.py`. Never wire `get_scraping_client` into the LLM
+  provider path, or provider API keys would route through a third party.
+- **Adding a provider** (BrightData/Oxylabs) = one class under `proxy/` + one
+  line in `registry.py::_PROVIDERS` + one Settings dropdown option. The scraper
+  talks to the `ProxyProvider` interface, not to any provider directly. Don't
+  hard-code a provider into `read_url.py`.
+- **`proxy.password` auto-vault-encrypts** via the existing
+  `is_sensitive_config_key` rule.
+
+### 14. Swarm Autoscaler (`kazma-core/kazma_core/swarm/autoscaler.py`)
+
+Dynamic worker creation: when a task with `workers=["auto"]` has no matching
+registered worker, the autoscaler spawns one from `swarm_templates.json` so the
+swarm works with zero pre-registered workers.
+
+- **`engine.get_autoscaler()` (engine.py:163-187) is a lazy singleton.** It loads
+  `swarm_templates.json` once on first access. The dispatch fallback that calls
+  `maybe_scale()` is at `dispatch_inner.py:54-62` — it only fires on
+  `NoCapableWorkersError`, never when a named worker is requested or when routing
+  succeeds. Do not call `maybe_scale` from elsewhere.
+- **`swarm_templates.json` ships production templates** (coder/researcher/generalist)
+  with `model`/`provider` left EMPTY so best-model selection (`models/selection.py`)
+  fires at dispatch. Do not assume `swarm_registry.json` is the only worker source.
+- **`matches_task` uses word-boundary token matching** (not raw substring). When
+  adding expertise tags to a template, pick whole words — the tag `code` would
+  not match "barcode" (intentional). Templates are first-match-wins by file order
+  (specialist → general).
+- **Best-model-per-task** (`models/selection.py`): spawned workers classify their
+  prompt (`models/router.py::classify_prompt`) and pick the best available model
+  (user `models.defaults.<kind>` → heuristic → active). The selection never
+  mutates the active profile. Env-lock (`KAZMA_MODEL`) always wins.
+- **Handoff cycle guards (§4) still apply** to auto-spawned instances — they are
+  regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
+  `record_activity` refreshes the timer.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## Unreleased — Bulletproof scraping proxy addon (anyip.io) + dynamic swarm autoscaler (2026-07-30)
+
+- **Bulletproof scraping via pluggable proxy provider.** The scraper had zero
+  proxy infrastructure — every request exited from the server's IP directly,
+  making bulk scraping trivial to block.
+  - **New `kazma_core/proxy/` package:** `ProxyProvider` interface + `NullProvider`
+    (direct, default) + `AnyIpProvider` (residential/mobile rotation via
+    `portal.anyip.io:1080`, flag-decorated username). `get_scraping_client()`
+    factory is the single injection point — injects `proxy=` when configured,
+    rotates UA from a curated browser pool. Scraping-scoped only (never applied
+    to LLM API calls; separate from `http_pool.py`).
+  - **Resilience:** `read_url` now retries 429/403 with backoff from a different
+    residential IP; `crawl_site` and `web_search` route through the proxy too;
+    UA rotation defeats fingerprint-based blocking.
+  - **Opt-in addon:** default `provider: none` = zero change for existing users.
+    Configure in Settings → System → Proxy Provider (creds auto-vault-encrypt);
+    Test button shows the exit IP. Live config (no restart).
+  - **Pluggable:** adding future providers (BrightData/Oxylabs) = one class +
+    one registry line + one dropdown option.
+- **Dynamic swarm autoscaler — auto-spawn workers + best-model-per-task.** With
+  zero workers configured, a `/swarm` task previously failed with "No workers
+  registered." Now it auto-spawns the right worker from a template.
+  - **New `swarm_templates.json`** seed (coder/researcher/generalist). The
+    autoscaler (`swarm/autoscaler.py`) was fully wired but inert — it returned
+    `None` only because the templates file didn't exist.
+  - **Best model for task kind** (`models/selection.py`): classify the prompt
+    (coding/vision/reasoning/general) → pick best available model by id-heuristics
+    + user `models.defaults.<kind>` override. Env-lock aware; never mutates active.
+  - **Fixes:** `system_prompt` was dropped at spawn (workers had no Soul);
+    template matching used raw substring (tag `code` matched "barcode") → now
+    word-boundary token matching.
+  - **New Templates UI tab** in the Swarm panel (full CRUD via existing REST).
+  - **Template-driven, not LLM-per-task** — keyword tokens + id heuristics at ~0
+    cost; the dormant `ModelRouter` graph hook remains for a future LLM phase.
+  - **Docs:** `guide/swarm-orchestration.md` §14, `guide/web-research.md` (proxy).
+
 ## Unreleased — Stop "silent finalization on LLM failure" + vision routing (2026-07-30)
 
 Two intertwined bug fixes, both root-caused from server logs.

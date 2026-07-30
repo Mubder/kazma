@@ -25,7 +25,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
 | Dashboard | `/dashboard` | Observability + **Memory & Governance** (health board, L2 property graph explorer, backups) |
-| Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`) |
+| Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`), **Proxy Provider** (System tab) |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
 | Research | `/research` | Research results browser, archive/restore, side-by-side comparison, export to DOCX/PDF/Markdown |
@@ -67,6 +67,20 @@ Connect real mailboxes for the agent without env-only setup:
 | Microsoft 365 | **OAuth** (Graph browser or device code) · **IMAP** · **POP** |
 
 API: `/api/email/status`, OAuth start/callback, `POST /api/email/protocol/connect`. Full guide: [Email integration](../guide/email-integration).
+
+## Proxy Provider (Settings → System)
+
+Opt-in scraping-resilience addon. When enabled, web scraping (`read_url`,
+`crawl_site`, `web_search`) routes through a residential rotating proxy so it
+resists IP blocks/rate limits. Disabled by default — non-users see no change.
+
+- **Provider:** `None` (direct) or **anyIP.io** (residential/mobile rotation).
+- Fields: host/port/username/password (password vault-encrypted), network type,
+  optional country, sticky-session toggle.
+- **Test Connection** fetches `api.ipify.org` through the proxy and shows the exit IP.
+- Live config — a Settings change takes effect without a restart.
+
+API: `GET/PUT /api/settings/proxy`, `POST /api/settings/proxy/test`. Full guide: [Web research → Bulletproof scraping](../guide/web-research#bulletproof-scraping-proxy-provider-addon-ipua-rotation).
 
 ## Auth
 
