@@ -20,15 +20,19 @@ from kazma_core.agent.graph_builder import (
 
 
 def test_format_memories_renders_block():
-    """Memories render as a numbered '## Relevant context from memory' block."""
+    """Memories render as a bulleted '## Relevant context from memory' block,
+    wrapped in the untrusted prompt-fence so the model treats them as
+    observation data, not instructions."""
     mems = [
         {"content": "User prefers concise answers."},
         {"content": "Project uses Python 3.12."},
     ]
     block = _format_retrieved_memories(mems)
     assert "## Relevant context from memory" in block
-    assert "1. User prefers concise answers." in block
-    assert "2. Project uses Python 3.12." in block
+    assert "- User prefers concise answers." in block
+    assert "- Project uses Python 3.12." in block
+    # Wrapped in the untrusted-data fence (defense-in-depth vs injection).
+    assert "memory_rag" in block and "untrusted" in block
 
 
 def test_format_memories_empty_returns_empty():
@@ -36,12 +40,19 @@ def test_format_memories_empty_returns_empty():
 
 
 def test_format_memories_caps_long_entries():
-    """Each memory is capped to avoid blowing up the context window."""
+    """Each memory entry is capped (300 chars + ellipsis) so the context
+    window does not blow up. The cap is per-memory; the surrounding
+    prompt-fence wrapper adds fixed overhead unrelated to the cap."""
     long = "x" * 1000
     block = _format_retrieved_memories([{"content": long}])
-    # Should be truncated with ellipsis.
+    # Should be truncated with an ellipsis.
     assert "…" in block
-    assert len(block) < 400
+    # The single memory line ("- <300 x's>…") holds exactly 300 capped chars.
+    # (The fence wrapper contributes a few stray "x"s of its own, e.g. "text",
+    # so assert on the memory bullet line, not the whole block.)
+    mem_line = next(l for l in block.splitlines() if l.startswith("- "))
+    assert mem_line.count("x") == 300
+    assert mem_line.endswith("…")
 
 
 def test_format_memories_skips_empty_content():
