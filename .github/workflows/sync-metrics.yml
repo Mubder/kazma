@@ -31,6 +31,12 @@ permissions:
   contents: write
   pull-requests: read
 
+# Only one Sync Metrics run at a time — cancel any in-flight run when a new
+# push lands, so a burst of commits doesn't pile up queued runs.
+concurrency:
+  group: sync-metrics
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.11"
   WEBSITE_REPO: "Mubder/KazmaAI"
