@@ -1362,8 +1362,15 @@ class KazmaAppBuilder:
                     if asyncio.iscoroutine(maybe):
                         await maybe
                 logger.info("[app] Checkpointer closed")
-        except Exception as e:
-            logger.warning("[app] Error closing checkpointer: %s", e)
+        except BaseException as e:
+            # BaseException (not Exception): asyncio.CancelledError is raised here when
+            # uvicorn cancels the lifespan task mid-teardown (Ctrl+C during the Postgres
+            # pool close). It is a BaseException since Py3.8, so `except Exception` would
+            # miss it and leak a scary traceback. Best-effort teardown — log and continue.
+            if isinstance(e, asyncio.CancelledError):
+                logger.info("[app] Checkpointer close interrupted by shutdown cancellation (expected)")
+            else:
+                logger.warning("[app] Error closing checkpointer: %s", e)
 
         # 5) Close all cached ModelRegistry clients
         try:
@@ -1430,7 +1437,17 @@ class KazmaAppBuilder:
             try:
                 yield
             finally:
-                await builder._on_shutdown()
+                # Shield teardown from lifespan cancellation: on Ctrl+C uvicorn cancels
+                # this task, which would interrupt _on_shutdown mid-await (e.g. during the
+                # Postgres pool close) and leak an asyncio.CancelledError traceback. shield
+                # lets teardown finish; the except is a backstop if cancellation is already
+                # in flight when the awaited coroutine resumes.
+                try:
+                    await asyncio.shield(builder._on_shutdown())
+                except asyncio.CancelledError:
+                    logger.info("[app] Shutdown completed (task was cancelled during teardown)")
+                except BaseException as e:  # pragma: no cover - last-resort
+                    logger.warning("[app] Error during lifespan shutdown: %s", e)
 
         # Attach lifespan after app construction (Starlette/FastAPI)
         self.app.router.lifespan_context = lifespan
