@@ -14,8 +14,13 @@ which meant:
 
 This module wires up a proper two-handler setup:
 
-  - **RotatingFileHandler** → ``paths.log_file()`` (``<repo>/.kazma/kazma.log``)
-    — 10 MB × 5 files, UTF-8. The durable record every diagnostic needs.
+  - **TimedRotatingFileHandler** → ``paths.log_file()`` (``<repo>/.kazma/kazma.log``)
+    — daily rotation at local midnight with a rolling ``retention_days``-day
+    window (default 7). Self-cleaning by age: each midnight rotation renames
+    the current file to ``kazma.log.<yesterday>`` and auto-deletes anything
+    older than the window, so the log always holds the last N days with no
+    line lost. UTF-8. Retention is configurable via the Settings UI
+    (``logging.retention_days`` in ConfigStore) or ``KAZMA_LOG_RETENTION_DAYS``.
   - **StreamHandler** → stdout at INFO — preserves the current "logs in the
     terminal" behaviour during interactive development.
 
@@ -55,10 +60,18 @@ import logging
 import logging.config
 import os
 import sys
-from datetime import datetime, UTC
+from datetime import datetime, time, UTC
 from typing import Any
 
-__all__ = ["StructuredJSONFormatter", "setup_logging", "is_debug", "LOG_LEVELS", "NOISY_LIBS"]
+__all__ = [
+    "StructuredJSONFormatter",
+    "setup_logging",
+    "is_debug",
+    "LOG_LEVELS",
+    "NOISY_LIBS",
+    "resolve_retention_days",
+    "resolve_log_format",
+]
 
 # Valid level names accepted from KAZMA_LOG_LEVEL / --debug.
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -120,6 +133,73 @@ def _resolve_level(explicit: str | None) -> str:
     return "INFO"
 
 
+def _resolve_level_with_config(explicit: str | None) -> str:
+    """Resolve level with precedence: explicit arg → ConfigStore → env → INFO.
+
+    Mirrors the overlay pattern in memory/config.py: ConfigStore (set by the
+    Settings UI) overrides the env default but not an explicit call arg.
+    """
+    if explicit:
+        return _resolve_level(explicit)
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs_val = get_config_store().get("logging.level")
+        if isinstance(cs_val, str) and cs_val.strip().upper() in LOG_LEVELS:
+            return cs_val.strip().upper()
+    except Exception:
+        pass
+    return _resolve_level(None)
+
+
+def resolve_retention_days() -> int:
+    """Log retention in days. Precedence: ConfigStore → env → default 7.
+
+    Controls the ``backupCount`` of the daily-rotating file handler — the
+    number of past days kept before the oldest is auto-deleted.
+    """
+    for source in (
+        lambda: _store_get("logging.retention_days"),
+        lambda: os.environ.get("KAZMA_LOG_RETENTION_DAYS"),
+    ):
+        try:
+            val = source()
+        except Exception:
+            val = None
+        if val is None:
+            continue
+        try:
+            n = int(val)
+        except (TypeError, ValueError):
+            continue
+        if n >= 1:
+            return n
+    return 7
+
+
+def resolve_log_format(explicit: str | None = None) -> str:
+    """Log output format. Precedence: explicit → ConfigStore → env → text."""
+    if explicit:
+        return "json" if explicit.strip().lower() == "json" else "text"
+    try:
+        cs_val = _store_get("logging.format")
+        if isinstance(cs_val, str) and cs_val.strip().lower() == "json":
+            return "json"
+    except Exception:
+        pass
+    return "json" if (os.environ.get("KAZMA_LOG_FORMAT") or "").strip().lower() == "json" else "text"
+
+
+def _store_get(key: str) -> Any:
+    """Read a key from ConfigStore, returning None if unavailable/unset."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        return get_config_store().get(key)
+    except Exception:
+        return None
+
+
 # Process-wide flag: once setup_logging() has configured handlers, subsequent
 # calls become no-ops. Prevents the double "Logging initialised" log line that
 # happens because both ``kazma serve`` CLI AND ``app.py:_setup_services`` call
@@ -166,7 +246,7 @@ def setup_logging(level: str | None = None) -> str:
     except Exception:
         pass  # Logging must never fail boot.
 
-    effective = _resolve_level(level)
+    effective = _resolve_level_with_config(level)
     log_path = log_file()
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,8 +261,9 @@ def setup_logging(level: str | None = None) -> str:
         # Cap at WARNING; never let NOISY_LIBS go below WARNING even in DEBUG.
         loggers_config[name] = {"level": "WARNING", "propagate": True}
 
-    use_json = (os.environ.get("KAZMA_LOG_FORMAT") or "").strip().lower() == "json"
+    use_json = resolve_log_format(None) == "json"
     console_formatter = "json" if use_json else "console"
+    retention_days = resolve_retention_days()
 
     config: dict[str, Any] = {
         "version": 1,
@@ -202,13 +283,21 @@ def setup_logging(level: str | None = None) -> str:
         },
         "handlers": {
             "file": {
-                "class": "logging.handlers.RotatingFileHandler",
+                # Daily rotation at local midnight with a rolling retention window.
+                # Rotates once per day → kazma.log (today) + kazma.log.<yesterday>,
+                # … backupCount auto-deletes the oldest daily file on each rotation,
+                # so the log always holds the last `retention_days` days with no
+                # line lost within the window. Self-cleaning by age.
+                "()": "logging.handlers.TimedRotatingFileHandler",
                 "filename": str(log_path),
-                "maxBytes": 10 * 1024 * 1024,  # 10 MB
-                "backupCount": 5,
+                "when": "midnight",
+                "interval": 1,
+                "backupCount": retention_days,
                 "encoding": "utf-8",
                 "formatter": "standard",
                 "level": effective,
+                "atTime": time(0, 0, 0),
+                "utc": False,
             },
             "console": {
                 "class": "logging.StreamHandler",
@@ -238,7 +327,8 @@ def setup_logging(level: str | None = None) -> str:
         ul.propagate = True  # let records flow to root
 
     logging.getLogger(__name__).info(
-        "Logging initialised: level=%s file=%s", effective, log_path,
+        "Logging initialised: level=%s file=%s rotation=daily retention=%dd",
+        effective, log_path, retention_days,
     )
     # Mark configured AFTER the success log so subsequent calls skip — this
     # also catches the line itself being logged only once.
