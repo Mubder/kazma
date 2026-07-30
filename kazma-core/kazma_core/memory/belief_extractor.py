@@ -297,6 +297,36 @@ async def extract_and_apply_beliefs(
     # Fence + mutate each belief
     from kazma_core.memory.entity_resolution import resolve_entity, slug
 
+    # Lazily embed a text via the shared embedder (returns float list or None).
+    def _embed(text: str) -> bytes | None:
+        try:
+            from kazma_core.swarm.memory.embedder import encode_text_to_blob
+
+            return encode_text_to_blob(text)
+        except Exception:
+            return None
+
+    # Gather candidate entity embeddings for Tier-2 vector matching.
+    # We embed existing entity names on the fly (cheap for small sets; the
+    # macro-sleep job could persist these to a column later for scale).
+    def _gather_candidates(tenant: str) -> tuple[dict[str, bytes], dict[str, str]]:
+        try:
+            rows = primary_conn.execute(
+                "SELECT id, name FROM entities WHERE tenant_id=?", (tenant,)
+            ).fetchall()
+        except Exception:
+            return {}, {}
+        vecs: dict[str, bytes] = {}
+        names: dict[str, str] = {}
+        for r in rows:
+            names[r["id"]] = r["name"]
+            v = _embed(r["name"])
+            if v:
+                vecs[r["id"]] = v
+        return vecs, names
+
+    candidate_vecs, candidate_names = _gather_candidates(tenant_id)
+
     for b in raw_beliefs:
         clean = _sanitize_belief(b)
         if clean is None:
@@ -304,17 +334,22 @@ async def extract_and_apply_beliefs(
             continue
         # Resolve the object entity through the 3-tier cascade so it gets
         # canonicalized + registered (subject is usually "user", left as-is).
-        # This populates the entities table and surfaces merge candidates.
+        # Tier-2 vector matching is now ACTIVE: the object text is embedded
+        # and compared against existing entity name embeddings.
         try:
+            obj_vec = _embed(clean["object"]) if clean["object"] and clean["object"] != "user" else None
             if clean["subject"] and clean["subject"] != "user":
+                sub_vec = _embed(clean["subject"].replace("_", " "))
                 resolve_entity(
                     primary_conn, clean["subject"].replace("_", " "),
                     entity_type="concept", tenant_id=tenant_id, cfg=cfg,
+                    candidate_vectors=candidate_vecs, query_vector=sub_vec,
                 )
             if clean["object"] and clean["object"] != "user":
                 resolve_entity(
                     primary_conn, clean["object"],
                     entity_type="concept", tenant_id=tenant_id, cfg=cfg,
+                    candidate_vectors=candidate_vecs, query_vector=obj_vec,
                 )
         except Exception:
             logger.debug("[belief_extract] entity resolution skipped", exc_info=True)

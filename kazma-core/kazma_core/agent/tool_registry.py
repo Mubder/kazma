@@ -822,6 +822,59 @@ class LocalToolRegistry:
                 meta = json.loads(metadata) if isinstance(metadata, str) else metadata
             except json.JSONDecodeError:
                 meta = {"raw": metadata}
+            # ── V2 native write path ──────────────────────────────────
+            # When the V2 stack is active, store natively as a V2 episode
+            # (raw text) + a user-explicit belief (importance 5, trust 1.0
+            # — the user explicitly asked to remember it, so it's the
+            # highest-confidence source). The legacy dual-write bridge also
+            # catches this via the adapter path below, so old stores stay
+            # populated during the transition.
+            try:
+                from kazma_core.memory.config import memory_v2_enabled
+
+                if memory_v2_enabled():
+                    import sqlite3
+
+                    from kazma_core.memory.belief_mutation import mutate_belief
+                    from kazma_core.memory.dual_write import mirror_episode
+                    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+                    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+                    primary = sqlite3.connect(
+                        primary_memory_db(), check_same_thread=False, isolation_level=None
+                    )
+                    primary.row_factory = sqlite3.Row
+                    ops = sqlite3.connect(
+                        memory_ops_db(), check_same_thread=False, isolation_level=None
+                    )
+                    try:
+                        ensure_primary_schema(primary)
+                        ensure_ops_schema(ops)
+                        # Episode (raw text snapshot)
+                        eid = mirror_episode(
+                            session_id=str(meta.get("session_id", "memory_store")),
+                            turn_number=int(meta.get("turn", 0)),
+                            user_text=text,
+                            source="memory_store_tool",
+                        )
+                        # User-explicit belief (highest trust/importance)
+                        action = mutate_belief(
+                            primary, "user", "noted", text[:200],
+                            ops_conn=ops,
+                            predicate_type="set",  # noted facts are additive
+                            confidence=1.0, importance=5,
+                            extraction_method="user_explicit",
+                            cfg=None,
+                        )
+                        bid = action.get("belief_id", "")
+                        if eid or bid:
+                            return f"Stored memory (v2 episode={eid or 'n/a'}, belief={bid or 'n/a'})"
+                    finally:
+                        primary.close()
+                        ops.close()
+            except Exception:
+                pass  # fall through to legacy adapter
+            # ── Legacy 4-layer adapter path (fail-closed) ─────────────
             # Route through the unified adapter so stored memories are visible
             # to per-turn RAG retrieval. Fail-closed: never claim success
             # without a durable layer write. Falls back to VectorMemory.
