@@ -36,16 +36,20 @@ __all__ = [
     "backups_dir",
     "checkpoints_db",
     "data_dir",
+    "exports_dir",
     "fts5_memory_path",
     "get_project_root",
     "hub_registry_db",
     "installed_extras_path",
     "installed_skills_dir",
+    "knowledge_graph_db",
     "legacy_user_home",
     "log_file",
+    "memory_ops_db",
     "merge_legacy_hub_if_empty",
     "migrate_legacy_user_home",
     "preferences_path",
+    "primary_memory_db",
     "rbac_db",
     "settings_db",
     "snapshots_db",
@@ -54,6 +58,7 @@ __all__ = [
     "tui_themes_dir",
     "user_home",
     "vault_db_path",
+    "vector_db",
     "vector_memory_path",
 ]
 
@@ -122,12 +127,77 @@ def fts5_memory_path() -> str:
     return str(data_dir() / "memory.db")
 
 
+def primary_memory_db() -> str:
+    """Memory V2 primary cognitive-state database path.
+
+    Holds the bi-temporal ``beliefs`` graph, tiered ``episodes``,
+    ``entities``/``entity_merges``, ``procedural_dags``, and the cold
+    ``beliefs_archive``. Isolated from :func:`memory_ops_db` so background
+    consolidation writes never WAL-contend with chat reads.
+    """
+    env = os.environ.get("KAZMA_MEMORY_STATE_DB")
+    if env:
+        return str(Path(env).expanduser().resolve())
+    return str(data_dir() / "memory_state.db")
+
+
+def memory_ops_db() -> str:
+    """Memory V2 operational database path.
+
+    Holds the durable ``memory_task_queue`` and the immutable
+    ``memory_audit_log``. Split from :func:`primary_memory_db` to keep
+    queue/audit writes off the hot read path.
+    """
+    env = os.environ.get("KAZMA_MEMORY_OPS_DB")
+    if env:
+        return str(Path(env).expanduser().resolve())
+    return str(data_dir() / "memory_ops.db")
+
+
+def knowledge_graph_db() -> str:
+    """L2 property-graph database path.
+
+    Previously a hard-coded ``kazma-data/knowledge_graph.db`` string in
+    ``swarm/memory/graph.py``; centralized here for portability.
+    """
+    env = os.environ.get("KAZMA_KNOWLEDGE_GRAPH_DB")
+    if env:
+        return str(Path(env).expanduser().resolve())
+    return str(data_dir() / "knowledge_graph.db")
+
+
+def vector_db() -> str:
+    """L4 sqlite-vec database path.
+
+    Previously a hard-coded ``kazma-data/vector.db`` string in
+    ``swarm/memory/sqlite_vec.py``; centralized here for portability.
+    """
+    env = os.environ.get("KAZMA_VECTOR_DB")
+    if env:
+        return str(Path(env).expanduser().resolve())
+    return str(data_dir() / "vector.db")
+
+
 def backups_dir() -> Path:
     """Backups directory."""
     env = os.environ.get("KAZMA_BACKUPS_DIR")
     if env:
         return Path(env).expanduser().resolve()
     d = data_dir() / "backups"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def exports_dir() -> Path:
+    """Plain-text exports directory (JSON-L, GraphML).
+
+    Long-term-survival dumps of the cognitive state live here so the
+    knowledge base survives even if the binary SQLite format changes.
+    """
+    env = os.environ.get("KAZMA_EXPORTS_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    d = data_dir() / "exports"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -639,8 +639,26 @@ def schedule_consolidation(
         logger.debug("[consolidator] could not schedule task", exc_info=True)
 
 
-def schedule_post_turn_memory(messages: list[dict[str, Any]]) -> None:
-    """Run auto_store then consolidator in one background task (dedup-aware)."""
+def schedule_post_turn_memory(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+    turn: int | None = None,
+) -> None:
+    """Run auto_store then consolidator in one background task (dedup-aware).
+
+    Also mirrors the turn into the V2 schema via the dual-write bridge
+    so the cognitive engine stays warm during the transition. Provenance
+    (``session_id`` / ``turn``) is nullable — populated when available
+    (resolution #3) so V2 beliefs/episodes carry source traces.
+
+    Args:
+        messages: The finalized conversation messages for this turn.
+        session_id: The active conversation/session identifier (e.g. the
+            LangGraph thread_id). None when unavailable — the V2 mirror
+            writes NULL provenance, never fails.
+        turn: The turn number within the session. None when unavailable.
+    """
     try:
         import asyncio
 
@@ -667,8 +685,46 @@ def schedule_post_turn_memory(messages: list[dict[str, Any]]) -> None:
                 )
         except Exception:
             logger.warning("[post_turn] consolidator failed", exc_info=True)
+        # ── V2 dual-write mirror (best-effort, never blocks) ──────────
+        # Captures the turn as a V2 episode + any extracted facts as
+        # beliefs, so the cognitive schema stays populated. Provenance
+        # flows through for source tracing.
+        try:
+            _mirror_turn_to_v2(messages, session_id=session_id, turn=turn)
+        except Exception:
+            logger.debug("[post_turn] V2 mirror failed", exc_info=True)
 
     try:
         loop.create_task(_run())
     except Exception:
         logger.debug("[post_turn] could not schedule", exc_info=True)
+
+
+def _mirror_turn_to_v2(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str | None,
+    turn: int | None,
+) -> None:
+    """Best-effort mirror of the just-finished turn into the V2 schema.
+
+    Extracts the last user/assistant pair and writes a V2 episode. Belief
+    extraction proper happens in the Phase 3 consolidator; here we only
+    capture the raw turn so recall can find it once ``use_new_stack`` flips.
+    """
+    from kazma_core.memory.auto_store import extract_turn_texts
+    from kazma_core.memory.dual_write import mirror_episode
+
+    user_text, assistant_text = extract_turn_texts(messages)
+    if not (user_text or assistant_text):
+        return
+    # Skip slash commands and trivial turns
+    u = (user_text or "").strip()
+    if not u or u.startswith("/"):
+        return
+    mirror_episode(
+        session_id=session_id or "unknown",
+        turn_number=int(turn) if turn is not None else 0,
+        user_text=user_text,
+        assistant_text=assistant_text,
+    )

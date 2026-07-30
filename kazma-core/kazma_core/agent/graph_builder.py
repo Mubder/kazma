@@ -527,23 +527,61 @@ async def supervisor_node(
         pass
 
     if _per_turn_on and iteration == 0 and last_user_content:
+        # ── V2 cognitive recall path (bi-temporal beliefs + PPR) ──────
+        # Active when memory.v2.use_new_stack is True. Falls back to the
+        # legacy 4-layer RRF adapter when False (the dual-write transition
+        # default). The V2 path never blocks: any failure degrades to the
+        # legacy path or to no injection.
+        _use_v2 = False
         try:
-            _top_k = _rag_top_k()
-            memories = await authority.compactor.retrieve_memories(
-                last_user_content, limit=_top_k,
-            )
-            if memories:
-                mem_block = _format_retrieved_memories(memories)
-                if mem_block:
-                    # Insert after the base system prompt (position 0) so
-                    # the memory block sits with the persona/env context,
-                    # not in the user/assistant conversation thread.
-                    messages.insert(1, {"role": "system", "content": mem_block})
-                    logger.info(
-                        "[Supervisor] Retrieved %d memories for turn", len(memories),
-                    )
+            from kazma_core.memory.config import memory_v2_enabled
+
+            _use_v2 = memory_v2_enabled()
         except Exception:
-            logger.warning("[Supervisor] per-turn memory retrieval failed — recall degraded", exc_info=True)
+            pass
+
+        if _use_v2:
+            try:
+                _top_k = _rag_top_k()
+                from kazma_core.memory.recall import format_recall_block, recall
+
+                result = recall(
+                    last_user_content, limit=_top_k,
+                )
+                if not result.empty:
+                    mem_block = format_recall_block(result)
+                    if mem_block:
+                        messages.insert(1, {"role": "system", "content": mem_block})
+                        logger.info(
+                            "[Supervisor] V2 recall: %d beliefs, %d episodes for turn",
+                            len(result.beliefs), len(result.episodes),
+                        )
+            except Exception:
+                logger.warning(
+                    "[Supervisor] V2 recall failed — degrading to legacy path",
+                    exc_info=True,
+                )
+                # Fall through to legacy retrieval below
+                _use_v2 = False
+
+        if not _use_v2:
+            try:
+                _top_k = _rag_top_k()
+                memories = await authority.compactor.retrieve_memories(
+                    last_user_content, limit=_top_k,
+                )
+                if memories:
+                    mem_block = _format_retrieved_memories(memories)
+                    if mem_block:
+                        # Insert after the base system prompt (position 0) so
+                        # the memory block sits with the persona/env context,
+                        # not in the user/assistant conversation thread.
+                        messages.insert(1, {"role": "system", "content": mem_block})
+                        logger.info(
+                            "[Supervisor] Retrieved %d memories for turn", len(memories),
+                        )
+            except Exception:
+                logger.warning("[Supervisor] per-turn memory retrieval failed — recall degraded", exc_info=True)
 
     # Per-turn language lock (again at graph level so Telegram/Discord paths
     # get it even when SSE already injected one — duplicate is harmless).
@@ -1345,10 +1383,16 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
 
     # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
     # in one task so consolidator can dedup against auto_store texts.
+    # Provenance (session_id/turn) flows through to the V2 dual-write mirror
+    # so beliefs/episodes carry source traces (resolution #3).
     try:
         from kazma_core.memory.consolidator import schedule_post_turn_memory
 
-        schedule_post_turn_memory(messages)
+        schedule_post_turn_memory(
+            messages,
+            session_id=state.get("thread_id"),
+            turn=iteration,
+        )
     except Exception:
         logger.debug("[Respond] post_turn memory schedule failed", exc_info=True)
 

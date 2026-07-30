@@ -22,6 +22,7 @@ __all__ = [
     "memory_enabled",
     "memory_per_turn_enabled",
     "memory_retrieval_top_k",
+    "memory_v2_enabled",
     "read_memory_cfg",
     "set_memory_flag",
 ]
@@ -44,6 +45,47 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "skip_adapter_if_auto_stored": True,
         "skip_llm_if_auto_stored": True,
         "skip_llm_in_demo": True,
+    },
+    # ── Memory V2 cognitive engine (bi-temporal beliefs + tiers + PPR) ──
+    # All keys flow through ConfigStore so the TUI/Settings panel can
+    # surface and toggle them (AGENTS.md §8 single-source-of-truth rule).
+    # use_new_stack=False during the dual-write transition; flip to True
+    # once the V2 recall path is validated (rollback flag).
+    "v2": {
+        "use_new_stack": False,
+        # Source trust weights (W_trust in V_retention formula §4.1)
+        "trust_weight_user": 1.0,
+        "trust_weight_tool": 0.85,
+        "trust_weight_llm": 0.60,
+        # Retention-score blend weights (ω1, ω2 in §4.1)
+        "retention_importance_weight": 0.60,
+        "retention_access_weight": 0.40,
+        # Decay constants (λ_type in §4.1) per derived memory_class.
+        # memory_class is DERIVED (resolution #4): no schema column.
+        "decay_lambda_identity": 0.0001,   # functional + importance≥4
+        "decay_lambda_general": 0.01,      # default
+        "decay_lambda_ephemeral": 0.10,    # importance≤2
+        # memory_class derivation thresholds (resolution #4)
+        "identity_min_importance": 4,
+        "ephemeral_max_importance": 2,
+        # Tier TTLs (days)
+        "recall_ttl_days": 90,
+        "episodic_ttl_days": 30,
+        "recall_demote_idle_days": 30,     # no access → demote recall→episodic
+        "archive_after_days": 180,         # superseded belief → beliefs_archive
+        # Tier promotion/demotion rules
+        "promote_to_recall_min_importance": 3,
+        "promote_to_recall_min_access": 2,
+        # Procedural DAG confidence (Laplace §4.2)
+        "procedural_quarantine_threshold": 0.40,
+        "procedural_quarantine_min_trials": 3,
+        # Local Ego-Graph PPR (§5.1)
+        "ppr_alpha": 0.15,
+        "ppr_max_iter": 15,
+        "ppr_max_nodes": 200,
+        "ppr_seed_k": 10,
+        # Entity resolution (§5.2 micro-consolidation)
+        "entity_vector_merge_threshold": 0.12,
     },
 }
 
@@ -101,6 +143,41 @@ def _read_store_overlay() -> dict[str, Any]:
                 cons[sub] = val
         if cons:
             out["consolidation"] = cons
+        # Nested v2 flags — every tunable is ConfigStore-readable so the
+        # TUI/Settings panel can surface them (AGENTS.md §8). The critical
+        # one is `use_new_stack` (the dual-write → V2 recall rollback flag).
+        v2: dict[str, Any] = {}
+        for sub in (
+            "use_new_stack",
+            "trust_weight_user",
+            "trust_weight_tool",
+            "trust_weight_llm",
+            "retention_importance_weight",
+            "retention_access_weight",
+            "decay_lambda_identity",
+            "decay_lambda_general",
+            "decay_lambda_ephemeral",
+            "identity_min_importance",
+            "ephemeral_max_importance",
+            "recall_ttl_days",
+            "episodic_ttl_days",
+            "recall_demote_idle_days",
+            "archive_after_days",
+            "promote_to_recall_min_importance",
+            "promote_to_recall_min_access",
+            "procedural_quarantine_threshold",
+            "procedural_quarantine_min_trials",
+            "ppr_alpha",
+            "ppr_max_iter",
+            "ppr_max_nodes",
+            "ppr_seed_k",
+            "entity_vector_merge_threshold",
+        ):
+            val = store.get(f"memory.v2.{sub}")
+            if val is not None:
+                v2[sub] = val
+        if v2:
+            out["v2"] = v2
     except Exception:
         logger.debug("[memory.config] ConfigStore overlay failed", exc_info=True)
     return out
@@ -146,7 +223,82 @@ def _coerce(cfg: dict[str, Any]) -> dict[str, Any]:
     if mode not in ("durable", "turns", "both"):
         mode = "both"
     out["auto_store_mode"] = mode
+    _coerce_v2(out)
     return out
+
+
+# ── V2 tunable coercion ───────────────────────────────────────────────────
+
+# Booleans (use_new_stack is the dual-write → V2 recall rollback flag)
+_V2_BOOL_KEYS = ("use_new_stack",)
+# Floats (trust weights, retention blend, decay λ, thresholds)
+_V2_FLOAT_KEYS = (
+    "trust_weight_user",
+    "trust_weight_tool",
+    "trust_weight_llm",
+    "retention_importance_weight",
+    "retention_access_weight",
+    "decay_lambda_identity",
+    "decay_lambda_general",
+    "decay_lambda_ephemeral",
+    "procedural_quarantine_threshold",
+    "entity_vector_merge_threshold",
+    "ppr_alpha",
+)
+# Integers (TTLs, days, counts, iteration caps)
+_V2_INT_KEYS = (
+    "identity_min_importance",
+    "ephemeral_max_importance",
+    "recall_ttl_days",
+    "episodic_ttl_days",
+    "recall_demote_idle_days",
+    "archive_after_days",
+    "promote_to_recall_min_importance",
+    "promote_to_recall_min_access",
+    "procedural_quarantine_min_trials",
+    "ppr_max_iter",
+    "ppr_max_nodes",
+    "ppr_seed_k",
+)
+
+
+def _to_bool(v: Any) -> bool:
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v)
+
+
+def _to_float(v: Any, default: float) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(v: Any, default: int) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_v2(out: dict[str, Any]) -> None:
+    """Type-normalize the nested ``v2`` config block in place."""
+    v2 = out.get("v2")
+    if not isinstance(v2, dict):
+        return
+    c2 = dict(v2)
+    defaults = DEFAULT_MEMORY_CFG.get("v2") or {}
+    for bk in _V2_BOOL_KEYS:
+        if bk in c2:
+            c2[bk] = _to_bool(c2[bk])
+    for fk in _V2_FLOAT_KEYS:
+        if fk in c2:
+            c2[fk] = _to_float(c2[fk], _to_float(defaults.get(fk), 0.0))
+    for ik in _V2_INT_KEYS:
+        if ik in c2:
+            c2[ik] = _to_int(c2[ik], _to_int(defaults.get(ik), 0))
+    out["v2"] = c2
 
 
 def read_memory_cfg() -> dict[str, Any]:
@@ -154,20 +306,32 @@ def read_memory_cfg() -> dict[str, Any]:
     merged = dict(DEFAULT_MEMORY_CFG)
     # Deep-copy nested consolidation defaults
     merged["consolidation"] = dict(DEFAULT_MEMORY_CFG.get("consolidation") or {})
+    # Deep-copy nested v2 defaults
+    merged["v2"] = dict(DEFAULT_MEMORY_CFG.get("v2") or {})
     yaml_block = _read_yaml_memory()
     yaml_cons = yaml_block.pop("consolidation", None) if isinstance(yaml_block, dict) else None
+    yaml_v2 = yaml_block.pop("v2", None) if isinstance(yaml_block, dict) else None
     merged.update(yaml_block)
     if isinstance(yaml_cons, dict):
         base = dict(merged.get("consolidation") or {})
         base.update(yaml_cons)
         merged["consolidation"] = base
+    if isinstance(yaml_v2, dict):
+        base = dict(merged.get("v2") or {})
+        base.update(yaml_v2)
+        merged["v2"] = base
     store_overlay = _read_store_overlay()
     store_cons = store_overlay.pop("consolidation", None) if isinstance(store_overlay, dict) else None
+    store_v2 = store_overlay.pop("v2", None) if isinstance(store_overlay, dict) else None
     merged.update(store_overlay)
     if isinstance(store_cons, dict):
         base = dict(merged.get("consolidation") or {})
         base.update(store_cons)
         merged["consolidation"] = base
+    if isinstance(store_v2, dict):
+        base = dict(merged.get("v2") or {})
+        base.update(store_v2)
+        merged["v2"] = base
     return _coerce(merged)
 
 
@@ -204,6 +368,22 @@ def memory_retrieval_top_k(cfg: dict[str, Any] | None = None) -> int:
         return max(1, int(c.get("retrieval_top_k", 5)))
     except (TypeError, ValueError):
         return 5
+
+
+def memory_v2_enabled(cfg: dict[str, Any] | None = None) -> bool:
+    """True when the V2 cognitive memory stack is the active read path.
+
+    Requires both ``memory.enabled`` (master switch) AND
+    ``memory.v2.use_new_stack`` (the dual-write → V2 recall cutover flag).
+    During the transition ``use_new_stack`` stays False so the legacy
+    4-layer RRF adapter serves reads; the V2 schema still receives
+    dual-writes so no data is lost.
+    """
+    c = cfg if cfg is not None else read_memory_cfg()
+    if not memory_enabled(c):
+        return False
+    v2 = c.get("v2") or {}
+    return bool(v2.get("use_new_stack", False))
 
 
 def set_memory_flag(key: str, value: Any, *, category: str = "memory") -> None:

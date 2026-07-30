@@ -1,0 +1,330 @@
+"""Dual-write bridge: mirror legacy memory writes into the V2 schema.
+
+During the transition from the 4-layer RRF stack to the V2 cognitive
+engine, every legacy write is **also** mirrored into the new
+``memory_state.db`` so no data is lost and the V2 schema stays warm.
+The mirror is **best-effort and non-blocking**: a V2 write failure is
+logged but never propagates to the caller, so the legacy path is
+unaffected.
+
+Read-path control is separate: :func:`kazma_core.memory.config.memory_v2_enabled`
+(the ``memory.v2.use_new_stack`` flag) decides whether ``recall()`` or
+the legacy adapter serves reads. Dual-write runs regardless, so flipping
+the flag later is instant.
+
+Three legacy write paths are mirrored:
+
+1. **Fact text** (``UnifiedMemoryAdapter.store`` / ``index``) → ``episodes``
+   as a turn snapshot with the raw text.
+2. **Triples** (``KnowledgeGraph.upsert_triple``) → ``beliefs`` with
+   ``predicate_type`` inferred heuristically (functional predicates are a
+   small known set; everything else is treated as ``set``-valued so
+   nothing is accidentally superseded during the mirror).
+3. **Turn snapshots** (``auto_store``) → ``episodes`` with the full
+   user/assistant text.
+
+Provenance (``source_session`` / ``source_turn``) is nullable per
+resolution #3 — populated when available, NULL otherwise.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DualWriteMirror",
+    "get_mirror",
+    "mirror_belief",
+    "mirror_episode",
+    "reset_mirror",
+]
+
+# Predicates that are single-valued (functional) by nature. Mirrored
+# triples using one of these get predicate_type='functional'; everything
+# else is 'set' (multi-valued) to avoid accidental supersession during
+# the mirror — the V2 consolidator will re-classify when it runs.
+_FUNCTIONAL_PREDICATES = frozenset(
+    {
+        "name_is",
+        "lives_in",
+        "works_at",
+        "active_project",
+        "favorite_ide",
+        "favorite_editor",
+        "favorite_language",
+        "located_in",
+        "current_role",
+        "preferred_name",
+    }
+)
+
+
+def _slug(text: str) -> str:
+    """Canonicalize an entity label into a stable slug."""
+    import re
+
+    raw = (text or "").strip().lower()
+    s = re.sub(r"[^a-z0-9_]+", "_", raw)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s[:80] or "entity"
+
+
+def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) -> str:
+    """Stable belief PK = sha256(tenant + subject + predicate + valid_from)."""
+    h = hashlib.sha256(
+        f"{tenant_id}|{subject}|{predicate}|{valid_from}".encode("utf-8")
+    ).hexdigest()
+    return f"b_{h[:24]}"
+
+
+def _episode_id(session_id: str, turn: int, content: str) -> str:
+    """Stable episode PK."""
+    h = hashlib.sha256(
+        f"{session_id}|{turn}|{content[:512]}".encode("utf-8")
+    ).hexdigest()
+    return f"e_{h[:24]}"
+
+
+def _infer_predicate_type(predicate: str) -> str:
+    """Heuristic: functional predicates are single-valued; else set-valued.
+
+    Conservative on purpose — defaults to 'set' so the mirror never
+    supersedes an existing belief during the transition. The V2
+    consolidator (Phase 3) re-classifies with LLM extraction.
+    """
+    p = (predicate or "").strip().lower()
+    if p in _FUNCTIONAL_PREDICATES:
+        return "functional"
+    return "set"
+
+
+class DualWriteMirror:
+    """Best-effort mirror of legacy writes into the V2 schema.
+
+    Holds two lazy SQLite connections (primary + ops) protected by a
+    lock. All public methods swallow exceptions and log — the legacy
+    write path must never be blocked by a V2 mirror failure.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._primary: sqlite3.Connection | None = None
+        self._ops: sqlite3.Connection | None = None
+        self._ready = False
+
+    def _ensure(self) -> bool:
+        """Lazily open + initialize both DBs. Returns False if unavailable."""
+        if self._ready:
+            return True
+        try:
+            from kazma_core.memory.schema_v2 import (
+                ensure_ops_schema,
+                ensure_primary_schema,
+            )
+            from kazma_core.paths import memory_ops_db, primary_memory_db
+
+            self._primary = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            self._primary.row_factory = sqlite3.Row
+            ensure_primary_schema(self._primary)
+            self._ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+            self._ops.row_factory = sqlite3.Row
+            ensure_ops_schema(self._ops)
+            self._ready = True
+            logger.info("[dual_write] V2 schema mirror ready")
+            return True
+        except Exception:
+            logger.debug("[dual_write] schema init failed — mirror inactive", exc_info=True)
+            self._ready = False
+            return False
+
+    # ── Public mirror API ──────────────────────────────────────────────
+
+    def mirror_belief(
+        self,
+        subject: str,
+        predicate: str,
+        obj: str,
+        *,
+        fact_text: str = "",
+        tenant_id: str = "default",
+        source_session: str | None = None,
+        source_turn: int | None = None,
+        extraction_method: str = "llm_inferred",
+        confidence: float = 0.5,
+        importance: int = 1,
+        trust_weight: float = 0.60,
+    ) -> str | None:
+        """Mirror a legacy triple into the V2 ``beliefs`` table.
+
+        Conservative: always inserts a NEW belief row with
+        ``valid_from=now``. It does NOT supersede existing rows during
+        the mirror — that's the consolidator's job (Phase 3) once it can
+        classify predicate types with LLM confidence. This means the
+        mirror may create parallel rows for the same (subject, predicate)
+        during the transition; the consolidator reconciles them.
+
+        Returns the V2 belief id, or None if the mirror is inactive /
+        the write failed.
+        """
+        if not self._ensure():
+            return None
+        now = time.time()
+        sub = _slug(subject)
+        pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
+        ptype = _infer_predicate_type(pred)
+        bid = _belief_id(tenant_id, sub, pred, now)
+        meta = {"source": "dual_write_mirror", "fact_text": (fact_text or "")[:500]}
+        try:
+            with self._lock:
+                self._primary.execute(
+                    """
+                    INSERT OR IGNORE INTO beliefs (
+                        id, tenant_id, subject, predicate, predicate_type, object,
+                        confidence, structural_importance, source_trust_weight,
+                        valid_from, ingested_at, source_session, source_turn,
+                        extraction_method, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bid,
+                        tenant_id,
+                        sub,
+                        pred,
+                        ptype,
+                        (obj or "")[:500],
+                        float(confidence),
+                        int(importance),
+                        float(trust_weight),
+                        now,
+                        now,
+                        source_session,
+                        source_turn,
+                        extraction_method,
+                        json.dumps(meta, ensure_ascii=False),
+                    ),
+                )
+                self._primary.commit()
+            return bid
+        except Exception:
+            logger.debug("[dual_write] belief mirror failed", exc_info=True)
+            return None
+
+    def mirror_episode(
+        self,
+        *,
+        session_id: str,
+        turn_number: int,
+        user_text: str = "",
+        assistant_text: str = "",
+        summary_text: str = "",
+        tenant_id: str = "default",
+        tier: str = "episodic",
+        importance: int = 1,
+        source: str = "dual_write_mirror",
+    ) -> str | None:
+        """Mirror a legacy turn/fact into the V2 ``episodes`` table.
+
+        Returns the V2 episode id, or None if inactive/failed.
+        """
+        if not self._ensure():
+            return None
+        # Build a content blob for the stable id when texts are empty
+        content = (user_text or assistant_text or summary_text or "").strip()
+        eid = _episode_id(session_id, turn_number, content)
+        now = time.time()
+        meta = {"source": source}
+        try:
+            with self._lock:
+                self._primary.execute(
+                    """
+                    INSERT OR IGNORE INTO episodes (
+                        id, tenant_id, session_id, turn_number,
+                        user_text, assistant_text, summary_text,
+                        tier, structural_importance, created_at, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        eid,
+                        tenant_id,
+                        session_id,
+                        int(turn_number),
+                        (user_text or "")[:4000],
+                        (assistant_text or "")[:4000],
+                        (summary_text or "")[:2000],
+                        tier,
+                        int(importance),
+                        now,
+                        json.dumps(meta, ensure_ascii=False),
+                    ),
+                )
+                self._primary.commit()
+            return eid
+        except Exception:
+            logger.debug("[dual_write] episode mirror failed", exc_info=True)
+            return None
+
+    def close(self) -> None:
+        with self._lock:
+            for conn in (self._primary, self._ops):
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            self._primary = None
+            self._ops = None
+            self._ready = False
+
+
+# ── Module-level singleton ────────────────────────────────────────────────
+
+_mirror: DualWriteMirror | None = None
+_mirror_lock = threading.Lock()
+
+
+def get_mirror() -> DualWriteMirror:
+    """Return the process-wide dual-write mirror singleton."""
+    global _mirror
+    if _mirror is not None:
+        return _mirror
+    with _mirror_lock:
+        if _mirror is None:
+            _mirror = DualWriteMirror()
+        return _mirror
+
+
+def reset_mirror() -> None:
+    """Close + drop the singleton (tests)."""
+    global _mirror
+    with _mirror_lock:
+        if _mirror is not None:
+            _mirror.close()
+        _mirror = None
+
+
+# ── Convenience wrappers (drop-in for legacy call sites) ──────────────────
+
+
+def mirror_belief(
+    subject: str,
+    predicate: str,
+    obj: str,
+    **kwargs: Any,
+) -> str | None:
+    """Module-level convenience: mirror a triple into V2 beliefs."""
+    return get_mirror().mirror_belief(subject, predicate, obj, **kwargs)
+
+
+def mirror_episode(*, session_id: str, turn_number: int, **kwargs: Any) -> str | None:
+    """Module-level convenience: mirror a turn into V2 episodes."""
+    return get_mirror().mirror_episode(
+        session_id=session_id, turn_number=turn_number, **kwargs
+    )

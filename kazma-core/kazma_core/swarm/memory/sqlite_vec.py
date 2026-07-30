@@ -19,7 +19,21 @@ __all__ = ["SQLiteVectorStore"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/vector.db"
+def _resolve_default_db() -> str:
+    """Resolve the default L4 db path via the centralized paths module.
+
+    Falls back to the legacy hard-coded relative path only if the import
+    fails (e.g. during early bootstrap).
+    """
+    try:
+        from kazma_core.paths import vector_db
+
+        return vector_db()
+    except Exception:
+        return "kazma-data/vector.db"
+
+
+_DEFAULT_DB = _resolve_default_db()
 _TABLE_PREFIX = "worker_vectors"
 # SQLite can't parameterize identifiers, so table names are built via
 # f-string interpolation below. Worker names can originate from the

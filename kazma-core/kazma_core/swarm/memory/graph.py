@@ -35,8 +35,34 @@ __all__ = ["KnowledgeGraph", "get_knowledge_graph", "reset_knowledge_graph", "se
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/knowledge_graph.db"
-_LEGACY_JSON = "kazma-data/knowledge_graph.json"
+def _resolve_default_db() -> str:
+    """Resolve the default KG db path via the centralized paths module.
+
+    Falls back to the legacy hard-coded relative path only if the import
+    fails (e.g. during early bootstrap), preserving prior behavior.
+    """
+    try:
+        from kazma_core.paths import knowledge_graph_db
+
+        return knowledge_graph_db()
+    except Exception:
+        return "kazma-data/knowledge_graph.db"
+
+
+def _resolve_legacy_json() -> str:
+    """Resolve the legacy NetworkX node-link JSON path (sibling of the db)."""
+    try:
+        from pathlib import Path
+
+        from kazma_core.paths import knowledge_graph_db
+
+        return str(Path(knowledge_graph_db()).with_suffix(".json"))
+    except Exception:
+        return "kazma-data/knowledge_graph.json"
+
+
+_DEFAULT_DB = _resolve_default_db()
+_LEGACY_JSON = _resolve_legacy_json()
 _SLUG_RE = re.compile(r"[^a-z0-9_]+")
 
 
