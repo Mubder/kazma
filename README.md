@@ -8,7 +8,7 @@ Kazma is the reliable multi-agent framework built for real deployment. Cryptogra
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests: 3,980+ passing](https://img.shields.io/badge/tests-3%2C980%2B%20passing-brightgreen.svg)](#-development)
+[![Tests: 4,300+ passing](https://img.shields.io/badge/tests-4%2C300%2B%20passing-brightgreen.svg)](#-development)
 
 ---
 
@@ -16,7 +16,7 @@ Kazma is the reliable multi-agent framework built for real deployment. Cryptogra
 
 | Lines of code | Tests | Commits | Contributors |
 |---|---:|---:|---:|
-| ~159K | 3,982 | 1,183 | 15 |
+| ~159K | 4,360 | 1,200+ | Solo |
 
 ![Kazma Dashboard](https://kazma.ai/screenshots/Hero-en.png)
 
@@ -129,7 +129,11 @@ pip install -e ".[rag,dev]"
 ### 2. Configure
 
 ```bash
+# Linux / macOS / WSL
 cp .env.example .env
+
+# Windows (PowerShell)
+Copy-Item .env.example .env
 ```
 
 Edit `.env` — set **at least one** LLM key:
@@ -283,7 +287,7 @@ These projects grew up next to Kazma — each one taught us something about agen
 
 ## 🧪 Development
 
-**3,980+ tests passing** across 5 suites.
+**4,300+ tests passing** across 5 suites.
 
 ```bash
 uv sync --all-extras
@@ -303,7 +307,7 @@ See: [Development](docs/docs/guide/development.md) · [CONTRIBUTING.md](CONTRIBU
 - **Startups & enterprises** evaluating production-grade multi-agent orchestration
 - **Contributors** looking for a well-tested, well-documented AI framework to build on
 
-MIT-licensed, production-tested, 1,183 commits. Built solo in Kuwait with full-stack execution.
+MIT-licensed, production-tested, 1,200+ commits. Built solo in Kuwait with full-stack execution.
 
 [🌐 kazma.ai](https://kazma.ai) · [🐙 GitHub](https://github.com/Mubder/kazma) · [💬 Try the live demo](https://kazma-demo.fly.dev/) · [📧 Pilots & partnerships](mailto:admin@kazma.ai)
 

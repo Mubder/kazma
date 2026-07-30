@@ -124,7 +124,8 @@ These modules implement or support tools (some registered at startup, some via s
 | `check_environment` | environment-bootstrapper | system | safe/read | Diagnose system binaries, active Python interpreter, PATH variables, and compile resources. |
 | `git_status` | git-github-manager | git | safe/read | Get the current git repository status, branch, and staged/unstaged changes. |
 | `git_commit` | git-github-manager | git | **danger** | Commit modified or untracked files with a detailed commit message. |
-| `git_push_pull` | git-github-manager | git | **danger** | Synchronize local branch changes by executing git pull or git push. |
+| `git_push` | git-github-manager | git | **danger** | Push (upload) local commits to the remote GitHub repository. |
+| `git_pull` | git-github-manager | git | safe/read | Pull (fetch + merge) the latest changes from the remote into the local branch. |
 | `github_create_pr` | git-github-manager | git | **danger** | Create a new Pull Request on the GitHub repository using GitHub APIs. |
 | `github_list_issues` | git-github-manager | git | safe/read | Retrieve and view list of issues currently open on the remote repository. |
 | `vault_store` | secret-vault | security | safe/read | Store an API key, token, password, or other secret in the encrypted vault. The secret is encrypted with AES-256-GCM and can be retrieved later by name. Use this when the user shares a credential that  |
@@ -169,7 +170,7 @@ From `kazma_core/safety/hitl.py` → `CANONICAL_DANGER_TOOLS` (also mirrored in 
 - `file_delete`
 - `file_write`
 - `git_commit`
-- `git_push_pull`
+- `git_push`
 - `github_create_pr`
 - `install_agent_skill`
 - `install_npm_packages`
