@@ -33,6 +33,16 @@ The **Swarm / Command Center** UI surfaces multi-worker orchestration: dispatch,
 3. Watch live tasks; approve checkpoints when paused.  
 4. Use metrics/history for cost and failure trends.
 
+## Worker templates (autoscaler)
+
+You don't need to pre-register workers — the **Templates** tab manages the
+autoscaler. When a swarm task has no matching registered worker, the engine
+auto-spawns one from a template (shipped defaults: `coder`, `researcher`,
+`generalist`), each capped by `max_instances` and idle-reaped after 5 min.
+Templates with an empty model auto-select the best available model for the task
+kind. Full CRUD here (add/edit/delete, view live instance counts, reap idle).
+See [Swarm orchestration §14](../guide/swarm-orchestration#14-dynamic-autoscaler--worker-templates).
+
 ## Related
 
 - [Swarm orchestration](../guide/swarm-orchestration)  

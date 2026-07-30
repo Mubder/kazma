@@ -248,6 +248,8 @@ flowchart TB
 
 Handoffs between workers are guarded against infinite recursion: `MAX_HANDOFF_DEPTH = 5` and `MAX_VISITS = 2` (per-worker visit count, not a boolean set) live in `swarm/handoff_guards.py:16-17`. See [Swarm Orchestration](swarm-orchestration) for the full pattern catalog.
 
+The engine also exposes `get_autoscaler()` (lazy) — when a task has no matching registered worker, it auto-spawns one from `swarm_templates.json` and selects the best available model for the task kind. See [Swarm Orchestration §14](swarm-orchestration#14-dynamic-autoscaler--worker-templates).
+
 ---
 
 ## 7. The memory subsystems (overview)

@@ -363,6 +363,38 @@ The full `kazma swarm` surface (dispatch, broadcast, consult, pipeline, fanout, 
 
 ---
 
+## 14. Dynamic autoscaler & worker templates
+
+When a dispatched task has `workers=["auto"]` and no registered worker can
+handle it (`NoCapableWorkersError`), the engine falls back to the **autoscaler**
+(`swarm/autoscaler.py`) which **spawns a worker on demand** from a template —
+so the swarm works with zero pre-registered workers.
+
+- **Templates** live in `swarm_templates.json` (repo root). The shipped defaults
+  are `coder` (max 3), `researcher` (max 2), `generalist` (max 5). A template
+  matches a task by **word-boundary token matching** on its `capabilities.expertise`
+  tags (the tag `coding` matches the prompt "write some python code" but not
+  "decode this barcode"). Templates are ordered specialist → general
+  (first-match-wins); the generalist is the catch-all.
+- **Spawned instances** are named `<template>-pool-<n>` (e.g. `coder-pool-1`),
+  capped per-template by `max_instances`, and idle-reaped after 5 min
+  (`AutoScaler.record_activity` refreshes the timer on each dispatch).
+- **Best model for the task kind.** Template `model`/`provider` are left empty
+  by default; the spawned worker then classifies its task
+  (`models/router.py::classify_prompt` → `CODING`/`VISION`/`REASONING`/`GENERAL`)
+  and picks the best **available** model via `models/selection.py`
+  (`find_best_model_for_task`). Precedence: user task-default
+  (`models.defaults.<kind>` from Settings → Models) → heuristic best-match by
+  model-id patterns → active profile fallback. Env-lock (`KAZMA_MODEL`) always wins.
+- **UI.** Manage templates in the Swarm panel → **Templates** tab
+  (REST: `GET/POST/DELETE /api/swarm/templates`, `POST /api/swarm/autoscaler/reap`).
+- **The autoscaler is template-driven, not LLM-per-task.** Keyword tokens + id
+  heuristics get ~80% of the value at ~0 cost; the dormant `ModelRouter` graph
+  hook (`model_router=None` in `agent_runner.py`) remains available for a future
+  LLM-routing phase. Handoff cycle guards (§4) still apply to spawned instances.
+
+---
+
 ## Documentation Audit Notes
 
 - **`reliability_registry.py` is config-only.** The half-open `_probe_in_flight` logic lives on the `CircuitBreaker` dataclass in `reliability.py`. Anyone modifying breaker semantics must edit `reliability.py`, not the registry.

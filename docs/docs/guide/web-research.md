@@ -113,6 +113,39 @@ Knowledge ingest (`knowledge_ingest_url` / site) reuses the same `_fetch_full_te
 
 Playwright (optional install): `pip install 'kazma[web]'` and `playwright install chromium`.
 
+## Bulletproof scraping: proxy provider addon (IP/UA rotation)
+
+The fetcher has an **opt-in, pluggable proxy provider** (`kazma_core/proxy/`)
+so scraping can route through a residential rotating proxy — resilient to IP
+blocks and rate limits. **Disabled by default** (`NullProvider` = direct); non-
+users see zero change.
+
+- **Configure** in Settings → System → **Proxy Provider** (ConfigStore keys
+  `proxy.*`; `proxy.password` auto-vault-encrypts). Live config — the provider is
+  re-resolved on every fetch (`proxy/registry.py::get_proxy_provider`), so a
+  Settings change takes effect without a restart.
+- **anyIP.io** (`proxy/anyip.py`) is the first provider: residential/mobile
+  rotation via `portal.anyip.io:1080`, flag-decorated username
+  (`type_residential`, `country_US`, per-request `sessid_` for rotation or a
+  sticky session). Each request exits from a different residential IP unless
+  `session_sticky` is set.
+- **Resilience applied transparently** to `read_url`, `crawl_site`, and `web_search`:
+  - **IP rotation** — a blocked IP retries from a new residential IP.
+  - **UA rotation** — a curated browser User-Agent pool
+    (`proxy/client.py::USER_AGENT_POOL`) so consecutive requests vary fingerprints.
+  - **429/403 retry with backoff** (1.5 s, 3 s) on the `read_url` httpx path —
+    complementary to the Firecrawl/Jina/Playwright recovery cascade above.
+- **Scraping-scoped only.** The proxy never touches LLM API calls (those use the
+  separate `http_pool.py`), so provider API keys never route through a third party.
+- **Graceful degradation** — an unconfigured/unreachable proxy falls back to
+  direct; a fetch never hard-fails because the proxy is down.
+- **Adding future providers** (BrightData, Oxylabs) = one class under `proxy/` +
+  one registry line (`registry.py::_PROVIDERS`) + one dropdown option. The
+  scraper talks to the `ProxyProvider` interface, not to anyip.io directly.
+
+> **Note:** This does **not** solve CAPTCHAs (only IP/UA rotation + the existing
+> Playwright escalation). A CAPTCHA-solving service could be a future provider type.
+
 ## Safety & honesty
 
 - **SSRF-safe** on all fetches and redirects.  

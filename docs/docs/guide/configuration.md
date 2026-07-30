@@ -431,6 +431,25 @@ commands:
 services: {}
 ```
 
+### 7.4 `proxy.*` keys (scraping proxy provider addon)
+
+Opt-in. Configured via **Settings → System → Proxy Provider** (the values below
+live in ConfigStore under `proxy.*`; `proxy.password` auto-vault-encrypts). The
+active provider is re-read live on every fetch — no restart needed.
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `proxy.provider` | `none` | `none` (direct) \| `anyip` |
+| `proxy.host` | `portal.anyip.io` | Proxy endpoint host |
+| `proxy.port` | `1080` | Proxy endpoint port |
+| `proxy.username` | _(empty)_ | anyip username (e.g. `user_YOURID`) |
+| `proxy.password` | _(empty, vault) | anyip password |
+| `proxy.network` | `mixed` | `residential` \| `mobile` \| `mixed` |
+| `proxy.country` | _(empty)_ | Optional ISO country code (e.g. `US`) |
+| `proxy.session_sticky` | `false` | `true` = same IP across requests (logins); `false` = rotate per request |
+
+See [Web research → Bulletproof scraping](web-research#bulletproof-scraping-proxy-provider-addon-ipua-rotation).
+
 ---
 
 ## Documentation Audit Notes
