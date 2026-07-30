@@ -318,9 +318,10 @@ export function initSoftNav() {
                 credentials: 'same-origin',
                 redirect: 'follow',
             });
+            // NOTE: the global fetch wrapper (auth-guard.js) now owns the
+            // session-expired → /login redirect for 401/403. Just bail here;
+            // the wrapper already fired the redirect.
             if (res.status === 401 || res.status === 403) {
-                const next = encodeURIComponent(pathOnly(url) + (new URL(url, location.origin).search || ''));
-                window.location.href = '/login?next=' + next;
                 return;
             }
             if (res.redirected && /\/login(?:\?|$)/.test(res.url)) {
