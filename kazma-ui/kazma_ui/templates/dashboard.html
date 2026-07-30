@@ -203,18 +203,18 @@
         </div>
       </div>
       <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(220px,0.8fr);gap:12px;align-items:stretch;">
-        <div id="kg-canvas-wrap" style="position:relative;height:300px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
-          <canvas id="kg-canvas" width="800" height="300" style="width:100%;height:100%;display:block;cursor:crosshair;"></canvas>
+        <div id="kg-canvas-wrap" style="position:relative;height:460px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(56,189,248,0.06), rgba(0,0,0,0.25));overflow:hidden;">
+          <canvas id="kg-canvas" width="800" height="300" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;"></canvas>
           <div id="kg-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:240px;padding:6px 10px;border-radius:6px;background:rgba(15,23,32,0.95);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.75rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,0.4);"></div>
           <div id="kg-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">
             {{ t('dashboard.memory_graph_empty') }}
           </div>
         </div>
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:300px;">
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:460px;">
           <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">
             {{ t('dashboard.memory_graph_nodes_list') }}
           </div>
-          <div id="kg-results" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:260px;"></div>
+          <div id="kg-results" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:420px;"></div>
         </div>
       </div>
     </div>
@@ -416,6 +416,8 @@
     graphCleared: "{{ t('dashboard.memory_graph_cleared') }}",
     graphNodes: "{{ t('dashboard.memory_graph_nodes') }}",
     graphEdges: "{{ t('dashboard.memory_graph_edges') }}",
+    graphClickHint: "{{ t('dashboard.memory_graph_click_hint') }}",
+    graphTrunc: "{{ t('dashboard.memory_graph_truncated') }}",
     pipeEnabled: "{{ t('dashboard.memory_pipe_enabled') }}",
     pipePerTurn: "{{ t('dashboard.memory_pipe_per_turn') }}",
     pipeAutoStore: "{{ t('dashboard.memory_pipe_auto_store') }}",
@@ -756,14 +758,38 @@
   }
 
   // ── Property graph (L2) explorer ─────────────────────────────────
+  // Force-directed canvas graph with pan / zoom / drag / select interactions.
   var _kgData = { nodes: [], edges: [] };
-  var _kgAnim = null;
-  var _kgPts = []; // last layout for hover hit-testing
-  var _kgHoverBound = false;
+  var _kgPts = [];                 // layout points in WORLD coordinates
+  var _kgEdges = [];               // resolved edges [{a,b,label}]
+  var _kgIds = {};                 // node id -> point index
+  var _kgSig = '';                 // data signature to detect reload vs resize
+  var _kgTrunc = 0;                // nodes omitted beyond the canvas cap
+  var _kgView = { scale: 1, ox: 0, oy: 0 };  // world -> canvas-px transform
+  var _kgAlpha = 0;                // simulation temperature (cools to 0)
+  var _kgAnim = null;              // requestAnimationFrame id
+  var _kgDrag = null;              // {idx, moved} while dragging a node
+  var _kgPan = null;               // {sx, sy, ox, oy} while panning the canvas
+  var _kgDown = null;              // mousedown snapshot for click detection
+  var _kgHover = -1;               // hovered point index
+  var _kgSelectedId = null;        // selected node id
+  var _kgRafBound = false;         // pointer handlers attached
+  var _kgHintShown = false;
+
+  var KG_CAP = 72;
+  var KG_NODE_R = 7;
+  var KG_MIN_SCALE = 0.35;
+  var KG_MAX_SCALE = 4;
 
   function _kgEsc(s) {
     return String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
+
+  // world <-> canvas-pixel transforms
+  function _kgSX(x) { return x * _kgView.scale + _kgView.ox; }
+  function _kgSY(y) { return y * _kgView.scale + _kgView.oy; }
+  function _kgWX(sx) { return (sx - _kgView.ox) / _kgView.scale; }
+  function _kgWY(sy) { return (sy - _kgView.oy) / _kgView.scale; }
 
   function renderKgList(nodes) {
     var el = document.getElementById('kg-results');
@@ -778,7 +804,7 @@
       var group = _kgEsc(n.group || '');
       var title = _kgEsc((n.title || '').slice(0, 160));
       return (
-        '<div style="padding:6px 8px;border-bottom:1px solid var(--border-subtle);display:flex;gap:10px;align-items:flex-start;">' +
+        '<div data-nid="' + _kgEsc(n.id) + '" style="padding:6px 8px;border-bottom:1px solid var(--border-subtle);display:flex;gap:10px;align-items:flex-start;cursor:pointer;">' +
           '<span style="flex:0 0 auto;font-size:0.65rem;padding:2px 6px;border-radius:4px;background:rgba(56,189,248,0.12);color:#38bdf8;font-weight:600;">' + group + '</span>' +
           '<div style="min-width:0;">' +
             '<div style="font-weight:600;color:var(--text-primary);">' + label + '</div>' +
@@ -789,165 +815,410 @@
     }).join('');
   }
 
-  function drawKgCanvas(nodes, edges) {
-    var canvas = document.getElementById('kg-canvas');
-    var empty = document.getElementById('kg-empty');
+  // Stable force-directed layout. Unlike the old routine, the repulsion is
+  // clamped, velocity is capped, and a gravity + cooling schedule keeps nodes
+  // from being shoved into the borders where they appeared "stacked".
+  function _kgStep(W, H) {
+    var n = _kgPts.length;
+    if (!n) return;
+    // repulsion (charge) — clamped so close nodes never explode
+    for (var i = 0; i < n; i++) {
+      for (var j = i + 1; j < n; j++) {
+        var a = _kgPts[i], b = _kgPts[j];
+        var dx = a.x - b.x, dy = a.y - b.y;
+        var d2 = dx * dx + dy * dy;
+        if (d2 < 0.04) { dx = (i - j) * 4 + 0.5; dy = (i - j) * 4 - 0.3; d2 = dx * dx + dy * dy; }
+        var d = Math.sqrt(d2);
+        var f = 1200 / d2;                 // repulsion magnitude
+        if (f > 30) f = 30;                // CLAMP — the fix for stacked dots
+        var ux = dx / d, uy = dy / d;
+        a.vx += ux * f * _kgAlpha; b.vx -= ux * f * _kgAlpha;
+        a.vy += uy * f * _kgAlpha; b.vy -= uy * f * _kgAlpha;
+      }
+    }
+    // attraction (springs) along edges
+    var k = 90;                            // target edge length in world units
+    for (var e = 0; e < _kgEdges.length; e++) {
+      var ed = _kgEdges[e];
+      var A = _kgPts[ed.a], B = _kgPts[ed.b];
+      var ddx = B.x - A.x, ddy = B.y - A.y;
+      var dd = Math.sqrt(ddx * ddx + ddy * ddy) || 0.01;
+      var disp = (dd - k);
+      var ff = disp * 0.04 * _kgAlpha;
+      var nx = ddx / dd, ny = ddy / dd;
+      A.vx += nx * ff; B.vx -= nx * ff;
+      A.vy += ny * ff; B.vy -= ny * ff;
+    }
+    // gravity toward world center + soft margin + integrate + clamp velocity
+    var cx = W / 2, cy = H / 2;
+    var margin = 34;                       // soft inner border (vs old hard clamp)
+    for (var p = 0; p < n; p++) {
+      var pt = _kgPts[p];
+      if (_kgDrag && _kgDrag.idx === p) { pt.vx = 0; pt.vy = 0; continue; }
+      // gravity (weak pull so the graph stays centered / doesn't drift off)
+      pt.vx += (cx - pt.x) * 0.006 * _kgAlpha;
+      pt.vy += (cy - pt.y) * 0.006 * _kgAlpha;
+      // soft margin: gentle inward push when near an edge, instead of the old
+      // hard border clamp that pinned many nodes to the same border pixels.
+      if (pt.x < margin) pt.vx += (margin - pt.x) * 0.03 * _kgAlpha;
+      if (pt.x > W - margin) pt.vx -= (pt.x - (W - margin)) * 0.03 * _kgAlpha;
+      if (pt.y < margin) pt.vy += (margin - pt.y) * 0.03 * _kgAlpha;
+      if (pt.y > H - margin) pt.vy -= (pt.y - (H - margin)) * 0.03 * _kgAlpha;
+      // velocity damping
+      pt.vx *= 0.83; pt.vy *= 0.83;
+      // velocity cap — prevents the runaway that clamped dots to the borders
+      var sp = Math.sqrt(pt.vx * pt.vx + pt.vy * pt.vy);
+      var maxSp = 16;
+      if (sp > maxSp) { pt.vx = pt.vx / sp * maxSp; pt.vy = pt.vy / sp * maxSp; }
+      pt.x += pt.vx; pt.y += pt.vy;
+    }
+    _kgAlpha *= 0.985;                     // cool down
+    if (_kgAlpha < 0.004) _kgAlpha = 0;
+  }
+
+  function _kgHeated() { _kgAlpha = Math.max(_kgAlpha, 0.18); }
+
+  function _kgCanvasSize() {
     var wrap = document.getElementById('kg-canvas-wrap');
-    if (!canvas || !wrap) return;
+    var canvas = document.getElementById('kg-canvas');
+    if (!wrap || !canvas) return null;
     var rect = wrap.getBoundingClientRect();
     var w = Math.max(320, Math.floor(rect.width));
-    var h = 280;
-    canvas.width = w;
-    canvas.height = h;
+    var h = Math.max(220, Math.floor(rect.height));
+    var dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
     var ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx: ctx, w: w, h: h };
+  }
+
+  // Pick the font family the rest of the UI uses, resolved at runtime so the
+  // invalid CSS-var canvas-font bug (var(--font-sans) is ignored by Canvas2D)
+  // is gone for good.
+  function _kgFont(px) {
+    var fam = 'sans-serif';
+    var probe = document.getElementById('kg-canvas-wrap');
+    if (probe) {
+      var v = getComputedStyle(probe).fontFamily;
+      if (v && String(v).indexOf('var(') === -1) fam = v;
+    }
+    return px + 'px ' + fam;
+  }
+
+  function _kgGroupHue(group) {
+    if (group === 'memory_chunk') return 280;
+    if (group === 'person' || group === 'user') return 145;
+    if (group === 'tag') return 40;
+    return 190;
+  }
+
+  function drawKgCanvas(nodes, edges) {
+    var size = _kgCanvasSize();
+    if (!size) return;
+    var ctx = size.ctx, W = size.w, H = size.h;
+    var empty = document.getElementById('kg-empty');
+    var canvas = document.getElementById('kg-canvas');
+    var wrap = document.getElementById('kg-canvas-wrap');
 
     if (!nodes || !nodes.length) {
+      ctx.clearRect(0, 0, W, H);
       if (empty) empty.style.display = 'flex';
+      _kgPts = []; _kgEdges = []; _kgIds = {}; _kgTrunc = 0;
+      if (_kgAnim) { cancelAnimationFrame(_kgAnim); _kgAnim = null; }
+      if (canvas) canvas.style.cursor = 'default';
       return;
     }
     if (empty) empty.style.display = 'none';
 
-    // Cap for layout readability
-    var maxN = 48;
-    var ns = nodes.slice(0, maxN);
-    var ids = {};
-    ns.forEach(function(n, i) { ids[n.id] = i; });
-    var es = (edges || []).filter(function(e) {
-      return ids[e.from] !== undefined && ids[e.to] !== undefined;
-    });
-
-    // Simple circle layout + light force iteration
-    var pts = ns.map(function(n, i) {
-      var ang = (i / Math.max(ns.length, 1)) * Math.PI * 2;
-      var r = Math.min(w, h) * 0.32;
-      return {
-        x: w / 2 + Math.cos(ang) * r,
-        y: h / 2 + Math.sin(ang) * r,
-        vx: 0, vy: 0,
-        id: n.id,
-        label: String(n.label || n.id || '').slice(0, 18),
-        fullLabel: String(n.label || n.id || ''),
-        title: String(n.title || ''),
-        group: n.group || 'entity',
-      };
-    });
-
-    function step() {
-      var i, j;
-      for (i = 0; i < pts.length; i++) {
-        for (j = i + 1; j < pts.length; j++) {
-          var dx = pts[i].x - pts[j].x;
-          var dy = pts[i].y - pts[j].y;
-          var d2 = dx * dx + dy * dy + 0.01;
-          var f = 400 / d2;
-          var d = Math.sqrt(d2);
-          pts[i].vx += (dx / d) * f;
-          pts[i].vy += (dy / d) * f;
-          pts[j].vx -= (dx / d) * f;
-          pts[j].vy -= (dy / d) * f;
+    // data signature: reload layout only when the underlying data changes,
+    // not on every redraw (resize). Preserves node positions during pan/zoom.
+    var sig = (nodes.length) + ':' + (edges ? edges.length : 0) + ':' +
+      (nodes[0] ? nodes[0].id : '');
+    if (sig !== _kgSig) {
+      _kgSig = sig;
+      _kgTrunc = Math.max(0, nodes.length - KG_CAP);
+      var ns = nodes.slice(0, KG_CAP);
+      _kgIds = {};
+      _kgPts = ns.map(function(n, i) {
+        _kgIds[n.id] = i;
+        // deterministic but spread initial seed (golden-angle spiral)
+        var ang = i * 2.39996;
+        var r = 18 + (i % 5) * 22;
+        return {
+          x: W / 2 + Math.cos(ang) * r,
+          y: H / 2 + Math.sin(ang) * r,
+          vx: 0, vy: 0,
+          id: n.id,
+          label: String(n.label || n.id || '').slice(0, 18),
+          fullLabel: String(n.label || n.id || ''),
+          title: String(n.title || ''),
+          group: n.group || 'entity',
+        };
+      });
+      _kgEdges = [];
+      (edges || []).forEach(function(e) {
+        var ai = _kgIds[e.from], bi = _kgIds[e.to];
+        if (ai !== undefined && bi !== undefined) {
+          _kgEdges.push({ a: ai, b: bi, label: String(e.label || e.relation || 'related').slice(0, 18) });
         }
-      }
-      es.forEach(function(e) {
-        var a = pts[ids[e.from]], b = pts[ids[e.to]];
-        if (!a || !b) return;
-        var dx = b.x - a.x, dy = b.y - a.y;
-        a.vx += dx * 0.002;
-        a.vy += dy * 0.002;
-        b.vx -= dx * 0.002;
-        b.vy -= dy * 0.002;
       });
-      pts.forEach(function(p) {
-        p.x += p.vx * 0.08;
-        p.y += p.vy * 0.08;
-        p.vx *= 0.6;
-        p.vy *= 0.6;
-        p.x = Math.max(24, Math.min(w - 24, p.x));
-        p.y = Math.max(20, Math.min(h - 20, p.y));
-      });
+      // fresh layout: reset view + heat
+      _kgView = { scale: 1, ox: 0, oy: 0 };
+      _kgSelectedId = null;
+      _kgAlpha = 1;
     }
-    for (var s = 0; s < 40; s++) step();
 
-    // edges — always draw relation labels (P3)
-    ctx.strokeStyle = 'rgba(148,163,184,0.4)';
-    ctx.lineWidth = 1.25;
-    es.forEach(function(e) {
-      var a = pts[ids[e.from]], b = pts[ids[e.to]];
-      if (!a || !b) return;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-      var elabel = String(e.label || e.relation || 'related').slice(0, 18);
-      var mx = (a.x + b.x) / 2;
-      var my = (a.y + b.y) / 2;
-      ctx.save();
-      ctx.font = '10px var(--font-sans, sans-serif)';
-      var tw = ctx.measureText(elabel).width;
-      ctx.fillStyle = 'rgba(15,23,32,0.75)';
-      ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 14);
-      ctx.fillStyle = 'rgba(186,198,214,0.95)';
-      ctx.textAlign = 'center';
-      ctx.fillText(elabel, mx, my + 3);
-      ctx.restore();
-    });
-
-    // nodes
-    pts.forEach(function(p) {
-      var hue = 190;
-      if (p.group === 'memory_chunk') hue = 280;
-      else if (p.group === 'person' || p.group === 'user') hue = 145;
-      else if (p.group === 'tag') hue = 40;
-      ctx.beginPath();
-      ctx.fillStyle = 'hsla(' + hue + ',70%,55%,0.9)';
-      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(226,232,240,0.95)';
-      ctx.font = '11px var(--font-sans, sans-serif)';
-      ctx.textAlign = 'left';
-      ctx.fillText(p.label, p.x + 10, p.y + 4);
-    });
-
-    _kgPts = pts;
-    _wireKgHover(canvas, wrap);
+    _kgBindPointer(canvas, wrap);
+    if (!_kgAnim) _kgTick();
   }
 
-  function _wireKgHover(canvas, wrap) {
-    if (_kgHoverBound || !canvas || !wrap) return;
-    _kgHoverBound = true;
-    var tip = document.getElementById('kg-tooltip');
-    canvas.addEventListener('mousemove', function(ev) {
-      if (!tip || !_kgPts.length) return;
-      var rect = canvas.getBoundingClientRect();
-      var scaleX = canvas.width / Math.max(rect.width, 1);
-      var scaleY = canvas.height / Math.max(rect.height, 1);
-      var mx = (ev.clientX - rect.left) * scaleX;
-      var my = (ev.clientY - rect.top) * scaleY;
-      var hit = null;
-      for (var i = 0; i < _kgPts.length; i++) {
-        var p = _kgPts[i];
-        var dx = p.x - mx, dy = p.y - my;
-        if (dx * dx + dy * dy <= 14 * 14) { hit = p; break; }
+  // One animation frame: advance the sim (if still warm) and repaint.
+  function _kgTick() {
+    var size = _kgCanvasSize();
+    if (!size) { _kgAnim = null; return; }
+    var ctx = size.ctx, W = size.w, H = size.h;
+    if (_kgAlpha > 0) _kgStep(W, H);
+    _kgPaint(ctx, W, H);
+    if (_kgAlpha > 0 || _kgDrag) {
+      _kgAnim = requestAnimationFrame(_kgTick);
+    } else {
+      _kgAnim = null;
+    }
+  }
+
+  function _kgRequestRepaint() {
+    if (!_kgAnim) _kgAnim = requestAnimationFrame(_kgTick);
+  }
+
+  function _kgPaint(ctx, W, H) {
+    ctx.clearRect(0, 0, W, H);
+
+    // edges (in canvas space)
+    ctx.strokeStyle = 'rgba(148,163,184,0.4)';
+    ctx.lineWidth = 1.25;
+    ctx.font = _kgFont(10);
+    for (var e = 0; e < _kgEdges.length; e++) {
+      var ed = _kgEdges[e];
+      var A = _kgPts[ed.a], B = _kgPts[ed.b];
+      if (!A || !B) continue;
+      var ax = _kgSX(A.x), ay = _kgSY(A.y), bx = _kgSX(B.x), by = _kgSY(B.y);
+      // highlight edges touching the selected node
+      var hot = _kgSelectedId && (A.id === _kgSelectedId || B.id === _kgSelectedId);
+      ctx.strokeStyle = hot ? 'rgba(56,189,248,0.9)' : 'rgba(148,163,184,0.35)';
+      ctx.lineWidth = hot ? 2 : 1.25;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      if (_kgView.scale > 0.7 && ed.label) {
+        var mx = (ax + bx) / 2, my = (ay + by) / 2;
+        var tw = ctx.measureText(ed.label).width;
+        ctx.fillStyle = 'rgba(15,23,32,0.78)';
+        ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 14);
+        ctx.fillStyle = hot ? '#7dd3fc' : 'rgba(186,198,214,0.95)';
+        ctx.textAlign = 'center';
+        ctx.fillText(ed.label, mx, my + 3);
       }
-      if (!hit) {
-        tip.style.display = 'none';
-        canvas.style.cursor = 'crosshair';
+    }
+
+    // nodes
+    var showLabels = _kgView.scale > 0.6;
+    ctx.font = _kgFont(11);
+    for (var i = 0; i < _kgPts.length; i++) {
+      var p = _kgPts[i];
+      var x = _kgSX(p.x), y = _kgSY(p.y);
+      var r = KG_NODE_R;
+      var isHover = (i === _kgHover);
+      var isSel = (p.id === _kgSelectedId);
+      if (isSel || isHover) r += 3;
+      var hue = _kgGroupHue(p.group);
+      ctx.beginPath();
+      ctx.fillStyle = 'hsla(' + hue + ',70%,' + (isSel ? '62%' : '55%') + ',0.95)';
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (isSel) {                       // selection ring
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (showLabels) {
+        ctx.fillStyle = isSel ? '#e0f2fe' : 'rgba(226,232,240,0.92)';
+        ctx.textAlign = 'left';
+        ctx.fillText(p.label, x + r + 4, y + 4);
+      }
+    }
+  }
+
+  // hit test in canvas-pixel space -> point index, or -1
+  function _kgHit(sx, sy) {
+    for (var i = _kgPts.length - 1; i >= 0; i--) {
+      var p = _kgPts[i];
+      var dx = _kgSX(p.x) - sx, dy = _kgSY(p.y) - sy;
+      var rad = (KG_NODE_R + 4);
+      if (dx * dx + dy * dy <= rad * rad) return i;
+    }
+    return -1;
+  }
+
+  function _kgShowTip(html, ev) {
+    var tip = document.getElementById('kg-tooltip');
+    var wrap = document.getElementById('kg-canvas-wrap');
+    if (!tip || !wrap) return;
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+    var wrect = wrap.getBoundingClientRect();
+    var wx = ev.clientX - wrect.left + 14;
+    var wy = ev.clientY - wrect.top + 14;
+    tip.style.left = Math.min(wx, wrap.clientWidth - 250) + 'px';
+    tip.style.top = Math.min(wy, wrap.clientHeight - 70) + 'px';
+  }
+  function _kgHideTip() {
+    var tip = document.getElementById('kg-tooltip');
+    if (tip) tip.style.display = 'none';
+  }
+
+  function _kgBindPointer(canvas, wrap) {
+    if (_kgRafBound || !canvas || !wrap) return;
+    _kgRafBound = true;
+    var tip = document.getElementById('kg-tooltip');
+
+    function evToCanvas(ev) {
+      var rect = canvas.getBoundingClientRect();
+      return { sx: ev.clientX - rect.left, sy: ev.clientY - rect.top };
+    }
+
+    canvas.addEventListener('mousedown', function(ev) {
+      if (ev.button !== 0) return;
+      var c = evToCanvas(ev);
+      var idx = _kgHit(c.sx, c.sy);
+      _kgDown = { sx: c.sx, sy: c.sy, idx: idx, t: Date.now() };
+      if (idx >= 0) {
+        _kgDrag = { idx: idx, moved: false };
+        canvas.style.cursor = 'grabbing';
+      } else {
+        _kgPan = { sx: c.sx, sy: c.sy, ox: _kgView.ox, oy: _kgView.oy };
+        canvas.style.cursor = 'grabbing';
+      }
+    });
+
+    canvas.addEventListener('mousemove', function(ev) {
+      var c = evToCanvas(ev);
+      if (_kgDrag) {                       // dragging a node
+        var p = _kgPts[_kgDrag.idx];
+        if (p) {
+          p.x = _kgWX(c.sx); p.y = _kgWY(c.sy);
+          _kgDrag.moved = _kgDrag.moved || (Math.abs(c.sx - _kgDown.sx) + Math.abs(c.sy - _kgDown.sy) > 3);
+          _kgHeated();                    // wake the sim so neighbors react
+          _kgRequestRepaint();
+        }
+        _kgHideTip();
         return;
       }
-      canvas.style.cursor = 'pointer';
-      var html = '<strong>' + _kgEsc(hit.fullLabel || hit.label) + '</strong>';
-      if (hit.group) html += '<div style="color:var(--text-muted);margin-top:2px;">' + _kgEsc(hit.group) + '</div>';
-      if (hit.title) html += '<div style="margin-top:4px;">' + _kgEsc(hit.title.slice(0, 180)) + '</div>';
-      tip.innerHTML = html;
-      tip.style.display = 'block';
-      var wx = ev.clientX - wrap.getBoundingClientRect().left + 12;
-      var wy = ev.clientY - wrap.getBoundingClientRect().top + 12;
-      tip.style.left = Math.min(wx, wrap.clientWidth - 200) + 'px';
-      tip.style.top = Math.min(wy, wrap.clientHeight - 60) + 'px';
+      if (_kgPan) {                        // panning the canvas
+        _kgView.ox = _kgPan.ox + (c.sx - _kgPan.sx);
+        _kgView.oy = _kgPan.oy + (c.sy - _kgPan.sy);
+        _kgRequestRepaint();
+        _kgHideTip();
+        return;
+      }
+      // plain hover -> tooltip + cursor
+      var idx = _kgHit(c.sx, c.sy);
+      _kgHover = idx;
+      if (idx >= 0) {
+        var p = _kgPts[idx];
+        canvas.style.cursor = 'pointer';
+        var html = '<strong>' + _kgEsc(p.fullLabel || p.label) + '</strong>';
+        if (p.group) html += '<div style="color:var(--text-muted);margin-top:2px;">' + _kgEsc(p.group) + '</div>';
+        if (p.title) html += '<div style="margin-top:4px;">' + _kgEsc(p.title.slice(0, 180)) + '</div>';
+        html += '<div style="margin-top:5px;color:var(--text-tertiary);font-size:0.68rem;">' +
+          (I18N.graphClickHint || 'click to select · drag to move · wheel to zoom') + '</div>';
+        _kgShowTip(html, ev);
+        _kgRequestRepaint();
+      } else {
+        canvas.style.cursor = 'grab';
+        _kgHideTip();
+        if (_kgHover !== -1) { _kgHover = -1; _kgRequestRepaint(); }
+      }
     });
+
+    function endDrag() {
+      var wasDrag = _kgDrag && _kgDrag.moved;
+      var downIdx = _kgDown ? _kgDown.idx : -1;
+      _kgDrag = null; _kgPan = null;
+      if (canvas) canvas.style.cursor = 'grab';
+      // click = press + release on the same node without much movement
+      if (!wasDrag && _kgDown && downIdx >= 0) {
+        var dt = Date.now() - _kgDown.t;
+        if (dt < 600) {
+          _kgSelectedId = _kgPts[downIdx].id;
+          _kgFlashListSelect(_kgPts[downIdx].id);
+          _kgHeated();
+          _kgRequestRepaint();
+        }
+      }
+      _kgDown = null;
+    }
+    canvas.addEventListener('mouseup', endDrag);
     canvas.addEventListener('mouseleave', function() {
-      if (tip) tip.style.display = 'none';
+      _kgHover = -1; _kgDrag = null; _kgPan = null; _kgDown = null;
+      _kgHideTip();
+      if (canvas) canvas.style.cursor = 'grab';
+      _kgRequestRepaint();
     });
+
+    // wheel zoom, centered on cursor
+    canvas.addEventListener('wheel', function(ev) {
+      ev.preventDefault();
+      var c = evToCanvas(ev);
+      var factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+      var ns = Math.max(KG_MIN_SCALE, Math.min(KG_MAX_SCALE, _kgView.scale * factor));
+      if (ns === _kgView.scale) return;
+      // keep the world point under the cursor fixed
+      var wx = _kgWX(c.sx), wy = _kgWY(c.sy);
+      _kgView.scale = ns;
+      _kgView.ox = c.sx - wx * ns;
+      _kgView.oy = c.sy - wy * ns;
+      _kgRequestRepaint();
+    }, { passive: false });
+
+    // double-click a node to center + zoom on it
+    canvas.addEventListener('dblclick', function(ev) {
+      var c = evToCanvas(ev);
+      var idx = _kgHit(c.sx, c.sy);
+      if (idx < 0) return;
+      var p = _kgPts[idx];
+      _kgSelectedId = p.id;
+      _kgFlashListSelect(p.id);
+      var rect = canvas.getBoundingClientRect();
+      _kgView.scale = 2;
+      _kgView.ox = rect.width / 2 - p.x * 2;
+      _kgView.oy = rect.height / 2 - p.y * 2;
+      _kgHeated();
+      _kgRequestRepaint();
+    });
+  }
+
+  // Highlight the matching row in the side node list when a canvas node is
+  // selected, so the two panes stay in sync.
+  function _kgFlashListSelect(id) {
+    var el = document.getElementById('kg-results');
+    if (!el) return;
+    var rows = el.querySelectorAll('[data-nid]');
+    var found = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute('data-nid') === String(id)) {
+        rows[i].style.background = 'rgba(56,189,248,0.16)';
+        found = rows[i];
+      } else {
+        rows[i].style.background = '';
+      }
+    }
+    if (found) found.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
   async function loadKnowledgeGraph(q) {
@@ -958,14 +1229,19 @@
       var data = await resp.json();
       _kgData = data || { nodes: [], edges: [] };
       var st = data.stats || {};
+      var nodesTotal = (_kgData.nodes || []).length;
       var line = document.getElementById('kg-stats-line');
       if (line) {
-        line.textContent =
+        var txt =
           (st.nodes != null ? st.nodes : (_kgData.nodes || []).length) + ' ' + (I18N.graphNodes || 'nodes') +
           ' · ' +
           (st.edges != null ? st.edges : (_kgData.edges || []).length) + ' ' + (I18N.graphEdges || 'edges') +
           (st.backend ? ' · ' + st.backend : '') +
           (data.query ? ' · filter: ' + data.query : '');
+        line.textContent = txt;
+        if (_kgTrunc > 0 && I18N.graphTrunc) {
+          line.title = I18N.graphTrunc.replace('{n}', String(KG_CAP)).replace('{total}', String(nodesTotal));
+        }
       }
       drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
       renderKgList(_kgData.nodes || []);
@@ -1042,8 +1318,15 @@
       });
     }
     loadKnowledgeGraph('');
+    var _kgResizeT = null;
     window.addEventListener('resize', function() {
-      if (_kgData) drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
+      if (_kgResizeT) clearTimeout(_kgResizeT);
+      _kgResizeT = setTimeout(function() {
+        if (_kgData && _kgPts.length) {
+          _kgHeated();                 // re-center via gravity on the new size
+          drawKgCanvas(_kgData.nodes || [], _kgData.edges || []);
+        }
+      }, 150);
     });
   }
 

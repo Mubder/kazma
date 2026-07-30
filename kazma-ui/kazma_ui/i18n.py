@@ -1370,6 +1370,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.memory_graph_cleared": {"en": "Graph cleared", "ar": "تم مسح الرسم"},
     "dashboard.memory_graph_nodes": {"en": "nodes", "ar": "عقدة"},
     "dashboard.memory_graph_edges": {"en": "edges", "ar": "حافة"},
+    "dashboard.memory_graph_click_hint": {
+        "en": "click to select · drag to move · wheel to zoom",
+        "ar": "انقر للتحديد · اسحب للتحريك · العجلة للتكبير",
+    },
+    "dashboard.memory_graph_truncated": {
+        "en": "showing first {n} of {total} nodes",
+        "ar": "عرض أول {n} من {total} عقدة",
+    },
     "dashboard.memory_refresh": {"en": "Refresh", "ar": "تحديث"},
     "dashboard.memory_health_kpi": {"en": "Health", "ar": "الصحة"},
     "dashboard.memory_graph_nodes_list": {"en": "Nodes", "ar": "العقد"},
