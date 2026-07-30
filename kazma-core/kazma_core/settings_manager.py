@@ -430,6 +430,65 @@ class SettingsManager:
         except Exception:
             pass
 
+    # ══════════════════════════════════════════════════════════════════
+    # PROXY PROVIDER (opt-in scraping resilience addon)
+    # ══════════════════════════════════════════════════════════════════
+
+    def get_proxy_settings(self) -> dict[str, Any]:
+        """Get proxy provider config (opt-in scraping proxy).
+
+        ``password`` is vault-encrypted at rest; ``get()`` decrypts it here.
+        """
+        return {
+            "provider": self._cs.get("proxy.provider", "none"),
+            "host": self._cs.get("proxy.host", "portal.anyip.io"),
+            "port": self._cs.get("proxy.port", "1080"),
+            "username": self._cs.get("proxy.username", ""),
+            "password": self._cs.get("proxy.password", ""),
+            "network": self._cs.get("proxy.network", "mixed"),
+            "country": self._cs.get("proxy.country", ""),
+            "session_sticky": self._cs.get("proxy.session_sticky", False),
+        }
+
+    def save_proxy_settings(self, data: dict[str, Any]) -> None:
+        """Save proxy provider config.
+
+        ``password`` auto-encrypts via the vault (the key matches the sensitive
+        rule). Provider changes take effect live (no restart) because the
+        registry re-reads ``proxy.provider`` on each call.
+        """
+        allowed_networks = ("residential", "mobile", "mixed")
+        for key, value in data.items():
+            if key == "provider" and isinstance(value, str):
+                value = value.strip().lower()
+                if value not in ("none", "anyip"):
+                    continue
+            elif key == "network" and isinstance(value, str):
+                value = value.strip().lower()
+                if value not in allowed_networks:
+                    continue
+            elif key == "port":
+                try:
+                    value = str(int(value))
+                except (TypeError, ValueError):
+                    continue
+            elif key == "session_sticky":
+                value = bool(value)
+            elif key == "country" and isinstance(value, str):
+                value = value.strip().upper()[:3]  # ISO code, max 3 chars
+            self._cs.set(f"proxy.{key}", value, category="proxy")
+
+    async def test_proxy(self) -> dict[str, Any]:
+        """Health-check the active proxy provider. Returns {success, exit_ip?}."""
+        from kazma_core.proxy.registry import get_proxy_provider
+
+        # Force a fresh provider read so a just-saved config is picked up.
+        try:
+            provider = get_proxy_provider()
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"Provider init failed: {exc}"}
+        return await provider.test()
+
     def get_context_settings(self) -> dict[str, Any]:
         """Get context window settings."""
         return {
