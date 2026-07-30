@@ -19,10 +19,13 @@ From the project root:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -64,6 +67,158 @@ def git_files(pattern: str = "*.py") -> list[str]:
     """List git-tracked files matching a pattern."""
     out = git("ls-files", "-z", pattern)
     return [f for f in out.split("\0") if f.strip()]
+
+
+# Account names / email fragments that signal automation, not a human. A commit
+# is dropped when its author name OR email matches any of these (case-blind).
+_BOT_AUTHORS: frozenset[str] = frozenset(
+    {
+        "copilot-swe-agent[bot]",
+        "github-actions[bot]",
+        "kazma-agent[bot]",
+        "kazma-agent",
+        "qwen.ai[bot]",
+        "openresearch",
+        "semantic-release",
+        "dependabot[bot]",
+        "dependabot-preview[bot]",
+    }
+)
+# Email substrings that mark a bot/app account (GitHub apps all use "[bot]" in
+# their no-reply address; semantic-release uses a bare local-part).
+_BOT_EMAIL_FRAGMENTS: tuple[str, ...] = ("[bot]", "copilot@", "qwenlm-intl@", "bot@openresearch.sh")
+
+
+def _is_bot(name: str, email: str) -> bool:
+    """True if this commit author is automation rather than a human."""
+    nl, el = name.lower(), email.lower()
+    if nl.endswith("[bot]") or nl in _BOT_AUTHORS:
+        return True
+    if any(bot in el for bot in _BOT_EMAIL_FRAGMENTS):
+        return True
+    # GitHub-app no-reply addresses: the local part carries "+<name>[bot]".
+    if "@users.noreply.github.com" in el and "+kazma-agent" in el:
+        return True
+    return False
+
+
+# Some authors commit under several emails that git (unlike GitHub) cannot know
+# belong to one account — e.g. a personal gmail, a custom domain, and a
+# placeholder like "your-email@example.com", all from the same maintainer.
+# Map every known address for such a person to a single canonical login so they
+# count once, mirroring GitHub's account-merge behaviour. Edit this when you
+# adopt a new commit identity.
+_EMAIL_ALIASES: dict[str, str] = {
+    # Mubder / Alfaris — one maintainer across many local git configs.
+    "mubder@users.noreply.github.com": "mubder",
+    "46130504+mubder@users.noreply.github.com": "mubder",
+    "b.alfaris@gmail.com": "mubder",
+    "admin@kazma.ai": "mubder",
+    "your-email@example.com": "mubder",
+    "balfaris@users.noreply.github.com": "mubder",
+}
+
+
+def count_human_contributors() -> int:
+    """Count distinct *human* contributors, matching what GitHub's Contributors
+    page shows — bots excluded, one person's many email aliases collapsed.
+
+    The naive ``git shortlog -sne HEAD`` line count over-reports badly: it
+    groups by raw email, so a single author spread across several addresses
+    (personal gmail, ``+ID@users.noreply.github.com``, custom domains, a local
+    placeholder) counts many times, and bots (copilot-swe-agent, kazma-agent,
+    github-actions[bot], …) count as people. The website was showing ~19 while
+    GitHub's Contributors tab shows far fewer for exactly this reason.
+
+    Git history alone *cannot* reproduce GitHub's number reliably — GitHub also
+    attributes contributors from merged PRs and squash-merges that aren't all
+    reachable as authors in ``HEAD``. So we prefer GitHub's own Contributors
+    API (the source of truth) when reachable, and fall back to a best-effort
+    git-based dedup when offline or unauthenticated.
+
+    Priority:
+      1. GitHub ``/repos/{owner}/{repo}/contributors`` API — count entries of
+         ``type == "User"`` (drops bots). Needs network; honours the
+         ``GH_TOKEN``/``GITHUB_TOKEN`` env var if set for higher rate limits.
+      2. Offline fallback: dedupe by canonical identity (alias map → GitHub
+         login from no-reply address → raw email) after excluding bots.
+    """
+    api_count = _count_contributors_via_api()
+    if api_count is not None:
+        return api_count
+
+    # Offline fallback: %ae=author email, %an=author name; one line per commit.
+    raw = git("log", "--format=%ae%x09%an", "HEAD")
+    identities: set[str] = set()
+    for line in raw.splitlines():
+        if "\t" not in line:
+            continue
+        email, name = line.split("\t", 1)
+        email_l = email.strip().lower()
+        if _is_bot(name.strip(), email_l):
+            continue
+        if email_l in _EMAIL_ALIASES:
+            identities.add(_EMAIL_ALIASES[email_l])
+            continue
+        # Canonical GitHub no-reply addresses encode the login.
+        login = None
+        if "@users.noreply.github.com" in email_l:
+            local = email_l.split("@", 1)[0]
+            if "+" in local:
+                login = local.split("+", 1)[1]  # "46130504+mubder" → "mubder"
+            elif local and not local.isdigit():
+                login = local  # "mubder" (no id prefix)
+        identities.add(login if login else email_l)
+    return len(identities)
+
+
+# GitHub repo the metrics describe. Used for the Contributors API lookup.
+_GITHUB_REPO = "Mubder/kazma"
+
+
+def _count_contributors_via_api() -> int | None:
+    """Return the human-contributor count from GitHub's Contributors API, or
+    ``None`` if unreachable (offline, rate-limited, non-200). Bots are filtered
+    out by checking each entry's ``type`` == "User"."""
+    url = f"https://api.github.com/repos/{_GITHUB_REPO}/contributors?per_page=100&anon=false"
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "kazma-generate-metrics",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    # The contributors list may span multiple pages; follow Link rel="next".
+    users = 0
+    visited = set()
+    try:
+        while url and url not in visited:
+            visited.add(url)
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — fixed GitHub host
+                if resp.status != 200:
+                    return None
+                page = json.loads(resp.read().decode("utf-8", "replace"))
+                users += sum(1 for c in page if c.get("type") == "User")
+                link = resp.headers.get("Link", "")
+                next_url = _next_link(link)
+                url = next_url
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return None
+    return users
+
+
+def _next_link(link_header: str) -> str | None:
+    """Extract the rel="next" URL from a GitHub Link header, if present."""
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        if 'rel="next"' in part:
+            start = part.find("<")
+            end = part.find(">")
+            if start != -1 and end != -1:
+                return part[start + 1 : end]
+    return None
 
 
 # ── Counting ─────────────────────────────────────────────────────────────────
@@ -215,7 +370,9 @@ def collect() -> dict:
         "commits": int(git("rev-list", "--count", "HEAD") or 0),
         "branches": len(git("branch").splitlines()),
         "tags": len(git("tag").splitlines()) if git("tag") else 0,
-        "contributors": len(git("shortlog", "-sne", "HEAD").splitlines()),
+        # Bots excluded + one person's many email aliases merged → matches
+        # GitHub's Contributors tab (was inflating to ~19 from shortlog -sne).
+        "contributors": count_human_contributors(),
     }
 
     # ── Largest Python files ──
