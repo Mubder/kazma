@@ -52,6 +52,7 @@ function settingsApp() {
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
+        logging: { level: 'INFO', format: 'text', retention_days: 7 },
 
         // ── Connectors Tab ──
         connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },
@@ -600,6 +601,21 @@ function settingsApp() {
                     body: JSON.stringify(this.context),
                 });
                 showToast('Context settings saved', 'success');
+            } catch (e) {
+                showToast('Save failed', 'error');
+            }
+            this.saving = false;
+        },
+
+        async saveLogging() {
+            this.saving = true;
+            try {
+                await fetch('/api/settings/system/logging', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.logging),
+                });
+                showToast(I18N?.logging_saved || 'Logging settings saved (restart for rotation changes)', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
             }
@@ -1760,6 +1776,19 @@ function settingsApp() {
             }
         },
 
+        async loadLogging() {
+            try {
+                const data = await this._fetch('/api/settings/system/logging');
+                if (data) {
+                    this.logging = {
+                        level: data.level || 'INFO',
+                        format: data.format || 'text',
+                        retention_days: data.retention_days || 7,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
         async loadPackages() {
             this.pkgLoading = true;
             try {
@@ -2200,7 +2229,7 @@ function settingsApp() {
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
                 case 'voice':

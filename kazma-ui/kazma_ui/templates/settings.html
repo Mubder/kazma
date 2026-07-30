@@ -1079,6 +1079,38 @@
             </div>
         </div>
 
+        <!-- Logging -->
+        <div class="settings-group">
+            <h3>{{ t('settings.logging_title') }}</h3>
+            <div class="form-group">
+                <label>{{ t('settings.logging_level') }}</label>
+                <select class="form-select" x-model="logging.level">
+                    <option value="DEBUG">DEBUG</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                </select>
+                <div class="form-hint">{{ t('settings.logging_level_hint') }}</div>
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.logging_format') }}</label>
+                <select class="form-select" x-model="logging.format">
+                    <option value="text">{{ t('settings.logging_format_text') }}</option>
+                    <option value="json">{{ t('settings.logging_format_json') }}</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.logging_retention') }}</label>
+                <input type="number" class="form-input" x-model.number="logging.retention_days" min="1" max="365" step="1">
+                <div class="form-hint">{{ t('settings.logging_retention_hint') }}</div>
+            </div>
+            <div style="margin-top:8px;padding:10px 12px;background:rgba(255,193,7,0.06);border:1px solid rgba(255,193,7,0.25);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted)">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.logging_restart_hint') }}
+            </div>
+            <button class="btn btn-primary" @click="saveLogging()">{{ t('settings.save_logging') }}</button>
+        </div>
+
         <!-- Logs -->
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
