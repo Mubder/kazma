@@ -26,13 +26,10 @@ export const KazmaAPI = {
 
         try {
             const res = await fetch(url, config);
+            // NOTE: the global fetch wrapper (auth-guard.js) now owns the
+            // session-expired → /login redirect for 401/403. Keep throwing
+            // here so callers awaiting KazmaAPI.fetch get a clear error.
             if (res.status === 401 || res.status === 403) {
-                // Remote / LAN session expired — send browser to login once
-                if (!window.__kazmaAuthRedirecting && !url.includes('/api/auth/')) {
-                    window.__kazmaAuthRedirecting = true;
-                    const next = encodeURIComponent(location.pathname + location.search);
-                    window.location.href = '/login?next=' + next;
-                }
                 throw new Error('HTTP 401: Unauthorized');
             }
             if (!res.ok) {

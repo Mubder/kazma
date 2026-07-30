@@ -119,6 +119,11 @@
         };
     </script>
 
+    {# Auth guard — global fetch wrapper for session-expired (401) handling.
+       Classic script, runs before any page/module script so every fetch is
+       covered. Must come AFTER window.t injection above (it uses window.t). #}
+    <script src="/static/js/auth-guard.js?v={{ js_version() }}"></script>
+
     {# WebSocket auth token for browser WS connections (query param fallback) #}
     {% set ws_token = ws_token() if ws_token is callable else ws_token %}
     {% if ws_token %}

@@ -381,6 +381,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.delete": {"en": "Delete", "ar": "حذف"},
     "settings.status_active": {"en": "active", "ar": "نشط"},
     "settings.status_disabled": {"en": "disabled", "ar": "معطّل"},
+    "auth.session_expired": {
+        "en": "Your session has expired. Please sign in again to continue.",
+        "ar": "انتهت جلستك. يرجى تسجيل الدخول مرة أخرى للمتابعة.",
+    },
+    "auth.session_expired_title": {"en": "Session expired", "ar": "انتهت الجلسة"},
+    "auth.relogin_hint": {
+        "en": "Your session expired — you'll be redirected to the login page.",
+        "ar": "انتهت جلستك — سيتم توجيهك إلى صفحة تسجيل الدخول.",
+    },
     "login.sign_in": {"en": "Sign in", "ar": "تسجيل الدخول"},
     "login.blurb": {
         "en": "Sign in with a platform user, the server secret, or your organization IdP.",

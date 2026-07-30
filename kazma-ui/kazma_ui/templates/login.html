@@ -53,6 +53,7 @@
       background: rgba(220, 80, 80, 0.15); color: #f0a0a0; font-size: 0.82rem;
     }
     .login-error.show { display: block; }
+    .login-error.info { background: rgba(234, 179, 8, 0.15); color: #facc15; }
     .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
     .login-brand img { height: 32px; width: 32px; border-radius: 6px; }
     .login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -116,6 +117,13 @@
       var params = new URLSearchParams(location.search);
       var next = params.get('next') || '/';
       if (!next.startsWith('/') || next.startsWith('//')) next = '/';
+
+      // If redirected here due to an expired session, explain it instead of
+      // showing a bare login form. 'info' = amber informational banner.
+      if (params.get('reason') === 'session_expired' && err) {
+        err.textContent = {{ t('auth.session_expired') | tojson }};
+        err.classList.add('show', 'info');
+      }
 
       document.querySelectorAll('.login-tabs button').forEach(function (btn) {
         btn.addEventListener('click', function () {

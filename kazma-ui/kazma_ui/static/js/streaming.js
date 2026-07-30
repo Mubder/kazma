@@ -145,16 +145,22 @@ var KazmaStream = (function() {
       ws.onclose = function(event) {
         if (callbacks.onStatus) callbacks.onStatus('disconnected');
         if (event && event.code === 4003) {
-          console.warn('[KazmaStream] WebSocket closed with 4003 (Unauthorized). Reloading page to refresh credentials...');
-          var lastReload = sessionStorage.getItem('kazma_last_reload');
-          var now = Date.now();
-          if (!lastReload || (now - parseInt(lastReload, 10)) > 10000) {
-            sessionStorage.setItem('kazma_last_reload', String(now));
-            location.reload();
-          } else {
-            if (callbacks.onError) {
-              callbacks.onError('Unauthorized session. Please refresh the page manually.');
-            }
+          // Unauthorized WS close = session expired. Route to login (same
+          // routine as the global fetch wrapper) instead of a blind reload,
+          // which previously landed the user back on a still-broken page.
+          console.warn('[KazmaStream] WebSocket closed with 4003 (Unauthorized). Redirecting to login...');
+          if (!window.__kazmaAuthRedirecting) {
+            window.__kazmaAuthRedirecting = true;
+            try {
+              if (typeof window.showToast === 'function') {
+                window.showToast(
+                  (window.t && window.t('auth.session_expired')) || 'Your session has expired. Redirecting to login…',
+                  'warning', 3500
+                );
+              }
+            } catch (e) { /* best-effort */ }
+            var next = encodeURIComponent(location.pathname + location.search);
+            location.href = '/login?next=' + next + '&reason=session_expired';
           }
           return;
         }
