@@ -371,6 +371,61 @@ class SettingsManager:
         for key, value in data.items():
             self._cs.set(f"safety.{key}", value, category="safety")
 
+    # ══════════════════════════════════════════════════════════════════
+    # LOGGING
+    # ══════════════════════════════════════════════════════════════════
+
+    def get_logging_settings(self) -> dict[str, Any]:
+        """Get logging settings (level, format, rotation retention).
+
+        These persist immediately but log *level* is the only one that can
+        hot-apply — rotation/retention params take effect on the next server
+        boot (Python logging handlers are configured once at startup).
+        """
+        from kazma_core.logging_config import resolve_retention_days, _resolve_level_with_config
+
+        return {
+            "level": self._cs.get("logging.level", _resolve_level_with_config(None)),
+            "format": self._cs.get("logging.format", "text"),
+            "retention_days": self._cs.get("logging.retention_days", resolve_retention_days()),
+        }
+
+    def save_logging_settings(self, data: dict[str, Any]) -> None:
+        """Update logging settings.
+
+        Persists to ConfigStore. The level can hot-apply; rotation/retention
+        changes require a server restart (handlers are set at boot).
+        """
+        allowed_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+        for key, value in data.items():
+            if key == "level" and isinstance(value, str):
+                value = value.strip().upper()
+                if value not in allowed_levels:
+                    continue
+            elif key == "retention_days":
+                try:
+                    n = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if n < 1:
+                    continue  # reject invalid; keep existing value
+                value = n
+            elif key == "format" and isinstance(value, str):
+                value = "json" if value.strip().lower() == "json" else "text"
+            self._cs.set(f"logging.{key}", value, category="logging")
+
+        # Hot-apply the level if possible (mutate existing loggers/handlers —
+        # safe, unlike handler reconfiguration). Rotation changes are deferred
+        # to next boot.
+        try:
+            level_name = data.get("level")
+            if isinstance(level_name, str) and level_name.strip().upper() in allowed_levels:
+                import logging as _logging
+
+                _logging.getLogger().setLevel(level_name.strip().upper())
+        except Exception:
+            pass
+
     def get_context_settings(self) -> dict[str, Any]:
         """Get context window settings."""
         return {

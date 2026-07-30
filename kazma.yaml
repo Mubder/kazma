@@ -150,6 +150,7 @@ ui:
 logging:
   level: INFO
   format: json
+  retention_days: 7  # daily rotation; auto-delete log files older than this many days
   langfuse:
     enabled: false
     public_key: ''

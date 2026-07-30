@@ -240,6 +240,21 @@ class SettingsRouterBuilder:
             _get_sm().save_safety_settings(req)
             return {"status": "ok"}
 
+        @router.get("/api/settings/system/logging")
+        async def api_get_logging() -> dict[str, Any]:
+            """Get logging settings (level, format, rotation retention)."""
+            return _get_sm().get_logging_settings()
+
+        @router.put("/api/settings/system/logging")
+        async def api_save_logging(req: dict[str, Any]) -> dict[str, str]:
+            """Save logging settings.
+
+            Level hot-applies; rotation/retention changes take effect on next
+            server restart (Python logging handlers are configured at boot).
+            """
+            _get_sm().save_logging_settings(req)
+            return {"status": "ok"}
+
         @router.put("/api/settings/agent/context")
         async def api_save_context(req: dict[str, Any]) -> dict[str, str]:
             """Save context window settings."""
