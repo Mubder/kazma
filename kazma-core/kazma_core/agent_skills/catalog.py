@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from kazma_core.agent_skills.discovery import AgentSkill, discover_skills
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "build_catalog_prompt",
@@ -63,7 +66,8 @@ def build_catalog_prompt(
         "<available_skills>",
     ]
     for skill in items:
-        lines.append("  <skill>")
+        verified_attr = ' integrity="verified"' if skill.checksum else ' integrity="unsigned"'
+        lines.append(f"  <skill{verified_attr}>")
         lines.append(f"    <name>{_xml_escape(skill.name)}</name>")
         lines.append(
             f"    <description>{_xml_escape(skill.description)}</description>"
@@ -82,12 +86,41 @@ def build_catalog_prompt(
 
 
 def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> str:
-    """Format full skill body + resource listing for activation (tier 2)."""
+    """Format full skill body + resource listing for activation (tier 2).
+
+    Integrity: verifies the SKILL.md against its stored install meta first.
+    A **tampered** skill (checksum/signature mismatch) fails closed — the body
+    is refused and an error is returned instead. An **unsigned** skill (no
+    checksum stored) loads with a warning. The skill body is always wrapped in
+    the untrusted-data prompt fence (it is arbitrary GitHub-sourced text).
+    """
+    # Integrity gate (fail-closed on tamper, warn on unsigned).
+    try:
+        from kazma_core.agent_skills.integrity import verify_skill
+
+        vr = verify_skill(skill.location)
+        if not vr.ok:
+            return (
+                f"[Kazma] Skill '{skill.name}' failed integrity verification — "
+                f"{vr.reason}. Refusing to load the skill body."
+            )
+    except Exception as exc:  # defensive: never crash activation
+        logger.warning("[agent_skills] integrity check error for %s: %s", skill.name, exc)
+
+    # Fence the body as untrusted data (defense-in-depth — the body is
+    # arbitrary text from a GitHub repo and must not enter the model as
+    # instructions). Mirrors the env_context / self-improvement fencing.
+    from kazma_core.safety.prompt_fence import format_untrusted_block
+
+    body = skill.parsed.body or "(no body content)"
+    fenced_body = format_untrusted_block(body, source=f"agent_skill:{skill.name}")
+    integrity_note = "" if vr.signed else " (unsigned — not integrity-verified)"
+
     resources = _list_resources(skill.base_dir, max_resources=max_resources)
 
     parts = [
-        f'<skill_content name="{_xml_escape(skill.name)}">',
-        skill.parsed.body or "(no body content)",
+        f'<skill_content name="{_xml_escape(skill.name)}"{integrity_note}>',
+        fenced_body,
         "",
         f"Skill directory: {skill.base_dir}",
         "Relative paths in this skill are relative to the skill directory.",

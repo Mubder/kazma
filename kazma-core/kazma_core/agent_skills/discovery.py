@@ -13,7 +13,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from kazma_core.agent_skills.parser import ParsedSkill, parse_skill_md
 
@@ -56,6 +56,8 @@ class AgentSkill:
     parsed: ParsedSkill
     enabled: bool = True
     source: str = ""  # install source URL / owner/repo if known
+    checksum: str = ""  # SHA-256 of SKILL.md at install time (integrity)
+    signature: str = ""  # HMAC-SHA256 of the checksum (integrity), empty if unsigned
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -80,6 +82,7 @@ class AgentSkill:
             "version": self.version,
             "enabled": self.enabled,
             "source": self.source,
+            "signed": bool(self.checksum),
             "warnings": list(self.warnings),
         }
 
@@ -201,17 +204,21 @@ def _is_enabled(skill_name: str) -> bool:
         return True
 
 
-def _read_install_meta(skill_dir: Path) -> str:
+def _read_install_meta(skill_dir: Path) -> dict[str, Any]:
+    """Read the ``.kazma-install.json`` next to a skill as a dict.
+
+    Returns the full parsed meta (source/checksum/signature/...) so callers can
+    pull whatever they need; empty dict if absent/unreadable.
+    """
     meta = skill_dir / ".kazma-install.json"
     if not meta.is_file():
-        return ""
+        return {}
     try:
         import json
 
-        data = json.loads(meta.read_text(encoding="utf-8"))
-        return str(data.get("source") or "")
+        return json.loads(meta.read_text(encoding="utf-8")) or {}
     except Exception:
-        return ""
+        return {}
 
 
 def discover_skills(
@@ -248,6 +255,7 @@ def discover_skills(
             if not enabled and not include_disabled:
                 continue
 
+            _meta = _read_install_meta(skill_md.parent)
             skill = AgentSkill(
                 name=parsed.name,
                 description=parsed.description,
@@ -255,7 +263,9 @@ def discover_skills(
                 scope=scope,
                 parsed=parsed,
                 enabled=enabled,
-                source=_read_install_meta(skill_md.parent),
+                source=str(_meta.get("source") or ""),
+                checksum=str(_meta.get("checksum") or ""),
+                signature=str(_meta.get("signature") or ""),
                 warnings=list(parsed.warnings),
             )
 

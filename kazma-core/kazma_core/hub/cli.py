@@ -734,7 +734,18 @@ def sign(path: str, secret: str | None) -> None:
         click.echo(f"Error: skill_manifest.yaml not found in {skill_dir}", err=True)
         sys.exit(1)
 
-    signing_secret = secret or os.environ.get("KAZMA_SECRET", "").strip()
+    signing_secret = secret or ""
+    if not signing_secret:
+        # Resolve via the unified getter so hub signing agrees with the
+        # verifier (hub/loader.py uses get_kazma_secret()). Previously this
+        # read os.environ["KAZMA_SECRET"] directly, which missed the
+        # ConfigStore/auto-generated secret the verifier uses.
+        try:
+            from kazma_core.config_store import get_kazma_secret
+
+            signing_secret = (get_kazma_secret() or "").strip()
+        except Exception:
+            signing_secret = ""
     if not signing_secret:
         click.echo(
             "Error: KAZMA_SECRET not set. Set it or pass --secret.", err=True

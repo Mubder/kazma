@@ -55,6 +55,9 @@ def main() -> None:
     elif cmd == "hub":
         _run_hub(sys.argv[2:])
 
+    elif cmd in ("agent-skills", "agent_skills"):
+        _run_agent_skills(sys.argv[2:])
+
     elif cmd == "docs":
         _run_docs(sys.argv[2:])
 
@@ -82,6 +85,7 @@ def main() -> None:
         print("  serve      Start the WebUI server (default port 9090)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
+        print("  agent-skills  Agent Skills (sign, list, verify)")
         print("  docs       Documentation commands (build, serve)")
         print("  completion Shell tab completion (bash, zsh, powershell, install)")
         print("  project    Project-level config (.kazma/) — init, show, validate")
@@ -209,6 +213,100 @@ def _run_hub(args: list[str]) -> None:
     from kazma_core.hub.cli import hub as hub_cli
 
     hub_cli(args, standalone_mode=True)
+
+
+def _run_agent_skills(args: list[str]) -> None:
+    """Run agent-skills commands (sign, list, verify)."""
+    if not args or args[0] in ("--help", "-h", "help"):
+        print("Usage: kazma agent-skills <command> [args]")
+        print("Commands:")
+        print("  sign <dir>   Sign an Agent Skill (writes checksum + HMAC signature")
+        print("               to .kazma-install.json next to SKILL.md)")
+        print("  verify <dir> Verify an Agent Skill's integrity")
+        print("  list         List discovered Agent Skills with integrity status")
+        return
+
+    sub = args[0]
+    if sub == "sign":
+        if len(args) < 2:
+            print("Usage: kazma agent-skills sign <skill-dir>")
+            sys.exit(1)
+        _agent_skills_sign(args[1])
+    elif sub == "verify":
+        if len(args) < 2:
+            print("Usage: kazma agent-skills verify <skill-dir>")
+            sys.exit(1)
+        _agent_skills_verify(args[1])
+    elif sub == "list":
+        _agent_skills_list()
+    else:
+        print(f"Unknown agent-skills command: {sub}")
+        print("Run 'kazma agent-skills help' for available commands.")
+        sys.exit(1)
+
+
+def _agent_skills_sign(skill_dir: str) -> None:
+    """Sign an Agent Skill directory (writes .kazma-install.json)."""
+    from pathlib import Path
+
+    d = Path(skill_dir).expanduser().resolve()
+    skill_md = d / "SKILL.md"
+    if not skill_md.is_file():
+        print(f"Error: SKILL.md not found in {d}")
+        sys.exit(1)
+
+    from kazma_core.agent_skills.integrity import (
+        compute_skill_signature,
+        read_install_meta,
+        write_install_meta,
+    )
+
+    text = skill_md.read_text(encoding="utf-8")
+    sig_fields = compute_skill_signature(text)
+    if not sig_fields.get("signature"):
+        print("Error: no signing secret available. Set KAZMA_SECRET or configure the vault.")
+        sys.exit(1)
+
+    meta = read_install_meta(d)
+    meta.update(sig_fields)
+    write_install_meta(d, meta)
+    print(f"Signed '{d.name}': checksum={sig_fields['checksum'][:16]}… signature=present")
+
+
+def _agent_skills_verify(skill_dir: str) -> None:
+    """Verify an Agent Skill's integrity."""
+    from pathlib import Path
+
+    d = Path(skill_dir).expanduser().resolve()
+    skill_md = d / "SKILL.md"
+    if not skill_md.is_file():
+        print(f"Error: SKILL.md not found in {d}")
+        sys.exit(1)
+
+    from kazma_core.agent_skills.integrity import verify_skill
+
+    vr = verify_skill(skill_md)
+    if vr.ok:
+        status = "verified ✓" if vr.signed else "unsigned (loads with warning)"
+        print(f"{d.name}: {status} — {vr.reason}")
+    else:
+        print(f"{d.name}: FAILED ✗ — {vr.reason}")
+        sys.exit(1)
+
+
+def _agent_skills_list() -> None:
+    """List discovered Agent Skills with integrity status."""
+    from kazma_core.agent_skills.discovery import discover_skills
+
+    skills = discover_skills(include_disabled=True)
+    if not skills:
+        print("No Agent Skills discovered.")
+        return
+    print(f"{'NAME':<28} {'SCOPE':<10} {'INTEGRITY':<12} SOURCE")
+    print("-" * 80)
+    for s in sorted(skills.values(), key=lambda x: x.name):
+        integrity = "verified" if s.checksum else "unsigned"
+        print(f"{s.name:<28} {s.scope:<10} {integrity:<12} {s.source or '-'}")
 
 
 def _run_docs(args: list[str]) -> None:

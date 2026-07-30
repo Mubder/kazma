@@ -238,13 +238,19 @@ class KazmaAgent:
             logger.debug("[agent_runner] env context injection skipped", exc_info=True)
 
         # Agent Skills catalog (agentskills.io progressive disclosure tier 1).
-        # Only name+description — full body loads via activate_skill.
+        # Only name+description — full body loads via activate_skill. The catalog
+        # descriptions are parsed from untrusted SKILL.md frontmatter, so the
+        # whole block is fenced as untrusted data (same defense as env_context /
+        # self-improvement). The full body is additionally fenced + integrity-
+        # verified at activation (catalog.format_skill_activation).
         try:
             from kazma_core.agent_skills.catalog import build_catalog_prompt
+            from kazma_core.safety.prompt_fence import format_untrusted_block
 
             skills_block = build_catalog_prompt()
             if skills_block and skills_block not in self.system_prompt:
-                self.system_prompt = self.system_prompt.rstrip() + "\n\n" + skills_block
+                fenced = format_untrusted_block(skills_block, source="agent_skills_catalog")
+                self.system_prompt = self.system_prompt.rstrip() + "\n\n" + fenced
             elif not skills_block:
                 # Still teach install path when catalog is empty
                 install_hint = (

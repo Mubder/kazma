@@ -173,6 +173,15 @@ def _copy_skill(src_dir: Path, dest_dir: Path, *, source: str) -> dict[str, str]
         "version": parsed.version,
         "author": parsed.author,
     }
+    # Integrity: sign the SKILL.md at install time so tampering is detectable
+    # on load. compute_skill_signature re-reads via _get_secret() so the
+    # written signature verifies against the same secret the verifier uses.
+    try:
+        from kazma_core.agent_skills.integrity import compute_skill_signature
+
+        meta.update(compute_skill_signature(text))
+    except Exception:
+        logger.debug("[agent_skills] integrity signing skipped", exc_info=True)
     (target / ".kazma-install.json").write_text(
         json.dumps(meta, indent=2),
         encoding="utf-8",
@@ -183,6 +192,8 @@ def _copy_skill(src_dir: Path, dest_dir: Path, *, source: str) -> dict[str, str]
         "path": str(target),
         "version": parsed.version,
         "author": parsed.author,
+        "checksum": meta.get("checksum", ""),
+        "signed": bool(meta.get("signature")),
     }
 
 

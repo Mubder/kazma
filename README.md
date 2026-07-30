@@ -43,7 +43,7 @@ LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80%
 Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with circuit breakers, retries, and a self-improvement engine that learns from swarm outcomes automatically.
 
 ### 🔒 Triple-Wired Safety
-Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Every downloaded skill is HMAC-SHA256 validated against a cryptographic checksum.
+Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Downloaded Agent Skills are **integrity-verified (HMAC-SHA256)** at load — tampered skills are refused — and their content is injected behind an untrusted-data prompt fence.
 
 ### 🌐 Multi-Platform
 Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph supervisor. Platform IDs never enter LangGraph state.
@@ -75,7 +75,7 @@ Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultura
 | **Encrypted vault** | ✅ AES-256 | ❌ | ❌ | ❌ | ❌ |
 | **MCP marketplace** | ✅ 85+ servers | ❌ | ❌ | ❌ | ❌ |
 | **Time-travel replay** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Skill signing** | ✅ HMAC | ❌ | ❌ | ❌ | ❌ |
+| **Skill integrity** | ✅ HMAC-SHA256 | ❌ | ❌ | ❌ | ❌ |
 | **Web UI included** | ✅ | ❌ | ❌ | ❌ | ✅ |
 
 ---
