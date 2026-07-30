@@ -80,6 +80,53 @@ _hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=Fals
 _graph_hitl_gate_ctx: ContextVar[bool] = ContextVar("_graph_hitl_gate", default=False)
 
 
+def _record_procedural_outcome(tool_name: str, arguments: dict[str, Any], *, success: bool) -> None:
+    """Feed a tool-execution outcome into the V2 procedural DAG memory.
+
+    Best-effort fire-and-forget on a daemon thread — never blocks the
+    tool result or raises into the tool path. Records the outcome so the
+    procedural recorder can cluster recurring tool patterns and compute
+    Laplace-smoothed confidence. No-op when the V2 schema is absent.
+    """
+    try:
+        import threading
+
+        def _run() -> None:
+            try:
+                import sqlite3
+
+                from kazma_core.memory.config import read_memory_cfg
+                from kazma_core.memory.procedural import record_procedural_outcome
+                from kazma_core.memory.schema_v2 import ensure_primary_schema
+                from kazma_core.paths import primary_memory_db
+
+                conn = sqlite3.connect(
+                    primary_memory_db(), check_same_thread=False, isolation_level=None
+                )
+                try:
+                    ensure_primary_schema(conn)
+                    # Arguments are the preconditions; the tool name + args
+                    # form the DAG signature. Postcondition is success bool.
+                    record_procedural_outcome(
+                        conn,
+                        name=tool_name,
+                        description=f"Tool: {tool_name}",
+                        preconditions={"tool": tool_name, "args_keys": sorted(arguments.keys())},
+                        dag_steps=[{"tool": tool_name, "args": arguments}],
+                        postconditions={"succeeded": success},
+                        success=success,
+                        cfg=read_memory_cfg(),
+                    )
+                finally:
+                    conn.close()
+            except Exception:
+                logger.debug("[ToolRegistry] procedural record failed", exc_info=True)
+
+        threading.Thread(target=_run, daemon=True, name="kazma-procedural-record").start()
+    except Exception:
+        logger.debug("[ToolRegistry] could not spawn procedural-record thread", exc_info=True)
+
+
 def _is_under_agent_skill_dir(resolved_p: Path) -> bool:
     """True if path is inside a known Agent Skills install/scan directory.
 
@@ -519,6 +566,7 @@ class LocalToolRegistry:
                 else:
                     content = str(result)
 
+                _record_procedural_outcome(tool_name, arguments, success=True)
                 return {"content": content, "is_error": False}
 
             except retryable_exc as exc:
@@ -540,11 +588,13 @@ class LocalToolRegistry:
                 # Non-retryable error — return immediately
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc)
+                _record_procedural_outcome(tool_name, arguments, success=False)
                 return {"content": "Error: Tool execution failed. Check server logs for details.", "is_error": True}
 
         # All retry attempts exhausted
         duration_ms = (time.monotonic() - start) * 1000
         logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc)
+        _record_procedural_outcome(tool_name, arguments, success=False)
         return {"content": f"Error: {last_exc}", "is_error": True}
 
     # ── Introspection ───────────────────────────────────────────────
@@ -707,9 +757,38 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_search(query: str, limit: int = 5) -> str:
-            # Use the unified adapter (4-layer RRF) so tool searches see the
-            # same store as per-turn RAG retrieval. Fall back to VectorMemory
-            # if the adapter is unavailable.
+            # ── V2 cognitive recall path ──────────────────────────────
+            # When the V2 stack is active (use_new_stack=true), route the
+            # search through recall() so the tool sees the same bi-temporal
+            # beliefs + tiered episodes as per-turn RAG. Returns a
+            # structured JSON list of beliefs + episodes.
+            try:
+                from kazma_core.memory.config import memory_v2_enabled
+
+                if memory_v2_enabled():
+                    from kazma_core.memory.recall import recall as v2_recall
+
+                    result = v2_recall(query, limit=limit)
+                    out: list[dict[str, Any]] = []
+                    for h in result.beliefs:
+                        out.append({
+                            "id": h.id, "content": h.content, "score": h.score,
+                            "kind": "belief", "source": h.source, "metadata": h.metadata,
+                        })
+                    for h in result.episodes:
+                        out.append({
+                            "id": h.id, "content": h.content, "score": h.score,
+                            "kind": "episode", "source": h.source, "metadata": h.metadata,
+                        })
+                    if out:
+                        return json.dumps(out, ensure_ascii=False, indent=2)
+                    return "No relevant memories found."
+            except Exception:
+                pass  # fall through to legacy adapter
+            # ── Legacy 4-layer RRF adapter path ───────────────────────
+            # Use the unified adapter so tool searches see the same store
+            # as per-turn RAG retrieval. Fall back to VectorMemory if the
+            # adapter is unavailable.
             try:
                 from kazma_core.swarm.memory.adapter import get_adapter
 

@@ -519,6 +519,7 @@ def format_recall_block(
     fence_source: str = "memory_v2_recall",
     max_beliefs: int = 5,
     max_episodes: int = 5,
+    max_tokens: int = 1500,
 ) -> str:
     """Render a RecallResult into a prompt-fenced context block.
 
@@ -526,16 +527,44 @@ def format_recall_block(
     History". The whole block is wrapped in the untrusted prompt fence
     via :func:`format_untrusted_block` (the ``source`` kwarg is
     REQUIRED per the actual signature — resolution #2).
+
+    A hard ``max_tokens`` budget (default ~1500, ≈4 chars/token) caps
+    the total injected context so PPR/RRF can't overrun the prompt.
+    Items are added in priority order (beliefs first, then episodes by
+    score) until the budget is exhausted.
     """
     from kazma_core.safety.prompt_fence import format_untrusted_block
 
+    # ~4 chars per token is the standard heuristic estimate
+    char_budget = max_tokens * 4
     parts: list[str] = []
+    used = 0
+
     if result.beliefs:
-        lines = [f"- {h.content}" for h in result.beliefs[:max_beliefs]]
-        parts.append("## Known Facts\n" + "\n".join(lines))
-    if result.episodes:
-        lines = [f"- {h.content}" for h in result.episodes[:max_episodes]]
-        parts.append("## Relevant History\n" + "\n".join(lines))
+        lines: list[str] = []
+        for h in result.beliefs[:max_beliefs]:
+            line = f"- {h.content}"
+            if used + len(line) + 1 > char_budget:
+                break
+            lines.append(line)
+            used += len(line) + 1
+        if lines:
+            header = "## Known Facts\n"
+            parts.append(header + "\n".join(lines))
+            used += len(header)
+
+    if result.episodes and used < char_budget:
+        lines = []
+        for h in result.episodes[:max_episodes]:
+            line = f"- {h.content}"
+            if used + len(line) + 1 > char_budget:
+                break
+            lines.append(line)
+            used += len(line) + 1
+        if lines:
+            header = "## Relevant History\n"
+            parts.append(header + "\n".join(lines))
+
     if not parts:
         return ""
     body = "\n\n".join(parts)

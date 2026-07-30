@@ -685,19 +685,53 @@ def schedule_post_turn_memory(
                 )
         except Exception:
             logger.warning("[post_turn] consolidator failed", exc_info=True)
-        # ── V2 dual-write mirror (best-effort, never blocks) ──────────
-        # Captures the turn as a V2 episode + any extracted facts as
-        # beliefs, so the cognitive schema stays populated. Provenance
-        # flows through for source tracing.
+
+    def _run_v2_sync() -> None:
+        """Synchronous V2 mirror + belief extraction (runs in a thread).
+
+        Decoupled from the legacy ``_run`` coroutine via
+        ``run_in_executor`` so the legacy path's blocking sync calls
+        (embedder load, Chroma init) cannot starve V2 writes. The async
+        extractor (LLM call) is driven by a fresh event loop inside this
+        thread — worker threads have no running loop by default, so
+        ``asyncio.run`` is always safe here.
+        """
+        # ── V2 dual-write mirror ─────────────────────────────────────
         try:
             _mirror_turn_to_v2(messages, session_id=session_id, turn=turn)
         except Exception:
             logger.debug("[post_turn] V2 mirror failed", exc_info=True)
+        # ── V2 belief extraction (the live wire) ──────────────────────
+        # Extracts typed beliefs and applies them via mutate_belief
+        # (functional supersede / set append / state). This populates the
+        # V2 belief graph from live conversation. Gated on the heuristic
+        # gatekeeper (filler turns skip the LLM call).
+        try:
+            import asyncio as _aio
+
+            _aio.run(
+                _extract_and_apply_v2_beliefs_inner(
+                    messages, session_id=session_id, turn=turn
+                )
+            )
+        except Exception:
+            logger.debug("[post_turn] V2 belief extraction failed", exc_info=True)
 
     try:
         loop.create_task(_run())
     except Exception:
-        logger.debug("[post_turn] could not schedule", exc_info=True)
+        logger.debug("[post_turn] could not schedule legacy task", exc_info=True)
+    # V2 path runs in a DEDICATED OS thread (not the loop's executor) so
+    # the legacy path's blocking sync calls (embedder MiniLM load, Chroma
+    # init) cannot starve or gate V2 writes. A plain Thread is fully
+    # decoupled from the asyncio loop and runs even if the loop freezes.
+    try:
+        import threading
+
+        t = threading.Thread(target=_run_v2_sync, daemon=True, name="kazma-v2-extract")
+        t.start()
+    except Exception:
+        logger.debug("[post_turn] could not start V2 thread", exc_info=True)
 
 
 def _mirror_turn_to_v2(
@@ -728,3 +762,72 @@ def _mirror_turn_to_v2(
         user_text=user_text,
         assistant_text=assistant_text,
     )
+
+
+async def _extract_and_apply_v2_beliefs_inner(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str | None,
+    turn: int | None,
+) -> None:
+    """Run the V2 belief extractor on the just-finished turn.
+
+    Opens primary + ops connections, calls
+    :func:`extract_and_apply_beliefs` (which gatekeeps filler, extracts
+    via LLM or heuristic, fences, and mutates), then closes. Best-effort:
+    any failure is logged and swallowed so the legacy path is unaffected.
+    """
+    import sqlite3
+
+    from kazma_core.memory.auto_store import extract_turn_texts
+    from kazma_core.memory.config import read_memory_cfg
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs
+
+    user_text, assistant_text = extract_turn_texts(messages)
+    if not user_text or user_text.strip().startswith("/"):
+        return
+    cfg = read_memory_cfg()
+    primary_conn = None
+    ops_conn = None
+    try:
+        # isolation_level=None = autocommit mode, so Python's sqlite3 does
+        # NOT open implicit transactions (which would hold a stale WAL
+        # snapshot and miss concurrent supersede commits from other threads).
+        # mutate_belief controls transactions explicitly via BEGIN IMMEDIATE.
+        primary_conn = sqlite3.connect(
+            primary_memory_db(), check_same_thread=False, isolation_level=None
+        )
+        primary_conn.row_factory = sqlite3.Row
+        ensure_primary_schema(primary_conn)
+        ops_conn = sqlite3.connect(
+            memory_ops_db(), check_same_thread=False, isolation_level=None
+        )
+        ensure_ops_schema(ops_conn)
+        stats = await extract_and_apply_beliefs(
+            primary_conn,
+            ops_conn,
+            user_text,
+            assistant_text,
+            session_id=session_id,
+            turn=turn,
+            cfg=cfg,
+            use_llm=True,
+        )
+        if stats.get("applied"):
+            logger.info(
+                "[post_turn] V2 beliefs extracted: source=%s applied=%d rejected=%d filler=%s",
+                stats.get("source"),
+                stats.get("applied", 0),
+                stats.get("rejected", 0),
+                stats.get("skipped_filler", False),
+            )
+    finally:
+        for conn in (primary_conn, ops_conn):
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass

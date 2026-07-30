@@ -156,6 +156,13 @@ def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
 
 _audit_lock = threading.Lock()
 
+# Serializes belief mutations across threads. The functional-supersede
+# logic does a read-then-write (find active belief → close it → insert
+# new) which is inherently racy if two threads mutate the same
+# (subject, predicate) concurrently — both could see no active belief
+# and both insert, losing the supersede. This lock makes mutations atomic.
+_mutation_lock = threading.Lock()
+
 
 def _write_audit(
     ops_conn: sqlite3.Connection | None,
@@ -235,30 +242,31 @@ def mutate_belief(
     now = time.time()
 
     try:
-        if ptype == "functional":
-            return _mutate_functional(
-                primary_conn, ops_conn, sub, pred, obj,
-                confidence=confidence, importance=importance, trust=trust,
-                extraction_method=extraction_method, tenant_id=tenant_id,
-                source_session=source_session, source_turn=source_turn,
-                mem_class=mem_class, now=now,
-            )
-        elif ptype == "state":
-            return _mutate_state(
-                primary_conn, ops_conn, sub, pred, obj,
-                confidence=confidence, importance=importance, trust=trust,
-                extraction_method=extraction_method, tenant_id=tenant_id,
-                source_session=source_session, source_turn=source_turn,
-                mem_class=mem_class, now=now,
-            )
-        else:
-            return _mutate_set(
-                primary_conn, ops_conn, sub, pred, obj,
-                confidence=confidence, importance=importance, trust=trust,
-                extraction_method=extraction_method, tenant_id=tenant_id,
-                source_session=source_session, source_turn=source_turn,
-                mem_class=mem_class, now=now,
-            )
+        with _mutation_lock:
+            if ptype == "functional":
+                return _mutate_functional(
+                    primary_conn, ops_conn, sub, pred, obj,
+                    confidence=confidence, importance=importance, trust=trust,
+                    extraction_method=extraction_method, tenant_id=tenant_id,
+                    source_session=source_session, source_turn=source_turn,
+                    mem_class=mem_class, now=now,
+                )
+            elif ptype == "state":
+                return _mutate_state(
+                    primary_conn, ops_conn, sub, pred, obj,
+                    confidence=confidence, importance=importance, trust=trust,
+                    extraction_method=extraction_method, tenant_id=tenant_id,
+                    source_session=source_session, source_turn=source_turn,
+                    mem_class=mem_class, now=now,
+                )
+            else:
+                return _mutate_set(
+                    primary_conn, ops_conn, sub, pred, obj,
+                    confidence=confidence, importance=importance, trust=trust,
+                    extraction_method=extraction_method, tenant_id=tenant_id,
+                    source_session=source_session, source_turn=source_turn,
+                    mem_class=mem_class, now=now,
+                )
     except Exception:
         logger.debug("[belief_mutate] mutation failed", exc_info=True)
         return {"action": "noop", "belief_id": "", "superseded_id": None}
@@ -326,6 +334,14 @@ def _mutate_functional(
     """Single-valued: close the prior active belief, insert a new one."""
     tenant_id = kw["tenant_id"]
     now = kw["now"]
+    # BEGIN IMMEDIATE acquires a write lock up front so the read below
+    # sees ALL prior committed writes (no stale WAL snapshot). This is
+    # essential when mutations run across separate connections/threads —
+    # a deferred read transaction could miss a just-committed supersede.
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except Exception:
+        pass  # already in a transaction
     # Find the currently-active belief for this (subject, predicate)
     existing = conn.execute(
         """SELECT id, object FROM beliefs

@@ -1276,6 +1276,18 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
 
+        # ── V2 memory worker (durable task queue) ────────────────────
+        # Registers the macro_sleep / entity_merge / micro_consolidation
+        # handlers and starts draining memory_ops.db. Pending rows
+        # survive restarts. Best-effort: a failure here never blocks boot.
+        try:
+            from kazma_core.memory.worker_bootstrap import start_memory_worker
+
+            start_memory_worker()
+            logger.info("[Memory] V2 durable worker started")
+        except Exception as e:
+            logger.warning("[Memory] V2 worker start failed: %s", e)
+
         if self.cron_store is not None:
             try:
                 await self.cron_store.init()
