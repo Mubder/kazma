@@ -78,6 +78,7 @@ class SlackAdapter(BaseAdapter):
         app_token: str | None = None,
         allowed_teams: list[str] | None = None,
         allowed_channels: list[str] | None = None,
+        allowed_users: list[str] | None = None,
     ) -> None:
         import os
 
@@ -88,6 +89,9 @@ class SlackAdapter(BaseAdapter):
         self._app_token = app_token or os.environ.get("SLACK_APP_TOKEN", "")
         self._allowed_teams: set[str] = set(allowed_teams or [])
         self._allowed_channels: set[str] = set(allowed_channels or [])
+        # Audit G2c: per-user allowlist (parity with Telegram/Discord). Empty
+        # = allow all members of allowed channels; populated = drop non-listed.
+        self._allowed_users: set[str] = set(allowed_users or [])
 
         if not self._bot_token:
             logger.warning("[Slack] No bot token — adapter will stay STOPPED")
@@ -155,12 +159,14 @@ class SlackAdapter(BaseAdapter):
             logger.error("[Slack] No channel_id in target: %s", outbound.target_id)
             return False
 
-        from kazma_gateway.adapters.slack_send import resolve_channel_id
+        from kazma_gateway.adapters.slack_send import resolve_channel_id, sanitize_outbound
 
         channel_id = resolve_channel_id(outbound.context_metadata, outbound.target_id) or channel_id
+        # Audit G9b: sanitize <!everyone>/<!here>/<!channel> and <@user> mentions
+        # so untrusted agent/tool output can't broadcast/ping.
         payload: dict[str, Any] = {
             "channel": channel_id,
-            "text": outbound.text,
+            "text": sanitize_outbound(outbound.text or ""),
             "mrkdwn": True,
         }
         thread_ts = outbound.context_metadata.get("thread_ts")
@@ -498,6 +504,23 @@ class SlackAdapter(BaseAdapter):
                                             channel = (
                                                 payload.get("channel", {}) or {}
                                             ).get("id", "")
+                                            user_id = user.get("id", "")
+                                            # Audit G2b: interactive payloads (HITL approvals,
+                                            # pickers) MUST respect the channel + user allowlists,
+                                            # same as events. Previously any member who could see
+                                            # an approval card could click Approve unchecked.
+                                            if self._allowed_channels and channel and channel not in self._allowed_channels:
+                                                logger.info(
+                                                    "[Slack] Ignoring interaction from non-allowed channel %s",
+                                                    channel,
+                                                )
+                                                continue
+                                            if getattr(self, "_allowed_users", None) and (not user_id or user_id not in self._allowed_users):
+                                                logger.info(
+                                                    "[Slack] Ignoring interaction from non-allowed user %s",
+                                                    user_id,
+                                                )
+                                                continue
                                             incoming = IncomingMessage(
                                                 platform="slack",
                                                 sender_id=f"slack:{user.get('id', '')}",
@@ -547,6 +570,12 @@ class SlackAdapter(BaseAdapter):
                                 if self._allowed_channels and cid not in self._allowed_channels:
                                     logger.debug("[Slack] Event from non-whitelisted channel %s — skipping", cid)
                                     continue
+                                # Audit G2c: enforce user allowlist if configured
+                                if self._allowed_users:
+                                    _uid = incoming.context_metadata.get("user_id", "")
+                                    if not _uid or _uid not in self._allowed_users:
+                                        logger.info("[Slack] Dropping event from non-allowed user %s — skipping", _uid)
+                                        continue
                                 # Voice: transcribe any audio attachment.
                                 incoming = await self._maybe_transcribe_audio(incoming)
                                 try:

@@ -3,9 +3,12 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system deps for ChromaDB + sentence-transformers + healthchecks
+# git is required by the git_* tools (git_status/push/commit/...) — without it
+# every git tool fails with FileNotFoundError inside the container. (Audit D1.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    git \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 

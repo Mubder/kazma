@@ -56,6 +56,11 @@ _SENSITIVE_LAST_SEGMENTS = frozenset({
     "auth_token",
     "client_secret",
     "webhook_secret",
+    # Audit S1: GitHub App credentials stored under connectors.github.app_*
+    # have last-segment names that the classifier above did not match, so they
+    # sat plaintext in settings.db/Postgres even with KAZMA_VAULT_KEY set.
+    "app_private_key",
+    "app_private_key_path",
 })
 
 

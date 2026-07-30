@@ -34,6 +34,27 @@ __all__ = ["build_env_context", "detect_branch", "detect_repo_slug", "env_contex
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_env_field(value: str, *, max_len: int = 120) -> str:
+    """Sanitize an attacker-controllable env-context field before prompt injection.
+
+    Workspace names, repo slugs, and branch names come from the filesystem /
+    git config and are fully attacker-controlled (a cloned malicious repo can
+    be named anything, or carry a crafted remote URL / branch name with embedded
+    newlines and instruction text). This collapses to a single line, strips
+    control chars, and caps length so none of these can break out of their
+    markdown list-item line or inject prompt directives. (Audit AC3.)
+    """
+    if not value:
+        return ""
+    # Collapse all whitespace runs (incl. newlines/tabs) to single spaces,
+    # drop other control characters, then cap length.
+    cleaned = "".join(
+        ch if (ch.isspace() or ch.isprintable()) else " " for ch in str(value)
+    )
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:max_len]
+
 # The subset of tools the brain should be told about. These are the
 # workspace-scoped, IDE-relevant capabilities. Kept short on purpose —
 # the full tool list is already passed as function-calling schemas; this
@@ -210,8 +231,8 @@ def build_env_context(workspace_id: str | None = None) -> str:
     except Exception:
         pass
 
-    slug = detect_repo_slug(root)
-    branch = detect_branch(root)
+    slug = _sanitize_env_field(detect_repo_slug(root))
+    branch = _sanitize_env_field(detect_branch(root))
 
     # Runtime identity — stops the agent "diagnosing" that Kazma is offline
     # while it is the process serving this chat (common smoke-test failure).
@@ -225,6 +246,8 @@ def build_env_context(workspace_id: str | None = None) -> str:
         or os.environ.get("PORT")
         or "9090"
     ).strip()
+    # Port is interpolated into a URL — keep only digits to prevent injection.
+    port_hint = "".join(ch for ch in port_hint if ch.isdigit()) or "9090"
 
     lines: list[str] = [
         "## You are Kazma (this process)",
@@ -242,7 +265,7 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "unrelated ports when verifying yourself.",
             "",
             "## Active Workspace (BINDING — not optional)",
-            f"- **Workspace name:** {ws_name}",
+            f"- **Workspace name:** {_sanitize_env_field(ws_name)}",
             f"- **Workspace root:** `{root}`",
             "- Native `file_*` / shell / git tools use this root (and per-task "
             "`workspace_scope` when a swarm task targets another workspace).",

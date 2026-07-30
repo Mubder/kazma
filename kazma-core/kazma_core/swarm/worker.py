@@ -17,11 +17,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from kazma_core.swarm.blackboard import SwarmDispatchContext
+from kazma_core.swarm.middleware import TruncationMiddleware
 from kazma_core.swarm.task import WorkerCapabilities
 
 __all__ = ["InProcessWorker", "SwarmWorker"]
 
 logger = logging.getLogger(__name__)
+
+# Module-level tool-output truncator for the worker ReAct loop (Audit AC6).
+_TRUNCATOR = TruncationMiddleware()
 
 
 def _utc_now_iso() -> str:
@@ -264,6 +268,23 @@ class InProcessWorker(SwarmWorker):
                 system_prompt = self.system_prompt
 
             if system_prompt:
+                # The worker Soul may carry accumulated [SelfImprovement] deltas
+                # derived from UNTRUSTED tool/web output. Split the trusted base
+                # prompt from the deltas and fence only the untrusted deltas, so
+                # a poisoned delta can't be obeyed as an instruction. (Audit AC2
+                # — previously the whole prompt, deltas included, was injected
+                # raw.)
+                _SI_MARKER = "[SelfImprovement]"
+                if _SI_MARKER in system_prompt:
+                    base_soul, _, deltas = system_prompt.partition(_SI_MARKER)
+                    base_soul = base_soul.rstrip()
+                    if deltas.strip():
+                        from kazma_core.safety.prompt_fence import format_untrusted_block
+
+                        fenced = format_untrusted_block(
+                            _SI_MARKER + deltas, source="self_improvement"
+                        )
+                        system_prompt = f"{base_soul}\n\n{fenced}" if base_soul.strip() else fenced
                 messages.append({"role": "system", "content": system_prompt})
 
             # Branding + product family (short) so Arabic replies never use كازما.
@@ -471,10 +492,19 @@ class InProcessWorker(SwarmWorker):
                     ]
 
                 for tc, result in batch_meta:
+                    # Audit AC6: centrally truncate tool results before they
+                    # enter the worker's ReAct loop. TruncationMiddleware caps
+                    # at MAX_TOKENS chars so an unbounded tool output (file
+                    # read, web crawl) can't overflow the worker context or
+                    # cause a re-compact loop. The supervisor path already
+                    # truncates via truncate_tool_result; this brings the swarm
+                    # worker to parity.
+                    _raw = result.get("content", "")
+                    _truncated = _TRUNCATOR.process(tc.name, _raw)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": result.get("content", ""),
+                        "content": _truncated.output,
                     })
 
             else:

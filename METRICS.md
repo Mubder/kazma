@@ -83,8 +83,8 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 |---|---:|
 | Commits | **1,198** |
 | Contributors | 4 |
-| Branches | 1 |
-| Tags | 6 |
+| Branches | 2 |
+| Tags | 7 |
 
 ## Largest Python files (top 15)
 

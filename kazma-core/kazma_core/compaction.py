@@ -100,15 +100,32 @@ class CompactionEngine:
         summary = await self.summarize(messages)
 
         # Step 2.5: Auto-store the summary in memory for long-term retention
-        # This ensures conversation facts survive context window compaction
+        # This ensures conversation facts survive context window compaction.
+        # Audit AC4: the summary is LLM-generated over untrusted conversation
+        # content, so it MUST be run through filter_injection before it lands
+        # in memory — otherwise attacker text bypasses the consolidator's
+        # sanitization and is retrieved + re-injected on future turns.
         if self.memory_store is not None:
             try:
                 import time
-                await self.memory_store.store(
-                    summary,
-                    metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"}
-                )
-                logger.debug("Auto-stored compaction summary to memory")
+                safe_summary = summary
+                try:
+                    from kazma_core.safety.prompt_fence import is_override_delta
+
+                    if is_override_delta(summary):
+                        logger.warning(
+                            "[Compaction] summary matched an injection marker — "
+                            "NOT auto-storing to memory (would poison future prompts)"
+                        )
+                        safe_summary = None
+                except Exception:
+                    pass
+                if safe_summary is not None:
+                    await self.memory_store.store(
+                        safe_summary,
+                        metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"}
+                    )
+                    logger.debug("Auto-stored compaction summary to memory")
             except Exception:
                 logger.debug("Auto-store failed (non-fatal)", exc_info=True)
 
@@ -128,10 +145,25 @@ class CompactionEngine:
                 compacted_messages.append({"role": "user", "content": msg.get("content", "")})
                 break
 
-        # Step 5: Build and return new state
+        # Step 5: Build and return new state.
+        # Audit AC4: preserve the most recent tool_results instead of wiping to
+        # {}. Dropping them mid-ReAct caused the agent to lose tool context,
+        # re-issue the same calls, climb tokens, and re-compact in a loop. We
+        # keep the last _MAX_PRESERVED_TOOL_RESULTS entries (bounded so the
+        # fresh context stays small).
+        _MAX_PRESERVED_TOOL_RESULTS = 8
+        prev_tool_results = state.get("tool_results", {}) or {}
+        if isinstance(prev_tool_results, dict) and len(prev_tool_results) > _MAX_PRESERVED_TOOL_RESULTS:
+            # dict is insertion-ordered; keep the most recent entries.
+            preserved_tool_results = dict(
+                list(prev_tool_results.items())[-_MAX_PRESERVED_TOOL_RESULTS:]
+            )
+        else:
+            preserved_tool_results = dict(prev_tool_results)
+
         new_state: AgentState = {
             "messages": compacted_messages,
-            "tool_results": {},
+            "tool_results": preserved_tool_results,
             "context_tokens": 0,
             "last_cp_id": state.get("last_cp_id", ""),
             "created_at": state.get("created_at", ""),

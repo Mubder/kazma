@@ -342,6 +342,18 @@ class DiscordAdapter(BaseAdapter):
             try:
                 user = data.get("member", {}).get("user") or data.get("user") or {}
                 channel_id = str(data.get("channel_id") or "")
+                user_id = str(user.get("id", ""))
+                # Audit G2a: interactions (HITL approval buttons, pickers) MUST
+                # respect the user allowlist, same as MESSAGE_CREATE. Previously
+                # a non-allowlisted user clicking an approval button could fire
+                # `hitl approve <thread>` into the queue unchecked.
+                if self._allowed_users and (not user_id or user_id not in self._allowed_users):
+                    logger.info(
+                        "[discord] Ignoring interaction from non-allowed user %s (kind=%s)",
+                        user_id, action.kind,
+                    )
+                    await _ack({"type": 6})
+                    return
                 msg = IncomingMessage(
                     platform="discord",
                     sender_id=f"discord:{channel_id}",
@@ -397,7 +409,7 @@ class DiscordAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
-        from kazma_gateway.adapters.discord_send import chunk_message, resolve_channel_id
+        from kazma_gateway.adapters.discord_send import chunk_message, resolve_channel_id, sanitize_outbound
 
         # Fire typing indicator before sending
         asyncio.create_task(self._trigger_typing(outbound.target_id))
@@ -414,8 +426,10 @@ class DiscordAdapter(BaseAdapter):
             logger.error("[discord] No channel_id available for send()")
             return False
 
-        # Send with 429 retry — chunk long messages into Discord-safe pieces
-        chunks = chunk_message(outbound.text or "")
+        # Send with 429 retry — chunk long messages into Discord-safe pieces.
+        # Audit G9b: sanitize @everyone/@here and raw mention markup first so
+        # untrusted agent/tool output can't ping/broadcast.
+        chunks = chunk_message(sanitize_outbound(outbound.text or ""))
         all_sent = True
         for chunk in chunks:
             for attempt in range(_SEND_MAX_RETRIES):
