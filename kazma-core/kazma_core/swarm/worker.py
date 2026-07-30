@@ -205,8 +205,9 @@ class InProcessWorker(SwarmWorker):
             registry = get_model_registry()
 
             # Resolve the correct provider for this worker's model.
-            # Priority: (1) worker's self.provider, (2) model search
-            # across all providers, (3) active/default provider.
+            # Priority: (1) worker's self.provider, (2) explicit model search
+            # across all providers, (3) best-model-for-task when auto-spawned
+            # with no model configured, (4) active/default provider fallback.
             provider = None
             if self.provider:
                 provider = registry.get_client_by_provider(
@@ -221,6 +222,26 @@ class InProcessWorker(SwarmWorker):
                         self.name, self.model, exc_info=True,
                     )
                     provider = registry.get_client(model=self.model)
+            # (3) Auto-spawned worker with no model configured: classify the task
+            # and pick the best AVAILABLE model for that task kind (user-defined
+            # task default → heuristic best-match). Falls through to the active
+            # profile if nothing suitable is found.
+            if provider is None and not self.model and not self.provider:
+                try:
+                    from kazma_core.models.selection import select_provider_for_task
+
+                    chosen = select_provider_for_task(registry, prompt=task)
+                    if chosen is not None:
+                        provider = chosen
+                        logger.info(
+                            "[InProcessWorker:%s] auto-selected model for task kind (prompt-classified)",
+                            self.name,
+                        )
+                except Exception:
+                    logger.debug(
+                        "[InProcessWorker:%s] best-model selection failed, using active profile",
+                        self.name, exc_info=True,
+                    )
             if provider is None:
                 provider = registry.get_client()
 

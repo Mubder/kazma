@@ -91,28 +91,49 @@ class WorkerTemplate:
     def matches_task(self, task_prompt: str, required_expertise: list[str] | None = None) -> bool:
         """Check if this template's capabilities match a task.
 
-        Matches on role, expertise tags, and keyword overlap with the prompt.
+        Matches on role, expertise tags, and model specialty against the prompt
+        using **word-boundary token matching** — the prompt is tokenized and a
+        tag matches only if it appears as a whole token (or as a contiguous
+        multi-word phrase), NOT as a substring. This stops false positives like
+        the tag "code" matching "barcode" or "decode".
         """
-        prompt_lower = (task_prompt or "").lower()
+        import re as _re
 
-        # Expertise tag match
+        prompt = (task_prompt or "").lower()
+        if not prompt:
+            return False
+        # Tokenize: split on non-alphanumeric. A tag matches if it equals a
+        # token, OR appears as a phrase bounded by word boundaries. Multi-word
+        # tags (e.g. "pros and cons") use the regex word-boundary form.
+        tokens = set(_re.split(r"[^a-z0-9]+", prompt))
+
+        def _tag_hits(tag: str) -> bool:
+            t = (tag or "").strip().lower()
+            if not t:
+                return False
+            if " " in t:
+                # Multi-word tag: require it as a bounded phrase in the prompt.
+                return bool(_re.search(r"\b" + _re.escape(t) + r"\b", prompt))
+            return t in tokens
+
+        # Expertise tag match (only when the caller passes required_expertise).
         if required_expertise:
             for tag in required_expertise:
-                if tag.lower() in prompt_lower:
+                if _tag_hits(tag):
                     return True
 
         # Capability expertise match
         for tag in self.capabilities.expertise:
-            if tag.lower() in prompt_lower:
+            if _tag_hits(tag):
                 return True
 
         # Role match
-        if self.role and self.role.lower() in prompt_lower:
+        if self.role and _tag_hits(self.role):
             return True
 
         # Model specialty match
         specialty = getattr(self.capabilities, "model_specialty", "")
-        if specialty and specialty.lower() in prompt_lower:
+        if specialty and _tag_hits(specialty):
             return True
 
         return False
@@ -247,6 +268,7 @@ class AutoScaler:
             provider=template.provider,
             role=template.role,
             capabilities=template.capabilities,
+            system_prompt=template.system_prompt,
         )
 
         try:
