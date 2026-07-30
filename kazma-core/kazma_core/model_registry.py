@@ -40,7 +40,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TASKS = ("chat", "code", "summarize", "translate")
+# Recognized task kinds for per-task default-model overrides. Extended beyond
+# the legacy 4 to cover the swarm's TaskProfile kinds (research/vision/general/fast).
+_DEFAULT_TASKS = ("chat", "code", "summarize", "translate", "research", "vision", "general", "fast")
 _PROFILE_FIELDS = ("base_url", "api_key", "model", "provider")
 
 # ── Singleton lifecycle ──────────────────────────────────────────────

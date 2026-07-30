@@ -57,6 +57,10 @@ DEFAULT_MODEL_DEFAULTS: dict[str, str] = {
     "code": "",
     "summarize": "",
     "translate": "",
+    "research": "",
+    "vision": "",
+    "general": "",
+    "fast": "",
 }
 
 _START_TIME = time.monotonic()

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-__all__ = ["ModelRouter", "ModelSpec", "TaskProfile"]
+__all__ = ["ModelRouter", "ModelSpec", "TaskProfile", "classify_prompt"]
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,10 @@ class TaskProfile(StrEnum):
 
     REASONING = "reasoning"  # Complex analysis, research, planning
     CODING = "coding"  # Code generation, debugging, refactoring
+    VISION = "vision"  # Image analysis, diagrams, screenshots
     FAST = "fast"  # Simple Q&A, greetings, status checks
-    DEFAULT = "default"  # Fallback
+    GENERAL = "general"  # Capable general-purpose work
+    DEFAULT = "default"  # Fallback (alias of general for routing)
 
 
 @dataclass
@@ -88,6 +90,15 @@ class ModelRouter:
         """
         msg_lower = message.lower().strip()
 
+        # Vision signals — image/photo/diagram analysis. Checked early because
+        # vision prompts often also contain analysis words ("analyze this image").
+        vision_keywords = [
+            "image", "photo", "picture", "screenshot", "diagram",
+            "what does this show", "ocr", "read the image", "look at this",
+        ]
+        if any(kw in msg_lower for kw in vision_keywords):
+            return TaskProfile.VISION
+
         # Coding signals
         coding_keywords = [
             "code", "function", "bug", "fix", "refactor",
@@ -115,6 +126,13 @@ class ModelRouter:
         ]
         if len(message.split()) <= 5 and any(kw in msg_lower for kw in fast_keywords):
             return TaskProfile.FAST
+
+        # Anything else with substance is general-purpose work. Threshold is
+        # >3 words so short-but-substantive requests ("draft a welcome email")
+        # classify as GENERAL rather than DEFAULT; the FAST branch above still
+        # catches ≤3-word greetings.
+        if len(message.split()) > 3:
+            return TaskProfile.GENERAL
 
         return TaskProfile.DEFAULT
 
@@ -157,3 +175,17 @@ class ModelRouter:
             len(providers),
         )
         return cls(models=models, default=default_model)
+
+
+def classify_prompt(text: str) -> TaskProfile:
+    """Classify a task prompt into a TaskProfile (standalone, no router needed).
+
+    Thin wrapper around :meth:`ModelRouter.classify` so swarm callers (autoscaler,
+    worker model selection) can classify a prompt without constructing a full
+    ModelRouter. Returns GENERAL for empty/None input instead of DEFAULT, so an
+    auto-spawned worker always gets a usable capability hint.
+    """
+    if not text or not str(text).strip():
+        return TaskProfile.GENERAL
+    return ModelRouter.classify(str(text))
+

@@ -137,6 +137,7 @@
     if (tabId === 'task-history') loadTaskHistory();
     if (tabId === 'results-dashboard') loadResultsDashboard();
     if (tabId === 'worker-registry') loadWorkerMetrics();
+    if (tabId === 'templates') loadTemplates();
     if (tabId === 'workflow-editor') {
       if (typeof mermaid !== 'undefined') {
         try {
@@ -2738,6 +2739,163 @@
   }
 
   // ══════════════════════════════════════════════════════
+  // AUTOSCALER TEMPLATES
+  // ══════════════════════════════════════════════════════
+
+  function loadTemplates() {
+    fetch('/api/swarm/templates')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        renderTemplates(data.templates || [], data.instances || []);
+      })
+      .catch(function() {
+        var c = $('template-cards-container');
+        if (c) c.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">' + (window.t ? t('swarm.templates_load_failed') : 'Failed to load') + '</div>';
+      });
+  }
+
+  function renderTemplates(templates, instances) {
+    var c = $('template-cards-container');
+    if (!c) return;
+    if (!templates.length) {
+      c.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);">' + (window.t ? t('swarm.no_templates') : 'No templates') + '</div>';
+      return;
+    }
+    // Count active instances per template name
+    var instCount = {};
+    (instances || []).forEach(function(i) {
+      var tn = i.template_name || i.template || '';
+      if (tn) instCount[tn] = (instCount[tn] || 0) + 1;
+    });
+    c.innerHTML = templates.map(function(tmpl) {
+      var active = instCount[tmpl.name] || 0;
+      var max = tmpl.max_instances || 5;
+      var expertise = (tmpl.capabilities && tmpl.capabilities.expertise) ? tmpl.capabilities.expertise : [];
+      var modelLabel = tmpl.model ? tmpl.model : (window.t ? t('swarm.model_auto') : 'auto (best available)');
+      return '' +
+        '<div class="card" style="margin-bottom:12px;">' +
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;">' +
+            '<div style="flex:1;">' +
+              '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                '<span style="font-weight:600;">' + KazmaUtils.esc(tmpl.name) + '</span>' +
+                (tmpl.role ? '<span class="badge badge-accent" style="font-size:0.65rem;">' + KazmaUtils.esc(tmpl.role) + '</span>' : '') +
+                '<span class="badge badge-info" style="font-size:0.65rem;">' + active + '/' + max + ' ' + (window.t ? t('swarm.instances') : 'active') + '</span>' +
+              '</div>' +
+              '<div style="font-size:0.8rem;color:var(--text-tertiary);">' + (window.t ? t('swarm.model') : 'Model') + ': <span style="color:var(--text-secondary);font-family:var(--font-mono);">' + KazmaUtils.esc(modelLabel) + '</span></div>' +
+              (expertise.length ? '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">' + expertise.map(function(tag){ return '<span class="badge badge-info" style="font-size:0.6rem;">' + KazmaUtils.esc(tag) + '</span>'; }).join('') + '</div>' : '') +
+              (tmpl.system_prompt ? '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">' + KazmaUtils.esc(tmpl.system_prompt.slice(0, 140)) + (tmpl.system_prompt.length > 140 ? '…' : '') + '</div>' : '') +
+            '</div>' +
+            '<div style="display:flex;gap:4px;">' +
+              '<button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.editTemplate(\'' + tmpl.name.replace(/'/g, "\\'") + '\')" title="Edit"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-danger" onclick="KazmaSwarm.deleteTemplate(\'' + tmpl.name.replace(/'/g, "\\'") + '\')" title="Delete"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function resetTemplateForm() {
+    var en = $('tmpl-edit-name'); if (en) en.value = '';
+    var n = $('tmpl-name'); if (n) n.value = '';
+    var r = $('tmpl-role'); if (r) r.value = '';
+    var e = $('tmpl-expertise'); if (e) e.value = '';
+    var m = $('tmpl-model'); if (m) m.value = '';
+    var mx = $('tmpl-max'); if (mx) mx.value = '3';
+    var p = $('tmpl-prompt'); if (p) p.value = '';
+    var title = $('template-form-title'); if (title) title.textContent = (window.t ? t('swarm.add_template') : 'Add Template');
+  }
+
+  function editTemplate(name) {
+    fetch('/api/swarm/templates')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var tmpl = (data.templates || []).find(function(t) { return t.name === name; });
+        if (!tmpl) return;
+        var en = $('tmpl-edit-name'); if (en) en.value = tmpl.name;
+        var n = $('tmpl-name'); if (n) n.value = tmpl.name;
+        var r = $('tmpl-role'); if (r) r.value = tmpl.role || '';
+        var e = $('tmpl-expertise'); if (e) e.value = ((tmpl.capabilities && tmpl.capabilities.expertise) || []).join(', ');
+        var m = $('tmpl-model'); if (m) m.value = tmpl.model || '';
+        var mx = $('tmpl-max'); if (mx) mx.value = tmpl.max_instances || 3;
+        var p = $('tmpl-prompt'); if (p) p.value = tmpl.system_prompt || '';
+        var title = $('template-form-title'); if (title) title.textContent = (window.t ? t('swarm.edit_template') : 'Edit Template');
+      });
+  }
+
+  function saveTemplate() {
+    var name = ($('tmpl-name') || {}).value || '';
+    var editName = ($('tmpl-edit-name') || {}).value || '';
+    if (!name.trim()) { if (window.showToast) showToast(window.t ? t('swarm.tmpl_name_required') : 'Name required', 'error'); return; }
+    var expertise = (($('tmpl-expertise') || {}).value || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    var payload = {
+      name: name.trim(),
+      role: (($('tmpl-role') || {}).value || '').trim(),
+      capabilities: { expertise: expertise },
+      model: (($('tmpl-model') || {}).value || '').trim(),
+      max_instances: parseInt(($('tmpl-max') || {}).value || '3', 10) || 3,
+      system_prompt: (($('tmpl-prompt') || {}).value || '').trim(),
+      worker_type: 'in_process',
+    };
+    // If editing (name changed), delete the old one first
+    var delFirst = editName && editName !== name.trim();
+    function doPost() {
+      fetch('/api/swarm/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (window.showToast) showToast(window.t ? t('swarm.template_saved') : 'Template saved', 'success');
+        resetTemplateForm();
+        loadTemplates();
+      }).catch(function(e) {
+        if (window.showToast) showToast((window.t ? t('swarm.save_failed') : 'Save failed') + ': ' + e.message, 'error');
+      });
+    }
+    if (delFirst) {
+      fetch('/api/swarm/templates/' + encodeURIComponent(editName), { method: 'DELETE' })
+        .then(function() { doPost(); })
+        .catch(function() { doPost(); });
+    } else {
+      doPost();
+    }
+  }
+
+  function deleteTemplate(name) {
+    if (!window.kazmaConfirm) { if (!confirm('Delete template "' + name + '"?')) return; }
+    else {
+      window.kazmaConfirm({ message: 'Delete template "' + name + '"?', danger: true, confirmText: 'Delete' })
+        .then(function(ok) { if (!ok) return; doDelete(); });
+      return;
+    }
+    doDelete();
+    function doDelete() {
+      fetch('/api/swarm/templates/' + encodeURIComponent(name), { method: 'DELETE' })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          if (window.showToast) showToast((window.t ? t('swarm.template_deleted') : 'Template deleted'), 'success');
+          loadTemplates();
+        })
+        .catch(function(e) {
+          if (window.showToast) showToast('Delete failed: ' + e.message, 'error');
+        });
+    }
+  }
+
+  function reapIdle() {
+    fetch('/api/swarm/autoscaler/reap', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var n = (data && data.reaped) || 0;
+        if (window.showToast) showToast((window.t ? t('swarm.reaped') : 'Reaped') + ' ' + n, 'success');
+        loadTemplates();
+      })
+      .catch(function() {
+        if (window.showToast) showToast('Reap failed', 'error');
+      });
+  }
+
+  // ══════════════════════════════════════════════════════
   // PUBLIC API
   // ══════════════════════════════════════════════════════
 
@@ -2772,6 +2930,13 @@
     applySavedProfile: applySavedProfile,
     saveOutputTarget: saveOutputTarget,
     clearOutputTarget: clearOutputTarget,
+    // Autoscaler templates
+    loadTemplates: loadTemplates,
+    saveTemplate: saveTemplate,
+    editTemplate: editTemplate,
+    deleteTemplate: deleteTemplate,
+    reapIdle: reapIdle,
+    resetTemplateForm: resetTemplateForm,
     
     // Visual Pipeline Editor hooks
     loadPipelineExample: loadPipelineExample,
