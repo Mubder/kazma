@@ -91,6 +91,16 @@ _HTTP_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
+
+def _random_ua() -> str:
+    """A rotated User-Agent for retry attempts (defeats UA-based blocking)."""
+    try:
+        from kazma_core.proxy.client import random_user_agent
+
+        return random_user_agent()
+    except Exception:  # noqa: BLE001 — UA rotation is best-effort
+        return _BROWSER_UA
+
 _BOT_DETECTION_MARKERS = (
     "cloudflare",
     "checking your browser",
@@ -632,12 +642,33 @@ async def _fetch_full_text(url: str) -> str:
     final_url = url
 
     try:
-        async with httpx.AsyncClient(
+        from kazma_core.proxy.client import get_scraping_client
+
+        async with get_scraping_client(
             follow_redirects=False,
             timeout=30.0,
-            headers=_HTTP_HEADERS,
+            headers=dict(_HTTP_HEADERS),
+            rotate_ua=True,
         ) as client:
             response = await client.get(final_url)
+            # 429/403 retry with backoff — the bulletproof core. A blocked IP
+            # retries from a different residential IP (the provider rotates the
+            # exit IP per request via a fresh session id). Only retries the raw
+            # httpx path; the existing Playwright/Firecrawl recovery cascade
+            # handles true bot-walls separately below.
+            import asyncio as _asyncio
+            for _retry in range(2):
+                if response.status_code not in (429, 403):
+                    break
+                delay = 1.5 * (_retry + 1)  # 1.5s, then 3s
+                logger.info(
+                    "[read_url] HTTP %d on %s — retry %d/2 via proxy in %.1fs",
+                    response.status_code, final_url, _retry + 1, delay,
+                )
+                await _asyncio.sleep(delay)
+                # Rebuild headers so the proxy rotates UA + exit IP for the retry.
+                client.headers["user-agent"] = _random_ua()
+                response = await client.get(final_url)
             for _ in range(3):
                 if response.status_code not in (301, 302, 303, 307, 308):
                     break

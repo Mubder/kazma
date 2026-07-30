@@ -155,6 +155,8 @@ logging:
     enabled: false
     public_key: ''
     secret_key: ''
+proxy:
+  provider: none  # opt-in scraping resilience addon: none | anyip
 time_travel:
   enabled: true
   max_snapshots: 50

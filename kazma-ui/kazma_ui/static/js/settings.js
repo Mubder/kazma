@@ -53,6 +53,9 @@ function settingsApp() {
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
+        proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
+        proxyTestResult: null,
+        proxyTesting: false,
 
         // ── Connectors Tab ──
         connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },
@@ -620,6 +623,58 @@ function settingsApp() {
                 showToast('Save failed', 'error');
             }
             this.saving = false;
+        },
+
+        async loadProxy() {
+            try {
+                const data = await this._fetch('/api/settings/proxy');
+                if (data) {
+                    this.proxy = {
+                        provider: data.provider || 'none',
+                        host: data.host || 'portal.anyip.io',
+                        port: String(data.port || '1080'),
+                        username: data.username || '',
+                        password: data.password || '',
+                        network: data.network || 'mixed',
+                        country: data.country || '',
+                        session_sticky: !!data.session_sticky,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+            this.proxyTestResult = null;
+        },
+
+        async saveProxy() {
+            this.saving = true;
+            try {
+                await fetch('/api/settings/proxy', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.proxy),
+                });
+                showToast(I18N?.proxy_saved || 'Proxy settings saved', 'success');
+            } catch (e) {
+                showToast('Save failed', 'error');
+            }
+            this.saving = false;
+        },
+
+        async testProxy() {
+            this.proxyTesting = true;
+            this.proxyTestResult = null;
+            try {
+                // Save first so the test uses the just-entered credentials.
+                await fetch('/api/settings/proxy', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.proxy),
+                });
+                const resp = await fetch('/api/settings/proxy/test', { method: 'POST' });
+                this.proxyTestResult = await resp.json();
+            } catch (e) {
+                this.proxyTestResult = { success: false, error: e.message };
+            }
+            this.proxyTesting = false;
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -2224,7 +2279,7 @@ function settingsApp() {
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
                 case 'voice':

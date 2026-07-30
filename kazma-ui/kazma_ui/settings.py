@@ -255,6 +255,22 @@ class SettingsRouterBuilder:
             _get_sm().save_logging_settings(req)
             return {"status": "ok"}
 
+        @router.get("/api/settings/proxy")
+        async def api_get_proxy() -> dict[str, Any]:
+            """Get proxy provider config (opt-in scraping resilience addon)."""
+            return _get_sm().get_proxy_settings()
+
+        @router.put("/api/settings/proxy")
+        async def api_save_proxy(req: dict[str, Any]) -> dict[str, str]:
+            """Save proxy provider config. Password auto-vault-encrypts."""
+            _get_sm().save_proxy_settings(req)
+            return {"status": "ok"}
+
+        @router.post("/api/settings/proxy/test")
+        async def api_test_proxy() -> dict[str, Any]:
+            """Health-check the active proxy (returns exit IP)."""
+            return await _get_sm().test_proxy()
+
         @router.put("/api/settings/agent/context")
         async def api_save_context(req: dict[str, Any]) -> dict[str, str]:
             """Save context window settings."""

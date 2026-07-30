@@ -101,11 +101,13 @@ def _extract_links(html: str, base_url: str) -> list[str]:
 async def _fetch_html(url: str) -> tuple[str | None, str]:
     """Return (html_or_none, final_url)."""
     try:
-        import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.proxy.client import get_scraping_client
 
         validate_url(url)
-        async with httpx.AsyncClient(
+        # Route through the proxy provider (opt-in) + rotate UA. The multi-page
+        # spider is the highest block-risk, so proxying it is the biggest win.
+        async with get_scraping_client(
             follow_redirects=True,
             timeout=30.0,
             headers={
@@ -114,6 +116,7 @@ async def _fetch_html(url: str) -> tuple[str | None, str]:
                     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                 ),
             },
+            rotate_ua=True,
         ) as client:
             r = await client.get(url)
             # Re-validate final URL after redirects

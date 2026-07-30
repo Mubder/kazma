@@ -1111,6 +1111,68 @@
             <button class="btn btn-primary" @click="saveLogging()">{{ t('settings.save_logging') }}</button>
         </div>
 
+        <!-- Proxy Provider -->
+        <div class="settings-group">
+            <h3>{{ t('settings.proxy_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.proxy_hint') }}
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.proxy_provider') }}</label>
+                <select class="form-select" x-model="proxy.provider">
+                    <option value="none">{{ t('settings.proxy_none') }}</option>
+                    <option value="anyip">anyIP.io</option>
+                </select>
+            </div>
+            <div x-show="proxy.provider !== 'none'" style="display:flex;flex-direction:column;gap:12px;">
+                <div style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:2;">
+                        <label>{{ t('settings.proxy_host') }}</label>
+                        <input type="text" class="form-input" x-model="proxy.host">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>{{ t('settings.proxy_port') }}</label>
+                        <input type="text" class="form-input" x-model="proxy.port">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.proxy_username') }}</label>
+                    <input type="text" class="form-input" x-model="proxy.username" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.proxy_password') }}</label>
+                    <input type="password" class="form-input" x-model="proxy.password" autocomplete="new-password">
+                </div>
+                <div style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:1;">
+                        <label>{{ t('settings.proxy_network') }}</label>
+                        <select class="form-select" x-model="proxy.network">
+                            <option value="mixed">{{ t('settings.proxy_network_mixed') }}</option>
+                            <option value="residential">{{ t('settings.proxy_network_residential') }}</option>
+                            <option value="mobile">{{ t('settings.proxy_network_mobile') }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>{{ t('settings.proxy_country') }}</label>
+                        <input type="text" class="form-input" x-model="proxy.country" placeholder="US" maxlength="3">
+                    </div>
+                </div>
+                <label style="display:flex;align-items:center;gap:8px;">
+                    <span>{{ t('settings.proxy_sticky') }}</span>
+                    <label class="toggle">
+                        <input type="checkbox" x-model="proxy.session_sticky">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </label>
+            </div>
+            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-text="proxyTestResult?.success ? ('✓ ' + (window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : ('✗ ' + (proxyTestResult?.error || 'Test failed'))"></div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" @click="saveProxy()">{{ t('settings.proxy_save') }}</button>
+                <button class="btn btn-secondary" @click="testProxy()" :disabled="proxyTesting">{{ t('settings.proxy_test') }}</button>
+            </div>
+        </div>
+
         <!-- Logs -->
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
