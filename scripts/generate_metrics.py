@@ -120,15 +120,13 @@ _EMAIL_ALIASES: dict[str, str] = {
 
 
 def count_human_contributors() -> int:
-    """Count distinct *human* contributors, matching what GitHub's Contributors
-    page shows — bots excluded, one person's many email aliases collapsed.
+    """Count contributors, matching what GitHub's Contributors page shows.
 
     The naive ``git shortlog -sne HEAD`` line count over-reports badly: it
     groups by raw email, so a single author spread across several addresses
     (personal gmail, ``+ID@users.noreply.github.com``, custom domains, a local
-    placeholder) counts many times, and bots (copilot-swe-agent, kazma-agent,
-    github-actions[bot], …) count as people. The website was showing ~19 while
-    GitHub's Contributors tab shows far fewer for exactly this reason.
+    placeholder) counts many times — the website was showing ~19 while GitHub's
+    Contributors tab shows far fewer for exactly this reason.
 
     Git history alone *cannot* reproduce GitHub's number reliably — GitHub also
     attributes contributors from merged PRs and squash-merges that aren't all
@@ -136,10 +134,15 @@ def count_human_contributors() -> int:
     API (the source of truth) when reachable, and fall back to a best-effort
     git-based dedup when offline or unauthenticated.
 
+    The count includes bot/app contributors (Copilot, kazma-agent, …) the way
+    GitHub's Contributors page does — it does NOT exactly equal the page's
+    number (GitHub's page count isn't exposed via any API), but it tracks the
+    same definition of "who appears on the contributors list".
+
     Priority:
-      1. GitHub ``/repos/{owner}/{repo}/contributors`` API — count entries of
-         ``type == "User"`` (drops bots). Needs network; honours the
-         ``GH_TOKEN``/``GITHUB_TOKEN`` env var if set for higher rate limits.
+      1. GitHub ``/repos/{owner}/{repo}/contributors`` API — count all entries
+         (Users + bots). Needs network; honours the ``GH_TOKEN``/
+         ``GITHUB_TOKEN`` env var if set for higher rate limits.
       2. Offline fallback: dedupe by canonical identity (alias map → GitHub
          login from no-reply address → raw email) after excluding bots.
     """
@@ -177,9 +180,10 @@ _GITHUB_REPO = "Mubder/kazma"
 
 
 def _count_contributors_via_api() -> int | None:
-    """Return the human-contributor count from GitHub's Contributors API, or
-    ``None`` if unreachable (offline, rate-limited, non-200). Bots are filtered
-    out by checking each entry's ``type`` == "User"."""
+    """Return the contributor count from GitHub's Contributors API, or ``None``
+    if unreachable (offline, rate-limited, non-200). Counts all entries — Users
+    AND bots — matching what GitHub's Contributors page lists (the page shows
+    Copilot / kazma-agent / etc. too)."""
     url = f"https://api.github.com/repos/{_GITHUB_REPO}/contributors?per_page=100&anon=false"
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     headers = {
@@ -199,7 +203,10 @@ def _count_contributors_via_api() -> int | None:
                 if resp.status != 200:
                     return None
                 page = json.loads(resp.read().decode("utf-8", "replace"))
-                users += sum(1 for c in page if c.get("type") == "User")
+                # Count every entry on the contributors list (Users + bots),
+                # matching GitHub's Contributors page (which lists Copilot,
+                # kazma-agent, etc. too).
+                users += len(page)
                 link = resp.headers.get("Link", "")
                 next_url = _next_link(link)
                 url = next_url
@@ -262,6 +269,44 @@ def count_patterns(paths: list[str], *patterns: re.Pattern) -> list[int]:
     return counts
 
 
+def count_collected_tests() -> int:
+    """Return the number of tests pytest collects at runtime (the real count,
+    including ``@pytest.mark.parametrize`` expansion). The static ``def test_*``
+    count under-reports for exactly that reason — one parametrized function can
+    produce dozens of collected cases.
+
+    Runs ``pytest --collect-only -q`` and parses the trailing
+    ``"N tests collected"`` summary. Returns ``0`` when pytest isn't available,
+    collection errors out, or the summary line is absent — callers fall back to
+    the static def count in that case.
+
+    Prefers the repo's own ``.venv`` interpreter (where the project's pytest is
+    installed) so the result reflects the project's real test suite rather than
+    whatever ``python`` happens to be on PATH in the build environment.
+    """
+    venv_python = str(REPO_ROOT / ".venv" / "Scripts" / "python.exe")
+    py = venv_python if (REPO_ROOT / ".venv" / "Scripts" / "python.exe").exists() else "python"
+    try:
+        out = subprocess.run(
+            [py, "-m", "pytest", "--collect-only", "-q"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=180,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    # pytest prints the summary to stderr; check both streams. The line can read
+    # "4354 tests collected" or "4354 tests collected, 1 error in 2.5s" — match
+    # the "<n> tests collected" prefix and ignore any trailing status.
+    for stream in (out.stderr, out.stdout):
+        m = re.search(r"(\d+)\s+tests?\s+collected", stream)
+        if m:
+            return int(m.group(1))
+    return 0
+
+
 def bucket(files: list[str], prefixes: list[str]) -> list[str]:
     return [f for f in files if any(f.startswith(p + "/") for p in prefixes)]
 
@@ -320,12 +365,18 @@ def collect() -> dict:
 
     # ── Tests ──
     tdefs = count_patterns(test_files, RE_TEST_DEF, RE_TEST_ASYNC, RE_TEST_CLASS)
+    # Runtime-collected count (the real number pytest would run, including
+    # @pytest.mark.parametrize expansion). The static def count above is a
+    # source-level count and under-reports; this is the figure that should face
+    # users. Returns 0 when pytest isn't installed or collection fails, so the
+    # static count remains available as a fallback (test_functions_total).
     m["tests"] = {
         "files": len(test_files),
         "test_def": tdefs[0],
         "test_async_def": tdefs[1],
         "test_class": tdefs[2],
         "test_functions_total": tdefs[0] + tdefs[1],
+        "collected": count_collected_tests(),
     }
 
     # ── Source structure ──
@@ -497,16 +548,18 @@ def render(m: dict) -> str:
         "| Metric | Count |",
         "|---|---:|",
         f"| Test files | **{t['files']}** |",
+        f"| Collected at runtime | **{t['collected']:,}** |" if t["collected"] else "| Collected at runtime | n/a |",
         f"| `def test_*` functions | {t['test_def']:,} |",
         f"| `async def test_*` functions | {t['test_async_def']:,} |",
         f"| `Test*` classes | {t['test_class']} |",
-        f"| Total test functions | **{t['test_functions_total']:,}** |",
+        f"| Total test functions | {t['test_functions_total']:,} |",
         f"| Test LOC | {tests['total']:,} |",
         f"| Test-to-source LOC ratio | ~{ratio:.2f}:1 |",
         "",
-        "> The function count above is a **static source count** (greps `def test_*`).",
-        "> pytest collects **~3,981** tests at runtime — the gap is `@pytest.mark.parametrize`",
-        "> expansion (one function → many test cases). Of those, **3,800+ pass** across all 5 suites.",
+        "> **Collected at runtime** is the real test count pytest would run",
+        "> (`pytest --collect-only`), including `@pytest.mark.parametrize` expansion.",
+        "> The `def test_*` / Total test functions counts are static source greps,",
+        "> so they under-report — one parametrized function produces many cases.",
         "",
         "## Source structure",
         "",
