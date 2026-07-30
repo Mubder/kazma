@@ -714,14 +714,17 @@ async def supervisor_node(
         content = response.content.strip() if response.content else ""
 
         # ── Empty-response recovery ────────────────────────────────
-        # Some providers (Groq compound-mini, certain Ollama models)
-        # return content="" on the final turn after a tool call —
-        # especially when the tool result (e.g. memory_search JSON)
-        # was large. Without this guard the user sees
-        # "(No response generated)". Retry once with an explicit nudge.
-        if not content and iteration > 0:
+        # Some providers (Groq compound-mini, certain Ollama models, and
+        # deepseek-v4-flash on long/summarised contexts) return content=""
+        # — either on the final turn after a tool call (large tool result
+        # like memory_search JSON) OR on a first-pass reply with no tool
+        # calls at all. Without this guard the user sees "Done" with no
+        # bubble text. Retry once with an explicit nudge on ANY iteration.
+        # (Previously gated on `iteration > 0`, which let iteration=0 empty
+        # replies reach respond_node and stream as empty — 2026-07-31.)
+        if not content:
             logger.warning(
-                "[Supervisor] LLM returned empty content after tool calls "
+                "[Supervisor] LLM returned empty content "
                 "(iteration=%d) — retrying with nudge", iteration,
             )
             messages_with_nudge = messages + [
@@ -1312,6 +1315,33 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             _last_role,
             len(_final_text),
         )
+
+    # ── Final empty-answer safety net ───────────────────────────────
+    # The supervisor's nudge recovery (supervisor_node) handles empty LLM
+    # content, but defence-in-depth: if the last assistant message that we
+    # are about to stream to the user is empty/whitespace, inject an honest
+    # fallback so the UI never shows "Done" with no bubble text. This guards
+    # non-max-iteration turns (the max-iter path is handled above).
+    if not _max_hit:
+        _final_for_user = _final_assistant_text_after_tools(messages)
+        if not _final_for_user:
+            logger.warning(
+                "[Respond] Final assistant text is empty on a normal turn "
+                "(iteration=%d messages=%d last_role=%s) — injecting fallback "
+                "so the turn is not silently empty",
+                iteration, len(messages), _last_role,
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        "⚠️ I completed my thinking but produced no written "
+                        "answer this turn. Please send the message again, or "
+                        "rephrase it — some models occasionally return an "
+                        "empty reply."
+                    ),
+                }
+            )
 
     # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
     # in one task so consolidator can dedup against auto_store texts.
