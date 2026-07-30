@@ -103,6 +103,11 @@ jobs:
           gh repo clone "$WEBSITE_REPO" site -- --depth 1
 
           cd site
+          # Authenticate raw git operations (push/fetch) for this clone with the
+          # WEBSITE_TOKEN. gh repo clone authenticates the clone itself, but the
+          # credential helper it installs does not cover subsequent `git push` —
+          # without this, push fails with "could not read Username for github.com".
+          gh auth setup-git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$PR_BRANCH" origin/main
