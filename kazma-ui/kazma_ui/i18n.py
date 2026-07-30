@@ -765,7 +765,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Applies immediately. Lower levels log more detail.",
         "ar": "يُطبّق فورًا. المستويات الأقل تسجّل تفاصيل أكثر.",
     },
-    "settings.logging_format": {"en": "Log Format", "ar": "تنسيق السجل"},
+    "settings.logging_format": {"en": "File Log Format", "ar": "تنسيق ملف السجل"},
     "settings.logging_format_text": {"en": "Text", "ar": "نص"},
     "settings.logging_format_json": {"en": "JSON", "ar": "JSON"},
     "settings.logging_retention": {"en": "Retention (days)", "ar": "الاحتفاظ (أيام)"},

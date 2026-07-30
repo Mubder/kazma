@@ -615,7 +615,7 @@ function settingsApp() {
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.logging),
                 });
-                showToast(I18N?.logging_saved || 'Logging settings saved (restart for rotation changes)', 'success');
+                showToast('Logging settings saved (restart for rotation changes)', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
             }

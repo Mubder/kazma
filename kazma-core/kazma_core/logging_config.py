@@ -261,8 +261,16 @@ def setup_logging(level: str | None = None) -> str:
         # Cap at WARNING; never let NOISY_LIBS go below WARNING even in DEBUG.
         loggers_config[name] = {"level": "WARNING", "propagate": True}
 
-    use_json = resolve_log_format(None) == "json"
-    console_formatter = "json" if use_json else "console"
+    # The `format` setting governs the DURABLE FILE output (for log shippers like
+    # Loki/Datadog that want JSON). The live TERMINAL console stays human-readable
+    # text by default — it's what you watch interactively, so JSON noise there is
+    # counterproductive. Opt into a JSON console explicitly via KAZMA_LOG_FORMAT=json
+    # (env only), restoring the original behaviour where the terminal was always text.
+    file_formatter = "standard"
+    use_json_file = resolve_log_format(None) == "json"
+    if use_json_file:
+        file_formatter = "json"
+    console_formatter = "console"
     retention_days = resolve_retention_days()
 
     config: dict[str, Any] = {
@@ -294,7 +302,7 @@ def setup_logging(level: str | None = None) -> str:
                 "interval": 1,
                 "backupCount": retention_days,
                 "encoding": "utf-8",
-                "formatter": "standard",
+                "formatter": file_formatter,
                 "level": effective,
                 "atTime": time(0, 0, 0),
                 "utc": False,
