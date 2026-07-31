@@ -237,7 +237,64 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 except Exception:
                     stats["skipped"] += 1
 
-        # ── kg_edges → beliefs ──
+        # ── memory_chunk nodes → beliefs (the REAL content) ─────────
+        # The L2 graph stores most memory content as memory_chunk nodes,
+        # NOT as fact edges. Each chunk's content/label IS the fact text.
+        # Some chunks also have structured subject/predicate/object in
+        # their properties (from the consolidator's upsert_triple).
+        if "kg_nodes" in tables:
+            chunks = legacy.execute(
+                "SELECT * FROM kg_nodes WHERE entity_type = 'memory_chunk'"
+            ).fetchall()
+            for c in chunks:
+                stats["edges_seen"] += 1  # count as a "belief source"
+                src_id = str(c["id"])
+                content = (c["content"] or c["label"] or "").strip()
+                if not content or len(content) < 5:
+                    stats["skipped"] += 1
+                    continue
+                # Check for structured SPO in properties
+                props = {}
+                if "properties" in c.keys() and c["properties"]:
+                    try:
+                        props = json.loads(c["properties"])
+                    except Exception:
+                        props = {}
+                subj = str(props.get("subject") or "user")
+                pred = str(props.get("predicate") or "noted")
+                obj = str(props.get("object") or content[:200])
+                pred_clean = pred.strip().lower().replace(" ", "_") or "noted"
+                # Skip if this is structural
+                if pred_clean in _STRUCTURAL_PREDICATES:
+                    stats["skipped"] += 1
+                    continue
+                ptype = _classify_predicate(pred_clean)
+                bid = "b_" + _stable_id("memory_chunk", src_id)
+                meta = {
+                    "source": "backfill_memory_chunk",
+                    "legacy_id": src_id,
+                    "fact_text": content[:200],
+                    "memory_class": "general",
+                }
+                try:
+                    primary.execute(
+                        """INSERT OR IGNORE INTO beliefs
+                           (id, tenant_id, subject, predicate, predicate_type, object,
+                            confidence, structural_importance, source_trust_weight,
+                            valid_from, ingested_at, extraction_method, metadata_json)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system_tool', ?)""",
+                        (
+                            bid, "default", _slug(subj), pred_clean, ptype,
+                            obj[:500], 0.7, 3, 0.85,
+                            now, now,
+                            json.dumps(meta, ensure_ascii=False),
+                        ),
+                    )
+                    stats["beliefs_inserted"] += 1
+                except Exception:
+                    stats["skipped"] += 1
+
+        # ── kg_edges → beliefs (real fact triples only) ──
         if "kg_edges" in tables:
             edges = legacy.execute("SELECT * FROM kg_edges").fetchall()
             for e in edges:
