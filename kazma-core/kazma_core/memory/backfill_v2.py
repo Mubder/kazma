@@ -88,6 +88,35 @@ def _classify_predicate(predicate: str) -> str:
     return "set"
 
 
+def _extract_pred_from_text(text: str) -> tuple[str, str]:
+    """Try to extract a (predicate, object) pair from memory_chunk text.
+
+    Falls back to ('noted', text) when no pattern matches. This replaces
+    the old behavior of defaulting everything to the meaningless 'noted'.
+    """
+    import re
+
+    t = (text or "").strip()
+    patterns = [
+        (re.compile(r"(?i)\buser(?:'s)? favorite (\w+) is (.+)", re.I), "favorite"),
+        (re.compile(r"(?i)\buser prefers (.+)", re.I), "prefers"),
+        (re.compile(r"(?i)\buser (?:lives|works) (?:in|at) (.+)", re.I), "lives_in"),
+        (re.compile(r"(?i)\buser(?:'s)? name is (.+)", re.I), "name_is"),
+        (re.compile(r"(?i)\buser (?:likes|loves|uses) (.+)", re.I), "prefers"),
+        (re.compile(r"(?i)\buser works (?:at|on) (.+)", re.I), "works_at"),
+    ]
+    for pat, default_pred in patterns:
+        m = pat.search(t)
+        if m:
+            if default_pred == "favorite":
+                cat = m.group(1).strip()
+                val = m.group(2).strip().rstrip(".")
+                return f"favorite_{cat}", val
+            return default_pred, m.group(1).strip().rstrip(".")
+    # No pattern matched — use the full text as a 'noted' fact
+    return "noted", t[:200]
+
+
 # ── Connection helpers ───────────────────────────────────────────────────
 
 
@@ -247,12 +276,36 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 "SELECT * FROM kg_nodes WHERE entity_type = 'memory_chunk'"
             ).fetchall()
             for c in chunks:
-                stats["edges_seen"] += 1  # count as a "belief source"
+                stats["edges_seen"] += 1
                 src_id = str(c["id"])
                 content = (c["content"] or c["label"] or "").strip()
+
+                # ── Content quality gate ────────────────────────────
+                # Reject non-fact content: system prompts, tool dumps,
+                # code blocks, very long blobs, markdown headers.
                 if not content or len(content) < 5:
                     stats["skipped"] += 1
                     continue
+                # Skip system-prompt-like content (markdown headers, code)
+                if content.startswith("#") or content.startswith("```"):
+                    stats["skipped"] += 1
+                    continue
+                # Skip content that looks like a system prompt or tool output
+                _NOISE_MARKERS = (
+                    "you are", "do not", "do *not", "system prompt",
+                    "def ", "class ", "import ", "http://", "https://",
+                    "traceback", "error:", "exception", "{\\n", "[{",
+                    "user:", "assistant:", "tool:", "---",
+                )
+                cl = content[:100].lower()
+                if any(cl.startswith(m) for m in _NOISE_MARKERS):
+                    stats["skipped"] += 1
+                    continue
+                # Skip very long content (likely a dump, not a fact)
+                if len(content) > 300:
+                    stats["skipped"] += 1
+                    continue
+
                 # Check for structured SPO in properties
                 props = {}
                 if "properties" in c.keys() and c["properties"]:
@@ -260,14 +313,22 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                         props = json.loads(c["properties"])
                     except Exception:
                         props = {}
+
                 subj = str(props.get("subject") or "user")
-                pred = str(props.get("predicate") or "noted")
-                obj = str(props.get("object") or content[:200])
+                # Try to extract a real predicate from the content itself
+                pred = str(props.get("predicate") or "")
+                obj = str(props.get("object") or "")
+
+                if not pred or pred == "noted":
+                    # Heuristic predicate extraction from the content text
+                    pred, obj = _extract_pred_from_text(content)
+
                 pred_clean = pred.strip().lower().replace(" ", "_") or "noted"
-                # Skip if this is structural
                 if pred_clean in _STRUCTURAL_PREDICATES:
                     stats["skipped"] += 1
                     continue
+                if not obj or obj == "noted":
+                    obj = content[:200]
                 ptype = _classify_predicate(pred_clean)
                 bid = "b_" + _stable_id("memory_chunk", src_id)
                 meta = {
@@ -285,7 +346,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system_tool', ?)""",
                         (
                             bid, "default", _slug(subj), pred_clean, ptype,
-                            obj[:500], 0.7, 3, 0.85,
+                            obj[:300], 0.7, 3, 0.85,
                             now, now,
                             json.dumps(meta, ensure_ascii=False),
                         ),
@@ -371,6 +432,8 @@ def cleanup_polluted_backfill() -> dict[str, int]:
     Deletes:
       - Beliefs whose subject OR object is a hash-like string (≥16 hex chars)
       - Beliefs with structural predicates (has_memory, tagged, has_fact, ...)
+      - Beliefs with the meaningless 'noted' predicate from the first run
+      - Beliefs whose object looks like system-prompt/code noise
       - Entities whose id is hash-like (left over from the bad node migration)
 
     Returns counts of what was deleted. Safe to run multiple times.
@@ -384,26 +447,30 @@ def cleanup_polluted_backfill() -> dict[str, int]:
         conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:
-            # Hash-like pattern: 16+ hex chars (the L2 slug IDs)
-            hash_pat = re.compile(r"^[a-f0-9]{16,}$")
-            # Delete beliefs with hash subjects/objects OR structural predicates
+            # Delete: hash subjects/objects, structural predicates, 'noted'
+            # fallback beliefs, and noise content (system prompts/code)
             placeholders = ",".join("?" * len(_STRUCTURAL_PREDICATES))
             cur = conn.execute(
                 f"""DELETE FROM beliefs
                     WHERE subject GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'
                        OR object GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'
-                       OR predicate IN ({placeholders})""",
+                       OR predicate IN ({placeholders})
+                       OR predicate = 'noted'
+                       OR object LIKE '#%'
+                       OR object LIKE 'You are%'
+                       OR object LIKE 'def %'
+                       OR object LIKE 'import %'
+                       OR length(object) > 300""",
                 tuple(_STRUCTURAL_PREDICATES),
             )
             stats["beliefs_deleted"] = cur.rowcount or 0
-            # Delete hash-named entities
             cur2 = conn.execute(
                 "DELETE FROM entities WHERE id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'"
             )
             stats["entities_deleted"] = cur2.rowcount or 0
             conn.commit()
             logger.info(
-                "[backfill] cleanup deleted %d beliefs + %d entities (polluted)",
+                "[backfill] cleanup deleted %d beliefs + %d entities (polluted/noise)",
                 stats["beliefs_deleted"], stats["entities_deleted"],
             )
         finally:

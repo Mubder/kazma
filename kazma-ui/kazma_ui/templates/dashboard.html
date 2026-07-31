@@ -1789,16 +1789,59 @@
         return;
       }
       const ptypeColor = { functional:'#2ed573', set:'#60a5fa', state:'#fbbf24' };
-      list.innerHTML = beliefs.map(b => {
+      list.innerHTML = beliefs.map((b, idx) => {
         const conf = Math.round((b.confidence||0) * 100);
         const pc = ptypeColor[b.predicate_type] || '#94a3b8';
-        return '<div style="padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px;">' +
-               '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;">' + (b.predicate_type||'?') + '</span>' +
-               '<span style="flex:1;color:var(--text-primary);"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b>' + _esc(b.object) + '</b></span>' +
-               '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);">i' + b.structural_importance + ' · ' + conf + '%</span>' +
+        return '<div class="v2-belief-row" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
+               '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;">' + (b.predicate_type||'?') + '</span>' +
+               '<span style="flex:1;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b>' + _esc(b.object) + '</b></span>' +
+               '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
                '</div>';
       }).join('');
+      // Make each belief row clickable — highlight subject+object in the graph
+      list.querySelectorAll('.v2-belief-row').forEach(function(row) {
+        row.addEventListener('click', function() {
+          var subj = row.getAttribute('data-subject');
+          var obj = row.getAttribute('data-object');
+          // Highlight in the graph: select the subject node + scroll to it
+          _v2gSelectByBelief(subj, obj);
+          // Visual feedback: highlight the clicked row
+          list.querySelectorAll('.v2-belief-row').forEach(function(r) { r.style.background = 'transparent'; r.style.borderLeft = ''; });
+          row.style.background = 'rgba(99,102,241,0.12)';
+          row.style.borderLeft = '3px solid #6366f1';
+        });
+      });
     } catch (e) { /* silent */ }
+  }
+
+  // Select a belief's subject node in the graph canvas + zoom to it
+  function _v2gSelectByBelief(subj, obj) {
+    if (!_v2gPts.length) return;
+    // Find the subject node in the canvas
+    var idx = -1;
+    for (var i = 0; i < _v2gPts.length; i++) {
+      if (_v2gPts[i].id === subj || _v2gPts[i].fullLabel === subj) { idx = i; break; }
+    }
+    if (idx < 0) {
+      // Try object
+      for (var i = 0; i < _v2gPts.length; i++) {
+        if (_v2gPts[i].id === obj || _v2gPts[i].fullLabel === obj) { idx = i; break; }
+      }
+    }
+    if (idx >= 0) {
+      var p = _v2gPts[idx];
+      _v2gSelectedId = p.id;
+      _v2gInspect(p);
+      // Zoom to the node
+      var size = _v2gCanvasSize();
+      if (size) {
+        _v2gView.scale = 2.5;
+        _v2gView.ox = size.w / 2 - p.x * 2.5;
+        _v2gView.oy = size.h / 2 - p.y * 2.5;
+        _v2gHeated();
+        _v2gRepaint();
+      }
+    }
   }
 
   function _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
