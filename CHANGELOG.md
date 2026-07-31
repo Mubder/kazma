@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## Unreleased — V1 memory stack removed (2026-07-31)
+
+- **The V1 memory stack is GONE.** All V1 modules deleted: `swarm/memory/
+  {adapter,graph,fts5,sqlite_vec}.py` and `memory/{auto_store,vector_store,
+  chroma_client,async_adapter,schema,backfill,fts5}.py`. V2 (bi-temporal
+  beliefs, PPR recall) is the single memory stack — there is no longer a
+  rollback path (`use_new_stack=false` no longer restores V1; the flag is
+  retained but inert). ~5,000 lines of V1 code removed.
+- **Relocated 3 shared symbols** so V2 + non-memory subsystems survive the
+  deletion: `embedder.py` → `memory/embedder.py` (V2 recall + semantic
+  router/cache depend on it); `vector.py` `VectorStore` →
+  `memory/vector_store_global.py` (KB index + semantic cache/router);
+  `extract_turn_texts` lifted into `consolidator.py` (V2 post-turn path).
+- **Rewired all UI/health/maintenance callers to V2:** `build_memory_health`
+  synthesizes V2 counts into the legacy component envelope; legacy graph
+  routes retired (410) except `/graph/search` (→ recall.search) and
+  `/graph/clear` (→ bi-temporal invalidate-all); maintenance routes → V2
+  backup/list/maintenance + a new V2 file-swap restore; dashboard legacy
+  kg-canvas block deleted (V2 board is the sole surface); TUI panel search →
+  recall.search, Clear button removed.
+- **Stripped V1 fallback branches:** `memory_search`/`memory_store` are V2-
+  only; compaction `retrieve_memories` is V2-only; agent_runner/app.py/TUI
+  boot pre-warm the V2 embedder instead of constructing VectorMemory;
+  installer/maintenance `_hot_reload_memory` are no-ops; `get_vector_memory`/
+  `set_vector_memory` are no-op stubs.
+- **Retained shared infra:** `swarm/memory/pipeline_logger.py` (used by live
+  swarm/patterns.py) + `swarm/memory/__init__.py` (re-exports it).
+- **Consolidator gutted to V2-only:** deleted `consolidate_from_messages`,
+  `extract_heuristic`, `_apply_to_memory`, `schedule_consolidation` + 8
+  orphaned helpers; `schedule_post_turn_memory` keeps only the V2 thread.
+- **Tests:** deleted 5 V1-orphan test files; moved the V2 worker_dispatch
+  tests into `test_memory_v2_swarm_bridge.py`. 261 tests pass.
+- Docs: memory-and-rag.md, architecture.md, glossary.md, faq.md,
+  api-and-extension-points.md, MEMORY_CODEMAP.md updated to remove V1 refs.
+
 ## Unreleased — V1→V2 full memory cutover (2026-07-31)
 
 - **V2 cognitive engine is now the single source of truth for ALL memory.**

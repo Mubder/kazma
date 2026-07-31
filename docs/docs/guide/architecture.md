@@ -254,18 +254,17 @@ The engine also exposes `get_autoscaler()` (lazy) — when a task has no matchin
 
 ## 7. The memory subsystems (overview)
 
-Kazma's chat memory is unified under **`UnifiedMemoryAdapter`** (4-layer RRF). Supporting pieces:
+Kazma's chat memory is the **V2 Cognitive Engine** (bi-temporal belief graph, PPR recall). The V1 4-layer RRF stack was removed in the V1→V2 cutover; V2 is the single stack. Supporting pieces:
 
 | Subsystem | Backing | Used by | Status |
 |---|---|---|---|
-| **UnifiedMemoryAdapter** | L1 Chroma + L2 graph + L3 FTS5 + L4 sqlite-vec | Chat (per-turn RAG, tools, auto-store, compaction) + swarm helpers | ✅ **Chat default** — fail-closed durable writes |
-| **L2 Property graph** | SQLite `knowledge_graph.db` (nodes/edges/FTS) | RRF + consolidator triples + Dashboard graph API | ✅ Replaced NetworkX JSON |
-| **Consolidator** | LLM + heuristic SPO extract | Post-turn → clean facts + graph edges | ✅ `memory.consolidation.*` |
-| **VectorMemory** | Chroma `agent_memory` (+ FTS5 degrade) | Boot singleton / tool fallback / health count | ✅ Same collection as L1 |
-| **SQLiteMemoryBackend / FTS5Memory** | `memories` + `memories_fts` in `memory.db` | Adapter L3 + VectorMemory degrade path | ✅ **One FTS schema** |
+| **V2 Cognitive Engine** | Bi-temporal belief graph + 4-tier episodes + sqlite-vec (`memory_state.db`) | Chat (per-turn recall, tools, auto-store, compaction) + swarm + self-improvement | ✅ **Chat default** — single read/write path (`recall()` from `memory/recall.py`) |
+| **Local Ego-Graph PPR** | Personalized PageRank over the belief/episode graph (2-hop, N≤200) | V2 recall boost | ✅ `memory/ppr.py` |
+| **Consolidator** | LLM/heuristic belief + episode extraction, prompt-fenced | Post-turn write pipeline | ✅ `memory/consolidator.py` |
+| **Durable consolidation queue** | SQLite-backed worker queue (`memory_ops.db`) | Async belief extraction, macro-sleep, backup/export | ✅ `memory/task_queue.py` |
 | **Knowledge Library** | Per-lib `kazma_kb_*` Chroma + SQLite chunks | Docs RAG (`knowledge_*` tools) | ✅ Isolated from chat memory |
 
-Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.config`). Full details in [Memory & RAG](memory-and-rag).
+Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.config`); V2 is on at `memory.v2.use_new_stack: true`. Full details in [Memory & RAG](memory-and-rag).
 
 ---
 
@@ -333,7 +332,7 @@ PRAGMA synchronous=NORMAL;     -- WAL-safe, faster than FULL
 
 ## Documentation Audit Notes
 
-- **Memory (2026-07 strengthen):** The 4-layer adapter **is** the chat path (per-turn, tools, auto-store, compaction). Earlier notes claiming it was swarm-only are obsolete.
+- **Memory (2026-07 cutover):** V2 (bi-temporal beliefs + PPR recall) **is** the single memory stack (per-turn recall, tools, auto-store, compaction). The V1 4-layer RRF adapter was removed; earlier notes referencing `UnifiedMemoryAdapter` / `VectorMemory` are obsolete.
 - **Build-site line numbers refreshed:** AGENTS.md cited "app.py ~line 966" for the startup recompile. The real site is `kazma-ui/kazma_ui/app.py:741-751` inside `_on_startup()` (line 721). `graph_builder.py:966` is an unrelated `aiosqlite.connect`.
 - **`agent_handler` is a package, not a file:** The gateway's `agent_handler.py` was decomposed into the `agent_handler/` package (`store.py`, `graph.py`, `commands.py`, …).
 - **`UnifiedModelRegistry`** is just an alias for `ModelRegistry` (`model_registry.py:950`).

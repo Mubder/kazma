@@ -250,27 +250,37 @@ httpx.post("http://127.0.0.1:8000/api/swarm/workers", json={
 })
 ```
 
-### 4.7 Tap the 4-layer memory adapter
+### 4.7 Tap the V2 memory stack
 
-The `UnifiedMemoryAdapter` is the **chat default** (per-turn RAG, tools, auto-store, compaction) and is also used by self-improvement / phonebook. Custom code:
+The **V2 Cognitive Engine** is the **chat default** (per-turn recall, tools, auto-store, compaction) and is also used by self-improvement / phonebook. (The V1 `UnifiedMemoryAdapter` was removed in the V1→V2 cutover.) Custom code:
 
 ```python
-from kazma_core.swarm.memory.adapter import get_adapter
+from kazma_core.memory.recall import recall
+from kazma_core.paths import primary_memory_db
+import sqlite3
 
-adapter = get_adapter()
-results = await adapter.query("your query", limit=5)   # RRF-blended across 4 layers
-doc_id = await adapter.store("User prefers dark mode", metadata={"source": "custom"})
-# doc_id is "" if no durable layer (L1/L3/L4) confirmed the write (fail-closed)
+conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+conn.row_factory = sqlite3.Row
+
+result = recall("what does the user prefer?", conn=conn, limit=5)
+# result.beliefs  -> list[RecallHit] of currently-valid beliefs
+# result.episodes -> list[RecallHit] of ranked episodes (FTS5 + dense + PPR, RRF-fused)
 ```
 
-Property graph (L2):
+Writing a belief (functional predicates supersede; set predicates append):
 
 ```python
-from kazma_core.swarm.memory.graph import get_knowledge_graph
+from kazma_core.memory.belief_mutation import mutate_belief
+from kazma_core.paths import primary_memory_db, ops_memory_db
 
-kg = get_knowledge_graph()
-kg.upsert_triple("user", "prefers", "dark mode", fact="User prefers dark mode.")
-hits = kg.search("dark mode", limit=10)
+primary = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+ops = sqlite3.connect(ops_memory_db(), check_same_thread=False)
+
+mutate_belief(
+    primary, "user", "prefers", "dark mode",
+    ops_conn=ops, predicate_type="set",
+    extraction_method="custom", source_session="my-integration",
+)
 ```
 
 See [Memory & RAG](memory-and-rag).
@@ -292,4 +302,4 @@ See [Memory & RAG](memory-and-rag).
 - **The WebSocket chat endpoint is dead** (410 Gone). All API consumers should use SSE.
 - **The SSE `approval_required` event** is the canonical way for frontends to surface HITL pauses; pair it with `POST /api/approve/\{thread_id\}`.
 - **`/api/approve` ownership enforcement** (403 on cross-user) means approval tokens are per-user — an admin can't approve another user's task without matching identity fields.
-- **The 4-layer memory adapter is the chat default** — per-turn RAG, tools, auto-store, and compaction all use `get_adapter()`.
+- **V2 is the single memory stack** — per-turn recall, tools, auto-store, and compaction all use `recall()` from `memory/recall.py`. The V1 4-layer adapter (`get_adapter()`) was removed in the V1→V2 cutover.

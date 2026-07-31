@@ -158,7 +158,7 @@ The process-wide singleton (`model_registry.py:81`) managing providers, models, 
 ## P
 
 **Phonebook**
-`swarm/phonebook.py` — direct summon-and-dispatch bypassing the reliability layer; used by topology/DAG executors. Injects episodic memory from the 4-layer adapter.
+`swarm/phonebook.py` — direct summon-and-dispatch bypassing the reliability layer; used by topology/DAG executors. Injects episodic memory from the V2 recall path.
 
 **PermissionLevel**
 The swarm tool-access tier: `READ_ONLY`, `SYSTEM_EXEC`, `FULL_ACCESS`. Assigned per worker role.
@@ -174,7 +174,7 @@ The invariant that `chat_id`/`user_id`/`message_id` etc. never enter the graph s
 ## R
 
 **RRF**
-Reciprocal Rank Fusion — the blending algorithm used by `UnifiedMemoryAdapter` (`_RRF_K = 60`).
+Reciprocal Rank Fusion — a rank-blending algorithm. The V1 `UnifiedMemoryAdapter` used it to fuse its 4 layers (`_RRF_K = 60`); that stack was removed in the V1→V2 cutover. V2 recall still fuses belief + episode + PPR hits via an internal RRF step in `memory/recall.py`.
 
 **ReliabilityRegistry**
 `swarm/reliability_registry.py` — a config holder for per-worker breakers, retries, timeouts, validators, concurrency. The state machines live in `reliability.py`.
@@ -196,7 +196,7 @@ The platform ID ↔ thread_id mapping (`gateway.py:185`). SQLite or in-memory. N
 A packaged, optionally-signed Python entry point + manifest registering one or more tools. Loaded from `kazma-skills/manifests/` or the Hub.
 
 **sqlite-vec**
-A SQLite extension for vector search, used by Layer 4 of the memory adapter. Declared in the `[rag]` optional extra (`sqlite-vec>=0.1.6`).
+A SQLite extension for vector search. In V2 it backs `memory/vector_engine.py` (native sqlite-vec with a guarded NumPy fallback) for episode dense-vector recall. Declared in the `[rag]` optional extra (`sqlite-vec>=0.1.6`).
 
 **SwarmEngine**
 `swarm/engine.py:103` — the central async orchestrator for swarm workers.
@@ -222,7 +222,7 @@ The Textual terminal dashboard (`kazma-tui`), a read-mostly consumer of the core
 ## U
 
 **UnifiedMemoryAdapter**
-The 4-layer memory blender (`swarm/memory/adapter.py`): ChromaDB + SQLite property graph + FTS5 + sqlite-vec, RRF-fused. **Chat default** (per-turn RAG, tools, auto-store, compaction) plus swarm helpers.
+*Removed in the V1→V2 cutover.* The former 4-layer memory blender (`swarm/memory/adapter.py`): ChromaDB + SQLite property graph + FTS5 + sqlite-vec, RRF-fused. Superseded by the **V2 Cognitive Engine** — see *V2 Cognitive Engine*.
 
 **UnifiedRouter**
 The auto-routing engine for `workers=["auto"]` swarm dispatch.
@@ -231,8 +231,11 @@ The auto-routing engine for `workers=["auto"]` swarm dispatch.
 
 ## V
 
+**V2 Cognitive Engine**
+Kazma's single memory stack (`kazma-core/kazma_core/memory/`). Bi-temporal belief graph (functional/set/state predicates with `valid_from`/`valid_until` + `ingested_at`/`invalidated_at` axes), 4-tier episodes, Local Ego-Graph Personalized PageRank recall, procedural skill DAGs, and a durable SQLite-backed consolidation queue. Unified read path: `recall()` in `memory/recall.py`; write path: `mutate_belief()` in `memory/belief_mutation.py`. Active by default (`memory.v2.use_new_stack: true`). Replaced the V1 4-layer RRF stack.
+
 **VectorMemory**
-ChromaDB-backed memory singleton (`memory/vector_store.py`) for boot / health / tool fallback. Same `agent_memory` collection as adapter L1. 384-d default MiniLM.
+*Removed in the V1→V2 cutover.* The former ChromaDB-backed memory singleton (`memory/vector_store.py`) used for boot / health / tool fallback. V2 uses `memory/vector_engine.py` (sqlite-vec native + guarded NumPy fallback) instead.
 
 **Consolidator**
 Post-turn librarian (`memory/consolidator.py`): extracts durable facts + SPO triples (LLM + heuristic), prompt-fenced, deduped vs auto_store, writes adapter + L2 graph.

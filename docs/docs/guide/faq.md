@@ -12,7 +12,7 @@ description: Kazma FAQ — code-audited reference (unified docs, v0.6.1+)
 
 ### Is Kazma production-ready?
 
-The core agent, swarm orchestration, HITL gates, gateways, and chat memory (4-layer adapter + per-turn RAG + auto-store) are implemented and wired. Install `pip install -e ".[rag]"` for full vector recall. Treat the safety layer as production-grade; memory is production-usable on single-node with health monitoring (see [Memory & RAG](memory-and-rag)).
+The core agent, swarm orchestration, HITL gates, gateways, and chat memory (V2 cognitive engine — bi-temporal beliefs + per-turn PPR recall + auto-store) are implemented and wired. Install `pip install -e ".[rag]"` for full vector recall. Treat the safety layer as production-grade; memory is production-usable on single-node with health monitoring (see [Memory & RAG](memory-and-rag)).
 
 ### What language is the UI in by default?
 
@@ -83,11 +83,11 @@ If recall is empty: install the RAG extra (`pip install -e ".[rag]"`), confirm D
 
 ### Is the "4-layer memory" real?
 
-**Yes.** `UnifiedMemoryAdapter` (Chroma L1 + graph L2 + FTS5 L3 + sqlite-vec L4, RRF-blended) is the **chat default** for per-turn RAG, tools, auto-store, and compaction — not only swarm helpers. L2 is structural (tags/snippets), not full semantic search.
+That was the **V1** stack (`UnifiedMemoryAdapter`: Chroma L1 + graph L2 + FTS5 L3 + sqlite-vec L4, RRF-blended). V1 was **removed** in the V1→V2 cutover. The current and only stack is the **V2 Cognitive Engine** — bi-temporal belief graph + 4-tier episodes + Local Ego-Graph PPR recall (`memory/recall.py:recall()`). It is the chat default for per-turn recall, tools, auto-store, and compaction.
 
 ### Do I need to install ChromaDB?
 
-For full vector recall, yes: `pip install -e ".[rag]"` (chromadb + sentence-transformers + sqlite-vec). Without it, durable writes may still succeed via FTS5 L3 if `kazma-memory` is available; health will show which layers are up.
+V2 recall runs on **sqlite-vec** (bundled via the `[rag]` extra), not ChromaDB. Install `pip install -e ".[rag]"` for the full vector stack (sqlite-vec + sentence-transformers; chromadb is still pulled in for the embedder types and the semantic router). Without it, V2 degrades to FTS5-only episode search; the Dashboard memory health board shows what is available.
 
 ### Why is `tiktoken` mentioned if it's not a dependency?
 
