@@ -1939,10 +1939,12 @@
         _v2gIds[nd.id] = i;
         var ang = i * 2.39996, r = 20 + (i % 6) * 24;
         var bc = nd.beliefCount || 1;
+        var fullName = String(nd.name || nd.id);
         return {
           x: W / 2 + Math.cos(ang) * r, y: H / 2 + Math.sin(ang) * r,
           vx: 0, vy: 0, id: nd.id,
-          label: String(nd.name || nd.id).slice(0, 20),
+          label: fullName.slice(0, 22),
+          fullLabel: fullName,
           type: nd.type || 'entity',
           isHighStakes: !!nd.isHighStakes,
           r: _v2gNodeBaseR + Math.min(8, Math.sqrt(bc) * 1.5),
@@ -2085,7 +2087,7 @@
         var tip = document.getElementById('v2g-tooltip');
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
-          tip.innerHTML = '<b style="color:' + (_V2G_TYPE_COLORS[p.type] || '#fff') + ';">' + _v2gEsc(p.label) + '</b><br><span style="color:var(--text-muted);">type: ' + p.type + (p.isHighStakes ? ' · ⚠ high-stakes' : '') + '</span>';
+          tip.innerHTML = '<b style="color:' + (_V2G_TYPE_COLORS[p.type] || '#fff') + ';word-break:break-word;">' + _v2gEsc((p.fullLabel || p.label).slice(0, 80)) + '</b><br><span style="color:var(--text-muted);">type: ' + p.type + (p.isHighStakes ? ' · ⚠ high-stakes' : '') + '</span>';
           tip.style.display = 'block';
           var rect = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect.width - 200) + 'px';
@@ -2121,8 +2123,9 @@
     var el = document.getElementById('v2g-inspect');
     if (!el || !p) return;
     var color = _V2G_TYPE_COLORS[p.type] || '#94a3b8';
-    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.85rem;margin-bottom:6px;">' + _v2gEsc(p.label) + '</div>';
-    html += '<div style="color:var(--text-muted);font-size:0.7rem;margin-bottom:8px;">type: ' + p.type;
+    var fullName = p.fullLabel || p.label || p.id;
+    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;margin-bottom:4px;word-break:break-word;">' + _v2gEsc(fullName) + '</div>';
+    html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">type: ' + p.type;
     if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
     html += '</div>';
     // List readable belief sentences touching this node
@@ -2133,20 +2136,19 @@
       if (!A || !B) continue;
       var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
       var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
-      var arrow = '→';
-      var target = _v2gEsc(B.label);
-      var source = _v2gEsc(A.label);
+      var targetName = _v2gEsc(B.fullLabel || B.label);
+      var sourceName = _v2gEsc(A.fullLabel || A.label);
       if (A.id === p.id) {
-        rels.push('<span style="color:' + pcolor + ';font-size:0.62rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b>' + target + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.6rem;">(superseded)</span>' : ''));
+        rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b>' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
       } else if (B.id === p.id) {
-        rels.push('<span style="color:var(--text-muted);font-size:0.7rem;">←</span> ' + source + ' ' + predLabel + ' <b>(this)</b>');
+        rels.push('<span style="color:var(--text-muted);font-size:0.68rem;">←</span> ' + sourceName + ' ' + predLabel + ' <b>(this)</b>');
       }
     }
     if (rels.length) {
-      html += '<div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ')</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:4px;">' + rels.slice(0, 8).map(function(r) { return '<div style="color:var(--text-secondary);line-height:1.4;">' + r + '</div>'; }).join('') + '</div>';
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ')</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;">' + rels.slice(0, 10).map(function(r) { return '<div style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;">' + r + '</div>'; }).join('') + '</div>';
     } else {
-      html += '<div style="color:var(--text-muted);font-size:0.72rem;">No direct beliefs — this entity may be referenced indirectly.</div>';
+      html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — this entity may be referenced indirectly.</div>';
     }
     el.innerHTML = html;
   }
