@@ -1,4 +1,9 @@
-"""Kazma Memory — Vector-based, full-text, and graph-backed long-term memory for agents."""
+"""Kazma Memory — V2 cognitive engine (bi-temporal beliefs, PPR recall).
+
+The V1 stack (ChromaDB VectorMemory, FTS5, property graph, sqlite-vec) was
+removed in the V1→V2 cutover. V2 is the single memory stack. The config
+helpers remain re-exported here for convenience.
+"""
 
 from kazma_core.memory.config import (
     memory_auto_store_enabled,
@@ -6,12 +11,8 @@ from kazma_core.memory.config import (
     memory_per_turn_enabled,
     read_memory_cfg,
 )
-from kazma_core.memory.fts5 import FTS5Memory
-from kazma_core.memory.vector_store import VectorMemory
 
 __all__ = [
-    "FTS5Memory",
-    "VectorMemory",
     "memory_auto_store_enabled",
     "memory_enabled",
     "memory_per_turn_enabled",

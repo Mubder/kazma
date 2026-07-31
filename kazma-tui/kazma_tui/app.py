@@ -299,21 +299,22 @@ class KazmaTUI(App[None]):
         except Exception as e:
             logger.warning("[TUI] SwarmEngine init failed: %s", e)
 
-        # ── VectorMemory (RAG) ─────────────────────────────────────
+        # ── V2 embedder pre-warm ────────────────────────────────────
+        # V2 recall() uses the shared embedder for dense retrieval; warm it
+        # so the first TUI chat turn isn't stalled on the MiniLM load. The
+        # legacy VectorMemory/ChromaDB boot was removed with the V1 stack.
         try:
             import os
             _demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
             if not _demo:
-                from kazma_core.agent.tool_registry import set_vector_memory
-                from kazma_core.memory.vector_store import VectorMemory
+                from kazma_core.memory.embedder import get_embedder
 
-                vec_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
-                vec_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
-                vm = VectorMemory(collection_name=vec_collection, model_name=vec_model)
-                set_vector_memory(vm)
-                logger.info("[TUI] VectorMemory initialized (collection=%s)", vec_collection)
+                emb = get_embedder()
+                if emb is not None:
+                    emb.encode("kazma tui warmup")
+                    logger.info("[TUI] V2 embedder ready (%s)", type(emb).__name__)
         except Exception as e:
-            logger.debug("[TUI] VectorMemory init skipped: %s", e)
+            logger.debug("[TUI] V2 embedder pre-warm skipped: %s", e)
 
         # ── Update status bar with active model info ──────────────────
         try:

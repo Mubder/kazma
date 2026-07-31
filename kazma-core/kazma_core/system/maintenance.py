@@ -381,22 +381,9 @@ def list_memory_backups() -> list[dict[str, Any]]:
 
 
 async def _hot_reload_memory() -> None:
-    """Hot-reload the VectorMemory singleton globally.
+    """V1 VectorMemory hot-reload — retired (V2 cutover).
 
-    Uses the SAME environment variables as ``app.py`` startup so the
-    hot-reload points at the user's configured path/collection/model,
-    not the defaults.
+    V2 uses its own SQLite stores and the shared embedder; no ChromaDB
+    singleton to reload. Kept as a no-op for the maintenance call site.
     """
-    import os
-    from kazma_core.memory.vector_store import VectorMemory
-    from kazma_core.agent.tool_registry import set_vector_memory
-
-    logger.info("[Maintenance] Reloading global memory instance...")
-    try:
-        collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
-        model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
-        mem = VectorMemory(collection_name=collection, model_name=model)
-        set_vector_memory(mem)
-        logger.info("[Maintenance] Memory reload complete. Registered count: %s", mem.count)
-    except Exception as e:
-        logger.error("[Maintenance] Failed to hot-reload global memory: %s", e, exc_info=True)
+    logger.info("[Maintenance] V2 memory stack — no V1 hot-reload needed (no-op).")

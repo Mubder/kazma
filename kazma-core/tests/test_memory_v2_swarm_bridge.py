@@ -191,3 +191,76 @@ def test_recall_search_never_raises(isolated_data):
 
     assert search("", limit=5) == []  # empty query
     assert isinstance(search("nonexistent query xyz", limit=5), list)
+
+
+# ── worker_dispatch._index_worker_l4_memory (the swarm_bridge caller) ─────
+# Moved from test_memory_p1_p2_p3.py before that V1-orphan file was deleted.
+# Tests the dispatch-layer wrapper around store_swarm_result.
+
+
+@pytest.mark.asyncio
+async def test_p3_index_worker_l4_sets_worker_meta(tmp_path: Path, monkeypatch):
+    """Successful worker dispatch writes a V2 swarm_result episode + belief."""
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory import dual_write
+
+    dual_write.reset_mirror()
+    try:
+        from kazma_core.swarm import worker_dispatch as wd
+
+        await wd._index_worker_l4_memory(
+            worker_name="Observer",
+            prompt="Summarize the repo structure",
+            output="Found 12 packages under monorepo.",
+            task_id="task-abc",
+        )
+        from kazma_core.paths import primary_memory_db
+
+        conn = sqlite3.connect(primary_memory_db())
+        conn.row_factory = sqlite3.Row
+        ep = conn.execute(
+            "SELECT user_text, metadata_json FROM episodes WHERE metadata_json LIKE ?",
+            ('%"source": "swarm_result"%',),
+        ).fetchall()
+        assert ep, "expected a swarm_result episode"
+        row = ep[0]
+        assert "Result:" in (row["user_text"] or "") or "Found 12" in (row["user_text"] or "")
+        meta = json.loads(row["metadata_json"])
+        assert meta.get("worker") == "Observer"
+        assert meta.get("source") == "swarm_result"
+        bel = conn.execute(
+            "SELECT object FROM beliefs WHERE predicate='produced'"
+        ).fetchall()
+        assert bel, "expected a worker→produced belief"
+        assert any("Found 12" in (b["object"] or "") for b in bel)
+        conn.close()
+    finally:
+        dual_write.reset_mirror()
+
+
+@pytest.mark.asyncio
+async def test_p3_index_skips_empty_output(tmp_path: Path, monkeypatch):
+    """No store when prompt and output are empty/trivial."""
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory import dual_write
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    dual_write.reset_mirror()
+    try:
+        from kazma_core.swarm import worker_dispatch as wd
+
+        await wd._index_worker_l4_memory(
+            worker_name="Observer", prompt="", output="", task_id="x",
+        )
+        from kazma_core.paths import primary_memory_db
+
+        conn = sqlite3.connect(primary_memory_db())
+        ensure_primary_schema(conn)
+        n = conn.execute(
+            "SELECT COUNT(*) FROM episodes WHERE metadata_json LIKE ?",
+            ('%"source": "swarm_result"%',),
+        ).fetchone()[0]
+        conn.close()
+        assert n == 0
+    finally:
+        dual_write.reset_mirror()

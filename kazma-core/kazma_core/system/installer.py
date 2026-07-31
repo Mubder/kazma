@@ -234,34 +234,11 @@ def _record_installed_extra(extra: str | None, package_name: str | None) -> None
 
 
 async def _hot_reload_memory() -> None:
-    """Hot-reloads the VectorMemory to active status and triggers re-indexing of fallback memories if needed."""
-    try:
-        logger.info("[Installer] Triggering VectorMemory hot-reload...")
-        from kazma_core.memory.vector_store import VectorMemory
-        # Instantiate VectorMemory anew, which will now successfully import chromadb
-        mem = VectorMemory()
-        
-        # Update global vector memory reference
-        from kazma_core.agent.tool_registry import set_vector_memory
-        set_vector_memory(mem)
-        
-        # Clear the degraded alerts for VectorMemory
-        from kazma_core.observability.alerts import AlertDispatcher
-        AlertDispatcher.resolve_alerts_for_subsystem("VectorMemory")
-        
-        # If there's any pending data in FTS5 fallback, we can migrate/re-index it into chromadb!
-        from kazma_core.memory.fts5 import FTS5Memory
-        fts = FTS5Memory()
-        fts_count = fts.count()
-        if fts_count > 0:
-            logger.info("[Installer] Re-indexing %d entries from FTS5 memory fallback into VectorMemory...", fts_count)
-            # Re-index: read all entries from FTS5 memory and add them to VectorMemory.
-            rows = fts._conn.execute(f"SELECT text, metadata, doc_id FROM {fts._table_name}").fetchall()
-            for row in rows:
-                import json
-                meta = json.loads(row["metadata"]) if row["metadata"] else {}
-                mem.add(text=row["text"], metadata=meta, doc_id=row["doc_id"])
-            logger.info("[Installer] Re-indexing complete.")
-            
-    except Exception as e:
-        logger.error("[Installer] Error during memory hot-reload: %s", e, exc_info=True)
+    """V1 VectorMemory hot-reload — retired.
+
+    The legacy ChromaDB/FTS5 stack was removed in the V1→V2 cutover. V2 uses
+    its own SQLite stores (memory_state.db / memory_ops.db) and the shared
+    embedder, neither of which needs a post-install hot-reload. This is kept
+    as a no-op so the install flow's call site (installer.py:152) stays valid.
+    """
+    logger.info("[Installer] V2 memory stack — no V1 hot-reload needed (no-op).")
