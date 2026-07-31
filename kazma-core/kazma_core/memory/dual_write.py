@@ -265,6 +265,22 @@ class DualWriteMirror:
                         json.dumps(meta, ensure_ascii=False),
                     ),
                 )
+                # Compute + store the episode embedding so dense vector
+                # recall can find it. Best-effort: a missing/broken
+                # embedder leaves embedding NULL (FTS5 recall still works).
+                try:
+                    from kazma_core.memory.embedder import encode_text_to_blob
+
+                    ep_text = (summary_text or user_text or assistant_text or "").strip()
+                    if ep_text:
+                        emb_blob = encode_text_to_blob(ep_text)
+                        if emb_blob is not None:
+                            self._primary.execute(
+                                "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL",
+                                (emb_blob, eid),
+                            )
+                except Exception:
+                    logger.debug("[dual_write] episode embedding failed for %s", eid, exc_info=True)
                 self._primary.commit()
             return eid
         except Exception:

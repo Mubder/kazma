@@ -110,6 +110,22 @@ def _insert_episode(
             importance, now, json.dumps(meta, ensure_ascii=False, default=str),
         ),
     )
+    # Compute + store the episode embedding so dense vector recall can
+    # find swarm results / evolution entries / compaction summaries.
+    # Best-effort: a missing embedder leaves embedding NULL (FTS5 still works).
+    try:
+        from kazma_core.memory.embedder import encode_text_to_blob
+
+        ep_text = (summary_text or user_text or "").strip()
+        if ep_text:
+            emb_blob = encode_text_to_blob(ep_text)
+            if emb_blob is not None:
+                conn.execute(
+                    "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL",
+                    (emb_blob, eid),
+                )
+    except Exception:
+        logger.debug("[swarm_bridge] episode embedding failed for %s", eid, exc_info=True)
     conn.commit()
     return eid
 
