@@ -229,7 +229,16 @@ def _recall_beliefs(
     hits: list[RecallHit] = []
     seen_subjects: dict[str, RecallHit] = {}
     for r in rows:
-        key = f"{r['subject']}|{r['predicate']}"
+        # Dedup: for FUNCTIONAL predicates (single-valued), keep only the
+        # highest-scoring belief per (subject, predicate). For SET and STATE
+        # predicates (multi-valued), each belief is unique — use the belief
+        # id as the key so they ALL survive dedup. This prevents 8 different
+        # 'noted' beliefs from collapsing to 1 in recall results.
+        ptype = r["predicate_type"] if "predicate_type" in r.keys() else "set"
+        if ptype == "functional":
+            key = f"{r['subject']}|{r['predicate']}"
+        else:
+            key = r["id"]
         content = _format_belief_text(r)
         score = float(r["structural_importance"]) * float(r["confidence"]) * float(
             r["source_trust_weight"]
