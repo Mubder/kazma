@@ -88,22 +88,25 @@ def _classify_predicate(predicate: str) -> str:
     return "set"
 
 
-def _extract_pred_from_text(text: str) -> tuple[str, str]:
+def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
     """Try to extract a (predicate, object) pair from memory_chunk text.
 
-    Falls back to ('noted', text) when no pattern matches. This replaces
-    the old behavior of defaulting everything to the meaningless 'noted'.
+    Returns None when the text doesn't match any fact pattern — the
+    caller should SKIP it rather than store conversational noise as a
+    'noted' belief. Only real, structured facts become beliefs.
     """
     import re
 
     t = (text or "").strip()
     patterns = [
-        (re.compile(r"(?i)\buser(?:'s)? favorite (\w+) is (.+)", re.I), "favorite"),
-        (re.compile(r"(?i)\buser prefers (.+)", re.I), "prefers"),
-        (re.compile(r"(?i)\buser (?:lives|works) (?:in|at) (.+)", re.I), "lives_in"),
-        (re.compile(r"(?i)\buser(?:'s)? name is (.+)", re.I), "name_is"),
-        (re.compile(r"(?i)\buser (?:likes|loves|uses) (.+)", re.I), "prefers"),
-        (re.compile(r"(?i)\buser works (?:at|on) (.+)", re.I), "works_at"),
+        (re.compile(r"(?i)\buser(?:'s)? favorite (\w+) is (.+)"), "favorite"),
+        (re.compile(r"(?i)\buser prefers (.+)"), "prefers"),
+        (re.compile(r"(?i)\buser (?:lives|works) (?:in|at) (.+)"), "lives_in"),
+        (re.compile(r"(?i)\buser(?:'s)? name is (.+)"), "name_is"),
+        (re.compile(r"(?i)\buser (?:likes|loves|uses) (.+)"), "prefers"),
+        (re.compile(r"(?i)\buser works (?:at|on) (.+)"), "works_at"),
+        (re.compile(r"(?i)\buser has skill (?:in|with) (.+)"), "has_skill"),
+        (re.compile(r"(?i)\buser(?:'s)? (?:github|gitlab) (?:is|username is) (.+)"), "github_is"),
     ]
     for pat, default_pred in patterns:
         m = pat.search(t)
@@ -113,8 +116,9 @@ def _extract_pred_from_text(text: str) -> tuple[str, str]:
                 val = m.group(2).strip().rstrip(".")
                 return f"favorite_{cat}", val
             return default_pred, m.group(1).strip().rstrip(".")
-    # No pattern matched — use the full text as a 'noted' fact
-    return "noted", t[:200]
+    # No pattern matched — this is conversational text, NOT a fact.
+    # Return None so the caller skips it instead of creating noise.
+    return None
 
 
 # ── Connection helpers ───────────────────────────────────────────────────
@@ -320,14 +324,21 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 obj = str(props.get("object") or "")
 
                 if not pred or pred == "noted":
-                    # Heuristic predicate extraction from the content text
-                    pred, obj = _extract_pred_from_text(content)
+                    # Heuristic predicate extraction from the content text.
+                    # Returns None when the content isn't a recognizable
+                    # fact — skip it rather than storing conversational
+                    # noise as a meaningless 'noted' belief.
+                    extracted = _extract_pred_from_text(content)
+                    if extracted is None:
+                        stats["skipped"] += 1
+                        continue
+                    pred, obj = extracted
 
                 pred_clean = pred.strip().lower().replace(" ", "_") or "noted"
                 if pred_clean in _STRUCTURAL_PREDICATES:
                     stats["skipped"] += 1
                     continue
-                if not obj or obj == "noted":
+                if not obj:
                     obj = content[:200]
                 ptype = _classify_predicate(pred_clean)
                 bid = "b_" + _stable_id("memory_chunk", src_id)
