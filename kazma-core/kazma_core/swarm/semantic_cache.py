@@ -11,7 +11,7 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from kazma_core.swarm.memory.vector import get_encoder
+from kazma_core.memory.vector_store_global import get_encoder
 
 from kazma_core.config_store import apply_sqlite_pragmas
 

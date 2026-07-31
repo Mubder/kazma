@@ -42,7 +42,7 @@ from typing import Any
 
 from kazma_core.paths import vector_memory_path
 from kazma_core.stores.knowledge import KnowledgeStore, get_knowledge_store
-from kazma_core.swarm.memory.vector import VectorStore
+from kazma_core.memory.vector_store_global import VectorStore
 
 __all__ = [
     "KnowledgeHit",

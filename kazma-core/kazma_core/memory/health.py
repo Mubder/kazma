@@ -119,7 +119,7 @@ def build_memory_health() -> dict[str, Any]:
     emb_detail = "Embedder not initialized."
     emb_meta: dict[str, Any] = {"provider": provider, "model": model, "dim": None}
     try:
-        from kazma_core.swarm.memory.embedder import get_embedder
+        from kazma_core.memory.embedder import get_embedder
 
         emb = get_embedder()
         if emb is None:

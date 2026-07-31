@@ -1,14 +1,15 @@
-"""Layer 1 — ChromaDB global vector store.
+"""ChromaDB global vector store (shared, non-chat-memory).
+
+Backs the knowledge-base index, semantic cache, and semantic router — NOT the
+chat memory (which is V2 since the V1→V2 cutover). Relocated here from
+``swarm/memory/vector.py`` so the V1 ``swarm/memory`` package could be deleted
+without breaking the subsystems that depend on this class.
 
 Encoder pattern: ``get_encoder()`` delegates to the pluggable
 ``embedder.get_embedder()`` factory so the system can use either local
 sentence-transformers or a remote OpenAI-compatible endpoint (NVIDIA NIM).
-All vector backends (L1 + L4) MUST use ``get_encoder()`` / ``get_embedder()``
-so the model is never loaded twice.
-
-The ``VectorStore`` manages ChromaDB collections for cross-worker semantic
-search.  Falls back gracefully to empty results when ChromaDB or
-sentence-transformers is unavailable.
+All vector backends MUST use ``get_encoder()`` / ``get_embedder()`` so the
+model is never loaded twice.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kazma_core.swarm.memory.embedder import get_embedder
+from kazma_core.memory.embedder import get_embedder
 
 __all__ = ["VectorStore", "get_encoder"]
 
@@ -70,7 +71,7 @@ class VectorStore:
             return True
         try:
             from kazma_core.memory.chroma_client import get_chroma_client
-            from kazma_core.swarm.memory.embedder import make_chroma_embedding_function
+            from kazma_core.memory.embedder import make_chroma_embedding_function
 
             # P5: share client with VectorMemory when same persist path
             self._client = get_chroma_client(self._persist_dir)

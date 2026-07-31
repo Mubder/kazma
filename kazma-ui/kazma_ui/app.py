@@ -272,7 +272,7 @@ class KazmaAppBuilder:
                     logger.info("[VectorMemory] V2 active — skipping V1 adapter pre-warm + backfill")
                 else:
                   try:
-                    from kazma_core.swarm.memory.embedder import get_embedder
+                    from kazma_core.memory.embedder import get_embedder
                     from kazma_core.swarm.memory.adapter import get_adapter
 
                     emb = get_embedder()

@@ -115,6 +115,41 @@ def _min_chars(cfg: dict[str, Any]) -> int:
         return 24
 
 
+def extract_turn_texts(messages: list[dict[str, Any]]) -> tuple[str, str]:
+    """Return (last_user, last_assistant) content from the message list.
+
+    Lifted here from the deleted ``auto_store.py`` so the V2 post-turn path
+    (``_mirror_turn_to_v2`` / ``_v2_extract_sync``) doesn't depend on a V1
+    module. Pure stdlib — no transitive V1 dependencies.
+    """
+    user = ""
+    assistant = ""
+    for m in reversed(messages or []):
+        role = m.get("role")
+        content = m.get("content")
+        if not isinstance(content, str):
+            # Multimodal: take first text part if present.
+            if isinstance(content, list):
+                parts = [
+                    p.get("text", "")
+                    for p in content
+                    if isinstance(p, dict) and p.get("type") in (None, "text")
+                ]
+                content = " ".join(p for p in parts if p)
+            else:
+                content = ""
+        content = str(content or "").strip()
+        if not content:
+            continue
+        if role == "assistant" and not assistant:
+            assistant = content
+        elif role == "user" and not user:
+            user = content
+        if user and assistant:
+            break
+    return user, assistant
+
+
 def _use_llm(cfg: dict[str, Any]) -> bool:
     if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
         block = _cons_block(cfg)
@@ -503,7 +538,6 @@ async def consolidate_from_messages(
             (for dedup / skip_adapter_if_auto_stored).
         force: Bypass every_n_turns (tests).
     """
-    from kazma_core.memory.auto_store import extract_turn_texts
     from kazma_core.memory.config import read_memory_cfg
 
     cfg = read_memory_cfg()
@@ -717,7 +751,6 @@ def schedule_post_turn_memory(
         # event loop (where httpx is valid), so it can safely call the LLM.
         # We point it at the episode the mirror just wrote.
         try:
-            from kazma_core.memory.auto_store import extract_turn_texts
             from kazma_core.memory.dual_write import _episode_id
 
             user_text, _ = extract_turn_texts(messages)
@@ -783,7 +816,6 @@ def _mirror_turn_to_v2(
     extraction proper happens in the Phase 3 consolidator; here we only
     capture the raw turn so recall can find it once ``use_new_stack`` flips.
     """
-    from kazma_core.memory.auto_store import extract_turn_texts
     from kazma_core.memory.dual_write import mirror_episode
 
     user_text, assistant_text = extract_turn_texts(messages)
@@ -820,7 +852,6 @@ def _v2_extract_sync(
     """
     import sqlite3
 
-    from kazma_core.memory.auto_store import extract_turn_texts
     from kazma_core.memory.config import read_memory_cfg
     from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
     from kazma_core.paths import memory_ops_db, primary_memory_db

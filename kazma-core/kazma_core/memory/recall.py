@@ -441,7 +441,7 @@ def _episode_dense(
         return []
     # Encode the query
     try:
-        from kazma_core.swarm.memory.embedder import get_embedder
+        from kazma_core.memory.embedder import get_embedder
 
         embedder = get_embedder()
         if embedder is None:

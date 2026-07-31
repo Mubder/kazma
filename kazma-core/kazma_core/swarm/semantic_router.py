@@ -30,7 +30,7 @@ _DEFAULT_COLLECTION = "swarm_worker_profiles"
 def _embedding_dim() -> int:
     """Read the embedding dimension from config (default 384)."""
     try:
-        from kazma_core.swarm.memory.embedder import get_embedding_dim
+        from kazma_core.memory.embedder import get_embedding_dim
 
         return get_embedding_dim()
     except Exception:
@@ -95,7 +95,7 @@ class SemanticRouter:
         if self._model is not None:
             return True
         try:
-            from kazma_core.swarm.memory.vector import get_encoder
+            from kazma_core.memory.vector_store_global import get_encoder
 
             self._model = get_encoder(self._model_name)
             if self._model is not None:

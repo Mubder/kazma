@@ -335,7 +335,7 @@ def _apply_beliefs_to_v2(
     # Lazily embed a text via the shared embedder (returns bytes or None).
     def _embed(text: str) -> bytes | None:
         try:
-            from kazma_core.swarm.memory.embedder import encode_text_to_blob
+            from kazma_core.memory.embedder import encode_text_to_blob
 
             return encode_text_to_blob(text)
         except Exception:
