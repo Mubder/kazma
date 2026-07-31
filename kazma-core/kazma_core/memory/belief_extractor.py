@@ -294,10 +294,45 @@ async def extract_and_apply_beliefs(
     if not raw_beliefs:
         return stats
 
-    # Fence + mutate each belief
-    from kazma_core.memory.entity_resolution import resolve_entity, slug
+    # Apply via the shared sync helper (entity resolution + mutate)
+    return _apply_beliefs_to_v2(
+        raw_beliefs,
+        primary_conn,
+        ops_conn,
+        stats=stats,
+        session_id=session_id,
+        turn=turn,
+        tenant_id=tenant_id,
+        cfg=cfg,
+    )
 
-    # Lazily embed a text via the shared embedder (returns float list or None).
+
+def _apply_beliefs_to_v2(
+    raw_beliefs: list[dict[str, Any]],
+    primary_conn,
+    ops_conn,
+    *,
+    stats: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    turn: int | None = None,
+    tenant_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    Pure SQLite + embedder — NO LLM call, NO httpx. Safe to run from a
+    worker thread (the post-turn hook spawns this in a thread; the LLM
+    extraction runs separately on the queue worker's loop).
+
+    Mutates ``stats`` in place and returns it.
+    """
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.entity_resolution import resolve_entity
+
+    if stats is None:
+        stats = {"skipped_filler": False, "source": "none", "applied": 0, "rejected": 0, "actions": []}
+
+    # Lazily embed a text via the shared embedder (returns bytes or None).
     def _embed(text: str) -> bytes | None:
         try:
             from kazma_core.swarm.memory.embedder import encode_text_to_blob
@@ -307,35 +342,28 @@ async def extract_and_apply_beliefs(
             return None
 
     # Gather candidate entity embeddings for Tier-2 vector matching.
-    # We embed existing entity names on the fly (cheap for small sets; the
-    # macro-sleep job could persist these to a column later for scale).
-    def _gather_candidates(tenant: str) -> tuple[dict[str, bytes], dict[str, str]]:
+    def _gather_candidates(tenant: str) -> dict[str, bytes]:
         try:
             rows = primary_conn.execute(
                 "SELECT id, name FROM entities WHERE tenant_id=?", (tenant,)
             ).fetchall()
         except Exception:
-            return {}, {}
+            return {}
         vecs: dict[str, bytes] = {}
-        names: dict[str, str] = {}
         for r in rows:
-            names[r["id"]] = r["name"]
             v = _embed(r["name"])
             if v:
                 vecs[r["id"]] = v
-        return vecs, names
+        return vecs
 
-    candidate_vecs, candidate_names = _gather_candidates(tenant_id)
+    candidate_vecs = _gather_candidates(tenant_id)
 
     for b in raw_beliefs:
         clean = _sanitize_belief(b)
         if clean is None:
             stats["rejected"] += 1
             continue
-        # Resolve the object entity through the 3-tier cascade so it gets
-        # canonicalized + registered (subject is usually "user", left as-is).
-        # Tier-2 vector matching is now ACTIVE: the object text is embedded
-        # and compared against existing entity name embeddings.
+        # Resolve entities through the 3-tier cascade (Tier-2 vector active).
         try:
             obj_vec = _embed(clean["object"]) if clean["object"] and clean["object"] != "user" else None
             if clean["subject"] and clean["subject"] != "user":
@@ -372,3 +400,55 @@ async def extract_and_apply_beliefs(
             stats["applied"] += 1
         stats["actions"].append(action)
     return stats
+
+
+def extract_and_apply_beliefs_sync(
+    primary_conn,
+    ops_conn,
+    user_text: str,
+    assistant_text: str = "",
+    *,
+    session_id: str | None = None,
+    turn: int | None = None,
+    tenant_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """SYNC extraction pipeline (heuristic only — NO LLM, NO httpx).
+
+    Thread-safe: safe to call from a worker thread because it never
+    touches the loop-bound httpx client. The LLM extraction pass is
+    deferred to the ``micro_consolidation`` queue task, which runs on
+    the worker's own event loop where the httpx client is valid.
+
+    Returns the same stats shape as :func:`extract_and_apply_beliefs`.
+    """
+    stats: dict[str, Any] = {
+        "skipped_filler": False,
+        "source": "none",
+        "applied": 0,
+        "rejected": 0,
+        "actions": [],
+    }
+    user_text = (user_text or "").strip()
+    if not user_text or user_text.startswith("/"):
+        return stats
+    if is_filler_turn(user_text):
+        stats["skipped_filler"] = True
+        return stats
+
+    # Heuristic extraction only (no LLM in the thread)
+    raw_beliefs = extract_beliefs_heuristic(user_text)
+    stats["source"] = "heuristic" if raw_beliefs else "none"
+    if not raw_beliefs:
+        return stats
+
+    return _apply_beliefs_to_v2(
+        raw_beliefs,
+        primary_conn,
+        ops_conn,
+        stats=stats,
+        session_id=session_id,
+        turn=turn,
+        tenant_id=tenant_id,
+        cfg=cfg,
+    )

@@ -687,35 +687,54 @@ def schedule_post_turn_memory(
             logger.warning("[post_turn] consolidator failed", exc_info=True)
 
     def _run_v2_sync() -> None:
-        """Synchronous V2 mirror + belief extraction (runs in a thread).
+        """Synchronous V2 mirror + heuristic belief extraction (runs in a thread).
 
-        Decoupled from the legacy ``_run`` coroutine via
-        ``run_in_executor`` so the legacy path's blocking sync calls
-        (embedder load, Chroma init) cannot starve V2 writes. The async
-        extractor (LLM call) is driven by a fresh event loop inside this
-        thread — worker threads have no running loop by default, so
-        ``asyncio.run`` is always safe here.
+        Deliberately SYNC and httpx-free: this thread never touches the
+        loop-bound httpx client, so it cannot raise
+        ``RuntimeError: ... bound to a different event loop`` (the bug
+        that poisoned the LLM connection pool and caused V2 amnesia).
+
+        Two-stage extraction:
+          1. HERE (sync, thread): heuristic extraction + mutate_belief.
+             Catches name/location/preference/favorite patterns instantly.
+          2. DEFERRED (queue, worker loop): a ``micro_consolidation`` task
+             runs the LLM extraction on the worker's own event loop where
+             the httpx client is valid, so complex/nuanced beliefs that the
+             heuristic misses still get extracted — just not synchronously.
         """
         # ── V2 dual-write mirror ─────────────────────────────────────
         try:
             _mirror_turn_to_v2(messages, session_id=session_id, turn=turn)
         except Exception:
             logger.debug("[post_turn] V2 mirror failed", exc_info=True)
-        # ── V2 belief extraction (the live wire) ──────────────────────
-        # Extracts typed beliefs and applies them via mutate_belief
-        # (functional supersede / set append / state). This populates the
-        # V2 belief graph from live conversation. Gated on the heuristic
-        # gatekeeper (filler turns skip the LLM call).
+        # ── Stage 1: sync heuristic extraction ───────────────────────
         try:
-            import asyncio as _aio
-
-            _aio.run(
-                _extract_and_apply_v2_beliefs_inner(
-                    messages, session_id=session_id, turn=turn
-                )
-            )
+            _v2_extract_sync(messages, session_id=session_id, turn=turn)
         except Exception:
-            logger.debug("[post_turn] V2 belief extraction failed", exc_info=True)
+            logger.debug("[post_turn] V2 heuristic extraction failed", exc_info=True)
+        # ── Stage 2: enqueue LLM deep-pass on the worker loop ─────────
+        # The micro_consolidation handler runs on the durable worker's
+        # event loop (where httpx is valid), so it can safely call the LLM.
+        # We point it at the episode the mirror just wrote.
+        try:
+            from kazma_core.memory.auto_store import extract_turn_texts
+            from kazma_core.memory.dual_write import _episode_id
+
+            user_text, _ = extract_turn_texts(messages)
+            if user_text and not user_text.strip().startswith("/"):
+                eid = _episode_id(
+                    session_id or "unknown",
+                    int(turn) if turn is not None else 0,
+                    user_text,
+                )
+                from kazma_core.memory.task_queue import enqueue_task
+
+                enqueue_task(
+                    "micro_consolidation",
+                    {"episode_id": eid},
+                )
+        except Exception:
+            logger.debug("[post_turn] could not enqueue micro_consolidation", exc_info=True)
 
     try:
         loop.create_task(_run())
@@ -764,18 +783,22 @@ def _mirror_turn_to_v2(
     )
 
 
-async def _extract_and_apply_v2_beliefs_inner(
+def _v2_extract_sync(
     messages: list[dict[str, Any]],
     *,
     session_id: str | None,
     turn: int | None,
 ) -> None:
-    """Run the V2 belief extractor on the just-finished turn.
+    """SYNC heuristic belief extraction (runs in the V2 thread).
 
-    Opens primary + ops connections, calls
-    :func:`extract_and_apply_beliefs` (which gatekeeps filler, extracts
-    via LLM or heuristic, fences, and mutates), then closes. Best-effort:
-    any failure is logged and swallowed so the legacy path is unaffected.
+    Uses :func:`extract_and_apply_beliefs_sync` which is heuristic-only —
+    NO LLM call, NO httpx client, so it is safe to run from a worker
+    thread without risking the ``bound to a different event loop``
+    RuntimeError that poisoned the connection pool.
+
+    The LLM deep-pass is deferred to the ``micro_consolidation`` queue
+    task (enqueued by the caller), which runs on the worker's own event
+    loop where the httpx client is valid.
     """
     import sqlite3
 
@@ -784,7 +807,7 @@ async def _extract_and_apply_v2_beliefs_inner(
     from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
     from kazma_core.paths import memory_ops_db, primary_memory_db
 
-    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs
+    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs_sync
 
     user_text, assistant_text = extract_turn_texts(messages)
     if not user_text or user_text.strip().startswith("/"):
@@ -806,7 +829,7 @@ async def _extract_and_apply_v2_beliefs_inner(
             memory_ops_db(), check_same_thread=False, isolation_level=None
         )
         ensure_ops_schema(ops_conn)
-        stats = await extract_and_apply_beliefs(
+        stats = extract_and_apply_beliefs_sync(
             primary_conn,
             ops_conn,
             user_text,
@@ -814,11 +837,10 @@ async def _extract_and_apply_v2_beliefs_inner(
             session_id=session_id,
             turn=turn,
             cfg=cfg,
-            use_llm=True,
         )
         if stats.get("applied"):
             logger.info(
-                "[post_turn] V2 beliefs extracted: source=%s applied=%d rejected=%d filler=%s",
+                "[post_turn] V2 beliefs extracted (heuristic): source=%s applied=%d rejected=%d filler=%s",
                 stats.get("source"),
                 stats.get("applied", 0),
                 stats.get("rejected", 0),
