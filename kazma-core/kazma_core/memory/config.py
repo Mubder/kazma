@@ -34,6 +34,7 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
     "per_turn_retrieval": True,
     "auto_store": True,
     "auto_store_mode": "both",
+    "tenant_mode": "shared",
     "retrieval_top_k": 5,
     "max_context_tokens": 128_000,
     "provenance": True,
@@ -103,6 +104,7 @@ _STORE_KEYS = (
     "per_turn_retrieval",
     "auto_store",
     "auto_store_mode",
+    "tenant_mode",
     "retrieval_top_k",
     "max_context_tokens",
     "provenance",
@@ -233,6 +235,11 @@ def _coerce(cfg: dict[str, Any]) -> dict[str, Any]:
     if mode not in ("durable", "turns", "both"):
         mode = "both"
     out["auto_store_mode"] = mode
+    # Tenant isolation mode: shared (default) | per_platform | per_user
+    tmode = str(out.get("tenant_mode", "shared") or "shared").strip().lower()
+    if tmode not in ("shared", "per_platform", "per_user"):
+        tmode = "shared"
+    out["tenant_mode"] = tmode
     _coerce_v2(out)
     return out
 
@@ -371,6 +378,44 @@ def memory_auto_store_mode(cfg: dict[str, Any] | None = None) -> str:
     if mode not in ("durable", "turns", "both"):
         return "both"
     return mode
+
+
+def memory_tenant_mode(cfg: dict[str, Any] | None = None) -> str:
+    """Return the active tenant isolation mode.
+
+    - ``"shared"`` (default): all platforms + users share one memory pool.
+    - ``"per_platform"``: each platform isolates (Telegram ≠ Web ≠ Discord).
+    - ``"per_user"``: each sender/session gets fully isolated memory.
+    """
+    c = cfg if cfg is not None else read_memory_cfg()
+    mode = str(c.get("tenant_mode", "shared") or "shared").strip().lower()
+    if mode not in ("shared", "per_platform", "per_user"):
+        return "shared"
+    return mode
+
+
+def resolve_tenant_id(
+    platform: str, sender_id: str = "", session_id: str = ""
+) -> str:
+    """Resolve the tenant_id for the current request based on the active mode.
+
+    Called by the 3 entry points (gateway store.py, SSE, WS) to centralize
+    the mode → tenant_id mapping. The result flows into every V2 memory
+    read/write as the SQL ``WHERE tenant_id = ?`` filter.
+
+    Args:
+        platform: Platform name (``"telegram"``, ``"discord"``, ``"web"`` …).
+        sender_id: Platform-prefixed sender identity (``"telegram:12345"``).
+            Empty for the Web path (which has no sender identity).
+        session_id: The Web/browser session ID (empty for gateway paths).
+    """
+    mode = memory_tenant_mode()
+    if mode == "shared":
+        return "default"
+    if mode == "per_platform":
+        return platform or "default"
+    # per_user: each sender/session gets their own isolated memory
+    return sender_id or (f"{platform}:{session_id}" if session_id else "default")
 
 
 def memory_retrieval_top_k(cfg: dict[str, Any] | None = None) -> int:

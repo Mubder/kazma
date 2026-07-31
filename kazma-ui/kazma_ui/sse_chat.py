@@ -1261,10 +1261,11 @@ def create_sse_chat_router(
 
         # ── Build SupervisorState for the graph ────────────────────
         from kazma_core.agent.state import initial_supervisor_state
+        from kazma_core.memory.config import resolve_tenant_id
 
         input_state = initial_supervisor_state(
             thread_id=thread_id,
-            tenant_id=f"web:{session_id}",
+            tenant_id=resolve_tenant_id("web", "", session_id),
         )
         input_state["messages"] = messages
 

@@ -586,6 +586,26 @@
             </div>
             <button class="btn btn-primary" @click="saveContext()">{{ t('settings.save_context') }}</button>
         </div>
+
+        <!-- Memory Tenant Mode -->
+        <div class="settings-group">
+            <h3>Memory Isolation</h3>
+            <div class="form-group">
+                <label>Tenant Mode</label>
+                <select class="form-select" x-model="memoryTenantMode" @change="saveTenantMode()">
+                    <option value="shared">Share everything (single-user) — all platforms share one memory pool</option>
+                    <option value="per_platform">Per platform — each platform isolates (Telegram ≠ Web)</option>
+                    <option value="per_user">Per user — each sender/session gets fully isolated memory</option>
+                </select>
+                <p style="font-size:0.75rem;color:var(--text-muted);margin-top:6px;">
+                    Controls whether memories (beliefs, episodes) are shared or isolated across platforms/users.
+                    <strong>Share everything</strong> is the default — best for single-user setups where you chat
+                    from both Web and Telegram and want unified memory.
+                    <strong>Per user</strong> is for multi-user SaaS deployments.
+                    Changes take effect on the next turn (no restart needed).
+                </p>
+            </div>
+        </div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════

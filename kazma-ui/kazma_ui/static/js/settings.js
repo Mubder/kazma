@@ -52,6 +52,7 @@ function settingsApp() {
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
+        memoryTenantMode: 'shared',
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -243,6 +244,10 @@ function settingsApp() {
                     }
                     if (settings.safety) Object.assign(this.safety, settings.safety);
                     if (settings.context) Object.assign(this.context, settings.context);
+                    // Load memory tenant mode from ConfigStore (stored under the
+                    // "memory" category as key "memory.tenant_mode").
+                    const memTenant = settings.memory && settings.memory['memory.tenant_mode'];
+                    if (memTenant) this.memoryTenantMode = memTenant;
                 }
                 if (Array.isArray(providers)) this.providers = providers;
                 if (Array.isArray(personalities)) this.personalities = personalities;
@@ -604,6 +609,21 @@ function settingsApp() {
                     body: JSON.stringify(this.context),
                 });
                 showToast('Context settings saved', 'success');
+            } catch (e) {
+                showToast('Save failed', 'error');
+            }
+            this.saving = false;
+        },
+
+        async saveTenantMode() {
+            this.saving = true;
+            try {
+                await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify([{ key: 'memory.tenant_mode', value: this.memoryTenantMode, category: 'memory' }]),
+                });
+                showToast('Memory isolation mode saved — takes effect next turn', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
             }

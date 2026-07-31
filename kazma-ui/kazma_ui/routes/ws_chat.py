@@ -467,6 +467,7 @@ def create_ws_chat_router(
 
                     from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.agent.state import initial_supervisor_state
+                    from kazma_core.memory.config import resolve_tenant_id
                     from kazma_core.ide.env_context import build_env_context
 
                     env_block = build_env_context()
@@ -482,7 +483,7 @@ def create_ws_chat_router(
                     # resolve even if the ContextVar is lost mid-graph.
                     input_state = initial_supervisor_state(
                         thread_id=thread_id,
-                        tenant_id=f"web:{session_id}",
+                        tenant_id=resolve_tenant_id("web", "", session_id),
                     )
                     input_state["messages"] = full_messages
 
