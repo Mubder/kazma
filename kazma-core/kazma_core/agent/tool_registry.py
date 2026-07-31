@@ -762,6 +762,11 @@ class LocalToolRegistry:
             # search through recall() so the tool sees the same bi-temporal
             # beliefs + tiered episodes as per-turn RAG. Returns a
             # structured JSON list of beliefs + episodes.
+            #
+            # IMPORTANT: if V2 returns nothing, FALL THROUGH to the legacy
+            # adapter. This ensures the agent can always see its historical
+            # memories even when the V2 belief graph is empty (e.g. during
+            # the dual-write transition before backfill completes).
             try:
                 from kazma_core.memory.config import memory_v2_enabled
 
@@ -782,7 +787,8 @@ class LocalToolRegistry:
                         })
                     if out:
                         return json.dumps(out, ensure_ascii=False, indent=2)
-                    return "No relevant memories found."
+                    # V2 found nothing — fall through to legacy adapter
+                    # so the agent can still see its historical memories.
             except Exception:
                 pass  # fall through to legacy adapter
             # ── Legacy 4-layer RRF adapter path ───────────────────────
