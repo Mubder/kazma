@@ -91,30 +91,54 @@ def _classify_predicate(predicate: str) -> str:
 def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
     """Try to extract a (predicate, object) pair from memory text.
 
-    Handles BOTH third-person ("User prefers teal") and first-person
-    ("I prefer teal", "My name is Mubder") phrasing — the memories
-    table stores facts in the user's original voice.
-
-    Returns None when the text doesn't match any fact pattern — the
-    caller should SKIP it rather than store conversational noise.
+    Returns None when the text doesn't look like a durable fact. Strict
+    validation on the extracted object prevents conversational fragments
+    ("name is just exploring", "prefers to disconnect") from becoming
+    garbage beliefs.
     """
     import re
 
     t = (text or "").strip()
-    # Each pattern tries third-person then first-person variants.
-    # Order matters: more specific patterns (works_at) before generic
-    # ones (lives_in) to avoid "I work at X" matching lives_in first.
+
+    # ── Object validation ──────────────────────────────────────────
+    # Reject objects that look like sentence fragments, not fact values.
+    _REJECT_STARTS = frozenset({
+        "to ", "a ", "an ", "the ", "my ", "your ", "his ", "her ",
+        "this ", "that ", "some ", "just ", "sorry", "done", "running",
+        "going", "not ", "no ", "yes", "ok", "sure", "actually",
+        "check", "try", "let ", "can ", "could ", "would ", "should ",
+        "disconnect", "re-insert", "reminder", "about ",
+    })
+
+    def _valid_obj(obj: str) -> bool:
+        """True if the extracted object looks like a real fact value."""
+        o = obj.strip().rstrip(".!?,").strip()
+        if not o or len(o) < 2 or len(o) > 60:
+            return False
+        ol = o.lower()
+        # Reject sentence-fragment starters
+        for rs in _REJECT_STARTS:
+            if ol.startswith(rs):
+                return False
+        # Reject if it contains sentence punctuation (likely a clause)
+        if any(c in o for c in (";", "!", "?", "\n")):
+            return False
+        # Reject if it's mostly verbs (ends in -ing or -ed without a noun)
+        if ol.endswith("ing") and len(ol) < 8:
+            return False
+        return True
+
     patterns = [
-        # name (most specific — proper noun capture)
-        (re.compile(r"(?i)\b(?:user(?:'s)? |my )name is (.+)"), "name_is"),
-        (re.compile(r"(?i)\b(?:i am|i'm|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"), "name_is"),
-        # favorite
+        # name — must be a proper noun (Capitalized)
+        (re.compile(r"(?i)\b(?:user(?:'s)? |my )name is ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"), "name_is"),
+        (re.compile(r"\b(?:i am|i'm|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"), "name_is"),
+        # favorite — category + value
         (re.compile(r"(?i)\b(?:user(?:'s)? |my )favorite (\w+) is (.+)"), "favorite"),
-        # works at/on (before lives_in — "I work at" shouldn't match lives_in)
+        # works at/on
         (re.compile(r"(?i)\b(?:user |i )works? (?:at|on) (.+)"), "works_at"),
-        # lives/works in
-        (re.compile(r"(?i)\b(?:user |i )(?:live|work)s? in (.+)"), "lives_in"),
-        # prefers / likes / loves / uses
+        # lives in
+        (re.compile(r"(?i)\b(?:user |i )live[s]? in (.+)"), "lives_in"),
+        # prefers — strict object validation
         (re.compile(r"(?i)\b(?:user |i )(?:prefer|like|love|use|need)s? (.+)"), "prefers"),
         # has skill
         (re.compile(r"(?i)\b(?:user |i )(?:has|have) skill (?:in|with) (.+)"), "has_skill"),
@@ -123,12 +147,18 @@ def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
     ]
     for pat, default_pred in patterns:
         m = pat.search(t)
-        if m:
-            if default_pred == "favorite":
-                cat = m.group(1).strip()
-                val = m.group(2).strip().rstrip(".")
-                return f"favorite_{cat}", val
-            return default_pred, m.group(1).strip().rstrip(".")
+        if not m:
+            continue
+        if default_pred == "favorite":
+            cat = m.group(1).strip()
+            val = m.group(2).strip().rstrip(".")
+            if not _valid_obj(val):
+                continue
+            return f"favorite_{cat}", val
+        obj = m.group(1).strip().rstrip(".")
+        if not _valid_obj(obj):
+            continue  # try the next pattern
+        return default_pred, obj
     return None
 
 
