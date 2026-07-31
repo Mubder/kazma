@@ -162,6 +162,158 @@ def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _llm_extract_beliefs_from_memories(
+    primary: sqlite3.Connection,
+    legacy: sqlite3.Connection,
+    cols: set[str],
+) -> int:
+    """Batch-extract structured beliefs from legacy memories using the LLM.
+
+    Sends memories in batches of 20 to the LLM, which extracts real
+    beliefs (subject, predicate, predicate_type, object, confidence).
+    Far more accurate than regex — the LLM understands context and
+    rejects conversational noise. Returns the count of beliefs stored.
+    """
+    import asyncio
+
+    try:
+        from kazma_core.memory.belief_mutation import mutate_belief
+    except Exception:
+        logger.debug("[backfill] belief_mutation import failed", exc_info=True)
+        return 0
+
+    # Gather memory contents (skip obvious noise to save LLM tokens)
+    rows = legacy.execute("SELECT * FROM memories").fetchall()
+    candidates: list[str] = []
+    for r in rows:
+        content = (r["content"] if "content" in cols else "").strip()
+        if not content or len(content) < 8 or len(content) > 300:
+            continue
+        # Skip obvious noise
+        cl = content[:80].lower()
+        if any(cl.startswith(m) for m in (
+            "#", "```", "you are", "def ", "class ", "import ",
+            "http", "user:", "assistant:", "tool:", "---",
+        )):
+            continue
+        candidates.append(content)
+
+    if not candidates:
+        logger.info("[backfill] no memory candidates for LLM extraction")
+        return 0
+
+    logger.info("[backfill] sending %d memories to LLM for belief extraction", len(candidates))
+
+    # Process in batches of 20
+    BATCH = 20
+    total_beliefs = 0
+    now = time.time()
+
+    # Open the ops connection for audit logging
+    try:
+        from kazma_core.paths import memory_ops_db
+        from kazma_core.memory.schema_v2 import ensure_ops_schema
+
+        ops = sqlite3.connect(memory_ops_db(), check_same_thread=False, isolation_level=None)
+        ensure_ops_schema(ops)
+    except Exception:
+        ops = None
+
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        client = get_model_registry().get_client()
+    except Exception:
+        client = None
+
+    if client is None:
+        logger.warning("[backfill] no LLM client — skipping belief extraction")
+        if ops:
+            ops.close()
+        return 0
+
+    for i in range(0, len(candidates), BATCH):
+        batch = candidates[i : i + BATCH]
+        batch_text = "\n".join(f"{j+1}. {c}" for j, c in enumerate(batch))
+        prompt = (
+            "You are a memory extraction engine. Below are memory entries from a chat history.\n"
+            "Extract ONLY durable, long-term facts about the user (identity, preferences, "
+            "skills, location, tools, decisions). Skip test messages, commands, questions, "
+            "system prompts, and one-off conversation.\n\n"
+            "Return ONLY valid JSON (no markdown):\n"
+            '{"beliefs": [{"subject": "user", "predicate": "snake_case", '
+            '"predicate_type": "functional|set|state", "object": "short value", '
+            '"confidence": 0.0-1.0}]}\n\n'
+            "Rules:\n"
+            "- subject is always 'user' unless clearly about something else\n"
+            "- predicate: short snake_case (lives_in, prefers, name_is, uses_tool, works_at)\n"
+            "- predicate_type: functional=single-valued (name, location), set=multi-valued (tools, skills)\n"
+            "- object: SHORT value (1-4 words max), NOT a sentence\n"
+            "- Skip if nothing durable. Return {\"beliefs\": []} if no facts.\n"
+            "- Never extract 'noted' or generic predicates.\n\n"
+            f"Memory entries:\n{batch_text}"
+        )
+        try:
+            import re as _re
+
+            raw = client.chat([
+                {"role": "system", "content": "You are a memory extraction engine. Return only JSON."},
+                {"role": "user", "content": prompt},
+            ])
+            if not isinstance(raw, str):
+                raw = str(raw or "")
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = _re.sub(r"^```(?:json)?\s*", "", raw)
+                raw = _re.sub(r"\s*```$", "", raw)
+            data = json.loads(raw)
+            beliefs = data.get("beliefs") or []
+            for b in beliefs:
+                if not isinstance(b, dict):
+                    continue
+                subj = str(b.get("subject") or "user").strip()[:80]
+                pred = str(b.get("predicate") or "").strip().lower().replace(" ", "_")[:60]
+                obj = str(b.get("object") or "").strip()[:200]
+                ptype = str(b.get("predicate_type") or "set").strip().lower()
+                if ptype not in ("functional", "set", "state"):
+                    ptype = "set"
+                conf = 0.8
+                try:
+                    conf = max(0.0, min(1.0, float(b.get("confidence", 0.8))))
+                except (TypeError, ValueError):
+                    pass
+                if not (subj and pred and obj) or pred == "noted":
+                    continue
+                # Fence check
+                try:
+                    from kazma_core.safety.prompt_fence import is_override_delta
+
+                    if is_override_delta(f"{subj} {pred} {obj}"):
+                        continue
+                except Exception:
+                    pass
+                # Write via mutate_belief
+                action = mutate_belief(
+                    primary, subj, pred, obj,
+                    ops_conn=ops, predicate_type=ptype,
+                    confidence=conf, importance=4,
+                    extraction_method="user_explicit",
+                    cfg=None,
+                )
+                if action["action"] != "noop":
+                    total_beliefs += 1
+        except Exception:
+            logger.debug("[backfill] LLM batch %d failed", i // BATCH, exc_info=True)
+
+    if ops:
+        try:
+            ops.close()
+        except Exception:
+            pass
+    logger.info("[backfill] LLM extracted %d beliefs from %d memories", total_beliefs, len(candidates))
+    return total_beliefs
+
+
 # ── Connection helpers ───────────────────────────────────────────────────
 
 
@@ -207,7 +359,7 @@ def _open_primary() -> sqlite3.Connection:
 
 
 def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int]:
-    """Migrate legacy `memories` rows → V2 `episodes` + extract beliefs."""
+    """Migrate legacy `memories` rows → V2 `episodes` + LLM-extract beliefs."""
     stats = {"memories_seen": 0, "episodes_inserted": 0, "skipped": 0, "beliefs_extracted": 0}
     legacy = _open_legacy_memory()
     if legacy is None:
@@ -257,39 +409,20 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int
                     ),
                 )
                 stats["episodes_inserted"] += 1
-                # ── Also try to extract a belief from this memory ──
-                # The memories table contains durable facts in the user's
-                # voice ("I prefer teal", "My name is Mubder"). Try to
-                # extract a structured belief from the content.
-                extracted = _extract_pred_from_text(content)
-                if extracted is not None:
-                    pred, obj = extracted
-                    pred_clean = pred.strip().lower().replace(" ", "_")
-                    ptype = _classify_predicate(pred_clean)
-                    bid = "b_" + _stable_id("memories_belief", src_id)
-                    bmeta = {
-                        "source": "backfill_memories_belief",
-                        "memory_class": "general",
-                    }
-                    try:
-                        primary.execute(
-                            """INSERT OR IGNORE INTO beliefs
-                               (id, tenant_id, subject, predicate, predicate_type, object,
-                                confidence, structural_importance, source_trust_weight,
-                                valid_from, ingested_at, extraction_method, metadata_json)
-                               VALUES (?, ?, 'user', ?, ?, ?, 0.8, 4, 1.0, ?, ?, 'system_tool', ?)""",
-                            (
-                                bid, tenant, pred_clean, ptype, obj[:300],
-                                ts, now,
-                                json.dumps(bmeta, ensure_ascii=False),
-                            ),
-                        )
-                        stats["beliefs_extracted"] += 1
-                    except Exception:
-                        pass
+                # Belief extraction is done in a batch LLM pass AFTER all
+                # episodes are stored (see _llm_extract_beliefs_from_memories).
+                # This is more efficient + accurate than per-row regex.
             except Exception:
                 stats["skipped"] += 1
                 logger.debug("[backfill] memories row %s skipped", src_id, exc_info=True)
+
+        # ── Batch LLM belief extraction ──────────────────────────────
+        # Send the memory contents to the LLM in batches and let IT
+        # extract structured beliefs. This replaces the broken regex
+        # approach — the LLM understands context and can distinguish
+        # "My name is Mubder" (a real fact) from "name is just exploring"
+        # (a sentence fragment).
+        stats["beliefs_extracted"] = _llm_extract_beliefs_from_memories(primary, legacy, cols)
     finally:
         legacy.close()
     return stats
