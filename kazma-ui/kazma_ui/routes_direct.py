@@ -364,6 +364,7 @@ def register_direct_routes(self: Any) -> None:
                     "source": b["subject"],
                     "target": b["object"],
                     "label": b["predicate"],
+                    "object_text": b["object"],
                     "type": b["predicate_type"],
                     "confidence": b["confidence"],
                     "superseded": b["valid_until"] is not None,

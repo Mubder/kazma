@@ -2007,7 +2007,7 @@
       (links || []).forEach(function(l) {
         var ai = _v2gIds[l.source], bi = _v2gIds[l.target];
         if (ai !== undefined && bi !== undefined) {
-          _v2gEdges.push({ a: ai, b: bi, label: String(l.label || '').slice(0, 18), type: l.type || 'set', confidence: l.confidence || 0.5, superseded: !!l.superseded });
+          _v2gEdges.push({ a: ai, b: bi, label: String(l.label || '').slice(0, 18), objectText: String(l.object_text || ''), type: l.type || 'set', confidence: l.confidence || 0.5, superseded: !!l.superseded });
         }
       });
       _v2gView = { scale: 1, ox: 0, oy: 0 }; _v2gSelectedId = null; _v2gAlpha = 1;
@@ -2203,10 +2203,10 @@
       if (!A || !B) continue;
       var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
       var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
-      var targetName = _v2gEsc(B.fullLabel || B.label);
-      var sourceName = _v2gEsc(A.fullLabel || A.label);
+      var targetName = _v2gEsc(ed.objectText || B.fullLabel || B.label);
+      var sourceName = _v2gEsc(ed.objectText || A.fullLabel || A.label);
       if (A.id === p.id) {
-        rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b>' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
+        rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
       } else if (B.id === p.id) {
         rels.push('<span style="color:var(--text-muted);font-size:0.68rem;">←</span> ' + sourceName + ' ' + predLabel + ' <b>(this)</b>');
       }
@@ -2299,6 +2299,9 @@
       if (activeEnt.length || activePred.length || search) suffix = ' (filtered from ' + _v2gRawNodes.length + ')';
       sl.textContent = nodes.length + ' nodes · ' + links.length + ' beliefs' + suffix;
     }
+    // Invalidate the layout signature so drawCanvas re-layouts on every
+    // filter change/reset, not just when node count differs.
+    _v2gSig = '';
     _v2gDrawCanvas(nodes, links);
   }
 
