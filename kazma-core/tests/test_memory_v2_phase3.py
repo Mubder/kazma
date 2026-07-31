@@ -135,6 +135,41 @@ def test_audit_log_written(dbs):
     assert count >= 2
 
 
+def test_state_transition_logs_transition_event_type(dbs):
+    """A state-predicate change records event_type='transition' (not 'supersede').
+
+    Regression guard: ``_mutate_state`` used to reuse ``_mutate_functional``'s
+    audit call, which mislabelled every state change as ``supersede``. Audit-log
+    consumers filtering by event_type would have missed state transitions.
+    """
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    p, o = dbs
+    # issue_status is a canonical state predicate (see _STATE_PREDICATES).
+    r1 = mutate_belief(
+        p, "task-1", "issue_status", "open",
+        ops_conn=o, importance=4, extraction_method="user_explicit",
+    )
+    r2 = mutate_belief(
+        p, "task-1", "issue_status", "closed",
+        ops_conn=o, importance=4, extraction_method="user_explicit",
+    )
+    # The returned action reflects the state semantics...
+    assert r1["action"] == "transition"
+    assert r2["action"] == "transition" and r2["superseded_id"] == r1["belief_id"]
+
+    # ...and the persisted audit row must carry the 'transition' label.
+    o.row_factory = sqlite3.Row
+    rows = o.execute(
+        "SELECT event_type FROM memory_audit_log WHERE target_id=?",
+        (r2["belief_id"],),
+    ).fetchall()
+    assert rows, "expected an audit row for the transitioned belief"
+    assert rows[0]["event_type"] == "transition", (
+        f"state transition mislabelled as {rows[0]['event_type']!r}"
+    )
+
+
 def test_memory_class_in_metadata(dbs):
     from kazma_core.memory.belief_mutation import mutate_belief
 

@@ -1,4 +1,4 @@
-"""Nightly long-term export — JSON-L + GraphML.
+"""Nightly long-term export — JSONL + GraphML.
 
 Plain-text dumps of the cognitive state so the knowledge base survives
 even if the binary SQLite format changes. networkx is a declared core

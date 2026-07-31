@@ -175,7 +175,7 @@ class TestAnalyzeWithQuestion:
 
         with patch(
             "kazma_core.tools.vision_analyze._get_llm_provider",
-            return_value=mock_provider,
+            return_value=(mock_provider, "test-active-model", "active-model"),
         ):
             result = await analyze_image(
                 str(img_file), question="What colour is this?"
@@ -208,7 +208,7 @@ class TestAnalyzeNoQuestion:
 
         with patch(
             "kazma_core.tools.vision_analyze._get_llm_provider",
-            return_value=mock_provider,
+            return_value=(mock_provider, "test-active-model", "active-model"),
         ):
             result = await analyze_image(str(img_file))
 
@@ -262,8 +262,8 @@ class TestUrlImage:
         with patch.dict("sys.modules", {"httpx": mock_httpx}), \
              patch("kazma_core.http_pool.get_http_client", return_value=mock_client), \
              patch(
-                 "kazma_core.tools.vision_analyze._get_llm_provider",
-                 return_value=mock_provider,
+                "kazma_core.tools.vision_analyze._get_llm_provider",
+                return_value=(mock_provider, "test-active-model", "active-model"),
              ):
             result = await analyze_image("https://example.com/image.png")
 
@@ -362,8 +362,8 @@ class TestLargeImageResize:
         # Patch MAX_IMAGE_BYTES to a tiny value so our small file triggers resize
         with patch("kazma_core.tools.vision_analyze.MAX_IMAGE_BYTES", 10), \
              patch(
-                 "kazma_core.tools.vision_analyze._get_llm_provider",
-                 return_value=mock_provider,
+                "kazma_core.tools.vision_analyze._get_llm_provider",
+                return_value=(mock_provider, "test-active-model", "active-model"),
              ):
             result = await analyze_image(str(img_file))
 
@@ -393,7 +393,7 @@ class TestVisionNotAvailable:
 
         with patch(
             "kazma_core.tools.vision_analyze._get_llm_provider",
-            return_value=mock_provider,
+            return_value=(mock_provider, "test-active-model", "active-model"),
         ):
             result = await analyze_image(str(img_file))
 
@@ -413,7 +413,7 @@ class TestVisionNotAvailable:
 
         with patch(
             "kazma_core.tools.vision_analyze._get_llm_provider",
-            return_value=mock_provider,
+            return_value=(mock_provider, "test-active-model", "active-model"),
         ):
             result = await analyze_image(str(img_file))
 
@@ -427,9 +427,11 @@ class TestVisionNotAvailable:
         img_file = tmp_path / "photo.png"
         img_file.write_bytes(png)
 
+        # _get_llm_provider always returns a 3-tuple; the "unavailable"
+        # case is signalled by provider=None with a reason string.
         with patch(
             "kazma_core.tools.vision_analyze._get_llm_provider",
-            return_value=None,
+            return_value=(None, None, "registry-unavailable"),
         ):
             result = await analyze_image(str(img_file))
 

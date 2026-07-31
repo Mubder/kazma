@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS memory_audit_log (
   id                  TEXT PRIMARY KEY,
   tenant_id           TEXT NOT NULL DEFAULT 'default',
   timestamp           REAL NOT NULL,
-  event_type          TEXT NOT NULL,                         -- supersede|merge|quarantine|decay|promote
+  event_type          TEXT NOT NULL,                         -- supersede|transition|merge|quarantine|decay|promote
   target_table        TEXT NOT NULL,
   target_id           TEXT NOT NULL,
   actor               TEXT NOT NULL,                         -- post_turn_worker|macro_sleep_job|user_override

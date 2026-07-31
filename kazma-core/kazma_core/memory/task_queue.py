@@ -17,7 +17,6 @@ started lazily on first enqueue (or explicitly via :func:`start_worker`).
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import sqlite3

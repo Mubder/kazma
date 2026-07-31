@@ -331,9 +331,15 @@ def _mutate_functional(
     ops_conn: sqlite3.Connection | None,
     sub: str, pred: str, obj: str, **kw: Any,
 ) -> dict[str, Any]:
-    """Single-valued: close the prior active belief, insert a new one."""
+    """Single-valued: close the prior active belief, insert a new one.
+
+    ``kw`` may carry ``audit_event_type`` (default ``"supersede"``) so the
+    state-predicate path can record a ``"transition"`` audit row via the same
+    code path instead of mislabeling every state change as a supersede.
+    """
     tenant_id = kw["tenant_id"]
     now = kw["now"]
+    audit_event_type = kw.get("audit_event_type", "supersede")
     # BEGIN IMMEDIATE acquires a write lock up front so the read below
     # sees ALL prior committed writes (no stale WAL snapshot). This is
     # essential when mutations run across separate connections/threads —
@@ -370,7 +376,7 @@ def _mutate_functional(
     )
     conn.commit()
     _write_audit(
-        ops_conn, tenant_id=tenant_id, event_type="supersede",
+        ops_conn, tenant_id=tenant_id, event_type=audit_event_type,
         target_id=bid, actor="post_turn_worker",
         reason=f"functional {sub} {pred} -> {obj}",
         state_before=state_before, state_after=state_after,
@@ -385,7 +391,9 @@ def _mutate_state(
 ) -> dict[str, Any]:
     """State transition: close prior active state, log the transition."""
     # Same mechanics as functional, but the audit event_type is 'transition'.
-    result = _mutate_functional(conn, ops_conn, sub, pred, obj, **kw)
+    # The kwarg flows through to _mutate_functional's _write_audit call so the
+    # persisted audit row is labelled correctly (not as a generic supersede).
+    result = _mutate_functional(conn, ops_conn, sub, pred, obj, audit_event_type="transition", **kw)
     if result["action"] == "supersede":
         result["action"] = "transition"
     return result

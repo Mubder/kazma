@@ -379,7 +379,15 @@ def register_direct_routes(self: Any) -> None:
             links: list[dict] = []
             node_ids = {n["id"] for n in nodes}
             for b in brows:
+                # Drop a belief link if EITHER endpoint was removed by a
+                # filter (e.g. entity_type). Previously only the subject was
+                # checked, which left dangling edges pointing at filtered-out
+                # virtual object nodes. The object text is the link's target
+                # identifier (facts are not entity IDs), so it must also be a
+                # surviving node id.
                 if b["subject"] not in node_ids:
+                    continue
+                if b["object"] not in node_ids:
                     continue
                 # object is the fact payload text, not an entity ID
                 links.append({

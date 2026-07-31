@@ -547,6 +547,7 @@ async def supervisor_node(
 
                 result = recall(
                     last_user_content, limit=_top_k,
+                    session_id=state.get("thread_id"),
                 )
                 if not result.empty:
                     mem_block = format_recall_block(result)

@@ -280,8 +280,8 @@ async def extract_and_apply_beliefs(
         # Skip LLM in demo mode (matches consolidator convention)
         import os
         if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
-            v2 = (cfg or {}).get("v2") or {}
-            # demo mode still allows heuristic
+            # demo mode still allows heuristic extraction below
+            pass
         else:
             raw_beliefs = await extract_beliefs_with_llm(user_text, assistant_text)
             if raw_beliefs:

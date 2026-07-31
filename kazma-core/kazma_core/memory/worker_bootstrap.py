@@ -21,9 +21,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["register_v2_handlers", "start_memory_worker"]
+__all__ = [
+    "register_v2_handlers",
+    "start_memory_worker",
+    "register_backup_export_handlers",
+]
 
 _registered = False
+# Separate guard so backup/export handlers can be registered independently
+# of the core V2 handlers (e.g. by tests) without re-churning either set.
+_backup_export_registered = False
 
 
 def register_v2_handlers() -> None:
@@ -235,9 +242,14 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
 def start_memory_worker() -> None:
     """Register handlers + start the durable worker (call at app boot).
 
-    Also starts a lightweight background scheduler that enqueues a
-    ``macro_sleep`` task every 6 hours so decay/tier-transitions/archival
-    run periodically without manual intervention.
+    Also starts two lightweight background schedulers:
+
+      - a ``macro_sleep`` task every 6 hours (decay / tier-transitions /
+        archival), and
+      - a nightly backup + export sweep every 24 hours (native
+        ``sqlite3.backup()`` copies of both memory DBs + JSONL/GraphML
+        long-term exports), so recovery artefacts exist without manual
+        intervention.
     """
     try:
         register_v2_handlers()
@@ -245,11 +257,16 @@ def start_memory_worker() -> None:
 
         start_worker()
         _start_macro_sleep_scheduler()
+        _start_backup_export_scheduler()
     except Exception:
         logger.debug("[memory_worker] could not start worker", exc_info=True)
 
 
 _MACRO_SLEEP_INTERVAL_HOURS = 6
+# Backup + export cadence: once per day. Kept separate from the 6h
+# macro_sleep loop so decay still runs on its own cycle even if the
+# backup step stalls on a slow disk.
+_BACKUP_EXPORT_INTERVAL_HOURS = 24
 
 
 def _start_macro_sleep_scheduler() -> None:
@@ -285,3 +302,96 @@ def _start_macro_sleep_scheduler() -> None:
         )
     except Exception:
         logger.debug("[memory_worker] could not start macro_sleep scheduler", exc_info=True)
+
+
+def _start_backup_export_scheduler() -> None:
+    """Run native DB backups + nightly exports once per day (fire-and-forget).
+
+    The work itself is enqueued onto the durable task queue (so it inherits
+    the queue's retry/dead-letter bounds) via two task handlers registered
+    here, rather than performed inline. This keeps the scheduler loop
+    trivial and crash-isolated: a failed ``enqueue_task`` cannot kill the
+    24h cadence, and a failed handler is retried/bounded by the worker.
+    """
+    # Register the backup/export handlers (idempotent — safe to call each boot).
+    register_backup_export_handlers()
+
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("[memory_worker] no loop — backup/export scheduler deferred")
+        return
+
+    async def _loop() -> None:
+        # First sweep shortly after boot (skip the full day-long wait), then
+        # repeat once per day. The body only enqueues; the durable worker
+        # drains the actual backup/export work on its own loop.
+        await asyncio.sleep(120)
+        while True:
+            try:
+                from kazma_core.memory.task_queue import enqueue_task
+
+                enqueue_task("native_backup", {"retention": 10})
+                enqueue_task("nightly_export", {"tenant_id": "default"})
+                logger.debug("[memory_worker] enqueued nightly backup + export")
+            except Exception:
+                logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
+            await asyncio.sleep(_BACKUP_EXPORT_INTERVAL_HOURS * 3600)
+
+    try:
+        loop.create_task(_loop())
+        logger.info(
+            "[memory_worker] backup/export scheduler started (every %dh)",
+            _BACKUP_EXPORT_INTERVAL_HOURS,
+        )
+    except Exception:
+        logger.debug("[memory_worker] could not start backup/export scheduler", exc_info=True)
+
+
+def register_backup_export_handlers() -> None:
+    """Register the native-backup and nightly-export queue handlers (idempotent).
+
+    Each handler wraps the corresponding best-effort routine in
+    :mod:`kazma_core.memory.backup` / :mod:`kazma_core.memory.export` and
+    returns ``True`` on success / ``False`` on failure so the durable queue
+    retries up to ``max_attempts`` before dead-lettering.
+    """
+    global _backup_export_registered
+    if _backup_export_registered:
+        return
+    from kazma_core.memory.task_queue import register_handler
+
+    register_handler("native_backup", _handle_native_backup)
+    register_handler("nightly_export", _handle_nightly_export)
+    _backup_export_registered = True
+    logger.info("[memory_worker] backup/export task handlers registered")
+
+
+async def _handle_native_backup(payload: dict[str, Any]) -> bool:
+    """Run one native ``sqlite3.backup()`` sweep of both memory DBs."""
+    try:
+        from kazma_core.memory.backup import perform_native_backups
+
+        retention = int(payload.get("retention", 10))
+        written = perform_native_backups(retention=retention)
+        logger.info("[memory_worker] native_backup done: %d file(s)", len(written))
+        return True
+    except Exception:
+        logger.debug("[memory_worker] native_backup handler failed", exc_info=True)
+        return False
+
+
+async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
+    """Run one nightly JSONL + GraphML export of the cognitive state."""
+    try:
+        from kazma_core.memory.export import export_nightly_snapshots
+
+        tenant_id = str(payload.get("tenant_id", "default"))
+        written = export_nightly_snapshots(tenant_id=tenant_id)
+        logger.info("[memory_worker] nightly_export done: %d file(s)", len(written))
+        return True
+    except Exception:
+        logger.debug("[memory_worker] nightly_export handler failed", exc_info=True)
+        return False

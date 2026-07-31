@@ -96,14 +96,13 @@ def record_procedural_outcome(
             (tenant_id, sig),
         ).fetchone()
         if existing:
-            row = existing if not isinstance(existing, sqlite3.Row) else existing
-            dag_id = row["id"]
-            s = int(row["success_count"]) + (1 if success else 0)
-            n = int(row["total_trials"]) + 1
+            dag_id = existing["id"]
+            s = int(existing["success_count"]) + (1 if success else 0)
+            n = int(existing["total_trials"]) + 1
             conf = laplace_confidence(s, n)
             quarantined = should_quarantine(conf, n, cfg=cfg)
             new_status = "quarantine" if quarantined else (
-                "active" if row["status"] != "retired" else "retired"
+                "active" if existing["status"] != "retired" else "retired"
             )
             conn.execute(
                 """UPDATE procedural_dags

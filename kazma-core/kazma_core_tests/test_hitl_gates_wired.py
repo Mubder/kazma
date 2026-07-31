@@ -117,15 +117,22 @@ class TestHITLGateB_SwarmMessageBus:
         assert "get_message_bus" in src
         assert "handle_callback" in src
 
-        # Discord: _handle_interaction routes swarm callbacks to the bus.
+        # Discord: _handle_interaction routes swarm callbacks via the
+        # extracted discord_callbacks.route_swarm_bus helper (the literal
+        # ``swarm_approve_``/``swarm_reject_`` prefix parsing lives there now,
+        # not in the adapter method body).
         from kazma_gateway.adapters.discord import DiscordAdapter
         src = inspect.getsource(DiscordAdapter._handle_interaction)
-        assert "swarm_approve_" in src or "swarm_reject_" in src
+        assert "route_swarm_bus" in src
+        assert "parse_custom_id" in src
+        assert "swarm" in src
 
-        # Slack: swarm callback handling is present on the adapter/bus.
+        # Slack: swarm callback handling is delegated to the extracted
+        # slack_callbacks.route_swarm_bus helper (same refactor as Discord).
         from kazma_gateway.adapters.slack import SlackAdapter
         src = inspect.getsource(SlackAdapter)
-        assert "swarm_approve_" in src or "swarm_reject_" in src
+        assert "route_swarm_bus" in src
+        assert "swarm" in src
 
         # The extracted Telegram parser must recognize the swarm prefixes.
         from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
