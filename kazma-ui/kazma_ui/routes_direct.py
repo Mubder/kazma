@@ -370,7 +370,13 @@ def register_direct_routes(self: Any) -> None:
 
             for eid in ref_ids:
                 e = ent_lookup.get(eid)
-                etype = e["type"] if e else "concept"
+                # The "user" node is always a person (it's hardcoded in
+                # ref_ids but has no entities-table row, so it would otherwise
+                # default to "concept" and render the wrong color).
+                if eid == "user":
+                    etype = "person"
+                else:
+                    etype = e["type"] if e else "concept"
                 if entity_type and entity_type.strip() and etype != entity_type.strip():
                     continue
                 nodes.append({

@@ -306,6 +306,23 @@ def _insert_belief(
             extraction_method, json.dumps(meta, ensure_ascii=False),
         ),
     )
+    # Compute + store the belief embedding so dense (semantic) recall can
+    # match beliefs whose literal tokens don't overlap the query (e.g. the
+    # query "where do I live" should semantically match "user lives_in Paris"
+    # even before the episode bridge fires). Embeds the canonical SPO text.
+    # Best-effort: a missing/broken embedder leaves embedding NULL (belief
+    # recall still works via the FTS token + bridge paths above).
+    try:
+        from kazma_core.memory.embedder import encode_text_to_blob
+
+        emb = encode_text_to_blob(f"{sub} {pred} {obj}")
+        if emb is not None:
+            conn.execute(
+                "UPDATE beliefs SET embedding=? WHERE id=? AND embedding IS NULL",
+                (emb, bid),
+            )
+    except Exception:
+        logger.debug("[belief_mutation] belief embedding failed for %s", bid, exc_info=True)
     return {
         "subject": sub, "predicate": pred, "predicate_type": ptype,
         "object": obj, "confidence": confidence, "importance": importance,

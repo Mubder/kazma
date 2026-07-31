@@ -110,7 +110,8 @@ def recall(
         # "user lives_in Paris" resolves without the query containing "Paris".
         episodes = _recall_episodes(conn, query, vector_engine, tenant_id, limit)
         beliefs = _recall_beliefs(
-            conn, query, tenant_id, limit, seed_episodes=episodes
+            conn, query, tenant_id, limit, seed_episodes=episodes,
+            vector_engine=vector_engine,
         )
         return RecallResult(beliefs=beliefs, episodes=episodes)
     except Exception:
@@ -186,6 +187,7 @@ def _recall_beliefs(
     limit: int,
     *,
     seed_episodes: list[RecallHit] | None = None,
+    vector_engine: Any = None,
 ) -> list[RecallHit]:
     """Find currently-valid beliefs relevant to the query.
 
@@ -276,6 +278,21 @@ def _recall_beliefs(
     except Exception:
         logger.debug("[recall] belief query failed", exc_info=True)
         return []
+
+    # Dense (semantic) belief match — when FTS/bridge yielded few hits, augment
+    # with beliefs whose embedding is cosine-close to the query. This catches
+    # "where do I live" → "user lives_in Paris" even when no token overlaps and
+    # the episode bridge hasn't fired. Best-effort: skipped if no embedder /
+    # no belief embeddings exist (falls back to the FTS results above).
+    if q and len(rows) < limit:
+        try:
+            dense_rows = _belief_dense(conn, q, vector_engine, tenant_id, limit)
+            existing_ids = {r["id"] for r in rows}
+            for dr in dense_rows:
+                if dr["id"] not in existing_ids:
+                    rows.append(dr)
+        except Exception:
+            logger.debug("[recall] belief dense search failed", exc_info=True)
 
     hits: list[RecallHit] = []
     seen_subjects: dict[str, RecallHit] = {}
@@ -456,6 +473,66 @@ def _episode_dense(
         RecallHit(id=eid, content="", score=float(sim), source="dense")
         for eid, sim in results
     ]
+
+
+def _belief_dense(
+    conn: sqlite3.Connection,
+    query: str,
+    vector_engine: Any | None,
+    tenant_id: str,
+    limit: int,
+) -> list[sqlite3.Row]:
+    """Dense (semantic) belief match via cosine similarity over belief embeddings.
+
+    Returns belief rows (same shape as the FTS query) whose embedding is
+    cosine-close to the query vector. Used to augment the FTS/bridge belief
+    results when they're sparse. Best-effort: returns [] if no embedder or no
+    belief embeddings exist.
+    """
+    try:
+        from kazma_core.memory.embedder import get_embedder
+
+        embedder = get_embedder()
+        if embedder is None:
+            return []
+        qvec = embedder.encode(query)
+        if not qvec:
+            return []
+    except Exception:
+        return []
+    try:
+        import numpy as np
+
+        qarr = np.asarray(qvec, dtype=np.float32)
+        qnorm = float(np.linalg.norm(qarr)) or 1.0
+        qarr = qarr / qnorm
+    except Exception:
+        return []  # numpy required for cosine; degrade silently
+
+    # Read all active beliefs WITH embeddings + their metadata in one pass.
+    rows = conn.execute(
+        """SELECT id, subject, predicate, object, predicate_type,
+                  confidence, structural_importance, valid_from,
+                  source_trust_weight, embedding
+           FROM beliefs
+           WHERE valid_until IS NULL AND invalidated_at IS NULL
+             AND tenant_id = ? AND embedding IS NOT NULL""",
+        (tenant_id,),
+    ).fetchall()
+    if not rows:
+        return []
+
+    scored: list[tuple[float, sqlite3.Row]] = []
+    for r in rows:
+        try:
+            varr = np.frombuffer(r["embedding"], dtype=np.float32)
+            vnorm = float(np.linalg.norm(varr)) or 1.0
+            sim = float(np.dot(qarr, varr / vnorm))
+        except Exception:
+            continue
+        scored.append((sim, r))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [r for _sim, r in scored[:limit]]
 
 
 def _episode_ppr(
