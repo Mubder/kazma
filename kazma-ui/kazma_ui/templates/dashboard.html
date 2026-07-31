@@ -1829,8 +1829,10 @@
   var _v2gAlpha = 0, _v2gAnim = null, _v2gDrag = null, _v2gHover = -1, _v2gSelectedId = null;
   var _v2gCap = 80, _v2gNodeBaseR = 7;
   var _v2gMinScale = 0.3, _v2gMaxScale = 4;
-  var _v2gTimeRange = { min: 0, max: 0 };  // for slider mapping
+  var _v2gTimeRange = { min: 0, max: 0 };
   var _v2gFilters = { entity: {}, predicate: {} };
+  // Cache the last full dataset so client-side filters don't need a re-fetch
+  var _v2gRawNodes = [], _v2gRawLinks = [];
 
   var _V2G_TYPE_COLORS = {
     person: '#10b981', tool: '#06b6d4', concept: '#6366f1',
@@ -2119,38 +2121,50 @@
     var el = document.getElementById('v2g-inspect');
     if (!el || !p) return;
     var color = _V2G_TYPE_COLORS[p.type] || '#94a3b8';
-    var html = '<div style="color:' + color + ';font-weight:700;margin-bottom:4px;">' + _v2gEsc(p.label) + '</div>';
-    html += '<div>type: ' + p.type + (p.isHighStakes ? ' · <span style="color:#ef4444;">⚠ high-stakes</span>' : '') + '</div>';
-    // List edges touching this node
+    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.85rem;margin-bottom:6px;">' + _v2gEsc(p.label) + '</div>';
+    html += '<div style="color:var(--text-muted);font-size:0.7rem;margin-bottom:8px;">type: ' + p.type;
+    if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
+    html += '</div>';
+    // List readable belief sentences touching this node
     var rels = [];
     for (var i = 0; i < _v2gEdges.length; i++) {
       var ed = _v2gEdges[i];
-      if (_v2gPts[ed.a] && _v2gPts[ed.a].id === p.id) rels.push('→ ' + _v2gEsc(ed.label) + ' ' + _v2gEsc(_v2gPts[ed.b].label));
-      else if (_v2gPts[ed.b] && _v2gPts[ed.b].id === p.id) rels.push('← ' + _v2gEsc(ed.label) + ' ' + _v2gEsc(_v2gPts[ed.a].label));
+      var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+      if (!A || !B) continue;
+      var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
+      var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
+      var arrow = '→';
+      var target = _v2gEsc(B.label);
+      var source = _v2gEsc(A.label);
+      if (A.id === p.id) {
+        rels.push('<span style="color:' + pcolor + ';font-size:0.62rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b>' + target + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.6rem;">(superseded)</span>' : ''));
+      } else if (B.id === p.id) {
+        rels.push('<span style="color:var(--text-muted);font-size:0.7rem;">←</span> ' + source + ' ' + predLabel + ' <b>(this)</b>');
+      }
     }
-    if (rels.length) html += '<div style="margin-top:4px;color:var(--text-secondary);">' + rels.slice(0, 6).join('<br>') + '</div>';
+    if (rels.length) {
+      html += '<div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ')</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:4px;">' + rels.slice(0, 8).map(function(r) { return '<div style="color:var(--text-secondary);line-height:1.4;">' + r + '</div>'; }).join('') + '</div>';
+    } else {
+      html += '<div style="color:var(--text-muted);font-size:0.72rem;">No direct beliefs — this entity may be referenced indirectly.</div>';
+    }
     el.innerHTML = html;
   }
 
-  // ── Filter + fetch logic ──
+  // ── Filter logic (CLIENT-SIDE against cached data) ──
+  // Filters don't re-fetch from the server — they filter the cached
+  // _v2gRawNodes/_v2gRawLinks. This avoids the "empty graph on filter"
+  // bug where the server-side entity_type filter found no matches.
+
   function _v2gBuildUrl() {
     var params = new URLSearchParams();
-    // Time slider
+    // Only the time slider goes to the server (bi-temporal query)
     var slider = document.getElementById('v2g-time-slider');
     if (slider && _v2gTimeRange.max > 0 && parseFloat(slider.value) < 100) {
       var frac = parseFloat(slider.value) / 100;
       var ts = _v2gTimeRange.min + frac * (_v2gTimeRange.max - _v2gTimeRange.min);
       params.set('at', String(Math.floor(ts)));
     }
-    // Predicate type filter (single active, or none)
-    var activePred = Object.keys(_v2gFilters.predicate).filter(function(k) { return _v2gFilters.predicate[k]; });
-    if (activePred.length === 1) params.set('type', activePred[0]);
-    // Entity type filter
-    var activeEnt = Object.keys(_v2gFilters.entity).filter(function(k) { return _v2gFilters.entity[k]; });
-    if (activeEnt.length === 1) params.set('entity_type', activeEnt[0]);
-    // Search
-    var search = document.getElementById('v2g-search');
-    if (search && search.value.trim()) params.set('q', search.value.trim());
     var qs = params.toString();
     return '/api/memory/v2/graph' + (qs ? ('?' + qs) : '');
   }
@@ -2160,15 +2174,63 @@
       var resp = await fetch(_v2gBuildUrl());
       var data = await resp.json();
       var stats = data.stats || {};
-      var nodes = data.nodes || [], links = data.links || [];
-      // Update time range from stats (for slider mapping)
+      _v2gRawNodes = data.nodes || [];
+      _v2gRawLinks = data.links || [];
       if (stats.earliest && stats.latest && stats.latest > stats.earliest) {
         _v2gTimeRange = { min: stats.earliest, max: Math.max(stats.latest, Date.now() / 1000) };
       }
-      var sl = document.getElementById('v2g-stats-line');
-      if (sl) sl.textContent = (nodes.length + ' nodes · ' + links.length + ' beliefs' + (stats.superseded ? ' · ' + stats.superseded + ' superseded' : ''));
-      _v2gDrawCanvas(nodes, links);
+      _v2gApplyFilters();
     } catch (e) { /* silent */ }
+  }
+
+  function _v2gApplyFilters() {
+    // Apply client-side entity-type + predicate-type + search filters
+    var activeEnt = Object.keys(_v2gFilters.entity);
+    var activePred = Object.keys(_v2gFilters.predicate);
+    var search = '';
+    var searchEl = document.getElementById('v2g-search');
+    if (searchEl) search = searchEl.value.trim().toLowerCase();
+
+    var nodes = _v2gRawNodes, links = _v2gRawLinks;
+
+    // Filter links by predicate type + search
+    if (activePred.length || search) {
+      links = links.filter(function(l) {
+        if (activePred.length && activePred.indexOf(l.type) < 0) return false;
+        if (search && (l.label || '').toLowerCase().indexOf(search) < 0 &&
+            (l.source || '').toLowerCase().indexOf(search) < 0 &&
+            (l.target || '').toLowerCase().indexOf(search) < 0) return false;
+        return true;
+      });
+    }
+    // Keep only nodes referenced by surviving links (+ search match on node names)
+    var nodeIds = new Set();
+    links.forEach(function(l) { nodeIds.add(l.source); nodeIds.add(l.target); });
+    if (search) {
+      nodes.forEach(function(n) {
+        if ((n.name || '').toLowerCase().indexOf(search) >= 0) nodeIds.add(n.id);
+      });
+    }
+    // Filter nodes by entity type + membership
+    nodes = nodes.filter(function(n) {
+      if (activeEnt.length && activeEnt.indexOf(n.type) < 0) return false;
+      // Keep nodes that are in a surviving link, OR all nodes if no link filter
+      if (activePred.length || search) return nodeIds.has(n.id);
+      return true;
+    });
+    // If entity-type filter is on, re-filter links to only those between surviving nodes
+    if (activeEnt.length) {
+      var keepIds = new Set(nodes.map(function(n) { return n.id; }));
+      links = links.filter(function(l) { return keepIds.has(l.source) && keepIds.has(l.target); });
+    }
+
+    var sl = document.getElementById('v2g-stats-line');
+    if (sl) {
+      var suffix = '';
+      if (activeEnt.length || activePred.length || search) suffix = ' (filtered from ' + _v2gRawNodes.length + ')';
+      sl.textContent = nodes.length + ' nodes · ' + links.length + ' beliefs' + suffix;
+    }
+    _v2gDrawCanvas(nodes, links);
   }
 
   function _v2gRenderFilters() {
@@ -2185,31 +2247,47 @@
     }
     if (entBox) entBox.innerHTML = entTypes.map(function(t) { return makeToggle(t[0], 'entity', t[1], _V2G_TYPE_COLORS[t[0]] || '#94a3b8'); }).join('');
     if (predBox) predBox.innerHTML = predTypes.map(function(t) { return makeToggle(t[0], 'predicate', t[1], _V2G_PRED_COLORS[t[0]] || '#94a3b8'); }).join('');
-    // Wire change handlers (radio-like: only one active per group, toggle off = all)
+    // Wire change handlers — multi-select (toggle each independently)
     document.querySelectorAll('[id^="v2g-ft-entity-"]').forEach(function(cb) {
       cb.addEventListener('change', function() {
         var key = cb.id.replace('v2g-ft-entity-', '');
-        if (cb.checked) { _v2gFilters.entity = {}; _v2gFilters.entity[key] = true; }
-        else { delete _v2gFilters.entity[key]; }
-        _v2gRenderFilters(); _v2gLoad();
+        if (cb.checked) _v2gFilters.entity[key] = true;
+        else delete _v2gFilters.entity[key];
+        _v2gRenderFilters(); _v2gApplyFilters();
       });
     });
     document.querySelectorAll('[id^="v2g-ft-predicate-"]').forEach(function(cb) {
       cb.addEventListener('change', function() {
         var key = cb.id.replace('v2g-ft-predicate-', '');
-        if (cb.checked) { _v2gFilters.predicate = {}; _v2gFilters.predicate[key] = true; }
-        else { delete _v2gFilters.predicate[key]; }
-        _v2gRenderFilters(); _v2gLoad();
+        if (cb.checked) _v2gFilters.predicate[key] = true;
+        else delete _v2gFilters.predicate[key];
+        _v2gRenderFilters(); _v2gApplyFilters();
       });
     });
-    // Active filter chips
+    // Active filter chips + reset button
     var chips = document.getElementById('v2g-active-filters');
     if (chips) {
       var all = Object.keys(_v2gFilters.entity).map(function(k) { return 'entity:' + k; })
         .concat(Object.keys(_v2gFilters.predicate).map(function(k) { return 'pred:' + k; }));
-      chips.innerHTML = all.length ? all.map(function(c) {
-        return '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.15);color:#a5b4fc;">' + c + '</span>';
-      }).join('') : '';
+      var html = all.map(function(c) {
+        return '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.15);color:#a5b4fc;cursor:pointer;">' + c + ' ✕</span>';
+      }).join('');
+      if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">Reset all</span>';
+      chips.innerHTML = html;
+      // Click a chip to remove that filter
+      chips.querySelectorAll('span:not(#v2g-reset-filters)').forEach(function(span, i) {
+        span.addEventListener('click', function() {
+          var parts = span.textContent.replace(' ✕','').split(':');
+          delete _v2gFilters[parts[0]][parts[1]];
+          _v2gRenderFilters(); _v2gApplyFilters();
+        });
+      });
+      var reset = document.getElementById('v2g-reset-filters');
+      if (reset) reset.addEventListener('click', function() {
+        _v2gFilters = { entity: {}, predicate: {} };
+        var s = document.getElementById('v2g-search'); if (s) s.value = '';
+        _v2gRenderFilters(); _v2gApplyFilters();
+      });
     }
   }
 
@@ -2217,7 +2295,7 @@
     var refresh = document.getElementById('v2g-refresh');
     if (refresh) refresh.addEventListener('click', _v2gLoad);
     var search = document.getElementById('v2g-search');
-    if (search) { var sto; search.addEventListener('input', function() { clearTimeout(sto); sto = setTimeout(_v2gLoad, 300); }); }
+    if (search) { var sto; search.addEventListener('input', function() { clearTimeout(sto); sto = setTimeout(_v2gApplyFilters, 250); }); }
     // Time slider
     var slider = document.getElementById('v2g-time-slider');
     var label = document.getElementById('v2g-time-label');
