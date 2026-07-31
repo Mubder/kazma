@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Unreleased — V1→V2 full memory cutover (2026-07-31)
+
+- **V2 cognitive engine is now the single source of truth for ALL memory.**
+  The V1→V2 cutover landed: `memory.v2.use_new_stack` defaults to `true`.
+  V2 (bi-temporal beliefs, PPR recall, procedural DAGs) serves chat, swarm,
+  self-improvement, and compaction memory. V1 code + stores are retained as
+  rollback insurance — flip the flag to `false` to restore the legacy
+  4-layer RRF stack.
+- **Swarm memory now captured by V2.** The dual-write bridge previously
+  covered only 2 of ~7 write paths; swarm results, SoulEvolution, and
+  compaction summaries were V1-only. New `memory/swarm_bridge.py` provides
+  V2-native write functions (`store_swarm_result`, `log_evolution_v2`,
+  `store_compaction_summary`), and the 5 V1 callers (worker_dispatch,
+  self_improvement ×3, phonebook, compaction) are rewired to V2.
+- **Fixed 3 latent swarm-reader bugs.** `self_improvement` and `phonebook`
+  iterated `adapter.search()` results with attribute access (`r.content`)
+  but the function returns dicts — the `AttributeError` was swallowed by
+  `except`, so swarm memory injection (`PREVIOUS_SUCCESSFUL_STRATEGIES:`,
+  `PAST_LEARNINGS_FOR_THIS_WORKER:`, `Past memory:` context) was silently a
+  no-op. Now uses `r["content"]`; worker context injection actually populates.
+- **V2 authoritative on the chat path.** `memory_search` returns V2 results
+  even when empty (no V1 fallthrough); the legacy consolidator task is
+  skipped when V2 is active; V2 recall failures degrade to no-injection
+  rather than silently routing to V1.
+- **Boot + dashboard decoupled from V1.** V1 adapter pre-warm + backfill
+  skipped when V2 active (faster startup, no Chroma/MiniLM load);
+  ContextAuthority defers to V2 recall; `/api/system/status` surfaces
+  `memory_stack: "v2"` + a V2 KPI block.
+- **Backfill + validation.** Ran `backfill_v2.run_backfill()` (migrated 223
+  entities + episodes + beliefs). New `scripts/verify_v2_coverage.py`
+  reports store populations + query diffs (100% entity coverage post-backfill).
+- Docs: `docs/docs/guide/memory-and-rag.md`, `MEMORY_CODEMAP.md`,
+  `docs/plans/MEMORY_REMAINING.md` updated to reflect V2-as-default.
+- Tests: `test_memory_v2_swarm_bridge.py` (8 tests for the bridge +
+  recall.search shape); updated `test_memory_p1_p2_p3`, `test_memory_v2_phase1`,
+  `test_per_turn_rag` for the V2-default reality. 294 tests pass.
+
 ## Unreleased — Post-V2 system-wide audit fixes (2026-07-31)
 
 - **Nightly backup/export now actually runs.** `perform_native_backups()` and

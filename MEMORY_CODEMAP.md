@@ -296,9 +296,9 @@ When implementing the bi-temporal belief architecture:
 
 1. **New tables**: `beliefs`, `episodes`, `entities`, `entity_merges`, `procedural_dags` (see `schema_v2.py`)
 2. **Backfill script**: `memory/backfill_v2.py` — reads `memories` + `kg_nodes` + Chroma → writes `episodes` + `beliefs` + `entities`
-3. **Dual-write wrapper**: `memory/dual_write.py` — `MemoryAgent` writes both old and new schemas during transition
-4. **Config flag**: `memory.use_new_stack: false` → flip to `true` after validation
-5. **Rollback**: Set `false` → old adapter path works instantly (dual-write ensured parity)
+3. **Dual-write wrapper**: `memory/dual_write.py` — `MemoryAgent` writes both old and new schemas (used during the transition; V2-native paths now bypass it)
+4. **Config flag**: `memory.use_new_stack: true` (V2 is the active stack after the cutover; flip to `false` to roll back to V1)
+5. **Rollback**: Set `false` → V1 adapter path reactivates instantly (V1 code + stores retained)
 
 ---
 

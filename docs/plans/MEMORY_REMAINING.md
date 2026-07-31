@@ -92,12 +92,12 @@ PPR retrieval, procedural skill DAGs, durable consolidation queue, and an
 idempotent backfill migration. See `docs/docs/guide/memory-and-rag.md`
 (V2 sections) and `MEMORY_CODEMAP.md` (V2 modules).
 
-Cutover state: `memory.v2.use_new_stack` defaults to `false` (dual-write
-transition). Run `backfill_v2.run_backfill()` then flip the flag to make V2
-the active read path. Rollback is a one-flag flip.
-
-The legacy 4-layer RRF stack remains as the default read path and continues
-to receive writes during the transition.
+Cutover state: `memory.v2.use_new_stack` **defaults to `true`** — the V1→V2
+cutover landed. V2 is the single read/write path for chat, swarm, self-
+improvement, and compaction memory. Run `backfill_v2.run_backfill()` once to
+migrate any pre-existing V1 corpus, then verify with
+`scripts/verify_v2_coverage.py`. Rollback is a one-flag flip (`false` restores
+the legacy 4-layer RRF stack; V1 code + stores are retained).
 
 ### Product / scale (only if required)
 

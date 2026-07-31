@@ -5,21 +5,21 @@ sidebar_label: Memory & RAG
 description: Kazma chat memory — V2 cognitive engine (bi-temporal beliefs, PPR recall, tier lifecycle) + legacy 4-layer RRF (2026-07)
 ---
 
-> **Live SoT (2026-07-31).** Kazma memory has TWO stacks:
+> **Live SoT (2026-07-31).** V2 is the active memory stack.
 >
-> - **V2 Cognitive Engine** (production-live, default `use_new_stack=false`
->   during the dual-write transition — flip to `true` after running the
->   backfill). Bi-temporal belief graph, 4-tier episodes, Local Ego-Graph
->   PPR retrieval, procedural skill DAGs, durable consolidation queue.
-> - **Legacy 4-layer RRF** (the original stack, still the default read
->   path until you flip the flag). Chroma + SQLite graph + FTS5 +
->   sqlite-vec, RRF-blended.
+> - **V2 Cognitive Engine** (production-live, **default `use_new_stack=true`**
+>   after the V1→V2 cutover). Bi-temporal belief graph, 4-tier episodes,
+>   Local Ego-Graph PPR retrieval, procedural skill DAGs, durable
+>   consolidation queue. This is the single read/write path for chat,
+>   swarm, self-improvement, and compaction memory.
+> - **Legacy 4-layer RRF** (the original stack, retained for rollback).
+>   Chroma + SQLite graph + FTS5 + sqlite-vec, RRF-blended. No longer on
+>   the active path; flip `use_new_stack=false` to restore it.
 >
-> Both stacks run concurrently during the transition: V2 receives
-> dual-writes on every turn regardless of the flag, so flipping later
-> is instant and lossless. The sections below marked **[V2]** describe
-> the new cognitive engine; **[Legacy]** sections describe the original
-> RRF stack.
+> The cutover extended V2-native writes to the swarm subsystem (worker
+> results, SoulEvolution, compaction summaries) via `memory/swarm_bridge.py`,
+> so V2 captures everything V1 did. The **[Legacy]** sections below describe
+> the original RRF stack, which stays in the repo as rollback insurance.
 
 ---
 
@@ -115,7 +115,7 @@ Functional predicates (`lives_in`, `name_is`, `works_at`, ...) are single-valued
 ```yaml
 memory:
   v2:
-    use_new_stack: false          # flip to true after backfill
+    use_new_stack: true           # V2 is the active stack (flip to false to roll back to V1)
     trust_weight_user: 1.0        # W_trust source weights
     trust_weight_tool: 0.85
     trust_weight_llm: 0.60

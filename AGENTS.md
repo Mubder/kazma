@@ -439,7 +439,7 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
-- `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (4-layer RRF, consolidator, graph)
+- `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the active stack; legacy 4-layer RRF retained for rollback)
 - `docs/plans/MEMORY_REMAINING.md` — Memory done vs later backlog
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
 - `docs/docs/reference/tools-catalog.md` — Built-in + native tools
