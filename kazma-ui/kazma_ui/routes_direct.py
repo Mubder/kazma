@@ -320,11 +320,10 @@ def register_direct_routes(self: Any) -> None:
             bparams.append(max(10, min(limit * 4, 800)))
             brows = conn.execute(bsql, bparams).fetchall()
 
-            # ── Entities referenced by the surviving beliefs ──
+            # ── Entities referenced by the surviving beliefs (subjects only) ──
             ref_ids: set[str] = set()
             for b in brows:
                 ref_ids.add(b["subject"])
-                ref_ids.add(b["object"])
             ref_ids.add("user")
             nodes: list[dict] = []
             ent_lookup: dict[str, dict] = {}
@@ -339,7 +338,6 @@ def register_direct_routes(self: Any) -> None:
             belief_count: dict[str, int] = {}
             for b in brows:
                 belief_count[b["subject"]] = belief_count.get(b["subject"], 0) + 1
-                belief_count[b["object"]] = belief_count.get(b["object"], 0) + 1
 
             for eid in ref_ids:
                 e = ent_lookup.get(eid)
@@ -354,15 +352,40 @@ def register_direct_routes(self: Any) -> None:
                     "beliefCount": belief_count.get(eid, 0),
                 })
 
+            # ── Collect unique object texts (facts) to create virtual nodes ──
+            obj_texts: set[str] = set()
+            for b in brows:
+                if b["object"]:
+                    obj_texts.add(b["object"])
+
+            # Add virtual nodes for object texts (facts like "teal", "Kuwait City")
+            obj_belief_count: dict[str, int] = {}
+            for b in brows:
+                if b["object"]:
+                    obj_belief_count[b["object"]] = obj_belief_count.get(b["object"], 0) + 1
+            for obj_text in obj_texts:
+                # Only add if not filtered out by entity_type (virtual nodes are 'concept')
+                if entity_type and entity_type.strip() and "concept" != entity_type.strip():
+                    continue
+                nodes.append({
+                    "id": obj_text,  # use the text as the node ID
+                    "name": obj_text,
+                    "type": "concept",
+                    "isHighStakes": False,
+                    "beliefCount": obj_belief_count.get(obj_text, 0),
+                    "isVirtual": True,  # mark as virtual node
+                })
+
             links: list[dict] = []
             node_ids = {n["id"] for n in nodes}
             for b in brows:
-                if b["subject"] not in node_ids or b["object"] not in node_ids:
+                if b["subject"] not in node_ids:
                     continue
+                # object is the fact payload text, not an entity ID
                 links.append({
                     "id": b["id"],
                     "source": b["subject"],
-                    "target": b["object"],
+                    "target": b["object"],  # use object text as target identifier
                     "label": b["predicate"],
                     "object_text": b["object"],
                     "type": b["predicate_type"],

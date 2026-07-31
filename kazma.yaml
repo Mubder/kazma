@@ -18,10 +18,8 @@ llm:
   output_cost_per_1m: 0.6
 mcp:
   servers:
-  # Real MCP only — do not commit stub echo/test servers (they cannot start).
   - name: filesystem
     transport: stdio
-    # Rebind on Switch Repo / clone to the active workspace root.
     workspace_bound: true
     command:
     - npx
@@ -29,6 +27,48 @@ mcp:
     - '@modelcontextprotocol/server-filesystem'
     - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
+  - name: test-server
+    transport: stdio
+    command:
+    - echo
+    url: ''
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+  - name: dup
+    transport: stdio
+    command:
+    - echo
+    url: ''
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+  - name: sse-server
+    transport: sse
+    command: []
+    url: http://localhost:8080
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+  - name: test-mcp
+    transport: stdio
+    command:
+    - echo
+    - hello
+    url: ''
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+    trust: approval_required
+    auth: {}
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.
 
@@ -44,9 +84,9 @@ system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كاز�
 
   When you have tools available, use them to accomplish tasks.
 
-  TOOL SELECTION: Prefer native tools over shell_exec. Use file_list/file_read/
-  file_search/file_write for files; git tools for git; python_exec for short
-  scripts. shell_exec cwd is already the workspace — never use cd (blocked).
+  TOOL SELECTION: Prefer native tools over shell_exec. Use file_list/file_read/ file_search/file_write
+  for files; git tools for git; python_exec for short scripts. shell_exec cwd is already
+  the workspace — never use cd (blocked).
 
   CRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user writes in.
   Arabic input = Arabic output. English input = English output. If they mix Arabic
@@ -72,7 +112,6 @@ memory:
     min_user_chars: 24
     every_n_turns: 1
     skip_adapter_if_auto_stored: true
-    # Skip LLM extract when auto_store already vacuumed durable text this turn
     skip_llm_if_auto_stored: true
     skip_llm_in_demo: true
   embedding:
@@ -105,8 +144,6 @@ gateway:
     enabled: true
   voice:
     enabled: false
-    # When true (and enabled): voice inbound → TTS voice-note reply on platforms.
-    # Turn off in Settings → Voice for text-only replies while keeping STT.
     tts_reply: true
     stt_provider: openai
     tts_provider: edgetts
@@ -150,13 +187,13 @@ ui:
 logging:
   level: INFO
   format: json
-  retention_days: 7  # daily rotation; auto-delete log files older than this many days
+  retention_days: 7
   langfuse:
     enabled: false
     public_key: ''
     secret_key: ''
 proxy:
-  provider: none  # opt-in scraping resilience addon: none | anyip
+  provider: none
 time_travel:
   enabled: true
   max_snapshots: 50

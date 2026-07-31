@@ -2001,11 +2001,13 @@
           type: nd.type || 'entity',
           isHighStakes: !!nd.isHighStakes,
           r: _v2gNodeBaseR + Math.min(8, Math.sqrt(bc) * 1.5),
+          isVirtual: !!nd.isVirtual,
         };
       });
       _v2gEdges = [];
       (links || []).forEach(function(l) {
-        var ai = _v2gIds[l.source], bi = _v2gIds[l.target];
+        var ai = _v2gIds[l.source];
+        var bi = _v2gIds[l.target];
         if (ai !== undefined && bi !== undefined) {
           _v2gEdges.push({ a: ai, b: bi, label: String(l.label || '').slice(0, 18), objectText: String(l.object_text || ''), type: l.type || 'set', confidence: l.confidence || 0.5, superseded: !!l.superseded });
         }
