@@ -89,24 +89,37 @@ def _classify_predicate(predicate: str) -> str:
 
 
 def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
-    """Try to extract a (predicate, object) pair from memory_chunk text.
+    """Try to extract a (predicate, object) pair from memory text.
+
+    Handles BOTH third-person ("User prefers teal") and first-person
+    ("I prefer teal", "My name is Mubder") phrasing — the memories
+    table stores facts in the user's original voice.
 
     Returns None when the text doesn't match any fact pattern — the
-    caller should SKIP it rather than store conversational noise as a
-    'noted' belief. Only real, structured facts become beliefs.
+    caller should SKIP it rather than store conversational noise.
     """
     import re
 
     t = (text or "").strip()
+    # Each pattern tries third-person then first-person variants.
+    # Order matters: more specific patterns (works_at) before generic
+    # ones (lives_in) to avoid "I work at X" matching lives_in first.
     patterns = [
-        (re.compile(r"(?i)\buser(?:'s)? favorite (\w+) is (.+)"), "favorite"),
-        (re.compile(r"(?i)\buser prefers (.+)"), "prefers"),
-        (re.compile(r"(?i)\buser (?:lives|works) (?:in|at) (.+)"), "lives_in"),
-        (re.compile(r"(?i)\buser(?:'s)? name is (.+)"), "name_is"),
-        (re.compile(r"(?i)\buser (?:likes|loves|uses) (.+)"), "prefers"),
-        (re.compile(r"(?i)\buser works (?:at|on) (.+)"), "works_at"),
-        (re.compile(r"(?i)\buser has skill (?:in|with) (.+)"), "has_skill"),
-        (re.compile(r"(?i)\buser(?:'s)? (?:github|gitlab) (?:is|username is) (.+)"), "github_is"),
+        # name (most specific — proper noun capture)
+        (re.compile(r"(?i)\b(?:user(?:'s)? |my )name is (.+)"), "name_is"),
+        (re.compile(r"(?i)\b(?:i am|i'm|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"), "name_is"),
+        # favorite
+        (re.compile(r"(?i)\b(?:user(?:'s)? |my )favorite (\w+) is (.+)"), "favorite"),
+        # works at/on (before lives_in — "I work at" shouldn't match lives_in)
+        (re.compile(r"(?i)\b(?:user |i )works? (?:at|on) (.+)"), "works_at"),
+        # lives/works in
+        (re.compile(r"(?i)\b(?:user |i )(?:live|work)s? in (.+)"), "lives_in"),
+        # prefers / likes / loves / uses
+        (re.compile(r"(?i)\b(?:user |i )(?:prefer|like|love|use|need)s? (.+)"), "prefers"),
+        # has skill
+        (re.compile(r"(?i)\b(?:user |i )(?:has|have) skill (?:in|with) (.+)"), "has_skill"),
+        # github
+        (re.compile(r"(?i)\b(?:user(?:'s)? |my )(?:github|gitlab) (?:is|username is|handle is) (.+)"), "github_is"),
     ]
     for pat, default_pred in patterns:
         m = pat.search(t)
@@ -116,8 +129,6 @@ def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
                 val = m.group(2).strip().rstrip(".")
                 return f"favorite_{cat}", val
             return default_pred, m.group(1).strip().rstrip(".")
-    # No pattern matched — this is conversational text, NOT a fact.
-    # Return None so the caller skips it instead of creating noise.
     return None
 
 
@@ -166,8 +177,8 @@ def _open_primary() -> sqlite3.Connection:
 
 
 def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int]:
-    """Migrate legacy `memories` rows → V2 `episodes`."""
-    stats = {"memories_seen": 0, "episodes_inserted": 0, "skipped": 0}
+    """Migrate legacy `memories` rows → V2 `episodes` + extract beliefs."""
+    stats = {"memories_seen": 0, "episodes_inserted": 0, "skipped": 0, "beliefs_extracted": 0}
     legacy = _open_legacy_memory()
     if legacy is None:
         logger.info("[backfill] no legacy memory.db found — skipping memories→episodes")
@@ -216,6 +227,36 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int
                     ),
                 )
                 stats["episodes_inserted"] += 1
+                # ── Also try to extract a belief from this memory ──
+                # The memories table contains durable facts in the user's
+                # voice ("I prefer teal", "My name is Mubder"). Try to
+                # extract a structured belief from the content.
+                extracted = _extract_pred_from_text(content)
+                if extracted is not None:
+                    pred, obj = extracted
+                    pred_clean = pred.strip().lower().replace(" ", "_")
+                    ptype = _classify_predicate(pred_clean)
+                    bid = "b_" + _stable_id("memories_belief", src_id)
+                    bmeta = {
+                        "source": "backfill_memories_belief",
+                        "memory_class": "general",
+                    }
+                    try:
+                        primary.execute(
+                            """INSERT OR IGNORE INTO beliefs
+                               (id, tenant_id, subject, predicate, predicate_type, object,
+                                confidence, structural_importance, source_trust_weight,
+                                valid_from, ingested_at, extraction_method, metadata_json)
+                               VALUES (?, ?, 'user', ?, ?, ?, 0.8, 4, 1.0, ?, ?, 'system_tool', ?)""",
+                            (
+                                bid, tenant, pred_clean, ptype, obj[:300],
+                                ts, now,
+                                json.dumps(bmeta, ensure_ascii=False),
+                            ),
+                        )
+                        stats["beliefs_extracted"] += 1
+                    except Exception:
+                        pass
             except Exception:
                 stats["skipped"] += 1
                 logger.debug("[backfill] memories row %s skipped", src_id, exc_info=True)
