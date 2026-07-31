@@ -130,14 +130,8 @@ def get_bot_identity() -> dict[str, str] | None:
     if not enabled:
         return None
 
-    name = (
-        os.environ.get("KAZMA_BOT_NAME", "")
-        or cfg.get("name", _DEFAULT_BOT_NAME)
-    )
-    email = (
-        os.environ.get("KAZMA_BOT_EMAIL", "")
-        or cfg.get("email", _DEFAULT_BOT_EMAIL)
-    )
+    name = os.environ.get("KAZMA_BOT_NAME", "") or cfg.get("name", _DEFAULT_BOT_NAME)
+    email = os.environ.get("KAZMA_BOT_EMAIL", "") or cfg.get("email", _DEFAULT_BOT_EMAIL)
 
     # GitHub App path: resolve the app's true bot email (which carries the custom logo/avatar).
     # Only use auto-derived email when NO explicit email is configured —
@@ -297,9 +291,9 @@ def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
 
     now = int(time.time())
     payload = {
-        "iat": now - 60,       # 60s in the past to tolerate clock drift
-        "exp": now + 600,      # 10-minute max lifetime
-        "iss": str(app_id),    # App ID / client ID as a string (per GitHub docs)
+        "iat": now - 60,  # 60s in the past to tolerate clock drift
+        "exp": now + 600,  # 10-minute max lifetime
+        "iss": str(app_id),  # App ID / client ID as a string (per GitHub docs)
     }
     return jwt.encode(payload, private_key_bytes, algorithm="RS256")
 
@@ -339,9 +333,9 @@ def mint_app_installation_token(force: bool = False) -> str | None:
         return _app_token_cache["token"]
 
     try:
-        import httpx
-        import jwt
         from pathlib import Path
+
+        import httpx
 
         # Read and normalize the private key bytes
         private_key_bytes: bytes
@@ -358,7 +352,7 @@ def mint_app_installation_token(force: bool = False) -> str | None:
                 logger.debug("[git_identity] App private key not found at path %s (expanded: %s)", key_path, kp)
                 return None
 
-        # Create the JWT with integer `iss` claim required by GitHub App API
+        # Create the JWT with string `iss` claim required by GitHub App API
         app_jwt = _mint_github_jwt(app_id, private_key_bytes)
         if not app_jwt:
             return None
@@ -397,4 +391,3 @@ def mint_app_installation_token(force: bool = False) -> str | None:
         logger.warning("[git_identity] App token minting failed: %s", exc)
 
     return None
-
