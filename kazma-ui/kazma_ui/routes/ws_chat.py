@@ -362,6 +362,72 @@ def create_ws_chat_router(
                     except Exception as exc:
                         logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
 
+                    # ── /yolo, /yolo on, /yolo off, /yolo status (parity with SSE + gateway) ──
+                    if text.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
+                        from kazma_core.safety.yolo import (
+                            YoloDisabledError,
+                            disable_yolo,
+                            enable_yolo,
+                            yolo_allowed,
+                            yolo_status,
+                        )
+
+                        cmd = text.lower().strip()
+                        if cmd == "/yolo status":
+                            st = yolo_status(thread_id)
+                            if st.get("active"):
+                                rem = st.get("remaining_seconds")
+                                ttl_note = f"Expires in ~{rem // 60}m." if rem is not None else "No auto-expiry."
+                                confirmation = f"🚀 YOLO is **ON** for this session. {ttl_note}\nDisable: `/yolo off`"
+                            else:
+                                prod_note = ""
+                                if not yolo_allowed():
+                                    prod_note = "\nProduction mode blocks YOLO (set `KAZMA_ALLOW_YOLO=1` to opt in)."
+                                confirmation = f"🛡️ YOLO is **OFF**. HITL approvals are required for danger tools.{prod_note}"
+                        elif cmd == "/yolo off":
+                            disable_yolo(thread_id, actor=f"ws:{session_id[:12]}")
+                            confirmation = "🛡️ YOLO deactivated. Safety gates and tool grants are cleared."
+                        else:
+                            try:
+                                st = enable_yolo(thread_id, actor=f"ws:{session_id[:12]}")
+                                rem = st.get("remaining_seconds")
+                                ttl_note = (
+                                    f"Auto-expires in ~{rem // 60} minutes." if rem is not None
+                                    else "No auto-expiry."
+                                )
+                                confirmation = (
+                                    "🚀 **YOLO ON** for this session only.\n"
+                                    "All danger tools run **without** approval until you `/yolo off` "
+                                    f"or TTL ends.\n{ttl_note}\n"
+                                    "⚠️ Use only when you fully trust this session."
+                                )
+                            except YoloDisabledError as yde:
+                                confirmation = f"🛡️ {yde}"
+
+                        # Send confirmation back to the client (NOT to the LLM)
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="llm_delta",
+                                data={"content": confirmation},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="stream_end",
+                                data={},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        # Persist to session UI projection (NOT the graph checkpoint)
+                        session.messages.append({"role": "user", "content": text})
+                        session.messages.append({"role": "assistant", "content": confirmation})
+                        try:
+                            get_session_manager().put(session)
+                        except Exception:
+                            logger.debug("[WS-Chat] Failed persisting YOLO message")
+                        continue  # ← CRITICAL: do NOT fall through to the LLM
+
                     # ── /research deep (parity with SSE + gateway) ─────
                     if text.lower().startswith("/research"):
                         parts = text.split(maxsplit=2)
