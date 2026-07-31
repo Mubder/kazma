@@ -386,6 +386,20 @@ document.addEventListener('alpine:init', () => {
               state: 'running',
             });
             this._syncThinkingBanner();
+          } else if (statusVal === 'synthesizing') {
+            // The graph finished tool execution and is now composing the
+            // final answer. Keep the thinking indicator alive so the user
+            // doesn't see "Done 0s" during the gap between tool completion
+            // and the backfilled response text arriving.
+            this.isThinking = true;
+            this._turnActive = true;
+            this.statusMessage = _ti('synthesizing', 'Composing response…');
+            this._progress({
+              kind: 'status',
+              title: _ti('synthesizing', 'Composing response…'),
+              state: 'running',
+            });
+            this._syncThinkingBanner();
           } else if (statusVal === 'paused_for_approval') {
             this._progress({
               kind: 'status',

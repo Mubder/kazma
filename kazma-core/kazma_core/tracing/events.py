@@ -125,6 +125,19 @@ class EventBridge:
                         thread_id=thread_id,
                     )
 
+                # 4. Terminal chain end — the graph is done, the final answer
+                # is about to be backfilled. Emit a "synthesizing" status so
+                # the client keeps the thinking indicator alive until the
+                # actual text arrives. Without this, the spinner dies the
+                # instant the graph loop ends, creating the "Done 0s" silence
+                # gap before the backfilled answer appears.
+                elif ev_type == "on_chain_end" and ev_name in ("__end__", "LangGraph"):
+                    yield TelemetryEvent(
+                        type="status_update",
+                        data={"status": "synthesizing", "active_node": "Respond"},
+                        thread_id=thread_id,
+                    )
+
         except Exception as exc:
             logger.exception("[EventBridge] Exception in event stream processing: %s", exc)
             raw = str(exc) or type(exc).__name__

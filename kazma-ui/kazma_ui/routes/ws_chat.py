@@ -543,6 +543,11 @@ def create_ws_chat_router(
                                 await _backfill_assistant_text_if_needed(
                                     graph_inst, config, websocket, thread_id, pre_msg_count
                                 )
+                                # Give the client a beat to render the
+                                # backfilled text before we send idle/end —
+                                # prevents the "Done 0s" flash where the
+                                # spinner dies before the text is visible.
+                                await asyncio.sleep(0.1)
 
                             await _persist_final_assistant_message(
                                 graph_inst,

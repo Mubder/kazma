@@ -292,6 +292,13 @@ async def _stream_langgraph_events(
                     # "__end__".  Match both so the handler fires in production
                     # and in unit tests.
                     elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
+                        # Emit synthesizing status so the client keeps the
+                        # thinking indicator alive until the backfilled text
+                        # arrives — prevents the "Done 0s" silence gap.
+                        yield _sse_frame("status_update", {
+                            "status": "synthesizing",
+                            "active_node": "Respond",
+                        })
                         # Extract final state if available
                         output = data.get("output", {})
                         if isinstance(output, dict):
@@ -326,6 +333,8 @@ async def _stream_langgraph_events(
                                         "token",
                                         {"content": msg_content},
                                     )
+                                    # Let the client render before done.
+                                    await asyncio.sleep(0.1)
 
             # ── Post-stream: HITL + backfill assistant text ────────────
             # Custom LLM path never streams tokens. On HITL interrupt,
@@ -350,6 +359,9 @@ async def _stream_langgraph_events(
                         if msg_content:
                             content_acc = msg_content
                             yield _sse_frame("token", {"content": msg_content})
+                            # Give the client a beat to render the text
+                            # before done — prevents "Done 0s" flash.
+                            await asyncio.sleep(0.1)
                     except Exception:
                         logger.debug("[SSE] post-stream text backfill failed", exc_info=True)
 
