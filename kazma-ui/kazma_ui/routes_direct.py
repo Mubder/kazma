@@ -156,50 +156,53 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.get("/api/memory/graph")
     async def _memory_graph(q: str = "", limit: int = 80):
-        """Full graph for vis (optional ``q`` filters to search hits + neighbors)."""
-        from kazma_core.swarm.memory.graph import get_knowledge_graph
+        """Retired — V2 belief graph superseded this. Use /api/memory/v2/graph."""
+        from starlette.responses import JSONResponse
 
-        kg = get_knowledge_graph()
-        data = kg.to_json()
-        stats = kg.stats()
-        if q and q.strip():
-            hits = kg.search(q.strip(), limit=max(5, min(limit, 100)))
-            hit_ids = {h["id"] for h in hits}
-            # include 1-hop neighbors of hits
-            for hid in list(hit_ids):
-                for rel in kg.query_related(hid, depth=1) or []:
-                    hit_ids.add(rel["id"])
-            data["nodes"] = [n for n in data.get("nodes") or [] if n.get("id") in hit_ids]
-            data["edges"] = [
-                e
-                for e in data.get("edges") or []
-                if e.get("from") in hit_ids and e.get("to") in hit_ids
-            ]
-            data["query"] = q.strip()
-            data["hit_count"] = len(hits)
-        data["stats"] = stats
-        return data
+        return JSONResponse(
+            status_code=410,
+            content={
+                "detail": "The legacy property-graph endpoint was retired with the V1 "
+                          "memory stack. Use GET /api/memory/v2/graph for the V2 belief "
+                          "graph (bi-temporal, with ?at=/type/entity_type filters).",
+                "replacement": "/api/memory/v2/graph",
+            },
+        )
 
     @self.app.get("/api/memory/graph/stats")
     async def _memory_graph_stats():
-        from kazma_core.swarm.memory.graph import get_knowledge_graph
+        """Retired — V2 belief counts live in /api/memory/v2/health."""
+        from starlette.responses import JSONResponse
 
-        return get_knowledge_graph().stats()
+        return JSONResponse(
+            status_code=410,
+            content={
+                "detail": "Legacy graph stats retired. Use GET /api/memory/v2/health "
+                          "(beliefs.active/superseded/archived).",
+                "replacement": "/api/memory/v2/health",
+            },
+        )
 
     @self.app.get("/api/memory/graph/search")
     async def _memory_graph_search(q: str = "", limit: int = 20):
-        from kazma_core.swarm.memory.graph import get_knowledge_graph
+        """Search the V2 cognitive memory (repoints the legacy graph FTS search).
 
+        Backed by ``recall.search`` — hybrid FTS5 + dense vector + PPR over V2
+        beliefs and episodes. Returns the same ``{query, results[]}`` envelope
+        the legacy handler emitted so existing callers keep working.
+        """
         if not (q or "").strip():
             return {"results": [], "query": ""}
-        hits = get_knowledge_graph().search(q.strip(), limit=max(1, min(int(limit), 50)))
+        from kazma_core.memory.recall import search
+
+        hits = search(q.strip(), limit=max(1, min(int(limit), 50)))
         return {
             "query": q.strip(),
             "results": [
                 {
                     "id": h.get("id"),
-                    "type": h.get("type"),
-                    "label": h.get("label") or h.get("id"),
+                    "type": h.get("source_layer"),
+                    "label": (h.get("content") or "")[:80] or h.get("id"),
                     "content": (h.get("content") or "")[:300],
                     "score": h.get("score"),
                 }
@@ -209,29 +212,55 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.post("/api/memory/graph/clear")
     async def _memory_graph_clear():
-        """Clear the property graph (destructive — operator confirmation in UI)."""
-        from kazma_core.swarm.memory.graph import get_knowledge_graph
+        """Invalidate all currently-active V2 beliefs (bi-temporal clear).
 
-        kg = get_knowledge_graph()
-        before = kg.stats()
-        kg.clear()
-        after = kg.stats()
-        return {
-            "ok": True,
-            "cleared_nodes": before.get("nodes", 0),
-            "cleared_edges": before.get("edges", 0),
-            "stats": after,
-        }
+        Replaces the legacy destructive ``kg.clear()``. V2 is append-only /
+        bi-temporal by design — rather than deleting rows, this marks every
+        currently-active belief invalidated (sets ``invalidated_at`` /
+        ``valid_until``) so they stop surfacing in recall while history is
+        preserved for point-in-time queries. Episodes are not touched.
+        """
+        import sqlite3
+        import time
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            ensure_primary_schema(conn)
+            now = time.time()
+            before = conn.execute(
+                "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            ).fetchone()[0]
+            conn.execute(
+                "UPDATE beliefs SET valid_until=?, invalidated_at=? "
+                "WHERE valid_until IS NULL AND invalidated_at IS NULL",
+                (now, now),
+            )
+            conn.commit()
+            after = conn.execute(
+                "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            ).fetchone()[0]
+            conn.close()
+            return {"ok": True, "invalidated_beliefs": before, "active_remaining": after}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @self.app.get("/api/memory/graph/export")
     async def _memory_graph_export():
-        """Export L2 property graph as JSON (nodes + edges + stats)."""
-        from kazma_core.swarm.memory.graph import get_knowledge_graph
+        """Retired — V2 nightly JSONL/GraphML export superseded this."""
+        from starlette.responses import JSONResponse
 
-        kg = get_knowledge_graph()
-        data = kg.to_json()
-        data["stats"] = kg.stats()
-        return data
+        return JSONResponse(
+            status_code=410,
+            content={
+                "detail": "Legacy graph JSON export retired. V2 nightly JSONL + GraphML "
+                          "exports run on a 24h scheduler (exports_dir); for an on-demand "
+                          "graph snapshot use GET /api/memory/v2/graph.",
+                "replacement": "/api/memory/v2/graph",
+            },
+        )
 
     @self.app.get("/api/memory/v2/health")
     async def _memory_v2_health():
@@ -507,13 +536,35 @@ def register_direct_routes(self: Any) -> None:
             except Exception as _e:
                 logger.debug("vector count failed: %s", _e)
 
-        graph_stats: dict = {"nodes": 0, "edges": 0, "backend": "sqlite", "path": ""}
+        # V2 cognitive-engine KPIs (computed early so graph_stats below can
+        # reuse the belief counts). When V2 is the active stack, the dashboard
+        # should prefer this `v2` block over the legacy layer counts above.
+        v2_block: dict = {}
+        memory_stack = "v1"
         try:
-            from kazma_core.swarm.memory.graph import get_knowledge_graph
+            from kazma_core.memory.config import memory_v2_enabled
 
-            graph_stats = get_knowledge_graph().stats()
+            if memory_v2_enabled():
+                memory_stack = "v2"
+                from kazma_core.memory.v2_health import build_v2_health
+
+                v2_block = build_v2_health()
         except Exception as _e:
-            logger.debug("graph stats failed: %s", _e)
+            logger.debug("v2 health probe failed: %s", _e)
+
+        # V2 belief counts, surfaced in the legacy `graph` field shape so the
+        # dashboard KPI strip keeps working. "nodes" = active beliefs;
+        # "edges" = active + superseded (the full belief graph). The real V2
+        # KPI board (/api/memory/v2/health) is the authoritative source.
+        graph_stats: dict = {"nodes": 0, "edges": 0, "backend": "v2", "path": ""}
+        try:
+            bel = (v2_block.get("beliefs") if v2_block else None) or {}
+            active = int(bel.get("active", 0))
+            superseded = int(bel.get("superseded", 0))
+            graph_stats["nodes"] = active
+            graph_stats["edges"] = active + superseded
+        except Exception as _e:
+            logger.debug("v2 belief stats failed: %s", _e)
 
         # Per-component green/red board for Memory & Governance UI.
         health: dict = {"components": [], "issues": [], "summary": ""}
@@ -557,22 +608,6 @@ def register_direct_routes(self: Any) -> None:
                     "detail": c.get("detail"),
                     "meta": c.get("meta") or {},
                 }
-
-        # V2 cognitive-engine KPIs — when V2 is the active stack, the
-        # dashboard should prefer this `v2` block over the legacy layer
-        # counts above (which probe V1 stores that may be frozen/empty).
-        v2_block: dict = {}
-        memory_stack = "v1"
-        try:
-            from kazma_core.memory.config import memory_v2_enabled
-
-            if memory_v2_enabled():
-                memory_stack = "v2"
-                from kazma_core.memory.v2_health import build_v2_health
-
-                v2_block = build_v2_health()
-        except Exception as _e:
-            logger.debug("v2 health probe failed: %s", _e)
 
         return {
             "status": status,
@@ -660,9 +695,26 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.get("/api/system/memory/backups")
     async def _list_memory_backups():
-        from kazma_core.system.maintenance import list_memory_backups
+        """List V2 native backup files (memory_state_<ts>.db / memory_ops_<ts>.db)."""
+        from pathlib import Path
+
+        from kazma_core.paths import backups_dir
+
         try:
-            backups = list_memory_backups()
+            bdir = Path(backups_dir())
+            backups: list[dict[str, Any]] = []
+            if bdir.is_dir():
+                for f in sorted(bdir.glob("memory_*_*.db"), reverse=True):
+                    try:
+                        st = f.stat()
+                    except Exception:
+                        continue
+                    backups.append({
+                        "name": f.name,
+                        "size": st.st_size,
+                        "timestamp": int(st.st_mtime),
+                        "path": str(f),
+                    })
             return {"backups": backups}
         except Exception as e:
             from fastapi import HTTPException
@@ -1230,34 +1282,97 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.post("/api/system/memory/backup")
     async def _create_memory_backup():
-        from kazma_core.system.maintenance import create_memory_backup
+        """V2 native backup — sqlite3.backup() of both V2 memory DBs."""
         try:
-            manifest = create_memory_backup()
-            return {"status": "success", "manifest": manifest}
+            from kazma_core.memory.backup import perform_native_backups
+
+            written = perform_native_backups(retention=10)
+            return {
+                "status": "success",
+                "manifest": {
+                    "files": [str(p) for p in written],
+                    "count": len(written),
+                    "dir": "backups/",
+                },
+            }
         except Exception as e:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
 
     @self.app.post("/api/system/memory/restore")
     async def _restore_memory_backup(req: dict):
-        backup_name = req.get("backup_name", "")
+        """V2 restore — file-swap memory_state.db from a chosen backup.
+
+        Body: ``{"backup_name": "memory_state_<ts>.db"}``. Quiesces the V2
+        worker first (best-effort), then overwrites the live primary DB with
+        the backup copy via sqlite3.restore(). Bi-temporal ops DB is NOT
+        restored (it is rebuildable from the primary). Returns the new counts.
+        """
+        backup_name = str(req.get("backup_name", "")).strip()
         if not backup_name:
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="backup_name is required")
-        from kazma_core.system.maintenance import restore_memory_backup
+        import sqlite3
+        from pathlib import Path
+
+        from kazma_core.paths import backups_dir, primary_memory_db
+
         try:
-            res = await restore_memory_backup(backup_name)
-            return res
+            src = Path(backups_dir()) / backup_name
+            if not src.exists() or not src.is_file():
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail=f"backup {backup_name!r} not found")
+            # Quiesce: nudge the durable worker to pause so no write races the swap.
+            try:
+                from kazma_core.memory.task_queue import get_worker
+
+                get_worker()._wake.clear()
+            except Exception:
+                pass
+            dest = Path(primary_memory_db())
+            # Online restore: open the live DB and restore from the backup file.
+            conn = sqlite3.connect(str(dest))
+            try:
+                with sqlite3.connect(str(src)) as bkp:
+                    bkp.backup(conn, pages=100, sleep=0.01)
+                conn.commit()
+            finally:
+                conn.close()
+            # Count active beliefs in the restored DB for confirmation.
+            conn = sqlite3.connect(str(dest))
+            conn.row_factory = sqlite3.Row
+            active = conn.execute(
+                "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            ).fetchone()[0]
+            conn.close()
+            return {
+                "status": "success",
+                "restored_from": backup_name,
+                "active_beliefs": active,
+            }
         except Exception as e:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
 
     @self.app.post("/api/system/memory/maintenance")
     async def _run_memory_maintenance():
-        from kazma_core.system.maintenance import run_memory_maintenance
+        """V2 maintenance — VACUUM + ANALYZE both V2 memory DBs."""
+        import sqlite3
+
+        from kazma_core.paths import memory_ops_db, primary_memory_db
+
         try:
-            res = run_memory_maintenance()
-            return {"status": "success", "details": res}
+            details: dict[str, Any] = {}
+            for label, db in (("primary", primary_memory_db()), ("ops", memory_ops_db())):
+                try:
+                    conn = sqlite3.connect(db)
+                    conn.execute("VACUUM")
+                    conn.execute("ANALYZE")
+                    conn.close()
+                    details[label] = "VACUUM + ANALYZE ok"
+                except Exception as exc:
+                    details[label] = f"failed: {exc}"
+            return {"status": "success", "details": details}
         except Exception as e:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))

@@ -174,116 +174,82 @@ def build_memory_health() -> dict[str, Any]:
         ok=emb_ok, status=emb_status, detail=emb_detail, meta=emb_meta,
     ))
 
-    # ── VectorMemory singleton (tools + compaction fallback) ──────────
-    vm_ok = False
-    vm_status = "error"
-    vm_detail = "VectorMemory not initialized (app boot failed or DEMO mode)."
-    vm_meta: dict[str, Any] = {"count": 0, "degraded": False, "path": ""}
+    # ── V2 cognitive-engine store counts ───────────────────────────────
+    # Replaces the legacy VectorMemory + 4-layer adapter probes. The V2
+    # health snapshot (build_v2_health) already reads memory_state.db /
+    # memory_ops.db; synthesize the legacy component-envelope from its counts
+    # so the 4 UI/TUI callers + their renderers keep working unchanged.
+    v2 = {"status": "OFF", "db_available": False,
+          "beliefs": {"active": 0, "superseded": 0, "archived": 0},
+          "episodes": {"working": 0, "episodic": 0, "recall": 0, "archived": 0},
+          "entities": 0, "procedural_dags": {"active": 0, "quarantine": 0},
+          "queue": {"pending": 0, "processing": 0, "failed": 0}}
     try:
-        from kazma_core.agent.tool_registry import get_vector_memory
+        from kazma_core.memory.v2_health import build_v2_health
 
-        vm = get_vector_memory()
-        if vm is None:
-            vm_detail = (
-                "VectorMemory singleton is None. "
-                "Install the rag extra: pip install -e '.[rag]' then restart."
-            )
-        else:
-            degraded = bool(getattr(vm, "degraded", False))
-            vm_meta["degraded"] = degraded
-            vm_meta["path"] = str(getattr(vm, "_path", "") or "")
-            try:
-                count = vm.count
-                if callable(count):
-                    count = count()
-                vm_meta["count"] = int(count or 0)
-            except Exception:
-                vm_meta["count"] = 0
-            if degraded:
-                vm_ok = True  # still usable via FTS5 fallback
-                vm_status = "warn"
-                vm_detail = (
-                    f"VectorMemory degraded to FTS5 keyword fallback "
-                    f"({vm_meta['count']} docs). Install chromadb + sentence-transformers."
-                )
-            else:
-                vm_ok = True
-                vm_status = "ok"
-                vm_detail = (
-                    f"VectorMemory active ({vm_meta['count']} vectors"
-                    f"{', path=' + vm_meta['path'] if vm_meta['path'] else ''})."
-                )
+        v2 = build_v2_health()
     except Exception as exc:
-        vm_detail = f"VectorMemory probe failed: {exc}"
+        logger.debug("[memory.health] V2 health probe failed: %s", exc)
 
+    bel = v2.get("beliefs") or {}
+    ep = v2.get("episodes") or {}
+    v2_ok = bool(v2.get("db_available"))
+    v2_status = "ok" if v2_ok else "error"
     components.append(_comp(
-        "vector_memory", "VectorMemory (tools)",
-        ok=vm_ok, status=vm_status, detail=vm_detail, meta=vm_meta,
+        "vector_memory", "V2 cognitive engine",
+        ok=v2_ok, status=v2_status,
+        detail=(
+            f"V2 stack active — {bel.get('active', 0)} active beliefs, "
+            f"{(ep.get('recall', 0) + ep.get('episodic', 0))} episodes, "
+            f"{v2.get('entities', 0)} entities."
+            if v2_ok
+            else "V2 memory_state.db unavailable — check kazma-data/ and restart."
+        ),
+        meta={
+            "active_beliefs": bel.get("active", 0),
+            "superseded_beliefs": bel.get("superseded", 0),
+            "entities": v2.get("entities", 0),
+        },
     ))
-
-    # ── 4-layer adapter ───────────────────────────────────────────────
-    layers = {"chromadb": False, "graph": False, "fts5": False, "sqlite_vec": False}
-    try:
-        from kazma_core.swarm.memory.adapter import get_adapter
-
-        adapter = get_adapter()
-        if adapter is not None and hasattr(adapter, "health"):
-            layers.update(adapter.health() or {})
-    except Exception as exc:
-        logger.debug("[memory.health] adapter health failed: %s", exc)
-
-    layer_specs = [
-        (
-            "layer_l1",
-            "L1 ChromaDB",
-            layers.get("chromadb"),
-            "Semantic vector index (shared agent_memory collection).",
-            "ChromaDB layer unavailable — pip install chromadb (rag extra).",
+    components.append(_comp(
+        "layer_l1", "V2 beliefs",
+        ok=v2_ok, status=v2_status,
+        detail=(
+            f"Bi-temporal belief graph: {bel.get('active', 0)} active, "
+            f"{bel.get('superseded', 0)} superseded, {bel.get('archived', 0)} archived."
+            if v2_ok else "Belief store unavailable."
         ),
-        (
-            "layer_l2",
-            "L2 Property graph",
-            layers.get("graph"),
-            "SQLite property graph (nodes/edges/FTS + multi-hop).",
-            "Knowledge graph unavailable (SQLite graph init failed).",
+        meta={"active": bel.get("active", 0), "superseded": bel.get("superseded", 0)},
+    ))
+    components.append(_comp(
+        "layer_l2", "V2 episodes",
+        ok=v2_ok, status=v2_status,
+        detail=(
+            f"4-tier episodes: {ep.get('recall', 0)} recall, {ep.get('episodic', 0)} episodic, "
+            f"{ep.get('archived', 0)} archived."
+            if v2_ok else "Episode store unavailable."
         ),
-        (
-            "layer_l3",
-            "L3 FTS5 lexical",
-            layers.get("fts5"),
-            "Keyword / BM25 search (works offline, no embeddings).",
-            "FTS5 lexical store failed to initialize.",
+        meta={"recall": ep.get("recall", 0), "episodic": ep.get("episodic", 0)},
+    ))
+    components.append(_comp(
+        "layer_l3", "V2 procedural + queue",
+        ok=v2_ok, status=v2_status,
+        detail=(
+            f"{(v2.get('procedural_dags') or {}).get('active', 0)} procedural DAGs; "
+            f"queue {(v2.get('queue') or {}).get('pending', 0)} pending."
+            if v2_ok else "Procedural/queue store unavailable."
         ),
-        (
-            "layer_l4",
-            "L4 sqlite-vec",
-            layers.get("sqlite_vec"),
-            "Local vector tables via sqlite-vec.",
-            "sqlite-vec not loaded — pip install sqlite-vec (included in .[rag]).",
+        meta={"procedural": (v2.get("procedural_dags") or {}).get("active", 0)},
+    ))
+    components.append(_comp(
+        "layer_l4", "V2 entities",
+        ok=v2_ok, status=v2_status,
+        detail=(
+            f"{v2.get('entities', 0)} resolved entities (3-tier merge cascade)."
+            if v2_ok else "Entity store unavailable."
         ),
-    ]
-    for id_, name, up, ok_msg, bad_msg in layer_specs:
-        meta: dict[str, Any] = {}
-        detail = ok_msg if up else bad_msg
-        if id_ == "layer_l2" and up:
-            try:
-                from kazma_core.swarm.memory.graph import get_knowledge_graph
-
-                st = get_knowledge_graph().stats()
-                meta = {"nodes": st.get("nodes", 0), "edges": st.get("edges", 0), "backend": st.get("backend")}
-                detail = (
-                    f"SQLite property graph ({st.get('nodes', 0)} nodes, "
-                    f"{st.get('edges', 0)} edges)."
-                )
-            except Exception:
-                pass
-        components.append(_comp(
-            id_, name,
-            ok=bool(up),
-            status="ok" if up else "error",
-            detail=detail,
-            meta=meta,
-        ))
+        meta={"entities": v2.get("entities", 0)},
+    ))
 
     # Consolidation flag
     cons = cfg.get("consolidation") if isinstance(cfg.get("consolidation"), dict) else {}
@@ -480,7 +446,9 @@ def build_memory_health() -> dict[str, Any]:
         ))
 
     # ── Overall rollup ────────────────────────────────────────────────
-    # Core path: embedder + VectorMemory + at least one of L1/L3 for recall.
+    # Core path: embedder + V2 cognitive engine + store config. The V2 store
+    # probes are surfaced via the synthesized vector_memory/layer_l1..l3
+    # components above (db_available gates them all).
     critical_ids = {"embedder", "vector_memory", "store_config"}
     core_errors = [
         c for c in components
@@ -514,9 +482,9 @@ def build_memory_health() -> dict[str, Any]:
     cfg_backend = backend_meta.get("config", "sqlite")
     ckpt_backend = backend_meta.get("checkpoints", "sqlite")
     vector_bit = (
-        "ChromaDB vector store + embeddings operational"
+        "V2 cognitive engine operational"
         if any(c["id"] == "vector_memory" and c["status"] == "ok" for c in components)
-        else "vector memory degraded or offline"
+        else "V2 memory degraded or offline"
     )
     headline = (
         f"Persistence: {cfg_backend} (config/sessions/swarm); "

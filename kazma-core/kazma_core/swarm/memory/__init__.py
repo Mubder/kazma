@@ -1,27 +1,9 @@
-"""Kazma 4-Layer Memory Architecture.
+"""Legacy V1 4-layer memory package — being retired (V1→V2 cutover).
 
-Exports:
-    Layer 1 — VectorStore (ChromaDB global semantic)
-    Layer 2 — KnowledgeGraph (SQLite property graph + FTS)
-    Layer 3 — FTS5LexicalStore (SQLite FTS5 + BM25)
-    Layer 4 — SQLiteVectorStore (sqlite-vec local)
-    Adapter — UnifiedMemoryAdapter (RRF blending)
-    get_encoder — shared sentence-transformers singleton
+The shared symbols that lived here (embedder, VectorStore) were relocated to
+``kazma_core.memory`` so V2 and the non-memory subsystems (KB index, semantic
+cache/router) survive the V1 deletion. The remaining V1 submodules
+(adapter, graph, fts5, sqlite_vec, pipeline_logger) are slated for deletion
+in Phase 4 of the V1 removal. This package is intentionally empty — import
+the relocated symbols from ``kazma_core.memory`` directly.
 """
-
-from kazma_core.swarm.memory.adapter import MemoryHit, UnifiedMemoryAdapter
-from kazma_core.swarm.memory.fts5 import FTS5LexicalStore
-from kazma_core.swarm.memory.graph import KnowledgeGraph, get_knowledge_graph
-from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
-from kazma_core.swarm.memory.vector import VectorStore, get_encoder
-
-__all__ = [
-    "VectorStore",
-    "KnowledgeGraph",
-    "get_knowledge_graph",
-    "FTS5LexicalStore",
-    "SQLiteVectorStore",
-    "UnifiedMemoryAdapter",
-    "MemoryHit",
-    "get_encoder",
-]

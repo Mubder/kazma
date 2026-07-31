@@ -1,7 +1,7 @@
 """Memory health widgets for the TUI (Web Memory & Governance parity).
 
 * :class:`MemoryHealthPanel` — compact strip for Dashboard
-* :class:`MemoryTab` — full Memory tab with components, graph search, clear
+* :class:`MemoryTab` — full Memory tab with components, memory search
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Static
-
-from kazma_tui.widgets.confirm_dialog import ConfirmDialog
 
 __all__ = ["MemoryHealthPanel", "MemoryTab"]
 
@@ -187,7 +185,7 @@ class MemoryHealthPanel(Widget):
 
 
 class MemoryTab(VerticalScroll):
-    """Full Memory tab: status, chips, component table, graph search + clear."""
+    """Full Memory tab: status, chips, component table, memory search."""
 
     DEFAULT_CSS = """
     MemoryTab {
@@ -261,16 +259,11 @@ class MemoryTab(VerticalScroll):
     MemoryTab #mem-graph-search:focus {
         border: tall $primary;
     }
-    MemoryTab #mem-graph-search-btn,
-    MemoryTab #mem-graph-clear-btn {
+    MemoryTab #mem-graph-search-btn {
         width: auto;
         min-width: 10;
         height: 3;
         margin: 0 1 0 0;
-    }
-    MemoryTab #mem-graph-clear-btn {
-        border: tall $error;
-        color: $error;
     }
     MemoryTab #mem-graph-results {
         height: auto;
@@ -288,7 +281,7 @@ class MemoryTab(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            "  MEMORY  ·  stack health · graph search · components",
+            "  MEMORY  ·  stack health · memory search · components",
             classes="mem-banner",
         )
         with Vertical(classes="mem-section"):
@@ -302,18 +295,17 @@ class MemoryTab(VerticalScroll):
                         classes="mem-chip",
                     )
         with Vertical(classes="mem-section"):
-            yield Static("GRAPH (L2)", classes="mem-section-title")
+            yield Static("MEMORY SEARCH", classes="mem-section-title")
             yield Static("[dim]—[/]", id="mem-graph-stats")
             with Horizontal(classes="mem-graph-actions"):
                 yield Input(
-                    placeholder="Search graph (entity / fact)…",
+                    placeholder="Search memory (belief / episode)…",
                     id="mem-graph-search",
                 )
                 yield Button("Search", id="mem-graph-search-btn", variant="primary")
-                yield Button("Clear", id="mem-graph-clear-btn")
             yield DataTable(id="mem-graph-results")
             yield Static(
-                "[dim]Search L2 property graph · Clear wipes all nodes/edges[/]",
+                "[dim]Search V2 recall (beliefs + episodes)[/]",
                 id="mem-graph-msg",
             )
         with Vertical(classes="mem-section"):
@@ -341,9 +333,6 @@ class MemoryTab(VerticalScroll):
         if bid == "mem-graph-search-btn":
             self._run_graph_search()
             event.stop()
-        elif bid == "mem-graph-clear-btn":
-            self._confirm_clear_graph()
-            event.stop()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "mem-graph-search":
@@ -351,7 +340,14 @@ class MemoryTab(VerticalScroll):
             event.stop()
 
     def _run_graph_search(self) -> None:
-        """Search the L2 knowledge graph and fill results table."""
+        """Run a V2 recall search and fill results table.
+
+        V2 ``search`` (kazma_core.memory.recall) returns dicts with keys
+        ``id, content, text, score, source_layer, metadata``. The panel's
+        DataTable has columns (Type, Label, Score, Content); we derive
+        ``type`` from ``source_layer`` (``v2:<kind>:<source>``) and
+        ``label`` from the hit id so the column layout is preserved.
+        """
         try:
             q = self.query_one("#mem-graph-search", Input).value.strip()
         except Exception:
@@ -367,9 +363,9 @@ class MemoryTab(VerticalScroll):
                 pass
             return
         try:
-            from kazma_core.swarm.memory.graph import get_knowledge_graph
+            from kazma_core.memory.recall import search
 
-            hits = get_knowledge_graph().search(q, limit=20)
+            hits = search(q, limit=20)
         except Exception as exc:
             logger.debug("graph search failed: %s", exc)
             try:
@@ -383,15 +379,18 @@ class MemoryTab(VerticalScroll):
         if not hits:
             try:
                 self.query_one("#mem-graph-msg", Static).update(
-                    f"[dim]No graph hits for[/] [bold]{q[:40]}[/]"
+                    f"[dim]No hits for[/] [bold]{q[:40]}[/]"
                 )
             except Exception:
                 pass
             return
 
         for h in hits:
-            etype = str(h.get("entity_type") or h.get("type") or "?")[:16]
-            label = str(h.get("label") or h.get("id") or "?")[:36]
+            source_layer = str(h.get("source_layer") or "")
+            # source_layer looks like "v2:belief:belief_match" or "v2:episode"
+            kind = source_layer.split(":", 2)[1] if source_layer.count(":") >= 1 else "?"
+            etype = kind[:16]
+            label = str(h.get("id") or "?")[:36]
             score = h.get("score")
             score_s = f"{float(score):.2f}" if score is not None else "—"
             content = str(h.get("content") or "")[:64]
@@ -403,63 +402,18 @@ class MemoryTab(VerticalScroll):
         except Exception:
             pass
 
-    def _confirm_clear_graph(self) -> None:
-        """Confirm then wipe L2 graph."""
-        dialog = ConfirmDialog(
-            message=(
-                "Delete ALL nodes and edges from the L2 knowledge graph?\n"
-                "This cannot be undone."
-            ),
-            title="Clear Knowledge Graph",
-            confirm_text="Clear graph",
-            cancel_text="Cancel",
-            is_destructive=True,
-        )
-
-        def on_result(confirmed: bool | None) -> None:
-            if not confirmed:
-                return
-            try:
-                from kazma_core.swarm.memory.graph import get_knowledge_graph
-
-                get_knowledge_graph().clear()
-                self._refresh_graph_stats()
-                try:
-                    self.query_one("#mem-graph-results", DataTable).clear()
-                    self.query_one("#mem-graph-msg", Static).update(
-                        "[bold $warning]Graph cleared.[/]"
-                    )
-                except Exception:
-                    pass
-                try:
-                    from kazma_tui.widgets.toast import Toast
-
-                    self.app.push_screen(
-                        Toast("Knowledge graph cleared", "success", duration=2.0)
-                    )
-                except Exception:
-                    pass
-            except Exception as exc:
-                logger.exception("graph clear failed")
-                try:
-                    self.query_one("#mem-graph-msg", Static).update(
-                        f"[bold $error]Clear failed[/]  [dim]{exc}[/]"
-                    )
-                except Exception:
-                    pass
-
-        self.app.push_screen(dialog, on_result)
-
     def _refresh_graph_stats(self) -> None:
         try:
-            from kazma_core.swarm.memory.graph import get_knowledge_graph
+            from kazma_core.memory.v2_health import build_v2_health
 
-            st = get_knowledge_graph().stats()
+            st = build_v2_health()
+            beliefs = st.get("beliefs") or {}
+            active = beliefs.get("active", 0)
+            superseded = beliefs.get("superseded", 0)
             gline = (
-                f"nodes [bold]{st.get('nodes', 0)}[/]  ·  "
-                f"edges [bold]{st.get('edges', 0)}[/]  ·  "
-                f"[dim]{st.get('backend', 'sqlite')}[/]  "
-                f"[dim]{str(st.get('path', ''))[:48]}[/]"
+                f"beliefs active [bold]{active}[/]  ·  "
+                f"superseded [bold]{superseded}[/]  ·  "
+                f"[dim]{str(st.get('status') or 'OFF')}[/]"
             )
             self.query_one("#mem-graph-stats", Static).update(gline)
         except Exception as exc:

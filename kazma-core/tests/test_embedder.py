@@ -1,4 +1,4 @@
-"""Tests for the pluggable embedding backend (kazma_core.swarm.memory.embedder).
+"""Tests for the pluggable embedding backend (kazma_core.memory.embedder).
 
 Covers the embedder factory dispatch, OpenAICompatibleEmbedder retry/cache,
 LocalSentenceTransformerEmbedder graceful degradation, get_embedding_dim,
@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from kazma_core.swarm.memory.embedder import (
+from kazma_core.memory.embedder import (
     LocalSentenceTransformerEmbedder,
     OpenAICompatibleEmbedder,
     get_embedding_dim,
@@ -40,7 +40,7 @@ def test_unknown_provider_warns(monkeypatch):
     monkeypatch.delenv("KAZMA_EMBED_BASE_URL", raising=False)
     monkeypatch.delenv("KAZMA_EMBED_API_KEY", raising=False)
     reset_embedder()
-    from kazma_core.swarm.memory.embedder import get_embedder
+    from kazma_core.memory.embedder import get_embedder
 
     e = get_embedder()
     assert isinstance(e, LocalSentenceTransformerEmbedder)
@@ -161,7 +161,7 @@ def test_openai_embedder_encode_batch_failure():
 def test_chroma_wrapper_local_uses_native_ef():
     """For local embedders, the wrapper delegates to ChromaDB's native EF."""
     e = LocalSentenceTransformerEmbedder(model_name="all-MiniLM-L6-v2", dim=384)
-    from kazma_core.swarm.memory.embedder import make_chroma_embedding_function
+    from kazma_core.memory.embedder import make_chroma_embedding_function
 
     try:
         ef = make_chroma_embedding_function(e)
