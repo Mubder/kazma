@@ -259,7 +259,7 @@
             Known Beliefs (currently valid)
             <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
           </div>
-          <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:280px;padding:6px 8px;"></div>
+          <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:500px;padding:6px 8px;"></div>
         </div>
         <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
           <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:10px;">Tier Breakdown</div>
@@ -1792,10 +1792,10 @@
       list.innerHTML = beliefs.map((b, idx) => {
         const conf = Math.round((b.confidence||0) * 100);
         const pc = ptypeColor[b.predicate_type] || '#94a3b8';
-        return '<div class="v2-belief-row" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
-               '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;">' + (b.predicate_type||'?') + '</span>' +
-               '<span style="flex:1;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b>' + _esc(b.object) + '</b></span>' +
-               '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
+        return '<div class="v2-belief-row" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
+               '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + (b.predicate_type||'?') + '</span>' +
+               '<div style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b>' + _esc(b.object) + '</b></div>' +
+               '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
                '</div>';
       }).join('');
       // Make each belief row clickable — highlight subject+object in the graph

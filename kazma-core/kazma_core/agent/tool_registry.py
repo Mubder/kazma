@@ -865,7 +865,7 @@ class LocalToolRegistry:
                         )
                         # User-explicit belief (highest trust/importance)
                         action = mutate_belief(
-                            primary, "user", "noted", text[:200],
+                            primary, "user", "noted", text[:1000],
                             ops_conn=ops,
                             predicate_type="set",  # noted facts are additive
                             confidence=1.0, importance=5,
