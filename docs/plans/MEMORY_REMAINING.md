@@ -105,7 +105,7 @@ to receive writes during the transition.
 |---|------|---------|
 | S1 | Remote vector (pgvector / Qdrant) | Multi-replica shared recall |
 | S2 | Shared graph backend (Postgres graph or Neo4j) | Multi-replica structural memory |
-| S3 | Nightly corpus re-consolidation | Large dirty stores need global merge |
+| S3 | Nightly corpus re-consolidation | Large dirty stores need global merge. **Not** the same as the nightly native backup + JSONL/GraphML export — those *recovery artefacts* are already wired (24h scheduler in `worker_bootstrap.py`); S3 is a global re-merge/re-extraction pass over the belief graph itself. |
 | S4 | Hosted embedding-only service | No local MiniLM on edge |
 
 ### Explicitly **not** planned as rewrites

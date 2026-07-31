@@ -53,7 +53,8 @@ User Turn
     ▼
 Supervisor iteration 0
     │
-    ├─► Per-turn recall():
+    ├─► Per-turn recall() (session_id=thread_id → biases toward the
+    │       current thread's episodes):
     │       1. Belief lookup (currently-valid beliefs matching the query,
     │          bridged by episode entities — "where do I live" → episode
     │          "I moved to Paris" → belief "user lives_in Paris")
@@ -87,7 +88,7 @@ The `beliefs` table tracks **two** time axes:
 - `valid_from` / `valid_until` — when the fact was true in the real world
 - `ingested_at` / `invalidated_at` — when the system learned/forgot it
 
-Functional predicates (`lives_in`, `name_is`, `works_at`, ...) are single-valued: a new value **supersedes** the old (sets `valid_until=now`, links via `supersedes_id`). Set-valued predicates (`uses_tool`, `knows_language`) append. State predicates (`issue_status`) log transitions. Only `valid_until IS NULL` beliefs surface in recall.
+Functional predicates (`lives_in`, `name_is`, `works_at`, ...) are single-valued: a new value **supersedes** the old (sets `valid_until=now`, links via `supersedes_id`). Set-valued predicates (`uses_tool`, `knows_language`) append. State predicates (`issue_status`) log transitions — recorded in the audit log with `event_type='transition'` (functional supersedes use `event_type='supersede'`), so audit consumers can distinguish the two. Only `valid_until IS NULL` beliefs surface in recall.
 
 ### V2 modules
 
@@ -100,14 +101,14 @@ Functional predicates (`lives_in`, `name_is`, `works_at`, ...) are single-valued
 | `memory/vector_engine.py` | sqlite-vec native + guarded NumPy fallback |
 | `memory/ppr.py` | Local Ego-Graph Personalized PageRank |
 | `memory/task_queue.py` | Durable SQLite-backed consolidation queue |
-| `memory/worker_bootstrap.py` | Handler registration + worker start at boot |
+| `memory/worker_bootstrap.py` | Handler registration + worker start at boot + schedulers (6h macro_sleep, 24h backup/export) |
 | `memory/macro_sleep.py` | Decay scoring, tier demotion/promotion, archival |
 | `memory/entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine |
 | `memory/procedural.py` | Parametric DAG skills, Laplace C(d)=(S+1)/(N+2) |
 | `memory/dual_write.py` | Best-effort mirror of legacy writes into V2 |
 | `memory/backfill_v2.py` | One-shot idempotent migration of legacy corpus |
-| `memory/backup.py` | Native `sqlite3.backup()` streaming copies |
-| `memory/export.py` | Nightly JSON-L + GraphML long-term dumps |
+| `memory/backup.py` | Native `sqlite3.backup()` streaming copies (scheduled 24h) |
+| `memory/export.py` | Nightly JSONL + GraphML long-term dumps (scheduled 24h) |
 
 ### V2 configuration (`memory.v2.*` via ConfigStore)
 
@@ -312,7 +313,7 @@ Documentation corpora use **isolated** collections `kazma_kb_<library_id>` and S
 | Single-node files | Chroma / FTS / graph / sqlite-vec are process-local disks |
 | Compaction checkpoint_manager | Often not passed; LangGraph checkpointer still persists turns |
 | Dual Chroma clients | VectorMemory + L1 share collection; cleanup is polish |
-| No nightly full-corpus merge | Only per-turn consolidator |
+| No nightly full-corpus re-consolidation | Nightly native backup + JSONL/GraphML export now run on a 24h scheduler (`worker_bootstrap.py`), but full-corpus *re-consolidation* of the belief graph is still per-turn only (see MEMORY_REMAINING S3) |
 | Scale-out | Needs remote vector/graph — see MEMORY_REMAINING S1–S2 |
 
 ---

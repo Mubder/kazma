@@ -36,20 +36,20 @@ kazma-data/                             # Runtime data (gitignored)
 | File | Purpose | Key Exports |
 |------|---------|-------------|
 | `schema_v2.py` | Bi-temporal DDL for `memory_state.db` + `memory_ops.db` | `ensure_primary_schema()`, `ensure_ops_schema()` |
-| `belief_mutation.py` | Functional/set/state mutation rules + audit log + memory_class derivation | `mutate_belief()`, `derive_memory_class()` |
+| `belief_mutation.py` | Functional/set/state mutation rules + audit log + memory_class derivation. State predicates record `event_type='transition'`; functional record `'supersede'` | `mutate_belief()`, `derive_memory_class()` |
 | `belief_extractor.py` | Post-turn LLM + heuristic extraction (gatekeeper, fence) | `extract_and_apply_beliefs()`, `extract_and_apply_beliefs_sync()`, `is_filler_turn()` |
-| `recall.py` | Unified V2 recall — beliefs + episodes + PPR + RRF + fence | `recall()`, `format_recall_block()`, `RecallHit`, `RecallResult` |
+| `recall.py` | Unified V2 recall — beliefs + episodes + PPR + RRF + fence. Accepts `session_id` (thread_id) for session-bias/episode-scoping | `recall()`, `format_recall_block()`, `RecallHit`, `RecallResult` |
 | `vector_engine.py` | sqlite-vec native + guarded NumPy fallback | `VectorEngine` |
 | `ppr.py` | Local Ego-Graph Personalized PageRank | `compute_local_ppr()`, `build_ego_graph()` |
 | `task_queue.py` | Durable SQLite-backed consolidation queue | `enqueue_task()`, `register_handler()`, `start_worker()` |
-| `worker_bootstrap.py` | Handler registration + worker start at boot + macro_sleep scheduler | `start_memory_worker()`, `register_v2_handlers()` |
+| `worker_bootstrap.py` | Handler registration + worker start at boot + two schedulers (6h `macro_sleep`, 24h `native_backup` + `nightly_export`) | `start_memory_worker()`, `register_v2_handlers()`, `register_backup_export_handlers()` |
 | `macro_sleep.py` | Decay scoring, tier demotion/promotion, archival | `run_macro_sleep()`, `compute_retention()` |
 | `entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine | `resolve_entity()` |
 | `procedural.py` | Parametric DAG skills, Laplace C(d)=(S+1)/(N+2) | `record_procedural_outcome()`, `laplace_confidence()` |
 | `dual_write.py` | Best-effort mirror of legacy writes into V2 | `mirror_belief()`, `mirror_episode()`, `get_mirror()` |
 | `backfill_v2.py` | One-shot idempotent migration of legacy corpus | `run_backfill()`, `backfill_status()` |
-| `backup.py` | Native `sqlite3.backup()` streaming copies + retention | `perform_native_backups()` |
-| `export.py` | Nightly JSON-L + GraphML long-term dumps | `export_nightly_snapshots()` |
+| `backup.py` | Native `sqlite3.backup()` streaming copies + retention (scheduled 24h via `native_backup` task) | `perform_native_backups()` |
+| `export.py` | Nightly JSONL + GraphML long-term dumps (scheduled 24h via `nightly_export` task) | `export_nightly_snapshots()` |
 
 ### V2 on-disk data paths
 

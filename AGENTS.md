@@ -358,6 +358,54 @@ swarm works with zero pre-registered workers.
   regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
   `record_activity` refreshes the timer.
 
+### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
+
+The V2 cognitive engine has a background maintenance tier: a durable task
+queue drained by a worker, plus two fire-and-forget asyncio scheduler loops.
+These were the subsystem that silently lost its backup/export runs (the
+routines existed but nothing called them) — read this before touching the
+background memory path.
+
+**A. `start_memory_worker()` is the single boot entry — it starts BOTH
+schedulers.** Called from `app.py:1283-1289` (wrapped in try/except so it
+can't block boot). It registers handlers + calls `start_worker()` +
+`_start_macro_sleep_scheduler()` + `_start_backup_export_scheduler()`. If a
+new scheduler is added, register/start it HERE or it will never run (the
+exact gap that previously left backups/export inert).
+
+**B. Two scheduler loops, distinct cadences (do not collapse them):**
+- **6h `macro_sleep` loop** (`_MACRO_SLEEP_INTERVAL_HOURS = 6`): enqueues a
+  `macro_sleep` task every 6h → decay scoring, tier demotion/promotion,
+  archival (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
+- **24h backup/export loop** (`_BACKUP_EXPORT_INTERVAL_HOURS = 24`): enqueues
+  `native_backup` + `nightly_export` tasks every 24h → native
+  `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML dumps
+  (`export.py`). First sweep 120s after boot. Kept separate from the 6h
+  loop so a slow disk on backup can't stall decay.
+Both loops only `enqueue_task(...)`; the durable worker drains the actual
+work, so a failed enqueue cannot kill the cadence and a failed handler is
+retried/bounded by the queue.
+
+**C. Handler registration is idempotent via separate module-level flags.**
+`register_v2_handlers()` guards on `_registered` (macro_sleep /
+entity_merge / micro_consolidation); `register_backup_export_handlers()`
+guards on `_backup_export_registered` (native_backup / nightly_export). The
+underlying `register_handler()` is a plain dict assignment (idempotent
+overwrite), but the flags avoid re-churning on re-boot / repeated calls and
+let the backup handlers register independently of the core V2 set.
+
+**D. The durable queue lives in `memory_ops.db` (`task_queue.py`).** Bounded
+retries: `max_attempts` (default 3) then dead-letter (`status='failed'`);
+stuck `processing` rows past 300s are reclaimed. Per-task short-lived
+SQLite connections (no WAL contention with chat reads on
+`memory_state.db`). `enqueue_task` is best-effort and never raises.
+
+**E. The split-DB design is load-bearing.** `memory_state.db` (hot reads:
+beliefs, episodes, entities, procedural DAGs) is isolated from
+`memory_ops.db` (cold writes: task queue, audit log) precisely so background
+consolidation/backup writes don't WAL-contend with chat recall reads. Do
+not merge them or route queue writes at the primary DB.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

@@ -61,6 +61,17 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | POST | `/api/memory/graph/clear` | Session | Destructive clear of L2 graph (UI confirms) |
 | * | `/api/system/memory/*` | Session | Backup / restore / maintenance of memory stores |
 
+### V2 cognitive engine (`/api/memory/v2/*`)
+
+Active when `memory.v2.use_new_stack` is true. All routes return shaped JSON
+on error (never a bare 500); non-numeric params yield a FastAPI 422.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/memory/v2/health` | Session | V2 health snapshot — active/superseded/archived belief counts, episode/entity/procedural stats, queue depth. Drives the dashboard KPI grid (`pollV2Health`, 5s cadence). |
+| GET | `/api/memory/v2/beliefs` | Session | Active beliefs list. `?q=` FTS filter, `?limit=` (default 50, clamped 1–200). |
+| GET | `/api/memory/v2/graph` | Session | Belief graph `{nodes, links, stats}` for the canvas. Bi-temporal + filter params: `?at=<unix_ts>` (point-in-time scrub; superseded beliefs marked `superseded=true`), `?type=` (`functional`/`set`/`state` predicate_type), `?entity_type=` (person/tool/concept/…), `?limit=` (default 200). Links whose source or target is filtered out are dropped at emission, so the payload is always self-consistent (no dangling edges). |
+
 Guide: [Memory & RAG](../guide/memory-and-rag).
 
 ## Settings & config

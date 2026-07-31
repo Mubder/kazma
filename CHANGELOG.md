@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## Unreleased — Post-V2 system-wide audit fixes (2026-07-31)
+
+- **Nightly backup/export now actually runs.** `perform_native_backups()` and
+  `export_nightly_snapshots()` were implemented but never invoked from any
+  startup path — the "nightly" naming was aspirational. A new 24h scheduler
+  loop in `worker_bootstrap.py` enqueues `native_backup` + `nightly_export`
+  tasks onto the durable `memory_ops.db` queue (so they inherit the queue's
+  retry/dead-letter bounds). Native `sqlite3.backup()` copies of both memory
+  DBs + JSONL/GraphML exports now land automatically every 24h.
+- **State-predicate beliefs log `event_type='transition'`.** `_mutate_state`
+  reused `_mutate_functional`'s audit call, mislabelling every state change
+  as `'supersede'`. Now flows an `audit_event_type='transition'` kwarg
+  through, so audit-log consumers filtering by event type see transitions.
+  Schema comment + proven regression test added.
+- **V2 recall receives `session_id`.** The supervisor call site passed only
+  the query + limit, leaving `recall()`'s session-bias/episode-scoping
+  feature dormant. Now passes `session_id=thread_id`.
+- **`/api/memory/v2/graph` `entity_type` hardening.** Link emission now
+  guards the object endpoint too (previously only checked the subject), so
+  links to `entity_type`-filtered nodes are dropped at the source —
+  defense-in-depth alongside the existing top-`limit` filter.
+- **Vision tests + stale HITL test fixed.** 7 `test_vision_analyze` cases
+  patched `_get_llm_provider` with a single value but unpacked the 3-tuple
+  contract — updated to `(provider, model_id, reason)`. The HITL test now
+  asserts `route_swarm_bus` delegation matching the discord/slack callback
+  refactor. **10 previously-failing tests → green.**
+- **Hygiene:** removed unused `import time` (recall.py) and `import hashlib`
+  (task_queue.py), dead no-op variables (procedural.py, belief_extractor.py),
+  and the `JSON-L`→`JSONL` docstring typo (export.py).
+- Docs: `docs/docs/guide/memory-and-rag.md` (V2 modules table, §9 honest
+  limits), `docs/docs/reference/api-routes.md` (added `/api/memory/v2/*`),
+  `MEMORY_CODEMAP.md`, `docs/plans/MEMORY_REMAINING.md`, `AGENTS.md` §15
+  (V2 memory worker & schedulers).
+- Tests: `test_memory_v2_graph_route.py` (graph self-consistency contract),
+  `test_memory_v2_phase3.py` (transition event_type regression guard).
+
 ## Unreleased — Bulletproof scraping proxy addon (anyip.io) + dynamic swarm autoscaler (2026-07-30)
 
 - **Bulletproof scraping via pluggable proxy provider.** The scraper had zero
