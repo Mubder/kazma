@@ -35,7 +35,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_backfill", "backfill_status"]
+__all__ = ["run_backfill", "backfill_status", "cleanup_polluted_backfill"]
+
+# Structural L2 edge types that are graph plumbing, NOT real beliefs.
+# These must be skipped during backfill — they produce noise like
+# "7eea13cd has_memory user" which means nothing as a belief.
+_STRUCTURAL_PREDICATES = frozenset(
+    {"has_memory", "has_fact", "tagged", "related", "mentions", "links_to"}
+)
 
 
 # ── Stable ID derivation (idempotency key) ────────────────────────────────
@@ -201,6 +208,9 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
         now = time.time()
 
         # ── kg_nodes → entities ──
+        # Build a node-ID → (label, type) lookup so edges can resolve
+        # hash IDs to human-readable labels.
+        node_lookup: dict[str, tuple[str, str]] = {}
         if "kg_nodes" in tables:
             nodes = legacy.execute("SELECT * FROM kg_nodes").fetchall()
             for n in nodes:
@@ -209,8 +219,8 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 ent_id = "ent_" + _stable_id("kg_nodes", src_id)
                 etype = n["entity_type"] if "entity_type" in n.keys() else "concept"
                 name = n["label"] or n["id"]
+                node_lookup[src_id] = (name, etype)
                 tenant = n["tenant_id"] if "tenant_id" in n.keys() and n["tenant_id"] else "default"
-                # high-stakes for person/project types
                 high = 1 if etype in ("person", "project") else 0
                 try:
                     primary.execute(
@@ -232,16 +242,27 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
             edges = legacy.execute("SELECT * FROM kg_edges").fetchall()
             for e in edges:
                 stats["edges_seen"] += 1
-                src_id = str(e["id"])
-                bid = "b_" + _stable_id("kg_edges", src_id) + "_" + _stable_id("edge", src_id)
-                subject = str(e["source_id"])
-                obj = str(e["target_id"])
                 relation = e["relation_type"] or "related"
                 pred = relation.strip().lower().replace(" ", "_") or "related"
+                # SKIP structural edges (has_memory, tagged, has_fact, ...)
+                # — they are graph plumbing, not real beliefs.
+                if pred in _STRUCTURAL_PREDICATES:
+                    stats["skipped"] += 1
+                    continue
+                src_id = str(e["id"])
+                bid = "b_" + _stable_id("kg_edges", src_id) + "_" + _stable_id("edge", src_id)
+                # Resolve hash IDs to human-readable labels via the lookup.
+                # Falls back to the raw ID only if the node isn't in the table.
+                raw_subj = str(e["source_id"])
+                raw_obj = str(e["target_id"])
+                subject = node_lookup.get(raw_subj, (raw_subj, "concept"))[0]
+                obj = node_lookup.get(raw_obj, (raw_obj, "concept"))[0]
+                # Slugify the resolved labels for belief subject/object
+                subject = _slug(subject) if not raw_subj.startswith("s_") else subject
+                obj = _slug(obj) if not raw_obj.startswith("o_") else obj
                 ptype = _classify_predicate(pred)
                 tenant = e["tenant_id"] if "tenant_id" in e.keys() and e["tenant_id"] else "default"
                 created = float(e["created_at"]) if "created_at" in e.keys() and e["created_at"] else now
-                # Decode edge properties for the fact payload + confidence
                 props = {}
                 if "properties" in e.keys() and e["properties"]:
                     try:
@@ -279,6 +300,60 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
 
 
 # ── Public entry points ──────────────────────────────────────────────────
+
+
+def cleanup_polluted_backfill() -> dict[str, int]:
+    """Delete beliefs/entities polluted by the buggy first backfill run.
+
+    The original backfill used raw L2 node IDs (hashes like
+    ``7eea13cd594dcf53``) as belief subjects/objects, and migrated
+    structural edges (``has_memory``, ``tagged``, ``has_fact``) that
+    aren't real beliefs. This cleans them so the V2 graph shows
+    human-readable labels + real facts only.
+
+    Deletes:
+      - Beliefs whose subject OR object is a hash-like string (≥16 hex chars)
+      - Beliefs with structural predicates (has_memory, tagged, has_fact, ...)
+      - Entities whose id is hash-like (left over from the bad node migration)
+
+    Returns counts of what was deleted. Safe to run multiple times.
+    """
+    import re
+
+    from kazma_core.paths import primary_memory_db
+
+    stats = {"beliefs_deleted": 0, "entities_deleted": 0}
+    try:
+        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        try:
+            # Hash-like pattern: 16+ hex chars (the L2 slug IDs)
+            hash_pat = re.compile(r"^[a-f0-9]{16,}$")
+            # Delete beliefs with hash subjects/objects OR structural predicates
+            placeholders = ",".join("?" * len(_STRUCTURAL_PREDICATES))
+            cur = conn.execute(
+                f"""DELETE FROM beliefs
+                    WHERE subject GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'
+                       OR object GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'
+                       OR predicate IN ({placeholders})""",
+                tuple(_STRUCTURAL_PREDICATES),
+            )
+            stats["beliefs_deleted"] = cur.rowcount or 0
+            # Delete hash-named entities
+            cur2 = conn.execute(
+                "DELETE FROM entities WHERE id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'"
+            )
+            stats["entities_deleted"] = cur2.rowcount or 0
+            conn.commit()
+            logger.info(
+                "[backfill] cleanup deleted %d beliefs + %d entities (polluted)",
+                stats["beliefs_deleted"], stats["entities_deleted"],
+            )
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("[backfill] cleanup failed", exc_info=True)
+    return stats
 
 
 def run_backfill(*, dry_run: bool = False) -> dict[str, Any]:
