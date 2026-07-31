@@ -220,10 +220,20 @@ def _llm_extract_beliefs_from_memories(
         ops = None
 
     try:
-        from kazma_core.model_registry import get_model_registry
+        from kazma_core.model_registry import (
+            get_model_registry,
+            initialize_model_registry,
+        )
 
-        client = get_model_registry().get_client()
+        # The registry needs initialization (normally done at server boot).
+        # When running from CLI, do it here.
+        mr = get_model_registry()
+        client = mr.get_client()
+        if client is None:
+            initialize_model_registry()
+            client = get_model_registry().get_client()
     except Exception:
+        logger.debug("[backfill] model registry init failed", exc_info=True)
         client = None
 
     if client is None:
@@ -636,25 +646,16 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
 
 
 def cleanup_polluted_backfill() -> dict[str, int]:
-    """Delete beliefs/entities polluted by the buggy first backfill run.
+    """Delete ALL backfilled beliefs + entities for a clean re-extraction.
 
-    The original backfill used raw L2 node IDs (hashes like
-    ``7eea13cd594dcf53``) as belief subjects/objects, and migrated
-    structural edges (``has_memory``, ``tagged``, ``has_fact``) that
-    aren't real beliefs. This cleans them so the V2 graph shows
-    human-readable labels + real facts only.
+    Deletes every belief whose extraction_method is 'system_tool' (the
+    backfill's method) — this clears ALL previous backfill attempts
+    (hash IDs, 'noted' noise, regex garbage like 'name_is Running').
+    Also deletes hash-named entities.
 
-    Deletes:
-      - Beliefs whose subject OR object is a hash-like string (≥16 hex chars)
-      - Beliefs with structural predicates (has_memory, tagged, has_fact, ...)
-      - Beliefs with the meaningless 'noted' predicate from the first run
-      - Beliefs whose object looks like system-prompt/code noise
-      - Entities whose id is hash-like (left over from the bad node migration)
-
-    Returns counts of what was deleted. Safe to run multiple times.
+    Beliefs created by the live extractor (extraction_method='llm_inferred'
+    or 'user_explicit') are PRESERVED.
     """
-    import re
-
     from kazma_core.paths import primary_memory_db
 
     stats = {"beliefs_deleted": 0, "entities_deleted": 0}
@@ -662,30 +663,19 @@ def cleanup_polluted_backfill() -> dict[str, int]:
         conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:
-            # Delete: hash subjects/objects, structural predicates, 'noted'
-            # fallback beliefs, and noise content (system prompts/code)
-            placeholders = ",".join("?" * len(_STRUCTURAL_PREDICATES))
+            # Delete ALL backfill-sourced beliefs (system_tool = backfill)
             cur = conn.execute(
-                f"""DELETE FROM beliefs
-                    WHERE subject GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'
-                       OR object GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'
-                       OR predicate IN ({placeholders})
-                       OR predicate = 'noted'
-                       OR object LIKE '#%'
-                       OR object LIKE 'You are%'
-                       OR object LIKE 'def %'
-                       OR object LIKE 'import %'
-                       OR length(object) > 300""",
-                tuple(_STRUCTURAL_PREDICATES),
+                "DELETE FROM beliefs WHERE extraction_method = 'system_tool'"
             )
             stats["beliefs_deleted"] = cur.rowcount or 0
+            # Also delete any remaining hash-named entities
             cur2 = conn.execute(
                 "DELETE FROM entities WHERE id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'"
             )
             stats["entities_deleted"] = cur2.rowcount or 0
             conn.commit()
             logger.info(
-                "[backfill] cleanup deleted %d beliefs + %d entities (polluted/noise)",
+                "[backfill] cleanup deleted %d backfill beliefs + %d hash entities",
                 stats["beliefs_deleted"], stats["entities_deleted"],
             )
         finally:
