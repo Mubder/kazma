@@ -178,14 +178,50 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
             ).fetchone()
             if not row:
                 return True  # episode gone
+            # ── Cost-gate (memory.v2.extraction_every_n_turns /
+            #   skip_llm_if_heuristic_extracted) ─────────────────────
+            from kazma_core.memory.config import read_memory_cfg
+
+            v2cfg = (read_memory_cfg().get("v2") or {})
+            every_n = max(1, int(v2cfg.get("extraction_every_n_turns", 1)))
+            turn_n = int(row["turn_number"] or 0)
+            # Skip the LLM pass entirely on turns that don't fall on the cadence
+            if every_n > 1 and (turn_n % every_n) != 0:
+                logger.debug(
+                    "[memory_worker] skip LLM extraction for %s (turn %d, every_n=%d)",
+                    episode_id, turn_n, every_n,
+                )
+                return True
+            # If the sync heuristic pass already extracted beliefs and the
+            # skip flag is set, don't spend another LLM call on this turn.
+            skip_if_heur = bool(v2cfg.get("skip_llm_if_heuristic_extracted", False))
+            use_llm = True
+            if skip_if_heur:
+                try:
+                    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs_sync
+
+                    sync_stats = extract_and_apply_beliefs_sync(
+                        primary, ops,
+                        row["user_text"] or "", row["assistant_text"] or "",
+                        session_id=row["session_id"], turn=row["turn_number"],
+                    )
+                    if sync_stats.get("applied", 0) > 0:
+                        logger.debug(
+                            "[memory_worker] heuristic already extracted %d belief(s) for %s — skipping LLM",
+                            sync_stats["applied"], episode_id,
+                        )
+                        use_llm = False
+                except Exception:
+                    pass  # fall through to LLM extraction
             stats = await extract_and_apply_beliefs(
                 primary, ops,
                 row["user_text"] or "", row["assistant_text"] or "",
                 session_id=row["session_id"], turn=row["turn_number"],
+                use_llm=use_llm,
             )
             logger.info(
-                "[memory_worker] micro_consolidation of %s: applied=%d",
-                episode_id, stats.get("applied", 0),
+                "[memory_worker] micro_consolidation of %s: applied=%d (llm=%s)",
+                episode_id, stats.get("applied", 0), use_llm,
             )
             return True
         finally:

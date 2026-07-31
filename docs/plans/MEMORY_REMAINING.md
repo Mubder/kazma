@@ -84,6 +84,21 @@ Install for full vector: `pip install -e ".[rag]"`.
 
 ## 3. What remains (later)
 
+### V2 Cognitive Engine — SHIPPED (2026-07-31)
+
+The "memory v2" rewrite that was previously "not planned" **is now done and
+production-live**. Bi-temporal belief graph, 4-tier episodes, Local Ego-Graph
+PPR retrieval, procedural skill DAGs, durable consolidation queue, and an
+idempotent backfill migration. See `docs/docs/guide/memory-and-rag.md`
+(V2 sections) and `MEMORY_CODEMAP.md` (V2 modules).
+
+Cutover state: `memory.v2.use_new_stack` defaults to `false` (dual-write
+transition). Run `backfill_v2.run_backfill()` then flip the flag to make V2
+the active read path. Rollback is a one-flag flip.
+
+The legacy 4-layer RRF stack remains as the default read path and continues
+to receive writes during the transition.
+
 ### Product / scale (only if required)
 
 | # | Item | Trigger |
@@ -95,9 +110,9 @@ Install for full vector: `pip install -e ".[rag]"`.
 
 ### Explicitly **not** planned as rewrites
 
-- Replacing RRF adapter with a new “memory v2” product name  
-- Merging Knowledge Library into chat `agent_memory`  
-- Dropping SQLite L2 for Neo4j on single-node by default  
+~~Replacing RRF adapter with a new "memory v2" product name~~ — **Done (V2 cognitive engine, 2026-07-31)**.
+- Merging Knowledge Library into chat `agent_memory`
+- Dropping SQLite L2 for Neo4j on single-node by default
 
 ### Hygiene P1–P3 (optional; shipped 2026-07-27)
 

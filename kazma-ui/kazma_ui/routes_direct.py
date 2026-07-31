@@ -233,6 +233,43 @@ def register_direct_routes(self: Any) -> None:
         data["stats"] = kg.stats()
         return data
 
+    @self.app.get("/api/memory/v2/health")
+    async def _memory_v2_health():
+        """V2 cognitive-engine health snapshot (beliefs, episodes, queue)."""
+        from kazma_core.memory.v2_health import build_v2_health
+
+        return build_v2_health()
+
+    @self.app.get("/api/memory/v2/beliefs")
+    async def _memory_v2_beliefs(q: str = "", limit: int = 50):
+        """Active V2 beliefs (currently valid only), optional FTS filter."""
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            sql = (
+                "SELECT id, subject, predicate, predicate_type, object, confidence, "
+                "structural_importance, valid_from, source_trust_weight, extraction_method "
+                "FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            )
+            params: list = []
+            if q and q.strip():
+                ql = f"%{q.strip().lower()}%"
+                sql += " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? OR LOWER(object) LIKE ?)"
+                params = [ql, ql, ql]
+            sql += " ORDER BY (structural_importance * confidence * source_trust_weight) DESC LIMIT ?"
+            params.append(max(1, min(limit, 200)))
+            rows = conn.execute(sql, params).fetchall()
+            conn.close()
+            return {"beliefs": [dict(r) for r in rows]}
+        except Exception as exc:
+            return {"beliefs": [], "error": str(exc)}
+
     import kazma_core.time_travel as _tt_mod
 
     @self.app.get("/api/session/history")

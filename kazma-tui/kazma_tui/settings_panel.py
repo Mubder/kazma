@@ -10,7 +10,7 @@ import logging
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll, Container
-from textual.widgets import SelectionList, Static, Button, Label
+from textual.widgets import SelectionList, Static, Button, Label, Input
 
 from kazma_tui.themes.theme_manager import ThemeManager
 from kazma_tui.widgets.confirm_dialog import ConfirmDialog
@@ -85,11 +85,26 @@ class SettingsPanel(VerticalScroll):
         ("Auto-store durable facts", "memory.auto_store", True),
         ("Memory consolidator (librarian)", "memory.consolidation.enabled", True),
         ("Consolidator use LLM", "memory.consolidation.use_llm", True),
+        ("V2 cognitive stack (use_new_stack)", "memory.v2.use_new_stack", False),
+        ("V2 skip LLM if heuristic extracted", "memory.v2.skip_llm_if_heuristic_extracted", False),
         ("Enable auto-summarization", "context.auto_summarize", True),
         ("Enable cost breaker", "cost.breaker_enabled", True),
         ("Enable tracing", "tracing.enabled", False),
         ("Enable cron", "cron.enabled", False),
         ("HITL approval (danger tools)", "safety.hitl_enabled", True),
+    ]
+
+    # V2 numeric tunables: (label, configstore key, type, default)
+    V2_NUMERIC = [
+        ("Decay λ identity", "memory.v2.decay_lambda_identity", float, "0.0001"),
+        ("Decay λ general", "memory.v2.decay_lambda_general", float, "0.01"),
+        ("Decay λ ephemeral", "memory.v2.decay_lambda_ephemeral", float, "0.1"),
+        ("Recall TTL (days)", "memory.v2.recall_ttl_days", int, "90"),
+        ("Episodic TTL (days)", "memory.v2.episodic_ttl_days", int, "30"),
+        ("Archive after (days)", "memory.v2.archive_after_days", int, "180"),
+        ("LLM extraction every N turns", "memory.v2.extraction_every_n_turns", int, "1"),
+        ("PPR alpha (restart)", "memory.v2.ppr_alpha", float, "0.15"),
+        ("Entity merge threshold", "memory.v2.entity_vector_merge_threshold", float, "0.12"),
     ]
 
     def __init__(self) -> None:
@@ -111,6 +126,24 @@ class SettingsPanel(VerticalScroll):
             return bool(val) if val is not None else default
         except Exception:
             return default
+
+    def _read_config_num(self, key: str, cast: type, default: str):
+        """Read a numeric V2 tunable, falling back to the default string."""
+        try:
+            from kazma_core.config_store import get_config_store
+            val = get_config_store().get(key)
+            if val is None:
+                return cast(default)
+            return cast(val)
+        except Exception:
+            return cast(default)
+
+    def _v2_key_for_input(self, input_id: str) -> tuple[str, type] | None:
+        """Resolve a v2-input widget id back to its (configstore key, cast)."""
+        for _label, key, cast, _default in self.V2_NUMERIC:
+            if input_id == "v2-input-" + key.replace(".", "-"):
+                return key, cast
+        return None
 
     def compose(self) -> ComposeResult:
         # Populate _last_saved from config before any change events fire
@@ -145,6 +178,27 @@ class SettingsPanel(VerticalScroll):
                 id="animations-label"
             )
 
+        # V2 Cognitive Engine numeric tunables
+        with Container(classes="settings-section"):
+            yield Static("V2 cognitive engine · tunables", classes="settings-title")
+            yield Static(
+                "[dim]Decay λ controls forgetting speed. TTLs control tier "
+                "lifecycle. Edit + Enter to persist (ConfigStore).[/]",
+                classes="settings-hint",
+            )
+            for label, key, cast, default in self.V2_NUMERIC:
+                val = self._read_config_num(key, cast, default)
+                yield Label(label, markup=False)
+                yield Input(
+                    value=str(val),
+                    id="v2-input-" + key.replace(".", "-"),
+                    classes="v2-numeric-input",
+                )
+                # Stash the (key, cast) metadata on the widget for the handler
+                # (Textual widgets support .meta-style attrs via a private dict)
+            # Hidden status line for V2 health
+            yield Label("", id="v2-health-line", markup=False)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         pass
@@ -176,6 +230,25 @@ class SettingsPanel(VerticalScroll):
                 self._confirm_hitl_disable(sel, cs)
         except Exception as e:
             self.notify(f"Failed to save settings: {e}", severity="error")
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Persist a V2 numeric tunable when the user presses Enter."""
+        meta = self._v2_key_for_input(event.input.id)
+        if meta is None:
+            return  # not a V2 input
+        key, cast = meta
+        raw = (event.value or "").strip()
+        try:
+            val = cast(raw)
+        except (TypeError, ValueError):
+            self.notify(f"Invalid value for {key}: '{raw}'", severity="error")
+            return
+        try:
+            from kazma_core.config_store import get_config_store
+            get_config_store().set(key, val, category="memory")
+            self.notify(f"Saved {key} = {val}", severity="information")
+        except Exception as e:
+            self.notify(f"Failed to save {key}: {e}", severity="error")
 
     def _confirm_hitl_disable(self, sel: SelectionList, cs) -> None:
         """Ask for explicit confirmation before disabling HITL approval."""

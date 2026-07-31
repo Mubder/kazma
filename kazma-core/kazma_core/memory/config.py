@@ -84,6 +84,14 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "ppr_max_iter": 15,
         "ppr_max_nodes": 200,
         "ppr_seed_k": 10,
+        # LLM extraction cost-gate. The micro_consolidation queue task runs
+        # the LLM belief extractor; these knobs throttle it so it doesn't
+        # fire on every single turn (one extra LLM call per turn is costly
+        # at scale). extraction_every_n_turns=1 = every turn; 3 = every 3rd.
+        # skip_llm_if_heuristic_extracted=True skips the LLM pass when the
+        # sync heuristic extractor already found ≥1 belief this turn.
+        "extraction_every_n_turns": 1,
+        "skip_llm_if_heuristic_extracted": False,
         # Entity resolution (§5.2 micro-consolidation)
         "entity_vector_merge_threshold": 0.12,
     },
@@ -171,6 +179,8 @@ def _read_store_overlay() -> dict[str, Any]:
             "ppr_max_iter",
             "ppr_max_nodes",
             "ppr_seed_k",
+            "extraction_every_n_turns",
+            "skip_llm_if_heuristic_extracted",
             "entity_vector_merge_threshold",
         ):
             val = store.get(f"memory.v2.{sub}")
@@ -230,7 +240,7 @@ def _coerce(cfg: dict[str, Any]) -> dict[str, Any]:
 # ── V2 tunable coercion ───────────────────────────────────────────────────
 
 # Booleans (use_new_stack is the dual-write → V2 recall rollback flag)
-_V2_BOOL_KEYS = ("use_new_stack",)
+_V2_BOOL_KEYS = ("use_new_stack", "skip_llm_if_heuristic_extracted")
 # Floats (trust weights, retention blend, decay λ, thresholds)
 _V2_FLOAT_KEYS = (
     "trust_weight_user",
@@ -259,6 +269,7 @@ _V2_INT_KEYS = (
     "ppr_max_iter",
     "ppr_max_nodes",
     "ppr_seed_k",
+    "extraction_every_n_turns",
 )
 
 

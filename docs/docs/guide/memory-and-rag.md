@@ -2,16 +2,136 @@
 id: memory-and-rag
 title: Memory & RAG
 sidebar_label: Memory & RAG
-description: Kazma chat memory — 4-layer RRF, auto-store, consolidator, SQLite graph (2026-07)
+description: Kazma chat memory — V2 cognitive engine (bi-temporal beliefs, PPR recall, tier lifecycle) + legacy 4-layer RRF (2026-07)
 ---
 
-> **Live SoT (2026-07).** Chat memory is real and automatic by default when
-> `.[rag]` is installed. Remaining backlog lives in
-> [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
+> **Live SoT (2026-07-31).** Kazma memory has TWO stacks:
+>
+> - **V2 Cognitive Engine** (production-live, default `use_new_stack=false`
+>   during the dual-write transition — flip to `true` after running the
+>   backfill). Bi-temporal belief graph, 4-tier episodes, Local Ego-Graph
+>   PPR retrieval, procedural skill DAGs, durable consolidation queue.
+> - **Legacy 4-layer RRF** (the original stack, still the default read
+>   path until you flip the flag). Chroma + SQLite graph + FTS5 +
+>   sqlite-vec, RRF-blended.
+>
+> Both stacks run concurrently during the transition: V2 receives
+> dual-writes on every turn regardless of the flag, so flipping later
+> is instant and lossless. The sections below marked **[V2]** describe
+> the new cognitive engine; **[Legacy]** sections describe the original
+> RRF stack.
 
 ---
 
-## 1. Architecture
+## V2. Cutover procedure (production-safe)
+
+```bash
+# 1. Backfill the historical corpus into V2 (idempotent — safe to re-run)
+python -c "from kazma_core.memory.backfill_v2 import run_backfill; print(run_backfill())"
+
+# 2. Check what migrated
+python -c "from kazma_core.memory.backfill_v2 import backfill_status; print(backfill_status())"
+
+# 3. Flip the flag (ConfigStore — takes effect on next read_memory_cfg)
+python -c "from kazma_core.memory.config import set_memory_flag; set_memory_flag('v2.use_new_stack', True)"
+
+# 4. Restart the server — recall() now serves reads from the V2 belief graph
+```
+
+**Rollback** is a one-flag flip back to `false`:
+```bash
+python -c "from kazma_core.memory.config import set_memory_flag; set_memory_flag('v2.use_new_stack', False)"
+```
+
+---
+
+## V2.1 Architecture
+
+```
+User Turn
+    │
+    ▼
+Supervisor iteration 0
+    │
+    ├─► Per-turn recall():
+    │       1. Belief lookup (currently-valid beliefs matching the query,
+    │          bridged by episode entities — "where do I live" → episode
+    │          "I moved to Paris" → belief "user lives_in Paris")
+    │       2. Episode hybrid search (FTS5 + dense vector, recall tier)
+    │       3. Local Ego-Graph PPR boost (2-hop, N≤200, α=0.15)
+    │       4. RRF fusion → dedup gate → token-budget truncation
+    │       5. format_untrusted_block(source="memory_v2_recall")
+    │
+    ▼
+LLM reply
+    │
+    ▼
+respond_node → schedule_post_turn_memory
+    ├─► Legacy path (loop task): auto_store → consolidator
+    └─► V2 path (dedicated OS thread, fully decoupled):
+            1. mirror_episode (raw turn snapshot)
+            2. extract_and_apply_beliefs_sync (heuristic, sync, thread-safe)
+            3. enqueue micro_consolidation (LLM deep-pass on worker loop)
+```
+
+### Two SQLite databases (split to prevent WAL contention)
+
+| Database | Tables | Role |
+|----------|--------|------|
+| `memory_state.db` | `beliefs`, `episodes`, `entities`, `entity_merges`, `procedural_dags`, `beliefs_archive` | Cognitive state (hot reads) |
+| `memory_ops.db` | `memory_task_queue`, `memory_audit_log` | Operational (queue + audit, cold) |
+
+### Bi-temporal belief graph
+
+The `beliefs` table tracks **two** time axes:
+- `valid_from` / `valid_until` — when the fact was true in the real world
+- `ingested_at` / `invalidated_at` — when the system learned/forgot it
+
+Functional predicates (`lives_in`, `name_is`, `works_at`, ...) are single-valued: a new value **supersedes** the old (sets `valid_until=now`, links via `supersedes_id`). Set-valued predicates (`uses_tool`, `knows_language`) append. State predicates (`issue_status`) log transitions. Only `valid_until IS NULL` beliefs surface in recall.
+
+### V2 modules
+
+| Module | Purpose |
+|--------|---------|
+| `memory/schema_v2.py` | Bi-temporal DDL for both databases |
+| `memory/belief_mutation.py` | Functional/set/state mutation rules + audit log |
+| `memory/belief_extractor.py` | Post-turn LLM + heuristic extraction (gatekeeper, fence) |
+| `memory/recall.py` | Unified `recall()` — beliefs + episodes + PPR |
+| `memory/vector_engine.py` | sqlite-vec native + guarded NumPy fallback |
+| `memory/ppr.py` | Local Ego-Graph Personalized PageRank |
+| `memory/task_queue.py` | Durable SQLite-backed consolidation queue |
+| `memory/worker_bootstrap.py` | Handler registration + worker start at boot |
+| `memory/macro_sleep.py` | Decay scoring, tier demotion/promotion, archival |
+| `memory/entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine |
+| `memory/procedural.py` | Parametric DAG skills, Laplace C(d)=(S+1)/(N+2) |
+| `memory/dual_write.py` | Best-effort mirror of legacy writes into V2 |
+| `memory/backfill_v2.py` | One-shot idempotent migration of legacy corpus |
+| `memory/backup.py` | Native `sqlite3.backup()` streaming copies |
+| `memory/export.py` | Nightly JSON-L + GraphML long-term dumps |
+
+### V2 configuration (`memory.v2.*` via ConfigStore)
+
+```yaml
+memory:
+  v2:
+    use_new_stack: false          # flip to true after backfill
+    trust_weight_user: 1.0        # W_trust source weights
+    trust_weight_tool: 0.85
+    trust_weight_llm: 0.60
+    decay_lambda_identity: 0.0001 # λ_type per memory_class
+    decay_lambda_general: 0.01
+    decay_lambda_ephemeral: 0.10
+    recall_ttl_days: 90
+    episodic_ttl_days: 30
+    archive_after_days: 180
+    ppr_alpha: 0.15               # Local Ego-Graph PPR restart factor
+    ppr_max_nodes: 200
+    procedural_quarantine_threshold: 0.40
+```
+
+---
+
+## [Legacy] 1. Architecture
 
 ```mermaid
 flowchart TB

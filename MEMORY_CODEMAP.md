@@ -2,21 +2,75 @@
 
 > **Purpose**: Single reference for all memory-related code locations, entry points, and data paths.
 > **Updated**: 2026-07-31
-> **Scope**: Chat memory (4-layer RRF + consolidator), not Knowledge Library or Time-Travel.
+> **Scope**: Both the V2 cognitive engine (production-live) and the legacy 4-layer RRF stack.
+
+---
+
+## Stack overview
+
+Kazma memory has TWO stacks running concurrently:
+
+- **V2 Cognitive Engine** — bi-temporal belief graph, 4-tier episodes, PPR recall, procedural DAGs. Default read path when `memory.v2.use_new_stack=true`. Receives dual-writes regardless of the flag.
+- **Legacy 4-layer RRF** — Chroma + SQLite graph + FTS5 + sqlite-vec, RRF-blended. Default read path until the flag flips.
+
+See `docs/docs/guide/memory-and-rag.md` for the cutover procedure.
 
 ---
 
 ## Package Layout
 
 ```
-kazma-core/kazma_core/memory/           # Core memory package (Config, Schema, Stores, Pipeline)
-kazma-core/kazma_core/swarm/memory/     # Swarm adapter + backends (RRF, Graph, Vector, FTS5, sqlite-vec)
-kazma-core/kazma_core/agent/            # Agent integration (per-turn RAG, post-turn hook)
+kazma-core/kazma_core/memory/           # Core memory package (V2 + legacy)
+kazma-core/kazma_core/swarm/memory/     # Swarm adapter + backends (legacy RRF, Graph, Vector, FTS5, sqlite-vec)
+kazma-core/kazma_core/agent/            # Agent integration (per-turn recall, post-turn hook)
 kazma-core/kazma_core/safety/           # Prompt fence (injection defense)
 kazma-core/kazma_core/                  # ConfigStore, Paths (singletons)
 kazma-core/tests/                       # Memory test suites
 kazma-data/                             # Runtime data (gitignored)
 ```
+
+---
+
+## V2 Cognitive Engine (`kazma-core/kazma_core/memory/`)
+
+| File | Purpose | Key Exports |
+|------|---------|-------------|
+| `schema_v2.py` | Bi-temporal DDL for `memory_state.db` + `memory_ops.db` | `ensure_primary_schema()`, `ensure_ops_schema()` |
+| `belief_mutation.py` | Functional/set/state mutation rules + audit log + memory_class derivation | `mutate_belief()`, `derive_memory_class()` |
+| `belief_extractor.py` | Post-turn LLM + heuristic extraction (gatekeeper, fence) | `extract_and_apply_beliefs()`, `extract_and_apply_beliefs_sync()`, `is_filler_turn()` |
+| `recall.py` | Unified V2 recall — beliefs + episodes + PPR + RRF + fence | `recall()`, `format_recall_block()`, `RecallHit`, `RecallResult` |
+| `vector_engine.py` | sqlite-vec native + guarded NumPy fallback | `VectorEngine` |
+| `ppr.py` | Local Ego-Graph Personalized PageRank | `compute_local_ppr()`, `build_ego_graph()` |
+| `task_queue.py` | Durable SQLite-backed consolidation queue | `enqueue_task()`, `register_handler()`, `start_worker()` |
+| `worker_bootstrap.py` | Handler registration + worker start at boot + macro_sleep scheduler | `start_memory_worker()`, `register_v2_handlers()` |
+| `macro_sleep.py` | Decay scoring, tier demotion/promotion, archival | `run_macro_sleep()`, `compute_retention()` |
+| `entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine | `resolve_entity()` |
+| `procedural.py` | Parametric DAG skills, Laplace C(d)=(S+1)/(N+2) | `record_procedural_outcome()`, `laplace_confidence()` |
+| `dual_write.py` | Best-effort mirror of legacy writes into V2 | `mirror_belief()`, `mirror_episode()`, `get_mirror()` |
+| `backfill_v2.py` | One-shot idempotent migration of legacy corpus | `run_backfill()`, `backfill_status()` |
+| `backup.py` | Native `sqlite3.backup()` streaming copies + retention | `perform_native_backups()` |
+| `export.py` | Nightly JSON-L + GraphML long-term dumps | `export_nightly_snapshots()` |
+
+### V2 on-disk data paths
+
+| Path | Role |
+|------|------|
+| `kazma-data/memory_state.db` | Cognitive state: beliefs, episodes, entities, entity_merges, procedural_dags, beliefs_archive |
+| `kazma-data/memory_ops.db` | Operational: memory_task_queue (durable), memory_audit_log (immutable) |
+
+### V2 key entry points
+
+| What | File:Function |
+|------|---------------|
+| V2 recall (read path) | `memory/recall.py:recall()` |
+| Belief mutation (write path) | `memory/belief_mutation.py:mutate_belief()` |
+| Post-turn extraction | `memory/consolidator.py:schedule_post_turn_memory()` → V2 thread |
+| V2 enabled check | `memory/config.py:memory_v2_enabled()` |
+| Backfill migration | `memory/backfill_v2.py:run_backfill()` |
+| Worker start (app boot) | `memory/worker_bootstrap.py:start_memory_worker()` |
+| Macro sleep sweep | `memory/macro_sleep.py:run_macro_sleep()` |
+
+---
 
 ---
 

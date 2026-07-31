@@ -219,6 +219,57 @@
       </div>
     </div>
 
+    <!-- V2 Cognitive Engine Panel -->
+    <div id="v2-memory-section" class="chart-card" style="margin-top:18px;padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">V2 Cognitive Engine</span>
+          <span id="v2-status-badge" style="font-size:0.68rem;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(148,163,184,0.15);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">—</span>
+        </div>
+        <button id="v2-refresh-btn" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);color:var(--text-secondary);font-size:0.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;">Refresh</button>
+      </div>
+      <div id="v2-status-desc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">Loading V2 status…</div>
+      <!-- V2 KPI grid -->
+      <div id="v2-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px;">
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Active Beliefs</div>
+          <div id="v2-kpi-beliefs-active" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-beliefs-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Recall Episodes</div>
+          <div id="v2-kpi-episodes-recall" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-episodes-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Entities</div>
+          <div id="v2-kpi-entities" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-procedural-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Queue</div>
+          <div id="v2-kpi-queue" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-queue-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+      </div>
+      <!-- Active beliefs list -->
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,0.6fr);gap:14px;">
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:300px;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;">
+            Known Beliefs (currently valid)
+            <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
+          </div>
+          <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:280px;padding:6px 8px;"></div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:10px;">Tier Breakdown</div>
+          <div id="v2-tier-breakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin:14px 0 10px;">Procedural Skills</div>
+          <div id="v2-procedural-breakdown" style="font-size:0.75rem;color:var(--text-muted);">–</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Expansion Deck Toggle -->
     <div style="margin-top:14px;">
       <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
@@ -1599,6 +1650,123 @@
   // Poll immediately and then every 5 seconds
   pollMemoryStatus();
   setInterval(pollMemoryStatus, 5000);
+
+  // ── V2 Cognitive Engine panel ─────────────────────────────────
+  function _v2ChipStyle(status) {
+    const map = {
+      ACTIVE:      { bg:'rgba(46,213,115,0.12)', color:'#2ed573', label:'Active' },
+      DUAL_WRITE:  { bg:'rgba(59,130,246,0.12)', color:'#60a5fa', label:'Dual-write' },
+      DEGRADED:    { bg:'rgba(245,158,11,0.12)', color:'#fbbf24', label:'Degraded' },
+      OFF:         { bg:'rgba(148,163,184,0.12)', color:'#94a3b8', label:'Off' },
+    };
+    return map[status] || map.OFF;
+  }
+
+  function fmtNum(n) { return (n === null || n === undefined) ? '–' : String(n); }
+
+  async function pollV2Health() {
+    try {
+      const resp = await fetch('/api/memory/v2/health');
+      const h = await resp.json();
+      // Status badge
+      const chip = _v2ChipStyle(h.status);
+      const badge = document.getElementById('v2-status-badge');
+      if (badge) {
+        badge.textContent = chip.label + (h.use_new_stack ? ' · LIVE' : '');
+        badge.style.background = chip.bg;
+        badge.style.color = chip.color;
+      }
+      const desc = document.getElementById('v2-status-desc');
+      if (desc) {
+        if (!h.db_available) {
+          desc.textContent = 'V2 database not initialized yet. Beliefs will populate after the first turn.';
+        } else if (h.use_new_stack) {
+          desc.textContent = 'V2 is the active read path (use_new_stack=true). Recall serves bi-temporal beliefs + tiered episodes.';
+        } else {
+          desc.textContent = 'Dual-write mode (use_new_stack=false). V2 receives writes; legacy RRF serves reads. Flip the flag to cut over.';
+        }
+      }
+      // KPIs
+      const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      setEl('v2-kpi-beliefs-active', fmtNum(h.beliefs.active));
+      setEl('v2-kpi-beliefs-meta', (h.beliefs.superseded||0) + ' superseded · ' + (h.beliefs.archived||0) + ' archived');
+      setEl('v2-kpi-episodes-recall', fmtNum(h.episodes.recall));
+      setEl('v2-kpi-episodes-meta', (h.episodes.episodic||0) + ' episodic · ' + (h.episodes.archived||0) + ' archived');
+      setEl('v2-kpi-entities', fmtNum(h.entities));
+      setEl('v2-kpi-procedural-meta', (h.procedural_dags.active||0) + ' active · ' + (h.procedural_dags.quarantine||0) + ' quarantined');
+      const qPending = (h.queue.pending||0) + (h.queue.processing||0);
+      setEl('v2-kpi-queue', fmtNum(qPending));
+      setEl('v2-kpi-queue-meta', (h.queue.failed||0) + ' failed · ' + (h.recent_audits||0) + ' audits/24h');
+      // Tier breakdown bars
+      const tb = document.getElementById('v2-tier-breakdown');
+      if (tb) {
+        const tiers = [
+          ['Working', h.episodes.working, '#60a5fa'],
+          ['Episodic', h.episodes.episodic, '#2ed573'],
+          ['Recall', h.episodes.recall, '#fbbf24'],
+          ['Archived', h.episodes.archived, '#94a3b8'],
+        ];
+        const total = tiers.reduce((s,t) => s + (t[1]||0), 0) || 1;
+        tb.innerHTML = tiers.map(([name, count, color]) => {
+          const pct = Math.round(((count||0) / total) * 100);
+          return '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;">' +
+                 '<span style="width:60px;color:var(--text-secondary);">' + name + '</span>' +
+                 '<div style="flex:1;height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;">' +
+                   '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;"></div>' +
+                 '</div>' +
+                 '<span style="width:32px;text-align:right;font-family:var(--font-mono);color:var(--text-primary);">' + (count||0) + '</span>' +
+                 '</div>';
+        }).join('');
+      }
+      const pb = document.getElementById('v2-procedural-breakdown');
+      if (pb) {
+        pb.textContent = (h.procedural_dags.active||0) + ' active skills · ' + (h.procedural_dags.quarantine||0) + ' quarantined';
+      }
+    } catch (e) {
+      // silent — panel just stays stale
+    }
+  }
+
+  async function loadV2Beliefs(q) {
+    try {
+      const url = '/api/memory/v2/beliefs' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+      const resp = await fetch(url);
+      const data = await resp.json();
+      const list = document.getElementById('v2-belief-list');
+      if (!list) return;
+      const beliefs = data.beliefs || [];
+      if (!beliefs.length) {
+        list.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:0.78rem;">No active beliefs yet.</div>';
+        return;
+      }
+      const ptypeColor = { functional:'#2ed573', set:'#60a5fa', state:'#fbbf24' };
+      list.innerHTML = beliefs.map(b => {
+        const conf = Math.round((b.confidence||0) * 100);
+        const pc = ptypeColor[b.predicate_type] || '#94a3b8';
+        return '<div style="padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px;">' +
+               '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;">' + (b.predicate_type||'?') + '</span>' +
+               '<span style="flex:1;color:var(--text-primary);"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b>' + _esc(b.object) + '</b></span>' +
+               '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);">i' + b.structural_importance + ' · ' + conf + '%</span>' +
+               '</div>';
+      }).join('');
+    } catch (e) { /* silent */ }
+  }
+
+  function _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  // Wire V2 controls + boot
+  try {
+    const v2Refresh = document.getElementById('v2-refresh-btn');
+    if (v2Refresh) v2Refresh.addEventListener('click', () => { pollV2Health(); loadV2Beliefs(document.getElementById('v2-belief-search').value); });
+    const v2Search = document.getElementById('v2-belief-search');
+    if (v2Search) {
+      let _v2STo;
+      v2Search.addEventListener('input', () => { clearTimeout(_v2STo); _v2STo = setTimeout(() => loadV2Beliefs(v2Search.value), 250); });
+    }
+    pollV2Health();
+    loadV2Beliefs('');
+    setInterval(pollV2Health, 5000);
+  } catch (e) { /* V2 panel optional */ }
 })();
 </script>
 {% endblock %}
