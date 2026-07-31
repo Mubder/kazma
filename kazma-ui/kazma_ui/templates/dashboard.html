@@ -180,6 +180,7 @@
 
     <!-- V2 Cognitive Engine Panel -->
     <div id="v2-memory-section" class="chart-card" style="margin-top:18px;padding:18px;">
+      <!-- ── Header ── -->
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">V2 Cognitive Engine</span>
@@ -188,8 +189,9 @@
         <button id="v2-refresh-btn" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);color:var(--text-secondary);font-size:0.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;">Refresh</button>
       </div>
       <div id="v2-status-desc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">Loading V2 status…</div>
-      <!-- V2 KPI grid -->
-      <div id="v2-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px;">
+
+      <!-- ── KPI grid ── -->
+      <div id="v2-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
         <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
           <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Active Beliefs</div>
           <div id="v2-kpi-beliefs-active" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
@@ -211,65 +213,74 @@
           <div id="v2-kpi-queue-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
         </div>
       </div>
-      <!-- Active beliefs list -->
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,0.6fr);gap:14px;">
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:300px;">
+
+      <!-- ── Row: Known Beliefs List (left) + Topology Graph (right) ── -->
+      <div style="display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);gap:14px;margin-bottom:16px;">
+
+        <!-- LEFT: Known Beliefs (currently valid) -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:500px;">
           <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;">
             Known Beliefs (currently valid)
             <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
           </div>
           <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:500px;padding:6px 8px;"></div>
         </div>
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:10px;">Tier Breakdown</div>
-          <div id="v2-tier-breakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin:14px 0 10px;">Procedural Skills</div>
-          <div id="v2-procedural-breakdown" style="font-size:0.75rem;color:var(--text-muted);">–</div>
-        </div>
-      </div>
-    </div>
 
-    <!-- V2 Belief Topology Graph -->
-    <div class="chart-card" style="margin-top:18px;padding:18px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
-        <div>
-          <div style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">V2 Belief Topology</div>
-          <div id="v2g-stats-line" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);">–</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:0.68rem;color:var(--text-muted);">
+        <!-- RIGHT: V2 Belief Topology Graph -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+              <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">V2 Belief Topology</span>
+              <div id="v2g-stats-line" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">–</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input id="v2g-search" type="search" placeholder="filter…" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
+              <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">↻</button>
+            </div>
+          </div>
+          <!-- Legend -->
+          <div style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);">
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:4px;"></span>person</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#06b6d4;margin-right:4px;"></span>tool</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6366f1;margin-right:4px;"></span>concept</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ec4899;margin-right:4px;"></span>location</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:4px;"></span>project</span>
-            <span style="margin-left:8px;border-left:1px solid var(--border-subtle);padding-left:8px;"><span style="display:inline-block;width:14px;height:2px;background:#10b981;margin-right:4px;vertical-align:middle;"></span>functional</span>
-            <span><span style="display:inline-block;width:14px;height:2px;background:#06b6d4;margin-right:4px;vertical-align:middle;"></span>set</span>
-            <span><span style="display:inline-block;width:14px;height:2px;background:#f59e0b;margin-right:4px;vertical-align:middle;"></span>state</span>
-            <span><span style="display:inline-block;width:14px;height:2px;background:#ef4444;margin-right:4px;vertical-align:middle;border-radius:50%;"></span>high-stakes</span>
+          </div>
+          <!-- Canvas -->
+          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at center, rgba(99,102,241,0.06), rgba(0,0,0,0.25));overflow:hidden;">
+            <canvas id="v2g-canvas" width="800" height="400" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;"></canvas>
+            <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:260px;padding:6px 10px;border-radius:6px;background:rgba(15,23,32,0.95);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.75rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,0.4);"></div>
+            <div id="v2g-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">No beliefs yet — the graph populates as Kazma learns.</div>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <input id="v2g-search" type="search" placeholder="filter beliefs…" style="min-width:140px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.8rem;">
-          <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.78rem;padding:6px 12px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">Refresh</button>
-        </div>
       </div>
-      <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(200px,0.7fr);gap:12px;align-items:stretch;">
-        <!-- Canvas -->
-        <div id="v2g-canvas-wrap" style="position:relative;height:480px;border-radius:10px;border:1px solid var(--border-subtle);background:radial-gradient(ellipse at center, rgba(99,102,241,0.06), rgba(0,0,0,0.25));overflow:hidden;">
-          <canvas id="v2g-canvas" width="800" height="400" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;"></canvas>
-          <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:260px;padding:6px 10px;border-radius:6px;background:rgba(15,23,32,0.95);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.75rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,0.4);"></div>
-          <div id="v2g-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">No beliefs yet — the graph populates as Kazma learns.</div>
-        </div>
-        <!-- Filter sidebar -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;display:flex;flex-direction:column;gap:10px;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">Entity Types</div>
+
+      <!-- ── Bottom row: Entity Types + Predicate Types + Tier Breakdown + Time Scrub ── -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+        <!-- Entity Types -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Entity Types</div>
           <div id="v2g-filters-entity" style="display:flex;flex-direction:column;gap:5px;"></div>
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-top:6px;">Predicate Types</div>
+        </div>
+        <!-- Predicate Types + Active Filters -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Predicate Types</div>
           <div id="v2g-filters-predicate" style="display:flex;flex-direction:column;gap:5px;"></div>
-          <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:20px;"></div>
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-top:10px;border-top:1px solid var(--border-subtle);padding-top:10px;">Bi-Temporal Scrub</div>
-          <div style="font-size:0.68rem;color:var(--text-muted);">Drag to see the belief graph at any past time. Superseded beliefs reappear as dashed edges.</div>
+          <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;min-height:20px;"></div>
+        </div>
+        <!-- Tier Breakdown + Procedural -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Tier Breakdown</div>
+          <div id="v2-tier-breakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin:12px 0 6px;">Procedural Skills</div>
+          <div id="v2-procedural-breakdown" style="font-size:0.75rem;color:var(--text-muted);">–</div>
+        </div>
+        <!-- Bi-Temporal Scrub + Inspect -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Bi-Temporal Scrub</div>
+          <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">Drag to see past states.</div>
           <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
             <span id="v2g-time-label" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">Live (now)</span>
             <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">Live</button>
           </div>

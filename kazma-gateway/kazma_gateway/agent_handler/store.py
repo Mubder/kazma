@@ -168,7 +168,10 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     try:
         from kazma_core.agent.state import initial_supervisor_state
 
-        state = initial_supervisor_state(thread_id=thread_id)
+        state = initial_supervisor_state(
+            thread_id=thread_id,
+            tenant_id=msg.sender_id or "default",
+        )
     except ImportError:
         state = {"thread_id": thread_id, "messages": []}
 

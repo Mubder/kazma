@@ -747,8 +747,9 @@ class LocalToolRegistry:
             # "no memories match", not a signal to consult a legacy store.
             try:
                 from kazma_core.memory.recall import recall as v2_recall
+                from kazma_core.safety.hitl import get_current_tenant_id
 
-                result = v2_recall(query, limit=limit)
+                result = v2_recall(query, limit=limit, tenant_id=get_current_tenant_id())
                 out: list[dict[str, Any]] = []
                 for h in result.beliefs:
                     out.append({
@@ -801,12 +802,16 @@ class LocalToolRegistry:
             try:
                 ensure_primary_schema(primary)
                 ensure_ops_schema(ops)
+                from kazma_core.safety.hitl import get_current_tenant_id
+
+                _tenant = get_current_tenant_id()
                 # Episode (raw text snapshot)
                 eid = mirror_episode(
                     session_id=str(meta.get("session_id", "memory_store")),
                     turn_number=int(meta.get("turn", 0)),
                     user_text=text,
                     source="memory_store_tool",
+                    tenant_id=_tenant,
                 )
                 # User-explicit belief (highest trust/importance)
                 action = mutate_belief(
@@ -815,6 +820,7 @@ class LocalToolRegistry:
                     predicate_type="set",  # noted facts are additive
                     confidence=1.0, importance=5,
                     extraction_method="user_explicit",
+                    tenant_id=_tenant,
                     cfg=None,
                 )
                 bid = action.get("belief_id", "")

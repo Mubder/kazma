@@ -106,6 +106,7 @@ def schedule_post_turn_memory(
     *,
     session_id: str | None = None,
     turn: int | None = None,
+    tenant_id: str = "default",
 ) -> None:
     """Run the V2 post-turn memory pipeline in a dedicated thread.
 
@@ -157,12 +158,12 @@ def schedule_post_turn_memory(
         """
         # ── V2 dual-write mirror ─────────────────────────────────────
         try:
-            _mirror_turn_to_v2(messages, session_id=session_id, turn=turn)
+            _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
         except Exception:
             logger.debug("[post_turn] V2 mirror failed", exc_info=True)
         # ── Stage 1: sync heuristic extraction ───────────────────────
         try:
-            _v2_extract_sync(messages, session_id=session_id, turn=turn)
+            _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
         except Exception:
             logger.debug("[post_turn] V2 heuristic extraction failed", exc_info=True)
         # ── Stage 2: enqueue LLM deep-pass on the worker loop ─────────
@@ -206,6 +207,7 @@ def _mirror_turn_to_v2(
     *,
     session_id: str | None,
     turn: int | None,
+    tenant_id: str = "default",
 ) -> None:
     """Best-effort mirror of the just-finished turn into the V2 schema.
 
@@ -227,6 +229,7 @@ def _mirror_turn_to_v2(
         turn_number=int(turn) if turn is not None else 0,
         user_text=user_text,
         assistant_text=assistant_text,
+        tenant_id=tenant_id,
     )
 
 
@@ -235,6 +238,7 @@ def _v2_extract_sync(
     *,
     session_id: str | None,
     turn: int | None,
+    tenant_id: str = "default",
 ) -> None:
     """SYNC heuristic belief extraction (runs in the V2 thread).
 
@@ -282,6 +286,7 @@ def _v2_extract_sync(
             assistant_text,
             session_id=session_id,
             turn=turn,
+            tenant_id=tenant_id,
             cfg=cfg,
         )
         if stats.get("applied"):

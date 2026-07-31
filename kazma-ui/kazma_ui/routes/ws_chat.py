@@ -480,7 +480,10 @@ def create_ws_chat_router(
                     )
                     # Stamp durable thread_id into state so YOLO/HITL grants
                     # resolve even if the ContextVar is lost mid-graph.
-                    input_state = initial_supervisor_state(thread_id=thread_id)
+                    input_state = initial_supervisor_state(
+                        thread_id=thread_id,
+                        tenant_id=f"web:{session_id}",
+                    )
                     input_state["messages"] = full_messages
 
                     async def _run_prompt_stream():

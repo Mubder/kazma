@@ -27,6 +27,9 @@ __all__ = [
     "set_current_thread_id",
     "reset_current_thread_id",
     "get_current_thread_id",
+    "set_current_tenant_id",
+    "reset_current_tenant_id",
+    "get_current_tenant_id",
 ]
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,29 @@ def reset_current_thread_id(token: contextvars.Token[str | None]) -> None:
 def get_current_thread_id() -> str | None:
     """Get the active thread ID for the current context."""
     return _current_thread_id.get()
+
+
+# Thread-safe context var for the active tenant_id (memory isolation).
+# Mirrors the _current_thread_id pattern — set in the tool worker / SSE / WS
+# so stateless memory tools (memory_search / memory_store) can read it.
+_current_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_current_tenant_id", default="default"
+)
+
+
+def set_current_tenant_id(tenant_id: str) -> contextvars.Token[str]:
+    """Set the active tenant_id for the current async task context."""
+    return _current_tenant_id.set(tenant_id)
+
+
+def reset_current_tenant_id(token: contextvars.Token[str]) -> None:
+    """Reset the tenant_id context to its previous state."""
+    _current_tenant_id.reset(token)
+
+
+def get_current_tenant_id() -> str:
+    """Get the active tenant_id for the current context (default 'default')."""
+    return _current_tenant_id.get()
 
 
 # ── Default tool tiers ────────────────────────────────────────────────

@@ -76,6 +76,7 @@ def _insert_episode(
     importance: int,
     metadata: dict[str, Any],
     eid: str | None = None,
+    tenant_id: str = "default",
 ) -> str:
     """Insert one V2 episode row. Caller owns the connection."""
     now = time.time()
@@ -99,10 +100,10 @@ def _insert_episode(
             id, tenant_id, session_id, turn_number,
             user_text, assistant_text, summary_text,
             tier, structural_importance, created_at, metadata_json
-        ) VALUES (?, 'default', ?, ?, ?, ?, ?, 'episodic', ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'episodic', ?, ?, ?)
         """,
         (
-            eid, session_id, turn_number,
+            eid, tenant_id, session_id, turn_number,
             user_text[:8000] if user_text else None,
             None,
             summary_text[:8000] if summary_text else None,
@@ -118,6 +119,7 @@ def store_swarm_result(
     task_id: str,
     snippet: str,
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = "default",
 ) -> str | None:
     """Persist a successful swarm worker result as a V2 episode + belief.
 
@@ -153,6 +155,7 @@ def store_swarm_result(
                 source="swarm_result",
                 importance=3,
                 metadata=meta,
+                tenant_id=tenant_id,
             )
             # Link worker → produced → snippet (set-valued belief, capped for the
             # object field; full text lives in the episode above).
@@ -162,6 +165,7 @@ def store_swarm_result(
                     predicate_type="set",
                     confidence=0.9, importance=3,
                     extraction_method="swarm_result",
+                    tenant_id=tenant_id,
                     cfg=None,
                 )
             except Exception:
@@ -186,6 +190,7 @@ def log_evolution_v2(
     delta: str,
     summary: str,
     timestamp: str = "",
+    tenant_id: str = "default",
 ) -> str | None:
     """Persist a SoulEvolution entry as a V2 episode (source="soul_evolution").
 
@@ -225,6 +230,7 @@ def log_evolution_v2(
                 source="soul_evolution",
                 importance=2,
                 metadata=meta,
+                tenant_id=tenant_id,
             )
         finally:
             conn.close()
@@ -236,6 +242,7 @@ def log_evolution_v2(
 def store_compaction_summary(
     summary: str,
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = "default",
 ) -> str | None:
     """Persist a compaction summary as a V2 episode (source="compaction_summary").
 
@@ -265,6 +272,7 @@ def store_compaction_summary(
                 source="compaction_summary",
                 importance=2,
                 metadata=meta,
+                tenant_id=tenant_id,
             )
         finally:
             conn.close()

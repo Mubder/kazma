@@ -110,6 +110,14 @@ class SupervisorState(TypedDict, total=False):
     thread_id: str
     """Stable conversation thread ID (persists across checkpoints)."""
 
+    tenant_id: str
+    """Tenant/sender identity for multi-tenant memory isolation.
+
+    Defaults to ``"default"``. Set to the platform sender_id (e.g.
+    ``"telegram:12345"``, ``"web:<session>"``) so each user's beliefs,
+    episodes, and entities are isolated in the V2 cognitive engine.
+    """
+
     last_checkpoint_id: str
     """Most recent checkpoint UUID (avoids LangGraph reserved name)."""
 
@@ -154,6 +162,7 @@ def initial_supervisor_state(
     *,
     thread_id: str | None = None,
     max_iterations: int | None = None,
+    tenant_id: str = "default",
 ) -> SupervisorState:
     """Create a fresh SupervisorState with sensible defaults.
 
@@ -189,6 +198,7 @@ def initial_supervisor_state(
         last_tokens=0,
         last_cost_usd=0.0,
         thread_id=thread_id or str(uuid.uuid4()),
+        tenant_id=tenant_id,
         last_checkpoint_id=str(uuid.uuid4()),
         snapshot_id="",
         snapshot_iteration=-1,

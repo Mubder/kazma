@@ -180,7 +180,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
             ensure_primary_schema(primary)
             ensure_ops_schema(ops)
             row = primary.execute(
-                "SELECT user_text, assistant_text, session_id, turn_number FROM episodes WHERE id=?",
+                "SELECT user_text, assistant_text, session_id, turn_number, tenant_id FROM episodes WHERE id=?",
                 (episode_id,),
             ).fetchone()
             if not row:
@@ -211,6 +211,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                         primary, ops,
                         row["user_text"] or "", row["assistant_text"] or "",
                         session_id=row["session_id"], turn=row["turn_number"],
+                        tenant_id=row["tenant_id"],
                     )
                     if sync_stats.get("applied", 0) > 0:
                         logger.debug(
@@ -224,6 +225,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                 primary, ops,
                 row["user_text"] or "", row["assistant_text"] or "",
                 session_id=row["session_id"], turn=row["turn_number"],
+                tenant_id=row["tenant_id"],
                 use_llm=use_llm,
             )
             logger.info(

@@ -553,6 +553,7 @@ async def supervisor_node(
                 result = recall(
                     last_user_content, limit=_top_k,
                     session_id=state.get("thread_id"),
+                    tenant_id=state.get("tenant_id", "default"),
                 )
                 if not result.empty:
                     mem_block = format_recall_block(result)
@@ -951,7 +952,9 @@ async def tool_worker_node(
     from kazma_core.safety.hitl import (
         get_current_thread_id,
         reset_current_thread_id,
+        reset_current_tenant_id,
         set_current_thread_id,
+        set_current_tenant_id,
     )
 
     _state_tid_token = None
@@ -959,6 +962,10 @@ async def tool_worker_node(
         _state_tid = state.get("thread_id")
         if _state_tid:
             _state_tid_token = set_current_thread_id(str(_state_tid))
+
+    # Bind tenant_id into the ContextVar so stateless memory tools
+    # (memory_search / memory_store) can read it without a state handle.
+    _state_tenant_token = set_current_tenant_id(str(state.get("tenant_id", "default")))
 
     try:
         # ── HITL: separate safe and danger tools ──────────────────────
@@ -1194,6 +1201,7 @@ async def tool_worker_node(
             pass
         if _state_tid_token is not None:
             reset_current_thread_id(_state_tid_token)
+        reset_current_tenant_id(_state_tenant_token)
 
 
 async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:
@@ -1400,6 +1408,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             messages,
             session_id=state.get("thread_id"),
             turn=iteration,
+            tenant_id=state.get("tenant_id", "default"),
         )
     except Exception:
         logger.debug("[Respond] post_turn memory schedule failed", exc_info=True)
