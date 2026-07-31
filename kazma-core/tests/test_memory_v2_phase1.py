@@ -130,7 +130,9 @@ def test_v2_defaults_present():
     from kazma_core.memory.config import DEFAULT_MEMORY_CFG
 
     v2 = DEFAULT_MEMORY_CFG["v2"]
-    assert v2["use_new_stack"] is False  # dual-write transition
+    # V2 is now the active stack by default (the V1→V2 cutover landed).
+    # Flip to False to roll back to the legacy 4-layer RRF stack.
+    assert v2["use_new_stack"] is True
     assert v2["trust_weight_user"] == 1.0
     assert v2["trust_weight_tool"] == 0.85
     assert v2["trust_weight_llm"] == 0.60
@@ -139,11 +141,11 @@ def test_v2_defaults_present():
     assert v2["procedural_quarantine_threshold"] == 0.40
 
 
-def test_memory_v2_disabled_during_transition():
+def test_memory_v2_enabled_by_default():
     from kazma_core.memory.config import memory_v2_enabled, read_memory_cfg
 
     cfg = read_memory_cfg()
-    assert memory_v2_enabled(cfg) is False
+    assert memory_v2_enabled(cfg) is True
 
 
 def test_memory_v2_enabled_after_flip():

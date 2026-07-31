@@ -133,53 +133,84 @@ def test_p2_legacy_memory_fts_with_rows_migrated(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_p3_index_worker_l4_sets_worker_meta(monkeypatch: pytest.MonkeyPatch):
-    """Successful worker dispatch path indexes with worker name in metadata."""
-    from kazma_core.swarm import worker_dispatch as wd
+async def test_p3_index_worker_l4_sets_worker_meta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Successful worker dispatch writes a V2 swarm_result episode + belief.
 
-    captured: list[dict] = []
+    After the V1→V2 migration, ``_index_worker_l4_memory`` stores the snippet
+    as a V2 episode (source="swarm_result") and a belief linking worker→produced,
+    instead of the V1 adapter.store / L4 table. The worker name becomes the
+    belief subject (replacing the worker_vectors_<name> L4 namespace).
+    """
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory import dual_write
 
-    class _FakeAdapter:
-        async def store(self, text, metadata=None):
-            captured.append({"text": text, "metadata": dict(metadata or {})})
-            return "id1"
+    dual_write.reset_mirror()
+    try:
+        from kazma_core.swarm import worker_dispatch as wd
 
-    monkeypatch.setattr(
-        "kazma_core.swarm.memory.adapter.get_adapter",
-        lambda: _FakeAdapter(),
-    )
-    await wd._index_worker_l4_memory(
-        worker_name="Observer",
-        prompt="Summarize the repo structure",
-        output="Found 12 packages under monorepo.",
-        task_id="task-abc",
-    )
-    assert captured
-    assert captured[0]["metadata"].get("worker") == "Observer"
-    assert captured[0]["metadata"].get("source") == "swarm_worker"
-    assert "Result:" in captured[0]["text"] or "Found 12" in captured[0]["text"]
+        await wd._index_worker_l4_memory(
+            worker_name="Observer",
+            prompt="Summarize the repo structure",
+            output="Found 12 packages under monorepo.",
+            task_id="task-abc",
+        )
+
+        from kazma_core.paths import primary_memory_db
+
+        conn = sqlite3.connect(primary_memory_db())
+        conn.row_factory = sqlite3.Row
+        # Episode written with swarm_result source + worker in metadata
+        ep = conn.execute(
+            "SELECT user_text, metadata_json FROM episodes WHERE metadata_json LIKE ?",
+            ('%"source": "swarm_result"%',),
+        ).fetchall()
+        assert ep, "expected a swarm_result episode"
+        row = ep[0]
+        assert "Result:" in (row["user_text"] or "") or "Found 12" in (row["user_text"] or "")
+        meta = json.loads(row["metadata_json"])
+        assert meta.get("worker") == "Observer"
+        # The V2 source categorization is authoritative ("swarm_result"); the
+        # caller's legacy "swarm_worker" source is overridden at insert time.
+        assert meta.get("source") == "swarm_result"
+        # Belief links the worker → produced. Note the subject is the
+        # canonical entity slug (case-normalized to lowercase by V2 entity
+        # resolution), so "Observer" is stored as "observer".
+        bel = conn.execute(
+            "SELECT object FROM beliefs WHERE predicate='produced'"
+        ).fetchall()
+        assert bel, "expected a worker→produced belief"
+        assert any("Found 12" in (b["object"] or "") for b in bel)
+        conn.close()
+    finally:
+        dual_write.reset_mirror()
 
 
 @pytest.mark.asyncio
-async def test_p3_index_skips_empty_output(monkeypatch: pytest.MonkeyPatch):
+async def test_p3_index_skips_empty_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """No store when prompt and output are empty/trivial."""
-    from kazma_core.swarm import worker_dispatch as wd
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory import dual_write
 
-    called = []
+    dual_write.reset_mirror()
+    try:
+        from kazma_core.swarm import worker_dispatch as wd
 
-    class _FakeAdapter:
-        async def store(self, text, metadata=None):
-            called.append(True)
-            return "id1"
+        await wd._index_worker_l4_memory(
+            worker_name="Observer",
+            prompt="",
+            output="",
+            task_id="x",
+        )
+        from kazma_core.paths import primary_memory_db
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
 
-    monkeypatch.setattr(
-        "kazma_core.swarm.memory.adapter.get_adapter",
-        lambda: _FakeAdapter(),
-    )
-    await wd._index_worker_l4_memory(
-        worker_name="Observer",
-        prompt="",
-        output="",
-        task_id="x",
-    )
-    assert not called
+        conn = sqlite3.connect(primary_memory_db())
+        ensure_primary_schema(conn)  # no episode written → ensure schema ourselves
+        n = conn.execute(
+            "SELECT COUNT(*) FROM episodes WHERE metadata_json LIKE ?",
+            ('%"source": "swarm_result"%',),
+        ).fetchone()[0]
+        conn.close()
+        assert n == 0
+    finally:
+        dual_write.reset_mirror()

@@ -43,7 +43,7 @@ async def _index_worker_l4_memory(
     head = (prompt or "").strip()
     if not body and not head:
         return
-    # Keep snippets short — L4 side table already caps content.
+    # Keep snippets short — V2 episode text caps content below.
     snippet = ""
     if head:
         snippet += f"Task: {head[:600]}\n"
@@ -52,45 +52,22 @@ async def _index_worker_l4_memory(
     snippet = snippet.strip()
     if len(snippet) < 12:
         return
-    import hashlib
-
-    doc_id = hashlib.sha256(
-        f"{name}:{task_id}:{snippet[:200]}".encode("utf-8", errors="ignore")
-    ).hexdigest()[:16]
     meta = {
         "worker": name,
         "source": "swarm_worker",
         "task_id": task_id or "",
         "type": "swarm_result",
     }
+    # V2-native write: store as a V2 episode (source="swarm_result") + a
+    # belief linking the worker → produced → snippet. Replaces the V1
+    # adapter.store + L4 fallback. Per-worker recall is served by the
+    # belief subject (worker name) instead of a worker_vectors_<name> table.
     try:
-        from kazma_core.swarm.memory.adapter import get_adapter
+        from kazma_core.memory.swarm_bridge import store_swarm_result
 
-        adapter = get_adapter()
-        if adapter is not None and hasattr(adapter, "store"):
-            await adapter.store(snippet, metadata=meta)
-            return
+        store_swarm_result(name, task_id or "", snippet, meta)
     except Exception:
-        logger.debug("[SwarmEngine] adapter L4 path failed for %s", name, exc_info=True)
-    # Direct L4 fallback if adapter unavailable
-    try:
-        from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
-
-        # Prefer the adapter's shared L4 instance when present
-        store = None
-        try:
-            from kazma_core.swarm.memory.adapter import get_adapter as _ga
-
-            ad = _ga()
-            store = getattr(ad, "_l4", None) if ad is not None else None
-        except Exception:
-            store = None
-        if store is None:
-            store = SQLiteVectorStore()
-        if store is not None and getattr(store, "available", True):
-            store.index(name, doc_id, snippet)
-    except Exception:
-        logger.debug("[SwarmEngine] direct L4 index failed for %s", name, exc_info=True)
+        logger.debug("[SwarmEngine] V2 swarm_result store failed for %s", name, exc_info=True)
 
 
 async def dispatch_worker(

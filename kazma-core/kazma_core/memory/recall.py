@@ -33,7 +33,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RecallHit", "RecallResult", "recall", "format_recall_block"]
+__all__ = ["RecallHit", "RecallResult", "recall", "search", "format_recall_block"]
 
 _RRF_K = 60  # RRF smoothing constant (matches legacy adapter)
 
@@ -122,6 +122,58 @@ def recall(
                 conn.close()
             except Exception:
                 pass
+
+
+# ── Dict-shape compat shim ────────────────────────────────────────────────
+
+
+def search(
+    query: str,
+    limit: int = 5,
+    *,
+    session_id: str | None = None,
+    kind: str | None = None,
+) -> list[dict[str, Any]]:
+    """V2-native search returning ``list[dict]`` — the shape callers of the
+    legacy ``adapter.search()`` consume.
+
+    This is the single read contract for swarm/compaction/self-improvement
+    callers after the V1→V2 migration. Returns dicts with keys
+    ``id, content, text, score, source_layer, metadata`` (the same keys
+    ``UnifiedMemoryAdapter.search`` documented and
+    ``compaction._build_compacted_system`` consumes).
+
+    Args:
+        query: Natural-language query.
+        limit: Max results to return (beliefs + episodes combined).
+        session_id: Optional — bias toward the current session's episodes
+            (thread_id). Activates the same session-bias the supervisor
+            per-turn RAG path uses.
+        kind: Optional — restrict to one hit kind (``"belief"`` or
+            ``"episode"``). ``None`` returns both, beliefs first.
+
+    Best-effort: never raises; returns ``[]`` on any failure.
+    """
+    try:
+        result = recall(query, limit=limit, session_id=session_id)
+        out: list[dict[str, Any]] = []
+        hits = list(result.beliefs) + list(result.episodes)
+        if kind:
+            hits = [h for h in hits if h.kind == kind]
+        for h in hits[:limit]:
+            source_layer = f"v2:{h.kind}:{h.source}" if h.source else f"v2:{h.kind}"
+            out.append({
+                "id": h.id,
+                "content": h.content,
+                "text": h.content,  # alias for retrieve_memories fallback
+                "score": h.score,
+                "source_layer": source_layer,
+                "metadata": dict(h.metadata),
+            })
+        return out
+    except Exception:
+        logger.debug("[recall.search] failed — returning []", exc_info=True)
+        return []
 
 
 # ── Belief lookup ─────────────────────────────────────────────────────────

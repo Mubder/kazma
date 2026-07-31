@@ -558,14 +558,32 @@ def register_direct_routes(self: Any) -> None:
                     "meta": c.get("meta") or {},
                 }
 
+        # V2 cognitive-engine KPIs — when V2 is the active stack, the
+        # dashboard should prefer this `v2` block over the legacy layer
+        # counts above (which probe V1 stores that may be frozen/empty).
+        v2_block: dict = {}
+        memory_stack = "v1"
+        try:
+            from kazma_core.memory.config import memory_v2_enabled
+
+            if memory_v2_enabled():
+                memory_stack = "v2"
+                from kazma_core.memory.v2_health import build_v2_health
+
+                v2_block = build_v2_health()
+        except Exception as _e:
+            logger.debug("v2 health probe failed: %s", _e)
+
         return {
             "status": status,
+            "memory_stack": memory_stack,
             "fts5_size": fts5_size,
             "fts5_count": fts5_count,
             "vector_size": vector_size,
             "vector_count": vector_count,
             "graph": graph_stats,
             "flags": flags,
+            "v2": v2_block,
             "components": health.get("components", []),
             "issues": health.get("issues", []),
             "summary": health.get("summary", ""),

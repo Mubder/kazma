@@ -72,33 +72,30 @@ class WorkerPhonebook:
             return {"synthesis": f"Worker '{worker_name}' not found", "opinions": []}
 
         # Inject episodic memory + evolution learnings before dispatch.
-        # Issue both queries in parallel to avoid doubling dispatch latency.
+        # V2-native recall for past strategies + evolution learnings.
         enriched = task
         try:
-            import asyncio as _asyncio
-            from kazma_core.swarm.memory.adapter import get_adapter
-            adapter = get_adapter()
-            if adapter is not None:
-                # Co-issue both memory queries in parallel
-                strategies_hits, evo_hits = await _asyncio.gather(
-                    adapter.search(task, limit=3),
-                    adapter.search(f"{worker_name} evolution learning", limit=2),
-                    return_exceptions=True,
-                )
+            from kazma_core.memory.recall import search
 
-                # Process past strategies
-                if isinstance(strategies_hits, list) and strategies_hits:
-                    strategies = [h.content or h.metadata.get("summary", "") for h in strategies_hits]
-                    episodic = " | ".join(s for s in strategies if s)
-                    if episodic:
-                        enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
+            # recall.search is sync; call both directly (fast local SQLite).
+            strategies_hits = search(task, limit=3)
+            evo_hits = search(f"{worker_name} evolution learning", limit=2)
 
-                # Process past evolution learnings
-                if isinstance(evo_hits, list) and evo_hits:
-                    learnings = [h.content for h in evo_hits if h.content]
-                    if learnings:
-                        learning_ctx = "\n".join(f"- {l[:300]}" for l in learnings)
-                        enriched = f"PAST_LEARNINGS_FOR_THIS_WORKER:\n{learning_ctx}\n\n{enriched}"
+            # Process past strategies
+            if isinstance(strategies_hits, list) and strategies_hits:
+                strategies = [
+                    h["content"] or h["metadata"].get("summary", "") for h in strategies_hits
+                ]
+                episodic = " | ".join(s for s in strategies if s)
+                if episodic:
+                    enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
+
+            # Process past evolution learnings
+            if isinstance(evo_hits, list) and evo_hits:
+                learnings = [h["content"] for h in evo_hits if h["content"]]
+                if learnings:
+                    learning_ctx = "\n".join(f"- {l[:300]}" for l in learnings)
+                    enriched = f"PAST_LEARNINGS_FOR_THIS_WORKER:\n{learning_ctx}\n\n{enriched}"
         except Exception as exc:
             logger.debug("Episodic memory lookup failed: %s", exc)
 

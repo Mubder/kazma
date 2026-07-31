@@ -147,19 +147,18 @@ class SelfImprovementSkill:
             dur = getattr(s, "duration_ms", 0)
             stage_details.append(f"- {role} ({dur:.0f}ms): {output[:200]}")
 
-        # Query memory adapter for past patterns
+        # Query V2 memory for past patterns
         past_context = ""
         try:
-            from kazma_core.swarm.memory.adapter import get_adapter
-            adapter = get_adapter()
-            if adapter is not None:
-                results = await adapter.search(f"{worker_name} pipeline {task[:100]}", limit=3)
-                if results:
-                    past_context = "\nPast memory:\n" + "\n".join(
-                        f"  [{r.source_layer}] {r.content[:200]}" for r in results[:3]
-                    )
+            from kazma_core.memory.recall import search
+
+            results = search(f"{worker_name} pipeline {task[:100]}", limit=3)
+            if results:
+                past_context = "\nPast memory:\n" + "\n".join(
+                    f"  [{r['source_layer']}] {r['content'][:200]}" for r in results[:3]
+                )
         except Exception as exc:
-            logger.debug("Memory adapter search failed: %s", exc)
+            logger.debug("Memory search failed: %s", exc)
 
         # Construct Meta-Refiner prompt
         refiner_prompt = f"""You are a Meta-Refiner for the Kazma self-improvement engine.
@@ -229,19 +228,18 @@ Output ONLY the delta text, no preamble."""
         if not failed_details and failed_count:
             failed_details.append(f"- (aggregate) {failed_count} failed stage(s)")
 
-        # Query memory for past failure patterns
+        # Query V2 memory for past failure patterns
         past_context = ""
         try:
-            from kazma_core.swarm.memory.adapter import get_adapter
-            adapter = get_adapter()
-            if adapter is not None:
-                results = await adapter.search(f"{worker_name} failure {task[:100]}", limit=3)
-                if results:
-                    past_context = "\nPast failures:\n" + "\n".join(
-                        f"  [{r.source_layer}] {r.content[:200]}" for r in results[:3]
-                    )
+            from kazma_core.memory.recall import search
+
+            results = search(f"{worker_name} failure {task[:100]}", limit=3)
+            if results:
+                past_context = "\nPast failures:\n" + "\n".join(
+                    f"  [{r['source_layer']}] {r['content'][:200]}" for r in results[:3]
+                )
         except Exception as exc:
-            logger.debug("Memory adapter search failed: %s", exc)
+            logger.debug("Memory search failed: %s", exc)
 
         refiner_prompt = f"""You are a Meta-Refiner for the Kazma self-improvement engine.
 Worker '{worker_name}' FAILED {failed_count}/{len(stages)} stages (success rate {rate:.0%}).
@@ -348,22 +346,19 @@ Output ONLY the delta text, no preamble."""
         logger.info("[SelfImprovement] Delta APPLIED to '%s' (prompt: %d → %d chars)",
                      worker_name, len(old_prompt), len(new_prompt))
 
-        # Persist to the 4-layer memory adapter for future retrieval.
-        # Use keyword arguments to match log_evolution's signature exactly.
+        # Persist to the V2 cognitive memory for future retrieval.
         try:
-            from kazma_core.swarm.memory.adapter import get_adapter
+            from kazma_core.memory.swarm_bridge import log_evolution_v2
 
-            adapter = get_adapter()
-            if adapter is not None:
-                await adapter.log_evolution(
-                    task_id=f"evolution_{ts}",
-                    worker_name=worker_name,
-                    delta=delta[:500],
-                    summary=f"Auto-applied evolution for {worker_name}",
-                )
-                logger.debug("[SelfImprovement] log_evolution persisted for %s", worker_name)
+            log_evolution_v2(
+                worker_name=worker_name,
+                task_id=f"evolution_{ts}",
+                delta=delta[:500],
+                summary=f"Auto-applied evolution for {worker_name}",
+            )
+            logger.debug("[SelfImprovement] log_evolution_v2 persisted for %s", worker_name)
         except Exception:
-            logger.warning("[SelfImprovement] log_evolution failed (non-fatal)", exc_info=True)
+            logger.warning("[SelfImprovement] log_evolution_v2 failed (non-fatal)", exc_info=True)
 
         return True
 

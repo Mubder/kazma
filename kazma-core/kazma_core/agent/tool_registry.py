@@ -758,15 +758,10 @@ class LocalToolRegistry:
         )
         async def memory_search(query: str, limit: int = 5) -> str:
             # ── V2 cognitive recall path ──────────────────────────────
-            # When the V2 stack is active (use_new_stack=true), route the
-            # search through recall() so the tool sees the same bi-temporal
-            # beliefs + tiered episodes as per-turn RAG. Returns a
-            # structured JSON list of beliefs + episodes.
-            #
-            # IMPORTANT: if V2 returns nothing, FALL THROUGH to the legacy
-            # adapter. This ensures the agent can always see its historical
-            # memories even when the V2 belief graph is empty (e.g. during
-            # the dual-write transition before backfill completes).
+            # When the V2 stack is active (use_new_stack=true), V2 is the
+            # single source of truth — return its results even if empty
+            # (no legacy fallthrough). An empty result is a real "no
+            # memories match", not a signal to consult a stale V1 store.
             try:
                 from kazma_core.memory.config import memory_v2_enabled
 
@@ -787,14 +782,12 @@ class LocalToolRegistry:
                         })
                     if out:
                         return json.dumps(out, ensure_ascii=False, indent=2)
-                    # V2 found nothing — fall through to legacy adapter
-                    # so the agent can still see its historical memories.
+                    return "No relevant memories found."
             except Exception:
-                pass  # fall through to legacy adapter
-            # ── Legacy 4-layer RRF adapter path ───────────────────────
-            # Use the unified adapter so tool searches see the same store
-            # as per-turn RAG retrieval. Fall back to VectorMemory if the
-            # adapter is unavailable.
+                pass  # fall through to legacy adapter (V2 disabled or errored)
+            # ── Legacy 4-layer RRF adapter path (V1 fallback) ─────────
+            # Only reached when V2 is OFF or its probe raised. Kept so a
+            # flag-flip rollback (use_new_stack=false) restores V1 search.
             try:
                 from kazma_core.swarm.memory.adapter import get_adapter
 

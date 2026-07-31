@@ -539,6 +539,11 @@ async def supervisor_node(
             _use_v2 = memory_v2_enabled()
         except Exception:
             pass
+        # Remember whether V2 was the intended path. If V2 recall RAISES,
+        # we degrade to "no memory injection" (V2 is authoritative, an
+        # empty/silent turn is safer than consulting a stale V1 store) —
+        # NOT to the legacy retrieve_memories path.
+        _v2_was_active = _use_v2
 
         if _use_v2:
             try:
@@ -559,13 +564,15 @@ async def supervisor_node(
                         )
             except Exception:
                 logger.warning(
-                    "[Supervisor] V2 recall failed — degrading to legacy path",
+                    "[Supervisor] V2 recall failed — skipping memory injection",
                     exc_info=True,
                 )
-                # Fall through to legacy retrieval below
-                _use_v2 = False
+                # V2 is authoritative: a failure degrades to no injection,
+                # NOT to the legacy retrieve_memories path. Keep _use_v2=True
+                # so the `if not _use_v2:` block below is skipped.
+                _use_v2 = True
 
-        if not _use_v2:
+        if not _use_v2 and not _v2_was_active:
             try:
                 _top_k = _rag_top_k()
                 memories = await authority.compactor.retrieve_memories(

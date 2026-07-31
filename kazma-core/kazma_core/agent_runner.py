@@ -175,14 +175,22 @@ class KazmaAgent:
         self._memory_backend = None
         self._init_memory()
 
-        # Context Authority (80% compaction) — wired with the UnifiedMemoryAdapter
-        # (4-layer RRF: ChromaDB + KG + FTS5 + sqlite-vec) so that the compaction
-        # engine can retrieve and inject relevant memories into the fresh
-        # context after summarizing. Falls back to VectorMemory-only if adapter fails.
+        # Context Authority (80% compaction) — memory store wiring.
+        # When the V2 cognitive engine is active, compaction retrieves via
+        # V2 recall() directly (memory_store=None → CompactionEngine probes
+        # V2 first), so the V1 adapter is not constructed here. When V2 is
+        # off, fall back to the legacy UnifiedMemoryAdapter (4-layer RRF) →
+        # VectorMemory fallback (preserves the V1 rollback path).
+        _memory_store = None
         try:
-            from kazma_core.swarm.memory.adapter import get_adapter
-            _memory_store = get_adapter()
-            logger.info("ContextAuthority wired with UnifiedMemoryAdapter (4-layer RRF)")
+            from kazma_core.memory.config import memory_v2_enabled
+
+            if memory_v2_enabled():
+                logger.info("ContextAuthority wired for V2 recall (memory_store deferred to V2)")
+            else:
+                from kazma_core.swarm.memory.adapter import get_adapter
+                _memory_store = get_adapter()
+                logger.info("ContextAuthority wired with UnifiedMemoryAdapter (4-layer RRF)")
         except Exception:
             # Fallback to VectorMemory-only if adapter initialization fails
             from kazma_core.agent.tool_registry import get_vector_memory

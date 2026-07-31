@@ -121,11 +121,24 @@ class CompactionEngine:
                 except Exception:
                     pass
                 if safe_summary is not None:
-                    await self.memory_store.store(
-                        safe_summary,
-                        metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"}
-                    )
-                    logger.debug("Auto-stored compaction summary to memory")
+                    # V2-native: store the summary as a V2 episode. The
+                    # is_override_delta guard above MUST run first (audit
+                    # AC4 — unsanitized summaries poison future prompts).
+                    try:
+                        from kazma_core.memory.swarm_bridge import store_compaction_summary
+
+                        store_compaction_summary(
+                            safe_summary,
+                            metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"},
+                        )
+                        logger.debug("Auto-stored compaction summary to V2 memory")
+                    except Exception:
+                        logger.debug("V2 summary store failed, trying legacy store", exc_info=True)
+                        await self.memory_store.store(
+                            safe_summary,
+                            metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"}
+                        )
+                        logger.debug("Auto-stored compaction summary to memory")
             except Exception:
                 logger.debug("Auto-store failed (non-fatal)", exc_info=True)
 
@@ -283,6 +296,24 @@ class CompactionEngine:
             List of memory dicts, or empty list if no memory store is configured
             or retrieval fails.
         """
+        # Prefer V2 recall when the cognitive engine is active — it is the
+        # single read source of truth after the V1→V2 migration. Falls
+        # through to the configured legacy store only if V2 is off/empty.
+        try:
+            from kazma_core.memory.config import memory_v2_enabled
+
+            if memory_v2_enabled():
+                from kazma_core.memory.recall import search as v2_search
+
+                hits = v2_search(query, limit=limit)
+                if hits:
+                    logger.info("Retrieved %d V2 memories for compaction", len(hits))
+                    return hits
+                # V2 returned nothing — fall through to the configured store
+                # so compaction isn't starved during the dual-write transition.
+        except Exception:
+            logger.debug("[Compaction] V2 recall probe failed", exc_info=True)
+
         if self.memory_store is None:
             # Lazy resolution: if no store was passed at construction time
             # (e.g. because VectorMemory was set AFTER the agent was built),
@@ -291,6 +322,15 @@ class CompactionEngine:
             # before calling set_vector_memory().
             store = self._resolve_memory_store()
             if store is None:
+                # No legacy store configured — try V2 recall directly so
+                # compaction still injects memories on a V2-only deployment.
+                try:
+                    from kazma_core.memory.config import memory_v2_enabled
+                    if memory_v2_enabled():
+                        from kazma_core.memory.recall import search as v2_search
+                        return v2_search(query, limit=limit)
+                except Exception:
+                    logger.debug("[Compaction] V2 recall fallback failed", exc_info=True)
                 return []
         else:
             store = self.memory_store

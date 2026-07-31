@@ -135,8 +135,19 @@ class _FakeTracer:
         pass
 
 
-async def test_retrieval_injects_at_iteration_0():
-    """At iteration 0, retrieved memories are injected as a system message."""
+async def test_retrieval_injects_at_iteration_0(monkeypatch):
+    """At iteration 0, retrieved memories are injected as a system message.
+
+    Exercises the LEGACY per-turn RAG path (retrieve_memories). With V2 now
+    the default stack, force ``use_new_stack=False`` here so the legacy branch
+    runs and the mocked authority's memories are injected.
+    """
+    # Force the legacy V1 path so the mocked _FakeAuthority is exercised.
+    monkeypatch.setenv("KAZMA_TEST_FORCE_V1_RAG", "1")
+    import kazma_core.memory.config as _mcfg
+
+    monkeypatch.setattr(_mcfg, "memory_v2_enabled", lambda cfg=None: False)
+
     from kazma_core.agent.graph_builder import supervisor_node
     from kazma_core.agent.state import NodeName
 

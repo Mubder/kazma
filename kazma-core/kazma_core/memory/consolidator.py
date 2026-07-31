@@ -737,9 +737,27 @@ def schedule_post_turn_memory(
             logger.debug("[post_turn] could not enqueue micro_consolidation", exc_info=True)
 
     try:
-        loop.create_task(_run())
+        # When V2 is the active stack, the V2 thread below + the
+        # micro_consolidation queue are the single write path — the legacy
+        # consolidator/auto_store task is skipped so V1 stores stop
+        # receiving parallel post-turn writes. The legacy branch (and its
+        # _run() coroutine) stay defined above so a flag-flip rollback
+        # (use_new_stack=false) restores the dual-write behavior.
+        from kazma_core.memory.config import memory_v2_enabled
+
+        _skip_legacy = memory_v2_enabled()
     except Exception:
-        logger.debug("[post_turn] could not schedule legacy task", exc_info=True)
+        _skip_legacy = False
+    if not _skip_legacy:
+        try:
+            loop.create_task(_run())
+        except Exception:
+            logger.debug("[post_turn] could not schedule legacy task", exc_info=True)
+    else:
+        # V2 is the active stack — the legacy task is intentionally skipped.
+        # Logged at debug (every turn) so operators can confirm via a tail;
+        # an info-level once-per-process log isn't worth a process-global.
+        logger.debug("[post_turn] V2 active — legacy consolidator/auto_store task skipped")
     # V2 path runs in a DEDICATED OS thread (not the loop's executor) so
     # the legacy path's blocking sync calls (embedder MiniLM load, Chroma
     # init) cannot starve or gate V2 writes. A plain Thread is fully

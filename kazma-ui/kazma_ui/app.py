@@ -257,7 +257,21 @@ class KazmaAppBuilder:
                 # Pre-warm embedder + 4-layer adapter at boot so the first
                 # chat turn is not blocked on HuggingFace download / Chroma
                 # open / sqlite-vec load. Failures are non-fatal.
+                # When the V2 cognitive engine is the active stack, skip the
+                # V1 adapter pre-warm + legacy integrity backfill (V2 uses
+                # its own SQLite stores; the V1 4-layer adapter is not on
+                # the read/write path). This also avoids the Chroma/sqlite-vec
+                # load cost at boot for V2 deployments.
                 try:
+                    from kazma_core.memory.config import memory_v2_enabled
+
+                    _v2_active = memory_v2_enabled()
+                except Exception:
+                    _v2_active = False
+                if _v2_active:
+                    logger.info("[VectorMemory] V2 active — skipping V1 adapter pre-warm + backfill")
+                else:
+                  try:
                     from kazma_core.swarm.memory.embedder import get_embedder
                     from kazma_core.swarm.memory.adapter import get_adapter
 
@@ -302,7 +316,7 @@ class KazmaAppBuilder:
                         logger.debug(
                             "[VectorMemory] Backfill schedule skipped: %s", bf_start
                         )
-                except Exception as warm_exc:
+                  except Exception as warm_exc:
                     logger.warning("[VectorMemory] Pre-warm skipped: %s", warm_exc)
             except Exception as e:
                 logger.warning("[VectorMemory] Not available: %s", e)
