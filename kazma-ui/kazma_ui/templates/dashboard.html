@@ -1814,34 +1814,44 @@
     } catch (e) { /* silent */ }
   }
 
-  // Select a belief's subject node in the graph canvas + zoom to it
+  // Select a belief's OBJECT node in the graph canvas + zoom to it.
+  // The object is the interesting entity (e.g. "teal", "Paris"), not
+  // the subject (usually "user"). Highlights both endpoints + the edge.
+  var _v2gHighlightSubj = null, _v2gHighlightObj = null;
   function _v2gSelectByBelief(subj, obj) {
     if (!_v2gPts.length) return;
-    // Find the subject node in the canvas
-    var idx = -1;
+    // Find the OBJECT node first (the specific entity, not "user")
+    var objIdx = -1, subjIdx = -1;
     for (var i = 0; i < _v2gPts.length; i++) {
-      if (_v2gPts[i].id === subj || _v2gPts[i].fullLabel === subj) { idx = i; break; }
+      var pid = _v2gPts[i].id;
+      var plabel = (_v2gPts[i].fullLabel || _v2gPts[i].label || '').toLowerCase();
+      // Match by id or by label (the graph node id is a slug; the belief
+      // object may be a display name — try both, case-insensitive)
+      if (objIdx < 0 && (pid === obj || pid === _v2gSlugify(obj) || plabel === obj.toLowerCase())) objIdx = i;
+      if (subjIdx < 0 && (pid === subj || pid === _v2gSlugify(subj) || plabel === subj.toLowerCase())) subjIdx = i;
     }
-    if (idx < 0) {
-      // Try object
-      for (var i = 0; i < _v2gPts.length; i++) {
-        if (_v2gPts[i].id === obj || _v2gPts[i].fullLabel === obj) { idx = i; break; }
-      }
+    // Prefer the object node (the specific entity); fall back to subject
+    var targetIdx = objIdx >= 0 ? objIdx : subjIdx;
+    if (targetIdx < 0) return;
+    var p = _v2gPts[targetIdx];
+    _v2gSelectedId = p.id;
+    // Store highlight endpoints so _v2gPaint can emphasize the edge
+    _v2gHighlightSubj = subjIdx >= 0 ? _v2gPts[subjIdx].id : null;
+    _v2gHighlightObj = objIdx >= 0 ? _v2gPts[objIdx].id : null;
+    _v2gInspect(p);
+    // Zoom to the target node
+    var size = _v2gCanvasSize();
+    if (size) {
+      _v2gView.scale = 2.5;
+      _v2gView.ox = size.w / 2 - p.x * 2.5;
+      _v2gView.oy = size.h / 2 - p.y * 2.5;
+      _v2gHeated();
+      _v2gRepaint();
     }
-    if (idx >= 0) {
-      var p = _v2gPts[idx];
-      _v2gSelectedId = p.id;
-      _v2gInspect(p);
-      // Zoom to the node
-      var size = _v2gCanvasSize();
-      if (size) {
-        _v2gView.scale = 2.5;
-        _v2gView.ox = size.w / 2 - p.x * 2.5;
-        _v2gView.oy = size.h / 2 - p.y * 2.5;
-        _v2gHeated();
-        _v2gRepaint();
-      }
-    }
+  }
+
+  function _v2gSlugify(s) {
+    return String(s || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   }
 
   function _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
@@ -2026,9 +2036,19 @@
       if (!A || !B) continue;
       var ax = _v2gSX(A.x), ay = _v2gSY(A.y), bx = _v2gSX(B.x), by = _v2gSY(B.y);
       var hot = _v2gSelectedId && (A.id === _v2gSelectedId || B.id === _v2gSelectedId);
+      // Also highlight the specific edge between the belief-click pair
+      var beliefHot = _v2gHighlightSubj && _v2gHighlightObj &&
+        ((A.id === _v2gHighlightSubj && B.id === _v2gHighlightObj) ||
+         (A.id === _v2gHighlightObj && B.id === _v2gHighlightSubj));
       var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
-      ctx.strokeStyle = hot ? 'rgba(56,189,248,0.9)' : (ed.superseded ? 'rgba(148,163,184,0.3)' : pcolor + '88');
-      ctx.lineWidth = hot ? 2.2 : (1 + (ed.confidence || 0.5) * 1.5);
+      if (beliefHot) {
+        ctx.strokeStyle = '#a5b4fc'; ctx.lineWidth = 3.5;
+      } else if (hot) {
+        ctx.strokeStyle = 'rgba(56,189,248,0.9)'; ctx.lineWidth = 2.2;
+      } else {
+        ctx.strokeStyle = ed.superseded ? 'rgba(148,163,184,0.3)' : pcolor + '88';
+        ctx.lineWidth = 1 + (ed.confidence || 0.5) * 1.5;
+      }
       if (ed.superseded) ctx.setLineDash([4, 3]); else ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
       ctx.setLineDash([]);
@@ -2106,9 +2126,13 @@
         _v2gDrag = { idx: idx, wx: _v2gWX(c.sx) - p.x, wy: _v2gWY(c.sy) - p.y };
         _v2gSelectedId = p.id; _v2gInspect(p); canvas.setPointerCapture(ev.pointerId);
         canvas.style.cursor = 'grabbing';
+        // Clear belief-click highlight when selecting a node directly
+        _v2gHighlightSubj = null; _v2gHighlightObj = null;
       } else {
         _v2gDrag = { pan: true, sx: c.sx, sy: c.sy, ox: _v2gView.ox, oy: _v2gView.oy };
         canvas.style.cursor = 'grabbing';
+        // Clear selection + belief highlight on empty-space click
+        _v2gSelectedId = null; _v2gHighlightSubj = null; _v2gHighlightObj = null;
       }
       _v2gHeated(); _v2gRepaint();
     });
@@ -2189,7 +2213,7 @@
     }
     if (rels.length) {
       html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ')</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;">' + rels.slice(0, 10).map(function(r) { return '<div style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;">' + r + '</div>'; }).join('') + '</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:3px;max-height:280px;overflow-y:auto;">' + rels.map(function(r) { return '<div style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:2px 0;">' + r + '</div>'; }).join('') + '</div>';
     } else {
       html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — this entity may be referenced indirectly.</div>';
     }
