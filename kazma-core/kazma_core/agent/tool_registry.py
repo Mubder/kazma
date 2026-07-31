@@ -757,56 +757,30 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_search(query: str, limit: int = 5) -> str:
-            # ── V2 cognitive recall path ──────────────────────────────
-            # When the V2 stack is active (use_new_stack=true), V2 is the
-            # single source of truth — return its results even if empty
-            # (no legacy fallthrough). An empty result is a real "no
-            # memories match", not a signal to consult a stale V1 store.
+            # V2 cognitive recall — the single memory read path (V1 removed).
+            # Returns its results even when empty: an empty result is a real
+            # "no memories match", not a signal to consult a legacy store.
             try:
-                from kazma_core.memory.config import memory_v2_enabled
+                from kazma_core.memory.recall import recall as v2_recall
 
-                if memory_v2_enabled():
-                    from kazma_core.memory.recall import recall as v2_recall
-
-                    result = v2_recall(query, limit=limit)
-                    out: list[dict[str, Any]] = []
-                    for h in result.beliefs:
-                        out.append({
-                            "id": h.id, "content": h.content, "score": h.score,
-                            "kind": "belief", "source": h.source, "metadata": h.metadata,
-                        })
-                    for h in result.episodes:
-                        out.append({
-                            "id": h.id, "content": h.content, "score": h.score,
-                            "kind": "episode", "source": h.source, "metadata": h.metadata,
-                        })
-                    if out:
-                        return json.dumps(out, ensure_ascii=False, indent=2)
-                    return "No relevant memories found."
-            except Exception:
-                pass  # fall through to legacy adapter (V2 disabled or errored)
-            # ── Legacy 4-layer RRF adapter path (V1 fallback) ─────────
-            # Only reached when V2 is OFF or its probe raised. Kept so a
-            # flag-flip rollback (use_new_stack=false) restores V1 search.
-            try:
-                from kazma_core.swarm.memory.adapter import get_adapter
-
-                adapter = get_adapter()
-                if adapter is not None:
-                    results = await adapter.search(query, limit=limit)
-                    if results:
-                        return json.dumps(results, ensure_ascii=False, indent=2)
-                    return "No relevant memories found."
-            except Exception:
-                pass
-            # Fallback: VectorMemory (agent_memory collection).
-            mem = get_vector_memory()
-            if mem is None:
-                return "Error: memory not initialized. RAG not available."
-            results = mem.search(query=query, n_results=limit)
-            if not results:
+                result = v2_recall(query, limit=limit)
+                out: list[dict[str, Any]] = []
+                for h in result.beliefs:
+                    out.append({
+                        "id": h.id, "content": h.content, "score": h.score,
+                        "kind": "belief", "source": h.source, "metadata": h.metadata,
+                    })
+                for h in result.episodes:
+                    out.append({
+                        "id": h.id, "content": h.content, "score": h.score,
+                        "kind": "episode", "source": h.source, "metadata": h.metadata,
+                    })
+                if out:
+                    return json.dumps(out, ensure_ascii=False, indent=2)
                 return "No relevant memories found."
-            return json.dumps(results, ensure_ascii=False, indent=2)
+            except Exception as exc:
+                logger.warning("[memory_search] V2 recall failed: %s", exc)
+                return "No relevant memories found."
 
         @self.register(
             description=(
@@ -821,88 +795,53 @@ class LocalToolRegistry:
                 meta = json.loads(metadata) if isinstance(metadata, str) else metadata
             except json.JSONDecodeError:
                 meta = {"raw": metadata}
-            # ── V2 native write path ──────────────────────────────────
-            # When the V2 stack is active, store natively as a V2 episode
-            # (raw text) + a user-explicit belief (importance 5, trust 1.0
-            # — the user explicitly asked to remember it, so it's the
-            # highest-confidence source). The legacy dual-write bridge also
-            # catches this via the adapter path below, so old stores stay
-            # populated during the transition.
+            # V2 native write — the single memory write path (V1 removed).
+            # Stores as a V2 episode (raw text snapshot) + a user-explicit
+            # belief (importance 5, trust 1.0 — the user explicitly asked to
+            # remember it, so it's the highest-confidence source).
+            import sqlite3
+
+            from kazma_core.memory.belief_mutation import mutate_belief
+            from kazma_core.memory.dual_write import mirror_episode
+            from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+            from kazma_core.paths import memory_ops_db, primary_memory_db
+
+            primary = sqlite3.connect(
+                primary_memory_db(), check_same_thread=False, isolation_level=None
+            )
+            primary.row_factory = sqlite3.Row
+            ops = sqlite3.connect(
+                memory_ops_db(), check_same_thread=False, isolation_level=None
+            )
             try:
-                from kazma_core.memory.config import memory_v2_enabled
-
-                if memory_v2_enabled():
-                    import sqlite3
-
-                    from kazma_core.memory.belief_mutation import mutate_belief
-                    from kazma_core.memory.dual_write import mirror_episode
-                    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
-                    from kazma_core.paths import memory_ops_db, primary_memory_db
-
-                    primary = sqlite3.connect(
-                        primary_memory_db(), check_same_thread=False, isolation_level=None
-                    )
-                    primary.row_factory = sqlite3.Row
-                    ops = sqlite3.connect(
-                        memory_ops_db(), check_same_thread=False, isolation_level=None
-                    )
-                    try:
-                        ensure_primary_schema(primary)
-                        ensure_ops_schema(ops)
-                        # Episode (raw text snapshot)
-                        eid = mirror_episode(
-                            session_id=str(meta.get("session_id", "memory_store")),
-                            turn_number=int(meta.get("turn", 0)),
-                            user_text=text,
-                            source="memory_store_tool",
-                        )
-                        # User-explicit belief (highest trust/importance)
-                        action = mutate_belief(
-                            primary, "user", "noted", text[:1000],
-                            ops_conn=ops,
-                            predicate_type="set",  # noted facts are additive
-                            confidence=1.0, importance=5,
-                            extraction_method="user_explicit",
-                            cfg=None,
-                        )
-                        bid = action.get("belief_id", "")
-                        if eid or bid:
-                            return f"Stored memory (v2 episode={eid or 'n/a'}, belief={bid or 'n/a'})"
-                    finally:
-                        primary.close()
-                        ops.close()
-            except Exception:
-                pass  # fall through to legacy adapter
-            # ── Legacy 4-layer adapter path (fail-closed) ─────────────
-            # Route through the unified adapter so stored memories are visible
-            # to per-turn RAG retrieval. Fail-closed: never claim success
-            # without a durable layer write. Falls back to VectorMemory.
-            try:
-                from kazma_core.swarm.memory.adapter import get_adapter
-
-                adapter = get_adapter()
-                if adapter is not None:
-                    doc_id = await adapter.store(text, metadata=meta)
-                    if doc_id:
-                        return f"Stored memory (id={doc_id})"
-                    # Adapter present but no durable write — try VectorMemory
-                    # before reporting failure (covers partial layer outages).
-            except Exception:
-                pass
-            mem = get_vector_memory()
-            if mem is None:
-                return (
-                    "Error: memory store failed — no durable layer available "
-                    "(install chromadb/sentence-transformers via pip install -e '.[rag]', "
-                    "or check L3 FTS / L4 sqlite-vec health)."
+                ensure_primary_schema(primary)
+                ensure_ops_schema(ops)
+                # Episode (raw text snapshot)
+                eid = mirror_episode(
+                    session_id=str(meta.get("session_id", "memory_store")),
+                    turn_number=int(meta.get("turn", 0)),
+                    user_text=text,
+                    source="memory_store_tool",
                 )
-            try:
-                doc_id = mem.add(text=text, metadata=meta)
-                if doc_id:
-                    return f"Stored memory (id={doc_id})"
+                # User-explicit belief (highest trust/importance)
+                action = mutate_belief(
+                    primary, "user", "noted", text[:1000],
+                    ops_conn=ops,
+                    predicate_type="set",  # noted facts are additive
+                    confidence=1.0, importance=5,
+                    extraction_method="user_explicit",
+                    cfg=None,
+                )
+                bid = action.get("belief_id", "")
+                if eid or bid:
+                    return f"Stored memory (v2 episode={eid or 'n/a'}, belief={bid or 'n/a'})"
+                return "Error: memory store failed — V2 write returned no ids."
             except Exception as exc:
+                logger.warning("[memory_store] V2 write failed: %s", exc)
                 return f"Error: memory store failed — {exc}"
-            return "Error: memory store failed — write returned empty id."
+            finally:
+                primary.close()
+                ops.close()
 
         @self.register(
             description=(

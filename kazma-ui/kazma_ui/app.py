@@ -228,102 +228,34 @@ class KazmaAppBuilder:
                     _env_provider, _env_model or "(default)", base_url,
                 )
 
-        # ── Initialize Vector Memory (RAG) BEFORE agent creation ──────
-        # The agent's ContextAuthority needs vector memory at init time
-        # for compaction retrieval. Initializing it here prevents the
-        # "ContextAuthority has no memory_store" warning.
+        # ── Pre-warm the V2 embedder BEFORE agent creation ──────────────
+        # V2 recall() uses the shared embedder (memory/embedder.py) for dense
+        # retrieval. Warming it at boot avoids a first-turn stall on the
+        # MiniLM download/load. The legacy VectorMemory / 4-layer adapter /
+        # integrity backfill were removed with the V1 stack.
         _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
         if _demo_mode:
-            logger.info("[VectorMemory] Skipped — KAZMA_DEMO_MODE is set")
+            logger.info("[Memory] Skipped embedder pre-warm — KAZMA_DEMO_MODE is set")
         else:
             try:
-                from kazma_core.agent.tool_registry import set_vector_memory
-                from kazma_core.memory.vector_store import VectorMemory
+                from kazma_core.memory.embedder import get_embedder
 
-                vector_memory_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
-                vector_memory_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
-
-                vector_memory = VectorMemory(
-                    collection_name=vector_memory_collection,
-                    model_name=vector_memory_model,
-                )
-                set_vector_memory(vector_memory)
-                logger.info(
-                    "[VectorMemory] Initialized at %s (collection=%s, model=%s)",
-                    getattr(vector_memory, '_path', 'unknown'),
-                    vector_memory_collection,
-                    vector_memory_model,
-                )
-                # Pre-warm embedder + 4-layer adapter at boot so the first
-                # chat turn is not blocked on HuggingFace download / Chroma
-                # open / sqlite-vec load. Failures are non-fatal.
-                # When the V2 cognitive engine is the active stack, skip the
-                # V1 adapter pre-warm + legacy integrity backfill (V2 uses
-                # its own SQLite stores; the V1 4-layer adapter is not on
-                # the read/write path). This also avoids the Chroma/sqlite-vec
-                # load cost at boot for V2 deployments.
-                try:
-                    from kazma_core.memory.config import memory_v2_enabled
-
-                    _v2_active = memory_v2_enabled()
-                except Exception:
-                    _v2_active = False
-                if _v2_active:
-                    logger.info("[VectorMemory] V2 active — skipping V1 adapter pre-warm + backfill")
+                emb = get_embedder()
+                if emb is not None:
+                    vec = emb.encode("kazma memory warmup")
+                    logger.info(
+                        "[Memory] V2 embedder ready (%s, dim=%s, sample=%d)",
+                        type(emb).__name__,
+                        getattr(emb, "dim", "?"),
+                        len(vec or []),
+                    )
                 else:
-                  try:
-                    from kazma_core.memory.embedder import get_embedder
-                    from kazma_core.swarm.memory.adapter import get_adapter
-
-                    emb = get_embedder()
-                    if emb is not None:
-                        vec = emb.encode("kazma memory warmup")
-                        logger.info(
-                            "[VectorMemory] Embedder ready (%s, dim=%s, sample=%d)",
-                            type(emb).__name__,
-                            getattr(emb, "dim", "?"),
-                            len(vec or []),
-                        )
-                    adapter = get_adapter()
-                    if adapter is not None:
-                        health = adapter.health()
-                        logger.info("[VectorMemory] Adapter layers: %s", health)
-                    # One-shot integrity repair: zero timestamps / null L3
-                    # embeddings / empty graph (legacy write-path bugs).
-                    try:
-                        import threading
-                        from kazma_core.memory.backfill import maybe_auto_backfill
-
-                        def _bg_backfill() -> None:
-                            try:
-                                stats = maybe_auto_backfill(max_rows=500)
-                                if stats:
-                                    logger.info(
-                                        "[VectorMemory] Integrity backfill: %s", stats
-                                    )
-                            except Exception as bf_exc:
-                                logger.warning(
-                                    "[VectorMemory] Integrity backfill failed: %s",
-                                    bf_exc,
-                                )
-
-                        threading.Thread(
-                            target=_bg_backfill,
-                            name="kazma-memory-backfill",
-                            daemon=True,
-                        ).start()
-                    except Exception as bf_start:
-                        logger.debug(
-                            "[VectorMemory] Backfill schedule skipped: %s", bf_start
-                        )
-                  except Exception as warm_exc:
-                    logger.warning("[VectorMemory] Pre-warm skipped: %s", warm_exc)
+                    logger.warning(
+                        "[Memory] V2 embedder is None — dense recall will degrade to FTS5. "
+                        "Install the rag extra: pip install -e '.[rag]'"
+                    )
             except Exception as e:
-                logger.warning("[VectorMemory] Not available: %s", e)
-                logger.info(
-                    "[VectorMemory] RAG memory disabled. "
-                    "Install the 'rag' extra (pip install -e '.[rag]') to enable."
-                )
+                logger.warning("[Memory] V2 embedder pre-warm failed: %s", e)
 
         self.agent = KazmaAgent(self.config)
 
@@ -1314,13 +1246,7 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Cron] Failed to start: %s", e)
 
-        # Flush any pending VectorMemory degradation alerts that were
-        # scheduled during construction (outside the event loop).
-        try:
-            from kazma_core.memory.vector_store import flush_pending_alerts
-            await flush_pending_alerts()
-        except Exception as e:
-            logger.debug("[Startup] flush_pending_alerts: %s", e)
+        # (VectorMemory degradation-alert flush removed with the V1 stack.)
 
     async def _on_shutdown(self) -> None:
         """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
@@ -1426,24 +1352,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.debug("[app] SessionManager close: %s", e)
 
-        try:
-            from kazma_core.memory import vector_store as _vs
-
-            vm = getattr(_vs, "_instance", None) or getattr(_vs, "VectorMemory", None)
-            for attr in ("get_vector_memory", "get_default", "default_memory"):
-                fn = getattr(_vs, attr, None)
-                if callable(fn):
-                    try:
-                        vm = fn()
-                        break
-                    except Exception:
-                        pass
-            if vm is not None and hasattr(vm, "close"):
-                maybe = vm.close()
-                if asyncio.iscoroutine(maybe):
-                    await maybe
-        except Exception as e:
-            logger.debug("[app] vector memory close: %s", e)
+        # (VectorMemory close removed with the V1 stack.)
 
         if self.gateway is None:
             return

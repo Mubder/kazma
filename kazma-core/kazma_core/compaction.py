@@ -105,42 +105,33 @@ class CompactionEngine:
         # content, so it MUST be run through filter_injection before it lands
         # in memory — otherwise attacker text bypasses the consolidator's
         # sanitization and is retrieved + re-injected on future turns.
-        if self.memory_store is not None:
+        try:
+            import time
+            safe_summary = summary
             try:
-                import time
-                safe_summary = summary
-                try:
-                    from kazma_core.safety.prompt_fence import is_override_delta
+                from kazma_core.safety.prompt_fence import is_override_delta
 
-                    if is_override_delta(summary):
-                        logger.warning(
-                            "[Compaction] summary matched an injection marker — "
-                            "NOT auto-storing to memory (would poison future prompts)"
-                        )
-                        safe_summary = None
-                except Exception:
-                    pass
-                if safe_summary is not None:
-                    # V2-native: store the summary as a V2 episode. The
-                    # is_override_delta guard above MUST run first (audit
-                    # AC4 — unsanitized summaries poison future prompts).
-                    try:
-                        from kazma_core.memory.swarm_bridge import store_compaction_summary
-
-                        store_compaction_summary(
-                            safe_summary,
-                            metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"},
-                        )
-                        logger.debug("Auto-stored compaction summary to V2 memory")
-                    except Exception:
-                        logger.debug("V2 summary store failed, trying legacy store", exc_info=True)
-                        await self.memory_store.store(
-                            safe_summary,
-                            metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"}
-                        )
-                        logger.debug("Auto-stored compaction summary to memory")
+                if is_override_delta(summary):
+                    logger.warning(
+                        "[Compaction] summary matched an injection marker — "
+                        "NOT auto-storing to memory (would poison future prompts)"
+                    )
+                    safe_summary = None
             except Exception:
-                logger.debug("Auto-store failed (non-fatal)", exc_info=True)
+                pass
+            if safe_summary is not None:
+                # V2-native: store the summary as a V2 episode. The
+                # is_override_delta guard above MUST run first (audit
+                # AC4 — unsanitized summaries poison future prompts).
+                from kazma_core.memory.swarm_bridge import store_compaction_summary
+
+                store_compaction_summary(
+                    safe_summary,
+                    metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"},
+                )
+                logger.debug("Auto-stored compaction summary to V2 memory")
+        except Exception:
+            logger.debug("Auto-store failed (non-fatal)", exc_info=True)
 
         # Step 3: Retrieve relevant memories based on the summary
         memories = await self.retrieve_memories(summary, limit=5)
@@ -280,107 +271,25 @@ class CompactionEngine:
         return summary
 
     async def retrieve_memories(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Retrieve relevant memories from the memory store.
-
-        Handles both async (``await search(query, limit=)``) and sync
-        (``search(query, n_results=)``) backends gracefully.  This makes the
-        compaction engine compatible with ``AsyncMemoryAdapter`` (the canonical
-        wrapper), ``UnifiedMemoryAdapter.search_dict()``, raw ``VectorMemory`` (sync),
-        and any future async backend.
+        """Retrieve relevant memories via V2 recall (the single read path).
 
         Args:
             query: Search query (typically the conversation summary).
             limit: Maximum number of memories to retrieve.
 
         Returns:
-            List of memory dicts, or empty list if no memory store is configured
-            or retrieval fails.
+            List of memory dicts (id/content/text/score/source_layer/metadata),
+            or empty list if V2 recall fails or finds nothing.
         """
-        # Prefer V2 recall when the cognitive engine is active — it is the
-        # single read source of truth after the V1→V2 migration. Falls
-        # through to the configured legacy store only if V2 is off/empty.
         try:
-            from kazma_core.memory.config import memory_v2_enabled
+            from kazma_core.memory.recall import search as v2_search
 
-            if memory_v2_enabled():
-                from kazma_core.memory.recall import search as v2_search
-
-                hits = v2_search(query, limit=limit)
-                if hits:
-                    logger.info("Retrieved %d V2 memories for compaction", len(hits))
-                    return hits
-                # V2 returned nothing — fall through to the configured store
-                # so compaction isn't starved during the dual-write transition.
+            hits = v2_search(query, limit=limit)
+            logger.info("Retrieved %d V2 memories for compaction", len(hits))
+            return hits
         except Exception:
-            logger.debug("[Compaction] V2 recall probe failed", exc_info=True)
-
-        if self.memory_store is None:
-            # Lazy resolution: if no store was passed at construction time
-            # (e.g. because VectorMemory was set AFTER the agent was built),
-            # try to resolve it now from the singleton. This fixes the
-            # initialization-ordering issue where app.py constructs KazmaAgent
-            # before calling set_vector_memory().
-            store = self._resolve_memory_store()
-            if store is None:
-                # No legacy store configured — try V2 recall directly so
-                # compaction still injects memories on a V2-only deployment.
-                try:
-                    from kazma_core.memory.config import memory_v2_enabled
-                    if memory_v2_enabled():
-                        from kazma_core.memory.recall import search as v2_search
-                        return v2_search(query, limit=limit)
-                except Exception:
-                    logger.debug("[Compaction] V2 recall fallback failed", exc_info=True)
-                return []
-        else:
-            store = self.memory_store
-
-        try:
-            result = store.search(query, limit=limit)
-            # If the backend is async (e.g. AsyncMemoryAdapter or UnifiedMemoryAdapter), await it.
-            if asyncio.iscoroutine(result):
-                memories = await result
-            else:
-                memories = result
-            logger.info("Retrieved %d memories for compaction", len(memories))
-            return memories
-        except TypeError:
-            # Fallback: the backend may use n_results= instead of limit=.
-            try:
-                result = store.search(query, n_results=limit)
-                if asyncio.iscoroutine(result):
-                    memories = await result
-                else:
-                    memories = result
-                logger.info("Retrieved %d memories for compaction (n_results fallback)", len(memories))
-                return memories
-            except Exception:
-                logger.exception("Memory retrieval failed during compaction (n_results fallback)")
-                return []
-        except Exception:
-            logger.exception("Memory retrieval failed during compaction")
+            logger.debug("[Compaction] V2 recall failed", exc_info=True)
             return []
-
-    def _resolve_memory_store(self) -> Any:
-        """Lazily resolve the memory store from the VectorMemory singleton.
-
-        Called when ``self.memory_store`` is None. Wraps the singleton in an
-        ``AsyncMemoryAdapter`` so the compaction engine can ``await`` it.
-        """
-        try:
-            from kazma_core.agent.tool_registry import get_vector_memory
-            from kazma_core.memory.async_adapter import wrap_vector_memory
-
-            vm = get_vector_memory()
-            if vm is not None:
-                logger.debug("CompactionEngine: lazily resolved VectorMemory singleton")
-                store = wrap_vector_memory(vm)
-                # Cache it so we don't re-resolve on every compaction.
-                self.memory_store = store
-                return store
-        except Exception:
-            logger.debug("CompactionEngine: could not lazily resolve memory store", exc_info=True)
-        return None
 
     def _build_compacted_system(self, summary: str, memories: list[dict[str, Any]]) -> str:
         """Build the system message content for the compacted context.

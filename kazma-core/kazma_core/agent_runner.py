@@ -175,29 +175,11 @@ class KazmaAgent:
         self._memory_backend = None
         self._init_memory()
 
-        # Context Authority (80% compaction) — memory store wiring.
-        # When the V2 cognitive engine is active, compaction retrieves via
-        # V2 recall() directly (memory_store=None → CompactionEngine probes
-        # V2 first), so the V1 adapter is not constructed here. When V2 is
-        # off, fall back to the legacy UnifiedMemoryAdapter (4-layer RRF) →
-        # VectorMemory fallback (preserves the V1 rollback path).
+        # Context Authority (80% compaction) — V2 is the single memory stack.
+        # Compaction retrieves via V2 recall() directly (memory_store=None),
+        # so no V1 adapter / VectorMemory is constructed here.
         _memory_store = None
-        try:
-            from kazma_core.memory.config import memory_v2_enabled
-
-            if memory_v2_enabled():
-                logger.info("ContextAuthority wired for V2 recall (memory_store deferred to V2)")
-            else:
-                from kazma_core.swarm.memory.adapter import get_adapter
-                _memory_store = get_adapter()
-                logger.info("ContextAuthority wired with UnifiedMemoryAdapter (4-layer RRF)")
-        except Exception:
-            # Fallback to VectorMemory-only if adapter initialization fails
-            from kazma_core.agent.tool_registry import get_vector_memory
-            from kazma_core.memory.async_adapter import wrap_vector_memory
-            _vm = get_vector_memory()
-            _memory_store = wrap_vector_memory(_vm) if _vm is not None else None
-            logger.warning("ContextAuthority fallback to VectorMemory (4-layer unavailable)")
+        logger.info("ContextAuthority wired for V2 recall (memory_store deferred to V2)")
 
         self.authority: ContextAuthority = create_authority(
             model=self.config.default_model,
@@ -384,13 +366,10 @@ class KazmaAgent:
         referenced ``self.memory`` now transparently uses the canonical
         ChromaDB/FTS5 backend.
         """
-        if self._memory_backend is not None:
-            return self._memory_backend
-        try:
-            from kazma_core.agent.tool_registry import get_vector_memory
-            return get_vector_memory()
-        except Exception:
-            return None
+        # V2 is the single memory stack; the legacy VectorMemory singleton is
+        # gone. This property is retained for backward-compat but returns the
+        # explicit backend only (None unless one was injected at construction).
+        return self._memory_backend
 
     def _make_compaction_client(self) -> Any:
         """Create a lightweight LLM client for the compaction engine."""
