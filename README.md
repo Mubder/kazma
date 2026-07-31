@@ -36,14 +36,14 @@ We engineered Kazma on those same pillars — not as metaphor, but as architectu
 
 ## 🧩 Features
 
-### 🧠 Agent Brain
-LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80% context compaction, and **per-turn RAG retrieval** — memories injected on every message, not just at compaction.
+### 🧠 Agent Brain & V2 Cognitive Memory
+LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80% context compaction, and **Pure V2 Cognitive Memory** — bi-temporal belief tracking (`valid_from` / `valid_until`), Local Ego-Graph Personalized PageRank (PPR), RRF episode retrieval, and prompt-fenced per-turn context injection on every message.
 
-### 🐝 Swarm Orchestration
-Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with circuit breakers, retries, and a self-improvement engine that learns from swarm outcomes automatically.
+### 🐝 Swarm Orchestration & Autoscaler
+Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with a **Dynamic Swarm Autoscaler** that auto-spawns specialist workers from templates (`coder`, `researcher`, `generalist`) with automatic best-model-per-task routing (coding, reasoning, vision).
 
 ### 🔒 Triple-Wired Safety
-Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Downloaded Agent Skills are **integrity-verified (HMAC-SHA256)** at load — tampered skills are refused — and their content is injected behind an untrusted-data prompt fence.
+Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Downloaded Agent Skills are **integrity-verified (HMAC-SHA256)** at load, and Soul evolution deltas are injected behind an untrusted-data prompt fence (`<kazma:data untrusted>`).
 
 ### 🌐 Multi-Platform
 Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph supervisor. Platform IDs never enter LangGraph state.
@@ -52,11 +52,12 @@ Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph 
 Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol. Built in Kuwait, for the world.
 
 ### 🔌 Rich Ecosystem
-- **Any LLM** — OpenAI, Anthropic, Gemini, DeepSeek, xAI, Ollama, and 15+ more via plain HTTP
+- **Any LLM** — OpenAI, Anthropic, Gemini, DeepSeek, xAI, Ollama, and 15+ more via plain HTTP with Vision Capability Routing
 - **MCP Marketplace** — One-click install from 85+ preset MCP servers with namespaced tools
+- **Pluggable Scraping Proxy** — Rotating residential/mobile proxy provider (`anyip.io`) with automatic 429/403 backoff retries and user-agent rotation
 - **Knowledge Library** — Ingest entire documentation sites into searchable RAG corpora with cited sources
 - **IDE Subsystem** — Transport-agnostic coding backend: multi-tab editor, file-aware AI chat, `/ide` commands across all platforms
-- **Time-Travel Replay** — Snapshot every iteration; restore, fork, and compare conversation paths
+- **Time-Travel Replay & Branching** — Snapshot every iteration to SQLite WAL (`snapshots.db`); restore in-place (`/replay`), fork threads (`/fork`), and compare paths
 - **Encrypted Vault** — AES-256-GCM storage for API keys and credentials
 - **Browser, Calendar & Documents** — Playwright automation, Google/Outlook calendar, PDF/DOCX/XLSX generation
 - **Deep Research** — Multi-query web search → parallel acquire → digest → LLM synthesis with DOCX export
@@ -183,21 +184,21 @@ Full diagrams: [Architecture](docs/docs/guide/architecture.md) · [System Map](d
 
 ---
 
-## 🧠 Memory & RAG
+## 🧠 Pure V2 Cognitive Memory & RAG
 
-Kazma remembers by default — 4-layer memory with intelligent consolidation:
+Kazma operates on a unified, single-source-of-truth **V2 Cognitive Engine** — combining bi-temporal graph beliefs, hybrid episode retrieval, and associative graph traversal:
 
-| Layer | Backend | Role |
+| Component | Architecture | Role |
 |---|---|---|
-| L1 | ChromaDB | Vector agent memory |
-| L2 | SQLite graph | Structured SPO triples with FTS |
-| L3 | FTS5 | Full-text search |
-| L4 | sqlite-vec | Sparse vectors |
+| **Bi-Temporal Beliefs** | SQLite Property Graph | Single-valued functional (`valid_until`), set-valued, and state transition beliefs with temporal scrubbing (`?at=`) |
+| **Episode Retrieval** | FTS5 + `sqlite-vec` | Sparse full-text + dense vector embeddings fused via Reciprocal Rank Fusion (RRF, $k=60$) |
+| **Associative PPR** | Local Ego-Graph | Multi-hop associative weight expansion via Personalized PageRank over the belief graph |
+| **Procedural Memory** | Parametric Action DAGs | Reusable multi-step tool skills with Laplace confidence smoothing $C(d) = \frac{S+1}{N+2}$ and auto-quarantine |
 
-- **Reciprocal Rank Fusion** (k=60) blends all 4 layers — fail-closed durable writes
-- **Per-turn RAG injection** — relevant memories are injected on every message
-- **Auto-store + Consolidator** — durable facts written post-turn; LLM consolidator writes clean SPO triples into the property graph every N turns
-- **Soul Store** — self-improvement prompt deltas from success/failure analysis, injected behind prompt fences
+- **Per-Turn Prompt-Fenced RAG** — Relevant beliefs and episodes are retrieved and wrapped in `<kazma:data untrusted>` prompt fences on every turn.
+- **Durable Task Queue (`memory_ops.db`)** — Async micro-consolidation workers extract facts and mutate beliefs post-turn without blocking execution threads.
+- **Automated Nightly Backups & Exports** — 24-hour background schedulers execute native `sqlite3.backup()` snapshot copies and JSONL / GraphML exports automatically.
+- **Prompt-Fenced Soul Engine** — Self-improvement prompt deltas from success/failure outcomes are persisted to `ConfigStore` and safely injected into system prompts.
 
 Deep dive: [Memory & RAG](docs/docs/guide/memory-and-rag.md)
 
