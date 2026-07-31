@@ -270,6 +270,124 @@ def register_direct_routes(self: Any) -> None:
         except Exception as exc:
             return {"beliefs": [], "error": str(exc)}
 
+    @self.app.get("/api/memory/v2/graph")
+    async def _memory_v2_graph(
+        at: float = 0.0,
+        type: str = "",
+        entity_type: str = "",
+        limit: int = 200,
+    ):
+        """V2 belief graph as {nodes, links, stats} for the canvas.
+
+        Params:
+            at: unix timestamp for bi-temporal scrubbing. When >0, returns
+                beliefs valid AT that moment (valid_from <= at AND
+                (valid_until IS NULL OR valid_until >= at)). When 0
+                (default), returns only currently-valid beliefs. Superseded
+                beliefs surfacing via ``at`` are marked ``superseded=true``
+                so the canvas can render them dashed.
+            type: filter by predicate_type ('functional'|'set'|'state').
+            entity_type: filter entities by type (person|tool|concept|...).
+            limit: max nodes (default 200).
+        """
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+
+            # ── Belief links ──
+            bsql = (
+                "SELECT id, subject, object, predicate, predicate_type, "
+                "confidence, structural_importance, valid_from, valid_until "
+                "FROM beliefs WHERE invalidated_at IS NULL"
+            )
+            bparams: list = []
+            if at and float(at) > 0:
+                atf = float(at)
+                bsql += " AND valid_from <= ? AND (valid_until IS NULL OR valid_until >= ?)"
+                bparams.extend([atf, atf])
+            else:
+                bsql += " AND valid_until IS NULL"
+            if type and type.strip():
+                bsql += " AND predicate_type = ?"
+                bparams.append(type.strip())
+            bsql += " ORDER BY (structural_importance * confidence) DESC LIMIT ?"
+            bparams.append(max(10, min(limit * 4, 800)))
+            brows = conn.execute(bsql, bparams).fetchall()
+
+            # ── Entities referenced by the surviving beliefs ──
+            ref_ids: set[str] = set()
+            for b in brows:
+                ref_ids.add(b["subject"])
+                ref_ids.add(b["object"])
+            ref_ids.add("user")
+            nodes: list[dict] = []
+            ent_lookup: dict[str, dict] = {}
+            if ref_ids:
+                placeholders = ",".join("?" * len(ref_ids))
+                erows = conn.execute(
+                    f"SELECT id, name, type, is_high_stakes FROM entities WHERE id IN ({placeholders})",
+                    tuple(ref_ids),
+                ).fetchall()
+                ent_lookup = {r["id"]: dict(r) for r in erows}
+
+            belief_count: dict[str, int] = {}
+            for b in brows:
+                belief_count[b["subject"]] = belief_count.get(b["subject"], 0) + 1
+                belief_count[b["object"]] = belief_count.get(b["object"], 0) + 1
+
+            for eid in ref_ids:
+                e = ent_lookup.get(eid)
+                etype = e["type"] if e else "concept"
+                if entity_type and entity_type.strip() and etype != entity_type.strip():
+                    continue
+                nodes.append({
+                    "id": eid,
+                    "name": (e["name"] if e and e["name"] else eid),
+                    "type": etype,
+                    "isHighStakes": bool(e["is_high_stakes"]) if e else False,
+                    "beliefCount": belief_count.get(eid, 0),
+                })
+
+            links: list[dict] = []
+            node_ids = {n["id"] for n in nodes}
+            for b in brows:
+                if b["subject"] not in node_ids or b["object"] not in node_ids:
+                    continue
+                links.append({
+                    "id": b["id"],
+                    "source": b["subject"],
+                    "target": b["object"],
+                    "label": b["predicate"],
+                    "type": b["predicate_type"],
+                    "confidence": b["confidence"],
+                    "superseded": b["valid_until"] is not None,
+                    "valid_from": b["valid_from"],
+                    "valid_until": b["valid_until"],
+                })
+
+            conn.close()
+            nodes.sort(key=lambda n: n["beliefCount"], reverse=True)
+            kept_ids = {n["id"] for n in nodes[:limit]}
+            links = [l for l in links if l["source"] in kept_ids and l["target"] in kept_ids]
+
+            valid_froms = [l["valid_from"] for l in links if l["valid_from"]]
+            stats = {
+                "nodes": len(nodes[:limit]),
+                "links": len(links),
+                "superseded": sum(1 for l in links if l["superseded"]),
+                "earliest": min(valid_froms, default=0),
+                "latest": max(valid_froms, default=0),
+            }
+            return {"nodes": nodes[:limit], "links": links, "stats": stats}
+        except Exception as exc:
+            return {"nodes": [], "links": [], "stats": {}, "error": str(exc)}
+
     import kazma_core.time_travel as _tt_mod
 
     @self.app.get("/api/session/history")
