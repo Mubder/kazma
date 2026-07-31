@@ -1,18 +1,26 @@
-"""Memory backup, restoration, and maintenance operations for Kazma's memory architecture.
+"""Memory maintenance operations — RETIRED (V1→V2 cutover).
 
-This module provides routines to perform zero-downtime hot backups, safe rolling
-restorations with pre-restore checkpoints, database optimizations (VACUUM/ANALYZE),
-and hot-reloading of active memory singletons.
+The V1 memory stack (ChromaDB VectorMemory, FTS5, property graph) was removed.
+These functions backed the legacy ``/api/system/memory/*`` routes, which now
+call the V2 equivalents directly:
+
+  - backup  → ``kazma_core.memory.backup.perform_native_backups`` (native
+    sqlite3.backup of memory_state.db + memory_ops.db).
+  - restore → file-swap memory_state.db from a chosen backup (route handler
+    in kazma_ui/routes_direct.py).
+  - maintenance (VACUUM/ANALYZE) → runs against the two V2 DBs directly
+    (route handler in kazma_ui/routes_direct.py).
+  - backups list → scans ``paths.backups_dir()`` for V2 backup files.
+
+The stubs below are retained so ``from kazma_core.system import ...``
+(``system/__init__.py`` re-exports them) does not break any lingering
+importer, but they are no-ops that log the retirement. Do not add new
+callers — call the V2 functions directly.
 """
 
 from __future__ import annotations
 
-import os
-import json
-import shutil
 import logging
-import sqlite3
-from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -29,361 +37,72 @@ logger = logging.getLogger(__name__)
 
 
 def get_memory_paths() -> tuple[Path, Path, Path]:
-    """Retrieve resolved absolute paths for memory resources and backups.
+    """Resolve (fts5_path, vector_path, backups_dir) — V1 paths are inert.
 
-    Returns:
-        A tuple of (fts5_path, vector_path, backups_dir) Path objects.
+    The V1 fts5/vector paths no longer exist post-cutover; they're returned
+    for backward-compat with code that still calls this (e.g. _get_system_status
+    size probes, which will report 0 since the files are gone). backups_dir is
+    the live V2 backups directory.
     """
-    from kazma_core.paths import fts5_memory_path, vector_memory_path, backups_dir as _backups_dir
-    fts5_path = Path(fts5_memory_path())
-    vector_path = Path(vector_memory_path())
-    backups_dir = _backups_dir()
-    return fts5_path, vector_path, backups_dir
+    from kazma_core.paths import (
+        backups_dir as _backups_dir,
+        fts5_memory_path,
+        vector_memory_path,
+    )
+
+    return (
+        Path(fts5_memory_path()),
+        Path(vector_memory_path()),
+        _backups_dir(),
+    )
 
 
 def create_memory_backup() -> dict[str, Any]:
-    """Perform a zero-downtime hot backup of both keyword and vector stores.
-
-    Creates a timestamped backup directory in the backup folder containing
-    copied/backed-up databases and a metadata manifest file.
-
-    Returns:
-        A summary dictionary of the created backup.
-    """
-    fts5_path, vector_path, backups_dir = get_memory_paths()
-
-    # Generate timestamped backup folder
-    backup_name = f"memory_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
-    backup_dir = backups_dir / backup_name
-    backup_dir.mkdir(parents=True, exist_ok=True)
-
-    fts5_size = None
-    fts5_count = 0
-    vector_size = None
-    vector_count = None
-
-    logger.info("[Maintenance] Initiating memory backup: %s", backup_name)
-
-    # 1. Hot Backup keyword database (FTS5 SQLite)
-    if fts5_path.exists():
-        backup_db_file = backup_dir / "memory.db"
-        try:
-            # Safe zero-downtime hot backup via SQLite backup API
-            src_conn = sqlite3.connect(fts5_path)
-            dest_conn = sqlite3.connect(backup_db_file)
-            try:
-                src_conn.backup(dest_conn)
-            finally:
-                dest_conn.close()
-                src_conn.close()
-
-            fts5_size = backup_db_file.stat().st_size
-
-            # Count rows for manifest
-            try:
-                conn = sqlite3.connect(backup_db_file)
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'")
-                    if cursor.fetchone():
-                        cursor.execute("SELECT COUNT(*) FROM memory_fts")
-                        fts5_count = cursor.fetchone()[0]
-                finally:
-                    conn.close()
-            except Exception as e:
-                logger.debug("[Maintenance] Could not count FTS5 records: %s", e)
-        except Exception as e:
-            logger.error("[Maintenance] FTS5 hot backup failed: %s", e, exc_info=True)
-            # Cleanup half-baked backup dir
-            if backup_dir.exists():
-                shutil.rmtree(backup_dir)
-            raise e
-
-    # 2. Backup vector store (ChromaDB)
-    if vector_path.exists() and vector_path.is_dir():
-        backup_vector_dir = backup_dir / "vector_memory"
-        try:
-            shutil.copytree(vector_path, backup_vector_dir, dirs_exist_ok=True)
-            vector_size = sum(f.stat().st_size for f in backup_vector_dir.glob("**/*") if f.is_file())
-
-            # Count entries from active memory singleton if accessible
-            from kazma_core.agent.tool_registry import get_vector_memory
-            vm = get_vector_memory()
-            if vm and not getattr(vm, "degraded", False):
-                try:
-                    vector_count = vm.count
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.error("[Maintenance] Vector memory backup failed: %s", e, exc_info=True)
-            if backup_dir.exists():
-                shutil.rmtree(backup_dir)
-            raise e
-
-    # 3. Compile and save Manifest file
-    manifest = {
-        "name": backup_name,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "fts5_size": fts5_size,
-        "fts5_count": fts5_count,
-        "vector_size": vector_size,
-        "vector_count": vector_count,
-    }
-
-    manifest_file = backup_dir / "backup_manifest.json"
-    with open(manifest_file, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-
-    logger.info("[Maintenance] Backup %s completed successfully.", backup_name)
-    return manifest
+    """Retired — use ``memory.backup.perform_native_backups`` (V2)."""
+    logger.warning(
+        "[maintenance] create_memory_backup() is retired (V1 removed). "
+        "Use memory.backup.perform_native_backups() via POST /api/system/memory/backup."
+    )
+    return {"status": "retired", "reason": "V1 memory stack removed; use V2 backup route."}
 
 
 async def restore_memory_backup(backup_name: str) -> dict[str, Any]:
-    """Restore memory stores from a designated backup with pre-restore rollbacks.
-
-    Args:
-        backup_name: The subdirectory folder name under backups directory.
-
-    Returns:
-        Status dictionary indicating success.
-    """
-    fts5_path, vector_path, backups_dir = get_memory_paths()
-    backup_dir = backups_dir / backup_name
-
-    if not backup_dir.exists() or not (backup_dir / "backup_manifest.json").exists():
-        raise FileNotFoundError(f"Backup target {backup_name} not found or invalid.")
-
-    logger.info("[Maintenance] Initiating restore from backup: %s", backup_name)
-
-    # 1. Create a safe temporary rolling rollback checkpoint
-    temp_rollback_dir = backups_dir / ".temp_rollback"
-    if temp_rollback_dir.exists():
-        shutil.rmtree(temp_rollback_dir)
-    temp_rollback_dir.mkdir(parents=True)
-
-    try:
-        if fts5_path.exists():
-            src_conn = sqlite3.connect(fts5_path)
-            dest_conn = sqlite3.connect(temp_rollback_dir / "memory.db")
-            try:
-                src_conn.backup(dest_conn)
-            finally:
-                dest_conn.close()
-                src_conn.close()
-        if vector_path.exists():
-            shutil.copytree(vector_path, temp_rollback_dir / "vector_memory", dirs_exist_ok=True)
-    except Exception as e:
-        logger.warning("[Maintenance] Rolling backup checkpoint warning: %s. Proceeding.", e)
-
-    # 2. Execute restoration with rollback protection
-    try:
-        # Restore FTS5 DB (Keyword)
-        backup_db_file = backup_dir / "memory.db"
-        if backup_db_file.exists():
-            # To bypass Windows file locking, write directly using SQLite's backup API
-            dest_conn = sqlite3.connect(fts5_path)
-            src_conn = sqlite3.connect(backup_db_file)
-            try:
-                src_conn.backup(dest_conn)
-            finally:
-                dest_conn.close()
-                src_conn.close()
-            logger.info("[Maintenance] Restored FTS5 SQLite database in-place.")
-        else:
-            if fts5_path.exists():
-                fts5_path.unlink()
-
-        # Restore Vector Memory (ChromaDB)
-        backup_vector_dir = backup_dir / "vector_memory"
-        if backup_vector_dir.exists():
-            # Disconnect vector memory to try to release locks
-            from kazma_core.agent.tool_registry import get_vector_memory
-            vm = get_vector_memory()
-            if vm and hasattr(vm, "_client"):
-                try:
-                    del vm._client
-                    import gc
-                    gc.collect()
-                except Exception:
-                    pass
-
-            if vector_path.exists():
-                try:
-                    shutil.rmtree(vector_path)
-                except Exception as e:
-                    logger.debug("[Maintenance] Could not delete active vector folder. Overwriting files. Error: %s", e)
-
-            shutil.copytree(backup_vector_dir, vector_path, dirs_exist_ok=True)
-            logger.info("[Maintenance] Restored Vector store files.")
-        else:
-            if vector_path.exists():
-                try:
-                    shutil.rmtree(vector_path)
-                except Exception:
-                    pass
-
-        # 3. Dynamic Hot Reload of memory instances
-        await _hot_reload_memory()
-
-        # Clean up temp rollback folder
-        if temp_rollback_dir.exists():
-            shutil.rmtree(temp_rollback_dir)
-
-        logger.info("[Maintenance] Restoration of backup %s completed successfully.", backup_name)
-        return {"status": "success", "message": f"Successfully restored {backup_name} and hot-reloaded memory stores."}
-
-    except Exception as restore_err:
-        logger.error("[Maintenance] Restoration failed: %s. Reverting to rollback checkpoint.", restore_err, exc_info=True)
-        try:
-            # Revert to rollback checkpoint
-            if (temp_rollback_dir / "memory.db").exists():
-                dest_conn = sqlite3.connect(fts5_path)
-                src_conn = sqlite3.connect(temp_rollback_dir / "memory.db")
-                try:
-                    src_conn.backup(dest_conn)
-                finally:
-                    dest_conn.close()
-                    src_conn.close()
-            if (temp_rollback_dir / "vector_memory").exists():
-                if vector_path.exists():
-                    shutil.rmtree(vector_path, ignore_errors=True)
-                shutil.copytree(temp_rollback_dir / "vector_memory", vector_path, dirs_exist_ok=True)
-            await _hot_reload_memory()
-            logger.info("[Maintenance] Reverted to safe rollback checkpoint successfully.")
-        except Exception as rollback_err:
-            logger.critical("[Maintenance] CRITICAL: Reversion to safe rollback checkpoint also failed: %s", rollback_err, exc_info=True)
-        
-        if temp_rollback_dir.exists():
-            shutil.rmtree(temp_rollback_dir, ignore_errors=True)
-        raise restore_err
+    """Retired — use the V2 restore route (POST /api/system/memory/restore)."""
+    logger.warning(
+        "[maintenance] restore_memory_backup() is retired (V1 removed). "
+        "Use POST /api/system/memory/restore with {backup_name}."
+    )
+    return {"status": "retired", "reason": "V1 memory stack removed; use V2 restore route."}
 
 
 def run_memory_integrity_backfill(**kwargs: Any) -> dict[str, Any]:
-    """Repair L3 timestamps/embeddings and re-seed the knowledge graph."""
-    from kazma_core.memory.backfill import run_memory_integrity_backfill as _run
-
-    return _run(**kwargs)
+    """Retired — the V1 L3/graph integrity repair has no V2 equivalent
+    (V2 is bi-temporal, no legacy NULL timestamps to repair)."""
+    logger.warning(
+        "[maintenance] run_memory_integrity_backfill() is retired (V1 removed). "
+        "V2 has no equivalent (bi-temporal stores need no integrity backfill)."
+    )
+    return {"status": "retired", "reason": "V1 integrity repair not applicable to V2."}
 
 
 def run_memory_maintenance() -> dict[str, Any]:
-    """Execute maintenance optimization (VACUUM and ANALYZE) on memory databases.
-
-    Reclaims disk space, optimizes index statistics, and returns reclaimed metrics.
-
-    Returns:
-        Optimization outcome results detailing space reclaimed.
-    """
-    fts5_path, vector_path, _ = get_memory_paths()
-    details: dict[str, Any] = {}
-
-    # Integrity repair before VACUUM (so ANALYZE sees fixed rows)
-    try:
-        details["integrity"] = run_memory_integrity_backfill(force=False, encode=True)
-    except Exception as e:
-        logger.warning("[Maintenance] Integrity backfill skipped: %s", e)
-        details["integrity"] = {"status": "failed", "error": str(e)}
-
-    # 1. Optimize Keyword Memory (SQLite FTS5)
-    if fts5_path.exists():
-        try:
-            size_before = fts5_path.stat().st_size
-            conn = sqlite3.connect(fts5_path)
-            try:
-                conn.execute("VACUUM;")
-                conn.execute("ANALYZE;")
-            finally:
-                conn.close()
-            size_after = fts5_path.stat().st_size
-
-            details["fts5"] = {
-                "status": "success",
-                "size_before": size_before,
-                "size_after": size_after,
-                "reclaimed_bytes": max(0, size_before - size_after),
-            }
-            logger.info("[Maintenance] FTS5 SQLite optimized successfully.")
-        except Exception as e:
-            logger.error("[Maintenance] FTS5 optimization failed: %s", e)
-            details["fts5"] = {"status": "failed", "error": str(e)}
-
-    # 2. Optimize Vector Memory Database (ChromaDB chroma.sqlite3 if present)
-    chroma_sqlite = vector_path / "chroma.sqlite3"
-    if chroma_sqlite.exists():
-        try:
-            size_before = chroma_sqlite.stat().st_size
-            conn = sqlite3.connect(chroma_sqlite)
-            try:
-                conn.execute("VACUUM;")
-                conn.execute("ANALYZE;")
-            finally:
-                conn.close()
-            size_after = chroma_sqlite.stat().st_size
-
-            details["vector"] = {
-                "status": "success",
-                "size_before": size_before,
-                "size_after": size_after,
-                "reclaimed_bytes": max(0, size_before - size_after),
-            }
-            logger.info("[Maintenance] Vector store SQLite optimized successfully.")
-        except Exception as e:
-            logger.error("[Maintenance] Vector SQLite optimization failed: %s", e)
-            details["vector"] = {"status": "failed", "error": str(e)}
-
-    return details
+    """Retired — use the V2 maintenance route (VACUUM/ANALYZE on the two V2 DBs)."""
+    logger.warning(
+        "[maintenance] run_memory_maintenance() is retired (V1 removed). "
+        "Use POST /api/system/memory/maintenance (VACUUM on V2 DBs)."
+    )
+    return {"status": "retired", "reason": "V1 memory stack removed; use V2 maintenance route."}
 
 
 def list_memory_backups() -> list[dict[str, Any]]:
-    """Retrieve and list all available memory backups sorted by date.
-
-    Returns:
-        A sorted list of manifest dictionaries.
-    """
-    _, _, backups_dir = get_memory_paths()
-    if not backups_dir.exists():
-        return []
-
-    backups = []
-    for path in backups_dir.iterdir():
-        if path.is_dir() and not path.name.startswith("."):
-            manifest_file = path / "backup_manifest.json"
-            if manifest_file.exists():
-                try:
-                    with open(manifest_file, "r", encoding="utf-8") as f:
-                        manifest = json.load(f)
-                    backups.append(manifest)
-                except Exception as e:
-                    logger.debug("[Maintenance] Could not read manifest for %s: %s", path.name, e)
-            else:
-                # Reconstruct info if manifest is missing
-                try:
-                    fts5_size = None
-                    vector_size = None
-                    if (path / "memory.db").exists():
-                        fts5_size = (path / "memory.db").stat().st_size
-                    if (path / "vector_memory").exists():
-                        vector_size = sum(f.stat().st_size for f in (path / "vector_memory").glob("**/*") if f.is_file())
-                    
-                    backups.append({
-                        "name": path.name,
-                        "timestamp": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(),
-                        "fts5_size": fts5_size,
-                        "fts5_count": 0,
-                        "vector_size": vector_size,
-                        "vector_count": None,
-                    })
-                except Exception:
-                    pass
-
-    # Sort descending by timestamp
-    backups.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-    return backups
+    """Retired — use the V2 backups route (GET /api/system/memory/backups)."""
+    logger.warning(
+        "[maintenance] list_memory_backups() is retired (V1 removed). "
+        "Use GET /api/system/memory/backups (scans V2 backups_dir)."
+    )
+    return []
 
 
 async def _hot_reload_memory() -> None:
-    """V1 VectorMemory hot-reload — retired (V2 cutover).
-
-    V2 uses its own SQLite stores and the shared embedder; no ChromaDB
-    singleton to reload. Kept as a no-op for the maintenance call site.
-    """
+    """Retired no-op (V2 needs no ChromaDB hot-reload)."""
     logger.info("[Maintenance] V2 memory stack — no V1 hot-reload needed (no-op).")

@@ -40,16 +40,16 @@ Items are marked:
 
 | Capability | Status | Notes |
 |---|---|---|
-| ChromaDB vector memory | ✅ | Adapter L1 + VectorMemory singleton; collection `agent_memory`. |
-| Per-turn RAG | ✅ | Every user turn when `memory.per_turn_retrieval`. |
-| Compaction memory inject | ✅ | Adapter-backed retrieve + summary store. |
-| 4-layer UnifiedMemoryAdapter (RRF) | ✅ | **Chat default** (not swarm-only). Fail-closed durable store. |
-| Auto-store | ✅ | Heuristic durable facts + turn snapshots. |
-| LLM consolidator | ✅ | Facts + SPO triples; fence + dedup + cost flags. |
-| L2 SQLite property graph | ✅ | Replaces NetworkX JSON; Dashboard + `/api/memory/graph*`. |
-| FTS unified schema | ✅ | `memories` / `memories_fts` for L3 + degrade path. |
-| Document chunking | ✅ | 2000/200 on VectorMemory and adapter L1. |
-| Arabic tokenizer (FTS5) | ✅ | Symmetric normalization + clitic split. |
+| V2 cognitive engine | ✅ | Bi-temporal belief graph + 4-tier episodes + procedural DAGs. Single memory stack (V1 removed). |
+| Per-turn RAG | ✅ | V2 `recall()` (beliefs + episodes + PPR) every user turn. |
+| Compaction memory inject | ✅ | V2 `recall.search()` + summary store via `swarm_bridge`. |
+| Swarm memory bridge | ✅ | Worker results + SoulEvolution + compaction summaries written to V2. |
+| Bi-temporal belief graph | ✅ | Functional/set/state predicates; `valid_until`/`invalidated_at`. |
+| Local Ego-Graph PPR | ✅ | 2-hop, N≤200, α=0.15 recall boost. |
+| Durable consolidation queue | ✅ | `memory_ops.db` task queue + 6h macro_sleep + 24h backup/export. |
+| Procedural action DAGs | ✅ | Laplace-smoothed skill confidence C(d)=(S+1)/(N+2). |
+| Nightly backup + export | ✅ | Native `sqlite3.backup()` + JSONL/GraphML on a 24h scheduler. |
+| Arabic tokenizer (FTS5) | ✅ | V2 episode FTS5 + symmetric normalization. |
 | Multi-replica shared vectors/graph | 🔴 | Local files only — MEMORY_REMAINING S1–S2. |
 | `checkpoint_manager` in compaction | 🟡 | Still optional — LangGraph checkpointer covers turns. |
 

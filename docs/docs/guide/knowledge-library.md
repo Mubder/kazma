@@ -124,7 +124,7 @@ This mirrors the Research panel's archive pattern (a soft `archived` flag, not a
 | Web API | `kazma-ui/kazma_ui/kb_api.py` | `/api/kb/*` router. |
 | Web page | `kazma-ui/kazma_ui/templates/knowledge_base.html` + `static/js/kb.js` | `/knowledge` page. |
 
-**Why a separate namespace (not the shared `UnifiedMemoryAdapter`)?** The shared adapter's L1 is the `agent_memory` collection (KB would leak into chat recall), its L3 FTS5 layer doesn't reliably filter by metadata, and every layer keys UID on a bare `sha256(text)[:16]` which collides on identical sections across pages. The KB reuses the `VectorStore` *class* and `get_embedder()` singleton, but in dedicated per-library collections.
+**Why a separate namespace (not chat memory)?** The KB uses its own ChromaDB collections + FTS5 (`kazma_kb_<library_id>`), fully isolated from V2 chat memory (`memory_state.db` beliefs/episodes). Without isolation, KB content would leak into chat recall, and the KB's per-library metadata filtering + UID scheme (`sha256(text)[:16]`) doesn't match V2's bi-temporal belief model. The KB reuses the shared `VectorStore` *class* (`memory/vector_store_global.py`) and `get_embedder()` singleton, but in dedicated per-library collections.
 
 ## Optional dependencies
 

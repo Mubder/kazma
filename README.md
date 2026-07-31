@@ -174,10 +174,10 @@ SwarmEngine (when multi-agent is needed)
     ├── 6 dispatch patterns
     ├── Reliability layer (circuit breaker, retry, timeout)
     ├── Self-improvement (auto-learning feedback loop)
-    └── UnifiedMemoryAdapter
+    └── V2 Cognitive Engine (bi-temporal beliefs + PPR recall)
 ```
 
-Built on: `LangGraph` · `ChromaDB` · `FastAPI` · `SQLite` · `Postgres` · `Docker` · `LiteLLM` · `NetworkX`
+Built on: `LangGraph` · `FastAPI` · `SQLite` (WAL) · `Postgres` · `Docker` · `sentence-transformers` · `sqlite-vec`
 
 Full diagrams: [Architecture](docs/docs/guide/architecture.md) · [System Map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md)
 

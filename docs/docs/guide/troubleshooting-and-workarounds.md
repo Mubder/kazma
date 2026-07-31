@@ -134,45 +134,39 @@ Verify persistence via `get_config_store().get("registry.active_provider")` / `.
 
 ## 2. Memory & RAG issues
 
-> **Updated July 2026** — most previously-documented memory bugs have been fixed in the overhaul. Remaining items are design decisions, not bugs.
+> **Updated July 2026 (post-V2 cutover)** — Kazma now uses the V2 cognitive engine (bi-temporal beliefs, PPR recall) as the single memory stack. The legacy ChromaDB / VectorMemory / 4-layer RRF stack was removed. Items below reflect the V2 architecture.
 
 ### 2.1 "My agent doesn't seem to remember anything"
 
-**After the overhaul, memory works in two ways:**
+**V2 memory works in two ways:**
 
-1. **LLM tools** — the model can call `memory_search` / `memory_store` at any time.
-2. **Compaction injection** — when the conversation hits 80% of the context window, the `CompactionEngine` now **automatically retrieves the top-5 relevant memories** from ChromaDB and injects them into the fresh system message as `## Relevant Memories`. This was previously dead code; it's now active.
+1. **LLM tools** — the model can call `memory_search` / `memory_store` at any time. Both route through V2: `recall()` for reads, `mutate_belief()` for writes.
+2. **Compaction injection** — when the conversation hits 80% of the context window, the `CompactionEngine` automatically retrieves the top-5 relevant memories via V2 `recall.search()` and injects them into the fresh system message as `## Relevant Memories`.
 
 **If memories still aren't surfacing:**
-- Verify `pip install -e ".[rag]"` was run (ChromaDB + sentence-transformers).
-- Check logs for `[VectorMemory]` warnings (now logged at WARNING level, not debug).
-- Instruct the model (via `system_prompt`) to proactively call `memory_store` for important facts — there is no background auto-promotion (by design).
+- V2 recall needs the shared embedder (`get_embedder()`). Verify `pip install -e ".[rag]"` (sentence-transformers + sqlite-vec). Without it, recall degrades to FTS5-only keyword match.
+- Check `/api/memory/v2/health` — if `beliefs.active` is 0, no beliefs have been extracted yet (post-turn extraction runs on a background thread + queue; give it a few turns).
+- Check the dashboard V2 board (`/api/memory/v2/graph`) — confirms the belief graph has content.
+- Instruct the model (via `system_prompt`) to proactively call `memory_store` for important facts.
 
-### 2.2 VectorMemory not initialized
+### 2.2 V2 recall returns empty / embedder issues
 
-**Cause:** the `[rag]` extra is not installed, or ChromaDB failed to initialize (corrupt DB, disk permission, version incompatibility).
+**Cause:** the `[rag]` extra is not installed, or the embedder failed to load.
 
-**What happens:** `get_vector_memory()` returns `None`. The tools return `"Error: VectorMemory not initialized."` Compaction's memory retrieval gracefully returns `[]`.
+**What happens:** V2 `recall()` catches all failures and returns an empty `RecallResult` — tools return `"No relevant memories found."`, compaction gets `[]`. The system never crashes; it just has no semantic recall (FTS5 keyword match may still surface hits).
 
-**Fix:** `pip install -e ".[rag]"`. If it was installed but failed, check the WARNING-level log line (previously invisible at debug level — now elevated). The constructor catches all exceptions and degrades to FTS5; if even that fails, the singleton stays `None`.
+**Fix:** `pip install -e ".[rag]"`. The embedder (local MiniLM by default) loads on first use; check the boot log for `[Memory] V2 embedder ready`. If remote embeddings are configured (`memory.embedding.provider: openai-compatible`), verify the API key + `base_url`.
 
 ### 2.3 Embedding dimension mismatch (cosmetic)
 
-`kazma.yaml` declares `storage.vector_dim: 1536`, but the actual model (`all-MiniLM-L6-v2`) is **384-d**. This value is informational and not enforced by `VectorMemory`. Don't rely on it for dimension logic.
+`kazma.yaml` may declare `storage.vector_dim: 1536`, but the default model (`all-MiniLM-L6-v2`) is **384-d**. This value is informational; V2's `vector_engine.py` reads the actual dimension from the embedder at runtime. Don't rely on the config value for dimension logic.
 
-### 2.4 Long documents
+### 2.4 Previously-documented V1 bugs (historical)
 
-**Fixed:** `VectorMemory.add()` now chunks at 2000 characters with 200-char overlap. No manual pre-splitting needed.
-
-### 2.5 Previously-documented bugs (now fixed)
-
-These were fixed in the July 2026 memory overhaul:
-- ~~`distance()` SQL function error~~ → replaced with cosine distance in Python
-- ~~`_vec_available` false-positive detection~~ → now uses `load_extension("vec0")` + `vec_version()`
-- ~~Arabic FTS5 search asymmetric~~ → tokenized query now used in MATCH
-- ~~BM25 sort inverted~~ → ascending sort (most negative = best = first)
-- ~~4-layer adapter L1 dead~~ → `GlobalVectorStore` typo fixed to `VectorStore`
-- ~~4-layer callers crash on tuple unpack~~ → uses `MemoryHit` attribute access
+These were fixed in the July 2026 memory overhaul and are now moot (the V1 code was removed in the V1→V2 cutover):
+- ~~`distance()` SQL function error~~ → V2 uses `vector_engine.py` (sqlite-vec / numpy).
+- ~~`_vec_available` false-positive~~ → V2 `vector_engine.py` smoke-tests `vec_version()`.
+- ~~4-layer adapter L1 dead~~ / ~~callers crash on tuple unpack~~ → V1 adapter removed; V2 `recall.search()` returns a consistent `list[dict]` shape.
 
 ---
 

@@ -524,17 +524,10 @@ def register_direct_routes(self: Any) -> None:
                 f.stat().st_size for f in vector_path.glob("**/*") if f.is_file()
             )
 
+        # V1 ChromaDB vector count — always 0 now (V1 stack removed). Kept in
+        # the payload for dashboard backward-compat (the KPI grid still reads
+        # vector_count/vector_size); the values are inert.
         vector_count = 0
-        from kazma_core.agent.tool_registry import get_vector_memory
-
-        vm = get_vector_memory()
-        if vm is not None:
-            try:
-                vector_count = vm.count
-                if callable(vector_count):
-                    vector_count = vector_count()
-            except Exception as _e:
-                logger.debug("vector count failed: %s", _e)
 
         # V2 cognitive-engine KPIs (computed early so graph_stats below can
         # reuse the belief counts). When V2 is the active stack, the dashboard

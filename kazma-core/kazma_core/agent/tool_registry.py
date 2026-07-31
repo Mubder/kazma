@@ -56,7 +56,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any, get_type_hints
 
-__all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "get_vector_memory", "set_vector_memory", "tool"]
+__all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "tool"]
 
 logger = logging.getLogger(__name__)
 
@@ -188,23 +188,6 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
                         return None
                     return f"Safety: {op} outside workspace are not allowed. Path: {path}"
     return None
-
-# ── VectorMemory singleton — RETIRED (V1 stack removed) ──────────────
-# Kept as no-op stubs so any lingering caller (legacy maintenance/boot paths)
-# doesn't crash. V2 is the single memory stack; nothing reads this singleton.
-_vector_memory: Any = None
-
-
-def set_vector_memory(vm: Any) -> None:
-    """No-op (V1 VectorMemory removed in the V1→V2 cutover)."""
-    global _vector_memory
-    _vector_memory = vm
-
-
-def get_vector_memory() -> Any:
-    """Always returns None (V1 VectorMemory removed in the V1→V2 cutover)."""
-    return _vector_memory
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Schema generation from type hints
