@@ -163,7 +163,11 @@
     if (initialSessionId) {
       chatSessionId = initialSessionId;
       // Use setTimeout to ensure Alpine store is initialized before connecting
-      setTimeout(function() { loadSession(initialSessionId); }, 100);
+      setTimeout(function() {
+        loadSession(initialSessionId);
+        // Also check if a background turn is running (survived refresh)
+        _checkBackgroundGeneration();
+      }, 100);
     }
 
     // Load available models for the model selector
@@ -174,20 +178,50 @@
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
         if (showArchived) loadArchivedSessions(); else loadSessions();
-        // If a stream was active when we left and no tokens arrived while
-        // away, the browser may have suspended the fetch reader. Show a
-        // notice so the user knows to retry if the response is missing.
+        // If a stream was active when we left, check if the backend is
+        // still generating or if the fetch reader died. Reconnect if needed.
         if (activeStream && lastActivityTs) {
           var stallMs = Date.now() - lastActivityTs;
-          if (stallMs > 30000) {
-            // Stream stalled for >30s while backgrounded — likely dead.
-            if (KS && KS.toast) {
-              KS.toast('Connection may have stalled while away — if no response appears, resend your message.', 'warning', 5000);
-            }
+          if (stallMs > 5000) {
+            // Stream stalled for >5s while backgrounded — check server status.
+            _checkBackgroundGeneration();
           }
+        } else if (chatSessionId) {
+          // No active stream but we have a session — check if generating
+          _checkBackgroundGeneration();
         }
       }
     });
+
+    // Check if a background turn is running (called on load + visibility change)
+    function _checkBackgroundGeneration() {
+      if (!chatSessionId) return;
+      fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+          if (!data || !chatSessionId) return;
+          if (data.generating) {
+            // Server is still generating — show indicator and start polling
+            if (!activeStream) {
+              _showGeneratingIndicator();
+              _pollBackgroundTurn(chatSessionId, 0);
+            }
+          } else if (activeStream && lastActivityTs) {
+            // Stream was active but server says done — the fetch reader died.
+            // Reload to pick up the persisted result.
+            activeStream = null;
+            loadSession(chatSessionId);
+          }
+        })
+        .catch(function() { /* network error — ignore */ });
+    }
+
+    function _showGeneratingIndicator() {
+      // Show typing indicator if not already visible
+      if (typingEl && typingEl.style.display === 'none') {
+        KS.showTyping(typingEl, 'Generating response');
+      }
+    }
   }
 
   // ── Slash commands (discoverable in Web UI) ───────────

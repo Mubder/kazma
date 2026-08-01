@@ -1551,6 +1551,29 @@ def create_sse_chat_router(
             for s in _get_store().list_all()
         ]
 
+    @r.get("/api/chat/sessions/{session_id}/status")
+    async def get_session_status(session_id: str) -> dict[str, Any]:
+        """Return whether a background turn is running for this session.
+
+        Used by the frontend on page load / tab focus to detect that the
+        agent is still generating a response after a refresh or tab switch.
+        """
+        session = _get_store().get(session_id)
+        thread_id = ""
+        if session:
+            thread_id = session.thread_id or session_id
+
+        # Check if a detached turn is running for this thread
+        is_running = thread_id and thread_id in _active_turns
+        task = _active_turns.get(thread_id)
+        task_done = task.done() if task and hasattr(task, "done") else True
+
+        return {
+            "session_id": session_id,
+            "thread_id": thread_id,
+            "generating": bool(is_running and not task_done),
+        }
+
     @r.delete("/api/chat/sessions/{session_id}")
     async def delete_session(session_id: str) -> dict[str, str]:
         """Delete a chat session and its associated checkpoint data."""

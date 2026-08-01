@@ -1647,6 +1647,17 @@
               '</div>';
             container.appendChild(card);
           }
+          // Rehydrate SSE stream for tasks discovered after page refresh.
+          // If this task has no active SSE connection, attach one so the
+          // user sees live events (worker_progress, tool calls, etc.).
+          if (!activeTasks[t.id]) {
+            connectSSE(t.id, {
+              task: t.prompt || '',
+              workers: t.workers || [],
+              pattern: t.type || 'dispatch',
+              status: t.status || 'running'
+            });
+          }
         });
       })
       .catch(function() { /* tab may not be visible */ });
