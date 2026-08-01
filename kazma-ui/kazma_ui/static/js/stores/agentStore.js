@@ -187,6 +187,17 @@ document.addEventListener('alpine:init', () => {
         const chat = this._chat();
         if (chat && typeof chat.endTurn === 'function') chat.endTurn();
       }
+      
+      // If reconnecting to the same session, check for active tasks
+      if (this.sessionId === sessionId && this.connectionStatus === 'disconnected') {
+        // Notify chat.js to check for background generation after a short delay
+        setTimeout(() => {
+          const chat = this._chat();
+          if (chat && typeof chat._checkBackgroundGeneration === 'function') {
+            chat._checkBackgroundGeneration();
+          }
+        }, 100);
+      }
 
       this.sessionId = sessionId;
       this._closeSocket();
@@ -220,6 +231,15 @@ document.addEventListener('alpine:init', () => {
           this._reconnectTimer = null;
         }
         console.log(`[AgentStore] Connected to telemetry bus: ${sessionId}`);
+        
+        // After reconnecting, check if there's an active task that needs visualization
+        if (this.sessionId) {
+          // Notify chat.js to check for background generation
+          const chat = this._chat();
+          if (chat && typeof chat._checkBackgroundGeneration === 'function') {
+            setTimeout(() => chat._checkBackgroundGeneration(), 100);
+          }
+        }
       };
 
       this._socket.onmessage = (evt) => {
