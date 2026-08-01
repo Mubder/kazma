@@ -293,6 +293,41 @@ def create_ws_chat_router(
         except Exception as exc:
             logger.debug("[WS-Chat] Text backfill failed: %s", exc)
 
+    def _ensure_pending_assistant_bubble(session_id: str) -> None:
+        """Ensure a ``pending`` assistant bubble exists for the in-flight turn.
+
+        The bubble is the "turn in progress" marker (empty content + pending).
+        A reload then renders a processing indicator instead of a blank gap,
+        and the frontend poller keeps watching until the final persist pops
+        ``pending``. Mirrors the SSE path which sets the same flag.
+        """
+        try:
+            store = get_session_manager()
+            sess = store.get(session_id)
+            if not sess:
+                return
+            last = sess.messages[-1] if sess.messages else None
+            if last and last.get("role") == "assistant":
+                # An empty trailing assistant bubble is this turn's — mark it.
+                if not (last.get("content") or "").strip():
+                    last["pending"] = True
+                    store.put(sess)
+                # A bubble with content belongs to a finished turn — leave it.
+            else:
+                from datetime import UTC, datetime
+
+                sess.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "pending": True,
+                        "ts": datetime.now(UTC).isoformat(),
+                    }
+                )
+                store.put(sess)
+        except Exception as exc:
+            logger.warning("[WS-Chat] Failed ensuring pending bubble: %s", exc)
+
     async def _persist_final_assistant_message(
         graph_inst: Any,
         config: dict[str, Any],
@@ -346,6 +381,7 @@ def create_ws_chat_router(
             activity_rows = list(activity) if activity else None
             if sess.messages and sess.messages[-1].get("role") == "assistant":
                 sess.messages[-1]["content"] = text
+                sess.messages[-1].pop("pending", None)
                 if activity_rows:
                     sess.messages[-1]["activity"] = activity_rows
             else:
@@ -715,6 +751,11 @@ def create_ws_chat_router(
                     except Exception as exc:
                         logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
 
+                    # "Turn in progress" marker: a reload shows a processing
+                    # indicator instead of a blank gap, and the poller watches
+                    # until the final persist pops pending.
+                    _ensure_pending_assistant_bubble(session_id)
+
                     from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.agent.state import initial_supervisor_state
                     from kazma_core.memory.config import resolve_tenant_id
@@ -766,7 +807,6 @@ def create_ws_chat_router(
                                 input_state, config=config, version="v2"
                             )
                             tokens_emitted = False
-                            assistant_msg_added = False
 
                             async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
                                 _record_ws_activity(activity_log, ev, thought_recorded=thought_recorded)
@@ -780,12 +820,12 @@ def create_ws_chat_router(
                                                 store = get_session_manager()
                                                 sess = store.get(session_id)
                                                 if sess:
-                                                    if not assistant_msg_added:
-                                                        sess.add_message(
-                                                            "assistant", assistant_content_acc
-                                                        )
-                                                        assistant_msg_added = True
-                                                    elif (
+                                                    # Upsert the trailing
+                                                    # assistant bubble (which
+                                                    # _ensure_pending_assistant_bubble
+                                                    # created) — never append a
+                                                    # duplicate mid-stream.
+                                                    if (
                                                         sess.messages
                                                         and sess.messages[-1].get("role")
                                                         == "assistant"
@@ -795,6 +835,10 @@ def create_ws_chat_router(
                                                         )
                                                         if activity_log:
                                                             sess.messages[-1]["activity"] = list(activity_log)
+                                                    else:
+                                                        sess.add_message(
+                                                            "assistant", assistant_content_acc
+                                                        )
                                                     store.put(sess)
 
                                 # CRITICAL: when the client disconnected (refresh /
@@ -821,7 +865,11 @@ def create_ws_chat_router(
                                 if not is_lost():
                                     await asyncio.sleep(0.1)
 
-                            await _persist_final_assistant_message(
+                            interrupted = await _scan_and_emit_hitl_interrupt(
+                                graph_inst, config, websocket, thread_id
+                            )
+
+                            final_text = await _persist_final_assistant_message(
                                 graph_inst,
                                 config,
                                 session_id,
@@ -829,10 +877,46 @@ def create_ws_chat_router(
                                 prefer_text=assistant_content_acc,
                                 activity=activity_log,
                             )
-
-                            interrupted = await _scan_and_emit_hitl_interrupt(
-                                graph_inst, config, websocket, thread_id
-                            )
+                            if interrupted:
+                                # Paused for approval — the approval card takes
+                                # over. Pop pending so a reload doesn't show the
+                                # "still processing" bubble forever.
+                                try:
+                                    store = get_session_manager()
+                                    sess = store.get(session_id)
+                                    if (
+                                        sess
+                                        and sess.messages
+                                        and sess.messages[-1].get("role") == "assistant"
+                                    ):
+                                        sess.messages[-1].pop("pending", None)
+                                        store.put(sess)
+                                except Exception:
+                                    pass
+                            elif not (final_text or "").strip():
+                                # Empty turn — resolve the pending bubble with a
+                                # recovery notice (never leave it stuck).
+                                recovery = (
+                                    "⚠️ No assistant text was returned for this turn "
+                                    "(model may have failed silently or only planned "
+                                    "tools). Please try again or check server logs."
+                                )
+                                if not is_lost():
+                                    await send(
+                                        TelemetryEvent(
+                                            type="llm_delta",
+                                            data={"content": recovery},
+                                            thread_id=thread_id,
+                                        ).to_dict()
+                                    )
+                                await _persist_final_assistant_message(
+                                    graph_inst,
+                                    config,
+                                    session_id,
+                                    pre_msg_count=pre_msg_count,
+                                    prefer_text=recovery,
+                                    activity=activity_log,
+                                )
                             # Always release the UI turn lock. HITL pause is
                             # signalled via pendingApproval; idle still ends
                             # the "generating" state so Stop never sticks.

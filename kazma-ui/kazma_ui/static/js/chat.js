@@ -2380,6 +2380,23 @@
         var lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
           _pollBackgroundTurn(sessionId, messages.length);
+        } else if (
+          lastMsg && lastMsg.role === 'assistant' && lastMsg.pending &&
+          (lastMsg.content || '').trim()
+        ) {
+          // Partial content mid-stream — poll until the final persist pops
+          // pending, then reload shows the complete response.
+          _showGeneratingIndicator();
+          _pollBackgroundTurn(sessionId, messages.length);
+        } else if (
+          lastMsg && lastMsg.role === 'assistant' && !lastMsg.pending &&
+          !(lastMsg.content || '').trim()
+        ) {
+          // WS-path fallback: a turn is running but the trailing assistant
+          // bubble has no pending flag (e.g. recovery notice already popped
+          // it). Keep the indicator alive and poll for the completion.
+          _showGeneratingIndicator();
+          _pollBackgroundTurn(sessionId, messages.length);
         }
 
         scrollToBottom();
@@ -2399,18 +2416,25 @@
 
   /**
    * Poll for a background-completed turn after a refresh/tab-switch.
-   * Checks every 5s for up to 90s. If new messages appear (the detached
-   * graph task completed), reloads the session to show the response.
+   * Checks every 5s for up to 90s. If the pending assistant message gains
+   * content (the detached graph task completed), reloads the session to
+   * show the response. One poller per session (the pending-bubble branch
+   * and _checkBackgroundGeneration both call this — the guard dedupes).
    */
+  var _bgPollingSession = null;
+
   function _pollBackgroundTurn(sessionId, originalCount) {
+    if (_bgPollingSession === sessionId) return;  // already polling
+    _bgPollingSession = sessionId;
     var attempts = 0;
     var maxAttempts = 18;  // 90s at 5s intervals
 
     function poll() {
-      if (chatSessionId !== sessionId) return;  // user switched sessions
-      if (activeStream) return;  // user started a new turn, stop polling
+      if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }  // user switched sessions
+      if (activeStream) { _bgPollingSession = null; return; }  // user started a new turn, stop polling
       attempts++;
       if (attempts > maxAttempts) {
+        _bgPollingSession = null;
         // Replace the "still processing" indicator with a helpful message.
         var msgs = messagesEl.querySelectorAll('[data-role="assistant"]');
         if (msgs.length > 0) {
@@ -2426,15 +2450,19 @@
       fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
         .then(function(r) { return r.ok ? r.json() : []; })
         .then(function(messages) {
-          if (chatSessionId !== sessionId) return;
+          if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
           // If message count grew, the background turn completed — reload.
-          if (messages.length > originalCount) {
+          // (originalCount 0 = we never knew the baseline — only resolve via
+          // the pending-content check below, never via growth.)
+          if (originalCount > 0 && messages.length > originalCount) {
+            _bgPollingSession = null;
             loadSession(sessionId);  // re-renders with the completed response
             return;
           }
-          // Check if the pending message now has content (done_callback updated it)
+          // Check if the pending message now has content (final persist popped it)
           var lastMsg = messages[messages.length - 1];
           if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content && !lastMsg.pending) {
+            _bgPollingSession = null;
             loadSession(sessionId);
             return;
           }
