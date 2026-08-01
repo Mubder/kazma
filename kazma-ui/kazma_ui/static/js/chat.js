@@ -154,9 +154,6 @@
       }
     });
 
-    // Load sessions and connect
-    loadSessions();
-
     // Load the current session's messages if we have a session ID
     // (e.g., after page refresh)
     var initialSessionId = localStorage.getItem(SESSION_LS_KEY);
@@ -172,6 +169,8 @@
 
     // Load available models for the model selector
     loadModels();
+
+    // Load sessions after models are loaded
     loadSessions();
 
     // Refresh the sidebar session list when the tab regains focus.
@@ -1922,7 +1921,12 @@
 
   function loadSessions() {
     fetch('/api/chat/sessions')
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) {
+          throw new Error('HTTP ' + r.status);
+        }
+        return r.json();
+      })
       .then(function(data) {
         sessions = data || [];
         // Preserve optimistic active session if the server hasn't flushed it yet
@@ -1938,6 +1942,9 @@
       })
       .catch(function(err) {
         console.error('Failed to load sessions:', err);
+        if (sessionListEl) {
+          sessionListEl.innerHTML = '<div class="session-empty">Failed to load sessions</div>';
+        }
       });
   }
 
