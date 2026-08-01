@@ -183,7 +183,7 @@ class KazmaAgent:
 
         self.authority: ContextAuthority = create_authority(
             model=self.config.default_model,
-            window=self.config.raw.get("memory", {}).get("max_context_tokens", 128_000),
+            window=self._resolve_context_window(),
             llm_client=self._make_compaction_client(),
             memory_store=_memory_store,
         )
@@ -370,6 +370,35 @@ class KazmaAgent:
         # gone. This property is retained for backward-compat but returns the
         # explicit backend only (None unless one was injected at construction).
         return self._memory_backend
+
+    def _resolve_context_window(self) -> int:
+        """Resolve the context window from Settings (ConfigStore) → yaml → default.
+
+        The Settings UI writes to ``context.max_context_tokens`` in ConfigStore;
+        the yaml has ``memory.max_context_tokens``. Check both so the Settings
+        UI value actually takes effect (previously only the yaml was read).
+        """
+        # 1. Settings UI value (context.max_context_tokens in ConfigStore)
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs_val = get_config_store().get("context.max_context_tokens")
+            if cs_val is not None:
+                try:
+                    return max(1024, int(cs_val))
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
+        # 2. YAML value (memory.max_context_tokens)
+        yaml_val = self.config.raw.get("memory", {}).get("max_context_tokens")
+        if yaml_val is not None:
+            try:
+                return max(1024, int(yaml_val))
+            except (TypeError, ValueError):
+                pass
+        # 3. Default
+        return 128_000
 
     def _make_compaction_client(self) -> Any:
         """Create a lightweight LLM client for the compaction engine."""
