@@ -43,7 +43,21 @@ router = APIRouter(tags=["chat-sse"])
 # client disconnect (refresh / tab switch). The task runs to completion;
 # the checkpointer + done_callback persist the result so the client finds
 # it on reload.
-_active_turns: dict[str, Any] = {}
+#
+# The registry is SHARED with the WebSocket transport (kazma_ui.active_turns)
+# so a WS turn is visible to the SSE duplicate-turn guard and to the session
+# status endpoint — otherwise a refresh could start a second concurrent
+# graph run on the same thread/checkpointer.  ``_active_turns`` stays as a
+# back-compat alias to the shared dict.
+from kazma_ui.active_turns import (
+    active_turns,
+    is_turn_running,
+    mark_turn_orphaned,
+    register_turn,
+    unregister_turn,
+)
+
+_active_turns = active_turns  # type: ignore[name-defined]
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -260,10 +274,10 @@ async def _stream_langgraph_events(
                 # disconnects. The done_callback persists the final response
                 # to the session store so loadSession finds it on reload.
                 # This is the strong-reference pattern from self_improvement.py.
-                _active_turns[thread_id] = pump_task
+                register_turn(thread_id, pump_task)
 
                 def _on_pump_done(t: asyncio.Task) -> None:
-                    _active_turns.pop(thread_id, None)
+                    unregister_turn(thread_id, t)
                     # Persist the final response to the session store.
                     if not session_id:
                         return
@@ -277,33 +291,51 @@ async def _stream_langgraph_events(
                     async def _persist():
                         try:
                             snap = await graph.aget_state(config)
+                            asst = ""
                             if snap and snap.values:
                                 msgs = snap.values.get("messages") or []
                                 asst = _last_assistant_text(msgs)
+                            store = _get_store()
+                            sess = store.get(session_id)
+                            if sess:
                                 if asst:
-                                    store = _get_store()
-                                    sess = store.get(session_id)
-                                    if sess:
-                                        has_asst = any(
-                                            m.get("role") == "assistant"
-                                            for m in sess.messages
+                                    has_asst = any(
+                                        m.get("role") == "assistant"
+                                        for m in sess.messages
+                                    )
+                                    if not has_asst:
+                                        sess.messages.append(
+                                            {"role": "assistant", "content": asst}
                                         )
-                                        if not has_asst:
-                                            sess.messages.append(
-                                                {"role": "assistant", "content": asst}
+                                    else:
+                                        for m in reversed(sess.messages):
+                                            if m.get("role") == "assistant":
+                                                m["content"] = asst
+                                                m.pop("pending", None)
+                                                break
+                                else:
+                                    # The turn completed WITHOUT producing any
+                                    # assistant text. Never leave the pending
+                                    # bubble stuck for 90s — resolve it with a
+                                    # recovery notice so returning users see an
+                                    # explanation instead of nothing.
+                                    for m in reversed(sess.messages):
+                                        if m.get("role") == "assistant" and m.pop(
+                                            "pending", False
+                                        ):
+                                            m["content"] = (
+                                                "⚠️ Your previous turn finished "
+                                                "without producing a reply (the "
+                                                "model may have failed silently). "
+                                                "Please try again."
                                             )
-                                        else:
-                                            for m in reversed(sess.messages):
-                                                if m.get("role") == "assistant":
-                                                    m["content"] = asst
-                                                    m.pop("pending", None)
-                                                    break
-                                        store.put(sess)
-                                        logger.info(
-                                            "[SSE] Detached turn completed for thread=%s — "
-                                            "response persisted (%d chars)",
-                                            thread_id[:12], len(asst),
-                                        )
+                                            break
+                                store.put(sess)
+                                logger.info(
+                                    "[SSE] Detached turn completed for thread=%s — "
+                                    "response persisted (%d chars)",
+                                    thread_id[:12], len(asst),
+                                )
                         except Exception:
                             logger.debug(
                                 "[SSE] Detached turn persist failed for thread=%s",
@@ -313,6 +345,9 @@ async def _stream_langgraph_events(
                     loop.create_task(_persist())
 
                 pump_task.add_done_callback(_on_pump_done)
+
+                stream_error: str | None = None
+                _stream_completed = False
 
                 try:
                     while True:
@@ -324,8 +359,12 @@ async def _stream_langgraph_events(
                             yield ": keepalive\n\n"
                             continue
                         if event is None:
+                            _stream_completed = True
                             break  # stream finished
                         if isinstance(event, Exception):
+                            # Sanitize before it reaches the client — raw
+                            # exceptions can leak stack traces / API bodies.
+                            stream_error = sanitize_error(event)
                             logger.warning("[SSE] astream_events error: %s", event)
                             break
 
@@ -441,7 +480,20 @@ async def _stream_langgraph_events(
                     # the turn completes. The SSE generator just stops reading
                     # from the queue — the pump fills it and events are dropped
                     # harmlessly if nobody is consuming.
+                    if not _stream_completed:
+                        # The client went away (Starlette closes/cancels this
+                        # generator) — stamp the disconnect time so the WS
+                        # duplicate-turn guard can reap the pump task once the
+                        # turn has been abandoned past DETACHED_TTL_S.
+                        mark_turn_orphaned(thread_id)
                     pass
+
+            # Stream crashed mid-turn (or failed immediately) — surface a
+            # sanitized error frame BEFORE any fallback text so the client
+            # shows the failure instead of a silent blank turn. The raw
+            # exception never reaches the client.
+            if stream_error:
+                yield _sse_frame("error", {"content": stream_error})
 
             # ── Post-stream: HITL + backfill assistant text ────────────
             # Custom LLM path never streams tokens. On HITL interrupt,
@@ -519,7 +571,10 @@ async def _stream_langgraph_events(
                     logger.warning("[SSE] interrupt scan failed: %s", exc, exc_info=True)
 
             # Never leave the chat blank after "Thinking…"
-            if not content_acc and not interrupted:
+            # (skipped when the stream itself crashed — the error frame above
+            # already told the client the turn failed; don't stack a second
+            # generic notice on top of it)
+            if not content_acc and not interrupted and not stream_error:
                 notice = (
                     "⚠️ No assistant text was returned for this turn "
                     "(model may have failed silently or only planned tools). "
@@ -1214,8 +1269,8 @@ def create_sse_chat_router(
 
         # ── Duplicate-turn guard: reject if a background turn is still running
         # for this thread (e.g. user refreshed mid-turn and immediately resent).
-        _existing = _active_turns.get(thread_id)
-        if _existing is not None and not _existing.done():
+        # Shared with the WebSocket transport so WS turns are also covered.
+        if is_turn_running(thread_id):
             logger.info("[SSE] Rejecting duplicate turn for thread=%s (still running)", thread_id[:12])
             async def _dup_gen() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {
@@ -1415,6 +1470,71 @@ def create_sse_chat_router(
             assistant_message_started = False
             # Temporary message dict for incremental persistence
             temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
+            # CoT / activity log for this turn (tools + status), persisted with
+            # the assistant message so reloads / session switches restore the
+            # workbench panel instead of showing a blank transcript.
+            activity_log: list[dict[str, Any]] = []
+
+            def _parse_frame(frame: str) -> tuple[str, dict[str, Any]] | None:
+                """Split an SSE frame into (event_type, data) or None."""
+                try:
+                    head, _, rest = frame.partition("\n")
+                    if not head.startswith("event: "):
+                        return None
+                    ev_type = head[len("event: "):].strip()
+                    data: dict[str, Any] = {}
+                    for line in rest.split("\n"):
+                        if line.startswith("data: "):
+                            data = json.loads(line[len("data: "):])
+                            break
+                    return ev_type, data
+                except (json.JSONDecodeError, ValueError):
+                    return None
+
+            def _record_activity(ev_type: str, data: dict[str, Any]) -> None:
+                """Append a workbench row for a tool/status frame (deduped)."""
+                try:
+                    if ev_type == "tool_call":
+                        activity_log.append({
+                            "kind": "tool",
+                            "title": str(data.get("tool_name") or "tool"),
+                            "detail": str(data.get("inputs") or ""),
+                            "state": "running",
+                        })
+                    elif ev_type == "tool_result":
+                        activity_log.append({
+                            "kind": "tool",
+                            "title": str(data.get("tool_name") or "tool"),
+                            "detail": str(data.get("result") or ""),
+                            "state": "done",
+                        })
+                    elif ev_type == "status_update":
+                        status = str(data.get("status") or "").strip()
+                        # Only persist meaningful progress states; skip the
+                        # synthesizing heartbeat (cosmetic, noisy on reload).
+                        if status and status != "synthesizing":
+                            activity_log.append({
+                                "kind": "status",
+                                "title": status,
+                                "state": "running",
+                            })
+                except Exception:
+                    logger.debug("[SSE] activity capture failed", exc_info=True)
+
+            def _attach_activity(msg: dict[str, Any]) -> None:
+                if activity_log:
+                    msg["activity"] = list(activity_log)
+
+            def _persist_now() -> None:
+                """Persist the current temp_assistant_msg to the store."""
+                try:
+                    _attach_activity(temp_assistant_msg)
+                    _get_store().put(session)
+                except Exception:
+                    logger.debug(
+                        "[SSE] failed to persist assistant message for session=%s",
+                        session_id,
+                    )
 
             try:
                 async for frame in _stream_langgraph_events(
@@ -1424,33 +1544,33 @@ def create_sse_chat_router(
                     thread_id=thread_id,
                     session_id=session_id,
                 ):
-                    # Accumulate content for session history
-                    if frame.startswith("event: token\n"):
-                        try:
-                            data = json.loads(frame.split("data: ", 1)[1].split("\n\n")[0])
-                            token_text = data.get("content", "")
-                            content_acc += token_text
-                            temp_assistant_msg["content"] += token_text
-                            
-                            # Persist incrementally every few tokens to prevent data loss
-                            if len(content_acc) % 50 == 0:  # Every ~50 characters
-                                if not assistant_message_started:
-                                    # Add to session messages
-                                    session.messages.append(temp_assistant_msg.copy())
-                                    assistant_message_started = True
-                                else:
-                                    # Update last message
-                                    if session.messages:
-                                        session.messages[-1]["content"] = temp_assistant_msg["content"]
-                                try:
-                                    _get_store().put(session)
-                                except Exception:
-                                    logger.debug(
-                                        "[SSE] failed to persist incremental assistant message for session=%s",
-                                        session_id
-                                    )
-                        except (json.JSONDecodeError, IndexError):
-                            pass
+                    parsed = _parse_frame(frame)
+                    if parsed is None:
+                        yield frame
+                        continue
+                    ev_type, data = parsed
+
+                    # Accumulate content + record CoT activity
+                    if ev_type == "token":
+                        token_text = str(data.get("content", "") or "")
+                        content_acc += token_text
+                        temp_assistant_msg["content"] += token_text
+
+                        # Persist incrementally every few tokens to prevent data loss
+                        if len(content_acc) % 50 == 0:
+                            if not assistant_message_started:
+                                # Add to session messages
+                                _attach_activity(temp_assistant_msg)
+                                session.messages.append(temp_assistant_msg.copy())
+                                assistant_message_started = True
+                            else:
+                                # Update last message
+                                if session.messages:
+                                    session.messages[-1]["content"] = temp_assistant_msg["content"]
+                                    _attach_activity(session.messages[-1])
+                            _persist_now()
+                    elif ev_type in ("tool_call", "tool_result", "status_update"):
+                        _record_activity(ev_type, data)
 
                     yield frame
 
@@ -1460,15 +1580,16 @@ def create_sse_chat_router(
                     if assistant_message_started and session.messages:
                         if session.messages[-1].get("role") == "assistant":
                             session.messages[-1]["content"] = content_acc
+                            _attach_activity(session.messages[-1])
                             session.messages[-1].setdefault("ts", _ats)
                     else:
-                        session.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": content_acc,
-                                "ts": _ats,
-                            }
-                        )
+                        final_msg: dict[str, Any] = {
+                            "role": "assistant",
+                            "content": content_acc,
+                            "ts": _ats,
+                        }
+                        _attach_activity(final_msg)
+                        session.messages.append(final_msg)
                 try:
                     _get_store().put(session)
                 except Exception:
@@ -1563,15 +1684,13 @@ def create_sse_chat_router(
         if session:
             thread_id = session.thread_id or session_id
 
-        # Check if a detached turn is running for this thread
-        is_running = thread_id and thread_id in _active_turns
-        task = _active_turns.get(thread_id)
-        task_done = task.done() if task and hasattr(task, "done") else True
+        # Check if a detached turn is running for this thread (SSE or WS)
+        is_running = thread_id and is_turn_running(thread_id)
 
         return {
             "session_id": session_id,
             "thread_id": thread_id,
-            "generating": bool(is_running and not task_done),
+            "generating": bool(is_running),
         }
 
     @r.delete("/api/chat/sessions/{session_id}")
@@ -1706,6 +1825,11 @@ def create_sse_chat_router(
                 "content": msg.get("content", ""),
                 **({"pending": True} if msg.get("pending") else {}),
                 **({"ts": msg["ts"]} if msg.get("ts") else {}),
+                **(
+                    {"activity": msg["activity"]}
+                    if isinstance(msg.get("activity"), list) and msg["activity"]
+                    else {}
+                ),
             }
             for msg in messages
             if msg.get("role") in ("user", "assistant", "system")

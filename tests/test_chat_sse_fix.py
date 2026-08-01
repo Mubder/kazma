@@ -169,7 +169,9 @@ class TestFinalMessageExtraction:
         assert data["content"] == "streamed"
 
     def test_no_messages_key_does_not_crash(self):
-        """If the terminal state has no 'messages' key, we must not crash."""
+        """If the terminal state has no 'messages' key, we must not crash.
+        The empty-turn recovery notice is emitted instead of the missing
+        assistant text."""
         events = [
             {
                 "event": "on_chain_end",
@@ -192,14 +194,17 @@ class TestFinalMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        # No token frame, but done frame should still be there
+        # No assistant text, but the recovery notice token + done frame
         token_frames = [f for f in frames if f.startswith("event: token")]
         done_frames = [f for f in frames if f.startswith("event: done")]
-        assert len(token_frames) == 0
+        assert len(token_frames) == 1
+        _, data = _parse_frame(token_frames[0])
+        assert "No assistant text" in data["content"]
         assert len(done_frames) == 1
 
     def test_empty_messages_list_does_not_crash(self):
-        """If messages list is empty, we must not crash."""
+        """If messages list is empty, we must not crash. The recovery
+        notice token is emitted instead of assistant text."""
         events = [
             {
                 "event": "on_chain_end",
@@ -223,12 +228,15 @@ class TestFinalMessageExtraction:
 
         token_frames = [f for f in frames if f.startswith("event: token")]
         done_frames = [f for f in frames if f.startswith("event: done")]
-        assert len(token_frames) == 0
+        assert len(token_frames) == 1
+        _, data = _parse_frame(token_frames[0])
+        assert "No assistant text" in data["content"]
         assert len(done_frames) == 1
 
     def test_last_message_is_user_role_no_token_emitted(self):
         """If the last message is from the user (no assistant response),
-        do not emit a token frame."""
+        the user content must NOT be emitted as an assistant token — the
+        recovery notice is emitted instead."""
         events = [
             {
                 "event": "on_chain_end",
@@ -253,7 +261,10 @@ class TestFinalMessageExtraction:
         )
 
         token_frames = [f for f in frames if f.startswith("event: token")]
-        assert len(token_frames) == 0
+        assert len(token_frames) == 1
+        _, data = _parse_frame(token_frames[0])
+        assert "hello" not in data["content"]
+        assert "No assistant text" in data["content"]
 
     def test_token_frame_comes_before_done_frame(self):
         """The token frame must be emitted BEFORE the done frame so the
@@ -472,8 +483,8 @@ class TestEdgeCases:
     """Edge cases for the terminal state message extraction."""
 
     def test_assistant_message_with_empty_content(self):
-        """If the assistant message has empty content, do not emit a
-        token frame (it would create an empty bubble)."""
+        """If the assistant message has empty content, do not emit an
+        empty bubble — the recovery notice token is emitted instead."""
         events = [
             {
                 "event": "on_chain_end",
@@ -499,7 +510,9 @@ class TestEdgeCases:
         )
 
         token_frames = [f for f in frames if f.startswith("event: token")]
-        assert len(token_frames) == 0
+        assert len(token_frames) == 1
+        _, data = _parse_frame(token_frames[0])
+        assert "No assistant text" in data["content"]
 
     def test_output_not_dict_does_not_crash(self):
         """If output is not a dict (e.g. None or a string), we must not

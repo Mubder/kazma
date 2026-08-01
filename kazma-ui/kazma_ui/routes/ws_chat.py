@@ -7,6 +7,7 @@ LangGraph's `astream_events` directly into client stores (Alpine.js agentStore).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import traceback
@@ -15,8 +16,16 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langgraph.types import Command
+from starlette.websockets import WebSocketState
 
 from kazma_core.tracing.events import EventBridge, TelemetryEvent
+from kazma_ui.active_turns import (
+    get_active_turn,
+    mark_turn_orphaned,
+    reap_stale_turn,
+    register_turn,
+    unregister_turn,
+)
 from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
@@ -25,6 +34,92 @@ ws_chat_router = APIRouter(tags=["ws-chat"])
 
 # Match sse_chat / agent_runner / gateway — LangGraph default (25) is too low.
 _GRAPH_RECURSION_LIMIT = 100
+
+
+def _make_ws_sender(websocket: WebSocket) -> tuple[Callable[[dict[str, Any]], Any], Callable[[], bool]]:
+    """Return (send, is_lost) around ``websocket.send_json`` that never raises.
+
+    After the client disconnects (page refresh / tab switch) every send raises.
+    Previously that exception aborted the ``async for`` over the LangGraph
+    ``astream_events`` generator, which CANCELLED the graph mid-flight — the
+    "agent stops responding / no output after switching tabs" bug.  ``send``
+    records the loss and returns False; callers must keep draining the event
+    stream and let the turn complete + persist instead of dying with the socket.
+    """
+
+    def is_lost() -> bool:
+        try:
+            return websocket.client_state != WebSocketState.CONNECTED
+        except Exception:
+            return False
+
+    async def send(payload: dict[str, Any]) -> bool:
+        if is_lost():
+            return False
+        try:
+            await websocket.send_json(payload)
+            return True
+        except Exception:
+            return False
+
+    return send, is_lost
+
+
+def _record_ws_activity(
+    activity_log: list[dict[str, Any]],
+    ev: TelemetryEvent,
+    *,
+    thought_recorded: list[bool],
+) -> None:
+    """Map a TelemetryEvent onto a compact workbench row (persisted CoT log).
+
+    Rows mirror the shape chat.js ``logProgress`` consumes so the restored
+    panel renders identically to the live one.  Thinking heartbeats are
+    recorded once per turn (noisy as N rows on reload).
+    """
+    try:
+        if ev.type == "tool_lifecycle":
+            data = ev.data or {}
+            status = str(data.get("status") or "tool_running")
+            state = "done" if status == "tool_completed" else (
+                "failed" if status == "tool_failed" else "running"
+            )
+            detail = str(
+                data.get("result")
+                or data.get("error")
+                or data.get("inputs")
+                or ""
+            )
+            activity_log.append({
+                "kind": "tool",
+                "title": str(data.get("tool_name") or "tool"),
+                "detail": detail[:1000],
+                "state": state,
+            })
+        elif ev.type == "status_update":
+            status = str((ev.data or {}).get("status") or "").strip()
+            if status == "thinking" and not thought_recorded[0]:
+                thought_recorded[0] = True
+                activity_log.append({
+                    "kind": "status",
+                    "title": "thinking",
+                    "state": "running",
+                })
+            elif status in ("routing_node",):
+                activity_log.append({
+                    "kind": "status",
+                    "title": status,
+                    "state": "running",
+                })
+            elif status == "paused_for_approval":
+                activity_log.append({
+                    "kind": "status",
+                    "title": "Waiting for approval",
+                    "detail": str((ev.data or {}).get("tool") or ""),
+                    "state": "info",
+                })
+    except Exception:
+        logger.debug("[WS-Chat] activity capture failed", exc_info=True)
 
 
 def _friendly_graph_error(exc: BaseException) -> str:
@@ -182,13 +277,19 @@ def create_ws_chat_router(
                         text = content
                         break
             if text:
-                await websocket.send_json(
-                    TelemetryEvent(
-                        type="llm_delta",
-                        data={"content": text},
-                        thread_id=thread_id,
-                    ).to_dict()
-                )
+                try:
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        return
+                    await websocket.send_json(
+                        TelemetryEvent(
+                            type="llm_delta",
+                            data={"content": text},
+                            thread_id=thread_id,
+                        ).to_dict()
+                    )
+                except Exception:
+                    # Client gone (refresh/tab switch) — nothing to notify.
+                    pass
         except Exception as exc:
             logger.debug("[WS-Chat] Text backfill failed: %s", exc)
 
@@ -199,6 +300,7 @@ def create_ws_chat_router(
         *,
         pre_msg_count: int = 0,
         prefer_text: str = "",
+        activity: list[dict[str, Any]] | None = None,
     ) -> str:
         """Persist the latest *new* assistant text to SessionStore.
 
@@ -206,6 +308,8 @@ def create_ws_chat_router(
         can also emit it over the wire. Prefer *prefer_text* when the stream
         already accumulated tokens; otherwise pull NEW messages after
         *pre_msg_count* from the checkpoint (avoids re-appending older turns).
+        When *activity* (the CoT / workbench log for this turn) is given it is
+        stored on the assistant message so a later reload restores it.
         """
         text = (prefer_text or "").strip()
         try:
@@ -239,10 +343,22 @@ def create_ws_chat_router(
                 return text
             # Upsert trailing assistant bubble so incremental flushes don't
             # create duplicate rows for the same turn.
+            activity_rows = list(activity) if activity else None
             if sess.messages and sess.messages[-1].get("role") == "assistant":
                 sess.messages[-1]["content"] = text
+                if activity_rows:
+                    sess.messages[-1]["activity"] = activity_rows
             else:
-                sess.add_message("assistant", text)
+                from datetime import UTC, datetime
+
+                msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": text,
+                    "ts": datetime.now(UTC).isoformat(),
+                }
+                if activity_rows:
+                    msg["activity"] = activity_rows
+                sess.messages.append(msg)
             store.put(sess)
             return text
         except Exception as exc:
@@ -355,12 +471,10 @@ def create_ws_chat_router(
                     except Exception as cb_err:
                         logger.debug("[WS-Chat] cost_breaker record_user_interaction failed: %s", cb_err)
 
-                    # Record user message in SessionStore
-                    try:
-                        session.add_message("user", text)
-                        get_session_manager().put(session)
-                    except Exception as exc:
-                        logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
+                    # NOTE: the user message is persisted to SessionStore after
+                    # the duplicate-turn guard below (and in each slash-command
+                    # handler), so a rejected prompt never leaves a dangling
+                    # user bubble with no reply.
 
                     # ── /yolo, /yolo on, /yolo off, /yolo status (parity with SSE + gateway) ──
                     if text.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
@@ -444,6 +558,12 @@ def create_ws_chat_router(
 
                         async def _ws_research() -> None:
                             try:
+                                # Keep the transcript complete: user question first.
+                                try:
+                                    session.add_message("user", text)
+                                    get_session_manager().put(session)
+                                except Exception:
+                                    pass
                                 if not topic:
                                     await websocket.send_json(
                                         TelemetryEvent(
@@ -531,6 +651,70 @@ def create_ws_chat_router(
                         await _ws_research()
                         continue
 
+                    # ── Cross-transport duplicate-turn guard ─────────────
+                    # If a DETACHED turn (previous connection that refreshed/
+                    # switched tabs, or an SSE pump) is still running on this
+                    # thread, do NOT start a second concurrent graph invocation
+                    # — checkpoint writes would interleave and one turn would
+                    # error out ("no output"). The running turn persists its
+                    # result; the client polls and picks it up. A turn owned by
+                    # THIS connection (active_task) is superseded below instead.
+                    _detached = get_active_turn(thread_id)
+                    if (
+                        _detached is not None
+                        and not _detached.done()
+                        and _detached is not active_task
+                    ):
+                        # Abandoned turn: the client has been gone for longer
+                        # than DETACHED_TTL_S. Cancel it and await its full
+                        # unwind BEFORE the new run starts — strictly
+                        # sequential, so the two runs never interleave on the
+                        # checkpointer, and the abandoned turn stops billing
+                        # its remaining LLM calls.
+                        stale = reap_stale_turn(thread_id)
+                        if stale is not None and stale is _detached:
+                            logger.info(
+                                "[WS-Chat] Reaping stale detached turn for thread=%s",
+                                thread_id[:12],
+                            )
+                            stale.cancel()
+                            with contextlib.suppress(
+                                asyncio.CancelledError, Exception
+                            ):
+                                await stale
+                            _detached = get_active_turn(thread_id)
+                        if (
+                            _detached is not None
+                            and not _detached.done()
+                            and _detached is not active_task
+                        ):
+                            logger.info(
+                                "[WS-Chat] Rejecting prompt for thread=%s (turn still running)",
+                                thread_id[:12],
+                            )
+                            await websocket.send_json(
+                                TelemetryEvent(
+                                    type="graph_error",
+                                    data={
+                                        "message": "⏳ Your previous message is still being "
+                                        "processed. It will appear here shortly — no need to resend."
+                                    },
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
+                            await websocket.send_json(
+                                EventBridge.create_idle_event(thread_id).to_dict()
+                            )
+                            continue
+
+                    # Record user message in SessionStore (only once the turn is
+                    # accepted — a rejected prompt leaves no dangling bubble).
+                    try:
+                        session.add_message("user", text)
+                        get_session_manager().put(session)
+                    except Exception as exc:
+                        logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
+
                     from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.agent.state import initial_supervisor_state
                     from kazma_core.memory.config import resolve_tenant_id
@@ -559,7 +743,10 @@ def create_ws_chat_router(
                             set_current_thread_id,
                         )
 
+                        send, is_lost = _make_ws_sender(websocket)
                         assistant_content_acc = ""
+                        activity_log: list[dict[str, Any]] = []
+                        thought_recorded: list[bool] = [False]
                         tid_token = set_current_thread_id(thread_id)
                         try:
                             pre_msg_count = 0
@@ -582,6 +769,7 @@ def create_ws_chat_router(
                             assistant_msg_added = False
 
                             async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
+                                _record_ws_activity(activity_log, ev, thought_recorded=thought_recorded)
                                 if ev.type == "llm_delta":
                                     tokens_emitted = True
                                     if hasattr(ev, "data") and isinstance(ev.data, dict):
@@ -605,9 +793,22 @@ def create_ws_chat_router(
                                                         sess.messages[-1]["content"] = (
                                                             assistant_content_acc
                                                         )
+                                                        if activity_log:
+                                                            sess.messages[-1]["activity"] = list(activity_log)
                                                     store.put(sess)
 
-                                await websocket.send_json(ev.to_dict())
+                                # CRITICAL: when the client disconnected (refresh /
+                                # tab switch) is_lost() is True. Keep draining the
+                                # LangGraph stream so the turn COMPLETES and
+                                # persists — never let a dead socket abort the
+                                # async-for and cancel the graph run.
+                                if is_lost():
+                                    # Stamp the disconnect time so an abandoned
+                                    # turn can be reaped (credits) while a quick
+                                    # refresh keeps its background completion.
+                                    mark_turn_orphaned(thread_id)
+                                    continue
+                                await send(ev.to_dict())
 
                             if not tokens_emitted:
                                 await _backfill_assistant_text_if_needed(
@@ -617,7 +818,8 @@ def create_ws_chat_router(
                                 # backfilled text before we send idle/end —
                                 # prevents the "Done 0s" flash where the
                                 # spinner dies before the text is visible.
-                                await asyncio.sleep(0.1)
+                                if not is_lost():
+                                    await asyncio.sleep(0.1)
 
                             await _persist_final_assistant_message(
                                 graph_inst,
@@ -625,6 +827,7 @@ def create_ws_chat_router(
                                 session_id,
                                 pre_msg_count=pre_msg_count,
                                 prefer_text=assistant_content_acc,
+                                activity=activity_log,
                             )
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
@@ -635,10 +838,8 @@ def create_ws_chat_router(
                             # the "generating" state so Stop never sticks.
                             # Emit both idle + stream_end — agentStore listens
                             # for either; double endTurn is a no-op.
-                            await websocket.send_json(
-                                EventBridge.create_idle_event(thread_id).to_dict()
-                            )
-                            await websocket.send_json(
+                            await send(EventBridge.create_idle_event(thread_id).to_dict())
+                            await send(
                                 TelemetryEvent(
                                     type="stream_end",
                                     data={"interrupted": bool(interrupted)},
@@ -660,6 +861,7 @@ def create_ws_chat_router(
                                         config,
                                         session_id,
                                         prefer_text=assistant_content_acc,
+                                        activity=activity_log,
                                     )
                                 except Exception as e:
                                     logger.warning(
@@ -676,6 +878,7 @@ def create_ws_chat_router(
                                         config,
                                         session_id,
                                         prefer_text=assistant_content_acc,
+                                        activity=activity_log,
                                     )
                                 except Exception as e:
                                     logger.warning(
@@ -683,34 +886,26 @@ def create_ws_chat_router(
                                         e,
                                     )
                             err_msg = _friendly_graph_error(exc)
-                            # Check if websocket is still open before sending error
-                            try:
-                                if websocket.client_state == websocket.ClientState.CONNECTED:
-                                    await websocket.send_json(
-                                        TelemetryEvent(
-                                            type="graph_error",
-                                            data={"message": err_msg},
-                                            thread_id=thread_id,
-                                        ).to_dict()
-                                    )
-                            except Exception:
-                                # Ignore errors from send if websocket is closed
-                                pass
+                            # Safe sends: no-op after the client disconnected.
+                            await send(
+                                TelemetryEvent(
+                                    type="graph_error",
+                                    data={"message": err_msg},
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
                             # Always surface something in the transcript
-                            try:
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="llm_delta",
-                                        data={"content": f"⚠️ {err_msg}"},
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
-                            except Exception:
-                                pass
-                            await websocket.send_json(
+                            await send(
+                                TelemetryEvent(
+                                    type="llm_delta",
+                                    data={"content": f"⚠️ {err_msg}"},
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
+                            await send(
                                 EventBridge.create_idle_event(thread_id).to_dict()
                             )
-                            await websocket.send_json(
+                            await send(
                                 TelemetryEvent(
                                     type="stream_end",
                                     data={"error": True},
@@ -723,6 +918,10 @@ def create_ws_chat_router(
                     if active_task and not active_task.done():
                         active_task.cancel()
                     active_task = asyncio.create_task(_run_prompt_stream())
+                    register_turn(thread_id, active_task)
+                    active_task.add_done_callback(
+                        lambda t: unregister_turn(thread_id, t)
+                    )
 
                 # ── Action 2: approve_tool ───────────────────────────────
                 elif action == "approve_tool":
@@ -855,7 +1054,10 @@ def create_ws_chat_router(
                             set_current_thread_id,
                         )
 
+                        send, is_lost = _make_ws_sender(websocket)
                         assistant_content_acc = ""
+                        activity_log: list[dict[str, Any]] = []
+                        thought_recorded: list[bool] = [False]
                         tid_token = set_current_thread_id(target_thread_id)
                         try:
                             pre_msg_count = 0
@@ -917,14 +1119,20 @@ def create_ws_chat_router(
                                     "[WS-Chat] Could not update checkpoint metadata: %s", e
                                 )
 
-                            await websocket.send_json(
+                            activity_log.append({
+                                "kind": "thought",
+                                "title": "Approval resumed — continuing",
+                                "state": "running",
+                            })
+                            thought_recorded[0] = True
+                            await send(
                                 ApprovalEventBridge.create_approval_resuming_event(
                                     target_thread_id,
                                     tool=tool_name,
                                     scope=scope,
                                 )
                             )
-                            await websocket.send_json(
+                            await send(
                                 TelemetryEvent(
                                     type="status_update",
                                     data={
@@ -960,8 +1168,8 @@ def create_ws_chat_router(
                                     )
                                 except asyncio.TimeoutError:
                                     heartbeat_n += 1
-                                    try:
-                                        await websocket.send_json(
+                                    if not is_lost():
+                                        await send(
                                             TelemetryEvent(
                                                 type="status_update",
                                                 data={
@@ -975,10 +1183,8 @@ def create_ws_chat_router(
                                                 thread_id=target_thread_id,
                                             ).to_dict()
                                         )
-                                    except Exception:
-                                        # Client gone — keep graph running so
-                                        # checkpoint/session can still be updated.
-                                        pass
+                                    else:
+                                        mark_turn_orphaned(target_thread_id)
                             await resume_task  # re-raise graph errors
 
                             # Surface assistant text (no live token stream on ainvoke)
@@ -994,6 +1200,7 @@ def create_ws_chat_router(
                                 approve_config,
                                 session_id,
                                 pre_msg_count=pre_msg_count,
+                                activity=activity_log,
                             )
                             # Guarantee the user sees *something* after YOLO/approve.
                             # Empty backfill is the root of "only saw pre-HITL line".
@@ -1004,22 +1211,20 @@ def create_ws_chat_router(
                                     "Ask me to summarize what I found, or retry with "
                                     "a narrower question."
                                 )
-                                try:
-                                    await websocket.send_json(
-                                        TelemetryEvent(
-                                            type="llm_delta",
-                                            data={"content": recovery},
-                                            thread_id=target_thread_id,
-                                        ).to_dict()
-                                    )
-                                except Exception:
-                                    pass
+                                await send(
+                                    TelemetryEvent(
+                                        type="llm_delta",
+                                        data={"content": recovery},
+                                        thread_id=target_thread_id,
+                                    ).to_dict()
+                                )
                                 await _persist_final_assistant_message(
                                     graph_inst,
                                     approve_config,
                                     session_id,
                                     pre_msg_count=pre_msg_count,
                                     prefer_text=recovery,
+                                    activity=activity_log,
                                 )
                                 logger.warning(
                                     "[WS-Chat] Empty post-approve turn thread=%s — recovery notice sent",
@@ -1037,7 +1242,7 @@ def create_ws_chat_router(
                             )
 
                             duration_ms = (time.monotonic() - approval_start_time) * 1000
-                            await websocket.send_json(
+                            await send(
                                 ApprovalEventBridge.create_approval_complete_event(
                                     target_thread_id,
                                     tool=tool_name,
@@ -1047,10 +1252,10 @@ def create_ws_chat_router(
                             )
                             # Always idle + stream_end — releases UI even if
                             # another HITL card is about to show.
-                            await websocket.send_json(
+                            await send(
                                 EventBridge.create_idle_event(target_thread_id).to_dict()
                             )
-                            await websocket.send_json(
+                            await send(
                                 TelemetryEvent(
                                     type="stream_end",
                                     data={"interrupted": bool(interrupted)},
@@ -1075,6 +1280,7 @@ def create_ws_chat_router(
                                         approve_config,
                                         session_id,
                                         prefer_text=assistant_content_acc,
+                                        activity=activity_log,
                                     )
                                 except Exception as e:
                                     logger.warning(
@@ -1091,6 +1297,7 @@ def create_ws_chat_router(
                                         approve_config,
                                         session_id,
                                         prefer_text=assistant_content_acc,
+                                        activity=activity_log,
                                     )
                                 except Exception as e:
                                     logger.warning(
@@ -1099,7 +1306,7 @@ def create_ws_chat_router(
                                     )
 
                             err_msg = _friendly_graph_error(exc)
-                            await websocket.send_json(
+                            await send(
                                 ApprovalEventBridge.create_approval_error_event(
                                     target_thread_id,
                                     error=err_msg,
@@ -1109,7 +1316,7 @@ def create_ws_chat_router(
                                     scope=scope,
                                 )
                             )
-                            await websocket.send_json(
+                            await send(
                                 TelemetryEvent(
                                     type="graph_error",
                                     data={"message": err_msg},
@@ -1117,7 +1324,7 @@ def create_ws_chat_router(
                                 ).to_dict()
                             )
                             try:
-                                await websocket.send_json(
+                                await send(
                                     TelemetryEvent(
                                         type="llm_delta",
                                         data={"content": f"⚠️ {err_msg}"},
@@ -1126,7 +1333,7 @@ def create_ws_chat_router(
                                 )
                             except Exception:
                                 pass
-                            await websocket.send_json(
+                            await send(
                                 EventBridge.create_idle_event(target_thread_id).to_dict()
                             )
                         finally:
@@ -1135,6 +1342,10 @@ def create_ws_chat_router(
                     if active_task and not active_task.done():
                         active_task.cancel()
                     active_task = asyncio.create_task(_run_approve_stream())
+                    register_turn(target_thread_id, active_task)
+                    active_task.add_done_callback(
+                        lambda t: unregister_turn(target_thread_id, t)
+                    )
 
         except WebSocketDisconnect:
             logger.info("[WS-Chat] Client disconnected: session_id=%s (graph keeps running in background)", session_id)

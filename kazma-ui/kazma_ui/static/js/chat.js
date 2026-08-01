@@ -1552,8 +1552,82 @@
     _progressStartedAt = 0;
   }
 
+  // ── Restored CoT workbench (persisted activity, shown on reload) ──
+  // After a refresh / tab switch the live progress panel is gone. The server
+  // persists a compact activity log with each assistant message (see
+  // sse_chat / ws_chat), so returning to a session restores the "Thinking &
+  // Activity" accordion instead of a blank transcript.
+  function _activityRowsHtml(activity) {
+    if (!Array.isArray(activity)) return '';
+    return activity.map(function(row) {
+      var kind = row && row.kind === 'tool' ? 'tool'
+        : (row && row.kind === 'thought' ? 'thought' : 'status');
+      var state = (row && row.state) || 'done';
+      var rawTitle = String((row && row.title) || '').trim() || '\u2026';
+      var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
+      var detail = row && row.detail != null ? String(row.detail) : '';
+      var icon = kind === 'tool' ? '\u2699'
+        : (kind === 'thought' ? '\u25C8' : '\u2022');
+      return '<li class="agent-progress-step step-' + kind + ' state-' + state + ' is-expanded">' +
+        '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
+        '<div class="step-body">' +
+          '<div class="step-line">' +
+            '<span class="step-title">' + escapeHtml(title) + '</span>' +
+            (kind === 'tool'
+              ? ' <span class="step-state">' + escapeHtml(
+                  state === 'done' ? ti('step_done', 'Done')
+                    : (state === 'failed' ? ti('step_failed', 'Failed') : state)
+                ) + '</span>'
+              : '') +
+            '<span class="step-time"></span>' +
+          '</div>' +
+          (detail
+            ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
+            : '') +
+        '</div>' +
+      '</li>';
+    }).join('');
+  }
+
+  function _buildRestoredWorkbench(activity) {
+    var rows = _activityRowsHtml(activity);
+    if (!rows) return null;
+    var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
+    var panel = document.createElement('div');
+    panel.className = 'agent-progress is-done is-collapsed kazma-cot-restored';
+    if (pageRtl) {
+      panel.setAttribute('dir', 'rtl');
+      panel.classList.add('is-rtl');
+    }
+    var n = Array.isArray(activity) ? activity.length : 0;
+    var stepWord = n === 1 ? ti('step', 'step') : ti('steps', 'steps');
+    panel.innerHTML =
+      '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '">' +
+        '<span class="agent-progress-pulse is-off" aria-hidden="true"></span>' +
+        '<span class="agent-progress-title">' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '</span>' +
+        '<span class="agent-progress-count">' + n + ' ' + escapeHtml(stepWord) + '</span>' +
+        '<span class="agent-progress-chevron" aria-hidden="true">\u25B8</span>' +
+      '</div>' +
+      '<div class="agent-progress-body">' +
+        '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
+        '<ul class="agent-progress-steps">' + rows + '</ul>' +
+      '</div>';
+    var header = panel.querySelector('.agent-progress-header');
+    if (header) {
+      header.addEventListener('click', function() {
+        panel.classList.toggle('is-collapsed');
+        var chev = panel.querySelector('.agent-progress-chevron');
+        if (chev) chev.textContent = panel.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
+      });
+      header.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); header.click(); }
+      });
+    }
+    return panel;
+  }
+
   // ── Message rendering ─────────────────────────────────
-  function appendMessage(role, content, attachmentName, ts) {
+  function appendMessage(role, content, attachmentName, ts, opts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
 
@@ -1580,6 +1654,17 @@
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
         '</div>' +
       '</div>';
+
+    // Restore the persisted CoT workbench (activity log) for assistant
+    // messages when returning to a session after refresh / tab switch.
+    if (role === 'assistant' && opts && opts.activity && opts.activity.length) {
+      var cotPanel = _buildRestoredWorkbench(opts.activity);
+      if (cotPanel) {
+        var textWrap = wrapper.querySelector('.message-text');
+        if (textWrap) textWrap.parentNode.insertBefore(cotPanel, textWrap);
+        else wrapper.querySelector('.message-content').appendChild(cotPanel);
+      }
+    }
 
     if (role === 'user') {
       // Add message actions
@@ -2286,7 +2371,7 @@
             // Poll for the completed background turn.
             _pollBackgroundTurn(sessionId, messages.length);
           } else {
-            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null);
+            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, { activity: msg.activity });
           }
         });
 

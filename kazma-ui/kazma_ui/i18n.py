@@ -195,6 +195,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.thinking": {"en": "Kazma is thinking…", "ar": "كاظمه تفكر…"},
     "chat.writing_reply": {"en": "Writing reply…", "ar": "جارٍ كتابة الرد…"},
     "chat.activity": {"en": "Activity", "ar": "النشاط"},
+    "chat.cot_title": {"en": "Thinking & Activity", "ar": "التفكير والنشاط"},
     "chat.working": {"en": "Working…", "ar": "جارٍ العمل…"},
     "chat.plan": {"en": "Plan", "ar": "الخطة"},
     "chat.step": {"en": "step", "ar": "خطوة"},
