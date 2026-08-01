@@ -240,6 +240,11 @@ class SettingsRouterBuilder:
             _get_sm().save_safety_settings(req)
             return {"status": "ok"}
 
+        @router.get("/api/settings/agent/safety")
+        async def api_get_safety() -> dict[str, Any]:
+            """Get HITL safety settings (short keys for JS model)."""
+            return _get_sm().get_safety_settings()
+
         @router.get("/api/settings/system/logging")
         async def api_get_logging() -> dict[str, Any]:
             """Get logging settings (level, format, rotation retention)."""
@@ -276,6 +281,11 @@ class SettingsRouterBuilder:
             """Save context window settings."""
             _get_sm().save_context_settings(req)
             return {"status": "ok"}
+
+        @router.get("/api/settings/agent/context")
+        async def api_get_context() -> dict[str, Any]:
+            """Get context window settings (short keys for JS model)."""
+            return _get_sm().get_context_settings()
 
         @router.get("/api/settings/voice")
         async def api_get_voice_settings() -> dict[str, Any]:

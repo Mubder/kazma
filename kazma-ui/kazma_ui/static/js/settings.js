@@ -213,12 +213,15 @@ function settingsApp() {
             this.loading = true;
             try {
                 // Load all settings in parallel
-                const [settings, providers, personalities, shortcuts, agentCfg] = await Promise.all([
+                const [settings, providers, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg] = await Promise.all([
                     this._fetch('/api/settings'),
                     this._fetch('/api/settings/providers'),
                     this._fetch('/api/settings/agent/personalities'),
                     this._fetch('/api/settings/shortcuts'),
                     this._fetch('/api/settings/agent'),
+                    this._fetch('/api/settings/agent/context'),
+                    this._fetch('/api/settings/agent/safety'),
+                    this._fetch('/api/settings/appearance'),
                 ]);
 
                 if (settings) {
@@ -230,20 +233,20 @@ function settingsApp() {
                         Object.assign(this.agent, settings.agent);
                     }
                     if (settings.connectors) Object.assign(this.connectors, settings.connectors);
-                    if (settings.appearance) {
-                        Object.assign(this.appearance, settings.appearance);
-                        if (settings.appearance.font_size) {
+                    if (appearanceCfg) {
+                        Object.assign(this.appearance, appearanceCfg);
+                        if (appearanceCfg.font_size) {
                             try {
                                 const rootEl = document.documentElement;
                                 if (rootEl && rootEl._x_dataStack) {
                                     const root = Alpine.$data(rootEl);
-                                    if (root) root.fontSize = settings.appearance.font_size;
+                                    if (root) root.fontSize = appearanceCfg.font_size;
                                 }
                             } catch (e) { /* ignore font sync */ }
                         }
                     }
-                    if (settings.safety) Object.assign(this.safety, settings.safety);
-                    if (settings.context) Object.assign(this.context, settings.context);
+                    if (safetyCfg) Object.assign(this.safety, safetyCfg);
+                    if (contextCfg) Object.assign(this.context, contextCfg);
                     // Load memory tenant mode from ConfigStore (stored under the
                     // "memory" category as key "memory.tenant_mode").
                     const memTenant = settings.memory && settings.memory['memory.tenant_mode'];
