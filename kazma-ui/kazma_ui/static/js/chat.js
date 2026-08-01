@@ -2146,9 +2146,10 @@
 
   function renderSessionList() {
     if (!sessionListEl) return;
-    // Backend returns sessions sorted newest-first by updated_at.
-    // Additionally, pin the active session to the top so it's always
-    // visible (matches ChatGPT behavior).
+    // Backend returns sessions sorted newest-first by updated_at. Sort by
+    // updated_at descending as belt-and-braces. The active session is NOT
+    // pinned to the top: clicking a season must not reorder the list —
+    // only real activity (a sent message) bumps updated_at and moves it up.
     var filtered = sessions;
     if (searchQuery) {
       var q = searchQuery.toLowerCase();
@@ -2157,11 +2158,8 @@
                 (s.session_id || '').toLowerCase().includes(q));
       });
     }
-    // Sort: active session first, then by updated_at descending.
+    // Sort by updated_at descending (newest first).
     filtered = filtered.slice().sort(function(a, b) {
-      var aActive = a.session_id === chatSessionId ? 1 : 0;
-      var bActive = b.session_id === chatSessionId ? 1 : 0;
-      if (aActive !== bActive) return bActive - aActive;
       return (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '');
     });
 
