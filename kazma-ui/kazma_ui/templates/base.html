@@ -93,6 +93,44 @@
         </button>
     </nav>
 
+    {# Global Search Overlay (Ctrl+K / header icon) — backed by the
+       `search` Alpine store (modules/stores.js). Search results: static
+       pages + chat sessions, navigable with ↑/↓/Enter. #}
+    <div class="search-overlay" x-show="$store.search.open" x-transition.opacity
+         @click.self="$store.search.close()" style="display: none;"
+         @keydown.down.prevent="$store.search.next()"
+         @keydown.up.prevent="$store.search.prev()"
+         @keydown.enter.prevent="$store.search.go()">
+        <div class="search-panel">
+            <div class="search-box">
+                <svg class="search-box-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3"/>
+                </svg>
+                <input type="text" x-model="$store.search.query"
+                       @input.debounce.200ms="$store.search.doSearch()"
+                       @keydown.escape.stop="$store.search.close()"
+                       placeholder="{{ t('search.placeholder') }}" autocomplete="off">
+                <button type="button" class="search-cancel" @click="$store.search.close()">{{ t('search.cancel') }}</button>
+            </div>
+            <div class="search-hint">{{ t('search.prompt') }}</div>
+            <div class="search-results" x-show="$store.search.loading || $store.search.results.length || $store.search.searched">
+                <div class="search-loading" x-show="$store.search.loading" x-text="t('search.loading')"></div>
+                <div class="search-no-results"
+                     x-show="!$store.search.loading && $store.search.searched && !$store.search.results.length"
+                     x-text="t('search.no_results')"></div>
+                <template x-for="(r, i) in $store.search.results" :key="r.kind + r.href + i">
+                    <a class="search-result" :class="{ hovered: $store.search.hovered === i }"
+                       :href="r.href" @mouseenter="$store.search.hovered = i"
+                       @click="$store.search.close()">
+                        <span class="search-result-kind" x-text="r.kind === 'session' ? t('search.sessions') : t('search.pages')"></span>
+                        <span class="search-result-title" x-text="r.title"></span>
+                        <span class="search-result-sub" x-show="r.subtitle" x-text="r.subtitle"></span>
+                    </a>
+                </template>
+            </div>
+        </div>
+    </div>
+
     {# Toast Container #}
     {% include "components/toast.html" %}
 

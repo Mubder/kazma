@@ -145,6 +145,14 @@
       });
     }
 
+    // Click anywhere outside an open kebab menu closes it
+    document.addEventListener('click', function(e) {
+      if (_openMenuId && !e.target.closest('.session-menu') && !e.target.closest('.session-more')) {
+        _openMenuId = null;
+        renderSessionList();
+      }
+    });
+
     // Global Escape key — abort generation from anywhere on the page
     // (not just when the textarea has focus).
     document.addEventListener('keydown', function(e) {
@@ -155,8 +163,12 @@
     });
 
     // Load the current session's messages if we have a session ID
-    // (e.g., after page refresh)
+    // (e.g., after page refresh or via the global search overlay ?s=)
     var initialSessionId = localStorage.getItem(SESSION_LS_KEY);
+    try {
+      var sParam = new URLSearchParams(window.location.search).get('s');
+      if (sParam) initialSessionId = sParam;
+    } catch (e) { /* ignore malformed URLs */ }
     if (initialSessionId) {
       chatSessionId = initialSessionId;
       // Use setTimeout to ensure Alpine store is initialized before connecting
@@ -2144,59 +2156,134 @@
     } catch (e) { return ''; }
   }
 
+  // Session id whose kebab menu is open (single open menu at a time)
+  var _openMenuId = null;
+
+  function sessionGroupKey(isoStr) {
+    if (!isoStr) return 'older';
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) return 'older';
+    var now = new Date();
+    var startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var startDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    var days = Math.round((startToday - startDay) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return 'week';
+    return 'older';
+  }
+
+  function highlightTitle(title, q) {
+    if (!q) return escapeHtml(title || '');
+    var text = title || '';
+    var idx = text.toLowerCase().indexOf(q);
+    if (idx === -1) return escapeHtml(text);
+    return escapeHtml(text.slice(0, idx)) + '<mark>' +
+      escapeHtml(text.slice(idx, idx + q.length)) + '</mark>' +
+      escapeHtml(text.slice(idx + q.length));
+  }
+
+  function sessionRowHtml(s, q) {
+    var isActive = s.session_id === chatSessionId;
+    var title = s.title || (s.session_id || '').slice(0, 8);
+    var plat = s.platform || 'web';
+    var absTime = '';
+    try { absTime = new Date(s.updated_at || s.created_at).toLocaleString(); } catch (e) {}
+    var meta = s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+    var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
+      '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(plat) + '"></span>' +
+      '<div class="session-info">' +
+        '<span class="session-title" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
+        '<span class="session-meta">' + escapeHtml(meta) + '</span>' +
+      '</div>';
+    if (showArchived) {
+      html += '<div class="session-actions">' +
+        '<button class="session-act-btn" data-unarchive="' + escapeHtml(s.session_id) + '" title="' + escapeHtml(ti('restore', 'Restore')) + '">\u21BA</button>' +
+        '<button class="session-act-btn session-del" data-delete="' + escapeHtml(s.session_id) + '" title="' + escapeHtml(ti('delete', 'Delete')) + '">\u2715</button>' +
+      '</div>';
+    } else {
+      var isMenuOpen = _openMenuId === s.session_id;
+      html += '<div class="session-actions">' +
+        '<button class="session-more' + (isMenuOpen ? ' active' : '') + '" data-more="' + escapeHtml(s.session_id) + '" title="' + escapeHtml(ti('actions', 'Actions')) + '">\u22EF</button>' +
+        '<div class="session-menu' + (isMenuOpen ? ' open' : '') + '" data-menu="' + escapeHtml(s.session_id) + '">' +
+          '<button class="session-menu-item" data-menu-action="' + (s.pinned ? 'unpin' : 'pin') + '" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti(s.pinned ? 'unpin' : 'pin', s.pinned ? 'Unpin' : 'Pin')) + '</button>' +
+          '<button class="session-menu-item" data-menu-action="rename" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti('rename', 'Rename')) + '</button>' +
+          '<button class="session-menu-item" data-menu-action="archive" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti('archive', 'Archive')) + '</button>' +
+          '<button class="session-menu-item danger" data-menu-action="delete" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti('delete', 'Delete')) + '</button>' +
+        '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
   function renderSessionList() {
     if (!sessionListEl) return;
     // Backend returns sessions sorted newest-first by updated_at. Sort by
     // updated_at descending as belt-and-braces. The active session is NOT
     // pinned to the top: clicking a season must not reorder the list —
     // only real activity (a sent message) bumps updated_at and moves it up.
+    // Explicitly pinned sessions (server-side `pinned`) are grouped on top.
+    var q = searchQuery ? searchQuery.toLowerCase() : '';
     var filtered = sessions;
-    if (searchQuery) {
-      var q = searchQuery.toLowerCase();
+    if (q) {
       filtered = sessions.filter(function(s) {
         return ((s.title || '').toLowerCase().includes(q) ||
                 (s.session_id || '').toLowerCase().includes(q));
       });
     }
-    // Sort by updated_at descending (newest first).
     filtered = filtered.slice().sort(function(a, b) {
       return (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '');
     });
 
+    var countEl = document.getElementById('session-count');
+    if (countEl) countEl.textContent = sessions.length ? ' (' + sessions.length + ')' : '';
+
     if (filtered.length === 0) {
+      var emptyText = q
+        ? ti('no_matching_sessions', 'No matching sessions')
+        : ti('no_sessions_yet', 'No sessions yet');
       sessionListEl.innerHTML =
-        '<div class="session-empty">' + (searchQuery ? 'No matching sessions' : 'No sessions yet') + '</div>';
+        '<div class="session-empty">' + escapeHtml(emptyText) +
+        (q ? '' : '<button class="btn btn-sm btn-primary session-empty-cta" id="session-empty-new">' +
+          escapeHtml(ti('start_new_chat', 'Start a new chat')) + '</button>') +
+        '</div>';
+      var cta = document.getElementById('session-empty-new');
+      if (cta) cta.addEventListener('click', newSession);
       return;
     }
 
-    sessionListEl.innerHTML = filtered.map(function(s) {
-      var isActive = s.session_id === chatSessionId;
-      var title = s.title || (s.session_id || '').slice(0, 8);
-      var plat = s.platform || 'web';
-      var platIcon = ({
-        telegram: 'TG', discord: 'DC', slack: 'SL', gateway: 'GW', web: 'Web'
-      })[plat] || plat;
-      var meta = platIcon + ' \u00B7 ' + s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
-      var html = '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
-        '<div class="session-info">' +
-          '<span class="session-title" title="Double-click to rename — same season continues on ' + escapeHtml(plat) + '">' + escapeHtml(title) + '</span>' +
-          '<span class="session-meta">' + meta + '</span>' +
-        '</div>';
-      if (showArchived) {
-        // In archive view: show unarchive + delete buttons
-        html += '<button class="session-unarchive" data-unarchive="' + escapeHtml(s.session_id) + '" title="Restore">\u21BA</button>';
-        html += '<button class="session-delete" data-delete="' + escapeHtml(s.session_id) + '" title="Delete forever">\u2715</button>';
-      } else {
-        // Normal view: show rename + archive + delete buttons
-        html += '<button class="session-rename" data-rename="' + escapeHtml(s.session_id) + '" title="Rename">\u270F</button>';
-        html += '<button class="session-archive" data-archive="' + escapeHtml(s.session_id) + '" title="Archive">\u25A0</button>';
-        html += '<button class="session-delete" data-delete="' + escapeHtml(s.session_id) + '" title="Delete session">\u2715</button>';
-      }
-      html += '</div>';
-      return html;
-    }).join('');
+    // Group: pinned section first, then date buckets (Today/Yesterday/7d/Older)
+    var groups = [];
+    var pinned = filtered.filter(function(s) { return !!s.pinned; });
+    var rest = filtered.filter(function(s) { return !s.pinned; });
+    if (pinned.length) groups.push({ label: ti('pinned', 'Pinned'), items: pinned });
+    var buckets = { today: [], yesterday: [], week: [], older: [] };
+    rest.forEach(function(s) {
+      buckets[sessionGroupKey(s.updated_at || s.created_at)].push(s);
+    });
+    var labels = {
+      today: ti('today', 'Today'),
+      yesterday: ti('yesterday', 'Yesterday'),
+      week: ti('previous_7_days', 'Previous 7 days'),
+      older: ti('older', 'Older'),
+    };
+    ['today', 'yesterday', 'week', 'older'].forEach(function(k) {
+      if (buckets[k].length) groups.push({ label: labels[k], items: buckets[k] });
+    });
 
-    // Delete button handlers
+    var html = '';
+    groups.forEach(function(g) {
+      html += '<div class="session-section-label">' + escapeHtml(g.label) + '</div>';
+      g.items.forEach(function(s) { html += sessionRowHtml(s, q); });
+    });
+    sessionListEl.innerHTML = html;
+
+    // Delete buttons (archive view)
     sessionListEl.querySelectorAll('[data-delete]').forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.stopPropagation();
@@ -2204,29 +2291,59 @@
       });
     });
 
-    // Rename button handlers
-    sessionListEl.querySelectorAll('[data-rename]').forEach(function(btn) {
-      btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        renameSession(this.dataset.rename);
-      });
-    });
-
-    // Archive button handlers
-    sessionListEl.querySelectorAll('[data-archive]').forEach(function(btn) {
-      btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        archiveSession(this.dataset.archive);
-      });
-    });
-
-    // Unarchive button handlers
+    // Unarchive buttons (archive view)
     sessionListEl.querySelectorAll('[data-unarchive]').forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.stopPropagation();
         unarchiveSession(this.dataset.unarchive);
       });
     });
+
+    // Kebab toggle buttons
+    sessionListEl.querySelectorAll('[data-more]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var sid = this.dataset.more;
+        _openMenuId = (_openMenuId === sid) ? null : sid;
+        renderSessionList();
+      });
+    });
+
+    // Kebab menu actions
+    sessionListEl.querySelectorAll('[data-menu-action]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var action = this.dataset.menuAction;
+        var sid = this.dataset.menuSid;
+        _openMenuId = null;
+        if (action === 'pin') pinSession(sid, true);
+        else if (action === 'unpin') pinSession(sid, false);
+        else if (action === 'rename') renameSession(sid);
+        else if (action === 'archive') archiveSession(sid);
+        else if (action === 'delete') deleteSession(sid);
+      });
+    });
+  }
+
+  function pinSession(sessionId, pinned) {
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + (pinned ? '/pin' : '/unpin'), { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          KS.toast(pinned ? 'Session pinned' : 'Session unpinned', 'success', 2000);
+          for (var i = 0; i < sessions.length; i++) {
+            if (sessions[i].session_id === sessionId) {
+              sessions[i].pinned = !!data.pinned;
+              break;
+            }
+          }
+          renderSessionList();
+          refreshSessionsSoon();
+        } else {
+          KS.toast(data.error || 'Pin failed', 'error', 3000);
+        }
+      })
+      .catch(function() { KS.toast('Pin failed', 'error', 3000); });
   }
 
   function archiveSession(sessionId) {

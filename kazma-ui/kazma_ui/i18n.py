@@ -1031,6 +1031,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # ── Chat sidebar extras (archive/rename) ──────────────────────────
     "chat.archived": {"en": "Archived", "ar": "المؤرشفة"},
+    "chat.pinned": {"en": "Pinned", "ar": "مثبتة"},
+    "chat.pin": {"en": "Pin", "ar": "تثبيت"},
+    "chat.unpin": {"en": "Unpin", "ar": "إلغاء التثبيت"},
+    "chat.today": {"en": "Today", "ar": "اليوم"},
+    "chat.yesterday": {"en": "Yesterday", "ar": "أمس"},
+    "chat.previous_7_days": {"en": "Previous 7 days", "ar": "آخر 7 أيام"},
+    "chat.older": {"en": "Older", "ar": "أقدم"},
+    "chat.no_sessions_yet": {"en": "No sessions yet", "ar": "لا توجد جلسات بعد"},
+    "chat.start_new_chat": {"en": "Start a new chat", "ar": "ابدأ محادثة جديدة"},
+    "chat.no_matching_sessions": {"en": "No matching sessions", "ar": "لا توجد جلسات مطابقة"},
+    "chat.actions": {"en": "Actions", "ar": "إجراءات"},
+    "chat.delete": {"en": "Delete", "ar": "حذف"},
     "chat.rename": {"en": "Rename", "ar": "إعادة تسمية"},
     "chat.rename_title": {"en": "Rename session", "ar": "إعادة تسمية الجلسة"},
     "chat.session_title": {"en": "Session title", "ar": "عنوان الجلسة"},
@@ -1041,6 +1053,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.renamed_msg": {"en": "Session renamed", "ar": "تمت إعادة تسمية الجلسة"},
     "chat.delete_title": {"en": "Delete session", "ar": "حذف الجلسة"},
     "chat.deleted_msg": {"en": "Session deleted", "ar": "تم حذف الجلسة"},
+
+    # ── Global search overlay (Ctrl+K / header icon) ──────────────────
+    "search.placeholder": {"en": "Search sessions, pages…", "ar": "ابحث في الجلسات والصفحات…"},
+    "search.prompt": {"en": "Type to search your sessions and pages", "ar": "اكتب للبحث في جلساتك وصفحاتك"},
+    "search.no_results": {"en": "No results for “{query}”", "ar": "لا توجد نتائج لـ “{query}”"},
+    "search.sessions": {"en": "Sessions", "ar": "الجلسات"},
+    "search.pages": {"en": "Pages", "ar": "الصفحات"},
+    "search.loading": {"en": "Searching…", "ar": "جارٍ البحث…"},
+    "search.cancel": {"en": "Cancel", "ar": "إلغاء"},
+    "search.pinned_hint": {"en": "Pinned to top", "ar": "مثبتة في الأعلى"},
 
     # ── IDE ───────────────────────────────────────────────────────────
     "ide.title": {"en": "IDE", "ar": "بيئة التطوير المتكاملة"},

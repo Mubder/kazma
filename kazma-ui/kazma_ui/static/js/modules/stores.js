@@ -280,14 +280,109 @@ export function registerStores() {
         };
 
         // ── 3. Search Store ────────────────────────────────────────────
+        // Global overlay search (Ctrl+K / header icon). Searches static
+        // pages + chat sessions, with ↑/↓/Enter keyboard navigation.
+        // The overlay DOM lives in base.html; this store owns the state.
         Alpine.store('search', {
             open: false,
             query: '',
-            results: [],
+            results: [],       // flat list of {kind:'session'|'page', title, subtitle, href}
             loading: false,
+            searched: false,
+            hovered: 0,
 
-            toggle() { this.open = !this.open; },
-            close() { this.open = false; this.query = ''; this.results = []; },
+            _pages: [
+                { href: '/', title: 'Dashboard' },
+                { href: '/chat', title: 'Chat' },
+                { href: '/dashboard', title: 'Analytics' },
+                { href: '/skills', title: 'Skills' },
+                { href: '/mcp', title: 'MCP' },
+                { href: '/swarm', title: 'Swarm' },
+                { href: '/workspace', title: 'Workspace' },
+                { href: '/settings', title: 'Settings' },
+                { href: '/research', title: 'Research' },
+                { href: '/knowledge', title: 'Knowledge' },
+            ],
+
+            toggle() {
+                this.open = !this.open;
+                if (this.open) this._focusInput();
+            },
+
+            close() {
+                this.open = false;
+                this.query = '';
+                this.results = [];
+                this.searched = false;
+                this.loading = false;
+                this.hovered = 0;
+            },
+
+            next() {
+                if (this.results.length) this.hovered = (this.hovered + 1) % this.results.length;
+            },
+
+            prev() {
+                if (this.results.length) {
+                    this.hovered = (this.hovered - 1 + this.results.length) % this.results.length;
+                }
+            },
+
+            go() {
+                var r = this.results[this.hovered] || this.results[0];
+                if (!r) return;
+                this.close();
+                window.location.href = r.href;
+            },
+
+            _focusInput() {
+                var self = this;
+                setTimeout(function () {
+                    var input = document.querySelector('.search-overlay input[type="text"]');
+                    if (input) { input.focus(); input.select(); }
+                    if (self.query) self.doSearch();
+                }, 50);
+            },
+
+            async doSearch() {
+                var q = (this.query || '').trim().toLowerCase();
+                this.searched = true;
+                this.hovered = 0;
+                if (!q) { this.results = []; this.loading = false; return; }
+                this.loading = true;
+                var matches = [];
+
+                this._pages.forEach(function (p) {
+                    if (p.title.toLowerCase().includes(q) || p.href.toLowerCase().includes(q)) {
+                        matches.push({ kind: 'page', title: p.title, subtitle: p.href, href: p.href });
+                    }
+                });
+
+                try {
+                    var res = await fetch('/api/chat/sessions', {
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' },
+                    });
+                    if (res.ok) {
+                        var list = await res.json();
+                        (Array.isArray(list) ? list : []).forEach(function (s) {
+                            var title = s.title || s.session_id || '';
+                            var sid = s.session_id || '';
+                            if (title.toLowerCase().includes(q) || sid.toLowerCase().includes(q)) {
+                                matches.push({
+                                    kind: 'session',
+                                    title: title,
+                                    subtitle: (s.platform || 'web') + ' \u00B7 ' + (s.message_count || 0) + ' msgs',
+                                    href: '/chat?s=' + encodeURIComponent(sid),
+                                });
+                            }
+                        });
+                    }
+                } catch (e) { /* degrades to pages-only on failure */ }
+
+                this.results = matches;
+                this.loading = false;
+            },
         });
 
         // ── 4. Notifications Store ─────────────────────────────────────

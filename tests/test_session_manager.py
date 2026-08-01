@@ -326,3 +326,64 @@ class TestSessionManagerUnit:
         assert summary["message_count"] == 1
         assert summary["total_cost"] == 1.23
         assert "created_at" in summary
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Pinning (VAL-UX-012: server-persisted pinned sessions)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestPinning:
+    """Pin/unpin routes persist server-side and surface in the session list."""
+
+    def test_pin_then_unpin_roundtrip(self):
+        app = _make_sse_app()
+        client = TestClient(app)
+        client.post("/api/chat/stream", json={"message": "pin me"})
+
+        session_id = client.get("/api/chat/sessions").json()[0]["session_id"]
+        assert client.get("/api/chat/sessions").json()[0]["pinned"] is False
+
+        resp = client.post(f"/api/chat/sessions/{session_id}/pin")
+        assert resp.status_code == 200
+        assert resp.json()["pinned"] is True
+        assert client.get("/api/chat/sessions").json()[0]["pinned"] is True
+
+        resp = client.post(f"/api/chat/sessions/{session_id}/unpin")
+        assert resp.status_code == 200
+        assert resp.json()["pinned"] is False
+        assert client.get("/api/chat/sessions").json()[0]["pinned"] is False
+
+    def test_pin_is_idempotent(self):
+        app = _make_sse_app()
+        client = TestClient(app)
+        client.post("/api/chat/stream", json={"message": "pin twice"})
+
+        session_id = client.get("/api/chat/sessions").json()[0]["session_id"]
+        client.post(f"/api/chat/sessions/{session_id}/pin")
+        resp = client.post(f"/api/chat/sessions/{session_id}/pin")
+        assert resp.status_code == 200
+        assert resp.json()["pinned"] is True
+
+    def test_pin_unknown_session_returns_error(self):
+        app = _make_sse_app()
+        client = TestClient(app)
+        resp = client.post("/api/chat/sessions/does-not-exist/pin")
+        assert resp.status_code == 200
+        assert resp.json().get("status") == "error"
+
+    def test_pinned_survives_reload_of_store(self):
+        """Pinned flag persists in a real SQLite store (not just in-memory)."""
+        mgr = SessionManager(db_path=":memory:")
+        session = mgr.get_or_create("persist-pin")
+        session.messages.append({"role": "user", "content": "hi"})
+
+        mgr.set_pinned("persist-pin", True)
+        session2 = mgr.get("persist-pin")
+        assert session2.pinned is True
+
+        listed = [s for s in mgr.list_all() if s.session_id == "persist-pin"][0]
+        assert listed.pinned is True
+
+        mgr.set_pinned("persist-pin", False)
+        assert mgr.get("persist-pin").pinned is False

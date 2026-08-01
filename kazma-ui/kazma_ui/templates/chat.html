@@ -16,7 +16,9 @@
   <!-- ── Session Sidebar (slide-in drawer on mobile) ── -->
   <aside class="chat-sidebar" :class="{ 'mobile-open': mobileChatSidebarOpen }">
     <div class="chat-sidebar-header">
-      <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">{{ t('chat.sessions') }}</h3>
+      <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">{{ t('chat.sessions') }}
+        <span id="session-count" class="session-count" style="font-weight:500;color:var(--text-muted);"></span>
+      </h3>
       <button id="new-session-btn" class="btn btn-sm btn-primary" title="{{ t('chat.new_session') }} (Ctrl+N)">{{ t('chat.new_session') }}</button>
     </div>
     <div class="session-search-wrapper">
@@ -194,7 +196,22 @@
     approval_complete: {{ t('chat.approval_complete') | tojson }},
     step_done: {{ t('chat.step_done') | tojson }},
     step_failed: {{ t('chat.step_failed') | tojson }},
-    placeholder: {{ t('chat.placeholder') | tojson }}
+    placeholder: {{ t('chat.placeholder') | tojson }},
+    pinned: {{ t('chat.pinned') | tojson }},
+    pin: {{ t('chat.pin') | tojson }},
+    unpin: {{ t('chat.unpin') | tojson }},
+    today: {{ t('chat.today') | tojson }},
+    yesterday: {{ t('chat.yesterday') | tojson }},
+    previous_7_days: {{ t('chat.previous_7_days') | tojson }},
+    older: {{ t('chat.older') | tojson }},
+    no_sessions_yet: {{ t('chat.no_sessions_yet') | tojson }},
+    start_new_chat: {{ t('chat.start_new_chat') | tojson }},
+    no_matching_sessions: {{ t('chat.no_matching_sessions') | tojson }},
+    actions: {{ t('chat.actions') | tojson }},
+    rename: {{ t('chat.rename') | tojson }},
+    archive: {{ t('chat.archive') | tojson }},
+    restore: {{ t('chat.restore') | tojson }},
+    delete: {{ t('chat.delete') | tojson }}
   };
 </script>
 <script src="/static/js/stores/agentStore.js?v={{ js_version() }}"></script>

@@ -1754,6 +1754,30 @@ def create_sse_chat_router(
             logger.error("unarchive_session failed: %s", exc)
             return {"status": "error", "error": "Internal error"}
 
+    @r.post("/api/chat/sessions/{session_id}/pin")
+    async def pin_session(session_id: str) -> dict[str, Any]:
+        """Pin a chat session (stays at the top of the sidebar)."""
+        try:
+            session = _get_store().set_pinned(session_id, True)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "pinned": True}
+        except Exception as exc:
+            logger.error("pin_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.post("/api/chat/sessions/{session_id}/unpin")
+    async def unpin_session(session_id: str) -> dict[str, Any]:
+        """Unpin a chat session (back to normal updated_at ordering)."""
+        try:
+            session = _get_store().set_pinned(session_id, False)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "pinned": False}
+        except Exception as exc:
+            logger.error("unpin_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
     @r.get("/api/chat/sessions/archived")
     async def list_archived_sessions() -> list[dict[str, Any]]:
         """List archived chat sessions (for the archive view)."""

@@ -65,6 +65,7 @@ class ChatSession:
     updated_at: str = ""
     title: str = ""
     archived: bool = False
+    pinned: bool = False
 
     def __post_init__(self) -> None:
         now = datetime.now(UTC).isoformat()
@@ -108,6 +109,7 @@ class ChatSession:
             "updated_at": self.updated_at or self.created_at,
             "title": self.title or f"{platform.capitalize()} Session",
             "archived": bool(self.archived),
+            "pinned": bool(self.pinned),
             "total_cost": self.total_cost,
             "total_tokens": self.total_tokens,
             "thread_id": self.thread_id or self.session_id,
@@ -217,6 +219,7 @@ class SessionManager:
                 ("updated_at", "TEXT DEFAULT ''"),
                 ("title", "TEXT DEFAULT ''"),
                 ("archived", "INTEGER DEFAULT 0"),
+                ("pinned", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     self._conn.execute(
@@ -237,6 +240,7 @@ class SessionManager:
         updated_at: Any,
         title: Any,
         archived: Any,
+        pinned: Any = None,
     ) -> ChatSession:
         if isinstance(messages_raw, (list, dict)):
             messages = messages_raw if isinstance(messages_raw, list) else []
@@ -256,6 +260,7 @@ class SessionManager:
             updated_at=updated_at or "",
             title=title or "",
             archived=bool(archived),
+            pinned=bool(pinned),
         )
 
     def _load_all_from_db(self, limit: int | None = None) -> None:
@@ -265,7 +270,7 @@ class SessionManager:
 
             sql = (
                 "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                "total_tokens, thread_id, updated_at, title, archived "
+                "total_tokens, thread_id, updated_at, title, archived, pinned "
                 "FROM kazma_chat_sessions "
                 "ORDER BY COALESCE(NULLIF(updated_at,''), created_at) DESC"
             )
@@ -279,6 +284,7 @@ class SessionManager:
                     row["tenant_id"], row["session_id"], row["messages"],
                     row["created_at"], row["total_cost"], row["total_tokens"],
                     row["thread_id"], row["updated_at"], row["title"], row["archived"],
+                    row["pinned"] if "pinned" in row else None,
                 )
                 self._sessions[f"{session.tenant_id}:{session.session_id}"] = session
             return
@@ -286,7 +292,7 @@ class SessionManager:
         assert self._conn is not None
         sql = (
             "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-            "total_tokens, thread_id, updated_at, title, archived FROM sessions "
+            "total_tokens, thread_id, updated_at, title, archived, pinned FROM sessions "
             "ORDER BY COALESCE(NULLIF(updated_at,''), created_at) DESC"
         )
         if limit is not None and limit > 0:
@@ -295,10 +301,10 @@ class SessionManager:
         rows = cursor.fetchall()
         for row in rows:
             (tenant_id, session_id, messages_str, created_at, total_cost,
-             total_tokens, thread_id, updated_at, title, archived) = row
+             total_tokens, thread_id, updated_at, title, archived, pinned) = row
             session = self._session_from_row(
                 tenant_id, session_id, messages_str, created_at, total_cost,
-                total_tokens, thread_id, updated_at, title, archived,
+                total_tokens, thread_id, updated_at, title, archived, pinned,
             )
             self._sessions[f"{session.tenant_id}:{session_id}"] = session
 
@@ -337,8 +343,8 @@ class SessionManager:
                     INSERT INTO kazma_chat_sessions (
                         tenant_id, session_id, messages, created_at,
                         total_cost, total_tokens, thread_id, updated_at,
-                        title, archived
-                    ) VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
+                        title, archived, pinned
+                    ) VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (tenant_id, session_id) DO UPDATE SET
                         messages = EXCLUDED.messages,
                         created_at = EXCLUDED.created_at,
@@ -347,7 +353,8 @@ class SessionManager:
                         thread_id = EXCLUDED.thread_id,
                         updated_at = EXCLUDED.updated_at,
                         title = EXCLUDED.title,
-                        archived = EXCLUDED.archived
+                        archived = EXCLUDED.archived,
+                        pinned = EXCLUDED.pinned
                     """,
                     (
                         session.tenant_id,
@@ -360,6 +367,7 @@ class SessionManager:
                         session.updated_at,
                         session.title,
                         bool(session.archived),
+                        bool(session.pinned),
                     ),
                 )
                 return
@@ -370,8 +378,8 @@ class SessionManager:
                     """
                     INSERT INTO sessions (tenant_id, session_id, messages, created_at,
                                           total_cost, total_tokens, thread_id, updated_at,
-                                          title, archived)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          title, archived, pinned)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(tenant_id, session_id) DO UPDATE SET
                         messages=excluded.messages,
                         created_at=excluded.created_at,
@@ -380,7 +388,8 @@ class SessionManager:
                         thread_id=excluded.thread_id,
                         updated_at=excluded.updated_at,
                         title=excluded.title,
-                        archived=excluded.archived
+                        archived=excluded.archived,
+                        pinned=excluded.pinned
                     """,
                     (
                         session.tenant_id,
@@ -393,6 +402,7 @@ class SessionManager:
                         session.updated_at,
                         session.title,
                         int(session.archived),
+                        int(session.pinned),
                     ),
                 )
             try:
@@ -417,7 +427,7 @@ class SessionManager:
 
                 row = get_pool().execute_one(
                     "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                    "total_tokens, thread_id, updated_at, title, archived "
+                    "total_tokens, thread_id, updated_at, title, archived, pinned "
                     "FROM kazma_chat_sessions WHERE tenant_id = %s AND session_id = %s",
                     (tenant_id, session_id),
                 )
@@ -427,12 +437,13 @@ class SessionManager:
                     row["tenant_id"], row["session_id"], row["messages"],
                     row["created_at"], row["total_cost"], row["total_tokens"],
                     row["thread_id"], row["updated_at"], row["title"], row["archived"],
+                    row["pinned"] if "pinned" in row else None,
                 )
 
             assert self._conn is not None
             cursor = self._conn.execute(
                 "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                "total_tokens, thread_id, updated_at, title, archived "
+                "total_tokens, thread_id, updated_at, title, archived, pinned "
                 "FROM sessions WHERE tenant_id = ? AND session_id = ?",
                 (tenant_id, session_id),
             )
@@ -444,11 +455,11 @@ class SessionManager:
             return None
         (
             tenant_id, session_id, messages_str, created_at, total_cost,
-            total_tokens, thread_id, updated_at, title, archived,
+            total_tokens, thread_id, updated_at, title, archived, pinned,
         ) = row
         return self._session_from_row(
             tenant_id, session_id, messages_str, created_at, total_cost,
-            total_tokens, thread_id, updated_at, title, archived,
+            total_tokens, thread_id, updated_at, title, archived, pinned,
         )
 
     def get(self, session_id: str) -> ChatSession | None:
@@ -645,6 +656,16 @@ class SessionManager:
             if session is None:
                 return None
             session.archived = archived
+            self._upsert_db(session)
+            return session
+
+    def set_pinned(self, session_id: str, pinned: bool) -> ChatSession | None:
+        """Pin or unpin a session (stays at the top of the sidebar)."""
+        with self._lock:
+            session = self.get(session_id)
+            if session is None:
+                return None
+            session.pinned = pinned
             self._upsert_db(session)
             return session
 
