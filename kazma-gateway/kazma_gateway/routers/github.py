@@ -1071,7 +1071,22 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
         repo_dir = Path(f"{repo_dir}-{i}")
 
     try:
-        subprocess.run(["git", "clone", "--depth", "1", url, str(repo_dir)], check=True, capture_output=True, text=True, timeout=120)
+        # Inject the GitHub token into the HTTPS clone URL so private repos
+        # authenticate without prompting. Uses x-access-token:<token> scheme
+        # (works for PAT, OAuth, and GitHub App installation tokens). Harmless
+        # for public repos. SSH URLs are left untouched (SSH key handles auth).
+        clone_url = url
+        if not body.use_ssh and clone_url.startswith("https://github.com/"):
+            try:
+                from kazma_gateway.routers.github_client import get_github_token
+
+                token = get_github_token()
+                if token:
+                    clone_url = f"https://x-access-token:{token}@github.com/" + clone_url[len("https://github.com/"):]
+            except Exception:
+                logger.debug("[github/repos/clone] token injection failed, using raw URL", exc_info=True)
+
+        subprocess.run(["git", "clone", "--depth", "1", clone_url, str(repo_dir)], check=True, capture_output=True, text=True, timeout=120)
     except subprocess.CalledProcessError as exc:
         return JSONResponse({"error": f"git clone failed: {(exc.stderr or '')[:300]}"}, status_code=502)
     except subprocess.TimeoutExpired:
