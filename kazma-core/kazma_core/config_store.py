@@ -629,6 +629,8 @@ class ConfigStore:
             return secret if secret is not None else None
 
         # Lazy migrate: plaintext sensitive value + vault available → encrypt
+        # Guard against re-migration loops: only migrate if the vault doesn't
+        # already have this secret (or has a different value).
         if (
             is_sensitive_config_key(key)
             and isinstance(val, str)
@@ -639,12 +641,17 @@ class ConfigStore:
             if vault is not None:
                 try:
                     vname = _vault_secret_name(key)
-                    vault.store(vname, val, category="config")
-                    ref = _vault_ref_for_key(key)
-                    self._write_db_value(key, ref, category="security")
-                    logger.info(
-                        "[ConfigStore] Migrated sensitive key %s into vault", key
-                    )
+                    # Check if vault already has this exact value — skip the
+                    # store + DB write if so (prevents the 3-second flood loop
+                    # when the workspace page polls /api/github/status).
+                    existing = vault.retrieve(vname)
+                    if existing != val:
+                        vault.store(vname, val, category="config")
+                        ref = _vault_ref_for_key(key)
+                        self._write_db_value(key, ref, category="security")
+                        logger.info(
+                            "[ConfigStore] Migrated sensitive key %s into vault", key
+                        )
                     return val
                 except Exception as exc:
                     logger.debug("[ConfigStore] Vault migrate skip for %s: %s", key, exc)
