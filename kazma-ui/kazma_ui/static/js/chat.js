@@ -177,7 +177,6 @@
     // Also check if an active SSE stream stalled while backgrounded.
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
-        console.log('[KazmaChat] Tab visibility changed, checking for active tasks');
         if (showArchived) loadArchivedSessions(); else loadSessions();
         // If a stream was active when we left, check if the backend is
         // still generating or if the fetch reader died. Reconnect if needed.
@@ -185,12 +184,10 @@
           var stallMs = Date.now() - lastActivityTs;
           if (stallMs > 5000) {
             // Stream stalled for >5s while backgrounded — check server status.
-            console.log('[KazmaChat] Stream stalled for ' + stallMs + 'ms, checking background generation');
             _checkBackgroundGeneration();
           }
         } else if (chatSessionId) {
           // No active stream but we have a session — check if generating
-          console.log('[KazmaChat] No active stream, checking background generation');
           _checkBackgroundGeneration();
         }
       }
@@ -204,19 +201,10 @@
         .then(function(data) {
           if (!data || !chatSessionId) return;
           if (data.generating) {
-            // Server is still generating — restore full visual state
-            if (!_isGenerating) {
-              console.log('[KazmaChat] Background generation detected, restoring visual state');
-              // Restore turn state (Stop button, input lock, progress panel)
-              beginTurn();
-              // Show typing indicator
+            // Server is still generating — show indicator and start polling
+            if (!activeStream) {
               _showGeneratingIndicator();
-              // Start polling for completion
               _pollBackgroundTurn(chatSessionId, 0);
-              // Ensure WebSocket is connected for CoT updates
-              if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-                Alpine.store('agent').connect(chatSessionId);
-              }
             }
           } else if (activeStream && lastActivityTs) {
             // Stream was active but server says done — the fetch reader died.
@@ -225,9 +213,7 @@
             loadSession(chatSessionId);
           }
         })
-        .catch(function(err) {
-          console.warn('[KazmaChat] Failed to check background generation:', err);
-        });
+        .catch(function() { /* network error — ignore */ });
     }
 
     function _showGeneratingIndicator() {
@@ -2289,7 +2275,6 @@
           return;
         }
 
-        var hasPendingTurn = false;
         messages.forEach(function(msg) {
           var role = msg.role === 'assistant' ? 'assistant' : 'user';
           var content = msg.content || '';
@@ -2298,7 +2283,8 @@
           // indicator and start polling for the background-completed result.
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
-            hasPendingTurn = true;
+            // Poll for the completed background turn.
+            _pollBackgroundTurn(sessionId, messages.length);
           } else {
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null);
           }
@@ -2308,18 +2294,7 @@
         // response at all, the background turn may still be running.
         var lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
-          hasPendingTurn = true;
-        }
-
-        // Restore full visual state for background turn (CoT, Stop button, progress panel)
-        if (hasPendingTurn) {
-          console.log('[KazmaChat] Detected pending turn, restoring visual state');
           _pollBackgroundTurn(sessionId, messages.length);
-          // Restore turn state (Stop button, input lock, progress panel)
-          if (!_isGenerating) {
-            beginTurn();
-            _showGeneratingIndicator();
-          }
         }
 
         scrollToBottom();
@@ -2346,12 +2321,6 @@
     var attempts = 0;
     var maxAttempts = 18;  // 90s at 5s intervals
 
-    // Ensure visual state is maintained during polling (CoT, progress panel)
-    if (!_isGenerating) {
-      beginTurn();
-      _showGeneratingIndicator();
-    }
-
     function poll() {
       if (chatSessionId !== sessionId) return;  // user switched sessions
       if (activeStream) return;  // user started a new turn, stop polling
@@ -2366,8 +2335,6 @@
               + 'Please resend your message to start a new turn.</em></p>';
           }
         }
-        // End the turn since we're giving up on polling
-        endTurn();
         return;
       }
 
@@ -2386,20 +2353,10 @@
             loadSession(sessionId);
             return;
           }
-          // Not done yet — keep visual state active and poll again after 5s
-          if (!_isGenerating) {
-            beginTurn();
-            _showGeneratingIndicator();
-          }
+          // Not done yet — poll again after 5s
           setTimeout(poll, 5000);
         })
-        .catch(function(err) {
-          console.warn('[KazmaChat] Polling error:', err);
-          // Keep visual state active on network errors too
-          if (!_isGenerating) {
-            beginTurn();
-            _showGeneratingIndicator();
-          }
+        .catch(function() {
           setTimeout(poll, 5000);  // network error — keep trying
         });
     }
