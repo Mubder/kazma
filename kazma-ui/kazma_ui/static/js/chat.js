@@ -172,6 +172,7 @@
 
     // Load available models for the model selector
     loadModels();
+    loadSessions();
 
     // Refresh the sidebar session list when the tab regains focus.
     // Also check if an active SSE stream stalled while backgrounded.
@@ -661,7 +662,6 @@
     } catch (e) {
       newSession();
     }
-    loadSessions();
   }
 
   function populateModelSelector(providerGroups, savedProfiles) {
@@ -1936,7 +1936,9 @@
         }
         renderSessionList();
       })
-      .catch(function() {});
+      .catch(function(err) {
+        console.error('Failed to load sessions:', err);
+      });
   }
 
   function refreshSessionsSoon() {
