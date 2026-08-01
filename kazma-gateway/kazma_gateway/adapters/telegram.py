@@ -250,12 +250,10 @@ class TelegramAdapter(BaseAdapter):
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 409:
                         # 409 Conflict — another process is polling this bot.
-                        # Log once, then back off for 30 seconds.
                         logger.error(
                             "[telegram] 409 Conflict — another process is polling this bot. "
                             "Stopping adapter. Stop the other process or use a different bot token.",
                         )
-                        # Stop the adapter — retrying will just spam the log.
                         self._running = False
                         break
                     # Log status + response text without the full exception
@@ -265,6 +263,28 @@ class TelegramAdapter(BaseAdapter):
                     except Exception:
                         err_body = "<unreadable>"
                     logger.error("[telegram] HTTP %d polling error: %s", exc.response.status_code, err_body)
+
+                    # 429: respect Telegram's retry_after parameter instead
+                    # of the default 1-3s jitter (which causes double-429s).
+                    if exc.response.status_code == 429:
+                        retry_after = 5  # safe default
+                        try:
+                            body = exc.response.json()
+                            retry_after = int(
+                                body.get("parameters", {}).get("retry_after", 5)
+                            )
+                        except Exception:
+                            pass
+                        logger.info("[telegram] 429 rate limit — backing off %ds", retry_after)
+                        try:
+                            await asyncio.wait_for(
+                                shutdown_event.wait(), timeout=float(retry_after)
+                            )
+                            break  # shutdown signaled during backoff
+                        except asyncio.TimeoutError:
+                            pass  # backoff elapsed, resume polling
+                        continue
+
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
