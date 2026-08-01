@@ -1131,13 +1131,15 @@ def create_ws_chat_router(
                     active_task = asyncio.create_task(_run_approve_stream())
 
         except WebSocketDisconnect:
-            logger.info("[WS-Chat] Client disconnected: session_id=%s", session_id)
+            logger.info("[WS-Chat] Client disconnected: session_id=%s (graph keeps running in background)", session_id)
         except Exception as exc:
             logger.exception("[WS-Chat] WebSocket error: %s", exc)
         finally:
+            # DETACHED: do NOT cancel active_task. The graph keeps running in
+            # the background; the checkpointer + SSE done_callback persist the
+            # result. The client will pick it up on reconnect/reload.
             if active_task and not active_task.done():
-                active_task.cancel()
-                logger.info("[WS-Chat] Cancelled running stream task on teardown for session=%s", session_id)
+                logger.info("[WS-Chat] Detached stream task continues in background for session=%s", session_id)
 
     return router
 

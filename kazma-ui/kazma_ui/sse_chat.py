@@ -36,6 +36,17 @@ router = APIRouter(tags=["chat-sse"])
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Detached turn registry — keeps graph tasks alive across client disconnects
+# ══════════════════════════════════════════════════════════════════════════
+# Strong-reference map: thread_id → running graph pump task. Prevents CPython
+# from garbage-collecting the task when the SSE generator is cancelled by a
+# client disconnect (refresh / tab switch). The task runs to completion;
+# the checkpointer + done_callback persist the result so the client finds
+# it on reload.
+_active_turns: dict[str, Any] = {}
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # SSE frame helper (imported from shared utility)
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -155,6 +166,9 @@ async def _stream_langgraph_events(
     graph: Any,
     input_state: dict[str, Any] | Any,
     config: dict[str, Any],
+    *,
+    thread_id: str = "",
+    session_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """Consume LangGraph astream_events and yield SSE frames.
 
@@ -241,6 +255,65 @@ async def _stream_langgraph_events(
                         await _event_queue.put(None)  # sentinel
 
                 pump_task = asyncio.create_task(_pump_events())
+
+                # ── Detach: register the pump task so it survives client
+                # disconnects. The done_callback persists the final response
+                # to the session store so loadSession finds it on reload.
+                # This is the strong-reference pattern from self_improvement.py.
+                _active_turns[thread_id] = pump_task
+
+                def _on_pump_done(t: asyncio.Task) -> None:
+                    _active_turns.pop(thread_id, None)
+                    # Persist the final response to the session store.
+                    if not session_id:
+                        return
+                    try:
+                        import asyncio as _aio
+
+                        loop = _aio.get_event_loop()
+                    except RuntimeError:
+                        return
+
+                    async def _persist():
+                        try:
+                            snap = await graph.aget_state(config)
+                            if snap and snap.values:
+                                msgs = snap.values.get("messages") or []
+                                asst = _last_assistant_text(msgs)
+                                if asst:
+                                    store = _get_store()
+                                    sess = store.get(session_id)
+                                    if sess:
+                                        has_asst = any(
+                                            m.get("role") == "assistant"
+                                            for m in sess.messages
+                                        )
+                                        if not has_asst:
+                                            sess.messages.append(
+                                                {"role": "assistant", "content": asst}
+                                            )
+                                        else:
+                                            for m in reversed(sess.messages):
+                                                if m.get("role") == "assistant":
+                                                    m["content"] = asst
+                                                    m.pop("pending", None)
+                                                    break
+                                        store.put(sess)
+                                        logger.info(
+                                            "[SSE] Detached turn completed for thread=%s — "
+                                            "response persisted (%d chars)",
+                                            thread_id[:12], len(asst),
+                                        )
+                        except Exception:
+                            logger.debug(
+                                "[SSE] Detached turn persist failed for thread=%s",
+                                thread_id, exc_info=True,
+                            )
+
+                    loop.create_task(_persist())
+
+                pump_task.add_done_callback(_on_pump_done)
+
                 try:
                     while True:
                         try:
@@ -362,12 +435,13 @@ async def _stream_langgraph_events(
                                         )
                                         await asyncio.sleep(0.1)
                 finally:
-                    if not pump_task.done():
-                        pump_task.cancel()
-                        try:
-                            await pump_task
-                        except Exception:
-                            pass
+                    # DETACHED: do NOT cancel pump_task. The graph keeps running
+                    # in the background after the client disconnects. The
+                    # done_callback (_on_pump_done) persists the result when
+                    # the turn completes. The SSE generator just stops reading
+                    # from the queue — the pump fills it and events are dropped
+                    # harmlessly if nobody is consuming.
+                    pass
 
             # ── Post-stream: HITL + backfill assistant text ────────────
             # Custom LLM path never streams tokens. On HITL interrupt,
@@ -1138,6 +1212,23 @@ def create_sse_chat_router(
         if cost_breaker:
             cost_breaker.record_user_interaction()
 
+        # ── Duplicate-turn guard: reject if a background turn is still running
+        # for this thread (e.g. user refreshed mid-turn and immediately resent).
+        _existing = _active_turns.get(thread_id)
+        if _existing is not None and not _existing.done():
+            logger.info("[SSE] Rejecting duplicate turn for thread=%s (still running)", thread_id[:12])
+            async def _dup_gen() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {
+                    "content": "⏳ Your previous message is still being processed. "
+                               "It will appear here shortly — no need to resend."
+                })
+                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+            return StreamingResponse(
+                _dup_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         # ── Persist UI projection (display only) ───────────────────
         from datetime import UTC, datetime as _dt
 
@@ -1330,6 +1421,8 @@ def create_sse_chat_router(
                     graph=current_graph,
                     input_state=input_state,
                     config=graph_config,
+                    thread_id=thread_id,
+                    session_id=session_id,
                 ):
                     # Accumulate content for session history
                     if frame.startswith("event: token\n"):

@@ -2237,13 +2237,23 @@
           var content = msg.content || '';
           // If the last assistant message is marked pending (client refreshed
           // mid-turn while the LLM was still processing), show a processing
-          // indicator instead of a blank bubble.
+          // indicator and start polling for the background-completed result.
           if (role === 'assistant' && msg.pending && !content) {
-            appendMessage('assistant', '⏳ _This turn was in progress when you refreshed. The response may still be processing — try sending the message again, or wait and reload in a few seconds._', null, msg.ts || msg.timestamp || msg.created_at || null);
+            appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
+            // Poll for the completed background turn.
+            _pollBackgroundTurn(sessionId, messages.length);
           } else {
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null);
           }
         });
+
+        // Also check: if last message is a user message with no assistant
+        // response at all, the background turn may still be running.
+        var lastMsg = messages[messages.length - 1];
+        if (lastMsg && lastMsg.role === 'user') {
+          _pollBackgroundTurn(sessionId, messages.length);
+        }
+
         scrollToBottom();
         checkPendingApprovals();
       })
@@ -2257,6 +2267,58 @@
           '</div>';
         KS.toast('Failed to load session messages', 'error', 3000);
       });
+  }
+
+  /**
+   * Poll for a background-completed turn after a refresh/tab-switch.
+   * Checks every 5s for up to 90s. If new messages appear (the detached
+   * graph task completed), reloads the session to show the response.
+   */
+  function _pollBackgroundTurn(sessionId, originalCount) {
+    var attempts = 0;
+    var maxAttempts = 18;  // 90s at 5s intervals
+
+    function poll() {
+      if (chatSessionId !== sessionId) return;  // user switched sessions
+      if (activeStream) return;  // user started a new turn, stop polling
+      attempts++;
+      if (attempts > maxAttempts) {
+        // Replace the "still processing" indicator with a helpful message.
+        var msgs = messagesEl.querySelectorAll('[data-role="assistant"]');
+        if (msgs.length > 0) {
+          var lastAsst = msgs[msgs.length - 1];
+          if (lastAsst.textContent.indexOf('⏳') !== -1) {
+            lastAsst.innerHTML = '<p><em>The previous turn took too long. '
+              + 'Please resend your message to start a new turn.</em></p>';
+          }
+        }
+        return;
+      }
+
+      fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
+        .then(function(r) { return r.ok ? r.json() : []; })
+        .then(function(messages) {
+          if (chatSessionId !== sessionId) return;
+          // If message count grew, the background turn completed — reload.
+          if (messages.length > originalCount) {
+            loadSession(sessionId);  // re-renders with the completed response
+            return;
+          }
+          // Check if the pending message now has content (done_callback updated it)
+          var lastMsg = messages[messages.length - 1];
+          if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content && !lastMsg.pending) {
+            loadSession(sessionId);
+            return;
+          }
+          // Not done yet — poll again after 5s
+          setTimeout(poll, 5000);
+        })
+        .catch(function() {
+          setTimeout(poll, 5000);  // network error — keep trying
+        });
+    }
+
+    setTimeout(poll, 5000);  // first check after 5s
   }
 
   function checkPendingApprovals() {
