@@ -32,7 +32,7 @@
       <button class="btn btn-sm btn-secondary ws-action-btn" @click="showCreateModal = true" style="display:flex;align-items:center;justify-content:center;gap:6px;">
         <span><span x-html="KazmaIcons.plus()"></span></span> {{ t('workspace.create') }}
       </button>
-      <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
+      <button x-show="ghOAuthConnected || ghHasToken" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
         <span><span class="ki" data-icon="github" aria-hidden="true"></span></span> {{ t('workspace.switch_repo') }}
       </button>
       <button class="btn btn-sm btn-danger ws-action-btn" @click="deleteActiveWorkspace()"
