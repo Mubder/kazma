@@ -247,7 +247,46 @@ async def dispatch_inner(
     worker_name = task.workers[0]
     worker = engine.get_worker(worker_name)
     if worker is None:
-        msg = f"Worker '{worker_name}' not found."
+        # Fallback 1: try spawning from a template by name (autoscaler).
+        try:
+            scaler = engine.get_autoscaler()
+            if scaler is not None:
+                spawned = scaler.spawn_by_name(worker_name)
+                if spawned is not None:
+                    # spawn_by_name creates "name-pool-N" instances; redirect
+                    # the task to the spawned instance name.
+                    task.workers = [spawned.name]
+                    worker = spawned
+                    logger.info("[SwarmEngine] Auto-spawned '%s' for named dispatch",
+                                spawned.name)
+        except Exception:
+            logger.debug("[SwarmEngine] autoscaler spawn-by-name failed", exc_info=True)
+
+    if worker is None:
+        # Fallback 2: create a default worker from the active model profile.
+        try:
+            from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+            from kazma_core.model_registry import get_model_registry
+
+            reg = get_model_registry()
+            profile = reg.get_active_profile()
+            default_cfg = WorkerConfig(
+                name=worker_name,
+                type="in_process",
+                model=profile.get("model", ""),
+                provider=profile.get("provider", ""),
+                role=worker_name,
+                capabilities=WorkerCapabilities(expertise=[worker_name]),
+            )
+            worker = engine.add_worker(default_cfg)
+            logger.info("[SwarmEngine] Auto-created default worker '%s' (model=%s)",
+                        worker_name, profile.get("model", "?"))
+        except Exception as exc:
+            logger.warning("[SwarmEngine] Could not auto-create worker '%s': %s",
+                           worker_name, exc)
+
+    if worker is None:
+        msg = f"Worker '{worker_name}' not found and could not be auto-created."
         engine._tracing_emitter.end_span(task_span, status="error", status_msg=msg)
         return engine._finalize_task(
             task,

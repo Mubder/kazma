@@ -84,9 +84,35 @@ async def _dispatch_auto_route(
         })
 
     if not available:
-        await _send_swarm_reply(msg, store, manager, thread_id,
-            "⚠️ No workers registered. Add workers in the Swarm panel first.")
-        return True
+        # Auto-create a default worker from the active model so the swarm
+        # works out-of-the-box with zero pre-registered workers.
+        try:
+            from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+            from kazma_core.model_registry import get_model_registry
+
+            reg = get_model_registry()
+            profile = reg.get_active_profile()
+            default_cfg = WorkerConfig(
+                name="generalist",
+                type="in_process",
+                model=profile.get("model", ""),
+                provider=profile.get("provider", ""),
+                role="generalist",
+                capabilities=WorkerCapabilities(
+                    expertise=["task", "help", "general", "draft", "write", "answer", "explain", "assist"]
+                ),
+            )
+            engine.add_worker(default_cfg)
+            available.append({
+                "name": "generalist",
+                "capabilities": default_cfg.capabilities,
+            })
+            logger.info("[Swarm] No workers registered — auto-created 'generalist' (model=%s)",
+                        profile.get("model", "?"))
+        except Exception as exc:
+            await _send_swarm_reply(msg, store, manager, thread_id,
+                f"⚠️ No workers registered and could not auto-create one: {exc}")
+            return True
 
     # Try capability routing
     routed_workers: list[str] = []

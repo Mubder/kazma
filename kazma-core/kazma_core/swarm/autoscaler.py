@@ -254,6 +254,29 @@ class AutoScaler:
 
         return None
 
+    def spawn_by_name(self, name: str) -> Any | None:
+        """Spawn a worker from a template by NAME (not prompt matching).
+
+        Used by the dispatch fallback when a named worker isn't registered
+        but a template with that name exists. Returns the spawned worker or
+        None if no template matches / at capacity.
+        """
+        self.reap_idle()
+        with self._lock:
+            template = self._templates.get(name)
+            if template is None:
+                return None
+            active = self._count_active_instances(template.name)
+            if active >= template.max_instances:
+                logger.debug("[AutoScaler] Template '%s' at max capacity (%d/%d)",
+                             name, active, template.max_instances)
+                return None
+            worker = self._instantiate(template)
+            if worker is not None:
+                logger.info("[AutoScaler] Spawned '%s' by name from template '%s'",
+                            worker.name, template.name)
+            return worker
+
     def _instantiate(self, template: WorkerTemplate) -> Any | None:
         """Create a worker instance from a template and add it to the engine."""
         # Generate unique name
