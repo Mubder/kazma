@@ -31,12 +31,10 @@ async def _index_worker_l4_memory(
     output: str,
     task_id: str = "",
 ) -> None:
-    """Best-effort L4 index for a completed swarm worker (P3).
+    """Best-effort memory index for a completed swarm worker.
 
-    Chat memory uses ``worker=default``; named workers only filled when they
-    store something — empty ``worker_vectors_Observer`` tables were expected
-    until a real task ran. Index a compact prompt+output snippet under the
-    worker name so subsequent L4 queries for that worker have content.
+    Index a compact prompt+output snippet as a V2 ``swarm_result`` episode
+    under the worker name so subsequent recall for that worker has content.
     """
     name = (worker_name or "default").strip() or "default"
     body = (output or "").strip()
@@ -58,10 +56,10 @@ async def _index_worker_l4_memory(
         "task_id": task_id or "",
         "type": "swarm_result",
     }
-    # V2-native write: store as a V2 episode (source="swarm_result") + a
-    # belief linking the worker → produced → snippet. Replaces the V1
-    # adapter.store + L4 fallback. Per-worker recall is served by the
-    # belief subject (worker name) instead of a worker_vectors_<name> table.
+    # V2-native write: store the snippet as a V2 episode (source="swarm_result").
+    # No worker→produced belief is written — nothing reads it and it flooded
+    # the Beliefs UI; per-worker recall is served by the episode's worker
+    # metadata + embedding instead of a worker_vectors_<name> table.
     try:
         from kazma_core.memory.swarm_bridge import store_swarm_result
 
@@ -270,8 +268,8 @@ async def dispatch_worker(
 
         worker.mark_completed(worker_result.status)
 
-        # P3: index successful worker output into L4 under this worker's
-        # table (worker_vectors_<name>) so swarm memory is not only "default".
+        # Index successful worker output as a V2 swarm_result episode under
+        # this worker's name so swarm memory is not only "default".
         if worker_result.status == "success" and (worker_result.output or prompt):
             try:
                 await _index_worker_l4_memory(
@@ -282,7 +280,7 @@ async def dispatch_worker(
                 )
             except Exception:
                 logger.debug(
-                    "[SwarmEngine] L4 worker index skipped for %s",
+                    "[SwarmEngine] worker memory index skipped for %s",
                     getattr(worker, "name", "?"),
                     exc_info=True,
                 )
