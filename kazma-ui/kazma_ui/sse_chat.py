@@ -1588,6 +1588,8 @@ def create_sse_chat_router(
             {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
+                **({"pending": True} if msg.get("pending") else {}),
+                **({"ts": msg["ts"]} if msg.get("ts") else {}),
             }
             for msg in messages
             if msg.get("role") in ("user", "assistant", "system")
