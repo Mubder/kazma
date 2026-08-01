@@ -1384,12 +1384,11 @@ def create_sse_chat_router(
                     )
 
             except asyncio.CancelledError:
-                logger.warning("SSE generator cancelled for session=%s", session_id)
-                # Still flush whatever we have so a dropped connection doesn't
-                # lose the user message (and partial assistant text).
+                logger.warning("SSE generator cancelled for session=%s (client refresh/tab switch?)", session_id)
+                # Flush whatever partial content we have so the user's question
+                # isn't left without an answer on reload.
                 try:
                     if content_acc:
-                        # Check if we already have an assistant message
                         has_assistant = any(
                             msg.get("role") == "assistant" for msg in session.messages
                         )
@@ -1398,11 +1397,22 @@ def create_sse_chat_router(
                                 {"role": "assistant", "content": content_acc}
                             )
                         else:
-                            # Update existing assistant message
                             for msg in reversed(session.messages):
                                 if msg.get("role") == "assistant":
                                     msg["content"] = content_acc
                                     break
+                    else:
+                        # No content yet — the LLM was still processing when
+                        # the client disconnected. Mark the turn as in-progress
+                        # so loadSession can detect it and show a "still
+                        # processing" indicator instead of a blank response.
+                        has_assistant = any(
+                            msg.get("role") == "assistant" for msg in session.messages
+                        )
+                        if not has_assistant:
+                            session.messages.append(
+                                {"role": "assistant", "content": "", "pending": True}
+                            )
                     _get_store().put(session)
                 except Exception:
                     pass

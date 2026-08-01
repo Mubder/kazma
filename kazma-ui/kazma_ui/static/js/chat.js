@@ -10,6 +10,8 @@
   var currentMsgEl = null;
   var tokenAccum = '';
   var activeStream = null;
+  /** Timestamp of the last SSE activity (token/tool/done) — used by visibilitychange to detect stalled streams. */
+  var lastActivityTs = 0;
   /** Live typing-indicator element for the current turn (cleared on abort). */
   var activeTypingEl = null;
   // Track the last successfully-sent user message so the empty-turn
@@ -168,11 +170,22 @@
     loadModels();
 
     // Refresh the sidebar session list when the tab regains focus.
-    // Lightweight — only reloads the list, never disrupts the active
-    // conversation or re-fetches messages.
+    // Also check if an active SSE stream stalled while backgrounded.
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
         if (showArchived) loadArchivedSessions(); else loadSessions();
+        // If a stream was active when we left and no tokens arrived while
+        // away, the browser may have suspended the fetch reader. Show a
+        // notice so the user knows to retry if the response is missing.
+        if (activeStream && lastActivityTs) {
+          var stallMs = Date.now() - lastActivityTs;
+          if (stallMs > 30000) {
+            // Stream stalled for >30s while backgrounded — likely dead.
+            if (KS && KS.toast) {
+              KS.toast('Connection may have stalled while away — if no response appears, resend your message.', 'warning', 5000);
+            }
+          }
+        }
       }
     });
   }
@@ -795,6 +808,7 @@
       attachments: attachmentsPayload,
     }, {
       onToken: function(data) {
+        lastActivityTs = Date.now();
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         if (!currentMsgEl) {
@@ -845,6 +859,8 @@
       },
 
       onDone: function(data) {
+        lastActivityTs = 0;
+        activeStream = null;
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
@@ -2218,7 +2234,15 @@
 
         messages.forEach(function(msg) {
           var role = msg.role === 'assistant' ? 'assistant' : 'user';
-          appendMessage(role, msg.content || '', null, msg.ts || msg.timestamp || msg.created_at || null);
+          var content = msg.content || '';
+          // If the last assistant message is marked pending (client refreshed
+          // mid-turn while the LLM was still processing), show a processing
+          // indicator instead of a blank bubble.
+          if (role === 'assistant' && msg.pending && !content) {
+            appendMessage('assistant', '⏳ _This turn was in progress when you refreshed. The response may still be processing — try sending the message again, or wait and reload in a few seconds._', null, msg.ts || msg.timestamp || msg.created_at || null);
+          } else {
+            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null);
+          }
         });
         scrollToBottom();
         checkPendingApprovals();
