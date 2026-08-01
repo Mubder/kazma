@@ -202,9 +202,8 @@
           if (!data || !chatSessionId) return;
           if (data.generating) {
             // Server is still generating — show indicator and start polling
-            if (!_isGenerating) {
+            if (!activeStream) {
               _showGeneratingIndicator();
-              beginTurn(); // Restore visual state for active task
               _pollBackgroundTurn(chatSessionId, 0);
             }
           } else if (activeStream && lastActivityTs) {
@@ -2277,11 +2276,6 @@
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
             // Poll for the completed background turn.
             _pollBackgroundTurn(sessionId, messages.length);
-            // Restore visual state for active task
-            if (!_isGenerating) {
-              beginTurn();
-              _showGeneratingIndicator();
-            }
           } else {
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null);
           }
@@ -2292,11 +2286,6 @@
         var lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
           _pollBackgroundTurn(sessionId, messages.length);
-          // Restore visual state for active task
-          if (!_isGenerating) {
-            beginTurn();
-            _showGeneratingIndicator();
-          }
         }
 
         scrollToBottom();
@@ -2323,12 +2312,6 @@
     var attempts = 0;
     var maxAttempts = 18;  // 90s at 5s intervals
 
-    // Ensure visual state is active for background task
-    if (!_isGenerating) {
-      beginTurn();
-      _showGeneratingIndicator();
-    }
-
     function poll() {
       if (chatSessionId !== sessionId) return;  // user switched sessions
       if (activeStream) return;  // user started a new turn, stop polling
@@ -2343,8 +2326,6 @@
               + 'Please resend your message to start a new turn.</em></p>';
           }
         }
-        // End the turn since we're giving up on polling
-        endTurn();
         return;
       }
 
