@@ -498,9 +498,18 @@ class SettingsManager:
         }
 
     def save_context_settings(self, data: dict[str, Any]) -> None:
-        """Update context window settings."""
-        for key, value in data.items():
-            self._cs.set(f"context.{key}", value, category="context")
+        """Update context window settings.
+
+        Writes only the 3 known keys explicitly — prevents the nested-prefix
+        explosion that happens when the Alpine state object accumulates
+        dotted ConfigStore keys from get_all() and then resends them.
+        """
+        if "max_context_tokens" in data:
+            self._cs.set("context.max_context_tokens", data["max_context_tokens"], category="context")
+        if "context_strategy" in data:
+            self._cs.set("context.context_strategy", data["context_strategy"], category="context")
+        if "summarization_threshold" in data:
+            self._cs.set("context.summarization_threshold", data["summarization_threshold"], category="context")
 
     # ══════════════════════════════════════════════════════════════════
     # CONNECTORS
