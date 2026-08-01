@@ -107,8 +107,8 @@
       </div>
       
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-        <button class="btn btn-secondary" @click="showFolderModal = false">{{ t('workspace.cancel') }}</button>
-        <button class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">{{ t('workspace.open_folder') }}</button>
+        <button type="button" class="btn btn-secondary" @click="showFolderModal = false">{{ t('workspace.cancel') }}</button>
+        <button type="button" class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">{{ t('workspace.open_folder') }}</button>
       </div>
     </div>
   </div>
@@ -162,10 +162,10 @@
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-        <button class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
-        <button class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
-      </div>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+          <button type="button" class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
+          <button type="button" class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
+        </div>
     </div>
   </div>
 
@@ -207,8 +207,8 @@
       </div>
 
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-        <button class="btn btn-secondary" @click="showAppModal = false">Cancel</button>
-        <button class="btn btn-primary" @click="saveGitHubApp()" :disabled="!githubAppId.trim() || !githubAppInstallationId.trim()">Save GitHub App</button>
+        <button type="button" class="btn btn-secondary" @click="showAppModal = false">Cancel</button>
+        <button type="button" class="btn btn-primary" @click="saveGitHubApp()" :disabled="!githubAppId.trim() || !githubAppInstallationId.trim()">Save GitHub App</button>
       </div>
     </div>
   </div>

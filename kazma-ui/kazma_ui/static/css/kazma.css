@@ -830,6 +830,96 @@ button { cursor: pointer; font-family: inherit; }
   .account-sessions-row {
     grid-template-columns: 1fr 1fr;
   }
+  
+  /* Responsive sidebar - hide labels on small screens */
+  .sidebar.collapsed .logo-text,
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .nav-kbd,
+  .sidebar.collapsed .nav-section-title,
+  .sidebar.collapsed .sidebar-footer-info,
+  .sidebar.collapsed .sidebar-collapsed-hide {
+    display: none;
+  }
+  
+  /* Responsive chat layout */
+  .chat-layout {
+    flex-direction: column;
+  }
+  
+  .chat-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .chat-main {
+    width: 100%;
+  }
+  
+  /* Responsive swarm panel */
+  .swarm-layout {
+    flex-direction: column;
+  }
+  
+  .swarm-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .swarm-main {
+    width: 100%;
+  }
+  
+  /* Responsive settings grid */
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .settings-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .settings-content {
+    width: 100%;
+  }
+  
+  /* Responsive workspace layout */
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .workspace-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .workspace-main {
+    width: 100%;
+  }
+  
+  /* Responsive dashboard layout */
+  .dashboard-layout {
+    flex-direction: column;
+  }
+  
+  .dashboard-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .dashboard-main {
+    width: 100%;
+  }
 }
 
 /* ── 7. Buttons ─────────────────────────────────────────────────── */
@@ -2387,6 +2477,62 @@ tbody tr:last-child td {
   --shadow: 0 4px 12px rgba(15,23,42,0.08);
   --shadow-lg: 0 8px 24px rgba(15,23,42,0.12);
   --shadow-xl: 0 16px 48px rgba(15,23,42,0.16);
+}
+
+/* Auto-detect system preference for light theme */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f7f9fb;
+    --bg-2: #eef2f6;
+    --bg-deep: #f7f9fb;
+    --bg-primary: #ffffff;
+    --bg-panel: #f6f8fa;
+    --bg-surface: #ffffff;
+    --bg-elevated: #e6e8eb;
+    --bg-hover: rgba(8, 145, 178, 0.06);
+    --bg-active: rgba(8, 145, 178, 0.10);
+    --grid: rgba(15, 23, 42, 0.04);
+    --tint: rgba(15, 23, 42, 0.025);
+    --tint-strong: rgba(15, 23, 42, 0.05);
+
+    --text-primary: #0f1c2e;
+    --text-secondary: #475569;
+    --text-tertiary: #64748b;
+    --text-muted: #94a3b8;
+    --text-inverse: #ffffff;
+
+    --accent: #0891b2;
+    --accent-hover: #0e7490;
+    --accent-light: #0891b2;
+    --accent-subtle: rgba(8, 145, 178, 0.10);
+    --accent-glow: rgba(8, 145, 178, 0.22);
+    --accent-rgb: 8, 145, 178;
+    --gradient-accent: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+
+    --secondary: #2563eb;
+    --secondary-hover: #1d4ed8;
+    --secondary-light: #2563eb;
+    --secondary-subtle: rgba(37, 99, 235, 0.10);
+    --secondary-glow: rgba(37, 99, 235, 0.18);
+
+    --success: #059669;
+    --success-subtle: rgba(5, 150, 105, 0.12);
+    --warning: #d97706;
+    --warning-subtle: rgba(217, 119, 6, 0.12);
+    --danger: #dc2626;
+    --danger-subtle: rgba(220, 38, 38, 0.10);
+    --info: #0284c7;
+    --info-subtle: rgba(2, 132, 199, 0.10);
+
+    --border-subtle: rgba(15, 23, 42, 0.07);
+    --border: rgba(15, 23, 42, 0.10);
+    --border-strong: rgba(15, 23, 42, 0.16);
+
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+    --shadow: 0 4px 12px rgba(15,23,42,0.08);
+    --shadow-lg: 0 8px 24px rgba(15,23,42,0.12);
+    --shadow-xl: 0 16px 48px rgba(15,23,42,0.16);
+  }
 }
 
 [data-theme="light"] .card,

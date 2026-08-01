@@ -683,13 +683,19 @@ def create_ws_chat_router(
                                         e,
                                     )
                             err_msg = _friendly_graph_error(exc)
-                            await websocket.send_json(
-                                TelemetryEvent(
-                                    type="graph_error",
-                                    data={"message": err_msg},
-                                    thread_id=thread_id,
-                                ).to_dict()
-                            )
+                            # Check if websocket is still open before sending error
+                            try:
+                                if websocket.client_state == websocket.ClientState.CONNECTED:
+                                    await websocket.send_json(
+                                        TelemetryEvent(
+                                            type="graph_error",
+                                            data={"message": err_msg},
+                                            thread_id=thread_id,
+                                        ).to_dict()
+                                    )
+                            except Exception:
+                                # Ignore errors from send if websocket is closed
+                                pass
                             # Always surface something in the transcript
                             try:
                                 await websocket.send_json(

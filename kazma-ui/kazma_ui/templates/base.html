@@ -48,13 +48,13 @@
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <!-- Action Button -->
                     <template x-if="activeAlert && activeAlert.callback_id === 'sentence-transformers'">
-                        <button @click="installMl()" :disabled="installing" class="btn btn-sm" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-                            <span x-show="installing" class="spinner-inline animate-spin" style="width:12px; height:12px; border:2px solid #000; border-top-color:transparent; border-radius:50%; display:inline-block;"></span>
-                            <span x-text="installing ? 'Installing...' : (activeAlert ? activeAlert.button_text : 'Resolve')"></span>
-                        </button>
+        <button type="button" class="btn-icon" @click="installMl()" :disabled="installing" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <span x-show="installing" class="spinner-inline animate-spin" style="width:12px; height:12px; border:2px solid #000; border-top-color:transparent; border-radius:50%; display:inline-block;"></span>
+            <span x-text="installing ? 'Installing...' : (activeAlert ? activeAlert.button_text : 'Resolve')"></span>
+        </button>
                     </template>
                     <!-- Close button -->
-                    <button @click="dismissAlert()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px;" title="Dismiss">
+                    <button type="button" @click="dismissAlert()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px;" title="Dismiss">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
