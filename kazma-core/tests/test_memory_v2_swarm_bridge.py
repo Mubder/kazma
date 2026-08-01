@@ -3,7 +3,7 @@ replaced the V1 adapter calls in worker_dispatch, self_improvement, and
 compaction after the V1→V2 memory cutover.
 
 Covers:
-  - swarm_bridge.store_swarm_result  → episode (source="swarm_result") + belief
+  - swarm_bridge.store_swarm_result  → episode (source="swarm_result") only
   - swarm_bridge.log_evolution_v2    → episode (source="soul_evolution")
   - swarm_bridge.store_compaction_summary → episode (source="compaction_summary")
   - recall.search dict-shape compat shim (the linchpin read contract)
@@ -41,7 +41,13 @@ def _primary_conn() -> sqlite3.Connection:
 # ── store_swarm_result ────────────────────────────────────────────────────
 
 
-def test_store_swarm_result_writes_episode_and_belief(isolated_data):
+def test_store_swarm_result_writes_episode_only(isolated_data):
+    """Swarm results land as episodes; no ``worker→produced`` belief is written.
+
+    The belief was removed because nothing read it and it flooded the
+    Beliefs UI with one entry per worker completion (including throwaway
+    tasks). Recall goes through the episode (full text + embedding + FTS).
+    """
     from kazma_core.memory.swarm_bridge import store_swarm_result
 
     eid = store_swarm_result(
@@ -64,13 +70,12 @@ def test_store_swarm_result_writes_episode_and_belief(isolated_data):
         assert meta["worker"] == "coder-1"
         assert meta["task_id"] == "task-99"
 
-        # Belief links the worker → produced (subject is the canonical slug)
+        # No belief row — the Beliefs UI stays clean
         bel = conn.execute(
             "SELECT object FROM beliefs WHERE subject=? AND predicate='produced'",
             ("coder_1",),  # entity slugs are case-normalized
         ).fetchall()
-        assert bel, "expected a worker→produced belief"
-        assert any("added /api/login" in (b["object"] or "") for b in bel)
+        assert not bel, "swarm results must NOT create worker→produced beliefs"
     finally:
         conn.close()
 
@@ -200,7 +205,7 @@ def test_recall_search_never_raises(isolated_data):
 
 @pytest.mark.asyncio
 async def test_p3_index_worker_l4_sets_worker_meta(tmp_path: Path, monkeypatch):
-    """Successful worker dispatch writes a V2 swarm_result episode + belief."""
+    """Successful worker dispatch writes a V2 swarm_result episode only."""
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_core.memory import dual_write
 
@@ -231,8 +236,7 @@ async def test_p3_index_worker_l4_sets_worker_meta(tmp_path: Path, monkeypatch):
         bel = conn.execute(
             "SELECT object FROM beliefs WHERE predicate='produced'"
         ).fetchall()
-        assert bel, "expected a worker→produced belief"
-        assert any("Found 12" in (b["object"] or "") for b in bel)
+        assert not bel, "swarm results must NOT create worker→produced beliefs"
         conn.close()
     finally:
         dual_write.reset_mirror()

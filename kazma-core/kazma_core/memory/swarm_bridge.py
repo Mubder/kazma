@@ -50,23 +50,7 @@ def _open_primary() -> sqlite3.Connection | None:
         return None
 
 
-def _open_ops() -> sqlite3.Connection | None:
-    """Open a short-lived V2 ops DB connection (for the audit log), or None."""
-    try:
-        from kazma_core.memory.schema_v2 import ensure_ops_schema
-        from kazma_core.paths import memory_ops_db
-
-        conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        ensure_ops_schema(conn)
-        return conn
-    except Exception:
-        logger.debug("[swarm_bridge] could not open ops DB", exc_info=True)
-        return None
-
-
-def _insert_episode(
-    conn: sqlite3.Connection,
+def _insert_episode(    conn: sqlite3.Connection,
     *,
     session_id: str,
     turn_number: int,
@@ -137,12 +121,14 @@ def store_swarm_result(
     metadata: dict[str, Any] | None = None,
     tenant_id: str = "default",
 ) -> str | None:
-    """Persist a successful swarm worker result as a V2 episode + belief.
+    """Persist a successful swarm worker result as a V2 episode.
 
     Replaces ``worker_dispatch._index_worker_l4_memory``. The ``snippet``
-    is the same ``"Task: …\\nResult: …"`` blob the V1 path indexed; the
-    worker name becomes the belief subject so per-worker recall works
-    (replacing the ``worker_vectors_<name>`` L4 table namespace).
+    is the same ``"Task: …\\nResult: …"`` blob the V1 path indexed. The
+    full text + worker metadata + embedding live in the episode, which is
+    what ``recall.search`` reads — no ``worker → produced`` belief is
+    written (the belief had zero readers and polluted the Beliefs UI with
+    every worker completion, including throwaway/test tasks).
 
     Returns the V2 episode id, or None on failure. Never raises.
     """
@@ -155,12 +141,9 @@ def store_swarm_result(
         meta.setdefault("task_id", task_id)
         meta.setdefault("type", "swarm_result")
 
-        from kazma_core.memory.belief_mutation import mutate_belief
-
         conn = _open_primary()
         if conn is None:
             return None
-        ops = _open_ops()  # audit-log connection (None is tolerated but loses audit rows)
         try:
             eid = _insert_episode(
                 conn,
@@ -173,28 +156,14 @@ def store_swarm_result(
                 metadata=meta,
                 tenant_id=tenant_id,
             )
-            # Link worker → produced → snippet (set-valued belief, capped for the
-            # object field; full text lives in the episode above).
-            try:
-                mutate_belief(
-                    conn, worker, "produced", snippet[:500], ops_conn=ops,
-                    predicate_type="set",
-                    confidence=0.9, importance=3,
-                    extraction_method="swarm_result",
-                    tenant_id=tenant_id,
-                    cfg=None,
-                )
-            except Exception:
-                logger.debug("[swarm_bridge] belief link failed", exc_info=True)
+            # No worker→produced belief is written here: nothing reads it
+            # (recall goes through episodes) and it flooded the Beliefs UI
+            # with one belief per worker completion. The episode above is
+            # the authoritative record.
             logger.debug("[swarm_bridge] stored swarm_result for %s (%s)", worker, eid)
             return eid
         finally:
             conn.close()
-            if ops is not None:
-                try:
-                    ops.close()
-                except Exception:
-                    pass
     except Exception:
         logger.debug("[swarm_bridge] store_swarm_result failed", exc_info=True)
         return None
