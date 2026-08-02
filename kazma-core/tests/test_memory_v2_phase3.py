@@ -361,3 +361,95 @@ def test_recall_excludes_superseded_after_mutation(dbs):
     lives = [h for h in result.beliefs if h.metadata.get("predicate") == "lives_in"]
     assert len(lives) == 1
     assert lives[0].metadata["object"] == "London"
+
+
+# ── Never-supersede patterns (reminder protection) ────────────────────────
+
+
+def test_reminder_predicates_never_supersede(dbs):
+    """Time-bound predicates (reminder, scheduled, etc.) must be 'set' type.
+
+    Multiple reminders with the same (subject, predicate) should coexist
+    instead of superseding each other. This prevents the bug where a
+    scheduled reminder belief was silently replaced by a later conversation.
+    """
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    p, o = dbs
+    r1 = mutate_belief(p, "user", "has_reminder", "Grok reset Aug 3", ops_conn=o, importance=3)
+    r2 = mutate_belief(p, "user", "has_reminder", "ZCode reset Aug 5", ops_conn=o, importance=3)
+    r3 = mutate_belief(p, "user", "scheduled_event", "Meeting Monday", ops_conn=o, importance=3)
+
+    assert r1["action"] == "append"
+    assert r2["action"] == "append"
+    assert r3["action"] == "append"
+
+    active = p.execute(
+        "SELECT object FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+    ).fetchall()
+    objects = {row["object"] if isinstance(row, sqlite3.Row) else row[0] for row in active}
+    assert "Grok reset Aug 3" in objects, "First reminder was superseded"
+    assert "ZCode reset Aug 5" in objects, "Second reminder was superseded"
+    assert "Meeting Monday" in objects, "Scheduled event was superseded"
+
+
+def test_reminder_forced_set_even_with_explicit_functional(dbs):
+    """Even if the LLM explicitly classifies a reminder as 'functional', it must be forced to 'set'."""
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    p, o = dbs
+    r1 = mutate_belief(
+        p, "user", "has_reminder", "Event A",
+        ops_conn=o, predicate_type="functional", importance=3,
+    )
+    r2 = mutate_belief(
+        p, "user", "has_reminder", "Event B",
+        ops_conn=o, predicate_type="functional", importance=3,
+    )
+
+    assert r1["action"] == "append", "Reminder forced to functional"
+    assert r2["action"] == "append", "Second reminder superseded the first"
+
+    count = p.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE predicate='has_reminder' "
+        "AND valid_until IS NULL AND invalidated_at IS NULL"
+    ).fetchone()[0]
+    assert count == 2, f"Expected 2 active reminders, got {count}"
+
+
+# ── Episode FTS binding correctness ───────────────────────────────────────
+
+
+def test_episode_fts_binding_correct(isolated_data):
+    """_episode_fts must not raise a binding error (tenant_id passed twice bug).
+
+    Regression test for the bug where params had 2n+3 values but SQL had 2n+2
+    placeholders, causing all episode searches to silently return [].
+    """
+    from kazma_core.memory.recall import _episode_fts
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    p = sqlite3.connect(primary_memory_db())
+    p.row_factory = sqlite3.Row
+    ensure_primary_schema(p)
+    now = time.time()
+    p.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
+        "assistant_text, tier, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        ("e_fts1", "default", "s1", 1, "remind me about Grok reset", "Done, saved it", "episodic", now),
+    )
+    p.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
+        "assistant_text, tier, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        ("e_fts2", "default", "s1", 2, "also ZCode reset please", "All set", "episodic", now),
+    )
+    p.commit()
+
+    hits = _episode_fts(p, "Grok reset", "default", 10)
+    assert len(hits) > 0, "Episode FTS returned empty — binding error likely"
+    assert any("Grok" in h.content for h in hits), "Expected Grok episode in results"
+
+    hits2 = _episode_fts(p, "ZCode", "default", 10)
+    assert len(hits2) > 0, "Episode FTS returned empty for ZCode query"
+    p.close()

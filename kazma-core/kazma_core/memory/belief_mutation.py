@@ -67,6 +67,18 @@ _FUNCTIONAL_PREDICATES = frozenset(
 # State-transition predicates (governed by a transition log).
 _STATE_PREDICATES = frozenset({"issue_status", "pipeline_state", "task_state"})
 
+# Time-bound / scheduled predicates that must NEVER be superseded.
+# These are forced to 'set' type (append-only) regardless of LLM classification,
+# so multiple reminders/events can coexist without replacing each other.
+# Uses substring matching to catch whatever predicate name the LLM invents.
+_NEVER_SUPERSEDE_PATTERNS = (
+    "reminder",
+    "scheduled",
+    "appointment",
+    "event_",
+    "cron_",
+)
+
 
 class FunctionalBelief:
     """Typed payload for a functional belief mutation."""
@@ -132,9 +144,14 @@ def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) 
 
 
 def _classify_predicate(predicate: str, explicit: str | None) -> str:
+    p = (predicate or "").strip().lower()
+    # Time-bound predicates are NEVER functional — they accumulate, not replace.
+    # This check runs BEFORE the explicit override so even LLM-classified
+    # "functional" reminders are forced to 'set' (append-only).
+    if any(pat in p for pat in _NEVER_SUPERSEDE_PATTERNS):
+        return "set"
     if explicit:
         return explicit
-    p = (predicate or "").strip().lower()
     if p in _FUNCTIONAL_PREDICATES:
         return "functional"
     if p in _STATE_PREDICATES:

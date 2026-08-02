@@ -107,7 +107,7 @@ def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
         "this ", "that ", "some ", "just ", "sorry", "done", "running",
         "going", "not ", "no ", "yes", "ok", "sure", "actually",
         "check", "try", "let ", "can ", "could ", "would ", "should ",
-        "disconnect", "re-insert", "reminder", "about ",
+        "disconnect", "re-insert", "about ",
     })
 
     def _valid_obj(obj: str) -> bool:

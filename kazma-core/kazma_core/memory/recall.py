@@ -246,9 +246,13 @@ def _recall_beliefs(
                 ent_params: list[Any] = []
                 for e in bridge_entities:
                     ent_params.extend([f"%{e}%", f"%{e}%"])
-                sql += f" UNION SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type, b.confidence, b.structural_importance, b.valid_from, b.source_trust_weight FROM beliefs b WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL AND b.tenant_id = ? AND (" + ent_clauses + ")"
+                # Wrap UNION in a subquery so ORDER BY can reference column names
+                # (SQLite UNION requires ORDER BY on the outer query, not the
+                #  table alias — without this, "1st ORDER BY term does not match
+                #  any column in the result set" is raised).
+                sql = f"SELECT * FROM ({sql} UNION SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type, b.confidence, b.structural_importance, b.valid_from, b.source_trust_weight FROM beliefs b WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL AND b.tenant_id = ? AND ({ent_clauses}))"
                 params.extend([tenant_id] + ent_params)
-            sql += " ORDER BY (b.structural_importance * b.confidence * b.source_trust_weight) DESC LIMIT ?"
+            sql += " ORDER BY (structural_importance * confidence * source_trust_weight) DESC LIMIT ?"
             params.append(limit * 3)
             rows = conn.execute(sql, params).fetchall()
         elif bridge_entities:
@@ -407,7 +411,7 @@ def _episode_fts(
     params: list[Any] = []
     for t in terms:
         params.extend([f"%{t}%", f"%{t}%"])
-    params.extend([tenant_id, limit])
+    params.extend([limit])
     try:
         rows = conn.execute(
             f"""
@@ -421,7 +425,8 @@ def _episode_fts(
             """,
             [tenant_id] + params,
         ).fetchall()
-    except Exception:
+    except Exception as e:
+        logger.error("[recall] episode FTS binding failed: %s", e, exc_info=True)
         return []
     # Assign descending pseudo-scores (rank-based for RRF)
     hits: list[RecallHit] = []

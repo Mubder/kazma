@@ -53,6 +53,8 @@ Rules:
   A new value supersedes the old one.
 - set = multi-valued (uses_tool, knows_language, installed_package). New values append.
 - state = transition (issue_status, pipeline_state). Logged as a transition.
+- Reminder/schedule/appointment facts are ALWAYS 'set' type (multiple can coexist,
+  never supersede). Predicates like has_reminder, scheduled_event, appointment use 'set'.
 - Extract 0 to 5 beliefs. Prefer identity, preferences, decisions, project facts.
 - Skip greetings, one-off questions, secrets (passwords, API keys), and tool output dumps.
 - Slug subjects/objects: "John Smith" -> "john_smith". Use "user" for the user themselves.
