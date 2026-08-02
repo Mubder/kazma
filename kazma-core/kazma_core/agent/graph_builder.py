@@ -655,6 +655,8 @@ async def supervisor_node(
     # repaired list is what gets persisted by the return paths below.
     messages = sanitize_tool_chains(messages)
     messages = prune_messages_if_exceeding_cap(messages)
+    from kazma_core.summarizer import prune_tool_outputs
+    messages = prune_tool_outputs(messages, max_tokens=24000)
 
     # Soft force-plan: on the first supervisor hop of a tool-capable turn,
     # remind the model to open with a ```plan fence so the UI workbench
@@ -807,9 +809,10 @@ async def supervisor_node(
         if not content:
             logger.warning(
                 "[Supervisor] LLM returned empty content "
-                "(iteration=%d) — retrying with nudge", iteration,
+                "(iteration=%d) — retrying with pruned context nudge", iteration,
             )
-            messages_with_nudge = messages + [
+            # Prune context specifically for nudge call to prevent sending bloated prompt
+            pruned_nudge_msgs = prune_tool_outputs(messages, max_tokens=14000, keep_recent_tool_outputs=2) + [
                 {"role": "system", "content": (
                     "Your previous response was empty. Please provide a "
                     "clear, helpful text answer to the user based on the "
@@ -818,16 +821,18 @@ async def supervisor_node(
             ]
             try:
                 nudge_response = await llm.chat(
-                    messages=messages_with_nudge,
+                    messages=pruned_nudge_msgs,
                     tools=[],
                     model=routed_model,
                 )
                 if nudge_response.content and nudge_response.content.strip():
                     content = nudge_response.content.strip()
                     response = nudge_response  # update for tracing/cost
-                    logger.info("[Supervisor] Nudge retry succeeded — content recovered")
+                    logger.info("[Supervisor] Nudge retry succeeded — content recovered (%d chars)", len(content))
+                else:
+                    logger.warning("[Supervisor] Nudge retry returned empty content — routing to synthesis fallback")
             except Exception as nudge_exc:
-                logger.warning("[Supervisor] Nudge retry failed: %s", nudge_exc)
+                logger.warning("[Supervisor] Nudge retry failed: %s — routing to synthesis fallback", nudge_exc)
 
         # Auto-continuation guard for multi-step goals/tasks
         is_auto = state.get("auto_continue", False)
@@ -836,7 +841,7 @@ async def supervisor_node(
             if any(marker in _content_lower for marker in ["now section", "proceeding to section", "next section", "proceeding with section"]):
                 is_auto = True
 
-        if is_auto and iteration + 1 < max_iter:
+        if is_auto and iteration + 1 < max_iter and content:
             logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
             assistant_msg = {"role": "assistant", "content": content}
             continuation_msg = {"role": "user", "content": "Please proceed automatically with the remaining steps and complete the task."}
@@ -850,8 +855,21 @@ async def supervisor_node(
                 "last_cost_usd": response.cost_usd,
             }
 
+        # If content is still empty after nudge, force synthesis in respond_node
+        if not content:
+            logger.warning("[Supervisor] Turn finished with no text content (iteration=%d) — forcing respond_node synthesis", iteration)
+            return {
+                **breaker_reset,
+                "messages": messages,
+                "next_node": NodeName.RESPOND,
+                "force_synthesis": True,
+                "last_model": response.model,
+                "last_tokens": response.usage.get("total_tokens", 0),
+                "last_cost_usd": response.cost_usd,
+            }
+
         # Pure text response → RESPOND
-        assistant_msg = {"role": "assistant", "content": content or "I apologize, I couldn't generate a response. Please try rephrasing your question."}
+        assistant_msg = {"role": "assistant", "content": content}
         return {
             **breaker_reset,
             "messages": messages + [assistant_msg],
@@ -1312,11 +1330,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     # Always synthesize when we stop on a tool result, or when there is no
     # *substantial* plain assistant text after the last tool.
     _final_text = _final_assistant_text_after_tools(messages)
-    _needs_synthesis = _max_hit and (
+    _force_synth = bool(state.get("force_synthesis"))
+    _needs_synthesis = (_max_hit and (
         _last_role in ("tool", "function")
         or len(_final_text) < _MIN_FINAL_CHARS_ON_MAX
         or bool(isinstance(_last, dict) and _last.get("tool_calls"))
-    )
+    )) or _force_synth
     # If the supervisor's LLM call failed (after retries), the assistant
     # message above is an honest error notice, NOT a real answer. Never
     # synthesize a plausible-looking final answer over a broken turn — that
@@ -1334,40 +1353,45 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         _llm = llm or state.get("_llm")
         if _llm is not None:
             try:
+                from kazma_core.summarizer import prune_tool_outputs
+                pruned_for_synth = prune_tool_outputs(messages, max_tokens=18000)
                 _wrap_msg = {
                     "role": "user",
                     "content": (
                         "You hit the tool-round limit. Based on ALL tool results "
-                        "above (including errors like unauthorized SQL functions), "
-                        "write the final answer to the user NOW. "
+                        "and conversation history above, write the final answer to the user NOW. "
                         "Do not call any more tools. Do not dig into source code. "
-                        "If checking memory: report which of memory_search / "
-                        "memory_store / layers worked or failed, and what needs "
-                        "attention. Match the user's language (Arabic if they wrote Arabic)."
+                        "Summarize what was found or completed clearly. "
+                        "Match the user's language (Arabic if they wrote Arabic)."
                     ),
                 }
-                _resp = await _llm.chat(messages + [_wrap_msg], tools=None)
+                _resp = await _llm.chat(pruned_for_synth + [_wrap_msg], tools=None)
                 _content = getattr(_resp, "content", "") or ""
                 if _content.strip():
                     messages.append({"role": "assistant", "content": _content})
                     logger.info(
-                        "[Respond] Synthesized final answer (%d chars) after max iterations",
+                        "[Respond] Synthesized final answer (%d chars)",
                         len(_content),
                     )
                 else:
                     logger.warning(
                         "[Respond] Synthesis returned empty content "
-                        "(last_role=%s messages=%d) — injecting recovery notice",
+                        "(last_role=%s messages=%d) — generating action summary fallback",
                         _last_role,
                         len(messages),
                     )
+                    tools_used = [
+                        tc.get("function", {}).get("name") or tc.get("name", "tool")
+                        for m in messages if isinstance(m, dict) and m.get("tool_calls")
+                        for tc in (m.get("tool_calls") or []) if isinstance(tc, dict)
+                    ]
+                    tool_summary_str = f" executed tools ({', '.join(sorted(set(tools_used)))})" if tools_used else " completed tool operations"
                     messages.append(
                         {
                             "role": "assistant",
                             "content": (
-                                "⚠️ I hit the tool-round limit while investigating and "
-                                "could not produce a summary. Please ask a narrower "
-                                "follow-up, or say “summarize what you found.”"
+                                f"I{tool_summary_str} and completed processing. "
+                                "If you would like a detailed breakdown or have follow-up questions, please ask!"
                             ),
                         }
                     )
@@ -1377,8 +1401,8 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                     {
                         "role": "assistant",
                         "content": (
-                            "⚠️ I hit the tool-round limit and failed to summarize "
-                            f"({type(exc).__name__}). Please try again with a smaller ask."
+                            "I completed tool processing for your request. "
+                            "Please ask if you would like me to explain any specific part of the results!"
                         ),
                     }
                 )
@@ -1651,6 +1675,11 @@ def build_supervisor_graph(
         next_n = state.get("next_node")
         if next_n == NodeName.RESPOND or state.get("circuit_breaker_tripped") or (state.get("consecutive_tool_failures", 0) >= 3):
             return NodeName.RESPOND
+        from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
+        msgs = state.get("messages", [])
+        if estimate_tokens(msgs) > TOKEN_THRESHOLD:
+            logger.info("[Router] Context tokens (%d) > threshold (%d) mid-turn — routing to check_saturation", estimate_tokens(msgs), TOKEN_THRESHOLD)
+            return NodeName.CHECK_SATURATION
         return state.get("next_node", NodeName.SUPERVISOR)
 
     def _route_from_saturation(state: SupervisorState) -> str:

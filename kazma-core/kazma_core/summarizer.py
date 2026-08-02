@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-__all__ = ["SUMMARIZATION_SYSTEM_PROMPT", "SUMMARY_TEMPLATE", "TOKEN_THRESHOLD", "clear_summary", "estimate_tokens", "format_summary", "get_summary", "store_summary", "summarize"]
+__all__ = ["SUMMARIZATION_SYSTEM_PROMPT", "SUMMARY_TEMPLATE", "TOKEN_THRESHOLD", "clear_summary", "estimate_tokens", "format_summary", "get_summary", "prune_tool_outputs", "store_summary", "summarize"]
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,68 @@ def estimate_tokens(messages: list[Any]) -> int:
                     fn = tc.get("function", {})
                     total_chars += len(str(fn.get("name", ""))) + len(str(fn.get("arguments", "")))
     return total_chars // 4
+
+
+def prune_tool_outputs(
+    messages: list[Any],
+    max_tokens: int = 24000,
+    keep_recent_tool_outputs: int = 3,
+) -> list[dict[str, Any]]:
+    """Prune older tool/function output messages when conversation exceeds max_tokens.
+
+    Retains schema validity, system prompts, user request, and the most recent
+    `keep_recent_tool_outputs` tool results, while compacting older tool output
+    bodies to prevent context saturation.
+
+    Args:
+        messages: List of message dicts/objects.
+        max_tokens: Estimated token budget threshold.
+        keep_recent_tool_outputs: Number of recent tool outputs to keep intact.
+
+    Returns:
+        New message list with older tool output bodies truncated if budget exceeded.
+    """
+    normalized = [_normalize_msg(m) for m in messages]
+    if estimate_tokens(normalized) <= max_tokens:
+        return normalized
+
+    # Find indices of tool/function output messages
+    tool_indices = [
+        i for i, m in enumerate(normalized)
+        if isinstance(m, dict) and m.get("role") in ("tool", "function")
+    ]
+
+    if len(tool_indices) <= keep_recent_tool_outputs:
+        return normalized
+
+    # Older tool output indices to prune
+    indices_to_prune = set(tool_indices[:-keep_recent_tool_outputs])
+    pruned_messages: list[dict[str, Any]] = []
+
+    for i, msg in enumerate(normalized):
+        if i in indices_to_prune:
+            content = msg.get("content", "")
+            if isinstance(content, str) and len(content) > 250:
+                truncated_content = (
+                    content[:250] + f"\n\n[Tool output truncated from {len(content)} to 250 chars to fit context budget]"
+                )
+                msg_copy = dict(msg)
+                msg_copy["content"] = truncated_content
+                pruned_messages.append(msg_copy)
+            else:
+                pruned_messages.append(msg)
+        else:
+            pruned_messages.append(msg)
+
+    before_tokens = estimate_tokens(normalized)
+    after_tokens = estimate_tokens(pruned_messages)
+    logger.info(
+        "[Summarizer] Pruned %d older tool output(s): tokens %d -> %d",
+        len(indices_to_prune),
+        before_tokens,
+        after_tokens,
+    )
+    return pruned_messages
 
 
 def get_summary(thread_id: str) -> str | None:
