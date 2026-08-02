@@ -52,23 +52,71 @@ class ProviderInfo:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-async def discover_ollama_models() -> ProviderInfo:
+def _ollama_base_from_registry() -> str | None:
+    """Return the configured Ollama provider base URL, or None.
+
+    Reads the provider entry from the model registry so WSL/remote servers
+    (where 127.0.0.1 is NOT the Windows host) can point Ollama discovery at
+    the real daemon address. Falls back to None → the default local URL.
+    """
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        entry = get_model_registry().get_provider("ollama")
+        url = str((entry or {}).get("base_url", "")).strip()
+        return url or None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Ollama base resolution failed, using default: %s", exc)
+        return None
+
+
+def _ollama_native_base(base_url: str | None) -> str:
+    """Resolve the Ollama native base URL (no /v1 suffix)."""
+    if base_url:
+        url = base_url.strip().rstrip("/")
+        if url.endswith("/v1"):
+            url = url[:-3].rstrip("/")
+        if url:
+            return url
+    return _OLLAMA_BASE
+
+
+async def discover_ollama_models(base_url: str | None = None) -> ProviderInfo:
     """Discover models from the local Ollama daemon.
 
-    Queries http://127.0.0.1:11434/api/tags and strips :latest suffixes.
+    Queries {base}/api/tags and strips :latest suffixes.
+
+    Args:
+        base_url: Optional override (e.g. "http://host:11434/v1"). Defaults to
+            the configured Ollama provider URL, then 127.0.0.1:11434.
 
     Returns:
         ProviderInfo with model list (e.g. ["ollama/llama3.2", "ollama/qwen2.5"]).
     """
+    base = _ollama_native_base(base_url or _ollama_base_from_registry())
+    tags_url = f"{base}/api/tags"
     info = ProviderInfo(
         name="ollama",
         label="Ollama",
-        base_url=f"{_OLLAMA_BASE}/v1",
+        base_url=f"{base}/v1",
     )
+
+    # SSRF guard — allow private addresses for user-configured local providers
+    try:
+        from kazma_core.security.ssrf import SSRFError, validate_url
+        validate_url(tags_url, block_unresolved=True, allow_private=True)
+    except SSRFError as exc:
+        logger.warning("discover_ollama_models: SSRF blocked %r: %s", tags_url, exc)
+        info.error = f"SSRF blocked: {exc}"
+        return info
+    except Exception as exc:
+        logger.warning("discover_ollama_models: SSRF validation unavailable — blocking request for safety: %s", exc)
+        info.error = "SSRF validation unavailable"
+        return info
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
-            resp = await client.get(_OLLAMA_TAGS_URL)
+            resp = await client.get(tags_url)
             resp.raise_for_status()
             data = resp.json()
 
@@ -88,7 +136,7 @@ async def discover_ollama_models() -> ProviderInfo:
         logger.info("Discovered Ollama: %d models", len(cleaned))
 
     except httpx.ConnectError:
-        info.error = "Ollama not running (port 11434)"
+        info.error = f"Ollama not running at {base}"
         logger.debug("Ollama offline: %s", info.error)
 
     except httpx.TimeoutException:
@@ -250,7 +298,7 @@ async def discover_models(
     provider = provider.lower().strip()
 
     if provider == "ollama":
-        return await discover_ollama_models()
+        return await discover_ollama_models(base_url)
 
     if provider in ("lm-studio", "lm_studio", "lmstudio"):
         return await discover_lm_studio_models(base_url)
@@ -368,17 +416,23 @@ async def _discover_openai_compatible(base_url: str, api_key: str | None, provid
 # ══════════════════════════════════════════════════════════════════════════
 
 
-async def check_ollama_health() -> dict[str, Any]:
+async def check_ollama_health(base_url: str | None = None) -> dict[str, Any]:
     """Check if Ollama is running and responsive.
 
-    Pings http://127.0.0.1:11434/api/tags with a short timeout.
+    Pings {base}/api/tags with a short timeout.
+
+    Args:
+        base_url: Optional override. Defaults to the configured Ollama
+            provider URL, then 127.0.0.1:11434.
 
     Returns:
         Dict with "online" (bool), "models" (int), "error" (str|None).
     """
+    base = _ollama_native_base(base_url or _ollama_base_from_registry())
+    tags_url = f"{base}/api/tags"
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0)) as client:
-            resp = await client.get(_OLLAMA_TAGS_URL)
+            resp = await client.get(tags_url)
             resp.raise_for_status()
             data = resp.json()
 
@@ -387,7 +441,7 @@ async def check_ollama_health() -> dict[str, Any]:
         return {"online": True, "models": model_count, "error": None}
 
     except httpx.ConnectError:
-        return {"online": False, "models": 0, "error": "Connection refused (port 11434)"}
+        return {"online": False, "models": 0, "error": f"Connection refused at {base}"}
 
     except httpx.TimeoutException:
         return {"online": False, "models": 0, "error": "Timed out"}
@@ -495,7 +549,8 @@ async def get_model_base_url(model_name: str) -> str | None:
     if "/" in model_name:
         prefix = model_name.split("/")[0]
         if prefix == "ollama":
-            return f"{_OLLAMA_BASE}/v1"
+            base = _ollama_native_base(_ollama_base_from_registry())
+            return f"{base}/v1"
         if prefix == "openai":
             return "https://api.openai.com/v1"
 

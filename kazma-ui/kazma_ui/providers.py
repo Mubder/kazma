@@ -289,10 +289,12 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 last_status = None
                 last_body = ""
+                last_exc: Exception | None = None
                 for url in candidates:
                     try:
                         resp = await client.get(url, headers=headers)
-                    except Exception:
+                    except Exception as exc:
+                        last_exc = exc
                         # Try the next candidate endpoint.
                         continue
                     last_status = resp.status_code
@@ -303,6 +305,13 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         return {"success": True, "latency_ms": latency}
                 latency = int((time.monotonic() - start) * 1000)
                 registry.set_provider_health(name, "degraded")
+                if last_status is None:
+                    logger.debug("Provider test %r: all endpoints unreachable: %s", name, last_exc)
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "error": f"Cannot connect to {base_url} (connection failed)",
+                    }
                 return {
                     "success": False,
                     "latency_ms": latency,
