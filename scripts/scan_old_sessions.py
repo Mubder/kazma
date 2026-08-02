@@ -32,6 +32,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sqlite3
@@ -172,6 +173,37 @@ def run_heuristic_extraction(
         return 0
 
 
+async def run_llm_extraction(
+    primary_conn: sqlite3.Connection,
+    ops_conn: sqlite3.Connection,
+    user_text: str,
+    assistant_text: str,
+    *,
+    session_id: str,
+    turn: int,
+    tenant_id: str = "default",
+) -> int:
+    """Run LLM belief extraction on one turn. Returns count of beliefs extracted."""
+    try:
+        from kazma_core.memory.belief_extractor import extract_and_apply_beliefs
+
+        stats = await extract_and_apply_beliefs(
+            primary_conn,
+            ops_conn,
+            user_text,
+            assistant_text,
+            session_id=session_id,
+            turn=turn,
+            tenant_id=tenant_id,
+            extraction_method="retroactive_scan",
+            use_llm=True,
+        )
+        return stats.get("applied", 0)
+    except Exception as e:
+        logger.debug("LLM extraction failed for %s turn %d: %s", session_id, turn, e)
+        return 0
+
+
 def scan_session(
     primary_conn: sqlite3.Connection,
     ops_conn: sqlite3.Connection,
@@ -186,25 +218,46 @@ def scan_session(
         return {"turns": 0, "beliefs": 0}
 
     total_beliefs = 0
+    pending_turns: list[tuple[int, str, str]] = []
+
     for turn_idx, (user_text, assistant_text) in enumerate(pairs, start=1):
-        # Skip already-scanned turns (idempotency check)
+        # Skip already-scanned turns that actually produced beliefs (idempotency)
         existing = primary_conn.execute(
             "SELECT COUNT(*) FROM beliefs WHERE source_session=? AND source_turn=? AND extraction_method='retroactive_scan'",
             (session["session_id"], turn_idx),
         ).fetchone()[0]
         if existing > 0:
             continue
+        pending_turns.append((turn_idx, user_text, assistant_text))
 
-        count = run_heuristic_extraction(
-            primary_conn,
-            ops_conn,
-            user_text,
-            assistant_text,
-            session_id=session["session_id"],
-            turn=turn_idx,
-            tenant_id=tenant_id,
-        )
-        total_beliefs += count
+    if use_llm:
+        # Run LLM extraction in an event loop
+        async def _extract_batch():
+            total = 0
+            for turn_idx, user_text, assistant_text in pending_turns:
+                count = await run_llm_extraction(
+                    primary_conn, ops_conn,
+                    user_text, assistant_text,
+                    session_id=session["session_id"],
+                    turn=turn_idx,
+                    tenant_id=tenant_id,
+                )
+                total += count
+            return total
+
+        total_beliefs = asyncio.run(_extract_batch())
+    else:
+        for turn_idx, user_text, assistant_text in pending_turns:
+            count = run_heuristic_extraction(
+                primary_conn,
+                ops_conn,
+                user_text,
+                assistant_text,
+                session_id=session["session_id"],
+                turn=turn_idx,
+                tenant_id=tenant_id,
+            )
+            total_beliefs += count
 
     return {"turns": len(pairs), "beliefs": total_beliefs}
 

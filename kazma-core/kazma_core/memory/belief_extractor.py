@@ -249,6 +249,7 @@ async def extract_and_apply_beliefs(
     tenant_id: str = "default",
     cfg: dict[str, Any] | None = None,
     use_llm: bool = True,
+    extraction_method: str | None = None,
 ) -> dict[str, Any]:
     """Full extraction pipeline: gatekeep → LLM/heuristic → fence → mutate.
 
@@ -306,6 +307,7 @@ async def extract_and_apply_beliefs(
         turn=turn,
         tenant_id=tenant_id,
         cfg=cfg,
+        extraction_method=extraction_method,
     )
 
 
@@ -319,6 +321,7 @@ def _apply_beliefs_to_v2(
     turn: int | None = None,
     tenant_id: str = "default",
     cfg: dict[str, Any] | None = None,
+    extraction_method: str | None = None,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
 
@@ -392,7 +395,7 @@ def _apply_beliefs_to_v2(
             predicate_type=clean["predicate_type"],
             confidence=clean["confidence"],
             importance=clean["importance"],
-            extraction_method="llm_inferred",
+            extraction_method=extraction_method or "llm_inferred",
             tenant_id=tenant_id,
             source_session=session_id,
             source_turn=turn,
@@ -414,6 +417,7 @@ def extract_and_apply_beliefs_sync(
     turn: int | None = None,
     tenant_id: str = "default",
     cfg: dict[str, Any] | None = None,
+    extraction_method: str | None = None,
 ) -> dict[str, Any]:
     """SYNC extraction pipeline (heuristic only — NO LLM, NO httpx).
 
@@ -453,4 +457,5 @@ def extract_and_apply_beliefs_sync(
         turn=turn,
         tenant_id=tenant_id,
         cfg=cfg,
+        extraction_method=extraction_method,
     )
