@@ -415,6 +415,47 @@ class SettingsRouterBuilder:
             return get_rebuild_status()
 
         # ══════════════════════════════════════════════════════════════
+        # TIME TRAVEL — replay/fork snapshot retention
+        # ══════════════════════════════════════════════════════════════
+
+        @router.get("/api/settings/time_travel")
+        async def api_get_time_travel() -> dict[str, Any]:
+            """Get the time-travel override plus the LIVE recorder cap.
+
+            ``effective`` is what the running SnapshotRecorder was built
+            with (store > kazama.yaml > default), so the UI can show a
+            "restart required" banner until a saved value is applied.
+            """
+            from kazma_core.time_travel import DEFAULT_MAX_SNAPSHOTS
+
+            store = _get_sm().get_time_travel_settings()
+            effective: int | None = None
+            try:
+                rec = agent.snapshot_recorder
+                if rec is not None:
+                    effective = int(rec.max_snapshots)
+            except Exception:
+                logger.debug("[Settings] live time-travel cap unavailable", exc_info=True)
+            if effective is None:
+                yaml_cfg = {}
+                try:
+                    yaml_cfg = (agent.config.raw or {}).get("time_travel", {}) if getattr(agent, "config", None) else {}
+                except Exception:
+                    yaml_cfg = {}
+                yaml_val = yaml_cfg.get("max_snapshots")
+                effective = int(yaml_val) if yaml_val is not None else DEFAULT_MAX_SNAPSHOTS
+            return {"store": store, "effective": effective}
+
+        @router.put("/api/settings/time_travel")
+        async def api_save_time_travel(req: dict[str, Any]) -> dict[str, Any]:
+            """Persist the time-travel override (takes effect after restart)."""
+            try:
+                _get_sm().save_time_travel_settings(req)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            return {"status": "ok"}
+
+        # ══════════════════════════════════════════════════════════════
         # SERVER RESTART — used after saving embedder / other boot-time
         # settings. Best-effort: re-execs the same uvicorn command line
         # detached, then gracefully shuts the current process down.

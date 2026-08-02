@@ -472,6 +472,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Prefer the button above. From the repo root, the CLI script does the same (requires a server restart afterwards):",
         "ar": "فضّل الزر أعلاه. من جذر المستودع، يقوم سكربت CLI بنفس العمل (يتطلب إعادة تشغيل الخادم بعد ذلك):",
     },
+    "settings.time_travel_title": {"en": "Time travel (replay / fork)", "ar": "السفر عبر الزمن (إعادة / تفريع)"},
+    "settings.time_travel_hint": {
+        "en": "Kazma snapshots each conversation turn so /replay N and /fork N can rewind it. This cap controls how many snapshots are kept per thread — higher values allow deeper rewinds but grow snapshots.db (it accumulates per thread).",
+        "ar": "تلتقط كازما لقطات من كل محادثة لتتيح أمرَي /replay N و /fork N. هذا الحد يتحكم بعدد اللقطات المحفوظة لكل محادثة — القيم الأعلى تسمح بتراجع أعمق لكنها تزيد حجم snapshots.db (ينمو لكل محادثة).",
+    },
+    "settings.time_travel_max_snapshots": {"en": "Snapshots per thread", "ar": "عدد اللقطات لكل محادثة"},
+    "settings.time_travel_max_snapshots_hint": {
+        "en": "Default 50. Each snapshot stores the full conversation state at one supervisor iteration. Lower values shrink the snapshot DB; old threads' snapshots are evicted only when that thread captures again.",
+        "ar": "الافتراضي 50. كل لقطة تخزّن حالة المحادثة الكاملة عند تكرار مشرف واحد. القيم الأقل تصغّر قاعدة اللقطات؛ تُحذف لقطات المحادثات القديمة فقط عند التقاط جديد لنفس المحادثة.",
+    },
+    "settings.time_travel_save": {"en": "Save time travel settings", "ar": "حفظ إعدادات السفر عبر الزمن"},
+    "settings.time_travel_restart_needed": {"en": "Restart required to apply", "ar": "إعادة تشغيل مطلوبة للتطبيق"},
+    "settings.time_travel_restart_needed_hint": {
+        "en": "The snapshot cap is read when the server boots. The page will reconnect automatically after restart.",
+        "ar": "يُقرأ حد اللقطات عند إقلاع الخادم. ستُعاد الصفحة الاتصال تلقائيًا بعد إعادة التشغيل.",
+    },
+    "settings.time_travel_restart_btn": {"en": "Restart server", "ar": "إعادة تشغيل الخادم"},
+    "settings.time_travel_restart_title": {"en": "Restart server?", "ar": "إعادة تشغيل الخادم؟"},
+    "settings.time_travel_restart_message": {
+        "en": "The server will restart to apply the new snapshot cap. The page will reconnect automatically. Unsaved chat sessions are persisted.",
+        "ar": "سيعاد تشغيل الخادم لتطبيق حد اللقطات الجديد. ستُعاد الصفحة الاتصال تلقائيًا. جلسات المحادثة غير المحفوظة محفوظة.",
+    },
+    "settings.time_travel_restart_noop": {"en": "No restart needed — the running cap already matches.", "ar": "لا حاجة لإعادة التشغيل — الحد الحالي مطابق."},
     "settings.email_title": {"en": "Connect email", "ar": "ربط البريد"},
     "settings.email_subtitle": {
         "en": "Gmail, Microsoft 365/Outlook, or sandbox demo mailbox for the agent.",

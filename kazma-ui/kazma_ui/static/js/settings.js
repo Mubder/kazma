@@ -76,6 +76,12 @@ function settingsApp() {
         embedderRebuildStatus: { state: 'idle', model: '', total: 0, done: 0, error: null },
         _embedderPollTimer: null,
 
+        // ── Time Travel (replay / fork) ──
+        timeTravel: { max_snapshots: 50 },
+        timeTravelEffective: null,
+        timeTravelSaving: false,
+        timeTravelRestarting: false,
+
         // ── Connectors Tab ──
         connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },
         connectorStatuses: {},
@@ -793,18 +799,18 @@ function settingsApp() {
             this.embedderSaving = false;
         },
 
-        async restartServer() {
-            if (!this.embedderRestartNeeded()) {
-                showToast('No restart needed — config already matches the running embedder.', 'info');
+        async restartServer(opts = {}) {
+            const restartNeeded = opts.restartNeeded || (() => this.embedderRestartNeeded());
+            const setBusy = opts.setBusy || ((v) => { this.embedderRestarting = v; });
+            const title = opts.title || 'Restart server?';
+            const message = opts.message || 'The server will restart with the saved embedder config. The page will reconnect automatically. Unsaved chat sessions are persisted.';
+            if (!restartNeeded()) {
+                showToast(opts.noRestartMsg || 'No restart needed — config already matches the running server.', 'info');
                 return;
             }
-            const ok = await window.kazmaConfirm({
-                title: 'Restart server?',
-                message: 'The server will restart with the saved embedder config. The page will reconnect automatically. Unsaved chat sessions are persisted.',
-                danger: true,
-            });
+            const ok = await window.kazmaConfirm({ title, message, danger: true });
             if (!ok) return;
-            this.embedderRestarting = true;
+            setBusy(true);
             try {
                 const resp = await fetch('/api/settings/system/restart', {
                     method: 'POST',
@@ -813,7 +819,7 @@ function settingsApp() {
                 const data = await resp.json();
                 if (data.status === 'error') {
                     showToast(data.detail || 'Restart failed', 'error');
-                    this.embedderRestarting = false;
+                    setBusy(false);
                     return;
                 }
                 showToast('Restarting server… the page will reload shortly.', 'info', 5000);
@@ -829,7 +835,7 @@ function settingsApp() {
                     } catch (e) { /* server down — expected during restart */ }
                     if (Date.now() - start > 60000) {
                         showToast('Server did not come back — check the terminal.', 'error');
-                        this.embedderRestarting = false;
+                        setBusy(false);
                         return;
                     }
                     setTimeout(poll, 1500);
@@ -837,7 +843,7 @@ function settingsApp() {
                 setTimeout(poll, 1000);
             } catch (e) {
                 showToast('Restart request failed: ' + e.message, 'error');
-                this.embedderRestarting = false;
+                setBusy(false);
             }
         },
 
@@ -920,6 +926,53 @@ function settingsApp() {
             const total = this.embedderRebuildStatus.total || 0;
             if (!total) return 0;
             return Math.min(100, Math.round((this.embedderRebuildStatus.done / total) * 100));
+        },
+
+        /* ── Time Travel (replay / fork) ─────────────────────────────────
+           Snapshot retention cap for /replay N and /fork N. Read at server
+           startup — a saved value applies after restart. */
+
+        async loadTimeTravel() {
+            try {
+                const data = await this._fetch('/api/settings/time_travel');
+                if (!data) return;
+                const store = data.store || {};
+                this.timeTravel = {
+                    max_snapshots: store.max_snapshots != null ? Number(store.max_snapshots) : 50,
+                };
+                this.timeTravelEffective = data.effective != null ? Number(data.effective) : 50;
+            } catch (e) {
+                console.error('[Settings] Failed to load time travel settings:', e);
+            }
+        },
+
+        timeTravelRestartNeeded() {
+            return Number(this.timeTravel.max_snapshots) !== Number(this.timeTravelEffective);
+        },
+
+        async saveTimeTravel() {
+            const n = Number(this.timeTravel.max_snapshots);
+            if (!n || n < 1) {
+                showToast('Snapshots per thread must be at least 1', 'error');
+                return;
+            }
+            this.timeTravelSaving = true;
+            try {
+                const resp = await fetch('/api/settings/time_travel', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ max_snapshots: n }),
+                });
+                const data = await resp.json();
+                if (data.status === 'error') {
+                    showToast(data.error || 'Save failed', 'error');
+                } else {
+                    showToast('Time travel settings saved. Restart the server to apply.', 'success');
+                }
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+            this.timeTravelSaving = false;
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -2524,7 +2577,7 @@ function settingsApp() {
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'embedder': await this.loadEmbedder(); break;
+                case 'embedder': await this.loadEmbedder(); await this.loadTimeTravel(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

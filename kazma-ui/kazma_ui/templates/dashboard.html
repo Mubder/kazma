@@ -695,15 +695,18 @@
     const locName = (I18N.compNames && c.id && I18N.compNames[c.id]) || c.name || c.id || 'component';
     const name = String(locName).replace(/</g, '&lt;');
     return (
-      '<div style="padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
-          '<span style="font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
-          '<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
+      // min-width:0 + overflow-wrap so long details (e.g. Postgres DSNs in
+      // the ConfigStore card) wrap INSIDE the card instead of widening the
+      // grid track and drifting past the border.
+      '<div style="min-width:0;overflow-wrap:break-word;padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;min-width:0;">' +
+          '<span style="min-width:0;overflow-wrap:break-word;font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
+          '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
             '<span style="width:7px;height:7px;border-radius:50%;background:' + s.dot + ';box-shadow:0 0 6px ' + s.dot + ';"></span>' +
             statusLabel +
           '</span>' +
         '</div>' +
-        '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);">' + detail + '</div>' +
+        '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);overflow-wrap:break-word;">' + detail + '</div>' +
       '</div>'
     );
   }

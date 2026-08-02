@@ -549,6 +549,19 @@ def create_recorder(
     _max = max_snapshots if max_snapshots is not None else tt_cfg.get("max_snapshots", DEFAULT_MAX_SNAPSHOTS)
     _db = db_path or tt_cfg.get("db_path", DEFAULT_DB_PATH)
 
+    # Effective resolution mirrors the embedder: ConfigStore override >
+    # kazama.yaml > default. The Settings UI writes time_travel.max_snapshots
+    # to the store; a restart is still required because the recorder is
+    # created once per agent at startup.
+    try:
+        from kazma_core.config_store import get_config_store
+
+        store_max = get_config_store().get("time_travel.max_snapshots", None)
+        if store_max is not None:
+            _max = int(store_max)
+    except Exception:  # noqa: BLE001 - never break startup over the override
+        logger.debug("[TimeTravel] ConfigStore override unavailable; using yaml/default", exc_info=True)
+
     return SnapshotRecorder(
         enabled=enabled,
         max_snapshots=_max,

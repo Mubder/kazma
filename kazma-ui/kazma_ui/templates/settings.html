@@ -1329,6 +1329,35 @@
             </div>
         </div>
 
+        <!-- Time travel (replay / fork) -->
+        <div class="settings-group">
+            <h3>{{ t('settings.time_travel_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.time_travel_hint') }}
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.time_travel_max_snapshots') }}</label>
+                <input type="number" class="form-input" x-model.number="timeTravel.max_snapshots" min="1" max="1000" step="5" style="max-width:200px">
+                <div class="form-hint">{{ t('settings.time_travel_max_snapshots_hint') }}</div>
+            </div>
+            <div x-show="timeTravelRestartNeeded()" x-cloak style="margin-top:12px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem">
+                <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
+                <strong style="color:var(--warning)">{{ t('settings.time_travel_restart_needed') }}</strong>
+                <div style="color:var(--text-muted);margin-top:4px">{{ t('settings.time_travel_restart_needed_hint') }}</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <button class="btn btn-primary" @click="saveTimeTravel()" :disabled="timeTravelSaving" x-text="timeTravelSaving ? '…' : t('settings.time_travel_save')"></button>
+                <button class="btn btn-danger" @click="restartServer({
+                    restartNeeded: () => timeTravelRestartNeeded(),
+                    setBusy: (v) => { this.timeTravelRestarting = v; },
+                    title: t('settings.time_travel_restart_title'),
+                    message: t('settings.time_travel_restart_message'),
+                    noRestartMsg: t('settings.time_travel_restart_noop')
+                })" :disabled="timeTravelRestarting || timeTravelRestartNeeded() === false" x-text="timeTravelRestarting ? '…' : t('settings.time_travel_restart_btn')"></button>
+            </div>
+        </div>
+
         <!-- Vector-space composition -->
         <div class="settings-group">
             <h3>{{ t('settings.embedder_db_title') }}</h3>

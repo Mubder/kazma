@@ -536,6 +536,32 @@ class SettingsManager:
         self._cs.set("embedding.base_url", base_url, category="embedding")
         self._cs.set("embedding.api_key_env", api_key_env, category="embedding")
 
+    def get_time_travel_settings(self) -> dict[str, Any]:
+        """Get the ConfigStore override for time travel (replay/fork)."""
+        return {
+            "max_snapshots": self._cs.get("time_travel.max_snapshots", None),
+        }
+
+    def save_time_travel_settings(self, data: dict[str, Any]) -> None:
+        """Save the time-travel override to ConfigStore (``time_travel.*`` keys).
+
+        The SnapshotRecorder is created per-agent at server startup, so the
+        new cap takes effect on the next restart — saving never hot-swaps
+        the running recorder (per-thread eviction bounds rely on it).
+        """
+        raw = data.get("max_snapshots")
+        if raw is None or str(raw).strip() == "":
+            raise ValueError("Snapshots per thread is required.")
+        try:
+            max_snapshots = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError("Snapshots per thread must be an integer.")
+        if max_snapshots < 1:
+            raise ValueError("Snapshots per thread must be at least 1.")
+        if max_snapshots > 1000:
+            raise ValueError("Snapshots per thread must be at most 1000.")
+        self._cs.set("time_travel.max_snapshots", max_snapshots, category="time_travel")
+
     def get_context_settings(self) -> dict[str, Any]:
         """Get context window settings."""
         return {

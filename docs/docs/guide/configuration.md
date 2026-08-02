@@ -224,7 +224,7 @@ safety:
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `time_travel.enabled` | bool | `true` | Enable `/replay`. |
-| `time_travel.max_snapshots` | int | `50` | Snapshot cap. |
+| `time_travel.max_snapshots` | int | `50` | Snapshot cap (per thread). ConfigStore override `time_travel.max_snapshots` (Settings → Embedder → Time travel) takes precedence over this value; effective resolution is store > yaml > default. Applies at server startup. |
 | `time_travel.db_path` | string | `kazma-data/snapshots.db` | Snapshot DB. |
 
 ### `swarm` (lines 116-127)
