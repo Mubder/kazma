@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Retroactive session scanner — extract V2 beliefs from old chat sessions.
 
 Scans all sessions in ``chat_sessions.db`` and runs the V2 belief extraction
