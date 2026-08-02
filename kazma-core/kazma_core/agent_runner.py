@@ -967,6 +967,10 @@ class KazmaAgent:
         logger.warning("Graph produced no assistant response")
         return ""
 
+    def set_on_model_change_callback(self, cb: Callable[[], None]) -> None:
+        """Register a callback to run when the active model is synced/switched."""
+        self._on_model_change_cb = cb
+
     def sync_active_model(self) -> None:
         """Re-fetch active LLM client from ModelRegistry and reset cached graphs."""
         from kazma_core.model_registry import get_model_registry
@@ -977,6 +981,11 @@ class KazmaAgent:
         self._graph = None
         self._streaming_graph = None
         logger.info("[KazmaAgent] Active model synced to %s", getattr(self.llm, "model", "unknown"))
+        if getattr(self, "_on_model_change_cb", None) is not None:
+            try:
+                self._on_model_change_cb()
+            except Exception as cb_exc:
+                logger.warning("[KazmaAgent] Model change callback failed: %s", cb_exc)
 
     async def shutdown(self) -> None:
         """Clean shutdown of the agent."""

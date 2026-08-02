@@ -662,40 +662,63 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
 
 
 def cleanup_polluted_backfill() -> dict[str, int]:
-    """Delete ALL backfilled beliefs + entities for a clean re-extraction.
+    """Delete ALL backfilled beliefs, entities, and log noise for a clean memory state.
 
-    Deletes every belief whose extraction_method is 'system_tool' (the
-    backfill's method) — this clears ALL previous backfill attempts
-    (hash IDs, 'noted' noise, regex garbage like 'name_is Running').
-    Also deletes hash-named entities.
-
-    Beliefs created by the live extractor (extraction_method='llm_inferred'
-    or 'user_explicit') are PRESERVED.
+    Deletes backfill-sourced beliefs (system_tool), SoulEvolution log noise,
+    memory_chunk entities, and orphaned legacy graph nodes/edges across
+    memory_state.db and knowledge_graph.db.
     """
-    from kazma_core.paths import primary_memory_db
+    from kazma_core.paths import data_dir, primary_memory_db
+    import os
 
-    stats = {"beliefs_deleted": 0, "entities_deleted": 0}
+    stats = {
+        "beliefs_deleted": 0,
+        "entities_deleted": 0,
+        "episodes_deleted": 0,
+        "kg_nodes_deleted": 0,
+        "kg_edges_deleted": 0,
+    }
     try:
         conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:
-            # Delete ALL backfill-sourced beliefs (system_tool = backfill)
-            cur = conn.execute(
-                "DELETE FROM beliefs WHERE extraction_method = 'system_tool'"
+            cur1 = conn.execute(
+                "DELETE FROM beliefs WHERE extraction_method = 'system_tool' OR object LIKE '%SoulEvolution%' OR object LIKE '%SelfImprovement%'"
             )
-            stats["beliefs_deleted"] = cur.rowcount or 0
-            # Also delete any remaining hash-named entities
+            stats["beliefs_deleted"] = cur1.rowcount or 0
+
             cur2 = conn.execute(
-                "DELETE FROM entities WHERE id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'"
+                "DELETE FROM entities WHERE type = 'memory_chunk' OR name LIKE '%SoulEvolution%' OR name LIKE '%SelfImprovement%' OR id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'"
             )
             stats["entities_deleted"] = cur2.rowcount or 0
-            conn.commit()
-            logger.info(
-                "[backfill] cleanup deleted %d backfill beliefs + %d hash entities",
-                stats["beliefs_deleted"], stats["entities_deleted"],
+
+            cur3 = conn.execute(
+                "DELETE FROM episodes WHERE user_text LIKE '%SoulEvolution%' OR assistant_text LIKE '%SoulEvolution%' OR summary_text LIKE '%SoulEvolution%'"
             )
+            stats["episodes_deleted"] = cur3.rowcount or 0
+            conn.commit()
         finally:
             conn.close()
+
+        # Clean legacy knowledge_graph.db if present
+        kg_db = os.path.join(data_dir(), "knowledge_graph.db")
+        if os.path.exists(kg_db):
+            kg_conn = sqlite3.connect(kg_db, check_same_thread=False)
+            try:
+                cur_n = kg_conn.execute(
+                    "DELETE FROM kg_nodes WHERE entity_type = 'memory_chunk' OR label LIKE '%SoulEvolution%' OR label LIKE '%SelfImprovement%' OR content LIKE '%SoulEvolution%'"
+                )
+                stats["kg_nodes_deleted"] = cur_n.rowcount or 0
+
+                cur_e = kg_conn.execute(
+                    "DELETE FROM kg_edges WHERE source_id NOT IN (SELECT id FROM kg_nodes) OR target_id NOT IN (SELECT id FROM kg_nodes) OR properties LIKE '%\"backfill\": true%'"
+                )
+                stats["kg_edges_deleted"] = cur_e.rowcount or 0
+                kg_conn.commit()
+            finally:
+                kg_conn.close()
+
+        logger.info("[backfill] cleanup complete: %s", stats)
     except Exception:
         logger.debug("[backfill] cleanup failed", exc_info=True)
     return stats

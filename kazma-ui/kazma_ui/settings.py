@@ -994,6 +994,18 @@ class SettingsRouterBuilder:
                 logger.warning("[Settings] set_active_model failed: %s", exc)
             return {"active_model": model, "model": model, "status": "ok"}
 
+        @router.post("/api/settings/memory/clean")
+        async def api_clean_memory() -> dict[str, Any]:
+            """Purge backfill garbage, SoulEvolution noise, and scan chunks."""
+            try:
+                from kazma_core.memory.backfill_v2 import cleanup_polluted_backfill
+
+                stats = cleanup_polluted_backfill()
+                return {"status": "ok", "stats": stats}
+            except Exception as exc:
+                logger.warning("[Settings] Memory cleanup failed: %s", exc)
+                return {"status": "error", "error": str(exc)}
+
     def _build_mcp_routes(self) -> None:
         router = self.mcp_router
         _get_sm = self._get_sm

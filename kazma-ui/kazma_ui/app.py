@@ -1167,23 +1167,29 @@ class KazmaAppBuilder:
                     logger.debug("[App] snapshot recorder unavailable: %s", exc)
             self._snapshot_recorder = _recorder
 
-            recompiled = build_supervisor_graph(
-                llm=self.agent.llm,
-                system_prompt=self.agent.system_prompt,
-                tool_definitions=self.agent.tools.get_tool_definitions(),
-                tool_executor=self.agent.tools,
-                cost_breaker=self.agent.cost_breaker,
-                authority=self.agent.authority,
-                tracer=self.agent.tracer,
-                checkpointer=self._checkpointer,
-                hitl_config=recompile_hitl,
-                snapshot_recorder=_recorder,
-            )
-            self._graph_holder["graph"] = recompiled
-            logger.info("[Checkpoint] Graph recompiled with checkpointer")
+            def _recompile_holder_graph() -> None:
+                recompiled = build_supervisor_graph(
+                    llm=self.agent.llm,
+                    system_prompt=self.agent.system_prompt,
+                    tool_definitions=self.agent.tools.get_tool_definitions(),
+                    tool_executor=self.agent.tools,
+                    cost_breaker=self.agent.cost_breaker,
+                    authority=self.agent.authority,
+                    tracer=self.agent.tracer,
+                    checkpointer=self._checkpointer,
+                    hitl_config=recompile_hitl,
+                    snapshot_recorder=_recorder,
+                )
+                self._graph_holder["graph"] = recompiled
+                self._hitl_state["graph"] = recompiled
+                logger.info("[App] Graph recompiled on model switch (model=%s)", getattr(self.agent.llm, "model", "unknown"))
 
-            self._hitl_state["graph"] = recompiled
+            _recompile_holder_graph()
+            if hasattr(self.agent, "set_on_model_change_callback"):
+                self.agent.set_on_model_change_callback(_recompile_holder_graph)
+
             self._hitl_state["checkpointer"] = self._checkpointer
+            logger.info("[Checkpoint] Graph recompiled with checkpointer")
             logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
 
             # ── Time Travel: mount replay API + page route ──────────

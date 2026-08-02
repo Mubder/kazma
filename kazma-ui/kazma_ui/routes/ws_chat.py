@@ -346,28 +346,41 @@ def create_ws_chat_router(
         try:
             if not text:
                 snapshot = await graph_inst.aget_state(config)
-                if snapshot is None:
-                    return ""
-                vals = getattr(snapshot, "values", None) or {}
-                msgs = vals.get("messages") if isinstance(vals, dict) else None
-                if not msgs or not isinstance(msgs, list):
-                    return ""
-                new_msgs = msgs[pre_msg_count:] if pre_msg_count < len(msgs) else msgs
-                for m in reversed(new_msgs):
-                    role = None
-                    if isinstance(m, dict):
-                        role = m.get("role")
-                    else:
-                        role = getattr(m, "type", None) or getattr(m, "role", None)
-                    if role in ("assistant", "ai"):
-                        content = (
-                            m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
-                        )
-                        if isinstance(content, str) and content.strip():
-                            text = content.strip()
-                            break
+                if snapshot is not None:
+                    vals = getattr(snapshot, "values", None) or {}
+                    msgs = vals.get("messages") if isinstance(vals, dict) else None
+                    if msgs and isinstance(msgs, list):
+                        new_msgs = msgs[pre_msg_count:] if pre_msg_count < len(msgs) else msgs
+                        for m in reversed(new_msgs):
+                            role = None
+                            if isinstance(m, dict):
+                                role = m.get("role")
+                            else:
+                                role = getattr(m, "type", None) or getattr(m, "role", None)
+                            if role in ("assistant", "ai"):
+                                content = (
+                                    m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
+                                )
+                                if isinstance(content, str) and content.strip():
+                                    text = content.strip()
+                                    break
+
+                        # Fallback: if no text response was produced, check if tools were executed
+                        if not text and new_msgs:
+                            tools_run = [
+                                m.get("name") or getattr(m, "name", "tool")
+                                for m in new_msgs
+                                if (isinstance(m, dict) and m.get("role") in ("tool", "function"))
+                                or (getattr(m, "type", None) in ("tool", "function"))
+                            ]
+                            if tools_run:
+                                text = f"Completed execution of tools: {', '.join(set(tools_run))}."
+                            elif activity:
+                                text = "Task processing completed."
+
             if not text:
-                return ""
+                text = "Task completed."
+
             # T4: mutate + persist under the per-session mutation lock so this
             # never interleaves with the SSE live/detached persist paths on the
             # same ChatSession.
