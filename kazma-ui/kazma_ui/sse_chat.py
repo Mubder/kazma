@@ -16,6 +16,7 @@ Event contract (matches what the Alpine.js frontend expects):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -50,14 +51,23 @@ router = APIRouter(tags=["chat-sse"])
 # graph run on the same thread/checkpointer.  ``_active_turns`` stays as a
 # back-compat alias to the shared dict.
 from kazma_ui.active_turns import (
+    DETACHED_TTL_S,
     active_turns,
+    cancel_turn,
+    get_active_turn,
+    get_orphan_stamp,
     is_turn_running,
     mark_turn_orphaned,
+    reap_stale_turn,
     register_turn,
     unregister_turn,
 )
 
 _active_turns = active_turns  # type: ignore[name-defined]
+
+# T1: strong references to detached-pump watchdog tasks so CPython never
+# GCs one while its pump is still running.
+_watchdog_tasks: set[asyncio.Task] = set()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -256,12 +266,20 @@ async def _stream_langgraph_events(
                 # arrive, keeping the HTTP connection alive.
                 _event_queue: asyncio.Queue = asyncio.Queue()
                 _stream_done = False
+                # T1 watchdog: last-progress clock written by the pump on every
+                # queue put; read by _pump_watchdog to detect a stalled pump.
+                _progress = {"last": time.monotonic()}
+                # T5: capture the live loop at registration time — the pump
+                # done_callback may fire from any thread, and
+                # asyncio.get_event_loop() is not safe there.
+                _turn_loop = asyncio.get_running_loop()
 
                 async def _pump_events():
                     nonlocal _stream_done
                     try:
                         async for ev in graph.astream_events(input_state, config=config, version="v2"):
                             await _event_queue.put(ev)
+                            _progress["last"] = time.monotonic()
                     except Exception as exc:
                         await _event_queue.put(exc)
                     finally:
@@ -269,6 +287,35 @@ async def _stream_langgraph_events(
                         await _event_queue.put(None)  # sentinel
 
                 pump_task = asyncio.create_task(_pump_events())
+
+                # ── T1: detached-pump watchdog ────────────────────────────
+                # If the client is gone AND the stream has produced no events
+                # for DETACHED_TTL_S (measured from the later of the disconnect
+                # stamp and the last event), the pump is stuck (the documented
+                # astream_events hang) — cancel it so the done_callback
+                # persists whatever the checkpointer already wrote and the
+                # thread frees up for a new turn. Progress-based: a background
+                # turn still emitting events is left alone (refresh-safe).
+                async def _pump_watchdog() -> None:
+                    while not pump_task.done():
+                        await asyncio.sleep(5.0)
+                        stamp = get_orphan_stamp(thread_id)
+                        if stamp is None:
+                            continue
+                        idle_since = max(stamp, _progress["last"])
+                        if time.monotonic() - idle_since < DETACHED_TTL_S:
+                            continue
+                        logger.warning(
+                            "[SSE] Reaping stalled detached pump for thread=%s "
+                            "(no events for %.0fs)",
+                            thread_id[:12], DETACHED_TTL_S,
+                        )
+                        pump_task.cancel()
+                        return
+
+                _watchdog_task = asyncio.create_task(_pump_watchdog())
+                _watchdog_tasks.add(_watchdog_task)
+                _watchdog_task.add_done_callback(_watchdog_tasks.discard)
 
                 # ── Detach: register the pump task so it survives client
                 # disconnects. The done_callback persists the final response
@@ -281,12 +328,6 @@ async def _stream_langgraph_events(
                     # Persist the final response to the session store.
                     if not session_id:
                         return
-                    try:
-                        import asyncio as _aio
-
-                        loop = _aio.get_event_loop()
-                    except RuntimeError:
-                        return
 
                     async def _persist():
                         try:
@@ -295,9 +336,10 @@ async def _stream_langgraph_events(
                             if snap and snap.values:
                                 msgs = snap.values.get("messages") or []
                                 asst = _last_assistant_text(msgs)
-                            store = _get_store()
-                            sess = store.get(session_id)
-                            if sess:
+                            # T4: mutate + persist under the per-session lock so
+                            # this never interleaves with a live turn's
+                            # incremental persist on the same ChatSession.
+                            with _get_store().transact(session_id) as sess:
                                 if asst:
                                     has_asst = any(
                                         m.get("role") == "assistant"
@@ -330,19 +372,23 @@ async def _stream_langgraph_events(
                                                 "Please try again."
                                             )
                                             break
-                                store.put(sess)
-                                logger.info(
-                                    "[SSE] Detached turn completed for thread=%s — "
-                                    "response persisted (%d chars)",
-                                    thread_id[:12], len(asst),
-                                )
+                            logger.info(
+                                "[SSE] Detached turn completed for thread=%s — "
+                                "response persisted (%d chars)",
+                                thread_id[:12], len(asst),
+                            )
                         except Exception:
                             logger.debug(
                                 "[SSE] Detached turn persist failed for thread=%s",
                                 thread_id, exc_info=True,
                             )
 
-                    loop.create_task(_persist())
+                    # T5: schedule on the captured turn loop from whichever
+                    # thread fired the callback (get_event_loop() would raise
+                    # RuntimeError off-loop and drop the persist silently).
+                    _turn_loop.call_soon_threadsafe(
+                        lambda: _turn_loop.create_task(_persist())
+                    )
 
                 pump_task.add_done_callback(_on_pump_done)
 
@@ -1270,6 +1316,21 @@ def create_sse_chat_router(
         # ── Duplicate-turn guard: reject if a background turn is still running
         # for this thread (e.g. user refreshed mid-turn and immediately resent).
         # Shared with the WebSocket transport so WS turns are also covered.
+        # A turn whose client has been gone past DETACHED_TTL_S is REAPED
+        # (cancelled + awaited) instead of rejected — the WS transport does
+        # the same; without it a hung detached pump would block the thread
+        # forever (T2).
+        _detached_turn = get_active_turn(thread_id)
+        if _detached_turn is not None and not _detached_turn.done():
+            _stale = reap_stale_turn(thread_id)
+            if _stale is not None and _stale is _detached_turn:
+                logger.info(
+                    "[SSE] Reaping stale detached turn for thread=%s",
+                    thread_id[:12],
+                )
+                _stale.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await _stale
         if is_turn_running(thread_id):
             logger.info("[SSE] Rejecting duplicate turn for thread=%s (still running)", thread_id[:12])
             async def _dup_gen() -> AsyncGenerator[str, None]:
@@ -1526,10 +1587,23 @@ def create_sse_chat_router(
                     msg["activity"] = list(activity_log)
 
             def _persist_now() -> None:
-                """Persist the current temp_assistant_msg to the store."""
+                """Persist the current temp_assistant_msg to the store.
+
+                T4: runs under the per-session mutation lock so this live
+                persist never interleaves with the detached done_callback
+                persist (or /reset) on the same ChatSession.
+                """
+                nonlocal assistant_message_started
                 try:
                     _attach_activity(temp_assistant_msg)
-                    _get_store().put(session)
+                    with _get_store().transact(session_id) as sess:
+                        if not assistant_message_started:
+                            sess.messages.append(temp_assistant_msg.copy())
+                            assistant_message_started = True
+                        else:
+                            if sess.messages:
+                                sess.messages[-1]["content"] = temp_assistant_msg["content"]
+                                _attach_activity(sess.messages[-1])
                 except Exception:
                     logger.debug(
                         "[SSE] failed to persist assistant message for session=%s",
@@ -1556,18 +1630,10 @@ def create_sse_chat_router(
                         content_acc += token_text
                         temp_assistant_msg["content"] += token_text
 
-                        # Persist incrementally every few tokens to prevent data loss
+                        # Persist incrementally every few tokens to prevent data loss.
+                        # _persist_now performs the append/update under the
+                        # per-session mutation lock (T4) — no inline mutation.
                         if len(content_acc) % 50 == 0:
-                            if not assistant_message_started:
-                                # Add to session messages
-                                _attach_activity(temp_assistant_msg)
-                                session.messages.append(temp_assistant_msg.copy())
-                                assistant_message_started = True
-                            else:
-                                # Update last message
-                                if session.messages:
-                                    session.messages[-1]["content"] = temp_assistant_msg["content"]
-                                    _attach_activity(session.messages[-1])
                             _persist_now()
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
                         _record_activity(ev_type, data)
@@ -1986,5 +2052,35 @@ def create_sse_chat_router(
             "model": model,
             "status": "ok",
         }
+
+    # ── Stop: cancel the running turn (Stop button) ──────────────────
+    @r.post("/api/chat/stop")
+    async def stop_chat_turn(request: Request) -> dict[str, Any]:
+        """Cancel the in-flight turn for a session (user pressed Stop).
+
+        Body: ``{"session_id": ...}`` (or ``{"thread_id": ...}``). Resolves
+        the LangGraph thread from the session, atomically unregisters and
+        cancels the pump task. The pump's done_callback persists whatever
+        the checkpointer already wrote — a Stop never corrupts the
+        transcript. Returns ``{"cancelled": bool}``.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        session_id = str(payload.get("session_id") or "")
+        thread_id = str(payload.get("thread_id") or "")
+        if not thread_id and session_id:
+            try:
+                sess = _get_store().get(session_id)
+                thread_id = (sess.thread_id if sess else "") or session_id
+            except Exception:
+                thread_id = session_id
+        task = cancel_turn(thread_id) if thread_id else None
+        logger.info(
+            "[SSE] Stop requested for thread=%s -> %s",
+            thread_id[:12] if thread_id else "?", "cancelled" if task else "no active turn",
+        )
+        return {"cancelled": task is not None}
 
     return r

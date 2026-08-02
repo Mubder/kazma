@@ -16,6 +16,7 @@ so CPython never garbage-collects a running task whose client disconnected.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -23,7 +24,9 @@ from typing import Any
 
 __all__ = [
     "DETACHED_TTL_S",
+    "cancel_turn",
     "get_active_turn",
+    "get_orphan_stamp",
     "is_turn_running",
     "mark_turn_orphaned",
     "reap_stale_turn",
@@ -46,6 +49,8 @@ _turns: dict[str, Any] = {}
 # Side dict so ``active_turns`` and every task-based accessor stay untouched.
 _orphaned_at: dict[str, float] = {}
 _lock = threading.RLock()
+
+logger = logging.getLogger(__name__)
 
 # Back-compat alias: sse_chat historically exposed ``_active_turns``.
 active_turns = _turns
@@ -119,6 +124,45 @@ def reap_stale_turn(thread_id: str, ttl_s: float = DETACHED_TTL_S) -> Any | None
         _turns.pop(thread_id, None)
         _orphaned_at.pop(thread_id, None)
         return task
+
+
+def get_orphan_stamp(thread_id: str) -> float | None:
+    """Return the monotonic timestamp when *thread_id*'s turn was orphaned,
+    or ``None`` if the turn is not running / not orphaned."""
+    if not thread_id:
+        return None
+    with _lock:
+        task = _turns.get(thread_id)
+        if task is None:
+            return None
+        try:
+            if task.done():
+                return None
+        except Exception:
+            pass
+        return _orphaned_at.get(thread_id)
+
+
+def cancel_turn(thread_id: str) -> Any | None:
+    """Immediately cancel the running turn for *thread_id* (user Stop).
+
+    Atomically unregisters and cancels the turn's task. Returns the task
+    so the caller can await its full unwind before starting a replacement
+    run. The done callback still fires and persists partial state from
+    the checkpointer — a Stop never loses what the graph already wrote.
+    """
+    if not thread_id:
+        return None
+    with _lock:
+        task = _turns.pop(thread_id, None)
+        _orphaned_at.pop(thread_id, None)
+    if task is not None:
+        try:
+            task.cancel()
+        except Exception:
+            pass
+        logger.info("[active-turns] cancelled turn for thread=%s", thread_id[:12])
+    return task
 
 
 def get_active_turn(thread_id: str) -> Any | None:

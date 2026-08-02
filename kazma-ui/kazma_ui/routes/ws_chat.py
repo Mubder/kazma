@@ -20,6 +20,7 @@ from starlette.websockets import WebSocketState
 
 from kazma_core.tracing.events import EventBridge, TelemetryEvent
 from kazma_ui.active_turns import (
+    cancel_turn,
     get_active_turn,
     mark_turn_orphaned,
     reap_stale_turn,
@@ -302,29 +303,24 @@ def create_ws_chat_router(
         ``pending``. Mirrors the SSE path which sets the same flag.
         """
         try:
-            store = get_session_manager()
-            sess = store.get(session_id)
-            if not sess:
-                return
-            last = sess.messages[-1] if sess.messages else None
-            if last and last.get("role") == "assistant":
-                # An empty trailing assistant bubble is this turn's — mark it.
-                if not (last.get("content") or "").strip():
-                    last["pending"] = True
-                    store.put(sess)
-                # A bubble with content belongs to a finished turn — leave it.
-            else:
-                from datetime import UTC, datetime
+            with get_session_manager().transact(session_id) as sess:
+                last = sess.messages[-1] if sess.messages else None
+                if last and last.get("role") == "assistant":
+                    # An empty trailing assistant bubble is this turn's — mark it.
+                    if not (last.get("content") or "").strip():
+                        last["pending"] = True
+                    # A bubble with content belongs to a finished turn — leave it.
+                else:
+                    from datetime import UTC, datetime
 
-                sess.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": "",
-                        "pending": True,
-                        "ts": datetime.now(UTC).isoformat(),
-                    }
-                )
-                store.put(sess)
+                    sess.messages.append(
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "pending": True,
+                            "ts": datetime.now(UTC).isoformat(),
+                        }
+                    )
         except Exception as exc:
             logger.warning("[WS-Chat] Failed ensuring pending bubble: %s", exc)
 
@@ -372,30 +368,29 @@ def create_ws_chat_router(
                             break
             if not text:
                 return ""
-            store = get_session_manager()
-            sess = store.get(session_id)
-            if not sess:
-                return text
-            # Upsert trailing assistant bubble so incremental flushes don't
-            # create duplicate rows for the same turn.
-            activity_rows = list(activity) if activity else None
-            if sess.messages and sess.messages[-1].get("role") == "assistant":
-                sess.messages[-1]["content"] = text
-                sess.messages[-1].pop("pending", None)
-                if activity_rows:
-                    sess.messages[-1]["activity"] = activity_rows
-            else:
-                from datetime import UTC, datetime
+            # T4: mutate + persist under the per-session mutation lock so this
+            # never interleaves with the SSE live/detached persist paths on the
+            # same ChatSession.
+            with get_session_manager().transact(session_id) as sess:
+                # Upsert trailing assistant bubble so incremental flushes don't
+                # create duplicate rows for the same turn.
+                activity_rows = list(activity) if activity else None
+                if sess.messages and sess.messages[-1].get("role") == "assistant":
+                    sess.messages[-1]["content"] = text
+                    sess.messages[-1].pop("pending", None)
+                    if activity_rows:
+                        sess.messages[-1]["activity"] = activity_rows
+                else:
+                    from datetime import UTC, datetime
 
-                msg: dict[str, Any] = {
-                    "role": "assistant",
-                    "content": text,
-                    "ts": datetime.now(UTC).isoformat(),
-                }
-                if activity_rows:
-                    msg["activity"] = activity_rows
-                sess.messages.append(msg)
-            store.put(sess)
+                    msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": text,
+                        "ts": datetime.now(UTC).isoformat(),
+                    }
+                    if activity_rows:
+                        msg["activity"] = activity_rows
+                    sess.messages.append(msg)
             return text
         except Exception as exc:
             logger.warning("[WS-Chat] Failed persisting assistant message: %s", exc)
@@ -480,6 +475,23 @@ def create_ws_chat_router(
 
                 if action == "ping":
                     await websocket.send_json({"type": "pong"})
+                    continue
+
+                # ── Action: stop (Stop button) — cancel the running turn ─
+                if action == "stop":
+                    task = cancel_turn(thread_id)
+                    if task is not None:
+                        logger.info(
+                            "[WS-Chat] Stop requested — cancelling turn for thread=%s",
+                            thread_id[:12],
+                        )
+                    await websocket.send_json(
+                        TelemetryEvent(
+                            type="stream_end",
+                            data={"stopped": True},
+                            thread_id=thread_id,
+                        ).to_dict()
+                    )
                     continue
 
                 graph_inst = _get_graph()
@@ -817,29 +829,34 @@ def create_ws_chat_router(
                                         if content:
                                             assistant_content_acc += content
                                             if len(assistant_content_acc) % 50 == 0:
-                                                store = get_session_manager()
-                                                sess = store.get(session_id)
-                                                if sess:
-                                                    # Upsert the trailing
-                                                    # assistant bubble (which
-                                                    # _ensure_pending_assistant_bubble
-                                                    # created) — never append a
-                                                    # duplicate mid-stream.
-                                                    if (
-                                                        sess.messages
-                                                        and sess.messages[-1].get("role")
-                                                        == "assistant"
-                                                    ):
-                                                        sess.messages[-1]["content"] = (
-                                                            assistant_content_acc
-                                                        )
-                                                        if activity_log:
-                                                            sess.messages[-1]["activity"] = list(activity_log)
-                                                    else:
-                                                        sess.add_message(
-                                                            "assistant", assistant_content_acc
-                                                        )
-                                                    store.put(sess)
+                                                # T4: serialize with the other
+                                                # persist paths on this session.
+                                                try:
+                                                    with get_session_manager().transact(session_id) as sess:
+                                                        # Upsert the trailing
+                                                        # assistant bubble (which
+                                                        # _ensure_pending_assistant_bubble
+                                                        # created) — never append a
+                                                        # duplicate mid-stream.
+                                                        if (
+                                                            sess.messages
+                                                            and sess.messages[-1].get("role")
+                                                            == "assistant"
+                                                        ):
+                                                            sess.messages[-1]["content"] = (
+                                                                assistant_content_acc
+                                                            )
+                                                            if activity_log:
+                                                                sess.messages[-1]["activity"] = list(activity_log)
+                                                        else:
+                                                            sess.add_message(
+                                                                "assistant", assistant_content_acc
+                                                            )
+                                                except Exception:
+                                                    logger.debug(
+                                                        "[WS-Chat] incremental persist failed",
+                                                        exc_info=True,
+                                                    )
 
                                 # CRITICAL: when the client disconnected (refresh /
                                 # tab switch) is_lost() is True. Keep draining the
@@ -882,15 +899,12 @@ def create_ws_chat_router(
                                 # over. Pop pending so a reload doesn't show the
                                 # "still processing" bubble forever.
                                 try:
-                                    store = get_session_manager()
-                                    sess = store.get(session_id)
-                                    if (
-                                        sess
-                                        and sess.messages
-                                        and sess.messages[-1].get("role") == "assistant"
-                                    ):
-                                        sess.messages[-1].pop("pending", None)
-                                        store.put(sess)
+                                    with get_session_manager().transact(session_id) as sess:
+                                        if (
+                                            sess.messages
+                                            and sess.messages[-1].get("role") == "assistant"
+                                        ):
+                                            sess.messages[-1].pop("pending", None)
                                 except Exception:
                                     pass
                             elif not (final_text or "").strip():

@@ -20,10 +20,11 @@ import sqlite3
 import sys
 import threading
 import uuid
+import contextlib
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Iterator
 
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.tenant_context import get_current_tenant_id
@@ -153,6 +154,10 @@ class SessionManager:
         self.db_path = db_path
         # Guard OrderedDict + sqlite across threadpool/async (audit M15)
         self._lock = threading.RLock()
+        # T4: per-session mutation locks so read-modify-write sequences from
+        # concurrent persist paths (live stream, detached done_callback,
+        # /reset) never interleave on the same ChatSession.
+        self._mutation_locks: dict[str, threading.Lock] = {}
         self._pg = False
         self._conn: sqlite3.Connection | None = None
 
@@ -529,6 +534,33 @@ class SessionManager:
             self._sessions.move_to_end(key)
             self._upsert_db(session)
             self._evict_if_needed(tenant_id)
+
+    @contextlib.contextmanager
+    def transact(self, session_id: str) -> Iterator[ChatSession]:
+        """Serialize read-modify-write on *session_id* (T4).
+
+        Per-session lock held while the caller mutates the ChatSession,
+        then the transaction calls :meth:`put` before releasing. Without
+        this, the live incremental persist, the detached done_callback
+        persist, and /reset could interleave on the same message list and
+        last-write-wins could drop a concurrent update.
+
+        Usage::
+
+            with store.transact(session_id) as sess:
+                sess.messages.append(...)
+        """
+        with self._lock:
+            lock = self._mutation_locks.get(session_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._mutation_locks[session_id] = lock
+        with lock:
+            session = self.get(session_id)
+            if session is None:
+                raise KeyError(f"session not found: {session_id}")
+            yield session
+            self.put(session)
 
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if not found."""

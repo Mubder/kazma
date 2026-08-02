@@ -511,6 +511,19 @@
       activeStream = null;
       KS.toast('Generation stopped', 'info', 2000);
     }
+    // The SSE turn runs detached server-side (refresh-safe) — aborting the
+    // fetch alone would NOT stop the generation. Tell the server to cancel
+    // the pump task so billing stops and the transcript persists as-is.
+    try {
+      if (chatSessionId) {
+        fetch('/api/chat/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: chatSessionId }),
+          credentials: 'same-origin',
+        }).catch(function() { /* best-effort */ });
+      }
+    } catch (e) { /* best-effort */ }
     forceEndTurn();
   }
 
