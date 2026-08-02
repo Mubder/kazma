@@ -1239,6 +1239,19 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Memory] V2 worker start failed: %s", e)
 
+        # ── Time-travel snapshot maintenance loop ────────────────────
+        # Daily prune (TTL) + VACUUM of snapshots.db so replay/fork
+        # history never grows without bound. Reads auto_maintain /
+        # retention_days LIVE from the ConfigStore (Settings UI) on every
+        # run, so Settings changes apply without a restart. Best-effort.
+        try:
+            from kazma_core.time_travel import start_snapshot_maintenance_loop
+
+            start_snapshot_maintenance_loop()
+            logger.info("[TimeTravel] snapshot maintenance loop scheduled (24h cadence)")
+        except Exception as e:
+            logger.warning("[TimeTravel] maintenance loop start failed: %s", e)
+
         if self.cron_store is not None:
             try:
                 await self.cron_store.init()

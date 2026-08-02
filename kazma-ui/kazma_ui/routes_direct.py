@@ -1376,6 +1376,24 @@ def register_direct_routes(self: Any) -> None:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
 
+    @self.app.post("/api/system/snapshots/maintain")
+    async def _run_snapshot_maintenance():
+        """Time-travel snapshots: TTL prune + VACUUM to reclaim disk.
+
+        Retention is read LIVE from the ConfigStore (Settings UI), so the
+        manual run and the daily auto-loop always agree.
+        """
+        from kazma_core.time_travel import maintain_snapshots
+        from kazma_core.time_travel import _live_maintenance_config
+
+        try:
+            cfg = _live_maintenance_config()
+            stats = maintain_snapshots(retention_days=cfg["retention_days"])
+            return {"status": "success", "stats": stats, "auto_maintain": cfg["auto_maintain"]}
+        except Exception as e:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail=str(e))
+
     @self.app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
         from kazma_ui.auth import websocket_is_authenticated

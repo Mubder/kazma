@@ -132,15 +132,6 @@ class KazmaAgent:
         # Time Travel — snapshot recorder (lazy-init in _ensure_graph).
         self._snapshot_recorder: Any = None
 
-    @property
-    def snapshot_recorder(self) -> Any:
-        """The active SnapshotRecorder (time travel), or None before first graph build."""
-        return self._snapshot_recorder
-
-    @snapshot_recorder.setter
-    def snapshot_recorder(self, value: Any) -> None:
-        self._snapshot_recorder = value
-
         # Streaming graph for SSE path (built lazily, cached).
         # Separate from _graph which includes a checkpointer for run().
         self._streaming_graph: Any = None
@@ -320,6 +311,15 @@ class KazmaAgent:
             self.llm_config.model,
             self.llm_config.base_url,
         )
+
+    @property
+    def snapshot_recorder(self) -> Any:
+        """The active SnapshotRecorder (time travel), or None before first graph build."""
+        return self._snapshot_recorder
+
+    @snapshot_recorder.setter
+    def snapshot_recorder(self, value: Any) -> None:
+        self._snapshot_recorder = value
 
     def _default_system_prompt(self) -> str:
         return (

@@ -495,6 +495,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سيعاد تشغيل الخادم لتطبيق حد اللقطات الجديد. ستُعاد الصفحة الاتصال تلقائيًا. جلسات المحادثة غير المحفوظة محفوظة.",
     },
     "settings.time_travel_restart_noop": {"en": "No restart needed — the running cap already matches.", "ar": "لا حاجة لإعادة التشغيل — الحد الحالي مطابق."},
+    "settings.time_travel_retention_days": {"en": "Retention (days)", "ar": "الاحتفاظ (أيام)"},
+    "settings.time_travel_retention_days_hint": {
+        "en": "Snapshots older than this are deleted by the maintenance job. Applies to the next run — no restart needed.",
+        "ar": "تُحذف اللقطات الأقدم من هذا العدد بواسطة مهمة الصيانة. يُطبَّق في التشغيل التالي — لا حاجة لإعادة التشغيل.",
+    },
+    "settings.time_travel_auto_maintain": {"en": "Clean up automatically (daily)", "ar": "تنظيف تلقائي (يوميًا)"},
+    "settings.time_travel_auto_maintain_hint": {
+        "en": "Runs the prune + VACUUM every 24h on boot-cadence. Turn off to only run it manually from the Dashboard.",
+        "ar": "ينفّذ التنظيف + VACUUM كل 24 ساعة بعد الإقلاع. أوقفه لتشغيله يدويًا فقط من لوحة التحكم.",
+    },
     "settings.email_title": {"en": "Connect email", "ar": "ربط البريد"},
     "settings.email_subtitle": {
         "en": "Gmail, Microsoft 365/Outlook, or sandbox demo mailbox for the agent.",
@@ -1523,6 +1533,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.vectors": {"en": "vectors", "ar": "متجه"},
     "dashboard.create_backup": {"en": "Create Hot Backup", "ar": "إنشاء نسخة احتياطية ساخنة"},
     "dashboard.optimize_db": {"en": "Optimize Database", "ar": "تحسين قاعدة البيانات"},
+    "dashboard.snapshot_maintain": {"en": "Clean Up Snapshots", "ar": "تنظيف اللقطات"},
+    "dashboard.snapshot_maintain_title": {"en": "Clean up time-travel snapshots?", "ar": "تنظيف لقطات السفر عبر الزمن؟"},
+    "dashboard.snapshot_maintain_confirm": {
+        "en": "Snapshots older than the retention window will be deleted and the database vacuumed to reclaim disk space. Replay history inside the window is kept.",
+        "ar": "ستُحذف اللقطات الأقدم من نافذة الاحتفاظ وتُضغط قاعدة البيانات لاستعادة مساحة القرص. يبقى سجل الإعادة داخل النافذة محفوظًا.",
+    },
     "dashboard.available_backups": {"en": "Available Backups", "ar": "النسخ الاحتياطية المتاحة"},
     "dashboard.col_name": {"en": "Backup Name", "ar": "اسم النسخة"},
     "dashboard.col_keyword": {"en": "Keyword Size", "ar": "حجم الكلمات"},

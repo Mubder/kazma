@@ -10,11 +10,19 @@ Provides two main components:
   execution from that point, enabling "what if" analysis and
   side-by-side comparison of original vs. replayed runs.
 
-Configuration (kazma.yaml):
+Configuration (kazama.yaml):
     time_travel:
         enabled: true          # master switch
         max_snapshots: 50      # per-thread LRU cap
         db_path: kazma-data/snapshots.db
+
+Maintenance:
+    ``maintain_snapshots()`` prunes rows older than ``retention_days``
+    and VACUUMs the DB to reclaim space.  ``start_snapshot_maintenance_loop()``
+    runs that daily (24h cadence) reading ``time_travel.auto_maintain`` and
+    ``time_travel.retention_days`` LIVE from the ConfigStore so Settings-UI
+    changes apply without a restart (unlike max_snapshots which is read at
+    recorder creation).
 
 Design notes:
     - Snapshots are keyed by ``(thread_id, iteration)``.
@@ -26,18 +34,19 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
 import uuid
 from collections import OrderedDict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
-__all__ = ["DEFAULT_DB_PATH", "DEFAULT_MAX_SNAPSHOTS", "ReplayEngine", "SnapshotRecord", "SnapshotRecorder", "SnapshotStore", "create_recorder"]
+__all__ = ["DEFAULT_DB_PATH", "DEFAULT_MAX_SNAPSHOTS", "ReplayEngine", "SnapshotRecord", "SnapshotRecorder", "SnapshotStore", "create_recorder", "maintain_snapshots", "start_snapshot_maintenance_loop"]
 
 logger = logging.getLogger(__name__)
 
@@ -568,3 +577,138 @@ def create_recorder(
         db_path=_db,
         store=store,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Maintenance — TTL prune + VACUUM (dashboard button + daily auto-loop)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def maintain_snapshots(
+    db_path: str | Path | None = None,
+    retention_days: int = 30,
+) -> dict[str, Any]:
+    """Prune snapshots older than ``retention_days`` and VACUUM the DB.
+
+    SQLite never shrinks a file on DELETE; the freed pages are reclaimed
+    here so ``snapshots.db`` stops growing without bound across threads.
+    Safe to run while the server is live (WAL mode, short write lock).
+
+    Returns:
+        Stats dict: ``deleted``, ``size_before``, ``size_after``,
+        ``reclaimed`` (bytes), ``retention_days``, and per-step status.
+    """
+    db = Path(db_path) if db_path is not None else Path(DEFAULT_DB_PATH)
+    size_before = db.stat().st_size if db.exists() else 0
+    deleted = 0
+    cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(retention_days)))).isoformat()
+
+    try:
+        conn = sqlite3.connect(str(db))
+        try:
+            apply_sqlite_pragmas(conn)
+            if db.exists() and db.stat().st_size > 0:
+                cur = conn.execute("DELETE FROM snapshots WHERE timestamp < ?", (cutoff,))
+                deleted = cur.rowcount
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - never let maintenance take the server down
+        logger.warning("[TimeTravel] snapshot prune failed: %s", exc)
+        return {
+            "deleted": 0,
+            "size_before": size_before,
+            "size_after": size_before,
+            "reclaimed": 0,
+            "retention_days": int(retention_days),
+            "prune": f"failed: {exc}",
+            "vacuum": "skipped",
+        }
+
+    vacuum_status = "ok"
+    try:
+        conn = sqlite3.connect(str(db))
+        try:
+            apply_sqlite_pragmas(conn)
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[TimeTravel] snapshot VACUUM failed: %s", exc)
+        vacuum_status = f"failed: {exc}"
+
+    size_after = db.stat().st_size if db.exists() else 0
+    logger.info(
+        "[TimeTravel] maintenance: deleted=%d before=%d after=%d (retention=%dd)",
+        deleted,
+        size_before,
+        size_after,
+        int(retention_days),
+    )
+    return {
+        "deleted": deleted,
+        "size_before": size_before,
+        "size_after": size_after,
+        "reclaimed": max(0, size_before - size_after),
+        "retention_days": int(retention_days),
+        "prune": "ok",
+        "vacuum": vacuum_status,
+    }
+
+
+_MAINTENANCE_INTERVAL_HOURS = 24
+_MAINTENANCE_FIRST_DELAY_SECONDS = 120
+
+
+def _live_maintenance_config() -> dict[str, Any]:
+    """Live-read the maintenance knobs from the ConfigStore (Settings UI).
+
+    Mirrors ``get_hitl_config``: a Settings change applies on the next loop
+    run without a restart.  Falls back to yaml-free defaults on any error.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        auto = cs.get("time_travel.auto_maintain", True)
+        retention = cs.get("time_travel.retention_days", 30)
+        return {
+            "auto_maintain": bool(auto),
+            "retention_days": int(retention) if int(retention) >= 1 else 30,
+        }
+    except Exception:  # noqa: BLE001
+        logger.debug("[TimeTravel] maintenance config unavailable; using defaults", exc_info=True)
+        return {"auto_maintain": True, "retention_days": 30}
+
+
+def start_snapshot_maintenance_loop(
+    *,
+    interval_hours: int = _MAINTENANCE_INTERVAL_HOURS,
+    first_delay_seconds: int = _MAINTENANCE_FIRST_DELAY_SECONDS,
+) -> asyncio.Task:
+    """Start the daily snapshot prune + VACUUM loop (fire-and-forget).
+
+    Reads ``time_travel.auto_maintain`` / ``time_travel.retention_days`` live
+    from the ConfigStore on every run, so Settings-UI changes apply without
+    a restart.  Never raises — failures are logged and the loop continues.
+    """
+    async def _loop() -> None:
+        await asyncio.sleep(max(0, first_delay_seconds))
+        while True:
+            try:
+                from kazma_core.shutdown import is_shutting_down
+
+                if is_shutting_down():
+                    logger.info("[TimeTravel] maintenance loop exiting (shutdown)")
+                    return
+                cfg = _live_maintenance_config()
+                if not cfg["auto_maintain"]:
+                    logger.debug("[TimeTravel] auto-maintain disabled; skipping")
+                else:
+                    await asyncio.to_thread(maintain_snapshots, None, cfg["retention_days"])
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - loop must survive any failure
+                logger.warning("[TimeTravel] maintenance loop iteration failed: %s", exc)
+            await asyncio.sleep(max(1, interval_hours) * 3600)
+
+    return asyncio.create_task(_loop())

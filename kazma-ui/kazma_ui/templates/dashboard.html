@@ -325,6 +325,10 @@
             <span class="spinner" id="optimize-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
             <span x-html="KazmaIcons.zap()"></span> {{ t('dashboard.optimize_db') }}
           </button>
+          <button id="trigger-snapshots-btn" class="btn btn-sm" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-subtle);background:rgba(168,85,247,0.08);color:var(--text-secondary);">
+            <span class="spinner" id="snapshots-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            <span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('dashboard.snapshot_maintain') }}
+          </button>
         </div>
       </div>
 
@@ -475,6 +479,8 @@
     backupFailed: "{{ t('dashboard.backup_failed') }}",
     optimizeSuccess: "{{ t('dashboard.optimize_success') }}",
     optimizeFailed: "{{ t('dashboard.optimize_failed') }}",
+    snapshotMaintainTitle: "{{ t('dashboard.snapshot_maintain_title') }}",
+    snapshotMaintainConfirm: "{{ t('dashboard.snapshot_maintain_confirm') }}",
     memoryInstalling: "{{ t('dashboard.memory_installing') }}",
     installing: "{{ t('dashboard.installing') }}",
     memoryDescInstalling: "{{ t('dashboard.memory_desc_installing') }}",
@@ -1094,6 +1100,47 @@
       optimizeSpinner.style.display = 'none';
     }
   });
+
+  // Snapshot cleanup: TTL prune + VACUUM of snapshots.db (replay/fork history).
+  const snapshotsBtn = document.getElementById('trigger-snapshots-btn');
+  const snapshotsSpinner = document.getElementById('snapshots-spinner');
+
+  if (snapshotsBtn) {
+    snapshotsBtn.addEventListener('click', async () => {
+      const ok = await window.kazmaConfirm({
+        title: I18N.snapshotMaintainTitle || 'Clean up time-travel snapshots?',
+        message: I18N.snapshotMaintainConfirm || 'Snapshots older than the retention window will be deleted and the database vacuumed to reclaim disk space. Replay history inside the window is kept.',
+        confirmText: 'Clean up',
+        danger: true,
+      });
+      if (!ok) return;
+      snapshotsBtn.disabled = true;
+      snapshotsSpinner.style.display = 'inline-block';
+      try {
+        const resp = await fetch('/api/system/snapshots/maintain', { method: 'POST' });
+        const res = await resp.json();
+        if (res.status === 'success') {
+          const s = res.stats || {};
+          const parts = [];
+          if (s.deleted != null) parts.push(`${s.deleted} snapshot${s.deleted === 1 ? '' : 's'} older than ${s.retention_days}d`);
+          if (s.reclaimed != null) parts.push(`${formatBytes(s.reclaimed)} reclaimed`);
+          if (s.prune && s.prune !== 'ok') parts.push(`prune: ${s.prune}`);
+          if (s.vacuum && s.vacuum !== 'ok') parts.push(`vacuum: ${s.vacuum}`);
+          window.kazmaAlert({
+            title: 'Snapshot cleanup complete',
+            message: (parts.length ? parts.join('\n') : 'Nothing to clean — no snapshots outside the retention window.') + (res.auto_maintain ? '\n\nAuto-maintenance is ON (daily).' : '\n\nAuto-maintenance is OFF — run manually here.'),
+          });
+        } else {
+          window.kazmaAlert({ title: 'Error', message: 'Cleanup failed: ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
+        }
+      } catch (e) {
+        window.kazmaAlert({ title: 'Error', message: 'Cleanup failed: ' + e, variant: 'btn-danger' });
+      } finally {
+        snapshotsBtn.disabled = false;
+        snapshotsSpinner.style.display = 'none';
+      }
+    });
+  }
 
   // Poll immediately and then every 5 seconds
   pollMemoryStatus();

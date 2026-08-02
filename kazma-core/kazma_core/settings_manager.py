@@ -537,17 +537,26 @@ class SettingsManager:
         self._cs.set("embedding.api_key_env", api_key_env, category="embedding")
 
     def get_time_travel_settings(self) -> dict[str, Any]:
-        """Get the ConfigStore override for time travel (replay/fork)."""
+        """Get the ConfigStore override for time travel (replay/fork).
+
+        ``retention_days`` / ``auto_maintain`` are read live by the daily
+        maintenance loop (no restart needed); ``max_snapshots`` is read at
+        recorder creation (restart needed).
+        """
         return {
             "max_snapshots": self._cs.get("time_travel.max_snapshots", None),
+            "retention_days": self._cs.get("time_travel.retention_days", None),
+            "auto_maintain": self._cs.get("time_travel.auto_maintain", None),
         }
 
     def save_time_travel_settings(self, data: dict[str, Any]) -> None:
         """Save the time-travel override to ConfigStore (``time_travel.*`` keys).
 
-        The SnapshotRecorder is created per-agent at server startup, so the
-        new cap takes effect on the next restart — saving never hot-swaps
-        the running recorder (per-thread eviction bounds rely on it).
+        The SnapshotRecorder is created per-agent at server startup, so
+        ``max_snapshots`` takes effect on the next restart — saving never
+        hot-swaps the running recorder (per-thread eviction bounds rely on
+        it). ``retention_days`` / ``auto_maintain`` are live-read by the
+        daily maintenance loop and apply on its next run.
         """
         raw = data.get("max_snapshots")
         if raw is None or str(raw).strip() == "":
@@ -561,6 +570,17 @@ class SettingsManager:
         if max_snapshots > 1000:
             raise ValueError("Snapshots per thread must be at most 1000.")
         self._cs.set("time_travel.max_snapshots", max_snapshots, category="time_travel")
+
+        if data.get("retention_days") is not None:
+            try:
+                retention_days = int(data["retention_days"])
+            except (TypeError, ValueError):
+                raise ValueError("Retention days must be an integer.")
+            if retention_days < 1 or retention_days > 3650:
+                raise ValueError("Retention days must be between 1 and 3650.")
+            self._cs.set("time_travel.retention_days", retention_days, category="time_travel")
+        if data.get("auto_maintain") is not None:
+            self._cs.set("time_travel.auto_maintain", bool(data["auto_maintain"]), category="time_travel")
 
     def get_context_settings(self) -> dict[str, Any]:
         """Get context window settings."""

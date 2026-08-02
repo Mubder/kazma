@@ -77,7 +77,7 @@ function settingsApp() {
         _embedderPollTimer: null,
 
         // ── Time Travel (replay / fork) ──
-        timeTravel: { max_snapshots: 50 },
+        timeTravel: { max_snapshots: 50, retention_days: 30, auto_maintain: true },
         timeTravelEffective: null,
         timeTravelSaving: false,
         timeTravelRestarting: false,
@@ -939,6 +939,8 @@ function settingsApp() {
                 const store = data.store || {};
                 this.timeTravel = {
                     max_snapshots: store.max_snapshots != null ? Number(store.max_snapshots) : 50,
+                    retention_days: store.retention_days != null ? Number(store.retention_days) : 30,
+                    auto_maintain: store.auto_maintain != null ? Boolean(store.auto_maintain) : true,
                 };
                 this.timeTravelEffective = data.effective != null ? Number(data.effective) : 50;
             } catch (e) {
@@ -956,12 +958,17 @@ function settingsApp() {
                 showToast('Snapshots per thread must be at least 1', 'error');
                 return;
             }
+            const rd = Number(this.timeTravel.retention_days);
+            if (!rd || rd < 1) {
+                showToast('Retention days must be at least 1', 'error');
+                return;
+            }
             this.timeTravelSaving = true;
             try {
                 const resp = await fetch('/api/settings/time_travel', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({ max_snapshots: n }),
+                    body: JSON.stringify({ max_snapshots: n, retention_days: rd, auto_maintain: !!this.timeTravel.auto_maintain }),
                 });
                 const data = await resp.json();
                 if (data.status === 'error') {
