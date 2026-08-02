@@ -44,3 +44,23 @@ def test_prune_tool_outputs_truncates_older_tool_bodies():
     # Older tool output should be truncated
     pruned_older_tool = [m for m in pruned if m.get("role") == "tool"][0]
     assert "[Tool output truncated" in pruned_older_tool["content"]
+
+
+def test_prune_tool_outputs_caps_recent_large_outputs_when_over_budget():
+    massive_output = "Y" * 10000  # ~2500 tokens
+    messages = [
+        {"role": "system", "content": "You are Kazma."},
+        {"role": "user", "content": "Read files"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "tc1", "function": {"name": "file_read", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tc1", "content": massive_output},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "tc2", "function": {"name": "file_read", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tc2", "content": massive_output},
+    ]
+
+    # Force pruning with budget lower than 2 massive outputs
+    pruned = prune_tool_outputs(messages, max_tokens=1000, keep_recent_tool_outputs=3)
+
+    # Even though len(tools) <= 3, the massive outputs should be capped to fit budget
+    assert estimate_tokens(pruned) < estimate_tokens(messages)
+    assert "[Tool output truncated" in pruned[3]["content"]
+

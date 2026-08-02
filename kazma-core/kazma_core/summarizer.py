@@ -118,11 +118,12 @@ def prune_tool_outputs(
         if isinstance(m, dict) and m.get("role") in ("tool", "function")
     ]
 
-    if len(tool_indices) <= keep_recent_tool_outputs:
-        return normalized
-
     # Older tool output indices to prune
-    indices_to_prune = set(tool_indices[:-keep_recent_tool_outputs])
+    indices_to_prune = (
+        set(tool_indices[:-keep_recent_tool_outputs])
+        if len(tool_indices) > keep_recent_tool_outputs
+        else set()
+    )
     pruned_messages: list[dict[str, Any]] = []
 
     for i, msg in enumerate(normalized):
@@ -140,11 +141,30 @@ def prune_tool_outputs(
         else:
             pruned_messages.append(msg)
 
+    # CRITICAL: If estimate_tokens is STILL > max_tokens, then even recent tool outputs
+    # that are massive (e.g. > 1500 chars) must be capped to protect the context budget.
+    if estimate_tokens(pruned_messages) > max_tokens and tool_indices:
+        further_pruned: list[dict[str, Any]] = []
+        for msg in pruned_messages:
+            if isinstance(msg, dict) and msg.get("role") in ("tool", "function"):
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > 1500:
+                    truncated = (
+                        content[:1500] + f"\n\n[Tool output truncated from {len(content)} to 1500 chars to fit context budget]"
+                    )
+                    msg_copy = dict(msg)
+                    msg_copy["content"] = truncated
+                    further_pruned.append(msg_copy)
+                else:
+                    further_pruned.append(msg)
+            else:
+                further_pruned.append(msg)
+        pruned_messages = further_pruned
+
     before_tokens = estimate_tokens(normalized)
     after_tokens = estimate_tokens(pruned_messages)
     logger.info(
-        "[Summarizer] Pruned %d older tool output(s): tokens %d -> %d",
-        len(indices_to_prune),
+        "[Summarizer] Pruned tool outputs: tokens %d -> %d",
         before_tokens,
         after_tokens,
     )
