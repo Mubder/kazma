@@ -122,6 +122,7 @@ async def extract_beliefs_with_llm(
 
         client = get_model_registry().get_client()
         if client is None:
+            logger.warning("[belief_extract] No active LLM client returned by model registry")
             return None
         blob = f"User: {user_text[:1500]}\nAssistant: {(assistant_text or '')[:800]}"
         messages = [
@@ -145,8 +146,8 @@ async def extract_beliefs_with_llm(
         if not isinstance(beliefs, list):
             return None
         return beliefs
-    except Exception:
-        logger.debug("[belief_extract] LLM extraction failed", exc_info=True)
+    except Exception as exc:
+        logger.warning("[belief_extract] LLM extraction call failed: %s", exc)
         return None
 
 

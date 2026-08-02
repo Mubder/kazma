@@ -266,7 +266,7 @@ async def run_llm_extraction(
         )
         return stats.get("applied", 0)
     except Exception as e:
-        logger.debug("LLM extraction failed for %s turn %d: %s", session_id, turn, e)
+        logger.warning("LLM extraction failed for %s turn %d: %s", session_id, turn, e)
         return 0
 
 
@@ -345,6 +345,23 @@ def main() -> None:
 
     primary_db, ops_db = resolve_memory_dbs()
     logger.info("Memory DB: %s", primary_db)
+
+    if args.use_llm:
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            client = get_model_registry().get_client()
+            if client:
+                model_name = getattr(client, "model", None) or getattr(client, "model_id", "unknown")
+                provider_name = getattr(client, "provider_name", None) or type(client).__name__
+                logger.info("LLM extraction mode active: model=%s provider=%s", model_name, provider_name)
+            else:
+                logger.warning(
+                    "⚠️ --use-llm requested, but get_model_registry().get_client() returned None! "
+                    "Ensure LLM provider credentials (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY, or settings) are set."
+                )
+        except Exception as exc:
+            logger.warning("⚠️ Error checking ModelRegistry LLM client: %s", exc)
 
     sessions: list[dict[str, Any]] = []
 
