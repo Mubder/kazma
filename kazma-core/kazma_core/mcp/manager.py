@@ -499,17 +499,34 @@ class AsyncMCPManager:
         return None
 
     def list_servers(self) -> list[dict[str, Any]]:
-        """Return status info for all managed servers."""
-        return [
-            {
+        """Return status info for all managed servers.
+        
+        O3 fix: for stdio transport, verify the process is still alive before
+        reporting connected=True. If the process has exited (returncode is not
+        None), mark it disconnected to avoid the "reconnect lie" where status
+        says connected but the server is dead.
+        """
+        result = []
+        for h in self._servers.values():
+            # Health check: stdio transport - verify process is still alive
+            if h.transport == "stdio" and h.process is not None:
+                if h.process.returncode is not None:
+                    # Process has exited - mark disconnected
+                    if h.connected:
+                        logger.warning(
+                            "[MCP] Server '%s' process exited (returncode=%s) — marking disconnected",
+                            h.name, h.process.returncode
+                        )
+                        h.connected = False
+            
+            result.append({
                 "name": h.name,
                 "transport": h.transport,
                 "connected": h.connected,
                 "tool_count": len(h.tools),
                 "trust": h.trust,
-            }
-            for h in self._servers.values()
-        ]
+            })
+        return result
 
     def get_server_trust(self, server_name: str) -> str:
         """Return the trust level for a server (``trusted`` or ``approval_required``)."""
