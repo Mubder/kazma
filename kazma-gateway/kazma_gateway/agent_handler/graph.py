@@ -428,80 +428,89 @@ def create_graph_handler(
             logger.info("[agent-handler] /new for thread=%s (new_thread=%s)", thread_id, new_thread_id)
             return
 
+        # ── Checkpoint-mutating commands serialize per thread ─────
+        # /reset, /compact, /undo, /edit, /replay, /fork all write the
+        # LangGraph checkpointer. The main turn below acquires the same
+        # per-thread lock; without it, a command racing a running turn
+        # (or another command) corrupts checkpoints/messages.
+        cmd_lock = await _get_thread_lock(thread_id)
+
         # ── /reset: Clear conversation checkpoints and settings ───
         if msg.text and msg.text.strip().lower() == "/reset":
-            # 1. Delete checkpoints
-            if hasattr(graph, "checkpointer") and graph.checkpointer:
-                try:
-                    await graph.checkpointer.adelete_thread(thread_id)
-                except Exception as exc:
-                    logger.error("[agent-handler] Failed to delete checkpoints on /reset: %s", exc)
-            
-            # 2. Delete ConfigStore active mapping
-            try:
-                from kazma_core.config_store import get_config_store
-                cs = get_config_store()
-                cs.delete(f"active_thread.{sender}")
-            except Exception as exc:
-                logger.debug("[agent-handler] ConfigStore delete active_thread failed: %s", exc)
-                
-            # 3. Clear in-memory session cache
-            async with _sessions_lock:
-                _sessions.pop(sender, None)
-                
-            # 4. Delete from Web UI SessionManager
-            try:
-                from kazma_ui.session_manager import get_session_manager
-                web_store = get_session_manager()
-                for sess in web_store.list_all(include_archived=True):
-                    if sess.thread_id == thread_id or sess.session_id == thread_id:
-                        sess.messages = []
-                        sess.title = ""
-                        web_store.put(sess)
-                        break
-            except Exception as exc:
-                logger.debug("[agent-handler] Web UI session clear failed on /reset: %s", exc)
-                
-            # 5. Delete from platform session store
-            try:
-                await _store.delete(thread_id)
-            except Exception as exc:
-                logger.debug("[agent-handler] _store.delete failed: %s", exc)
+            async with cmd_lock:
+                # 1. Delete checkpoints
+                if hasattr(graph, "checkpointer") and graph.checkpointer:
+                    try:
+                        await graph.checkpointer.adelete_thread(thread_id)
+                    except Exception as exc:
+                        logger.error("[agent-handler] Failed to delete checkpoints on /reset: %s", exc)
 
-            reply_msg = "🔄 Conversation cleared and reset to default. Starting fresh!"
-            ctx = msg.context_metadata
-            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=out_text,
-                context_metadata=out_ctx,
-            ))
-            logger.info("[agent-handler] /reset completed for thread=%s", thread_id)
+                # 2. Delete ConfigStore active mapping
+                try:
+                    from kazma_core.config_store import get_config_store
+                    cs = get_config_store()
+                    cs.delete(f"active_thread.{sender}")
+                except Exception as exc:
+                    logger.debug("[agent-handler] ConfigStore delete active_thread failed: %s", exc)
+
+                # 3. Clear in-memory session cache
+                async with _sessions_lock:
+                    _sessions.pop(sender, None)
+
+                # 4. Delete from Web UI SessionManager
+                try:
+                    from kazma_ui.session_manager import get_session_manager
+                    web_store = get_session_manager()
+                    for sess in web_store.list_all(include_archived=True):
+                        if sess.thread_id == thread_id or sess.session_id == thread_id:
+                            sess.messages = []
+                            sess.title = ""
+                            web_store.put(sess)
+                            break
+                except Exception as exc:
+                    logger.debug("[agent-handler] Web UI session clear failed on /reset: %s", exc)
+
+                # 5. Delete from platform session store
+                try:
+                    await _store.delete(thread_id)
+                except Exception as exc:
+                    logger.debug("[agent-handler] _store.delete failed: %s", exc)
+
+                reply_msg = "🔄 Conversation cleared and reset to default. Starting fresh!"
+                ctx = msg.context_metadata
+                out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=out_text,
+                    context_metadata=out_ctx,
+                ))
+                logger.info("[agent-handler] /reset completed for thread=%s", thread_id)
             return
 
         # ── /compact: Force manually triggered context compaction ─
         if msg.text and msg.text.strip().lower() == "/compact":
-            try:
-                state_obj = await graph.aget_state(config)
-                if state_obj and state_obj.values:
-                    current_values = dict(state_obj.values)
-                    current_values["needs_compaction"] = True
-                    await graph.ainvoke(current_values, config)
-                    reply_msg = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
-                else:
-                    reply_msg = "🗜️ No conversation history found to compact yet."
-            except Exception as exc:
-                logger.error("[agent-handler] /compact failed for thread=%s: %s", thread_id, exc)
-                reply_msg = "⚠️ Failed to compact context. (Compaction error)"
+            async with cmd_lock:
+                try:
+                    state_obj = await graph.aget_state(config)
+                    if state_obj and state_obj.values:
+                        current_values = dict(state_obj.values)
+                        current_values["needs_compaction"] = True
+                        await graph.ainvoke(current_values, config)
+                        reply_msg = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
+                    else:
+                        reply_msg = "🗜️ No conversation history found to compact yet."
+                except Exception as exc:
+                    logger.error("[agent-handler] /compact failed for thread=%s: %s", thread_id, exc)
+                    reply_msg = "⚠️ Failed to compact context. (Compaction error)"
 
-            ctx = await _store.get(thread_id) or msg.context_metadata
-            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=out_text,
-                context_metadata=out_ctx,
-            ))
-            logger.info("[agent-handler] /compact completed for thread=%s", thread_id)
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=out_text,
+                    context_metadata=out_ctx,
+                ))
+                logger.info("[agent-handler] /compact completed for thread=%s", thread_id)
             return
 
         # ── /yolo: Toggle session YOLO safety bypass (TTL + audit) ─
@@ -550,54 +559,58 @@ def create_graph_handler(
 
         # ── /undo: Remove last assistant response ──────────────────
         if msg.text and msg.text.strip().lower() == "/undo":
-            undo_result = await _handle_undo(thread_id, config)
-            ctx = await _store.get(thread_id) or msg.context_metadata
-            undo_text, undo_ctx = _prepare_tg_outbound(msg, undo_result, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=undo_text,
-                context_metadata=undo_ctx,
-            ))
+            async with cmd_lock:
+                undo_result = await _handle_undo(thread_id, config)
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                undo_text, undo_ctx = _prepare_tg_outbound(msg, undo_result, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=undo_text,
+                    context_metadata=undo_ctx,
+                ))
             return
 
         # ── /edit: Correct last assistant response ─────────────────
         # None = not an /edit command; "" = bare /edit (show usage)
         edit_match = _extract_edit_command(msg.text)
         if edit_match is not None:
-            corrected_text, edit_result = await _handle_edit(thread_id, config, edit_match)
-            ctx = await _store.get(thread_id) or msg.context_metadata
-            edit_text, edit_ctx = _prepare_tg_outbound(msg, edit_result, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=edit_text,
-                context_metadata=edit_ctx,
-            ))
+            async with cmd_lock:
+                corrected_text, edit_result = await _handle_edit(thread_id, config, edit_match)
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                edit_text, edit_ctx = _prepare_tg_outbound(msg, edit_result, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=edit_text,
+                    context_metadata=edit_ctx,
+                ))
             return
 
         # ── /replay <n>: Restore from a snapshot (rewind in-place) ──
         replay_match = _extract_replay_command(msg.text)
         if replay_match is not None:
-            replay_result = await _handle_replay(thread_id, config, replay_match)
-            ctx = await _store.get(thread_id) or msg.context_metadata
-            replay_text, replay_ctx = _prepare_tg_outbound(msg, replay_result, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=replay_text,
-                context_metadata=replay_ctx,
-            ))
+            async with cmd_lock:
+                replay_result = await _handle_replay(thread_id, config, replay_match)
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                replay_text, replay_ctx = _prepare_tg_outbound(msg, replay_result, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=replay_text,
+                    context_metadata=replay_ctx,
+                ))
             return
 
         # ── /fork <n>: Branch from a snapshot into a new thread ────
         fork_match = _extract_fork_command(msg.text)
         if fork_match is not None:
-            fork_result = await _handle_fork(thread_id, config, fork_match, msg, _store, sender)
-            ctx = await _store.get(thread_id) or msg.context_metadata
-            fork_text, fork_ctx = _prepare_tg_outbound(msg, fork_result, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=fork_text,
-                context_metadata=fork_ctx,
-            ))
+            async with cmd_lock:
+                fork_result = await _handle_fork(thread_id, config, fork_match, msg, _store, sender)
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                fork_text, fork_ctx = _prepare_tg_outbound(msg, fork_result, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=fork_text,
+                    context_metadata=fork_ctx,
+                ))
             return
 
         # ── Slash-command intercept (/model, /help, /reset, etc.) ──

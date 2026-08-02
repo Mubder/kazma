@@ -50,10 +50,19 @@ logger = logging.getLogger(__name__)
 __all__ = ["handle_voice_websocket"]
 
 
-async def handle_voice_websocket(websocket: WebSocket) -> None:
+async def handle_voice_websocket(
+    websocket: WebSocket,
+    graph_getter: Any | None = None,
+) -> None:
     """Handle a voice streaming WebSocket connection.
 
     Expects 16-bit PCM mono audio at 16kHz from the browser.
+
+    Args:
+        websocket: The connected WebSocket.
+        graph_getter: Optional zero-arg callable returning the live
+            checkpointed streaming graph (wired by the app builder). Without
+            it, voice falls back to the plain error path.
     """
     await websocket.accept()
     await websocket.send_text(json.dumps({"type": "ready"}))
@@ -125,7 +134,8 @@ async def handle_voice_websocket(websocket: WebSocket) -> None:
                     await websocket.send_text(json.dumps({"type": "transcribing"}))
                     try:
                         await _process_utterance(
-                            websocket, segment, stt_provider, tts_provider, session_id=session_id
+                            websocket, segment, stt_provider, tts_provider,
+                            session_id=session_id, graph_getter=graph_getter,
                         )
                     except Exception as exc:
                         logger.exception("[ws-voice] Processing failed")
@@ -155,6 +165,7 @@ async def _process_utterance(
     stt_provider: str,
     tts_provider: str,
     session_id: str | None = None,
+    graph_getter: Any | None = None,
 ) -> None:
     """Transcribe audio, get LLM response, stream tokens + TTS back."""
     from kazma_core.voice.stt import transcribe
@@ -181,7 +192,9 @@ async def _process_utterance(
     full_response = ""
 
     try:
-        async for event in _stream_llm_response(text, session_id=session_id):
+        async for event in _stream_llm_response(
+            text, session_id=session_id, graph_getter=graph_getter,
+        ):
             event_type = event.get("type")
             if event_type == "token":
                 content = event.get("content", "")
@@ -224,23 +237,36 @@ async def _process_utterance(
     await websocket.send_text(json.dumps({"type": "done"}))
 
 
-async def _stream_llm_response(text: str, session_id: str | None = None) -> Any:
+async def _stream_llm_response(
+    text: str,
+    session_id: str | None = None,
+    graph_getter: Any | None = None,
+) -> Any:
     """Yield LLM response events from the agent runner.
 
-    This reuses the core streaming infrastructure. Falls back to a
-    simple message if the agent runner is unavailable.
+    Uses the live checkpointed streaming graph supplied by the app builder
+    (the same one the SSE chat path uses). Falls back to a clear error if no
+    graph is available.
     """
+    graph = None
+    if graph_getter is not None:
+        try:
+            graph = graph_getter()
+        except Exception as exc:
+            logger.debug("[ws-voice] graph_getter failed: %s", exc)
+
+    if graph is None:
+        logger.warning("[ws-voice] No agent graph available — voice stream cannot run")
+        yield {"type": "error", "content": "Agent graph unavailable"}
+        return
+
+    if not session_id:
+        session_id = f"ws-voice-{id(text)}"
+
+    config = {"configurable": {"thread_id": session_id}}
+    inputs = {"messages": [{"role": "user", "content": text}]}
+
     try:
-        from kazma_core.agent_runner import get_streaming_graph
-        from kazma_core.config_store import get_config_store
-
-        graph = get_streaming_graph(config_store=get_config_store())
-        if not session_id:
-            session_id = f"ws-voice-{id(text)}"
-
-        config = {"configurable": {"thread_id": session_id}}
-        inputs = {"messages": [{"role": "user", "content": text}]}
-
         async for event in graph.astream_events(inputs, config=config, version="v2"):
             kind = event.get("event", "")
 

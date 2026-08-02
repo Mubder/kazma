@@ -129,6 +129,10 @@ class KazmaAgent:
         self._checkpoint_conn: aiosqlite.Connection | None = None
         self._thread_id: str = ""
 
+        # Serializes _ensure_graph so two concurrent first run() calls build
+        # the graph once instead of racing (leaked checkpointer connection).
+        self._graph_build_lock = asyncio.Lock()
+
         # Time Travel — snapshot recorder (lazy-init in _ensure_graph).
         self._snapshot_recorder: Any = None
 
@@ -809,66 +813,72 @@ class KazmaAgent:
         if self._graph is not None:
             return self._graph
 
-        from kazma_core.agent.graph_builder import build_supervisor_graph
+        async with self._graph_build_lock:
+            # Double-checked: a concurrent caller may have built it while we
+            # waited for the lock.
+            if self._graph is not None:
+                return self._graph
 
-        # Durable checkpointer — Postgres when multi-replica, else SQLite.
-        db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
-        self._checkpointer = None
-        self._checkpoint_conn = None
-        try:
-            from kazma_core.db.backend import get_database_url, is_postgres
+            from kazma_core.agent.graph_builder import build_supervisor_graph
 
-            if is_postgres():
-                dsn = get_database_url() or ""
-                if dsn.startswith("postgres://"):
-                    dsn = "postgresql://" + dsn[len("postgres://") :]
-                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
-                from psycopg_pool import AsyncConnectionPool  # type: ignore
-
-                pool = AsyncConnectionPool(conninfo=dsn, min_size=1, max_size=8, open=False)
-                await pool.open()
-                self._checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]
-                await self._checkpointer.setup()
-                logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
-        except Exception as exc:
-            logger.debug("Postgres checkpointer unavailable (%s) — SQLite", exc)
-
-        if self._checkpointer is None:
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._checkpoint_conn = await aiosqlite.connect(db_path)
-            await apply_sqlite_pragmas_async(self._checkpoint_conn)
-            self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
-            await self._checkpointer.setup()
-            logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
-
-        # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
-        # apply on the run path the same way as the streaming graph.
-        from kazma_core.safety.hitl import get_hitl_config
-        hitl_config = get_hitl_config(self.config.raw)
-
-        # Time Travel — create the snapshot recorder once (honors kazma.yaml
-        # time_travel.enabled / max_snapshots / db_path).
-        if self._snapshot_recorder is None:
+            # Durable checkpointer — Postgres when multi-replica, else SQLite.
+            db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
+            self._checkpointer = None
+            self._checkpoint_conn = None
             try:
-                from kazma_core.time_travel import create_recorder
-                self._snapshot_recorder = create_recorder(config=self.config.raw)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Snapshot recorder unavailable: %s", exc)
+                from kazma_core.db.backend import get_database_url, is_postgres
 
-        self._graph = build_supervisor_graph(
-            llm=self.llm,
-            system_prompt=self.system_prompt,
-            tool_definitions=self.tools.get_tool_definitions(),
-            tool_executor=self.tools,
-            cost_breaker=self.cost_breaker,
-            authority=self.authority,
-            tracer=self.tracer,
-            checkpointer=self._checkpointer,
-            hitl_config=hitl_config,
-            snapshot_recorder=self._snapshot_recorder,
-        )
-        logger.info("KazmaAgent run path bound to supervisor graph")
-        return self._graph
+                if is_postgres():
+                    dsn = get_database_url() or ""
+                    if dsn.startswith("postgres://"):
+                        dsn = "postgresql://" + dsn[len("postgres://") :]
+                    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+                    from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+                    pool = AsyncConnectionPool(conninfo=dsn, min_size=1, max_size=8, open=False)
+                    await pool.open()
+                    self._checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]
+                    await self._checkpointer.setup()
+                    logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
+            except Exception as exc:
+                logger.debug("Postgres checkpointer unavailable (%s) — SQLite", exc)
+
+            if self._checkpointer is None:
+                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+                self._checkpoint_conn = await aiosqlite.connect(db_path)
+                await apply_sqlite_pragmas_async(self._checkpoint_conn)
+                self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
+                await self._checkpointer.setup()
+                logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
+
+            # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
+            # apply on the run path the same way as the streaming graph.
+            from kazma_core.safety.hitl import get_hitl_config
+            hitl_config = get_hitl_config(self.config.raw)
+
+            # Time Travel — create the snapshot recorder once (honors kazma.yaml
+            # time_travel.enabled / max_snapshots / db_path).
+            if self._snapshot_recorder is None:
+                try:
+                    from kazma_core.time_travel import create_recorder
+                    self._snapshot_recorder = create_recorder(config=self.config.raw)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Snapshot recorder unavailable: %s", exc)
+
+            self._graph = build_supervisor_graph(
+                llm=self.llm,
+                system_prompt=self.system_prompt,
+                tool_definitions=self.tools.get_tool_definitions(),
+                tool_executor=self.tools,
+                cost_breaker=self.cost_breaker,
+                authority=self.authority,
+                tracer=self.tracer,
+                checkpointer=self._checkpointer,
+                hitl_config=hitl_config,
+                snapshot_recorder=self._snapshot_recorder,
+            )
+            logger.info("KazmaAgent run path bound to supervisor graph")
+            return self._graph
 
     async def run(self, user_input: str, state: AgentState | None = None) -> str:
         """Process user input by invoking the LangGraph supervisor graph.

@@ -186,8 +186,8 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
 
             if is_yolo_active(tid):
                 enabled = False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("YOLO check failed in get_hitl_config: %s", exc)
 
     # Apply ConfigStore overrides (set by SettingsManager.save_safety_settings)
     try:
@@ -218,8 +218,8 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
                 cleaned = {str(x).strip() for x in cs_require if str(x).strip()}
                 if cleaned:
                     require_approval_for = cleaned
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("ConfigStore overrides read failed in get_hitl_config — using yaml defaults: %s", exc)
 
     return {
         "enabled": enabled,
@@ -246,15 +246,15 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
 
             if is_yolo_active(tid):
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("YOLO check failed in requires_approval: %s", exc)
         try:
             from kazma_core.safety.hitl_grants import has_tool_grant
 
             if has_tool_grant(tid, tool_name):
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Tool grant check failed in requires_approval: %s", exc)
 
     if not hitl_config.get("enabled", True):
         return False
@@ -264,8 +264,14 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
             from kazma_core.mcp.manager import classify_mcp_tool
 
             return classify_mcp_tool(tool_name) != "safe"
-        except Exception:
-            pass
+        except Exception as exc:
+            # Fail-closed: if we cannot classify an MCP tool, require
+            # approval rather than silently letting it through.
+            logger.warning(
+                "MCP tool classification failed for %r — requiring approval: %s",
+                tool_name, exc,
+            )
+            return True
 
     danger_tools = hitl_config.get("require_approval_for", set())
     return tool_name in danger_tools

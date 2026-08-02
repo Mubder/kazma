@@ -994,7 +994,16 @@ class KazmaAppBuilder:
                 if not websocket_is_authenticated(websocket):
                     await websocket.close(code=4003, reason="Unauthorized")
                     return
-                await handle_voice_websocket(websocket)
+
+                def _voice_graph_getter() -> Any:
+                    agent = self.agent
+                    if agent is not None:
+                        return agent.get_streaming_graph()
+                    return None
+
+                await handle_voice_websocket(
+                    websocket, graph_getter=_voice_graph_getter,
+                )
 
             self.app.websocket("/ws/voice")(_ws_voice)
             logger.info("Voice streaming WebSocket mounted at /ws/voice")
