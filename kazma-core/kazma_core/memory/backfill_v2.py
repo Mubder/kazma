@@ -266,10 +266,26 @@ def _llm_extract_beliefs_from_memories(
         try:
             import re as _re
 
-            raw = client.chat([
+            import asyncio
+            import inspect
+
+            res = client.chat([
                 {"role": "system", "content": "You are a memory extraction engine. Return only JSON."},
                 {"role": "user", "content": prompt},
             ])
+            if inspect.isawaitable(res):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop and loop.is_running():
+                    import nest_asyncio
+                    nest_asyncio.apply()
+                    res = loop.run_until_complete(res)
+                else:
+                    res = asyncio.run(res)
+
+            raw = res.content if hasattr(res, "content") else res
             if not isinstance(raw, str):
                 raw = str(raw or "")
             raw = raw.strip()

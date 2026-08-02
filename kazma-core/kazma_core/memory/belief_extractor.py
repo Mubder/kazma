@@ -129,6 +129,8 @@ async def extract_beliefs_with_llm(
             {"role": "user", "content": blob},
         ]
         raw = await client.chat(messages)
+        if hasattr(raw, "content"):
+            raw = raw.content
         if not isinstance(raw, str):
             raw = str(raw or "")
         raw = raw.strip()
