@@ -683,17 +683,17 @@ def cleanup_polluted_backfill() -> dict[str, int]:
         conn.row_factory = sqlite3.Row
         try:
             cur1 = conn.execute(
-                "DELETE FROM beliefs WHERE extraction_method = 'system_tool' OR object LIKE '%SoulEvolution%' OR object LIKE '%SelfImprovement%'"
+                "DELETE FROM beliefs WHERE extraction_method IN ('retroactive_scan', 're_extracted', 'system_tool') OR object LIKE '%SoulEvolution%' OR object LIKE '%SelfImprovement%'"
             )
             stats["beliefs_deleted"] = cur1.rowcount or 0
 
             cur2 = conn.execute(
-                "DELETE FROM entities WHERE type = 'memory_chunk' OR name LIKE '%SoulEvolution%' OR name LIKE '%SelfImprovement%' OR id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*'"
+                "DELETE FROM entities WHERE id != 'user' AND (type IN ('concept', 'memory_chunk') OR name LIKE '%SoulEvolution%' OR name LIKE '%SelfImprovement%' OR id GLOB '[a-f0-9][a-f0-9][a-f0-9][a-f0-9]*')"
             )
             stats["entities_deleted"] = cur2.rowcount or 0
 
             cur3 = conn.execute(
-                "DELETE FROM episodes WHERE user_text LIKE '%SoulEvolution%' OR assistant_text LIKE '%SoulEvolution%' OR summary_text LIKE '%SoulEvolution%'"
+                "DELETE FROM episodes WHERE user_text LIKE '%SoulEvolution%' OR assistant_text LIKE '%SoulEvolution%' OR summary_text LIKE '%SoulEvolution%' OR user_text LIKE '%retroactive%'"
             )
             stats["episodes_deleted"] = cur3.rowcount or 0
             conn.commit()
