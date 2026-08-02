@@ -248,6 +248,7 @@ async def run_llm_extraction(
     session_id: str,
     turn: int,
     tenant_id: str = "default",
+    ignore_filler: bool = False,
 ) -> int:
     """Run LLM belief extraction on one turn. Returns count of beliefs extracted."""
     try:
@@ -263,6 +264,7 @@ async def run_llm_extraction(
             tenant_id=tenant_id,
             extraction_method="retroactive_scan",
             use_llm=True,
+            ignore_filler=ignore_filler,
         )
         return stats.get("applied", 0)
     except Exception as e:
@@ -277,6 +279,7 @@ def scan_session(
     *,
     use_llm: bool = False,
     tenant_id: str = "default",
+    ignore_filler: bool = False,
 ) -> dict[str, int]:
     """Scan one session and extract beliefs. Returns stats dict."""
     pairs = extract_turn_pairs(session["messages"])
@@ -307,6 +310,7 @@ def scan_session(
                     session_id=session["session_id"],
                     turn=turn_idx,
                     tenant_id=tenant_id,
+                    ignore_filler=ignore_filler,
                 )
                 total += count
             return total
@@ -335,6 +339,7 @@ def main() -> None:
     parser.add_argument("--max-sessions", type=int, default=None, help="Limit to N sessions")
     parser.add_argument("--since", type=str, default=None, help="Only scan sessions updated after this date (ISO format)")
     parser.add_argument("--tenant-id", type=str, default="default", help="Tenant ID")
+    parser.add_argument("--ignore-filler", action="store_true", help="Do not skip short/filler turns during extraction")
     parser.add_argument(
         "--source",
         choices=["all", "chat_sessions", "snapshots"],
@@ -417,6 +422,7 @@ def main() -> None:
             stats = scan_session(
                 primary_conn, ops_conn, s,
                 use_llm=args.use_llm, tenant_id=args.tenant_id,
+                ignore_filler=args.ignore_filler,
             )
             if stats["turns"] == 0:
                 skipped += 1

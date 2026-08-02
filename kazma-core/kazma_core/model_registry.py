@@ -65,12 +65,18 @@ def initialize_model_registry(config_store: Any) -> ModelRegistry:
 def get_model_registry() -> ModelRegistry:
     """Return the singleton ``ModelRegistry``.
 
-    Raises ``RuntimeError`` if ``initialize_model_registry`` has not been called.
+    Fallback: auto-initializes via ``get_config_store()`` if not yet initialized.
     """
+    global _registry
     if _registry is None:
-        raise RuntimeError(
-            "ModelRegistry not initialized. Call initialize_model_registry() first."
-        )
+        try:
+            from kazma_core.config_store import get_config_store
+
+            _registry = initialize_model_registry(get_config_store())
+        except Exception as exc:
+            raise RuntimeError(
+                "ModelRegistry not initialized. Call initialize_model_registry() first."
+            ) from exc
     return _registry
 
 

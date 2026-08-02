@@ -253,11 +253,11 @@ async def extract_and_apply_beliefs(
     cfg: dict[str, Any] | None = None,
     use_llm: bool = True,
     extraction_method: str | None = None,
+    ignore_filler: bool = False,
 ) -> dict[str, Any]:
-    """Full extraction pipeline: gatekeep → LLM/heuristic → fence → mutate.
+    """ASYNC extraction pipeline — turns conversation into bi-temporal beliefs.
 
-    Returns stats::
-
+    Returns stats dict:
         {"skipped_filler": bool, "source": "llm"|"heuristic"|"none",
          "applied": int, "rejected": int, "actions": [...]}
 
@@ -276,7 +276,7 @@ async def extract_and_apply_beliefs(
     user_text = (user_text or "").strip()
     if not user_text or user_text.startswith("/"):
         return stats
-    if is_filler_turn(user_text):
+    if not ignore_filler and is_filler_turn(user_text):
         stats["skipped_filler"] = True
         return stats
 
