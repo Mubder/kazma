@@ -448,9 +448,9 @@ To trace into the graph/swarm, add it to the graph state or `SwarmTask.metadata`
 
 ### 11.1 Provider shows "down"/"degraded" / Test Connection fails
 
-**Symptom:** a provider card in **Settings → Providers & Connectors** shows `down`/`degraded`, or **Test Connection** returns `Cannot connect to &lt;base_url&gt;` / `HTTP 401`.
+**Symptom:** a provider card in **Settings → Providers & Connectors** shows `down`/`degraded`, or **Test Connection** returns `Cannot connect to &lt;base_url&gt;` / `Cannot connect to &lt;base_url&gt; (connection failed)` / `HTTP 401`.
 
-**Cause:** Base URL wrong/unreachable; API key missing/expired/invalid; provider disabled; or the provider's `/models` endpoint isn't OpenAI-compatible.
+**Cause:** Base URL wrong/unreachable; API key missing/expired/invalid; provider disabled; or the provider's `/models` endpoint isn't OpenAI-compatible. `Cannot connect to &lt;base_url&gt; (connection failed)` (previously the unhelpful `HTTP None:`) means every candidate endpoint threw — typically a wrong host/port, or **the server runs in WSL but the local provider (Ollama/LM Studio) runs on the Windows host**: inside WSL, `127.0.0.1` is the WSL VM, not Windows. Point the provider's Base URL at the host running the daemon (the WSL gateway IP — `ip route show default`).
 
 **Fix:** Edit the provider, verify the **Base URL**, paste the current key, click **Test Connection** (backend hits `/models` and reports latency or the exact HTTP error). The **Save** button is disabled until the test passes. On `401`, regenerate the key from the provider dashboard. For local servers (Ollama, LM Studio), ensure the server is running and the URL has the `/v1` suffix (e.g., `http://127.0.0.1:11434/v1`).
 

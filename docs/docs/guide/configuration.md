@@ -225,6 +225,8 @@ safety:
 |---|---|---|---|
 | `time_travel.enabled` | bool | `true` | Enable `/replay`. |
 | `time_travel.max_snapshots` | int | `50` | Snapshot cap (per thread). ConfigStore override `time_travel.max_snapshots` (Settings → Embedder → Time travel) takes precedence over this value; effective resolution is store > yaml > default. Applies at server startup. |
+| `time_travel.retention_days` | int | `30` | Prune snapshots older than this many days (1–3650). ConfigStore override `time_travel.retention_days` (Settings → Embedder → Time travel) is read LIVE by the daily maintenance loop — no restart needed. |
+| `time_travel.auto_maintain` | bool | `true` | Enable the daily snapshot prune + VACUUM loop. ConfigStore override `time_travel.auto_maintain` is read live, same as `retention_days`. |
 | `time_travel.db_path` | string | `kazma-data/snapshots.db` | Snapshot DB. |
 
 ### `swarm` (lines 116-127)

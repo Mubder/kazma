@@ -59,6 +59,14 @@ changes — just set the base URL + key.
 Local providers (Ollama/LM Studio) don't need a real key — a dummy key is
 injected automatically.
 
+**Ollama discovery/health use the configured provider Base URL** (fallback
+`http://127.0.0.1:11434`), so a server running in WSL/container can reach an
+Ollama daemon on another host by pointing the provider's Base URL at it
+(e.g. the WSL gateway IP for a Windows-hosted Ollama — `127.0.0.1` inside
+WSL is the WSL VM, not Windows). The provider **Test Connection** button
+reports `Cannot connect to <base_url> (connection failed)` when the endpoint
+is unreachable.
+
 ---
 
 ## Native providers

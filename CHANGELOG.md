@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Unreleased — Ollama discovery fix + snapshot auto-maintenance (2026-08-02)
+
+- **Ollama discovery now respects the configured provider base URL.**
+  `discover_ollama_models`, `check_ollama_health` and `get_model_base_url`
+  resolve the Ollama provider entry from the model registry (fallback
+  `127.0.0.1:11434`) instead of hardcoding the loopback — so a server inside
+  WSL/container can reach an Ollama daemon on the Windows host by setting the
+  provider's Base URL to the host address (e.g. the WSL gateway IP). The
+  provider test endpoint no longer reports `HTTP None:` for unreachable
+  endpoints — it now returns `Cannot connect to <base_url> (connection failed)`.
+- **Time-travel snapshot auto-maintenance:** daily background loop (24h,
+  first sweep 120s after boot) prunes snapshots older than
+  `time_travel.retention_days` (default 30) and VACUUMs `snapshots.db`;
+  `POST /api/system/snapshots/maintain` triggers it on demand; new Settings →
+  Embedder → Time travel fields (`max_snapshots` 1–1000,
+  `retention_days` 1–3650, `auto_maintain` toggle) + Dashboard "snapshots"
+  trigger button.
+- **Settings → Embedder page** (embedder backend selection + BGE-M3 default),
+  time-travel cap UI, and dashboard component-card overflow fix
+  (`min-width:0` + `overflow-wrap:break-word` so long ConfigStore DSNs no
+  longer escape the card).
+- **kazma.yaml cleanup:** removed test MCP servers (`test-server`, `dup`,
+  `sse-server`, `test-mcp`); the filesystem server stays
+  `workspace_bound: true` + `${KAZMA_ACTIVE_WORKSPACE}`.
+
 ## Unreleased — V1 memory stack removed (2026-07-31)
 
 - **The V1 memory stack is GONE.** All V1 modules deleted: `swarm/memory/
