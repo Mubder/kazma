@@ -159,6 +159,10 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
 
     Read-like ops (``reads``, ``listings``, ``searches``) may also access
     Agent Skills directories so skill resources load on demand.
+    
+    O2 fix: Removed temp directory fallbacks (/tmp, system temp) that
+    weakened path isolation. All paths must be under the workspace root
+    (or skill directories for reads) — no exceptions.
     """
     try:
         from kazma_core.tools.file_write import _get_workspace
@@ -172,21 +176,12 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
         try:
             resolved_p.relative_to(workspace)
         except ValueError:
-            # Check temp directories as fallbacks for testing
-            try:
-                resolved_p.relative_to(Path("/tmp").resolve())
-            except ValueError:
-                import tempfile
-                sys_temp = Path(tempfile.gettempdir()).resolve()
-                try:
-                    resolved_p.relative_to(sys_temp)
-                except ValueError:
-                    # Allow skill resource reads outside workspace
-                    if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(
-                        resolved_p
-                    ):
-                        return None
-                    return f"Safety: {op} outside workspace are not allowed. Path: {path}"
+            # Allow skill resource reads outside workspace
+            if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(
+                resolved_p
+            ):
+                return None
+            return f"Safety: {op} outside workspace are not allowed. Path: {path}"
     return None
 
 # ══════════════════════════════════════════════════════════════════════════

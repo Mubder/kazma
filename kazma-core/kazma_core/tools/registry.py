@@ -155,6 +155,39 @@ class ShellTool(BaseTool):
                 permission=self.permission,
             )
 
+        # O2 fix: workspace scoping for shell commands
+        # Check if any arguments are paths and validate they're within workspace
+        try:
+            from pathlib import Path as _Path
+            from kazma_core.tools.file_write import _get_workspace, _is_within_workspace, _ALLOW_ABSOLUTE
+            
+            workspace = _get_workspace()
+            for arg in args[1:]:  # Skip the command itself
+                # Skip flags (start with -)
+                if arg.startswith("-"):
+                    continue
+                # Check if it looks like a path
+                p = _Path(arg).expanduser()
+                if p.is_absolute() or "/" in arg or "\\" in arg or arg.startswith("."):
+                    resolved = p.resolve()
+                    if not _is_within_workspace(resolved, workspace) and not _ALLOW_ABSOLUTE:
+                        return ToolResult(
+                            tool_name=self.name,
+                            success=False,
+                            output=f"Safety: path '{arg}' is outside workspace and not allowed.",
+                            exit_code=-1,
+                            permission=self.permission,
+                        )
+        except Exception:
+            # If workspace module unavailable, deny by default (fail-closed)
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                output="Safety: workspace module unavailable — shell access denied.",
+                exit_code=-1,
+                permission=self.permission,
+            )
+
         t0 = _time.perf_counter()
         try:
             proc = await asyncio.create_subprocess_exec(

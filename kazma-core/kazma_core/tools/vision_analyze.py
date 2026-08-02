@@ -286,6 +286,17 @@ async def analyze_image(
             image_bytes, mime = await _download_image(image_path)
         else:
             path = Path(image_path).expanduser().resolve()
+            # O2 fix: workspace scoping for local images (mirrors file_read/file_write)
+            try:
+                from kazma_core.tools.file_write import _get_workspace, _is_within_workspace, _ALLOW_ABSOLUTE
+                
+                workspace = _get_workspace()
+                if not _is_within_workspace(path, workspace) and not _ALLOW_ABSOLUTE:
+                    return "Safety: image path outside workspace is not allowed."
+            except Exception:
+                # If workspace module unavailable, deny by default (fail-closed)
+                return "Safety: workspace module unavailable — image access denied."
+            
             image_bytes, mime = _load_local_image(path)
     except FileNotFoundError as exc:
         return f"Error: {exc}"
