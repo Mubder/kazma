@@ -496,6 +496,17 @@ class LLMProvider:
                 "remove any Arabic or other non-English text from Settings.",
                 transient=False,
             ) from e
+        except RuntimeError as e:
+            if "Event loop is closed" in str(e):
+                logger.warning("LLMProvider: Event loop was closed. Re-creating HTTP client and retrying request.")
+                self._http = None
+                client = await self._get_client()
+                resp = await client.post("/chat/completions", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            else:
+                logger.error("LLM call failed: %s", e, exc_info=True)
+                raise LLMError(f"LLM call failed: {e}") from e
         except Exception as e:
             logger.error("LLM call failed: %s", e, exc_info=True)
             raise LLMError(f"LLM call failed: {e}") from e

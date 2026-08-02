@@ -272,7 +272,7 @@ async def run_llm_extraction(
         return 0
 
 
-def scan_session(
+async def scan_session(
     primary_conn: sqlite3.Connection,
     ops_conn: sqlite3.Connection,
     session: dict[str, Any],
@@ -300,22 +300,16 @@ def scan_session(
         pending_turns.append((turn_idx, user_text, assistant_text))
 
     if use_llm:
-        # Run LLM extraction in an event loop
-        async def _extract_batch():
-            total = 0
-            for turn_idx, user_text, assistant_text in pending_turns:
-                count = await run_llm_extraction(
-                    primary_conn, ops_conn,
-                    user_text, assistant_text,
-                    session_id=session["session_id"],
-                    turn=turn_idx,
-                    tenant_id=tenant_id,
-                    ignore_filler=ignore_filler,
-                )
-                total += count
-            return total
-
-        total_beliefs = asyncio.run(_extract_batch())
+        for turn_idx, user_text, assistant_text in pending_turns:
+            count = await run_llm_extraction(
+                primary_conn, ops_conn,
+                user_text, assistant_text,
+                session_id=session["session_id"],
+                turn=turn_idx,
+                tenant_id=tenant_id,
+                ignore_filler=ignore_filler,
+            )
+            total_beliefs += count
     else:
         for turn_idx, user_text, assistant_text in pending_turns:
             count = run_heuristic_extraction(
@@ -332,7 +326,7 @@ def scan_session(
     return {"turns": len(pairs), "beliefs": total_beliefs}
 
 
-def main() -> None:
+async def main_async() -> None:
     parser = argparse.ArgumentParser(description="Retroactive V2 belief scanner")
     parser.add_argument("--dry-run", action="store_true", help="Report sessions without extracting")
     parser.add_argument("--use-llm", action="store_true", help="Run LLM deep-pass (slower)")
@@ -419,7 +413,7 @@ def main() -> None:
         skipped = 0
 
         for s in sessions:
-            stats = scan_session(
+            stats = await scan_session(
                 primary_conn, ops_conn, s,
                 use_llm=args.use_llm, tenant_id=args.tenant_id,
                 ignore_filler=args.ignore_filler,
@@ -461,6 +455,10 @@ def main() -> None:
     finally:
         primary_conn.close()
         ops_conn.close()
+
+
+def main() -> None:
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":
