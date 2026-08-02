@@ -492,11 +492,18 @@ class ModelRegistry:
         Searches both manually-configured ``models`` and cached
         ``_discovered_models`` so that discovered models route correctly.
         Returns ``None`` if no provider claims the model.
+        
+        Only searches ENABLED providers — disabled providers are ignored
+        to prevent auto-switching to providers the user has turned off.
         """
         clean_id = (model_id or "").strip()
         if not clean_id:
             return None
         for provider in self.list_providers():
+            # Skip disabled providers — they should not be considered
+            # for model resolution (fixes auto-switch to disabled providers)
+            if not provider.get("enabled", True):
+                continue
             name = provider.get("name", "")
             manual = set(self._normalize_models(provider.get("models", [])))
             discovered = set(self._discovered_models.get(name, []))
