@@ -2004,7 +2004,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/providers.js"></script>
-<script src="/static/js/models.js"></script>
-<script src="/static/js/settings.js"></script>
+<script src="/static/js/providers.js?v={{ js_version() }}"></script>
+<script src="/static/js/models.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings.js?v={{ js_version() }}"></script>
 {% endblock %}

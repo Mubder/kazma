@@ -445,6 +445,11 @@ class KazmaAppBuilder:
             _STATIC_DIR / "js" / "streaming.js",
             _STATIC_DIR / "js" / "stores" / "agentStore.js",
             _STATIC_DIR / "js" / "hitl_approval.js",
+            # Settings page scripts — must bust cache or the Embedder tab etc.
+            # runs stale JS against fresh HTML (empty status cards symptom).
+            _STATIC_DIR / "js" / "settings.js",
+            _STATIC_DIR / "js" / "providers.js",
+            _STATIC_DIR / "js" / "models.js",
         )
 
         def _css_version() -> int:
