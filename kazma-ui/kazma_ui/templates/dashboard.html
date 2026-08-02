@@ -742,34 +742,41 @@
   }
 
   function renderMemoryKpis(data) {
-    // V1 memory graph (data.graph) was retired. The KPI strip now reflects
-    // the V2 cognitive engine: active beliefs = "nodes", active+superseded
-    // beliefs = "edges". The native V2 KPI grid (v2-kpi-grid) shows the same
-    // data with richer detail; this just keeps the legacy strip non-empty.
+    // V2 cognitive engine KPIs. The legacy L1 Chroma / L3 BM25 / L2 graph
+    // labels are replaced with V2-native metrics (beliefs, episodes, entities).
     var v2 = data.v2 || {};
     var beliefs = v2.beliefs || {};
+    var episodes = v2.episodes || {};
+    var entities = v2.entities || {};
     var nodesN = beliefs.active != null ? beliefs.active : 0;
     var edgesN = (beliefs.active != null ? beliefs.active : 0) + (beliefs.superseded != null ? beliefs.superseded : 0);
     var set = function(id, text) {
       var n = document.getElementById(id);
       if (n) n.textContent = text;
     };
-    var l1 = I18N.kpiL1 || 'L1 Chroma';
-    var l3 = I18N.kpiL3 || 'L3 BM25';
-    var l2 = I18N.kpiL2 || 'L2 graph';
+    // V2 memory stats: beliefs, episodes, entities
+    var beliefsLabel = I18N.kpiBeliefs || 'Beliefs';
+    var episodesLabel = I18N.kpiEpisodes || 'Episodes';
+    var entitiesLabel = I18N.kpiEntities || 'Entities';
     var okLbl = I18N.kpiOk || 'OK';
-    set('kpi-vector-count', data.vector_count != null ? String(data.vector_count) : '–');
-    set('kpi-vector-size', data.vector_size != null ? (formatBytes(data.vector_size) + ' · ' + l1) : l1);
-    set('kpi-fts-count', data.fts5_count != null ? String(data.fts5_count) : '–');
-    set('kpi-fts-size', data.fts5_size != null ? (formatBytes(data.fts5_size) + ' · ' + l3) : l3);
-    // Only show real numbers when a V2 payload is present; otherwise zeros.
-    set('kpi-graph-nodes', data.v2 ? String(nodesN) : '0');
-    set('kpi-graph-edges', (data.v2 ? edgesN + ' ' + (I18N.graphEdges || 'edges') : l2));
+    
+    // Show V2 beliefs count (replaces legacy L1 Chroma vector count)
+    set('kpi-vector-count', data.v2 ? String(nodesN) : '–');
+    set('kpi-vector-size', data.v2 ? beliefsLabel : '–');
+    
+    // Show V2 episodes count (replaces legacy L3 BM25 FTS count)
+    set('kpi-fts-count', data.v2 ? String(episodes.active || 0) : '–');
+    set('kpi-fts-size', data.v2 ? episodesLabel : '–');
+    
+    // Show V2 entities (replaces legacy L2 graph)
+    set('kpi-graph-nodes', data.v2 ? String(entities.active || 0) : '0');
+    set('kpi-graph-edges', (data.v2 ? (entities.active || 0) + ' ' + entitiesLabel : '–'));
+    
     var comps = Array.isArray(data.components) ? data.components : [];
     var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
     set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
-    set('graph-size-metric', data.v2 ? String(nodesN) + ' ' + (I18N.graphNodes || 'nodes') : '–');
-    set('graph-count-metric', (data.v2 ? edgesN : 0) + ' ' + (I18N.graphEdges || 'edges'));
+    set('graph-size-metric', data.v2 ? String(nodesN) + ' ' + beliefsLabel : '–');
+    set('graph-count-metric', (data.v2 ? (entities.active || 0) : 0) + ' ' + entitiesLabel);
   }
 
   function renderMemoryComponents(data) {

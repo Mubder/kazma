@@ -2556,6 +2556,14 @@
     _bgPollingSession = sessionId;
     var attempts = 0;
     var maxAttempts = 18;  // 90s at 5s intervals
+    var lastMessageHash = '';  // track changes to avoid re-rendering
+
+    function _hashMessages(msgs) {
+      // Simple hash: count + last message content length
+      var last = msgs[msgs.length - 1];
+      var lastLen = last && last.content ? last.content.length : 0;
+      return msgs.length + ':' + lastLen;
+    }
 
     function poll() {
       if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }  // user switched sessions
@@ -2579,6 +2587,9 @@
         .then(function(r) { return r.ok ? r.json() : []; })
         .then(function(messages) {
           if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
+          
+          var currentHash = _hashMessages(messages);
+          
           // If message count grew, the background turn completed — reload.
           // (originalCount 0 = we never knew the baseline — only resolve via
           // the pending-content check below, never via growth.)
@@ -2594,6 +2605,19 @@
             loadSession(sessionId);
             return;
           }
+          
+          // Only update the "processing" indicator if content actually changed
+          // (prevents flickering when polling returns same data)
+          if (currentHash !== lastMessageHash && lastMsg && lastMsg.pending) {
+            lastMessageHash = currentHash;
+            // Update the processing indicator text if content grew
+            var pendingEl = messagesEl.querySelector('[data-role="assistant"]:last-child .message-text');
+            if (pendingEl && pendingEl.textContent.indexOf('⏳') !== -1) {
+              var progress = lastMsg.content ? ' (' + lastMsg.content.length + ' chars)' : '';
+              pendingEl.innerHTML = '<p>⏳ <em>Previous turn still processing in the background' + progress + '…</em></p>';
+            }
+          }
+          
           // Not done yet — poll again after 5s
           setTimeout(poll, 5000);
         })
