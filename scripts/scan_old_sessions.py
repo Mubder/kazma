@@ -55,6 +55,16 @@ def resolve_chat_sessions_db() -> str:
         return "kazma-data/chat_sessions.db"
 
 
+def resolve_snapshots_db() -> str:
+    """Find the snapshots.db path."""
+    try:
+        from kazma_core.paths import data_dir
+
+        return str(data_dir() / "snapshots.db")
+    except Exception:
+        return "kazma-data/snapshots.db"
+
+
 def resolve_memory_dbs() -> tuple[str, str]:
     """Return (primary_memory_db, memory_ops_db) paths."""
     try:
@@ -63,6 +73,62 @@ def resolve_memory_dbs() -> tuple[str, str]:
         return primary_memory_db(), memory_ops_db()
     except Exception:
         return "kazma-data/memory_state.db", "kazma-data/memory_ops.db"
+
+
+def load_snapshots_sessions(
+    db_path: str, *, max_sessions: int | None = None, since: str | None = None
+) -> list[dict[str, Any]]:
+    """Load latest snapshot state for each thread from snapshots.db."""
+    if not Path(db_path).exists():
+        logger.info("Snapshots DB not found: %s", db_path)
+        return []
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'"
+        ).fetchall()
+        if not tables:
+            logger.info("No 'snapshots' table found in %s", db_path)
+            return []
+
+        query = """
+            SELECT s1.thread_id, s1.state_json, s1.timestamp
+            FROM snapshots s1
+            WHERE s1.timestamp = (
+                SELECT MAX(s2.timestamp) FROM snapshots s2 WHERE s2.thread_id = s1.thread_id
+            )
+        """
+        params: list[Any] = []
+        if since:
+            query += " AND s1.timestamp >= ?"
+            params.append(since)
+
+        query += " ORDER BY s1.timestamp DESC"
+        if max_sessions:
+            query += " LIMIT ?"
+            params.append(max_sessions)
+
+        rows = conn.execute(query, params).fetchall()
+        sessions = []
+        for r in rows:
+            try:
+                st = json.loads(r["state_json"] or "{}")
+                messages = st.get("messages", [])
+            except (json.JSONDecodeError, TypeError):
+                messages = []
+
+            sessions.append({
+                "session_id": r["thread_id"],
+                "messages": messages,
+                "created_at": r["timestamp"],
+                "updated_at": r["timestamp"],
+                "title": f"Snapshot Thread {r['thread_id'][:8]}",
+            })
+        return sessions
+    finally:
+        conn.close()
 
 
 def load_sessions(
@@ -269,20 +335,36 @@ def main() -> None:
     parser.add_argument("--max-sessions", type=int, default=None, help="Limit to N sessions")
     parser.add_argument("--since", type=str, default=None, help="Only scan sessions updated after this date (ISO format)")
     parser.add_argument("--tenant-id", type=str, default="default", help="Tenant ID")
+    parser.add_argument(
+        "--source",
+        choices=["all", "chat_sessions", "snapshots"],
+        default="all",
+        help="Source database to scan (default: all)",
+    )
     args = parser.parse_args()
 
-    chat_db = resolve_chat_sessions_db()
     primary_db, ops_db = resolve_memory_dbs()
-
-    logger.info("Chat sessions DB: %s", chat_db)
     logger.info("Memory DB: %s", primary_db)
 
-    if not Path(chat_db).exists():
-        logger.error("Chat sessions DB not found: %s", chat_db)
-        sys.exit(1)
+    sessions: list[dict[str, Any]] = []
 
-    sessions = load_sessions(chat_db, max_sessions=args.max_sessions, since=args.since)
-    logger.info("Found %d sessions to scan", len(sessions))
+    if args.source in ("all", "chat_sessions"):
+        chat_db = resolve_chat_sessions_db()
+        logger.info("Checking Chat sessions DB: %s", chat_db)
+        if Path(chat_db).exists():
+            cs_sessions = load_sessions(chat_db, max_sessions=args.max_sessions, since=args.since)
+            logger.info("  Loaded %d sessions from chat_sessions.db", len(cs_sessions))
+            sessions.extend(cs_sessions)
+
+    if args.source in ("all", "snapshots"):
+        snapshots_db = resolve_snapshots_db()
+        logger.info("Checking Snapshots DB: %s", snapshots_db)
+        if Path(snapshots_db).exists():
+            sn_sessions = load_snapshots_sessions(snapshots_db, max_sessions=args.max_sessions, since=args.since)
+            logger.info("  Loaded %d threads from snapshots.db", len(sn_sessions))
+            sessions.extend(sn_sessions)
+
+    logger.info("Total sessions/threads found to scan: %d", len(sessions))
 
     if not sessions:
         logger.info("Nothing to do.")

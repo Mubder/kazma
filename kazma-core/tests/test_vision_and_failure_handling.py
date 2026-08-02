@@ -296,6 +296,9 @@ async def test_analyze_image_clear_error_when_no_vision_model(monkeypatch, tmp_p
     img = tmp_path / "t.png"
     img.write_bytes(png)
 
+    import sys
+    fw_mod = sys.modules["kazma_core.tools.file_write"]
+    monkeypatch.setattr(fw_mod, "_is_within_workspace", lambda path, ws: True)
     monkeypatch.setattr(
         va, "_get_llm_provider",
         lambda: (None, "deepseek-v4-pro", "no-vision-model"),
