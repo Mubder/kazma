@@ -1188,9 +1188,12 @@
       list.innerHTML = beliefs.map((b, idx) => {
         const conf = Math.round((b.confidence||0) * 100);
         const pc = ptypeColor[b.predicate_type] || '#94a3b8';
+        const objRaw = String(b.object || '');
+        const objFull = _esc(objRaw);
+        const objShown = objRaw.length > 160 ? objFull.slice(0, 160) + '…' : objFull;
         return '<div class="v2-belief-row" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
                '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + (b.predicate_type||'?') + '</span>' +
-               '<div style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b>' + _esc(b.object) + '</b></div>' +
+               '<div style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
                '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
                '</div>';
       }).join('');
@@ -1552,7 +1555,7 @@
         var tip = document.getElementById('v2g-tooltip');
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
-          tip.innerHTML = '<b style="color:' + (_V2G_TYPE_COLORS[p.type] || '#fff') + ';word-break:break-word;">' + _v2gEsc((p.fullLabel || p.label).slice(0, 80)) + '</b><br><span style="color:var(--text-muted);">type: ' + p.type + (p.isHighStakes ? ' · ⚠ high-stakes' : '') + '</span>';
+          tip.innerHTML = '<b style="color:' + (_V2G_TYPE_COLORS[p.type] || '#fff') + ';word-break:break-word;">' + _v2gEsc(_v2gTitle(p.fullLabel || p.label)) + '</b><br><span style="color:var(--text-muted);">type: ' + p.type + (p.isHighStakes ? ' · ⚠ high-stakes' : '') + '</span>';
           tip.style.display = 'block';
           var rect = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect.width - 200) + 'px';
@@ -1584,15 +1587,58 @@
 
   function _v2gEsc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
+  // Short heading for a node: the first " - " segment, or the first ~56
+  // chars. Long belief texts ("Repository: X - Description: ...") get a
+  // readable title instead of dumping the whole blob into the header.
+  function _v2gTitle(s) {
+    var t = String(s || '').trim();
+    if (!t) return '';
+    if (t.length <= 56) return t;
+    var seg = t.split(' - ')[0].trim();
+    if (seg && seg.length <= 56) return seg;
+    var cut = t.slice(0, 56).replace(/\s+\S*$/, '');
+    return (cut || t.slice(0, 56)) + '…';
+  }
+
+  // Full contents of a belief text, split into readable lines on " - ".
+  function _v2gContents(s) {
+    var t = String(s || '').trim();
+    if (!t) return '';
+    var segs = t.split(' - ');
+    if (segs.length > 1) {
+      return segs.map(function(seg) {
+        var html = _v2gEsc(seg.trim());
+        return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);line-height:1.4;">' + html + '</div>';
+      }).join('');
+    }
+    return '<div style="line-height:1.45;">' + _v2gEsc(t) + '</div>';
+  }
+
+  // Truncate a long neighbor label in belief rows so the selected node's
+  // full text is not repeated next to itself (the full text lives in the
+  // Contents block above).
+  function _v2gShortLabel(s, n) {
+    var t = String(s || '').trim();
+    if (!t) return '';
+    var lim = n || 64;
+    return t.length > lim ? t.slice(0, lim) + '…' : t;
+  }
+
   function _v2gInspect(p) {
     var el = document.getElementById('v2g-inspect');
     if (!el || !p) return;
     var color = _V2G_TYPE_COLORS[p.type] || '#94a3b8';
     var fullName = p.fullLabel || p.label || p.id;
-    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;margin-bottom:4px;word-break:break-word;">' + _v2gEsc(fullName) + '</div>';
+    var title = _v2gTitle(fullName);
+    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;margin-bottom:4px;word-break:break-word;">' + _v2gEsc(title) + '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">type: ' + p.type;
     if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
     html += '</div>';
+    // Contents — the full text of this belief/entity, shown exactly once.
+    if (fullName !== title) {
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Contents</div>';
+      html += '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;max-height:200px;overflow-y:auto;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
+    }
     // List readable belief sentences touching this node
     var rels = [];
     for (var i = 0; i < _v2gEdges.length; i++) {
@@ -1601,8 +1647,9 @@
       if (!A || !B) continue;
       var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
       var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
-      var targetName = _v2gEsc(ed.objectText || B.fullLabel || B.label);
-      var sourceName = _v2gEsc(ed.objectText || A.fullLabel || A.label);
+      // Neighbor labels only — never repeat THIS node's own text in the row.
+      var targetName = _v2gEsc(_v2gShortLabel(B.fullLabel || B.label || B.id || ed.objectText));
+      var sourceName = _v2gEsc(_v2gShortLabel(A.fullLabel || A.label || A.id || ed.objectText));
       if (A.id === p.id) {
         rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
       } else if (B.id === p.id) {
