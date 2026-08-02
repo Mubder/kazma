@@ -159,74 +159,82 @@ class SlackAdapter(BaseAdapter):
             logger.error("[Slack] No channel_id in target: %s", outbound.target_id)
             return False
 
-        from kazma_gateway.adapters.slack_send import resolve_channel_id, sanitize_outbound
+        from kazma_gateway.adapters.slack_send import chunk_message, resolve_channel_id, sanitize_outbound
 
         channel_id = resolve_channel_id(outbound.context_metadata, outbound.target_id) or channel_id
+        thread_ts = outbound.context_metadata.get("thread_ts")
+        blocks = outbound.context_metadata.get("blocks")
+        
+        # O4 fix: chunk long messages to match Discord/Telegram pattern.
         # Audit G9b: sanitize <!everyone>/<!here>/<!channel> and <@user> mentions
         # so untrusted agent/tool output can't broadcast/ping.
-        payload: dict[str, Any] = {
-            "channel": channel_id,
-            "text": sanitize_outbound(outbound.text or ""),
-            "mrkdwn": True,
-        }
-        thread_ts = outbound.context_metadata.get("thread_ts")
-        if thread_ts:
-            payload["thread_ts"] = thread_ts
-        blocks = outbound.context_metadata.get("blocks")
-        if blocks:
-            payload["blocks"] = blocks
+        chunks = chunk_message(sanitize_outbound(outbound.text or ""))
+        
+        for chunk_idx, chunk in enumerate(chunks):
+            payload: dict[str, Any] = {
+                "channel": channel_id,
+                "text": chunk,
+                "mrkdwn": True,
+            }
+            if thread_ts:
+                payload["thread_ts"] = thread_ts
+            # Only attach blocks on the first chunk
+            if blocks and chunk_idx == 0:
+                payload["blocks"] = blocks
 
-        for attempt in range(1, _MAX_RETRIES + 1):
-            try:
-                if not self._http:
-                    self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+            for attempt in range(1, _MAX_RETRIES + 1):
+                try:
+                    if not self._http:
+                        self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
 
-                resp = await self._http.post(
-                    f"{_SLACK_API}/chat.postMessage",
-                    json=payload,
-                    headers=self._headers(),
-                )
-
-                if resp.status_code == 429:
-                    retry_after = resp.headers.get("Retry-After", "1")
-                    try:
-                        delay = float(retry_after)
-                    except ValueError:
-                        delay = 1.0
-                    logger.warning(
-                        "[Slack] Rate-limited (attempt %d/%d), retrying in %.1fs",
-                        attempt, _MAX_RETRIES, delay,
+                    resp = await self._http.post(
+                        f"{_SLACK_API}/chat.postMessage",
+                        json=payload,
+                        headers=self._headers(),
                     )
-                    if attempt < _MAX_RETRIES:
-                        await asyncio.sleep(delay)
-                        continue
-                    return False
 
-                data = resp.json()
-                if data.get("ok"):
-                    logger.info("[Slack] Sent to channel=%s (ts=%s)", channel_id, data.get("ts", "?"))
-                    # Deliver any media attachments after the text.
-                    for att in outbound.attachments:
-                        await self._send_attachment(channel_id, att, thread_ts)
-                    # Voice reply: if the inbound was transcribed audio, reply
-                    # with synthesized speech.
-                    if outbound.context_metadata.get("voice_transcribed") and outbound.text:
-                        asyncio.create_task(
-                            self._send_voice_reply(channel_id, outbound.text, thread_ts)
+                    if resp.status_code == 429:
+                        retry_after = resp.headers.get("Retry-After", "1")
+                        try:
+                            delay = float(retry_after)
+                        except ValueError:
+                            delay = 1.0
+                        logger.warning(
+                            "[Slack] Rate-limited (attempt %d/%d), retrying in %.1fs",
+                            attempt, _MAX_RETRIES, delay,
                         )
-                    return True
-                else:
-                    logger.error("[Slack] Send failed: %s", data.get("error", "unknown"))
+                        if attempt < _MAX_RETRIES:
+                            await asyncio.sleep(delay)
+                            continue
+                        return False
+
+                    data = resp.json()
+                    if data.get("ok"):
+                        logger.info("[Slack] Sent chunk %d/%d to channel=%s (ts=%s)", 
+                                   chunk_idx + 1, len(chunks), channel_id, data.get("ts", "?"))
+                        # Deliver any media attachments after the first chunk.
+                        if chunk_idx == 0:
+                            for att in outbound.attachments:
+                                await self._send_attachment(channel_id, att, thread_ts)
+                            # Voice reply: if the inbound was transcribed audio, reply
+                            # with synthesized speech.
+                            if outbound.context_metadata.get("voice_transcribed") and outbound.text:
+                                asyncio.create_task(
+                                    self._send_voice_reply(channel_id, outbound.text, thread_ts)
+                                )
+                        break  # success — move to next chunk
+                    else:
+                        logger.error("[Slack] Send failed: %s", data.get("error", "unknown"))
+                        return False
+
+                except httpx.HTTPStatusError:
+                    logger.exception("[Slack] HTTP error sending to channel=%s", channel_id)
+                    return False
+                except Exception as exc:
+                    logger.exception("[Slack] Send exception: %s", exc)
                     return False
 
-            except httpx.HTTPStatusError:
-                logger.exception("[Slack] HTTP error sending to channel=%s", channel_id)
-                return False
-            except Exception as exc:
-                logger.exception("[Slack] Send exception: %s", exc)
-                return False
-
-        return False
+        return True
 
     async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
         """Telegram-depth STT: size caps, language, provider, metadata tags."""
