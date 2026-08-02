@@ -78,13 +78,20 @@ def _insert_episode(    conn: sqlite3.Connection,
     # win over any caller-supplied metadata["source"] (e.g. the legacy
     # "swarm_worker" source) so V2 read filters by source stay reliable.
     meta = {**metadata, "source": source}
+    try:
+        from kazma_core.memory.embedder import get_embedding_model_name
+
+        emb_version = get_embedding_model_name()
+    except Exception:
+        emb_version = ""
     conn.execute(
         """
         INSERT OR IGNORE INTO episodes (
             id, tenant_id, session_id, turn_number,
             user_text, assistant_text, summary_text,
-            tier, structural_importance, created_at, metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'episodic', ?, ?, ?)
+            tier, structural_importance, created_at, metadata_json,
+            embedding_model_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'episodic', ?, ?, ?, ?)
         """,
         (
             eid, tenant_id, session_id, turn_number,
@@ -92,6 +99,7 @@ def _insert_episode(    conn: sqlite3.Connection,
             None,
             summary_text[:8000] if summary_text else None,
             importance, now, json.dumps(meta, ensure_ascii=False, default=str),
+            emb_version,
         ),
     )
     # Compute + store the episode embedding so dense vector recall can

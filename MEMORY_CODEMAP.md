@@ -221,11 +221,12 @@ memory:
     procedural_quarantine_threshold: 0.40
   embedding:
     provider: "local"              # "local" or remote OpenAI-compatible
-    model: "all-MiniLM-L6-v2"
-    dim: 384
+    model: "BAAI/bge-m3"           # multilingual, 1024-dim (default)
+    dim: 1024
 ```
 
 **Env overrides**: `KAZMA_VECTOR_COLLECTION`, `KAZMA_EMBED_*`, `KAZMA_DEMO_MODE`
+(Web UI: Settings → Embedder — ConfigStore `embedding.*` wins over yaml)
 
 ---
 

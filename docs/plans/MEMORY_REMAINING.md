@@ -65,8 +65,8 @@ memory:
     skip_llm_in_demo: true
   embedding:
     provider: local
-    model: all-MiniLM-L6-v2
-    dim: 384
+    model: BAAI/bge-m3
+    dim: 1024
 ```
 
 **On-disk paths:**

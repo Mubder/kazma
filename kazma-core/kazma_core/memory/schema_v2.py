@@ -24,9 +24,11 @@ Resolution of blocking items (2026-07-31):
   hook may not always have provenance available, and the build must never
   fail on a missing session id (resolution #3).
 * ``embedding_model_version`` defaults to the **current live model**
-  (``all-MiniLM-L6-v2``) — NOT ``bge-small-en-v1.5`` — so existing
-  vectors remain valid and no re-index migration is required at rollout
-  (resolution #2). The column enables a *future* model swap per-row.
+  (``BAAI/bge-m3``) — so existing vectors remain valid and no re-index
+  migration is required at rollout (resolution #2). The column enables a
+  *future* model swap per-row; write sites stamp it explicitly (see
+  ``dual_write`` / ``belief_mutation``) so rows stay accurate even when a
+  database was created before a model switch.
 """
 
 from __future__ import annotations
@@ -43,9 +45,10 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Default model version — MUST match swarm/memory/embedder.py DEFAULT_MODEL
-# so existing vectors stay valid. See module docstring (resolution #2).
-_DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# Default model version — MUST match memory/embedder.py DEFAULT_MODEL so
+# existing vectors stay valid. See module docstring (resolution #2). New
+# databases get this DEFAULT; write sites stamp the LIVE model explicitly.
+_DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
 
 
 # ── Primary cognitive-state DDL (memory_state.db) ─────────────────────────

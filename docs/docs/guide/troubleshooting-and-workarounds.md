@@ -159,7 +159,7 @@ Verify persistence via `get_config_store().get("registry.active_provider")` / `.
 
 ### 2.3 Embedding dimension mismatch (cosmetic)
 
-`kazma.yaml` may declare `storage.vector_dim: 1536`, but the default model (`all-MiniLM-L6-v2`) is **384-d**. This value is informational; V2's `vector_engine.py` reads the actual dimension from the embedder at runtime. Don't rely on the config value for dimension logic.
+`kazma.yaml` may declare `storage.vector_dim: 1024`, but the default model (`BAAI/bge-m3`) is **1024-d**. This value is informational; V2's `vector_engine.py` reads the actual dimension from the embedder at runtime. Don't rely on the config value for dimension logic.
 
 ### 2.4 Previously-documented V1 bugs (historical)
 

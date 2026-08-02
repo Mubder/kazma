@@ -276,6 +276,226 @@ class SettingsRouterBuilder:
             """Health-check the active proxy (returns exit IP)."""
             return await _get_sm().test_proxy()
 
+        # ══════════════════════════════════════════════════════════════
+        # EMBEDDER — memory vector model (Web UI Embedder settings page)
+        # ══════════════════════════════════════════════════════════════
+
+        @router.get("/api/settings/embedder")
+        async def api_get_embedder() -> dict[str, Any]:
+            """Get embedder status: effective config, persisted override,
+            live singleton state, DB vector-space composition, presets."""
+            from kazma_core.memory.embedder import get_embedder_status
+            from kazma_core.memory.reembed import embedding_version_counts, get_rebuild_status
+
+            status = get_embedder_status()
+            store = _get_sm().get_embedder_settings()
+            # DB counts open the DB read-only — cheap enough per page load.
+            db = {}
+            try:
+                db = embedding_version_counts()
+            except Exception:
+                logger.debug("[Settings] embedder version counts failed", exc_info=True)
+            return {
+                "config": status.get("config", {}),
+                "store": store,
+                "active": status.get("active"),
+                "db": db,
+                "rebuild": get_rebuild_status(),
+                "presets": [
+                    {"model": "BAAI/bge-m3", "dim": 1024, "label": "BAAI/bge-m3 — multilingual (recommended)", "multilingual": True},
+                    {"model": "BAAI/bge-large-en-v1.5", "dim": 1024, "label": "BAAI/bge-large-en-v1.5 — English", "multilingual": False},
+                    {"model": "intfloat/multilingual-e5-large", "dim": 1024, "label": "intfloat/multilingual-e5-large", "multilingual": True},
+                    {"model": "Snowflake/snowflake-arctic-embed-l", "dim": 1024, "label": "Snowflake arctic-embed-l (English)", "multilingual": False},
+                    {"model": "nomic-ai/nomic-embed-text-v1.5", "dim": 768, "label": "nomic-embed-text-v1.5", "multilingual": False},
+                    {"model": "sentence-transformers/paraphrase-multilingual-mistral", "dim": 768, "label": "paraphrase-multilingual-mistral", "multilingual": True},
+                    {"model": "all-MiniLM-L6-v2", "dim": 384, "label": "all-MiniLM-L6-v2 — lightweight (legacy)", "multilingual": False},
+                ],
+            }
+
+        @router.put("/api/settings/embedder")
+        async def api_save_embedder(req: dict[str, Any]) -> dict[str, Any]:
+            """Persist the embedder override (takes effect after restart)."""
+            try:
+                _get_sm().save_embedder_settings(req)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            return {"status": "ok"}
+
+        @router.post("/api/settings/embedder/rebuild")
+        async def api_start_embedder_rebuild() -> dict[str, Any]:
+            """Start a background embedding rebuild (incremental: only rows
+            whose model version differs from the configured model)."""
+            import asyncio
+
+            from kazma_core.memory.embedder import get_embedding_model_name
+            from kazma_core.memory.reembed import (
+                REBUILD_STATUS_KEY,
+                get_rebuild_status,
+                rebuild_embeddings,
+            )
+
+            current = get_rebuild_status()
+            if current.get("state") == "running":
+                return {"status": "already", "detail": "A rebuild is already running."}
+            from datetime import UTC, datetime
+
+            model = get_embedding_model_name()
+            now_iso = datetime.now(UTC).isoformat()
+            _get_sm()._cs.set(
+                REBUILD_STATUS_KEY,
+                {
+                    "state": "running",
+                    "model": model,
+                    "total": 0,
+                    "done": 0,
+                    "started_at": now_iso,
+                    "finished_at": None,
+                    "error": None,
+                },
+                category="embedding",
+            )
+
+            loop = asyncio.get_running_loop()
+
+            def _progress(done: int, total: int) -> None:
+                _get_sm()._cs.set(
+                    REBUILD_STATUS_KEY,
+                    {
+                        "state": "running",
+                        "model": model,
+                        "total": total,
+                        "done": done,
+                        "started_at": get_rebuild_status().get("started_at"),
+                        "finished_at": None,
+                        "error": None,
+                    },
+                    category="embedding",
+                )
+
+            async def _run() -> None:
+                try:
+                    summary = await loop.run_in_executor(None, rebuild_embeddings, _progress)
+                    _get_sm()._cs.set(
+                        REBUILD_STATUS_KEY,
+                        {
+                            "state": "done",
+                            "model": summary.get("model") or model,
+                            "total": summary.get("episodes", 0) + summary.get("beliefs", 0),
+                            "done": summary.get("episodes", 0) + summary.get("beliefs", 0),
+                            "started_at": summary.get("started_at"),
+                            "finished_at": summary.get("finished_at"),
+                            "error": None,
+                        },
+                        category="embedding",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("[Settings] embedder rebuild failed: %s", exc)
+                    _get_sm()._cs.set(
+                        REBUILD_STATUS_KEY,
+                        {
+                            "state": "error",
+                            "model": model,
+                            "total": get_rebuild_status().get("total", 0),
+                            "done": get_rebuild_status().get("done", 0),
+                            "started_at": get_rebuild_status().get("started_at"),
+                            "finished_at": None,
+                            "error": str(exc),
+                        },
+                        category="embedding",
+                    )
+
+            loop.create_task(_run())
+            return {"status": "ok", "model": model}
+
+        @router.get("/api/settings/embedder/rebuild")
+        async def api_get_embedder_rebuild() -> dict[str, Any]:
+            """Poll the background rebuild status."""
+            from kazma_core.memory.reembed import get_rebuild_status
+
+            return get_rebuild_status()
+
+        # ══════════════════════════════════════════════════════════════
+        # SERVER RESTART — used after saving embedder / other boot-time
+        # settings. Best-effort: re-execs the same uvicorn command line
+        # detached, then gracefully shuts the current process down.
+        # ══════════════════════════════════════════════════════════════
+
+        _restart_in_flight = False
+
+        @router.post("/api/settings/system/restart")
+        async def api_restart_server() -> dict[str, Any]:
+            """Restart the server process (same command line, detached)."""
+            import asyncio
+            import os
+            import signal
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            nonlocal _restart_in_flight
+            if _restart_in_flight:
+                return {"status": "already", "detail": "Restart already in progress."}
+
+            try:
+                # Reconstruct the original launch command (works for both
+                # `uvicorn` CLI and `python -m uvicorn` invocations, on all
+                # platforms — preserves --host/--port which /proc/self/cmdline
+                # cannot provide on Windows).
+                args: list[str] = []
+                try:
+                    import psutil
+
+                    args = list(psutil.Process().cmdline())
+                except Exception:
+                    args = []
+                if not args:
+                    args = [sys.executable, "-m", "uvicorn", "kazma_ui.app:create_app", "--factory"]
+                args[0] = sys.executable
+
+                log_path = Path("kazma-data") / "restart.log"
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                logf = open(log_path, "ab")
+                kwargs = dict(
+                    stdin=subprocess.DEVNULL,
+                    stdout=logf,
+                    stderr=subprocess.STDOUT,
+                    cwd=os.getcwd(),
+                    close_fds=True,
+                )
+                if os.name == "nt":
+                    kwargs["creationflags"] = (
+                        subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                else:
+                    kwargs["start_new_session"] = True
+                subprocess.Popen(args, **kwargs)
+                _restart_in_flight = True
+                logger.info("[Settings] restart requested — relaunching %s", args)
+
+                loop = asyncio.get_running_loop()
+
+                def _graceful_exit() -> None:
+                    try:
+                        if os.name == "posix":
+                            os.kill(os.getpid(), signal.SIGTERM)
+                        else:
+                            os._exit(0)
+                    except Exception:
+                        os._exit(0)
+
+                def _hard_exit() -> None:
+                    os._exit(0)
+
+                # Let the new process boot; then stop this one gracefully
+                # (uvicorn closes the listener at shutdown start, so the
+                # new process can bind once its Python imports finish).
+                loop.call_later(0.8, _graceful_exit)
+                loop.call_later(25.0, _hard_exit)
+                return {"status": "ok", "detail": "Server restarting…", "log": str(log_path)}
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[Settings] restart failed: %s", exc)
+                return {"status": "error", "detail": f"Restart failed: {exc}"}
+
         @router.put("/api/settings/agent/context")
         async def api_save_context(req: dict[str, Any]) -> dict[str, str]:
             """Save context window settings."""

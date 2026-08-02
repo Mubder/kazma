@@ -116,13 +116,11 @@ memory:
     skip_llm_in_demo: true
   embedding:
     provider: local
-    model: all-MiniLM-L6-v2
-    dim: 384
+    model: BAAI/bge-m3
+    dim: 1024
     base_url: https://integrate.api.nvidia.com/v1
     api_key_env: KAZMA_EMBED_API_KEY
   v2:
-    # V2 cognitive engine is the active stack. Flip to false to roll back
-    # to the legacy 4-layer RRF (V1) stack — both code paths remain.
     use_new_stack: true
 git:
   bot_identity:

@@ -110,8 +110,8 @@ def test_source_session_and_turn_nullable(isolated_data):
     assert row == (None, None)
 
 
-def test_embedding_model_default_is_minilm(isolated_data):
-    """Resolution #2: default stays all-MiniLM-L6-v2 (no re-index needed)."""
+def test_embedding_model_default_is_bge_m3(isolated_data):
+    """Resolution #2: default matches the live model (BAAI/bge-m3)."""
     from kazma_core.memory.schema_v2 import ensure_primary_schema
     from kazma_core.paths import primary_memory_db
 
@@ -120,7 +120,7 @@ def test_embedding_model_default_is_minilm(isolated_data):
     cols = {r[1]: r[4] for r in conn.execute("PRAGMA table_info(beliefs)")}
     conn.close()
     default = cols["embedding_model_version"].strip("'\"")
-    assert default == "all-MiniLM-L6-v2"
+    assert default == "BAAI/bge-m3"
 
 
 # ── 2. Config tests ────────────────────────────────────────────────────────

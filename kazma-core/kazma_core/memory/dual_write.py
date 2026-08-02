@@ -47,6 +47,21 @@ __all__ = [
     "reset_mirror",
 ]
 
+
+def _embedding_model_version() -> str:
+    """Return the currently configured embedding model name.
+
+    Stamped on every new row so ``embedding_model_version`` stays accurate
+    even on databases whose column DEFAULT predates an embedder model switch
+    (SQLite cannot alter a column default in place).
+    """
+    try:
+        from kazma_core.memory.embedder import get_embedding_model_name
+
+        return get_embedding_model_name()
+    except Exception:
+        return ""
+
 # Predicates that are single-valued (functional) by nature. Mirrored
 # triples using one of these get predicate_type='functional'; everything
 # else is 'set' (multi-valued) to avoid accidental supersession during
@@ -190,8 +205,8 @@ class DualWriteMirror:
                         id, tenant_id, subject, predicate, predicate_type, object,
                         confidence, structural_importance, source_trust_weight,
                         valid_from, ingested_at, source_session, source_turn,
-                        extraction_method, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        extraction_method, metadata_json, embedding_model_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         bid,
@@ -209,6 +224,7 @@ class DualWriteMirror:
                         source_turn,
                         extraction_method,
                         json.dumps(meta, ensure_ascii=False),
+                        _embedding_model_version(),
                     ),
                 )
                 self._primary.commit()
@@ -248,8 +264,9 @@ class DualWriteMirror:
                     INSERT OR IGNORE INTO episodes (
                         id, tenant_id, session_id, turn_number,
                         user_text, assistant_text, summary_text,
-                        tier, structural_importance, created_at, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        tier, structural_importance, created_at, metadata_json,
+                        embedding_model_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         eid,
@@ -263,6 +280,7 @@ class DualWriteMirror:
                         int(importance),
                         now,
                         json.dumps(meta, ensure_ascii=False),
+                        _embedding_model_version(),
                     ),
                 )
                 # Compute + store the episode embedding so dense vector

@@ -248,7 +248,7 @@ cd 'G:\GitHubRepos\kazma'
 
 The repo's notes mention "resource constraints on 24 GB VRAM setups." Practical guidance:
 
-- `sentence-transformers` (`all-MiniLM-L6-v6-v2`) is **CPU-friendly** (~90 MB) — it does not need a GPU. VRAM is only relevant if you point Kazma at a **local GPU model server** (Ollama/LM Studio/vLLM).
+- `sentence-transformers` (`BAAI/bge-m3`) is **CPU-friendly** (~2.2 GB) — it does not need a GPU. VRAM is only relevant if you point Kazma at a **local GPU model server** (Ollama/LM Studio/vLLM).
 - For local LLM inference, the model server (not Kazma) owns the VRAM budget. Kazma itself is a lightweight `httpx` client to that server.
 - ChromaDB is memory-mapped; size the vector volume accordingly.
 

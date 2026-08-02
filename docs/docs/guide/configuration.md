@@ -112,7 +112,7 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 |---|---|---|---|
 | `storage.engine` | string | `sqlite` | Checkpointer engine. |
 | `storage.path` | string | `kazma-data/checkpoints.db` | LangGraph checkpointer DB. |
-| `storage.vector_dim` | int | `384` | Declared vector dimension (should match `memory.embedding.dim`; default MiniLM is **384**). |
+| `storage.vector_dim` | int | `1024` | Declared vector dimension (informational — should match `memory.embedding.dim`; default BGE-M3 is **1024**). |
 
 ### `memory` (lines 50-54)
 
@@ -130,8 +130,17 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 | `memory.consolidation.every_n_turns` | int | `1` | Cost control: run consolidator every N turns. |
 | `memory.consolidation.skip_llm_in_demo` | bool | `true` | No LLM under `KAZMA_DEMO_MODE`. |
 | `memory.embedding.provider` | str | `local` | `local` or remote OpenAI-compatible embed API. |
-| `memory.embedding.model` | str | `all-MiniLM-L6-v2` | Embedding model id. |
-| `memory.embedding.dim` | int | `384` | Must match the embedder. |
+| `memory.embedding.model` | str | `BAAI/bge-m3` | Embedding model id (multilingual, 1024-dim). |
+| `memory.embedding.dim` | int | `1024` | Must match the embedder. |
+| `memory.embedding.base_url` | str | unset | `/embeddings` endpoint for remote providers. |
+| `memory.embedding.api_key_env` | str | `KAZMA_EMBED_API_KEY` | Env var holding the remote API key. |
+
+The embedder is also configurable from the Web UI: **Settings → Embedder**
+(save there takes effect after a server restart, and includes a one-click
+background "Rebuild embeddings" action + the vector-space composition of
+your memory DB). The ConfigStore override (`embedding.*`) takes precedence
+over `kazma.yaml`; env vars (`KAZMA_EMBED_*`) win over both. After a model
+switch, run the rebuild so every row lives in the same vector space.
 
 ### `skills` (lines 55-57)
 
@@ -261,7 +270,7 @@ Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `sy
 | `KAZMA_SECRET` | HITL shared secret; binds `serve` to `0.0.0.0`; hub write-auth; `kazma hub sign`. | commented out |
 | `KAZMA_VECTOR_PATH` | Vector memory dir. | `~/.kazma/vector_memory` |
 | `KAZMA_VECTOR_COLLECTION` | ChromaDB collection name. | `agent_memory` |
-| `KAZMA_VECTOR_MODEL` | Embedding model. | `all-MiniLM-L6-v2` |
+| `KAZMA_VECTOR_MODEL` | Embedding model (legacy alias — prefer `KAZMA_EMBED_MODEL`). | `BAAI/bge-m3` |
 
 ### 3.2 Read in code, not in `.env.example`
 

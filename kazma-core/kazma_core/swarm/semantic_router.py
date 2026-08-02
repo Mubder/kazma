@@ -23,18 +23,18 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
-_DEFAULT_MODEL = "all-MiniLM-L6-v2"
+_DEFAULT_MODEL = "BAAI/bge-m3"
 _DEFAULT_COLLECTION = "swarm_worker_profiles"
 
 
 def _embedding_dim() -> int:
-    """Read the embedding dimension from config (default 384)."""
+    """Read the embedding dimension from config (default 1024)."""
     try:
         from kazma_core.memory.embedder import get_embedding_dim
 
         return get_embedding_dim()
     except Exception:
-        return 384
+        return 1024
 
 
 class SemanticRoutingUnavailableError(RuntimeError):

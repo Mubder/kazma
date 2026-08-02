@@ -2,7 +2,7 @@
 
 This module abstracts the embedding model so the system can use either:
 
-  * **local** — ``sentence-transformers`` in-process (default, free, 384-dim)
+  * **local** — ``sentence-transformers`` in-process (default, free, 1024-dim)
   * **openai-compatible** — any OpenAI-compatible ``/embeddings`` endpoint
     (NVIDIA NIM / NeMo Retriever, OpenAI, self-hosted TEI, etc.)
 
@@ -14,9 +14,21 @@ the return type identical (``list[float]``).
 For ChromaDB (which requires an ``EmbeddingFunction`` returning ``numpy.ndarray``),
 ``ChromaEmbeddingFunctionWrapper`` adapts any ``Embedder`` to that interface.
 
-Config is read from ``kazma.yaml`` under ``memory.embedding`` with env-var
-fallbacks (``KAZMA_EMBED_*``). When no config is present the defaults are
-identical to today: local + ``all-MiniLM-L6-v2`` + 384-dim.
+Config precedence (highest wins):
+
+1. Env vars (``KAZMA_EMBED_PROVIDER`` / ``KAZMA_EMBED_MODEL`` / ``KAZMA_EMBED_DIM`` /
+   ``KAZMA_EMBED_BASE_URL``; ``KAZMA_VECTOR_MODEL`` is accepted as a legacy alias
+   for the model name)
+2. ConfigStore override keys ``embedding.*`` (written by the Web UI Embedder
+   settings page — live, no restart needed to *save*; the embedder singleton
+   is per-process so a server restart is required to *apply*)
+3. ``kazma.yaml`` under ``memory.embedding``
+4. Built-in defaults: local + ``BAAI/bge-m3`` + 1024-dim (multilingual).
+
+The default model was upgraded from the 384-dim ``all-MiniLM-L6-v2`` to the
+1024-dim multilingual ``BAAI/bge-m3``. Existing stores keep their rows; run
+the Embedder rebuild action (Web UI) or ``scripts/reembed.py`` after switching
+so every row lives in the same vector space.
 """
 
 from __future__ import annotations
@@ -37,7 +49,10 @@ __all__ = [
     "OpenAICompatibleEmbedder",
     "encode_text_to_blob",
     "get_embedder",
+    "get_embedding_config",
     "get_embedding_dim",
+    "get_embedding_model_name",
+    "get_embedder_status",
     "make_chroma_embedding_function",
     "reset_embedder",
     "resolve_unix_timestamp",
@@ -46,8 +61,8 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
-DEFAULT_DIM = 384
+DEFAULT_MODEL = "BAAI/bge-m3"
+DEFAULT_DIM = 1024
 DEFAULT_PROVIDER = "local"
 
 
@@ -295,8 +310,36 @@ def make_chroma_embedding_function(embedder: Embedder) -> Any:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _store_embedding_overrides() -> dict[str, Any]:
+    """Read embedding overrides from the ConfigStore singleton, if initialized.
+
+    Uses the module-level singleton directly (never constructs the store) so
+    standalone scripts / tests that never boot the app are unaffected. The
+    Web UI Embedder settings page writes these keys via ``SettingsManager``;
+    they take effect on the next server start (the embedder is a per-process
+    singleton).
+    """
+    overrides: dict[str, Any] = {}
+    try:
+        import kazma_core.config_store as _cs_mod
+
+        store = getattr(_cs_mod, "_config_store", None)
+        if store is None:
+            return overrides
+        for key in ("provider", "model", "dim", "base_url", "api_key_env"):
+            try:
+                val = store.get(f"embedding.{key}")
+            except Exception:
+                val = None
+            if val is not None and str(val).strip() != "":
+                overrides[key] = val
+    except Exception:
+        pass
+    return overrides
+
+
 def _read_embedding_config() -> dict[str, Any]:
-    """Read the embedding config from kazma.yaml with env-var fallbacks.
+    """Read the embedding config: env vars > ConfigStore > kazma.yaml > defaults.
 
     Returns a dict with keys: provider, model, dim, base_url, api_key.
     """
@@ -315,11 +358,18 @@ def _read_embedding_config() -> dict[str, Any]:
     except Exception:
         pass
 
+    # From ConfigStore (Web UI Embedder settings page) — wins over yaml.
+    cfg = {**cfg, **_store_embedding_overrides()}
+
     provider = (
         os.environ.get("KAZMA_EMBED_PROVIDER", "")
         or cfg.get("provider", DEFAULT_PROVIDER)
     ).strip().lower()
-    model = os.environ.get("KAZMA_EMBED_MODEL", "") or cfg.get("model", DEFAULT_MODEL)
+    model = (
+        os.environ.get("KAZMA_EMBED_MODEL", "")
+        or os.environ.get("KAZMA_VECTOR_MODEL", "")
+        or cfg.get("model", DEFAULT_MODEL)
+    )
     dim = cfg.get("dim", DEFAULT_DIM)
     try:
         dim = int(os.environ.get("KAZMA_EMBED_DIM", "") or dim)
@@ -342,7 +392,51 @@ def _read_embedding_config() -> dict[str, Any]:
         "dim": dim,
         "base_url": base_url,
         "api_key": api_key,
+        "api_key_env": api_key_env,
     }
+
+
+def get_embedding_config() -> dict[str, Any]:
+    """Return the resolved embedding config WITHOUT secrets.
+
+    Same resolution as :func:`get_embedder` uses, minus the API key (the
+    caller only learns whether one is present). Used by the Web UI Embedder
+    settings page and health checks.
+    """
+    cfg = _read_embedding_config()
+    cfg["api_key_present"] = bool(cfg.get("api_key"))
+    cfg.pop("api_key", None)
+    return cfg
+
+
+def get_embedding_model_name() -> str:
+    """Return the resolved embedding model name (no side effects).
+
+    Used to stamp ``embedding_model_version`` on new rows so existing
+    databases (whose column DEFAULT predates a model switch) stay accurate.
+    """
+    return _read_embedding_config()["model"]
+
+
+def get_embedder_status() -> dict[str, Any]:
+    """Return the embedder configuration + live-singleton state (no model load).
+
+    ``active`` is None until the embedder has actually been instantiated in
+    this process (config is not enough to know the class). The UI uses this
+    to show the "restart required" banner when ``active`` disagrees with the
+    resolved ``config``.
+    """
+    config = get_embedding_config()
+    active: dict[str, Any] | None = None
+    if _embedder is not None:
+        active = {
+            "class": type(_embedder).__name__,
+            "dim": getattr(_embedder, "dim", None),
+            "model": getattr(_embedder, "_model_name", None)
+            or getattr(_embedder, "_model", None)
+            or None,
+        }
+    return {"config": config, "active": active}
 
 
 _embedder: Embedder | None = None
@@ -357,7 +451,7 @@ def get_embedder() -> Embedder | None:
     callers already handle None gracefully).
 
     When a remote provider is configured but missing ``base_url``/API key,
-    fall back to the **default local model** (``all-MiniLM-L6-v2`` / 384-d),
+    fall back to the **default local model** (``BAAI/bge-m3`` / 1024-d),
     not the remote model name. Previously we kept ``nvidia/nv-embed-v1`` and
     tried to load it via sentence-transformers, which fails (gated HF repo)
     and silently kills store + per-turn recall.

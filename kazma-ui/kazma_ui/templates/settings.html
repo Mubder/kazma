@@ -17,6 +17,7 @@
         <button class="settings-tab" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">{{ t('settings.tab_shortcuts') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'embedder' }" @click="onTabChange('embedder')">{{ t('settings.tab_embedder') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
@@ -1237,6 +1238,152 @@
                 <template x-if="updateInfo?.error">
                     <span class="text-error" x-text="updateInfo.error"></span>
                 </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         EMBEDDER TAB — memory vector model
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'embedder'" x-transition>
+        <!-- Active embedder status -->
+        <div class="settings-group">
+            <h3>{{ t('settings.embedder_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.embedder_hint') }}
+            </div>
+            <div class="metrics-row" style="margin-bottom:16px">
+                <div class="metric-card">
+                    <div class="metric-value" x-text="embedderStatus.config.model || '—'" style="font-size:0.85rem;word-break:break-all"></div>
+                    <div class="metric-label">{{ t('settings.embedder_model') }}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="embedderStatus.config.dim || '—'"></div>
+                    <div class="metric-label">{{ t('settings.embedder_dim') }}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="embedderStatus.config.provider || '—'" style="font-size:0.85rem"></div>
+                    <div class="metric-label">{{ t('settings.embedder_provider') }}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="activeEmbedderClass()" style="font-size:0.85rem"></div>
+                    <div class="metric-label">{{ t('settings.embedder_active_class') }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Restart-required banner -->
+        <div x-show="embedderRestartNeeded()" x-cloak style="margin-bottom:16px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem">
+            <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
+            <strong style="color:var(--warning)">{{ t('settings.embedder_restart_needed') }}</strong>
+            <div style="color:var(--text-muted);margin-top:4px">{{ t('settings.embedder_restart_needed_hint') }}</div>
+        </div>
+
+        <!-- Config form -->
+        <div class="settings-group">
+            <h3>{{ t('settings.embedder_config_title') }}</h3>
+            <div class="form-group">
+                <label>{{ t('settings.embedder_provider') }}</label>
+                <select class="form-select" x-model="embedder.provider">
+                    <option value="local">{{ t('settings.embedder_provider_local') }}</option>
+                    <option value="openai-compatible">{{ t('settings.embedder_provider_remote') }}</option>
+                </select>
+                <div class="form-hint">{{ t('settings.embedder_provider_hint') }}</div>
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.embedder_model') }}</label>
+                <select class="form-select" x-model="embedder._preset" @change="applyEmbedderPreset()">
+                    <template x-for="p in embedderPresets" :key="p.model">
+                        <option :value="p.model" x-text="p.label"></option>
+                    </template>
+                    <option value="__custom__">{{ t('settings.embedder_model_custom') }}</option>
+                </select>
+                <div class="form-hint">{{ t('settings.embedder_model_hint') }}</div>
+            </div>
+            <div x-show="embedder._preset === '__custom__'">
+                <div class="form-group">
+                    <label>{{ t('settings.embedder_custom_model') }}</label>
+                    <input type="text" class="form-input" x-model="embedder.model" placeholder="BAAI/bge-m3">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.embedder_dim') }}</label>
+                <input type="number" class="form-input" x-model.number="embedder.dim" min="1" step="1" style="max-width:200px">
+                <div class="form-hint">{{ t('settings.embedder_dim_hint') }}</div>
+            </div>
+            <div x-show="embedder.provider === 'openai-compatible'" x-cloak>
+                <div class="form-group">
+                    <label>{{ t('settings.embedder_base_url') }}</label>
+                    <input type="text" class="form-input" x-model="embedder.base_url" placeholder="https://integrate.api.nvidia.com/v1">
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.embedder_api_key_env') }}</label>
+                    <input type="text" class="form-input" x-model="embedder.api_key_env" placeholder="KAZMA_EMBED_API_KEY">
+                    <div class="form-hint">{{ t('settings.embedder_api_key_env_hint') }}</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+                <button class="btn btn-primary" @click="saveEmbedder()" :disabled="embedderSaving" x-text="embedderSaving ? '…' : t('settings.embedder_save')"></button>
+                <button class="btn btn-danger" @click="restartServer()" :disabled="embedderRestarting || embedderRestartNeeded() === false" x-text="embedderRestarting ? '…' : t('settings.embedder_restart_btn')"></button>
+            </div>
+        </div>
+
+        <!-- Vector-space composition -->
+        <div class="settings-group">
+            <h3>{{ t('settings.embedder_db_title') }}</h3>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px">{{ t('settings.embedder_db_hint') }}</div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+                <thead>
+                    <tr style="color:var(--text-muted);text-align:left;border-bottom:1px solid var(--border)">
+                        <th style="padding:6px 8px">{{ t('settings.embedder_db_version') }}</th>
+                        <th style="padding:6px 8px">{{ t('settings.embedder_db_episodes') }}</th>
+                        <th style="padding:6px 8px">{{ t('settings.embedder_db_beliefs') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="v in embedderDbVersions()" :key="v.version">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+                            <td style="padding:6px 8px;font-family:var(--font-mono)" x-text="v.version" :style="v.version === (embedderStatus.config.model || '') ? 'color:var(--success)' : 'color:var(--warning)'"></td>
+                            <td style="padding:6px 8px" x-text="v.episodes"></td>
+                            <td style="padding:6px 8px" x-text="v.beliefs"></td>
+                        </tr>
+                    </template>
+                    <tr x-show="embedderDbVersions().length === 0">
+                        <td colspan="3" style="padding:10px 8px;color:var(--text-muted)">{{ t('settings.embedder_db_empty') }}</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div style="margin-top:12px;padding:10px 12px;background:rgba(255,193,7,0.06);border:1px solid rgba(255,193,7,0.25);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted)">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.embedder_rebuild_hint') }}
+            </div>
+            <div style="margin-top:12px">
+                <button class="btn btn-danger" @click="rebuildEmbeddings()" :disabled="embedderRebuilding || embedderRebuildStatus.state === 'running'">
+                    <template x-if="embedderRebuildStatus.state !== 'running'">{{ t('settings.embedder_rebuild_btn') }}</template>
+                    <template x-if="embedderRebuildStatus.state === 'running'">{{ t('settings.embedder_rebuild_running') }}</template>
+                </button>
+                <div x-show="embedderRebuildStatus.state !== 'idle'" x-cloak style="margin-top:10px">
+                    <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">
+                        <span x-text="embedderRebuildStatus.state === 'done' ? t('settings.embedder_rebuild_done') : (embedderRebuildStatus.state === 'error' ? t('settings.embedder_rebuild_error') : (embedderRebuildStatus.done + ' / ' + (embedderRebuildStatus.total || '…')))"></span>
+                        <span x-show="embedderRebuildStatus.model" x-text="embedderRebuildStatus.model"></span>
+                    </div>
+                    <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:999px;height:10px;overflow:hidden">
+                        <div style="height:100%;background:var(--accent,#6366f1);transition:width .5s;width:0%" :style="{ width: rebuildPercent() + '%' }"></div>
+                    </div>
+                    <div x-show="embedderRebuildStatus.error" x-cloak style="margin-top:6px;color:var(--danger);font-size:0.8rem" x-text="embedderRebuildStatus.error"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manual fallback -->
+        <div class="settings-group">
+            <h3>{{ t('settings.embedder_manual_title') }}</h3>
+            <div style="font-size:0.8rem;color:var(--text-muted)">
+                {{ t('settings.embedder_manual_hint') }}
+            </div>
+            <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-family:var(--font-mono);font-size:0.78rem;margin-top:8px">
+                python scripts/reembed.py
             </div>
         </div>
     </div>

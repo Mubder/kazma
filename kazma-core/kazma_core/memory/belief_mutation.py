@@ -292,18 +292,26 @@ def _insert_belief(
     supersedes_id: str | None = None,
 ) -> dict[str, Any]:
     meta = {"memory_class": mem_class}
+    try:
+        from kazma_core.memory.embedder import get_embedding_model_name
+
+        emb_version = get_embedding_model_name()
+    except Exception:
+        emb_version = ""
     conn.execute(
         """INSERT OR IGNORE INTO beliefs
            (id, tenant_id, subject, predicate, predicate_type, object,
             confidence, structural_importance, source_trust_weight,
             valid_from, ingested_at, supersedes_id, source_session,
-            source_turn, extraction_method, metadata_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            source_turn, extraction_method, metadata_json,
+            embedding_model_version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             bid, tenant_id, sub, pred, ptype, obj,
             float(confidence), int(importance), float(trust),
             now, now, supersedes_id, source_session, source_turn,
             extraction_method, json.dumps(meta, ensure_ascii=False),
+            emb_version,
         ),
     )
     # Compute + store the belief embedding so dense (semantic) recall can

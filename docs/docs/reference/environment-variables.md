@@ -80,7 +80,12 @@ Generic `ConfigStore.get()` does **not** automatically overlay every env var —
 |----------|---------|----------------|---------|
 | `KAZMA_WORKSPACE` | active WorkspaceStore / data dir | Prod root policy | Agent filesystem workspace root. |
 | `KAZMA_VECTOR_COLLECTION` | `agent_memory` | No | Chroma collection name. |
-| `KAZMA_VECTOR_MODEL` | `all-MiniLM-L6-v2` | No | Embedding model id. |
+| `KAZMA_VECTOR_MODEL` | `BAAI/bge-m3` | No | Legacy alias for the embedding model id (prefer `KAZMA_EMBED_MODEL`). |
+| `KAZMA_EMBED_PROVIDER` | `local` | No | Embedding provider (`local` or `openai-compatible`). |
+| `KAZMA_EMBED_MODEL` | `BAAI/bge-m3` | No | Embedding model id (overrides `memory.embedding.model`). |
+| `KAZMA_EMBED_DIM` | `1024` | No | Embedding dimension (must match the model's output). |
+| `KAZMA_EMBED_BASE_URL` | unset | Remote only | `/embeddings` endpoint base URL for `openai-compatible`. |
+| `KAZMA_EMBED_API_KEY` | unset | Remote only | API key for the remote `/embeddings` endpoint. |
 | `KAZMA_DEMO_MODE` | unset | **No** | Demo fixtures — never enable in real prod. |
 
 ---

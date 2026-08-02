@@ -100,11 +100,23 @@ def build_memory_health() -> dict[str, Any]:
 
     # ── Embedder ──────────────────────────────────────────────────────
     emb_cfg = (cfg.get("embedding") or {}) if isinstance(cfg.get("embedding"), dict) else {}
-    provider = str(
-        os.environ.get("KAZMA_EMBED_PROVIDER", "") or emb_cfg.get("provider", "local")
-    ).strip().lower()
-    model = str(os.environ.get("KAZMA_EMBED_MODEL", "") or emb_cfg.get("model", "all-MiniLM-L6-v2"))
-    api_key_env = str(emb_cfg.get("api_key_env") or "KAZMA_EMBED_API_KEY")
+    _emb_cfg: dict[str, Any] = {}
+    try:
+        from kazma_core.memory.embedder import get_embedding_config, DEFAULT_MODEL
+
+        _emb_cfg = get_embedding_config()
+        provider = str(_emb_cfg["provider"])
+        model = str(_emb_cfg["model"])
+    except Exception:
+        provider = str(
+            os.environ.get("KAZMA_EMBED_PROVIDER", "") or emb_cfg.get("provider", "local")
+        ).strip().lower()
+        model = str(
+            os.environ.get("KAZMA_EMBED_MODEL", "")
+            or emb_cfg.get("model", "BAAI/bge-m3")
+        )
+    _cfg = _emb_cfg if _emb_cfg else emb_cfg
+    api_key_env = str(_cfg.get("api_key_env") or "KAZMA_EMBED_API_KEY")
     has_key = bool(
         os.environ.get(api_key_env)
         or os.environ.get("KAZMA_EMBED_API_KEY")
@@ -112,7 +124,7 @@ def build_memory_health() -> dict[str, Any]:
         or os.environ.get("NGC_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
     )
-    base_url = str(os.environ.get("KAZMA_EMBED_BASE_URL", "") or emb_cfg.get("base_url", "")).strip()
+    base_url = str(os.environ.get("KAZMA_EMBED_BASE_URL", "") or _cfg.get("base_url", "")).strip()
 
     emb_ok = False
     emb_status = "error"
@@ -155,7 +167,7 @@ def build_memory_health() -> dict[str, Any]:
             emb_detail = (
                 f"Remote provider '{provider}' has no API key "
                 f"(set {api_key_env} or NVIDIA_API_KEY). "
-                f"Falling back to local MiniLM — working, but not using {model}."
+                f"Falling back to local {model} — working, but not using {model}."
             )
         elif not emb_ok:
             emb_status = "error"
@@ -283,7 +295,7 @@ def build_memory_health() -> dict[str, Any]:
 
     pkgs = [
         ("pkg_chromadb", "Package: chromadb", "chromadb", "Required for VectorMemory / L1."),
-        ("pkg_st", "Package: sentence-transformers", "sentence_transformers", "Required for local MiniLM embeddings."),
+        ("pkg_st", "Package: sentence-transformers", "sentence_transformers", "Required for local embeddings."),
         ("pkg_sqlite_vec", "Package: sqlite-vec", "sqlite_vec", "Required for L4 local vectors."),
         (
             "pkg_psycopg",

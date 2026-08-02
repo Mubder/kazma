@@ -34,6 +34,25 @@ def test_get_embedding_dim_default(monkeypatch):
     assert dim >= 1
 
 
+def test_default_model_is_multilingual_1024():
+    """The shipped default embedder is BAAI/bge-m3 @ 1024-dim."""
+    assert DEFAULT_MODEL == "BAAI/bge-m3"
+    assert DEFAULT_DIM == 1024
+
+
+def test_embedding_model_name_env_override(monkeypatch):
+    """KAZMA_EMBED_MODEL (and legacy KAZMA_VECTOR_MODEL alias) win."""
+    from kazma_core.memory.embedder import get_embedding_model_name
+
+    monkeypatch.setenv("KAZMA_EMBED_MODEL", "test/local-model")
+    monkeypatch.delenv("KAZMA_VECTOR_MODEL", raising=False)
+    assert get_embedding_model_name() == "test/local-model"
+
+    monkeypatch.delenv("KAZMA_EMBED_MODEL")
+    monkeypatch.setenv("KAZMA_VECTOR_MODEL", "legacy/alias-model")
+    assert get_embedding_model_name() == "legacy/alias-model"
+
+
 def test_unknown_provider_warns(monkeypatch):
     """An unknown provider string falls back to local with a warning."""
     monkeypatch.setenv("KAZMA_EMBED_PROVIDER", "invalid-provider")

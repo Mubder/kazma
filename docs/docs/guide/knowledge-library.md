@@ -31,7 +31,7 @@ When you give Kazma a seed URL (e.g. `https://developers.facebook.com/docs/whats
 1. **Discovery (sitemap-first).** Kazma reads `robots.txt` for `Sitemap:` directives, then tries `/sitemap.xml`, `/sitemap_index.xml`, `/docs/sitemap.xml`. The resulting URLs are filtered to the **seed's path prefix** (`/docs/whatsapp/overview` → `/docs/whatsapp/`), so the crawl stays inside the doc subtree and doesn't wander into unrelated docs. Fallback: BFS link-walk using Playwright-rendered HTML (so SPA nav links are captured).
 2. **Fetch (tiered + tab-aware).** Each page is fetched via the shared tiered extractor (Jina → Firecrawl → httpx+trafilatura → Playwright). Tabbed/JS pages get a Playwright full-DOM pass that pulls text from **all** elements including hidden panels, so per-tab content isn't lost.
 3. **Chunk (hierarchy-aware).** Markdown is split on `#`/`##`/`###`/`####` headers with a section breadcrumb (`"Messages > Send Text Message"`). **Fenced code blocks are atomic** — never split, even when oversized.
-4. **Embed + index.** Each chunk is embedded (local `all-MiniLM-L6-v2` by default, or any OpenAI-compatible `/embeddings`) and stored in a per-library ChromaDB collection + a dedicated FTS5 table + SQLite (source of truth). Re-ingest dedups via `content_hash`.
+4. **Embed + index.** Each chunk is embedded (local `BAAI/bge-m3` by default, or any OpenAI-compatible `/embeddings`) and stored in a per-library ChromaDB collection + a dedicated FTS5 table + SQLite (source of truth). Re-ingest dedups via `content_hash`.
 
 Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZMA_KB_MAX_DEPTH` (default 10), `KAZMA_KB_DELAY_MS` (default 300), `KAZMA_KB_SCOPE_MODE` (`tree` | `prefix` | `domain` | `exact`, default **`tree`**).
 
@@ -139,7 +139,7 @@ Indexed retrieval needs the `rag` extra (`pip install kazma[rag]` → `chromadb`
   The job's `errors` list (visible in the progress panel + `/kb status`) names the missing backend when all tiers fail, so you know exactly which to enable.
 - **Chromium binary is separate from the Python package.** `pip install kazma[web]` installs the playwright Python bindings; you still need `playwright install chromium` to download the browser binary itself. The job error names this explicitly: *"Chromium binary not installed (run: playwright install chromium)"*.
 - A small fraction of heavily-obfuscated SPA doc sites can resist all of the above. Pages that fail are reported in the job log so you can add them manually.
-- Local embeddings (`all-MiniLM-L6-v2`) are free but slower on CPU; remote (e.g. NVIDIA NIM `nv-embed-v1`) is faster/better but costs money. See `memory.embedding:` in `kazma.yaml`.
+- Local embeddings (`BAAI/bge-m3`) are free but slower on CPU; remote (e.g. NVIDIA NIM `nv-embed-v1`) is faster/better but costs money. See `memory.embedding:` in `kazma.yaml` or the **Settings → Embedder** page.
 - Crawl is bounded by `KAZMA_KB_MAX_PAGES` (hard cap 1000) to prevent runaway.
 - **Library IDs are slugged automatically** to keep them ChromaDB-safe (`"Meta WhatsApp Docs"` → `meta_whatsapp_docs`). Spaces/uppercase in the input are normalized on insert; you'll see the slug form in the UI.
 - **Job registries are per-process**: a crawl started from the web UI is visible via `/api/kb/jobs/{id}` (web) but not via `/kb status` (chat), and vice versa. Cross-process job visibility is a planned future improvement; for now, start and check from the same surface.

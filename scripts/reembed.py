@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Re-embed all beliefs and episodes after an embedder model change.
 
-Run AFTER updating ``memory.embedding`` in ``kazma.yaml`` (model + dim).
-The script:
+Run AFTER updating ``memory.embedding`` in ``kazma.yaml`` (model + dim) —
+or after saving a new model in the Web UI Embedder settings page and
+restarting the server. The script:
   1. Backs up ``memory_state.db`` to ``memory_state.db.pre_reembed``
-  2. NULLs out existing 384-dim embedding BLOBs (preserves all source text)
-  3. Re-encodes every belief and episode with the **new** embedder
+  2. NULLs out existing embedding BLOBs whose model version differs
+     (preserves all source text)
+  3. Re-encodes every affected belief and episode with the **new** embedder
   4. Deletes the ChromaDB ``vector_memory/`` directory (auto-recreates)
   5. Updates ``embedding_model_version`` on every row
+
+The Web UI "Rebuild embeddings" button runs the same logic in-process
+(incremental — only rows not already in the current vector space).
 
 Usage::
 
@@ -97,10 +102,22 @@ def main() -> int:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
 
-    # 3. NULL out old embeddings ------------------------------------------------
-    logger.info("NULLing existing embeddings (preserving source text) …")
-    conn.execute("UPDATE episodes SET embedding = NULL")
-    conn.execute("UPDATE beliefs SET embedding = NULL")
+    # 3. NULL out embeddings that are NOT already in the target vector
+    #    space (NULL-version rows are treated as stale) -------------------
+    from kazma_core.memory.embedder import get_embedding_model_name
+
+    model_name = get_embedding_model_name()
+    logger.info("NULLing embeddings not stamped '%s' (preserving source text) …", model_name)
+    conn.execute(
+        "UPDATE episodes SET embedding = NULL "
+        "WHERE embedding_model_version IS NULL OR embedding_model_version != ?",
+        (model_name,),
+    )
+    conn.execute(
+        "UPDATE beliefs SET embedding = NULL "
+        "WHERE embedding_model_version IS NULL OR embedding_model_version != ?",
+        (model_name,),
+    )
     conn.commit()
 
     # 4. Load the NEW embedder -------------------------------------------------
@@ -109,10 +126,6 @@ def main() -> int:
     emb = get_embedder()
     logger.info("Embedder ready in %.1fs", time.monotonic() - t0)
 
-    model_name = os.environ.get(
-        "KAZMA_EMBED_MODEL",
-        "BAAI/bge-m3",  # fallback; actual value comes from yaml
-    )
     dim = len(emb.encode("dimension probe"))
     logger.info("Embedder model=%s  dim=%d", model_name, dim)
 

@@ -489,6 +489,53 @@ class SettingsManager:
             return {"success": False, "error": f"Provider init failed: {exc}"}
         return await provider.test()
 
+    # ══════════════════════════════════════════════════════════════════
+    # EMBEDDER (memory vector model — Web UI Embedder settings page)
+    # ══════════════════════════════════════════════════════════════════
+
+    def get_embedder_settings(self) -> dict[str, Any]:
+        """Get the ConfigStore override for the memory embedder.
+
+        Returns only what is persisted in the store (empty strings when
+        unset). The *effective* config (store > kazma.yaml > defaults) is
+        resolved by ``kazma_core.memory.embedder.get_embedding_config()``.
+        """
+        return {
+            "provider": self._cs.get("embedding.provider", ""),
+            "model": self._cs.get("embedding.model", ""),
+            "dim": self._cs.get("embedding.dim", ""),
+            "base_url": self._cs.get("embedding.base_url", ""),
+            "api_key_env": self._cs.get("embedding.api_key_env", ""),
+        }
+
+    def save_embedder_settings(self, data: dict[str, Any]) -> None:
+        """Save the embedder override to ConfigStore (``embedding.*`` keys).
+
+        The embedder singleton is per-process, so the new model takes effect
+        on the next server restart — saving never hot-swaps the live model
+        (stamping + vector-space consistency require a clean boot).
+        """
+        provider = str(data.get("provider") or "").strip().lower()
+        if provider not in ("local", "openai-compatible"):
+            raise ValueError("Provider must be 'local' or 'openai-compatible'.")
+        model = str(data.get("model") or "").strip()
+        if not model:
+            raise ValueError("Model is required.")
+        try:
+            dim = int(data.get("dim") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Dimension must be an integer.")
+        if dim < 1:
+            raise ValueError("Dimension must be a positive integer.")
+        base_url = str(data.get("base_url") or "").strip()
+        api_key_env = str(data.get("api_key_env") or "KAZMA_EMBED_API_KEY").strip() or "KAZMA_EMBED_API_KEY"
+
+        self._cs.set("embedding.provider", provider, category="embedding")
+        self._cs.set("embedding.model", model, category="embedding")
+        self._cs.set("embedding.dim", int(dim), category="embedding")
+        self._cs.set("embedding.base_url", base_url, category="embedding")
+        self._cs.set("embedding.api_key_env", api_key_env, category="embedding")
+
     def get_context_settings(self) -> dict[str, Any]:
         """Get context window settings."""
         return {

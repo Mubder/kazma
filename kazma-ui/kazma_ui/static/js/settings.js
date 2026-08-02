@@ -58,6 +58,24 @@ function settingsApp() {
         proxyTestResult: null,
         proxyTesting: false,
 
+        // ── Embedder Tab ──
+        embedder: { provider: 'local', model: 'BAAI/bge-m3', dim: 1024, base_url: '', api_key_env: 'KAZMA_EMBED_API_KEY', _preset: 'BAAI/bge-m3' },
+        embedderStatus: { config: {}, active: null, db: { episodes: {}, beliefs: {} } },
+        embedderPresets: [
+            { model: 'BAAI/bge-m3', dim: 1024, label: 'BAAI/bge-m3 — multilingual (recommended)' },
+            { model: 'BAAI/bge-large-en-v1.5', dim: 1024, label: 'BAAI/bge-large-en-v1.5 — English' },
+            { model: 'intfloat/multilingual-e5-large', dim: 1024, label: 'intfloat/multilingual-e5-large' },
+            { model: 'Snowflake/snowflake-arctic-embed-l', dim: 1024, label: 'Snowflake arctic-embed-l (English)' },
+            { model: 'nomic-ai/nomic-embed-text-v1.5', dim: 768, label: 'nomic-embed-text-v1.5' },
+            { model: 'sentence-transformers/paraphrase-multilingual-mistral', dim: 768, label: 'paraphrase-multilingual-mistral' },
+            { model: 'all-MiniLM-L6-v2', dim: 384, label: 'all-MiniLM-L6-v2 — lightweight (legacy)' },
+        ],
+        embedderSaving: false,
+        embedderRestarting: false,
+        embedderRebuilding: false,
+        embedderRebuildStatus: { state: 'idle', model: '', total: 0, done: 0, error: null },
+        _embedderPollTimer: null,
+
         // ── Connectors Tab ──
         connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },
         connectorStatuses: {},
@@ -698,6 +716,210 @@ function settingsApp() {
                 this.proxyTestResult = { success: false, error: e.message };
             }
             this.proxyTesting = false;
+        },
+
+        /* ══════════════════════════════════════════════════════════════════
+           EMBEDDER TAB — memory vector model
+           ══════════════════════════════════════════════════════════════════ */
+
+        async loadEmbedder() {
+            try {
+                const data = await this._fetch('/api/settings/embedder');
+                if (!data) return;
+                this.embedderStatus = {
+                    config: data.config || {},
+                    active: data.active || null,
+                    db: data.db || { episodes: {}, beliefs: {} },
+                };
+                const store = data.store || {};
+                if (store.model) {
+                    this.embedder = {
+                        provider: store.provider || 'local',
+                        model: store.model,
+                        dim: store.dim ? Number(store.dim) : 1024,
+                        base_url: store.base_url || '',
+                        api_key_env: store.api_key_env || 'KAZMA_EMBED_API_KEY',
+                        _preset: this.embedderPresets.some(p => p.model === store.model) ? store.model : '__custom__',
+                    };
+                } else {
+                    // Nothing persisted in the store — mirror the effective config.
+                    const cfg = data.config || {};
+                    this.embedder = {
+                        provider: cfg.provider || 'local',
+                        model: cfg.model || 'BAAI/bge-m3',
+                        dim: cfg.dim || 1024,
+                        base_url: cfg.base_url || '',
+                        api_key_env: cfg.api_key_env || 'KAZMA_EMBED_API_KEY',
+                        _preset: this.embedderPresets.some(p => p.model === (cfg.model || '')) ? cfg.model : '__custom__',
+                    };
+                }
+                if (data.rebuild) this.embedderRebuildStatus = { state: 'idle', model: '', total: 0, done: 0, error: null, ...data.rebuild };
+                if (this.embedderRebuildStatus.state === 'running') this.startEmbedderRebuildPoll();
+            } catch (e) {
+                console.error('[Settings] Failed to load embedder status:', e);
+            }
+        },
+
+        applyEmbedderPreset() {
+            const preset = this.embedderPresets.find(p => p.model === this.embedder._preset);
+            if (preset) {
+                this.embedder.model = preset.model;
+                this.embedder.dim = preset.dim;
+            }
+        },
+
+        async saveEmbedder() {
+            if (!this.embedder.model || !String(this.embedder.model).trim()) {
+                showToast('Model is required', 'error');
+                return;
+            }
+            this.embedderSaving = true;
+            try {
+                const resp = await fetch('/api/settings/embedder', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.embedder),
+                });
+                const data = await resp.json();
+                if (data.status === 'error') {
+                    showToast(data.error || 'Save failed', 'error');
+                } else {
+                    showToast('Embedder settings saved. Restart the server to apply.', 'success');
+                    this.loadEmbedder();
+                }
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+            this.embedderSaving = false;
+        },
+
+        async restartServer() {
+            if (!this.embedderRestartNeeded()) {
+                showToast('No restart needed — config already matches the running embedder.', 'info');
+                return;
+            }
+            const ok = await window.kazmaConfirm({
+                title: 'Restart server?',
+                message: 'The server will restart with the saved embedder config. The page will reconnect automatically. Unsaved chat sessions are persisted.',
+                danger: true,
+            });
+            if (!ok) return;
+            this.embedderRestarting = true;
+            try {
+                const resp = await fetch('/api/settings/system/restart', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (data.status === 'error') {
+                    showToast(data.detail || 'Restart failed', 'error');
+                    this.embedderRestarting = false;
+                    return;
+                }
+                showToast('Restarting server… the page will reload shortly.', 'info', 5000);
+                // Poll the health endpoint until it comes back, then reload.
+                const start = Date.now();
+                const poll = async () => {
+                    try {
+                        const r = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
+                        if (r.ok && Date.now() - start > 3000) {
+                            window.location.reload();
+                            return;
+                        }
+                    } catch (e) { /* server down — expected during restart */ }
+                    if (Date.now() - start > 60000) {
+                        showToast('Server did not come back — check the terminal.', 'error');
+                        this.embedderRestarting = false;
+                        return;
+                    }
+                    setTimeout(poll, 1500);
+                };
+                setTimeout(poll, 1000);
+            } catch (e) {
+                showToast('Restart request failed: ' + e.message, 'error');
+                this.embedderRestarting = false;
+            }
+        },
+
+        async rebuildEmbeddings() {
+            const ok = await window.kazmaConfirm({
+                title: 'Rebuild embeddings?',
+                message: 'All memory rows not in the current vector space will be re-encoded with the active model. This runs in the background and can take a while for large stores. A backup is created automatically first.',
+                danger: true,
+            });
+            if (!ok) return;
+            this.embedderRebuilding = true;
+            try {
+                const resp = await fetch('/api/settings/embedder/rebuild', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    showToast('Rebuild started in the background.', 'success');
+                    this.startEmbedderRebuildPoll();
+                } else if (data.status === 'already') {
+                    showToast('A rebuild is already running.', 'info');
+                    this.startEmbedderRebuildPoll();
+                } else {
+                    showToast(data.detail || 'Failed to start rebuild', 'error');
+                }
+            } catch (e) {
+                showToast('Rebuild failed to start: ' + e.message, 'error');
+            }
+            this.embedderRebuilding = false;
+        },
+
+        startEmbedderRebuildPoll() {
+            if (this._embedderPollTimer) clearInterval(this._embedderPollTimer);
+            this._embedderPollTimer = setInterval(async () => {
+                try {
+                    const status = await this._fetch('/api/settings/embedder/rebuild');
+                    if (status) this.embedderRebuildStatus = status;
+                    if (status && status.state !== 'running') {
+                        clearInterval(this._embedderPollTimer);
+                        this._embedderPollTimer = null;
+                        this.loadEmbedder(); // refresh DB composition
+                        if (status.state === 'done') {
+                            showToast('Embedding rebuild complete.', 'success');
+                        } else if (status.state === 'error') {
+                            showToast('Embedding rebuild failed: ' + (status.error || 'unknown error'), 'error');
+                        }
+                    }
+                } catch (e) { /* server still up, keep polling */ }
+            }, 3000);
+        },
+
+        activeEmbedderClass() {
+            if (this.embedderStatus.active && this.embedderStatus.active.class) {
+                return this.embedderStatus.active.class.replace('Embedder', '');
+            }
+            return '—';
+        },
+
+        embedderRestartNeeded() {
+            const cfg = this.embedderStatus.config || {};
+            const active = this.embedderStatus.active;
+            if (!active) return true; // singleton not instantiated yet — restart harmless
+            const modelMatch = !active.model || active.model === (cfg.model || '');
+            const dimMatch = active.dim == cfg.dim;
+            return !(modelMatch && dimMatch);
+        },
+
+        embedderDbVersions() {
+            const db = this.embedderStatus.db || {};
+            const versions = new Set([...Object.keys(db.episodes || {}), ...Object.keys(db.beliefs || {})]);
+            return [...versions].map(v => ({
+                version: v,
+                episodes: (db.episodes || {})[v] || 0,
+                beliefs: (db.beliefs || {})[v] || 0,
+            })).sort((a, b) => (b.episodes + b.beliefs) - (a.episodes + a.beliefs));
+        },
+
+        rebuildPercent() {
+            const total = this.embedderRebuildStatus.total || 0;
+            if (!total) return 0;
+            return Math.min(100, Math.round((this.embedderRebuildStatus.done / total) * 100));
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -2302,6 +2524,7 @@ function settingsApp() {
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
+                case 'embedder': await this.loadEmbedder(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
