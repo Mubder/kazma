@@ -45,6 +45,19 @@ def _is_path_allowed(path_str: str) -> bool:
         return False
 
 
+def _connect_sqlite(db_uri: str) -> sqlite3.Connection:
+    """Connect to SQLite and attempt to load sqlite_vec extension if available."""
+    conn = sqlite3.connect(db_uri)
+    try:
+        import sqlite_vec
+
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+    except Exception:
+        pass
+    return conn
+
+
 async def inspect_db_schema(db_uri: str) -> str:
     """Extract list of tables, column names, data types, primary/foreign keys, and indexes from SQLite databases.
 
@@ -65,7 +78,7 @@ async def inspect_db_schema(db_uri: str) -> str:
             return f"Error: Database file not found: {db_uri}"
 
     try:
-        conn = sqlite3.connect(db_uri)
+        conn = _connect_sqlite(db_uri)
         cursor = conn.cursor()
 
         # Get list of tables
@@ -167,7 +180,7 @@ async def execute_db_query(
             return f"Error: Database file not found: {db_uri}"
 
     try:
-        conn = sqlite3.connect(db_uri)
+        conn = _connect_sqlite(db_uri)
         conn.row_factory = sqlite3.Row
 
         # Read-only authorizer: allow SELECT/READ plus safe scalar/aggregate

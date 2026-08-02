@@ -216,6 +216,40 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     return out
 
 
+def prune_messages_if_exceeding_cap(messages: list[dict[str, Any]], max_tokens: int = 30000) -> list[dict[str, Any]]:
+    """Prune message history if estimated tokens exceeds max_tokens.
+
+    Preserves system messages and the most recent turn history while truncating
+    large intermediate tool outputs and dropping older turns to keep the LLM
+    from exceeding vendor context limits and returning empty completions.
+    """
+    from kazma_core.summarizer import estimate_tokens
+
+    if estimate_tokens(messages) <= max_tokens:
+        return messages
+
+    system_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+    non_system = [m for m in messages if isinstance(m, dict) and m.get("role") != "system"]
+
+    truncated_non_system = []
+    for m in non_system:
+        m_copy = dict(m)
+        if m_copy.get("role") == "tool" and isinstance(m_copy.get("content"), str):
+            if len(m_copy["content"]) > 2000:
+                m_copy["content"] = m_copy["content"][:2000] + "\n[Tool output truncated for context limits]"
+        truncated_non_system.append(m_copy)
+
+    while len(truncated_non_system) > 6 and estimate_tokens(system_msgs + truncated_non_system) > max_tokens:
+        truncated_non_system.pop(0)
+
+    repaired = sanitize_tool_chains(system_msgs + truncated_non_system)
+    logger.info(
+        "[ContextPruner] Pruned message history from %d tokens to %d tokens",
+        estimate_tokens(messages), estimate_tokens(repaired),
+    )
+    return repaired
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # HITL approval summary (compact, never dumps large blob args verbatim)
 # ══════════════════════════════════════════════════════════════════════════
@@ -620,6 +654,7 @@ async def supervisor_node(
     # provider call forever. Sanitizing here also heals the thread: the
     # repaired list is what gets persisted by the return paths below.
     messages = sanitize_tool_chains(messages)
+    messages = prune_messages_if_exceeding_cap(messages)
 
     # Soft force-plan: on the first supervisor hop of a tool-capable turn,
     # remind the model to open with a ```plan fence so the UI workbench
@@ -1471,9 +1506,16 @@ async def summarize_node(
         m for m in messages if not (m.get("role") == "system" and "CONVERSATION SUMMARY" in str(m.get("content", "")))
     ]
 
-    new_messages = [summary_msg] + filtered
+    system_msgs = [m for m in filtered if m.get("role") == "system"]
+    recent_msgs = [m for m in filtered if m.get("role") != "system"][-6:]
 
-    logger.info("[Summarize] Injected summary (%d chars) at position 0", len(summary_text))
+    new_messages = system_msgs + [summary_msg] + recent_msgs
+    new_messages = sanitize_tool_chains(new_messages)
+
+    logger.info(
+        "[Summarize] Injected summary (%d chars) at position 0; compacted messages from %d to %d",
+        len(summary_text), len(messages), len(new_messages),
+    )
 
     return {
         "messages": new_messages,
