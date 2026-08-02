@@ -2557,12 +2557,23 @@
     var attempts = 0;
     var maxAttempts = 18;  // 90s at 5s intervals
     var lastMessageHash = '';  // track changes to avoid re-rendering
+    var _savedScrollPos = 0;  // preserve scroll position
 
     function _hashMessages(msgs) {
       // Simple hash: count + last message content length
       var last = msgs[msgs.length - 1];
       var lastLen = last && last.content ? last.content.length : 0;
       return msgs.length + ':' + lastLen;
+    }
+
+    function _saveScrollPosition() {
+      _savedScrollPos = messagesEl ? messagesEl.scrollTop : 0;
+    }
+
+    function _restoreScrollPosition() {
+      if (messagesEl) {
+        messagesEl.scrollTop = _savedScrollPos;
+      }
     }
 
     function poll() {
@@ -2595,14 +2606,18 @@
           // the pending-content check below, never via growth.)
           if (originalCount > 0 && messages.length > originalCount) {
             _bgPollingSession = null;
+            _saveScrollPosition();
             loadSession(sessionId);  // re-renders with the completed response
+            setTimeout(_restoreScrollPosition, 100);
             return;
           }
           // Check if the pending message now has content (final persist popped it)
           var lastMsg = messages[messages.length - 1];
           if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content && !lastMsg.pending) {
             _bgPollingSession = null;
+            _saveScrollPosition();
             loadSession(sessionId);
+            setTimeout(_restoreScrollPosition, 100);
             return;
           }
           
