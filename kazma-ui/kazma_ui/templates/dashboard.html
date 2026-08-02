@@ -747,36 +747,36 @@
     var v2 = data.v2 || {};
     var beliefs = v2.beliefs || {};
     var episodes = v2.episodes || {};
-    var entities = v2.entities || {};
-    var nodesN = beliefs.active != null ? beliefs.active : 0;
-    var edgesN = (beliefs.active != null ? beliefs.active : 0) + (beliefs.superseded != null ? beliefs.superseded : 0);
+    var entitiesTotal = typeof v2.entities === 'number' ? v2.entities : 0;
+    
+    var activeBeliefs = beliefs.active != null ? beliefs.active : 0;
+    var supersededBeliefs = beliefs.superseded != null ? beliefs.superseded : 0;
+    var episodicCount = episodes.episodic != null ? episodes.episodic : 0;
+    var workingCount = episodes.working != null ? episodes.working : 0;
+    
     var set = function(id, text) {
       var n = document.getElementById(id);
       if (n) n.textContent = text;
     };
-    // V2 memory stats: beliefs, episodes, entities
-    var beliefsLabel = I18N.kpiBeliefs || 'Beliefs';
-    var episodesLabel = I18N.kpiEpisodes || 'Episodes';
-    var entitiesLabel = I18N.kpiEntities || 'Entities';
     var okLbl = I18N.kpiOk || 'OK';
     
-    // Show V2 beliefs count (replaces legacy L1 Chroma vector count)
-    set('kpi-vector-count', data.v2 ? String(nodesN) : '–');
-    set('kpi-vector-size', data.v2 ? beliefsLabel : '–');
+    // Beliefs card: show active count, subtitle shows superseded
+    set('kpi-vector-count', data.v2 ? String(activeBeliefs) : '–');
+    set('kpi-vector-size', data.v2 ? (supersededBeliefs + ' superseded') : '–');
     
-    // Show V2 episodes count (replaces legacy L3 BM25 FTS count)
-    set('kpi-fts-count', data.v2 ? String(episodes.active || 0) : '–');
-    set('kpi-fts-size', data.v2 ? episodesLabel : '–');
+    // Episodes card: show episodic count, subtitle shows working
+    set('kpi-fts-count', data.v2 ? String(episodicCount) : '–');
+    set('kpi-fts-size', data.v2 ? (workingCount + ' working') : '–');
     
-    // Show V2 entities (replaces legacy L2 graph)
-    set('kpi-graph-nodes', data.v2 ? String(entities.active || 0) : '0');
-    set('kpi-graph-edges', (data.v2 ? (entities.active || 0) + ' ' + entitiesLabel : '–'));
+    // Entities card: show total count
+    set('kpi-graph-nodes', data.v2 ? String(entitiesTotal) : '0');
+    set('kpi-graph-edges', data.v2 ? 'total entities' : '–');
     
     var comps = Array.isArray(data.components) ? data.components : [];
     var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
     set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
-    set('graph-size-metric', data.v2 ? String(nodesN) + ' ' + beliefsLabel : '–');
-    set('graph-count-metric', (data.v2 ? (entities.active || 0) : 0) + ' ' + entitiesLabel);
+    set('graph-size-metric', data.v2 ? String(activeBeliefs) + ' beliefs' : '–');
+    set('graph-count-metric', (data.v2 ? entitiesTotal : 0) + ' entities');
   }
 
   function renderMemoryComponents(data) {
