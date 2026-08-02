@@ -849,7 +849,7 @@
     // Route over Central WebSocket Telemetry Bus if connected
     const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
     if (agentStore && agentStore.connectionStatus === 'connected') {
-      agentStore.sendPrompt(content, selectedModel || '');
+      agentStore.sendPrompt(content, selectedModel || '', attachmentsPayload);
       return;
     }
 

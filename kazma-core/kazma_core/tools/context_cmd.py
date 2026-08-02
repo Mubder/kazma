@@ -49,15 +49,35 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
 
     total_tokens = estimate_tokens(messages)
 
-    # Default context window (matches kazma.yaml default)
-    context_window = 16_000
+    # Context window: Settings UI (ConfigStore context.*) → yaml
+    # (memory.max_context_tokens) → 128k default. Mirrors
+    # KazmaAgent._resolve_context_window() — previously this fell back to
+    # 16k, understating utilization for every 128k-context model.
+    context_window = 128_000
     try:
         from kazma_core.config_store import get_config_store
 
         store = get_config_store()
-        context_window = store.get("memory.max_context_tokens", 16_000)
+        cs_val = store.get("context.max_context_tokens")
+        if cs_val is not None:
+            try:
+                context_window = max(1024, int(cs_val))
+            except (TypeError, ValueError):
+                pass
     except Exception as exc:
         logger.debug("Failed to read context_window config: %s", exc)
+    if context_window == 128_000:
+        try:
+            from kazma_core.config_store import get_config_store
+
+            yaml_val = get_config_store().get("memory.max_context_tokens")
+            if yaml_val is not None:
+                try:
+                    context_window = max(1024, int(yaml_val))
+                except (TypeError, ValueError):
+                    pass
+        except Exception as exc:
+            logger.debug("Failed to read yaml context_window config: %s", exc)
 
     pct = (total_tokens / context_window * 100) if context_window > 0 else 0
     threshold_pct = (TOKEN_THRESHOLD / context_window * 100) if context_window > 0 else 0

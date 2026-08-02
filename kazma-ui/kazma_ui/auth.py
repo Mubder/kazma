@@ -255,8 +255,18 @@ def get_kazma_secret() -> str:
             _generated_secret = secret
         return secret
     except Exception as exc:
-        logger.debug("[SECURITY] config_store get_kazma_secret failed: %s", exc)
-        return ""
+        # Fail-loud: never silently disable auth (open admin). Use a cached
+        # ephemeral random secret so tokens stay consistent within the process.
+        import secrets as _secrets
+
+        logger.error(
+            "[SECURITY] config_store get_kazma_secret failed: %s — auth using "
+            "ephemeral random secret; set KAZMA_SECRET to persist it",
+            exc,
+        )
+        if _generated_secret is None:
+            _generated_secret = _secrets.token_hex(16)
+        return _generated_secret
 
 
 def is_sensitive_path(path: str) -> bool:

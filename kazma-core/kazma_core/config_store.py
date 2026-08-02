@@ -119,6 +119,12 @@ def _redact_for_log(key: str, value: Any) -> str:
     return s if len(s) < 80 else s[:77] + "..."
 
 
+# Cached ephemeral secret generated when ConfigStore is unavailable. Cached
+# because auth checks call get_kazma_secret() per request — a fresh random
+# secret per call would invalidate every token immediately.
+_EPHEMERAL_SECRET: str | None = None
+
+
 def get_kazma_secret() -> str:
     """Central getter for KAZMA_SECRET (env → ConfigStore → auto-gen).
 
@@ -158,8 +164,21 @@ def get_kazma_secret() -> str:
         )
         return new_secret
     except Exception as exc:
-        logger.debug("[SECURITY] Could not load/generate ConfigStore secret: %s", exc)
-        return ""
+        # Fail-loud: a broken ConfigStore must NOT silently disable auth
+        # (returning "" leaves the admin surface open). Generate a cached
+        # ephemeral secret instead — auth stays ON, sessions just reset on
+        # restart. Set KAZMA_SECRET to make it stable.
+        global _EPHEMERAL_SECRET
+        logger.error(
+            "[SECURITY] ConfigStore unavailable (%s) — auth using ephemeral "
+            "random secret; set KAZMA_SECRET to persist it",
+            exc,
+        )
+        if _EPHEMERAL_SECRET is None:
+            import secrets
+
+            _EPHEMERAL_SECRET = secrets.token_hex(16)
+        return _EPHEMERAL_SECRET
 
 
 def get_or_create_disclosure_key(store: "ConfigStore" | None = None) -> str:

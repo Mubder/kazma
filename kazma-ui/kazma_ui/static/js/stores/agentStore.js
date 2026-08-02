@@ -292,7 +292,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── WebSocket Actions ────────────────────────────────────
-    sendPrompt(text, model) {
+    sendPrompt(text, model, attachments) {
       if (!text || !text.trim()) return;
       this.pendingApproval = null;
       this._beginTurn();
@@ -304,6 +304,13 @@ document.addEventListener('alpine:init', () => {
         text: text.trim(),
         model: model || '',
       };
+
+      // Attachments (binary uploads) carried over the WS bus the same way the
+      // SSE fallback sends them — the server builds the multimodal content
+      // via build_user_content (T7).
+      if (attachments && Array.isArray(attachments) && attachments.length) {
+        payload.attachments = attachments;
+      }
 
       this._sendPayload(payload);
     },
