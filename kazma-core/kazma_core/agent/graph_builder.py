@@ -1675,10 +1675,11 @@ def build_supervisor_graph(
         next_n = state.get("next_node")
         if next_n == NodeName.RESPOND or state.get("circuit_breaker_tripped") or (state.get("consecutive_tool_failures", 0) >= 3):
             return NodeName.RESPOND
-        from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
+        from kazma_core.summarizer import estimate_tokens
         msgs = state.get("messages", [])
-        if estimate_tokens(msgs) > TOKEN_THRESHOLD:
-            logger.info("[Router] Context tokens (%d) > threshold (%d) mid-turn — routing to check_saturation", estimate_tokens(msgs), TOKEN_THRESHOLD)
+        _MID_TURN_SATURATION_THRESHOLD = 24000
+        if estimate_tokens(msgs) > _MID_TURN_SATURATION_THRESHOLD:
+            logger.info("[Router] Context tokens (%d) > mid-turn threshold (%d) — routing to check_saturation", estimate_tokens(msgs), _MID_TURN_SATURATION_THRESHOLD)
             return NodeName.CHECK_SATURATION
         return state.get("next_node", NodeName.SUPERVISOR)
 
@@ -1732,13 +1733,14 @@ def build_supervisor_graph(
         },
     )
 
-    # Tool Worker → Supervisor / Respond (circuit breaker route)
+    # Tool Worker → Supervisor / Respond / Check Saturation
     graph.add_conditional_edges(
         NodeName.TOOL_WORKER,
         _route_from_worker,
         {
             NodeName.SUPERVISOR: NodeName.SUPERVISOR,
             NodeName.RESPOND: NodeName.RESPOND,
+            NodeName.CHECK_SATURATION: NodeName.CHECK_SATURATION,
         },
     )
 
