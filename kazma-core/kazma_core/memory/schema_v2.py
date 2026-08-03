@@ -262,6 +262,9 @@ def ensure_primary_schema(conn: Any) -> None:
     for col_sql in (
         "ALTER TABLE episodes ADD COLUMN embedding BLOB",
         "ALTER TABLE beliefs ADD COLUMN embedding BLOB",
+        # Phase A: access accounting on beliefs (episodes already have these columns)
+        "ALTER TABLE beliefs ADD COLUMN access_count INTEGER DEFAULT 0",
+        "ALTER TABLE beliefs ADD COLUMN last_accessed REAL",
     ):
         try:
             conn.execute(col_sql)

@@ -50,10 +50,14 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
     # ── Memory V2 cognitive engine (bi-temporal beliefs + tiers + PPR) ──
     # All keys flow through ConfigStore so the TUI/Settings panel can
     # surface and toggle them (AGENTS.md §8 single-source-of-truth rule).
-    # use_new_stack=True: V2 is the active read/write stack. Flip to False
-    # to roll back to the legacy 4-layer RRF stack (V1 stays in the repo).
+    # use_new_stack=True: V2 is the active stack. Flip to False only disables
+    # V2 injection/post-turn (V1 RRF stack was removed — no legacy rollback).
     "v2": {
         "use_new_stack": True,
+        # Phase A: bump access_count on successful recall hits
+        "access_bump_enabled": True,
+        # Phase A: score boost for same-session episodes (RRF units)
+        "session_boost": 0.35,
         # Source trust weights (W_trust in V_retention formula §4.1)
         "trust_weight_user": 1.0,
         "trust_weight_tool": 0.85,

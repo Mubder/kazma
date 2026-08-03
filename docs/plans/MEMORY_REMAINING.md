@@ -1,7 +1,7 @@
 # Memory — Done vs Remaining
 
-**Status date:** 2026-07-27  
-**Shipped polish commit:** see CHANGELOG *Memory polish P2–P7*  
+**Status date:** 2026-08-03  
+**Shipped polish commit:** see CHANGELOG *Memory polish P2–P7* + *Memory V2 Phase A*  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)
 
 Use this file when picking up memory work later. Do **not** start a greenfield rewrite unless a multi-replica product requirement appears.
@@ -28,76 +28,43 @@ Fail-closed store, config SoT, FTS unify, L2 SQLite graph, consolidator, dashboa
 
 ---
 
-## 2. Architecture (current truth)
+## 2. Architecture (current truth — V2 only)
 
 ```text
 User turn
-  → per-turn RAG (RRF: L1 Chroma + L2 graph + L3 FTS + L4 sqlite-vec)
-       → fence + injection-filter before system prompt
+  → per-turn recall() (beliefs + episodes hybrid + session bias + PPR)
+       → format_untrusted_block → system prompt
   → LLM reply
-  → schedule_post_turn_memory
-       → auto_store (heuristic vacuum)
-       → consolidator (librarian)
-            → if auto_store durable: skip LLM extract + skip adapter re-store
-            → graph triples always eligible
-            → adapter facts only when not skip_adapter
+  → schedule_post_turn_memory (OS thread)
+       → mirror_episode (+ optional promote-to-recall on "remember")
+       → heuristic belief extract
+       → enqueue micro_consolidation (LLM deep-pass on worker)
 
-Tools memory_store / memory_search → adapter first → VectorMemory fallback
+Tools memory_search → recall(); memory_store → V2 episode/belief
 KB (kazma_kb_*) → isolated from chat memory
 ```
 
-**Config keys** (`memory.*` — ConfigStore ← yaml):
-
-```yaml
-memory:
-  enabled: true
-  per_turn_retrieval: true
-  auto_store: true
-  auto_store_mode: both   # durable | turns | both
-  retrieval_top_k: 5
-  consolidation:
-    enabled: true
-    use_llm: true
-    min_user_chars: 24
-    every_n_turns: 1
-    skip_adapter_if_auto_stored: true
-    skip_llm_if_auto_stored: true   # P2
-    skip_llm_in_demo: true
-  embedding:
-    provider: local
-    model: BAAI/bge-m3
-    dim: 1024
-```
-
-**On-disk paths:**
+**On-disk (V2):**
 
 | Path | Role |
 |------|------|
-| `kazma-data/vector_memory/` | Chroma `agent_memory` (shared client) |
-| `kazma-data/memory.db` | FTS `memories` / `memories_fts` |
-| `kazma-data/knowledge_graph.db` | L2 property graph |
-| `kazma-data/vector.db` | L4 sqlite-vec (per-worker tables) |
+| `kazma-data/memory_state.db` | beliefs, episodes, entities, procedural DAGs |
+| `kazma-data/memory_ops.db` | task queue + audit |
 
-Install for full vector: `pip install -e ".[rag]"`.
+See `docs/docs/guide/memory-and-rag.md` and `docs/plans/MEMORY_V2_ONE_SHOT_PLAN.md`.
 
 ---
 
 ## 3. What remains (later)
 
-### V2 Cognitive Engine — SHIPPED (2026-07-31)
+### V2 Cognitive Engine — SHIPPED (2026-07-31) + Phase A fixes (2026-08-03)
 
-The "memory v2" rewrite that was previously "not planned" **is now done and
-production-live**. Bi-temporal belief graph, 4-tier episodes, Local Ego-Graph
-PPR retrieval, procedural skill DAGs, durable consolidation queue, and an
-idempotent backfill migration. See `docs/docs/guide/memory-and-rag.md`
-(V2 sections) and `MEMORY_CODEMAP.md` (V2 modules).
+Bi-temporal beliefs, episodes, PPR, durable queue, macro_sleep, backup/export.
+**V1 RRF stack was removed** — `use_new_stack=false` only disables V2 injection
+/post-turn; it does **not** restore L1–L4 RRF.
 
-Cutover state: `memory.v2.use_new_stack` **defaults to `true`** — the V1→V2
-cutover landed. V2 is the single read/write path for chat, swarm, self-
-improvement, and compaction memory. Run `backfill_v2.run_backfill()` once to
-migrate any pre-existing V1 corpus, then verify with
-`scripts/verify_v2_coverage.py`. Rollback is a one-flag flip (`false` restores
-the legacy 4-layer RRF stack; V1 code + stores are retained).
+Phase A (Sprint 1): access bump on recall, dense search over episodic+recall,
+session bias, post-turn metrics, explicit-remember → recall tier.
 
 ### Product / scale (only if required)
 

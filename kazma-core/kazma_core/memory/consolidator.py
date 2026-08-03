@@ -30,6 +30,7 @@ __all__ = [
     "reset_turn_counter",
     "schedule_post_turn_memory",
     "extract_turn_texts",
+    "get_post_turn_metrics",
 ]
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,45 @@ logger = logging.getLogger(__name__)
 # Process-local turn counter for every_n_turns cost control
 _turn_lock = threading.Lock()
 _turn_counter = 0
+
+# Phase A observability — process-local counters for Dashboard / health
+_metrics_lock = threading.Lock()
+_post_turn_metrics: dict[str, Any] = {
+    "ok": 0,
+    "mirror_fail": 0,
+    "extract_fail": 0,
+    "enqueue_fail": 0,
+    "thread_fail": 0,
+    "last_ok_at": None,
+    "last_error": None,
+    "last_error_at": None,
+}
+
+
+def get_post_turn_metrics() -> dict[str, Any]:
+    """Snapshot of post-turn pipeline counters (for health/dashboard)."""
+    with _metrics_lock:
+        return dict(_post_turn_metrics)
+
+
+def _metric_ok() -> None:
+    import time
+
+    with _metrics_lock:
+        _post_turn_metrics["ok"] += 1
+        _post_turn_metrics["last_ok_at"] = time.time()
+
+
+def _metric_fail(kind: str, exc: BaseException | None = None) -> None:
+    import time
+
+    with _metrics_lock:
+        key = f"{kind}_fail" if not kind.endswith("_fail") else kind
+        if key in _post_turn_metrics:
+            _post_turn_metrics[key] = int(_post_turn_metrics.get(key) or 0) + 1
+        if exc is not None:
+            _post_turn_metrics["last_error"] = f"{type(exc).__name__}: {exc}"[:400]
+            _post_turn_metrics["last_error_at"] = time.time()
 
 
 def reset_turn_counter() -> None:
@@ -159,13 +199,15 @@ def schedule_post_turn_memory(
         # ── V2 dual-write mirror ─────────────────────────────────────
         try:
             _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
-        except Exception:
-            logger.debug("[post_turn] V2 mirror failed", exc_info=True)
+        except Exception as exc:
+            logger.warning("[post_turn] V2 mirror failed: %s", exc, exc_info=True)
+            _metric_fail("mirror", exc)
         # ── Stage 1: sync heuristic extraction ───────────────────────
         try:
             _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
-        except Exception:
-            logger.debug("[post_turn] V2 heuristic extraction failed", exc_info=True)
+        except Exception as exc:
+            logger.warning("[post_turn] V2 heuristic extraction failed: %s", exc, exc_info=True)
+            _metric_fail("extract", exc)
         # ── Stage 2: enqueue LLM deep-pass on the worker loop ─────────
         # The micro_consolidation handler runs on the durable worker's
         # event loop (where httpx is valid), so it can safely call the LLM.
@@ -186,8 +228,15 @@ def schedule_post_turn_memory(
                     "micro_consolidation",
                     {"episode_id": eid},
                 )
-        except Exception:
-            logger.debug("[post_turn] could not enqueue micro_consolidation", exc_info=True)
+        except Exception as exc:
+            logger.warning(
+                "[post_turn] could not enqueue micro_consolidation: %s",
+                exc,
+                exc_info=True,
+            )
+            _metric_fail("enqueue", exc)
+        else:
+            _metric_ok()
 
     # V2 path runs in a DEDICATED OS thread (not the loop's executor) so
     # blocking sync calls cannot starve or gate V2 writes. A plain Thread
@@ -198,8 +247,9 @@ def schedule_post_turn_memory(
     try:
         t = threading.Thread(target=_run_v2_sync, daemon=True, name="kazma-v2-extract")
         t.start()
-    except Exception:
-        logger.debug("[post_turn] could not start V2 thread", exc_info=True)
+    except Exception as exc:
+        logger.warning("[post_turn] could not start V2 thread: %s", exc, exc_info=True)
+        _metric_fail("thread", exc)
 
 
 def _mirror_turn_to_v2(

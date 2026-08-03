@@ -257,6 +257,25 @@ class DualWriteMirror:
         eid = _episode_id(session_id, turn_number, content)
         now = time.time()
         meta = {"source": source}
+        # Explicit "remember" turns go straight to recall tier so dense search
+        # finds them immediately (Phase A — avoid episodic-only dense miss).
+        effective_tier = tier
+        effective_importance = int(importance)
+        ut_low = (user_text or "").strip().lower()
+        if any(
+            phrase in ut_low
+            for phrase in (
+                "remember that",
+                "remember my",
+                "remember this",
+                "don't forget",
+                "do not forget",
+                "note that",
+            )
+        ):
+            effective_tier = "recall"
+            effective_importance = max(effective_importance, 3)
+            meta["promote_reason"] = "explicit_remember"
         try:
             with self._lock:
                 self._primary.execute(
@@ -276,8 +295,8 @@ class DualWriteMirror:
                         (user_text or "")[:4000],
                         (assistant_text or "")[:4000],
                         (summary_text or "")[:2000],
-                        tier,
-                        int(importance),
+                        effective_tier,
+                        effective_importance,
                         now,
                         json.dumps(meta, ensure_ascii=False),
                         _embedding_model_version(),

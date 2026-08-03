@@ -69,7 +69,24 @@ def build_v2_health() -> dict[str, Any]:
         "procedural_dags": {"active": 0, "quarantine": 0},
         "queue": {"pending": 0, "processing": 0, "failed": 0},
         "recent_audits": 0,
+        "post_turn": {},
+        "embedder_ready": False,
+        "last_error": None,
     }
+    try:
+        from kazma_core.memory.consolidator import get_post_turn_metrics
+
+        out["post_turn"] = get_post_turn_metrics()
+        out["last_error"] = out["post_turn"].get("last_error")
+    except Exception:
+        pass
+    try:
+        from kazma_core.memory.embedder import get_embedder
+
+        emb = get_embedder()
+        out["embedder_ready"] = emb is not None
+    except Exception:
+        out["embedder_ready"] = False
 
     primary_conn = None
     ops_conn = None
@@ -128,10 +145,18 @@ def build_v2_health() -> dict[str, Any]:
 
         # Overall status
         if out["db_available"]:
-            out["status"] = "ACTIVE" if use_new_stack else "DUAL_WRITE"
-        # Degraded if queue has many failed tasks
+            # V1 dual-stack is gone — OFF when use_new_stack false means
+            # injection/post-turn disabled, not "legacy RRF active".
+            out["status"] = "ACTIVE" if use_new_stack else "OFF"
+        # Degraded if queue has many failed tasks or recent post-turn errors
         if out["queue"]["failed"] >= 5:
             out["status"] = "DEGRADED"
+        pt = out.get("post_turn") or {}
+        if int(pt.get("mirror_fail") or 0) + int(pt.get("extract_fail") or 0) >= 3:
+            out["status"] = "DEGRADED"
+        if pt.get("last_error") and out["status"] == "ACTIVE":
+            # Soft signal: still ACTIVE but surface error for UI banner
+            out["status_detail"] = "post_turn_errors"
     except Exception:
         logger.debug("[v2_health] build failed", exc_info=True)
         out["status"] = "DEGRADED"

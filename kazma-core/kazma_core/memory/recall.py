@@ -108,14 +108,21 @@ def recall(
         # bridged by the entities the episodes surface. This is how
         # "where do I live" → episode "I just moved to Paris" → belief
         # "user lives_in Paris" resolves without the query containing "Paris".
-        episodes = _recall_episodes(conn, query, vector_engine, tenant_id, limit)
+        episodes = _recall_episodes(
+            conn, query, vector_engine, tenant_id, limit,
+            session_id=session_id,
+        )
         beliefs = _recall_beliefs(
             conn, query, tenant_id, limit, seed_episodes=episodes,
             vector_engine=vector_engine,
         )
-        return RecallResult(beliefs=beliefs, episodes=episodes)
+        result = RecallResult(beliefs=beliefs, episodes=episodes)
+        # Phase A: bump access so macro_sleep promotion/retention is real.
+        if not result.empty:
+            _bump_access(conn, beliefs, episodes)
+        return result
     except Exception:
-        logger.debug("[recall] failed — returning empty", exc_info=True)
+        logger.warning("[recall] failed — returning empty", exc_info=True)
         return RecallResult([], [])
     finally:
         if own_conn and conn is not None:
@@ -355,6 +362,8 @@ def _recall_episodes(
     vector_engine: Any | None,
     tenant_id: str,
     limit: int,
+    *,
+    session_id: str | None = None,
 ) -> list[RecallHit]:
     """Hybrid episode search: FTS5 + dense + PPR, fused via RRF."""
     q = (query or "").strip()
@@ -364,15 +373,19 @@ def _recall_episodes(
     # ── Sparse: FTS5-style LIKE over user/assistant text ──
     sparse = _episode_fts(conn, q, tenant_id, limit * 3)
 
-    # ── Dense: VectorEngine cosine over recall-tier embeddings ──
+    # ── Dense: cosine over recall + episodic (fresh turns) ──
     dense = _episode_dense(conn, q, vector_engine, tenant_id, limit * 3)
 
-    # ── PPR boost over the belief graph seeded by top hybrid hits ──
+    # ── PPR boost over session cliques seeded by top hybrid hits ──
     ppr_seeds = [h.id for h in (sparse + dense)[:10]]
     ppr_scores = _episode_ppr(conn, ppr_seeds, tenant_id)
 
     # ── RRF fusion ──
     fused = _rrf_fuse(sparse, dense, ppr_scores, limit * 2)
+
+    # ── Session bias: boost same-thread episodes (Phase A) ──
+    if session_id:
+        fused = _apply_session_bias(conn, fused, session_id)
 
     # ── Deterministic dedup gate ──
     deduped = _dedup_gate(fused)
@@ -389,6 +402,7 @@ def _recall_episodes(
                     score=hit.score,
                     kind="episode",
                     source=hit.source,
+                    metadata=dict(hit.metadata or {}),
                 )
             )
     return out
@@ -473,7 +487,15 @@ def _episode_dense(
             return []
     except Exception:
         return []
-    results = vector_engine.search(qvec, tenant_id=tenant_id, tier="recall", limit=limit)
+    # Search both recall (promoted) and episodic (fresh post-turn writes).
+    # Searching only tier=recall was the main "semantic amnesia" footgun:
+    # dual_write defaults to tier=episodic, so new memories never dense-hit.
+    results = vector_engine.search(
+        qvec,
+        tenant_id=tenant_id,
+        tier=["recall", "episodic"],
+        limit=limit,
+    )
     return [
         RecallHit(id=eid, content="", score=float(sim), source="dense")
         for eid, sim in results
@@ -581,6 +603,109 @@ def _episode_ppr(
         return compute_local_ppr(seed_episode_ids, edges, alpha=0.15, max_iter=10, max_nodes=200)
     except Exception:
         return {}
+
+
+# ── Access accounting + session bias (Phase A) ────────────────────────────
+
+
+def _bump_access(
+    conn: sqlite3.Connection,
+    beliefs: list[RecallHit],
+    episodes: list[RecallHit],
+) -> None:
+    """Increment access_count / last_accessed for recalled rows.
+
+    Without this, macro_sleep promotion (access >= 2) never fires and
+    retention scoring stays stale. Best-effort — never raises to caller.
+    """
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        v2 = (read_memory_cfg() or {}).get("v2") or {}
+        if v2.get("access_bump_enabled", True) is False:
+            return
+    except Exception:
+        pass
+    now = __import__("time").time()
+    try:
+        for h in beliefs:
+            if not h.id:
+                continue
+            conn.execute(
+                """UPDATE beliefs
+                   SET access_count = COALESCE(access_count, 0) + 1,
+                       last_accessed = ?
+                   WHERE id = ?""",
+                (now, h.id),
+            )
+        for h in episodes:
+            if not h.id:
+                continue
+            conn.execute(
+                """UPDATE episodes
+                   SET access_count = COALESCE(access_count, 0) + 1,
+                       last_accessed = ?
+                   WHERE id = ?""",
+                (now, h.id),
+            )
+        conn.commit()
+    except Exception:
+        logger.debug("[recall] access bump failed", exc_info=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def _apply_session_bias(
+    conn: sqlite3.Connection,
+    hits: list[RecallHit],
+    session_id: str,
+    *,
+    boost: float = 0.35,
+) -> list[RecallHit]:
+    """Boost scores for episodes belonging to the active thread/session.
+
+    Does not hard-filter: global memories still appear, but same-session
+    episodes rank higher for identical content. ``boost`` is added to the
+    fused RRF score (typical RRF scores are small, so 0.35 is material).
+    """
+    if not hits or not session_id:
+        return hits
+    try:
+        ids = [h.id for h in hits if h.id]
+        if not ids:
+            return hits
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT id, session_id FROM episodes WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        same = {r["id"] for r in rows if (r["session_id"] or "") == session_id}
+        if not same:
+            return hits
+        boosted: list[RecallHit] = []
+        for h in hits:
+            if h.id in same:
+                meta = dict(h.metadata or {})
+                meta["session_boost"] = True
+                boosted.append(
+                    RecallHit(
+                        id=h.id,
+                        content=h.content,
+                        score=float(h.score) + boost,
+                        kind=h.kind,
+                        source=h.source,
+                        metadata=meta,
+                    )
+                )
+            else:
+                boosted.append(h)
+        boosted.sort(key=lambda x: x.score, reverse=True)
+        return boosted
+    except Exception:
+        logger.debug("[recall] session bias failed", exc_info=True)
+        return hits
 
 
 # ── RRF fusion ────────────────────────────────────────────────────────────

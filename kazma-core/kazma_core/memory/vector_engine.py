@@ -89,7 +89,7 @@ class VectorEngine:
         query_vec: list[float] | None,
         *,
         tenant_id: str = "default",
-        tier: str | None = "recall",
+        tier: str | list[str] | None = "recall",
         limit: int = 10,
     ) -> list[tuple[str, float]]:
         """Return ``(episode_id, similarity)`` pairs ranked by cosine.
@@ -99,8 +99,8 @@ class VectorEngine:
                 engine is unavailable, returns ``[]`` (caller falls back
                 to FTS5).
             tenant_id: Tenant isolation filter.
-            tier: Restrict to a specific tier ('recall'|'episodic'|...).
-                None = search all tiers.
+            tier: Restrict to a tier (``'recall'``), a list of tiers
+                (``['recall','episodic']``), or ``None`` for all tiers.
             limit: Max results.
 
         Returns:
@@ -119,7 +119,7 @@ class VectorEngine:
         self,
         query_vec: list[float],
         tenant_id: str,
-        tier: str | None,
+        tier: str | list[str] | None,
         limit: int,
     ) -> list[tuple[str, float]]:
         """Native sqlite-vec cosine search via a transient vec0 view.
@@ -173,7 +173,7 @@ class VectorEngine:
         self,
         query_vec: list[float],
         tenant_id: str,
-        tier: str | None,
+        tier: str | list[str] | None,
         limit: int,
     ) -> list[tuple[str, float]]:
         """In-memory cosine similarity via NumPy."""
@@ -204,7 +204,7 @@ class VectorEngine:
     def _fetch_candidate_embeddings(
         self,
         tenant_id: str,
-        tier: str | None,
+        tier: str | list[str] | None,
         limit: int,
     ) -> list[tuple[str, bytes]]:
         """Read (episode_id, embedding_blob) from episodes with embeddings.
@@ -221,7 +221,13 @@ class VectorEngine:
             "WHERE tenant_id = ? AND embedding IS NOT NULL"
         )
         params: list[Any] = [tenant_id]
-        if tier:
+        if isinstance(tier, (list, tuple)):
+            tiers = [str(t) for t in tier if t]
+            if tiers:
+                placeholders = ",".join("?" for _ in tiers)
+                sql += f" AND tier IN ({placeholders})"
+                params.extend(tiers)
+        elif tier:
             sql += " AND tier = ?"
             params.append(tier)
         sql += " LIMIT ?"

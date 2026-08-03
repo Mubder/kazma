@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Unreleased — Memory V2 Phase A: remember actually works (2026-08-03)
+
+- **Access accounting:** successful `recall()` bumps `access_count` /
+  `last_accessed` on belief + episode hits (batched UPDATE; toggle
+  `memory.v2.access_bump_enabled`). Beliefs gain the same columns via
+  idempotent ALTER.
+- **Dense + sparse cover episodic:** `_episode_dense` and FTS episode
+  paths search `tier IN ('recall','episodic')` so fresh turns are
+  findable before macro_sleep promotion.
+- **Session bias:** `session_id` / `thread_id` boosts same-session
+  episode scores (`memory.v2.session_boost`, default 0.35); graph
+  already wires `thread_id` into per-turn recall.
+- **Explicit remember → recall tier:** dual-write promotes phrases like
+  “remember my…”, “don’t forget…” to `tier=recall` with higher
+  importance so dense search hits immediately.
+- **Post-turn observability:** consolidator counters (`ok`,
+  `mirror_fail`, `extract_fail`, `enqueue_fail`, `last_error`);
+  `build_v2_health()` exposes post_turn + embedder_ready + soft depth;
+  critical failures log at `warning`.
+- **Hygiene:** dead V1 rollback branch removed from `graph_builder`;
+  `MEMORY_REMAINING.md` documents V2-only truth.
+- Plan/audit: `docs/plans/MEMORY_V2_ONE_SHOT_PLAN.md`,
+  `docs/audits/AUDIT_MEMORY_V2_COGNITIVE_2026-08-03.md`.
+- Tests: `kazma-core/tests/test_memory_v2_phase_a.py` (access bump,
+  multi-tier dense, session bias, E2E remember-style recall).
+
 ## Unreleased — Chat markdown: tables, lists, quotes (2026-08-03)
 
 - **Rich markdown in chat** (`streaming.js` `mdRender`): GFM pipe tables
