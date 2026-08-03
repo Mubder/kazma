@@ -17,7 +17,14 @@ __all__ = [
     "get_graph_backend",
     "graph_capability",
     "upsert_belief_edge",
+    "test_neo4j_connection",
+    "sync_beliefs_to_neo4j",
+    "reset_graph_backend_cache",
 ]
+
+# Process-level cache so available/unavailable re-probes after Save / Test
+_cached_backend: Any | None = None
+_cached_key: str = ""
 
 
 @runtime_checkable
@@ -341,7 +348,15 @@ def graph_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+def reset_graph_backend_cache() -> None:
+    """Clear cached backend so next get_graph_backend re-reads config."""
+    global _cached_backend, _cached_key
+    _cached_backend = None
+    _cached_key = ""
+
+
 def get_graph_backend(conn: Any | None = None) -> Any:
+    global _cached_backend, _cached_key
     try:
         from kazma_core.memory.backends import get_backends_cfg
 
@@ -351,14 +366,162 @@ def get_graph_backend(conn: Any | None = None) -> Any:
     g = c.get("graph") or {}
     provider = str(g.get("provider") or "sqlite").lower()
     url = str(g.get("url") or "").strip()
+    user = str(g.get("user") or g.get("username") or "neo4j")
+    password = str(g.get("password") or g.get("api_key") or "")
+    cache_key = f"{provider}|{url}|{user}|{bool(password)}"
+    if _cached_backend is not None and _cached_key == cache_key and conn is None:
+        return _cached_backend
+
     if provider == "neo4j" and url:
-        user = str(g.get("user") or g.get("username") or "neo4j")
-        password = str(g.get("password") or g.get("api_key") or "")
         neo = Neo4jGraphBackend(url=url, user=user, password=password)
         if neo.available:
+            if conn is None:
+                _cached_backend = neo
+                _cached_key = cache_key
             return neo
-        logger.info("[graph_backend] neo4j unavailable — falling back to sqlite")
-    return SqliteGraphBackend(conn)
+        logger.warning(
+            "[graph_backend] neo4j unavailable (url=%s) — falling back to sqlite",
+            url,
+        )
+    be = SqliteGraphBackend(conn)
+    if conn is None:
+        _cached_backend = be
+        _cached_key = cache_key
+    return be
+
+
+def test_neo4j_connection(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Probe Neo4j connectivity for Settings UI. Never raises."""
+    import time as _time
+
+    t0 = _time.perf_counter()
+    try:
+        from kazma_core.memory.backends import get_backends_cfg
+
+        g = (cfg or get_backends_cfg()).get("graph") or {}
+    except Exception:
+        g = cfg or {}
+    url = str(g.get("url") or "").strip()
+    user = str(g.get("user") or "neo4j")
+    password = str(g.get("password") or g.get("api_key") or "")
+    if not url:
+        return {
+            "ok": False,
+            "error": "Set Graph store to Neo4j and enter bolt URL, then Save backends",
+            "latency_ms": 0,
+        }
+    try:
+        from neo4j import GraphDatabase  # type: ignore
+    except ImportError:
+        return {
+            "ok": False,
+            "error": "Python package missing: pip install neo4j  (in the same venv as Kazma)",
+            "latency_ms": 0,
+            "hint": "Server Neo4j ≠ Python driver. Install both.",
+        }
+    try:
+        drv = GraphDatabase.driver(url, auth=(user, password))
+        try:
+            drv.verify_connectivity()
+            # Optional light query
+            with drv.session() as session:
+                rec = session.run("RETURN 1 AS n").single()
+                _ = rec["n"] if rec else None
+        finally:
+            drv.close()
+        ms = (_time.perf_counter() - t0) * 1000
+        reset_graph_backend_cache()
+        return {
+            "ok": True,
+            "latency_ms": round(ms, 1),
+            "url": url,
+            "user": user,
+            "detail": "Connected. Click Sync beliefs → Neo4j, then refresh Dashboard graph.",
+        }
+    except Exception as exc:
+        ms = (_time.perf_counter() - t0) * 1000
+        err = str(exc)[:400]
+        hint = ""
+        low = err.lower()
+        if "unauthorized" in low or "authentication" in low:
+            hint = "Check username/password (Neo4j default user is neo4j)."
+        elif "refused" in low or "failed to establish" in low:
+            hint = (
+                "Cannot reach bolt port. If Neo4j runs in WSL and Kazma on Windows, "
+                "use the WSL IP or ensure port 7687 is published. From WSL: hostname -I"
+            )
+        elif "module" in low:
+            hint = "pip install neo4j in Kazma venv"
+        return {
+            "ok": False,
+            "error": err,
+            "latency_ms": round(ms, 1),
+            "hint": hint,
+        }
+
+
+def sync_beliefs_to_neo4j(
+    *,
+    tenant_id: str = "default",
+    limit: int = 500,
+) -> dict[str, Any]:
+    """One-shot: push active SQLite beliefs into Neo4j (backfill dual-write)."""
+    import sqlite3
+
+    reset_graph_backend_cache()
+    be = get_graph_backend()
+    if getattr(be, "name", "") != "neo4j" or not getattr(be, "available", False):
+        return {
+            "ok": False,
+            "synced": 0,
+            "error": "Neo4j backend not available — Test connection first; provider must be neo4j",
+        }
+    try:
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        ensure_primary_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT id, subject, predicate, object, confidence, tenant_id
+            FROM beliefs
+            WHERE valid_until IS NULL AND invalidated_at IS NULL
+              AND tenant_id = ?
+            ORDER BY structural_importance DESC, confidence DESC
+            LIMIT ?
+            """,
+            (tenant_id, max(1, min(int(limit), 5000))),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        return {"ok": False, "synced": 0, "error": f"read sqlite failed: {exc}"[:300]}
+
+    ok_n = 0
+    fail_n = 0
+    for r in rows:
+        if be.upsert_triple(
+            subject=r["subject"] or "",
+            predicate=r["predicate"] or "related",
+            obj=r["object"] or "",
+            belief_id=r["id"] or "",
+            tenant_id=r["tenant_id"] or tenant_id,
+            confidence=float(r["confidence"] or 0.5),
+        ):
+            ok_n += 1
+        else:
+            fail_n += 1
+    return {
+        "ok": ok_n > 0 or (ok_n == 0 and fail_n == 0),
+        "synced": ok_n,
+        "failed": fail_n,
+        "total_read": len(rows),
+        "detail": (
+            f"Synced {ok_n}/{len(rows)} active beliefs to Neo4j. "
+            "Refresh Dashboard → V2 Belief Topology."
+        ),
+    }
 
 
 def upsert_belief_edge(

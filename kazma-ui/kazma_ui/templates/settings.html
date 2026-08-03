@@ -728,6 +728,17 @@
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:8px 0 0;">
                     {{ t('settings.memory_neo4j_driver_hint') }}
                 </p>
+                <ol style="font-size:0.75rem;color:var(--text-muted);margin:10px 0 0;padding-left:1.2rem;line-height:1.5;">
+                    <li>{{ t('settings.memory_neo4j_step1') }}</li>
+                    <li>{{ t('settings.memory_neo4j_step2') }}</li>
+                    <li>{{ t('settings.memory_neo4j_step3') }}</li>
+                    <li>{{ t('settings.memory_neo4j_step4') }}</li>
+                </ol>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;">
+                    <button type="button" class="btn btn-sm btn-primary" @click="testMemoryNeo4j()" x-text="t('settings.memory_test_neo4j')"></button>
+                    <button type="button" class="btn btn-sm" @click="syncMemoryNeo4j()" x-text="t('settings.memory_sync_neo4j')"></button>
+                </div>
+                <p style="font-size:0.75rem;margin-top:8px;" x-text="memoryNeo4jStatus" :style="memoryNeo4jOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
             </div>
 
             <div class="form-group" style="margin-top:14px;">

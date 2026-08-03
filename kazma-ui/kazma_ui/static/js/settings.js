@@ -72,6 +72,8 @@ function settingsApp() {
         memoryBackendsGraphCap: { detail: '' },
         memoryMergeKb: true,
         memoryPromoteKb: true,
+        memoryNeo4jStatus: '',
+        memoryNeo4jOk: false,
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -747,8 +749,10 @@ function settingsApp() {
                         const b = data.backends;
                         this.memoryBackends.embedder = Object.assign({}, this.memoryBackends.embedder, b.embedder || {});
                         this.memoryBackends.vector = Object.assign({}, this.memoryBackends.vector, b.vector || {});
+                        this.memoryBackends.graph = Object.assign({}, this.memoryBackends.graph, b.graph || {});
+                        this.memoryBackends.state = Object.assign({}, this.memoryBackends.state, b.state || {});
                     }
-                    this.memoryBackendsStatus = 'Saved. Embedder reloaded for this process.';
+                    this.memoryBackendsStatus = 'Saved. Next: Test Neo4j, then Sync beliefs → Neo4j.';
                     showToast('Memory backends saved', 'success');
                 } else {
                     this.memoryBackendsStatus = data.error || 'Save failed';
@@ -759,6 +763,51 @@ function settingsApp() {
                 showToast('Save failed', 'error');
             }
             this.memoryBackendsSaving = false;
+        },
+
+        async testMemoryNeo4j() {
+            this.memoryNeo4jStatus = 'Testing Neo4j…';
+            this.memoryNeo4jOk = false;
+            try {
+                const resp = await fetch('/api/settings/memory/backends/test-neo4j', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ graph: this.memoryBackends.graph || {} }),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    this.memoryNeo4jOk = true;
+                    this.memoryNeo4jStatus = 'Connected · ' + (data.latency_ms || 0) + 'ms — ' + (data.detail || '');
+                    showToast('Neo4j connected', 'success');
+                } else {
+                    this.memoryNeo4jStatus = (data.error || 'Failed') + (data.hint ? (' — ' + data.hint) : '');
+                    showToast('Neo4j test failed', 'error');
+                }
+            } catch (e) {
+                this.memoryNeo4jStatus = 'Test error: ' + e;
+            }
+        },
+
+        async syncMemoryNeo4j() {
+            this.memoryNeo4jStatus = 'Syncing beliefs to Neo4j…';
+            this.memoryNeo4jOk = false;
+            try {
+                const resp = await fetch('/api/settings/memory/backends/sync-neo4j', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    this.memoryNeo4jOk = true;
+                    this.memoryNeo4jStatus = data.detail || ('Synced ' + (data.synced || 0) + ' beliefs');
+                    showToast('Synced ' + (data.synced || 0) + ' beliefs to Neo4j', 'success');
+                } else {
+                    this.memoryNeo4jStatus = data.error || 'Sync failed';
+                    showToast('Neo4j sync failed', 'error');
+                }
+            } catch (e) {
+                this.memoryNeo4jStatus = 'Sync error: ' + e;
+            }
         },
 
         async testMemoryEmbed() {

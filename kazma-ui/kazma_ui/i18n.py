@@ -398,9 +398,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.memory_neo4j_user": {"en": "Neo4j username", "ar": "اسم مستخدم Neo4j"},
     "settings.memory_neo4j_password": {"en": "Neo4j password", "ar": "كلمة مرور Neo4j"},
     "settings.memory_neo4j_driver_hint": {
-        "en": "Requires: pip install neo4j · then Save backends · restart optional for driver load.",
-        "ar": "يتطلب: pip install neo4j · ثم حفظ الخلفيات · أعد التشغيل إن لزم لتحميل المكتبة.",
+        "en": "Requires Python package in Kazma venv: pip install neo4j (installing the Neo4j Desktop/server alone is not enough).",
+        "ar": "يتطلب حزمة Python في بيئة Kazma: pip install neo4j (تثبيت خادم Neo4j وحده لا يكفي).",
     },
+    "settings.memory_neo4j_step1": {
+        "en": "Select Neo4j in the dropdown, enter bolt URL + password",
+        "ar": "اختر Neo4j وأدخل رابط bolt وكلمة المرور",
+    },
+    "settings.memory_neo4j_step2": {
+        "en": "Click Save backends (must save — typing URL alone does nothing)",
+        "ar": "انقر حفظ الخلفيات (الحفظ إلزامي — كتابة الرابط وحده لا يكفي)",
+    },
+    "settings.memory_neo4j_step3": {
+        "en": "Click Test Neo4j — must say Connected",
+        "ar": "انقر اختبار Neo4j — يجب أن يظهر Connected",
+    },
+    "settings.memory_neo4j_step4": {
+        "en": "Click Sync beliefs → Neo4j, then open Dashboard graph (same canvas, source may say neo4j)",
+        "ar": "انقر مزامنة المعتقدات ثم افتح رسم اللوحة (نفس اللوحة، قد يظهر المصدر neo4j)",
+    },
+    "settings.memory_test_neo4j": {"en": "Test Neo4j", "ar": "اختبار Neo4j"},
+    "settings.memory_sync_neo4j": {"en": "Sync beliefs → Neo4j", "ar": "مزامنة المعتقدات → Neo4j"},
     "settings.tab_connectors": {"en": "Connectors", "ar": "الموصلات"},
     "settings.tab_mcp": {"en": "MCP", "ar": "MCP"},
     "settings.tab_skills": {"en": "Skills", "ar": "المهارات"},

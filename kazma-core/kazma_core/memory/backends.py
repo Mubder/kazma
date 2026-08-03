@@ -907,6 +907,12 @@ def save_backends_cfg(payload: dict[str, Any]) -> dict[str, Any]:
         reset_embedder()
     except Exception:
         logger.debug("[backends] reset_embedder failed", exc_info=True)
+    try:
+        from kazma_core.memory.graph_backend import reset_graph_backend_cache
+
+        reset_graph_backend_cache()
+    except Exception:
+        logger.debug("[backends] reset_graph_backend_cache failed", exc_info=True)
 
     return mask_backends_cfg()
 

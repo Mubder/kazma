@@ -930,6 +930,43 @@ def register_direct_routes(self: Any) -> None:
 
         return test_vector_backend()
 
+    @self.app.post("/api/settings/memory/backends/test-neo4j")
+    async def _settings_memory_test_neo4j(request: Request):
+        """Probe Neo4j using saved config, or optional body override before save."""
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from kazma_core.memory.backends import get_backends_cfg
+        from kazma_core.memory.graph_backend import test_neo4j_connection
+
+        cfg = get_backends_cfg()
+        if isinstance(body, dict) and (body.get("graph") or body.get("url")):
+            g = dict(cfg.get("graph") or {})
+            if body.get("graph"):
+                g.update(body["graph"])
+            else:
+                if body.get("url") is not None:
+                    g["url"] = body["url"]
+                if body.get("user") is not None:
+                    g["user"] = body["user"]
+                if body.get("password") is not None and str(body.get("password")) not in (
+                    "",
+                    "***",
+                ):
+                    g["password"] = body["password"]
+            g["provider"] = "neo4j"
+            cfg = {**cfg, "graph": g}
+        return test_neo4j_connection(cfg)
+
+    @self.app.post("/api/settings/memory/backends/sync-neo4j")
+    async def _settings_memory_sync_neo4j():
+        """Backfill active SQLite beliefs into Neo4j (needed once after enabling)."""
+        from kazma_core.memory.graph_backend import sync_beliefs_to_neo4j
+
+        return sync_beliefs_to_neo4j(tenant_id="default", limit=1000)
+
     @self.app.post("/api/settings/memory/backends/reset-local")
     async def _settings_memory_reset_local():
         from kazma_core.memory.backends import reset_backends_to_local
