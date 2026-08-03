@@ -2015,6 +2015,8 @@
         : (scope === 'yolo' ? 'YOLO on \u2014 running\u2026'
           : (scope === 'tool' ? 'Granting tool \u2014 running\u2026' : 'Running approved tool\u2026'));
       setCardState('pending', pendingLabel);
+      // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
+      tokenAccum = '';
       beginTurn();
 
       // Prefer the live WebSocket bus when connected (same graph + grants path).
@@ -2672,9 +2674,20 @@
           return;
         }
 
+        var prevAssistantContent = null;
         messages.forEach(function(msg) {
           var role = msg.role === 'assistant' ? 'assistant' : 'user';
           var content = msg.content || '';
+          // Collapse identical consecutive assistant rows left by older
+          // double-persist bugs (same answer twice after YOLO/refresh).
+          if (role === 'assistant' && content && prevAssistantContent === content.trim()) {
+            return;
+          }
+          if (role === 'assistant') {
+            prevAssistantContent = (content || '').trim() || null;
+          } else {
+            prevAssistantContent = null;
+          }
           // If the last assistant message is marked pending (client refreshed
           // mid-turn while the LLM was still processing), show a processing
           // indicator and start polling for the background-completed result.
@@ -2740,6 +2753,8 @@
   function _softApplyFinalAssistant(content, model) {
     if (!content) return;
     // Prefer existing live helpers — do not wipe the whole transcript.
+    // applyFinalAssistantText reuses the last bubble when possible so a late
+    // poll after endTurn never creates a second copy of the same answer.
     if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
       window.KazmaChat.applyFinalAssistantText(content, model || '');
       return;
@@ -2752,6 +2767,12 @@
     }
     var textEl = last.querySelector('.message-text');
     if (textEl) {
+      var already = (textEl.textContent || '').trim();
+      var incoming = String(content).trim();
+      if (already && already === incoming) {
+        scrollToBottom();
+        return; // already painted — avoid visual duplicate
+      }
       textEl.innerHTML = (window.KS && KS.markdown) ? KS.markdown(content) : escapeHtml(content);
     }
     if (model) {
@@ -3106,16 +3127,58 @@
     applyMemoryExplain: applyMemoryExplain,
     pollBackgroundTurn: _pollBackgroundTurn,
     stopBackgroundPoll: _stopBackgroundPoll,
+    /**
+     * After HITL approve/YOLO: clear token accum so the resumed final answer
+     * replaces rather than concatenating onto the pre-approval partial.
+     * Keeps the open bubble (HITL card stays visible on the same turn).
+     */
+    preparePostApprovalTurn: function() {
+      tokenAccum = '';
+      noteTurnActivity();
+      // Keep currentMsgEl so applyFinal paints into the same turn bubble.
+    },
     applyFinalAssistantText: function(content, model) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;
       if (!content) return;
-      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      noteTurnActivity();
+      if (!currentMsgEl) {
+        // Prefer reusing the last assistant bubble so soft-apply / late
+        // turn_complete after endTurn never create a duplicate bubble.
+        var nodes = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
+        var last = nodes.length ? nodes[nodes.length - 1] : null;
+        if (last) {
+          var existingText = '';
+          var te = last.querySelector('.message-text');
+          if (te) existingText = (te.textContent || '').trim();
+          var incoming = String(content).trim();
+          // Same answer already painted → reuse (no second bubble).
+          if (existingText && (existingText === incoming || existingText.indexOf(incoming.slice(0, 80)) === 0 || incoming.indexOf(existingText.slice(0, 80)) === 0)) {
+            currentMsgEl = last;
+          } else if (!existingText || last.querySelector('.hitl-approval-card')) {
+            // Empty bubble or HITL-card turn — paint final into it.
+            currentMsgEl = last;
+          } else {
+            currentMsgEl = createAssistantMessage();
+          }
+        } else {
+          currentMsgEl = createAssistantMessage();
+        }
+      }
       // Full final answer — replace accum so we don't double-append after partials
       tokenAccum = String(content);
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+      if (textEl) {
+        // Skip no-op re-paint of identical markdown (reduces flicker/dups).
+        if ((textEl.getAttribute('data-final-len') || '') === String(tokenAccum.length)
+            && (textEl.textContent || '').trim().length >= Math.min(40, tokenAccum.trim().length)) {
+          /* already showing this final */
+        } else {
+          textEl.innerHTML = KS.markdown(tokenAccum);
+          textEl.setAttribute('data-final-len', String(tokenAccum.length));
+        }
+      }
       if (model && currentMsgEl) {
         var meta = currentMsgEl.querySelector('.message-meta');
         if (meta && meta.textContent.indexOf(model) < 0) {
@@ -3124,10 +3187,25 @@
       }
       scrollToBottom();
     },
-    appendLiveToken: function(content) {
+    appendLiveToken: function(content, opts) {
       noteTurnActivity();
       KS.hideTyping(typingEl);
       activeTypingEl = null;
+      if (!content) return;
+      // Full-message backfill: replace, never append (post-HITL duplicate fix).
+      if (opts && opts.full && window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+        window.KazmaChat.applyFinalAssistantText(content, (opts && opts.model) || '');
+        return;
+      }
+      // If server re-sends a full answer that already starts with what we have,
+      // treat as replace (guards older servers without full=true).
+      if (tokenAccum && content && content.length > tokenAccum.length + 20
+          && content.indexOf(tokenAccum.slice(0, Math.min(60, tokenAccum.length))) === 0) {
+        if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+          window.KazmaChat.applyFinalAssistantText(content, '');
+          return;
+        }
+      }
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       if (!tokenAccum) {
         logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });

@@ -249,24 +249,21 @@ def create_ws_chat_router(
             logger.warning("[WS-Chat] Failed scanning graph snapshot for interrupts: %s", exc)
         return False
 
-    async def _backfill_assistant_text_if_needed(
+    async def _extract_new_assistant_text(
         graph_inst: Any,
         config: dict[str, Any],
-        websocket: WebSocket,
-        thread_id: str,
         pre_msg_count: int = 0,
-    ) -> None:
-        """If no tokens were streamed (non-BaseChatModel LLM), backfill NEW assistant text from graph state."""
+    ) -> str:
+        """Return the latest *new* assistant text from graph state (after *pre_msg_count*)."""
         try:
             snapshot = await graph_inst.aget_state(config)
             if snapshot is None:
-                return
+                return ""
             vals = getattr(snapshot, "values", None) or {}
             msgs = vals.get("messages") if isinstance(vals, dict) else None
             if not msgs or not isinstance(msgs, list):
-                return
+                return ""
             new_msgs = msgs[pre_msg_count:] if pre_msg_count < len(msgs) else []
-            text = ""
             for m in reversed(new_msgs):
                 role = None
                 if isinstance(m, dict):
@@ -274,43 +271,80 @@ def create_ws_chat_router(
                 else:
                     role = getattr(m, "type", None) or getattr(m, "role", None)
                 if role in ("assistant", "ai"):
-                    content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
-                    if isinstance(content, str) and content.strip():
-                        text = content
-                        break
-            if text:
-                try:
-                    if websocket.client_state != WebSocketState.CONNECTED:
-                        return
-                    await websocket.send_json(
-                        TelemetryEvent(
-                            type="llm_delta",
-                            data={"content": text},
-                            thread_id=thread_id,
-                        ).to_dict()
+                    content = (
+                        m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
                     )
-                except Exception:
-                    # Client gone (refresh/tab switch) — nothing to notify.
-                    pass
+                    if isinstance(content, str) and content.strip():
+                        return content
+            return ""
         except Exception as exc:
-            logger.debug("[WS-Chat] Text backfill failed: %s", exc)
+            logger.debug("[WS-Chat] extract assistant text failed: %s", exc)
+            return ""
 
-    def _ensure_pending_assistant_bubble(session_id: str) -> None:
+    async def _backfill_assistant_text_if_needed(
+        graph_inst: Any,
+        config: dict[str, Any],
+        websocket: WebSocket,
+        thread_id: str,
+        pre_msg_count: int = 0,
+        *,
+        emit_delta: bool = True,
+        already_streamed: bool = False,
+    ) -> str:
+        """Backfill NEW assistant text from graph state after a non-streaming LLM turn.
+
+        Returns the extracted text (may be empty). When *emit_delta* is True and
+        tokens were not already streamed (*already_streamed*), sends a single
+        ``llm_delta`` so the live UI paints something before ``turn_complete``.
+
+        Industry note: full-answer backfill must NOT re-append after partial
+        tokens — that doubled the reply on screen. Prefer ``turn_complete``
+        (replace semantics) as the authoritative paint; *emit_delta* is only
+        a progressive hint when nothing was streamed yet.
+        """
+        text = await _extract_new_assistant_text(graph_inst, config, pre_msg_count)
+        if not text:
+            return ""
+        if not emit_delta or already_streamed:
+            return text
+        try:
+            if websocket.client_state != WebSocketState.CONNECTED:
+                return text
+            await websocket.send_json(
+                TelemetryEvent(
+                    type="llm_delta",
+                    data={"content": text, "full": True},
+                    thread_id=thread_id,
+                ).to_dict()
+            )
+        except Exception:
+            # Client gone (refresh/tab switch) — nothing to notify; persist still wins.
+            pass
+        return text
+
+    def _ensure_pending_assistant_bubble(
+        session_id: str,
+        *,
+        force: bool = False,
+    ) -> None:
         """Ensure a ``pending`` assistant bubble exists for the in-flight turn.
 
         The bubble is the "turn in progress" marker (empty content + pending).
         A reload then renders a processing indicator instead of a blank gap,
         and the frontend poller keeps watching until the final persist pops
         ``pending``. Mirrors the SSE path which sets the same flag.
+
+        *force=True* marks the trailing assistant row pending even when it
+        already has pre-HITL partial content — used on YOLO/approve resume so
+        a mid-resume refresh still arms the background poller.
         """
         try:
             with get_session_manager().transact(session_id) as sess:
                 last = sess.messages[-1] if sess.messages else None
                 if last and last.get("role") == "assistant":
-                    # An empty trailing assistant bubble is this turn's — mark it.
-                    if not (last.get("content") or "").strip():
+                    # Empty trailing bubble, or force during HITL resume.
+                    if force or not (last.get("content") or "").strip():
                         last["pending"] = True
-                    # A bubble with content belongs to a finished turn — leave it.
                 else:
                     from datetime import UTC, datetime
 
@@ -401,6 +435,7 @@ def create_ws_chat_router(
                 # create duplicate rows for the same turn.
                 activity_rows = list(activity) if activity else None
                 if sess.messages and sess.messages[-1].get("role") == "assistant":
+                    # Idempotent upsert (re-persist after reconnect / double complete).
                     sess.messages[-1]["content"] = text
                     sess.messages[-1].pop("pending", None)
                     if activity_rows:
@@ -420,6 +455,18 @@ def create_ws_chat_router(
                     if model_id:
                         msg["model"] = model_id
                     sess.messages.append(msg)
+
+                # Collapse accidental identical consecutive assistant rows
+                # (legacy double-persist left duplicates visible on refresh).
+                while (
+                    len(sess.messages) >= 2
+                    and sess.messages[-1].get("role") == "assistant"
+                    and sess.messages[-2].get("role") == "assistant"
+                    and (sess.messages[-1].get("content") or "").strip()
+                    and (sess.messages[-1].get("content") or "").strip()
+                    == (sess.messages[-2].get("content") or "").strip()
+                ):
+                    sess.messages.pop()
             return text
         except Exception as exc:
             logger.warning("[WS-Chat] Failed persisting assistant message: %s", exc)
@@ -1069,10 +1116,17 @@ def create_ws_chat_router(
                                     await heartbeat_task
 
                             # Always backfill from checkpoint at end (custom LLM
-                            # has no on_chat_model_stream). If checkpoint text is
-                            # longer than streamed accum, emit the full final.
+                            # has no on_chat_model_stream). Emit progressive
+                            # llm_delta only when nothing was streamed yet —
+                            # turn_complete is the authoritative replace paint.
                             await _backfill_assistant_text_if_needed(
-                                graph_inst, config, websocket, thread_id, pre_msg_count
+                                graph_inst,
+                                config,
+                                websocket,
+                                thread_id,
+                                pre_msg_count,
+                                emit_delta=not tokens_emitted,
+                                already_streamed=tokens_emitted,
                             )
                             if not is_lost():
                                 await asyncio.sleep(0.05)
@@ -1504,6 +1558,10 @@ def create_ws_chat_router(
                                 target_thread_id,
                                 scope,
                             )
+                            # Mark trailing assistant pending *before* long ainvoke
+                            # so a mid-resume F5 still arms the SessionStore poller
+                            # and the final answer is not "only visible after refresh".
+                            _ensure_pending_assistant_bubble(session_id, force=True)
                             resume_task = asyncio.create_task(
                                 graph_inst.ainvoke(resume_command, approve_config)
                             )
@@ -1534,20 +1592,29 @@ def create_ws_chat_router(
                                         mark_turn_orphaned(target_thread_id)
                             await resume_task  # re-raise graph errors
 
-                            # Surface assistant text (no live token stream on ainvoke)
-                            await _backfill_assistant_text_if_needed(
+                            # Resume uses ainvoke — no live token stream. Extract
+                            # + persist, then deliver via turn_complete (replace
+                            # semantics). Do NOT emit a full-text llm_delta here:
+                            # that appended onto pre-HITL partials and duplicated
+                            # the answer; refresh then showed store dups too.
+                            _active_model = _resolve_active_model()
+                            backfill_text = await _backfill_assistant_text_if_needed(
                                 graph_inst,
                                 approve_config,
                                 websocket,
                                 target_thread_id,
                                 pre_msg_count,
+                                emit_delta=False,
+                                already_streamed=False,
                             )
                             final_text = await _persist_final_assistant_message(
                                 graph_inst,
                                 approve_config,
                                 session_id,
                                 pre_msg_count=pre_msg_count,
+                                prefer_text=backfill_text or assistant_content_acc,
                                 activity=activity_log,
+                                model=_active_model,
                             )
                             # Guarantee the user sees *something* after YOLO/approve.
                             # Empty backfill is the root of "only saw pre-HITL line".
@@ -1558,20 +1625,14 @@ def create_ws_chat_router(
                                     "Ask me to summarize what I found, or retry with "
                                     "a narrower question."
                                 )
-                                await send(
-                                    TelemetryEvent(
-                                        type="llm_delta",
-                                        data={"content": recovery},
-                                        thread_id=target_thread_id,
-                                    ).to_dict()
-                                )
-                                await _persist_final_assistant_message(
+                                final_text = await _persist_final_assistant_message(
                                     graph_inst,
                                     approve_config,
                                     session_id,
                                     pre_msg_count=pre_msg_count,
                                     prefer_text=recovery,
                                     activity=activity_log,
+                                    model=_active_model,
                                 )
                                 logger.warning(
                                     "[WS-Chat] Empty post-approve turn thread=%s — recovery notice sent",
@@ -1589,6 +1650,24 @@ def create_ws_chat_router(
                             )
 
                             duration_ms = (time.monotonic() - approval_start_time) * 1000
+                            # Authoritative client paint — same contract as prompt path.
+                            # Without this the UI stayed on "Still working after approval"
+                            # until refresh (industry gap).
+                            await send(
+                                TelemetryEvent(
+                                    type="turn_complete",
+                                    data={
+                                        "content": final_text or "",
+                                        "interrupted": bool(interrupted),
+                                        "empty": not bool((final_text or "").strip()),
+                                        "model": _active_model,
+                                        "session_id": session_id,
+                                        "duration_ms": int(duration_ms),
+                                        "source": "hitl_resume",
+                                    },
+                                    thread_id=target_thread_id,
+                                ).to_dict()
+                            )
                             await send(
                                 ApprovalEventBridge.create_approval_complete_event(
                                     target_thread_id,
@@ -1608,6 +1687,14 @@ def create_ws_chat_router(
                                     data={"interrupted": bool(interrupted)},
                                     thread_id=target_thread_id,
                                 ).to_dict()
+                            )
+                            logger.info(
+                                "[WS-Chat] approve turn_complete thread=%s model=%s "
+                                "content_len=%d interrupted=%s",
+                                target_thread_id[:12],
+                                _active_model or "?",
+                                len(final_text or ""),
+                                interrupted,
                             )
                             if interrupted:
                                 logger.info(

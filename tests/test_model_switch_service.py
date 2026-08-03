@@ -161,6 +161,19 @@ class TestSourceContracts:
         assert "turn_complete" in src
         assert 'payload.get("model")' in src or "payload.get('model')" in src
 
+    def test_ws_approve_emits_turn_complete_not_append_delta(self):
+        """Post-HITL resume must paint via turn_complete (replace), not llm_delta append.
+
+        Industry regression: YOLO/approve finished server-side but the client only
+        saw the answer after F5, and full-text llm_delta doubled the bubble.
+        """
+        src = _WS.read_text(encoding="utf-8")
+        assert 'source": "hitl_resume"' in src or "source': 'hitl_resume'" in src or 'source": "hitl_resume"' in src
+        assert "emit_delta=False" in src
+        assert "preparePostApprovalTurn" not in src  # client-side only
+        # Approve path must still register turn_complete TelemetryEvent
+        assert "approve turn_complete" in src
+
     def test_app_uses_live_getters(self):
         src = _APP.read_text(encoding="utf-8")
         assert "llm_provider_getter" in src

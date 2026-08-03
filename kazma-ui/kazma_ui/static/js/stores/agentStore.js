@@ -358,6 +358,14 @@ document.addEventListener('alpine:init', () => {
       };
 
       this.pendingApproval = null;
+      // Reset token accumulator so post-HITL full-answer delivery replaces
+      // instead of concatenating onto the pre-approval partial (duplicate text).
+      try {
+        const chat = this._chat();
+        if (chat && typeof chat.preparePostApprovalTurn === 'function') {
+          chat.preparePostApprovalTurn();
+        }
+      } catch (e) { /* ignore */ }
       this._beginTurn();
       this.statusMessage = approved
         ? (scope === 'yolo'
@@ -606,14 +614,14 @@ document.addEventListener('alpine:init', () => {
 
         case 'done':
         case 'turn_complete': {
-          // Authoritative terminal: apply content if present, then unlock.
+          // Authoritative terminal: REPLACE paint (never append — that doubled
+          // post-HITL answers when backfill re-sent the full text).
           const finalText = data.content || frame.content || '';
-          if (finalText && window.KazmaChat && typeof window.KazmaChat.appendLiveToken === 'function') {
-            // Prefer a full replace-style paint when content is the full final answer
+          if (finalText && window.KazmaChat) {
             if (typeof window.KazmaChat.applyFinalAssistantText === 'function') {
               window.KazmaChat.applyFinalAssistantText(finalText, data.model || '');
-            } else {
-              window.KazmaChat.appendLiveToken(finalText);
+            } else if (typeof window.KazmaChat.appendLiveToken === 'function') {
+              window.KazmaChat.appendLiveToken(finalText, { full: true });
             }
           }
           if (!this.pendingApproval) {
@@ -639,8 +647,13 @@ document.addEventListener('alpine:init', () => {
           this.isThinking = true;
           this._turnActive = true;
           const text = frame.content || data.content;
-          if (text && window.KazmaChat && typeof window.KazmaChat.appendLiveToken === 'function') {
-            window.KazmaChat.appendLiveToken(text);
+          if (!text || !window.KazmaChat) break;
+          // full=true backfill / recovery: replace, don't concatenate
+          const isFull = !!(data && data.full) || !!(frame && frame.full);
+          if (isFull && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+            window.KazmaChat.applyFinalAssistantText(text, data.model || '');
+          } else if (typeof window.KazmaChat.appendLiveToken === 'function') {
+            window.KazmaChat.appendLiveToken(text, { full: isFull });
           }
           break;
         }
