@@ -302,6 +302,7 @@ export function registerStores() {
                 { href: '/settings', title: 'Settings' },
                 { href: '/research', title: 'Research' },
                 { href: '/knowledge', title: 'Knowledge' },
+                { href: '/memory', title: 'Memory' },
             ],
 
             toggle() {

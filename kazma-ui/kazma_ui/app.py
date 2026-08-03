@@ -1069,6 +1069,17 @@ class KazmaAppBuilder:
             logger.warning("Knowledge Base API router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "kb_api", "error": str(e)})
 
+        # ── Memory admin UI + API (beliefs / entities / merge / hygiene) ──
+        try:
+            from kazma_ui.memory_api import mount_memory_api, register_memory_page
+
+            mount_memory_api(self.app)
+            register_memory_page(self.app, self.templates, self.agent)
+            logger.info("[Memory] Admin UI routes mounted at /memory")
+        except Exception as e:
+            logger.warning("[App] Memory admin UI failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "memory_api", "error": str(e)})
+
         # ── Email integration (status + Microsoft device OAuth) ──
         # Open router (GET / status / OAuth callbacks) + protected router
         # (state-mutating POSTs guarded by Origin + X-Requested-With check).
