@@ -1540,12 +1540,25 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     _final_text = _final_assistant_text_after_tools(messages)
     _force_synth = bool(state.get("force_synthesis"))
     _junk_final = bool(_final_text and is_unusable_assistant_content(_final_text))
-    # Always synthesize on max-iter, explicit force, or leaked/stub final text.
-    _needs_synthesis = bool(_max_hit or _force_synth or _junk_final)
+    _usable_final = bool(_final_text) and not _junk_final
+    # Synthesize when: max-iter, supervisor forced it, final is junk/leak,
+    # OR there is simply no usable final text (e.g. last msg is tool result
+    # after empty/leak was stripped). Never ship "no written answer" without
+    # attempting synthesis first (2026-08-03 force_synthesis drop regression).
+    _needs_synthesis = bool(
+        _max_hit or _force_synth or _junk_final or not _usable_final
+    )
     if _junk_final:
         logger.warning(
             "[Respond] Final draft unusable (leak/stub, %d chars) — forcing synthesis",
             len(_final_text or ""),
+        )
+    elif _force_synth:
+        logger.info("[Respond] force_synthesis=True — running final synthesis")
+    elif not _usable_final:
+        logger.info(
+            "[Respond] No usable final text (last_role=%s) — running final synthesis",
+            _last_role,
         )
     # If the supervisor's LLM call failed (after retries), the assistant
     # message above is an honest error notice, NOT a real answer. Never
@@ -1671,31 +1684,42 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             )
 
     # ── Final empty-answer safety net ───────────────────────────────
-    # The supervisor's nudge recovery (supervisor_node) handles empty LLM
-    # content, but defence-in-depth: if the last assistant message that we
-    # are about to stream to the user is empty/whitespace, inject an honest
-    # fallback so the UI never shows "Done" with no bubble text. This guards
-    # non-max-iteration turns (the max-iter path is handled above).
-    if not _max_hit:
-        _final_for_user = _final_assistant_text_after_tools(messages)
-        if not _final_for_user:
-            logger.warning(
-                "[Respond] Final assistant text is empty on a normal turn "
-                "(iteration=%d messages=%d last_role=%s) — injecting fallback "
-                "so the turn is not silently empty",
-                iteration, len(messages), _last_role,
-            )
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": (
-                        "⚠️ I completed my thinking but produced no written "
-                        "answer this turn. Please send the message again, or "
-                        "rephrase it — some models occasionally return an "
-                        "empty reply."
-                    ),
-                }
-            )
+    # After synthesis (or if synthesis was skipped), ensure the user never
+    # sees a blank turn. Prefer tool-aware partial notice over a vague
+    # "no written answer" line.
+    _final_for_user = _final_assistant_text_after_tools(messages)
+    if not _final_for_user or is_unusable_assistant_content(_final_for_user):
+        tools_used = [
+            tc.get("function", {}).get("name") or tc.get("name", "tool")
+            for m in messages
+            if isinstance(m, dict) and m.get("tool_calls")
+            for tc in (m.get("tool_calls") or [])
+            if isinstance(tc, dict)
+        ]
+        tool_note = (
+            f" Tools used: {', '.join(sorted(set(tools_used))[:12])}."
+            if tools_used
+            else ""
+        )
+        logger.warning(
+            "[Respond] Still no usable final text after synthesis path "
+            "(iteration=%d messages=%d last_role=%s force=%s) — terminal fallback",
+            iteration,
+            len(messages),
+            _last_role,
+            _force_synth,
+        )
+        messages.append(
+            {
+                "role": "assistant",
+                "content": (
+                    "⚠️ Partial result: I could not produce a clean final answer "
+                    f"this turn.{tool_note} "
+                    "Send **continue** or a narrower request "
+                    "(e.g. `list memory entities` / `invalidate belief …`)."
+                ),
+            }
+        )
 
     # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
     # in one task so consolidator can dedup against auto_store texts.

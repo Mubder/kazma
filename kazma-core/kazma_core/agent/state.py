@@ -154,6 +154,15 @@ class SupervisorState(TypedDict, total=False):
     error_message: str
     """Human-readable message describing the failure when ``turn_failed`` is True."""
 
+    force_synthesis: bool
+    """When True, ``respond_node`` MUST run a final synthesis LLM call.
+
+    Set by the supervisor when the model returned empty content or unusable
+    leaked tool-markup (DSML). Must be a declared state key — undeclared
+    fields are dropped by LangGraph and never reach respond_node
+    (2026-08-03 empty-reply regression).
+    """
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
@@ -206,4 +215,7 @@ def initial_supervisor_state(
         consecutive_tool_failures=0,
         circuit_breaker_tripped=False,
         auto_continue=False,
+        force_synthesis=False,
+        turn_failed=False,
+        error_message="",
     )

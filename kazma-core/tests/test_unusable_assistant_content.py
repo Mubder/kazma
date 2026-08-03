@@ -35,3 +35,12 @@ def test_short_let_me_stub():
     assert is_unusable_assistant_content(
         "Let me probe whether the proper memory tooling is now exposed:"
     ) is True
+
+
+def test_force_synthesis_is_declared_on_supervisor_state():
+    """LangGraph drops undeclared state keys — force_synthesis must be declared."""
+    from kazma_core.agent.state import SupervisorState, initial_supervisor_state
+
+    assert "force_synthesis" in SupervisorState.__annotations__
+    st = initial_supervisor_state()
+    assert st.get("force_synthesis") is False
