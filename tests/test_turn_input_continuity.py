@@ -86,5 +86,8 @@ async def test_empty_checkpoint_uses_session():
         user_text="continue",
         fallback_history=session,
     )
-    assert any("Fix memory" in str(m.get("content")) for m in out)
+    assert any(
+        "memory" in str(m.get("content") or "").lower() and m.get("role") == "user"
+        for m in out
+    )
     assert out[-1]["content"] == "continue"
