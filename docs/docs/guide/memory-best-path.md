@@ -41,6 +41,10 @@ Chat turn
 **UI location:** Settings → **Memory** tab  
 (deep link: `/settings?tab=memory`)
 
+**Neo4j:** same tab → scroll to **Belief graph — Neo4j (optional)**  
+(or open `/settings?tab=memory` and search the page for “Neo4j”).  
+Pick Neo4j in Graph store, enter `bolt://…`, save backends.
+
 Also: Settings → **Embedder** for model rebuild / vector-space composition.
 
 | Setting | Effect |

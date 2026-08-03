@@ -693,26 +693,44 @@
                     <option value="postgres">Postgres dual-mirror</option>
                 </select>
             </div>
-            <div class="form-group" x-show="memoryBackends.state.provider === 'postgres'">
+            <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'">
                 <label>Postgres DSN</label>
                 <input type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
             </div>
-            <div class="form-group">
-                <label>{{ t('settings.memory_graph_provider') }}</label>
-                <select class="form-select" x-model="memoryBackends.graph.provider">
-                    <option value="sqlite">Local SQLite beliefs</option>
-                    <option value="neo4j">Neo4j dual-write</option>
-                </select>
+
+            <!-- Neo4j — always visible (not only after dropdown pick) -->
+            <div id="memory-neo4j-section" style="margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-card);background:rgba(99,102,241,0.06);">
+                <h4 style="margin:0 0 6px;font-size:0.95rem;">{{ t('settings.memory_neo4j_title') }}</h4>
+                <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 12px;">
+                    {{ t('settings.memory_neo4j_hint') }}
+                </p>
+                <div class="form-group">
+                    <label>{{ t('settings.memory_graph_provider') }}</label>
+                    <select class="form-select" x-model="memoryBackends.graph.provider">
+                        <option value="sqlite">{{ t('settings.memory_graph_sqlite') }}</option>
+                        <option value="neo4j">{{ t('settings.memory_graph_neo4j') }}</option>
+                    </select>
+                </div>
+                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'">
+                    <label>{{ t('settings.memory_neo4j_url') }}</label>
+                    <input type="text" class="form-input" x-model="memoryBackends.graph.url" placeholder="bolt://localhost:7687">
+                </div>
+                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'">
+                    <label>{{ t('settings.memory_neo4j_user') }}</label>
+                    <input type="text" class="form-input" x-model="memoryBackends.graph.user" placeholder="neo4j">
+                </div>
+                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'">
+                    <label>{{ t('settings.memory_neo4j_password') }}</label>
+                    <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="leave blank to keep">
+                </div>
+                <p style="font-size:0.72rem;color:var(--text-muted);margin:0;"
+                   x-text="memoryBackendsGraphCap.detail || ''"></p>
+                <p style="font-size:0.72rem;color:var(--text-muted);margin:8px 0 0;">
+                    {{ t('settings.memory_neo4j_driver_hint') }}
+                </p>
             </div>
-            <div class="form-group" x-show="memoryBackends.graph.provider === 'neo4j'">
-                <label>Neo4j bolt URL</label>
-                <input type="text" class="form-input" x-model="memoryBackends.graph.url" placeholder="bolt://localhost:7687">
-            </div>
-            <div class="form-group" x-show="memoryBackends.graph.provider === 'neo4j'">
-                <label>Neo4j password</label>
-                <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="leave blank to keep">
-            </div>
-            <div class="form-group">
+
+            <div class="form-group" style="margin-top:14px;">
                 <label>{{ t('settings.memory_failover') }}</label>
                 <select class="form-select" x-model="memoryBackends.failover.on_remote_error">
                     <option value="local">{{ t('settings.memory_failover_local') }}</option>

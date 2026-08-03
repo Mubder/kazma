@@ -378,6 +378,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "For model rebuild and vector-space composition, open Embedder.",
         "ar": "لإعادة بناء النموذج وتركيبة فضاء المتجهات، افتح المُضمِّن.",
     },
+    "settings.memory_neo4j_title": {
+        "en": "Belief graph — Neo4j (optional)",
+        "ar": "رسم المعتقدات — Neo4j (اختياري)",
+    },
+    "settings.memory_neo4j_hint": {
+        "en": "Default is SQLite (V2 Belief Topology). Choose Neo4j to dual-write triples and use Neo4j for the Dashboard graph when online. Personal beliefs stay in SQLite.",
+        "ar": "الافتراضي SQLite (طوبولوجيا معتقدات V2). اختر Neo4j لكتابة مزدوجة واستخدامه في لوحة الرسم عند الاتصال. المعتقدات تبقى في SQLite.",
+    },
+    "settings.memory_graph_sqlite": {
+        "en": "Local SQLite (default — V2 Belief Topology)",
+        "ar": "SQLite محلي (افتراضي — طوبولوجيا V2)",
+    },
+    "settings.memory_graph_neo4j": {
+        "en": "Neo4j (bolt — dual-write + primary topology when online)",
+        "ar": "Neo4j (bolt — كتابة مزدوجة + طوبولوجيا عند الاتصال)",
+    },
+    "settings.memory_neo4j_url": {"en": "Neo4j bolt URL", "ar": "رابط Neo4j bolt"},
+    "settings.memory_neo4j_user": {"en": "Neo4j username", "ar": "اسم مستخدم Neo4j"},
+    "settings.memory_neo4j_password": {"en": "Neo4j password", "ar": "كلمة مرور Neo4j"},
+    "settings.memory_neo4j_driver_hint": {
+        "en": "Requires: pip install neo4j · then Save backends · restart optional for driver load.",
+        "ar": "يتطلب: pip install neo4j · ثم حفظ الخلفيات · أعد التشغيل إن لزم لتحميل المكتبة.",
+    },
     "settings.tab_connectors": {"en": "Connectors", "ar": "الموصلات"},
     "settings.tab_mcp": {"en": "MCP", "ar": "MCP"},
     "settings.tab_skills": {"en": "Skills", "ar": "المهارات"},
