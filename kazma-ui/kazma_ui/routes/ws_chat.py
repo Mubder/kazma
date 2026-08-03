@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 import traceback
 import uuid
 from typing import Any, Callable
@@ -324,6 +325,14 @@ def create_ws_chat_router(
         except Exception as exc:
             logger.warning("[WS-Chat] Failed ensuring pending bubble: %s", exc)
 
+    def _resolve_active_model() -> str:
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            return str(get_model_registry().get_active_profile().get("model") or "")
+        except Exception:
+            return ""
+
     async def _persist_final_assistant_message(
         graph_inst: Any,
         config: dict[str, Any],
@@ -332,6 +341,7 @@ def create_ws_chat_router(
         pre_msg_count: int = 0,
         prefer_text: str = "",
         activity: list[dict[str, Any]] | None = None,
+        model: str | None = None,
     ) -> str:
         """Persist the latest *new* assistant text to SessionStore.
 
@@ -341,8 +351,10 @@ def create_ws_chat_router(
         *pre_msg_count* from the checkpoint (avoids re-appending older turns).
         When *activity* (the CoT / workbench log for this turn) is given it is
         stored on the assistant message so a later reload restores it.
+        *model* stamps which LLM produced the reply.
         """
         text = (prefer_text or "").strip()
+        model_id = (model or "").strip() or _resolve_active_model()
         try:
             if not text:
                 snapshot = await graph_inst.aget_state(config)
@@ -393,6 +405,8 @@ def create_ws_chat_router(
                     sess.messages[-1].pop("pending", None)
                     if activity_rows:
                         sess.messages[-1]["activity"] = activity_rows
+                    if model_id:
+                        sess.messages[-1]["model"] = model_id
                 else:
                     from datetime import UTC, datetime
 
@@ -403,6 +417,8 @@ def create_ws_chat_router(
                     }
                     if activity_rows:
                         msg["activity"] = activity_rows
+                    if model_id:
+                        msg["model"] = model_id
                     sess.messages.append(msg)
             return text
         except Exception as exc:
@@ -951,57 +967,90 @@ def create_ws_chat_router(
                                 input_state, config=config, version="v2"
                             )
                             tokens_emitted = False
+                            turn_started_at = time.monotonic()
+                            last_progress_at = {"t": time.monotonic()}
 
-                            async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
-                                _record_ws_activity(activity_log, ev, thought_recorded=thought_recorded)
-                                if ev.type == "llm_delta":
-                                    tokens_emitted = True
-                                    if hasattr(ev, "data") and isinstance(ev.data, dict):
-                                        content = ev.data.get("content", "")
-                                        if content:
-                                            assistant_content_acc += content
-                                            if len(assistant_content_acc) % 50 == 0:
-                                                # T4: serialize with the other
-                                                # persist paths on this session.
-                                                try:
-                                                    with get_session_manager().transact(session_id) as sess:
-                                                        # Upsert the trailing
-                                                        # assistant bubble (which
-                                                        # _ensure_pending_assistant_bubble
-                                                        # created) — never append a
-                                                        # duplicate mid-stream.
-                                                        if (
-                                                            sess.messages
-                                                            and sess.messages[-1].get("role")
-                                                            == "assistant"
-                                                        ):
-                                                            sess.messages[-1]["content"] = (
-                                                                assistant_content_acc
-                                                            )
-                                                            if activity_log:
-                                                                sess.messages[-1]["activity"] = list(activity_log)
-                                                        else:
-                                                            sess.add_message(
-                                                                "assistant", assistant_content_acc
-                                                            )
-                                                except Exception:
-                                                    logger.debug(
-                                                        "[WS-Chat] incremental persist failed",
-                                                        exc_info=True,
-                                                    )
+                            # Industry-grade long-horizon heartbeat: every 15s
+                            # with no events, emit status so the UI idle-watchdog
+                            # stays armed and the user sees "still working".
+                            async def _long_turn_heartbeat() -> None:
+                                n = 0
+                                while True:
+                                    await asyncio.sleep(15.0)
+                                    if is_lost():
+                                        return
+                                    idle = time.monotonic() - last_progress_at["t"]
+                                    if idle < 14.0:
+                                        continue
+                                    n += 1
+                                    elapsed = int(time.monotonic() - turn_started_at)
+                                    await send(
+                                        TelemetryEvent(
+                                            type="status_update",
+                                            data={
+                                                "status": "thinking",
+                                                "message": f"Still working… ({elapsed}s)",
+                                                "active_node": "Supervisor",
+                                                "heartbeat": n,
+                                                "elapsed_s": elapsed,
+                                            },
+                                            thread_id=thread_id,
+                                        ).to_dict()
+                                    )
 
-                                # CRITICAL: when the client disconnected (refresh /
-                                # tab switch) is_lost() is True. Keep draining the
-                                # LangGraph stream so the turn COMPLETES and
-                                # persists — never let a dead socket abort the
-                                # async-for and cancel the graph run.
-                                if is_lost():
-                                    # Stamp the disconnect time so an abandoned
-                                    # turn can be reaped (credits) while a quick
-                                    # refresh keeps its background completion.
-                                    mark_turn_orphaned(thread_id)
-                                    continue
-                                await send(ev.to_dict())
+                            heartbeat_task = asyncio.create_task(_long_turn_heartbeat())
+                            try:
+                                async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
+                                    last_progress_at["t"] = time.monotonic()
+                                    _record_ws_activity(activity_log, ev, thought_recorded=thought_recorded)
+                                    if ev.type == "llm_delta":
+                                        tokens_emitted = True
+                                        if hasattr(ev, "data") and isinstance(ev.data, dict):
+                                            content = ev.data.get("content", "")
+                                            if content:
+                                                assistant_content_acc += content
+                                                if len(assistant_content_acc) % 50 == 0:
+                                                    # T4: serialize with the other
+                                                    # persist paths on this session.
+                                                    try:
+                                                        with get_session_manager().transact(session_id) as sess:
+                                                            if (
+                                                                sess.messages
+                                                                and sess.messages[-1].get("role")
+                                                                == "assistant"
+                                                            ):
+                                                                sess.messages[-1]["content"] = (
+                                                                    assistant_content_acc
+                                                                )
+                                                                if activity_log:
+                                                                    sess.messages[-1]["activity"] = list(
+                                                                        activity_log
+                                                                    )
+                                                            else:
+                                                                sess.add_message(
+                                                                    "assistant",
+                                                                    assistant_content_acc,
+                                                                    model=_resolve_active_model() or None,
+                                                                )
+                                                    except Exception:
+                                                        logger.debug(
+                                                            "[WS-Chat] incremental persist failed",
+                                                            exc_info=True,
+                                                        )
+
+                                    # CRITICAL: when the client disconnected (refresh /
+                                    # tab switch) is_lost() is True. Keep draining the
+                                    # LangGraph stream so the turn COMPLETES and
+                                    # persists — never let a dead socket abort the
+                                    # async-for and cancel the graph run.
+                                    if is_lost():
+                                        mark_turn_orphaned(thread_id)
+                                        continue
+                                    await send(ev.to_dict())
+                            finally:
+                                heartbeat_task.cancel()
+                                with contextlib.suppress(asyncio.CancelledError, Exception):
+                                    await heartbeat_task
 
                             # Always backfill from checkpoint at end (custom LLM
                             # has no on_chat_model_stream). If checkpoint text is
@@ -1016,6 +1065,7 @@ def create_ws_chat_router(
                                 graph_inst, config, websocket, thread_id
                             )
 
+                            _active_model = _resolve_active_model()
                             final_text = await _persist_final_assistant_message(
                                 graph_inst,
                                 config,
@@ -1023,6 +1073,7 @@ def create_ws_chat_router(
                                 pre_msg_count=pre_msg_count,
                                 prefer_text=assistant_content_acc,
                                 activity=activity_log,
+                                model=_active_model,
                             )
                             if interrupted:
                                 # Paused for approval — the approval card takes
@@ -1035,6 +1086,8 @@ def create_ws_chat_router(
                                             and sess.messages[-1].get("role") == "assistant"
                                         ):
                                             sess.messages[-1].pop("pending", None)
+                                            if _active_model:
+                                                sess.messages[-1]["model"] = _active_model
                                 except Exception:
                                     pass
                             elif not (final_text or "").strip():
@@ -1060,21 +1113,13 @@ def create_ws_chat_router(
                                     pre_msg_count=pre_msg_count,
                                     prefer_text=recovery,
                                     activity=activity_log,
+                                    model=_active_model,
                                 )
                             # Always release the UI turn lock. HITL pause is
                             # signalled via pendingApproval; idle still ends
                             # the "generating" state so Stop never sticks.
                             # turn_complete carries final content so clients
                             # never depend on racey partial deltas alone.
-                            _active_model = ""
-                            try:
-                                from kazma_core.model_registry import get_model_registry
-
-                                _active_model = str(
-                                    get_model_registry().get_active_profile().get("model") or ""
-                                )
-                            except Exception:
-                                pass
                             await send(
                                 TelemetryEvent(
                                     type="turn_complete",
@@ -1084,6 +1129,7 @@ def create_ws_chat_router(
                                         "empty": not bool((final_text or assistant_content_acc or "").strip()),
                                         "model": _active_model,
                                         "session_id": session_id,
+                                        "duration_ms": int((time.monotonic() - turn_started_at) * 1000),
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()

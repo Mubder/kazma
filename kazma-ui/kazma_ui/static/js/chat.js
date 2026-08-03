@@ -978,6 +978,37 @@
         scrollToBottom();
       },
 
+      // SSE CoT parity with WS agentStore — routing / synthesizing / heartbeats
+      onStatus: function(data) {
+        noteTurnActivity();
+        var status = (data && (data.status || data.message)) || '';
+        if (!status) return;
+        if (status === 'thinking' || status === 'synthesizing' || status === 'routing_node') {
+          var title = status === 'synthesizing'
+            ? ti('synthesizing', 'Composing response\u2026')
+            : (status === 'routing_node'
+              ? tiFmt('routing', 'Routing: {node}', { node: (data && data.active_node) || 'Supervisor' })
+              : (data.message || ti('thinking', 'Kazma is thinking\u2026')));
+          logProgress({
+            kind: 'status',
+            title: title,
+            detail: (data && data.message && status !== 'thinking') ? data.message : '',
+            state: 'running',
+          });
+          if (typingEl && KS.showTyping) {
+            try { KS.showTyping(typingEl, title); } catch (e) { /* ignore */ }
+          }
+        } else if (status === 'paused_for_approval' || status === 'idle') {
+          // HITL / idle handled by other callbacks
+        } else {
+          logProgress({
+            kind: 'status',
+            title: String(data.message || status),
+            state: 'running',
+          });
+        }
+      },
+
       onDone: function(data) {
         lastActivityTs = 0;
         activeStream = null;
@@ -1734,6 +1765,7 @@
           'onerror="this.style.display=\'none\';this.parentNode.textContent=\'K\';" />' +
         '</div>';
 
+    var modelBit = (opts && opts.model) ? (' \u00B7 ' + escapeHtml(String(opts.model))) : '';
     wrapper.innerHTML =
       avatarHtml +
       '<div class="message-content">' +
@@ -1741,6 +1773,7 @@
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
+          modelBit +
         '</div>' +
       '</div>';
 
@@ -2563,7 +2596,10 @@
             // Poll for the completed background turn.
             _pollBackgroundTurn(sessionId, messages.length);
           } else {
-            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, { activity: msg.activity });
+            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
+              activity: msg.activity,
+              model: msg.model || '',
+            });
           }
         });
 

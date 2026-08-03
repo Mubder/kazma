@@ -1572,8 +1572,20 @@ def create_sse_chat_router(
             content_acc = ""
             # Track if we've started persisting assistant messages
             assistant_message_started = False
+            # Stamp active model on the assistant bubble for reload / meta.
+            _turn_model = ""
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                _turn_model = str(
+                    get_model_registry().get_active_profile().get("model") or ""
+                )
+            except Exception:
+                _turn_model = ""
             # Temporary message dict for incremental persistence
             temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
+            if _turn_model:
+                temp_assistant_msg["model"] = _turn_model
             # CoT / activity log for this turn (tools + status), persisted with
             # the assistant message so reloads / session switches restore the
             # workbench panel instead of showing a blank transcript.
@@ -1628,6 +1640,8 @@ def create_sse_chat_router(
             def _attach_activity(msg: dict[str, Any]) -> None:
                 if activity_log:
                     msg["activity"] = list(activity_log)
+                if _turn_model and not msg.get("model"):
+                    msg["model"] = _turn_model
 
             def _persist_now() -> None:
                 """Persist the current temp_assistant_msg to the store.
@@ -1647,6 +1661,8 @@ def create_sse_chat_router(
                             if sess.messages:
                                 sess.messages[-1]["content"] = temp_assistant_msg["content"]
                                 _attach_activity(sess.messages[-1])
+                                if _turn_model:
+                                    sess.messages[-1]["model"] = _turn_model
                 except Exception:
                     logger.debug(
                         "[SSE] failed to persist assistant message for session=%s",

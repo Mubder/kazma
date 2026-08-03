@@ -159,6 +159,13 @@
       }
     }
 
+    // Active model chip (registry SoT)
+    if (data.active_model != null || data.active_provider != null) {
+      setMetric('metric-active-model', data.active_model || '—');
+      var provEl = $('metric-active-provider');
+      if (provEl) provEl.textContent = data.active_provider || 'provider';
+    }
+
     var costEl = $('metric-cost');
     if (costEl) {
       if (headroom < 0.01 && data.cost) costEl.style.color = 'var(--danger)';

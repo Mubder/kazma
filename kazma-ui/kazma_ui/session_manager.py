@@ -75,15 +75,36 @@ class ChatSession:
         if not self.updated_at:
             self.updated_at = now
 
-    def add_message(self, role: str, content: str) -> None:
-        """Append a message dict to message history and update timestamp."""
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        *,
+        model: str | None = None,
+        activity: list[dict[str, Any]] | None = None,
+        **extra: Any,
+    ) -> None:
+        """Append a message dict to message history and update timestamp.
+
+        Optional *model* stamps which LLM produced an assistant reply (for UI
+        meta + reload). *activity* stores CoT/workbench rows. Extra kwargs are
+        merged onto the message dict (best-effort, string/JSON-serializable).
+        """
         if not content:
             return
         # Deduplicate consecutive identical messages
         if self.messages and self.messages[-1].get("role") == role and self.messages[-1].get("content") == content:
             return
         now = datetime.now(UTC).isoformat()
-        self.messages.append({"role": role, "content": content, "ts": now})
+        msg: dict[str, Any] = {"role": role, "content": content, "ts": now}
+        if model:
+            msg["model"] = str(model)
+        if activity:
+            msg["activity"] = list(activity)
+        for k, v in extra.items():
+            if v is not None and k not in msg:
+                msg[k] = v
+        self.messages.append(msg)
         if len(self.messages) > MAX_MESSAGES_PER_SESSION:
             self.messages = self.messages[-MAX_MESSAGES_PER_SESSION:]
         self.updated_at = now

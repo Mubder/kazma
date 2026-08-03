@@ -83,6 +83,12 @@
       <div class="metric-value" id="metric-uptime" style="color:var(--text-primary);">{{ metrics.uptime }}</div>
       <div class="metric-sub" id="silence-info">{{ silence_info }}</div>
     </div>
+    <div class="metric-card" title="Active chat model (ModelRegistry)">
+      <div class="metric-icon"><span class="ki" data-icon="cpu" aria-hidden="true"></span></div>
+      <div class="metric-label">Active model</div>
+      <div class="metric-value" id="metric-active-model" style="color:var(--text-primary);font-size:0.95rem;word-break:break-all;">{{ active_model or '—' }}</div>
+      <div class="metric-sub" id="metric-active-provider">{{ active_provider or 'provider' }}</div>
+    </div>
   </div>
 
   <!-- ── Charts Row ── -->

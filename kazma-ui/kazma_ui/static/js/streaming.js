@@ -97,6 +97,11 @@ var KazmaStream = (function() {
               window.KazmaReplay.onLiveSnapshot(data);
             }
             break;
+          case 'status_update':
+          case 'status':
+            if (callbacks.onStatus) callbacks.onStatus(data || {});
+            else if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;

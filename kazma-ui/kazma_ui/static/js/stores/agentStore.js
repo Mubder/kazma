@@ -383,15 +383,14 @@ document.addEventListener('alpine:init', () => {
           if (statusVal === 'thinking') {
             this.isThinking = true;
             this._turnActive = true;
-            // Keep one canonical label so Activity does not show
-            // "thinking…" (beginTurn) + "thinking..." (server) as two rows.
-            this.statusMessage = _ti('thinking', 'Kazma is thinking…');
+            // Prefer server heartbeat message ("Still working… (45s)") when present
+            this.statusMessage = (data && data.message)
+              ? String(data.message)
+              : _ti('thinking', 'Kazma is thinking…');
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
             this._progress({
               kind: 'status',
               title: this.statusMessage,
-              // Avoid noisy "Node:" detail on every thinking heartbeat —
-              // it also broke title-only coalesce in the workbench.
               state: 'running',
             });
             this._syncThinkingBanner();

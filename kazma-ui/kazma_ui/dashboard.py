@@ -210,6 +210,17 @@ async def dashboard(request: Request) -> HTMLResponse:
         "total_tokens": f"{raw_metrics['total_tokens']:,}",
     }
 
+    active_model = ""
+    active_provider = ""
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        prof = get_model_registry().get_active_profile() or {}
+        active_model = str(prof.get("model") or "")
+        active_provider = str(prof.get("provider") or "")
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -224,6 +235,8 @@ async def dashboard(request: Request) -> HTMLResponse:
             "tracing_backend": tracing_backend,
             "traces": _get_trace_data(),
             "metrics": metrics_ssr,
+            "active_model": active_model,
+            "active_provider": active_provider,
             "active_page": "dashboard",
         },
     )
@@ -273,6 +286,17 @@ async def dashboard_status() -> JSONResponse:
 
     status["metrics"] = _get_metrics()
     status["traces"] = _get_trace_data()
+
+    # Active LLM profile chip (reliability sprint 2)
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        prof = get_model_registry().get_active_profile() or {}
+        status["active_model"] = str(prof.get("model") or "")
+        status["active_provider"] = str(prof.get("provider") or "")
+    except Exception:
+        status["active_model"] = ""
+        status["active_provider"] = ""
 
     return JSONResponse(status)
 

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — Reliability Sprint 2 (2026-08-03)
+
+- **WS long-turn heartbeat** every 15s idle → `status_update` “Still working…
+  (Ns)” so the UI idle-watchdog stays armed and users see progress.
+- **SSE CoT parity:** `status_update` / synthesizing / routing wired into
+  chat workbench via `streaming.js` `onStatus` + `chat.js`.
+- **Model stamp on messages:** SessionStore assistant bubbles persist
+  `model`; reload meta shows it; WS/SSE final persist always sets it.
+- **Health + Dashboard active model:** `/health/ready` registry check and
+  `/health/details` expose `active_model` / `active_provider`; Dashboard
+  metric card + live `/api/dashboard/status` refresh.
+- Tests: `tests/test_reliability_sprint2.py`.
+
 ## Unreleased — Model stickiness + long-horizon delivery (2026-08-03)
 
 - **Single model-switch pipeline** (`kazma_core.runtime.model_switch`): every

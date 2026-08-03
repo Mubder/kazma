@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03  
 **Scope:** Everything that can make (1) the UI model disagree with the LLM that actually runs, or (2) CoT show “Done” while the reply is missing until the user interacts.  
-**Status:** Implementation in progress (2026-08-03 reliability sprint).  
+**Status:** Sprint 1 + Sprint 2 implemented (2026-08-03).  
 **Plan:** `docs/plans/RELIABILITY_MODEL_AND_TURN_DELIVERY.md`
 
 ---

@@ -73,14 +73,25 @@ def check_swarm_engine() -> dict[str, Any]:
 
 
 def check_model_registry() -> dict[str, Any]:
-    """Check ModelRegistry availability."""
+    """Check ModelRegistry availability and surface the active profile."""
     try:
         from kazma_core.model_registry import get_model_registry
         registry = get_model_registry()
         if registry is None:
             return {"status": "not_initialized", "component": "model_registry"}
         providers = registry.list_providers() if hasattr(registry, "list_providers") else []
-        return {"status": "ok", "component": "model_registry", "providers": len(providers)}
+        profile: dict[str, Any] = {}
+        try:
+            profile = registry.get_active_profile() or {}
+        except Exception:
+            profile = {}
+        return {
+            "status": "ok",
+            "component": "model_registry",
+            "providers": len(providers),
+            "active_model": str(profile.get("model") or ""),
+            "active_provider": str(profile.get("provider") or ""),
+        }
     except Exception as e:
         logger.error("ModelRegistry health check failed: %s", e)
         return {"status": "failed", "component": "model_registry", "error": "check failed"}
@@ -220,10 +231,15 @@ async def health_details():
     # Add system info
     import sys
     import platform
+
+    active_model = str(checks.get("model_registry", {}).get("active_model") or "")
+    active_provider = str(checks.get("model_registry", {}).get("active_provider") or "")
     
     response = {
         "timestamp": time.time(),
         "checks": checks,
+        "active_model": active_model,
+        "active_provider": active_provider,
         "system": {
             "python_version": sys.version.split()[0],
             "platform": platform.platform(),
