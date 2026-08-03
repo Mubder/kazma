@@ -599,13 +599,60 @@ async def supervisor_node(
             last_user_content = str(m.get("content", ""))
             break
 
+    # Same-session short continuations ("Proceed", "try now") must inherit
+    # the prior task — expand recall query + pin a continuity system note.
+    _recall_query = last_user_content
+    try:
+        from kazma_core.agent.turn_input import is_short_continuation
+
+        if is_short_continuation(last_user_content):
+            prev_users: list[str] = []
+            for m in messages:
+                if not isinstance(m, dict) or m.get("role") != "user":
+                    continue
+                c = m.get("content")
+                if isinstance(c, str) and c.strip() and c.strip() != last_user_content.strip():
+                    prev_users.append(c.strip())
+            if prev_users:
+                # Prefer last 3 substantive user turns as the real goal.
+                _recall_query = " | ".join(prev_users[-3:])
+                logger.info(
+                    "[Supervisor] Continuation phrase %r — expanded recall from %d prior user turns",
+                    last_user_content[:40],
+                    len(prev_users[-3:]),
+                )
+            # Always inject continuity instruction when history has more than
+            # this one short line (industry: do not re-ask "what should I do?").
+            _user_turns = sum(
+                1
+                for m in messages
+                if isinstance(m, dict)
+                and m.get("role") == "user"
+                and str(m.get("content") or "").strip()
+            )
+            if _user_turns >= 2:
+                _cont_note = (
+                    "CONTINUITY: The user sent a short follow-up "
+                    f"({last_user_content!r}). The open task is in the conversation "
+                    "history above (and prior user messages). Continue that work. "
+                    "Do NOT claim you forgot the task or ask what to do unless the "
+                    "history truly has no prior goal."
+                )
+                messages.insert(
+                    1 if messages and messages[0].get("role") == "system" else 0,
+                    {"role": "system", "content": _cont_note},
+                )
+    except Exception:
+        logger.debug("[Supervisor] continuation expand skipped", exc_info=True)
+
     # Classify and route to optimal model if router is available
     routed_model = None
     if model_router is not None:
         from kazma_core.models.router import ModelRouter
 
         if last_user_content:
-            profile = ModelRouter.classify(last_user_content)
+            # Route on expanded query so "proceed" does not pick a trivial profile
+            profile = ModelRouter.classify(_recall_query or last_user_content)
             model_spec = model_router.route(profile)
             routed_model = model_spec.model
             logger.info(
@@ -659,7 +706,8 @@ async def supervisor_node(
                 except Exception:
                     _explain = False
                 result = recall(
-                    last_user_content, limit=_top_k,
+                    _recall_query or last_user_content,
+                    limit=_top_k,
                     session_id=state.get("thread_id"),
                     tenant_id=state.get("tenant_id", "default"),
                     explain=_explain,
@@ -753,7 +801,7 @@ async def supervisor_node(
                     _had_inject = (not result.empty) or bool(_kb_hits_for_explain)
                     if _explain or _had_inject:
                         _payload = build_memory_explain_payload(
-                            query=last_user_content,
+                            query=_recall_query or last_user_content,
                             result=result if not result.empty else None,
                             kb_hits=_kb_hits_for_explain,
                             explain=True if _explain else "summary",
