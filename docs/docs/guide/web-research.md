@@ -22,18 +22,28 @@ Search, scrape, and crawl I/O are centralized under **`kazma_core.web_acquire`**
 
 **Knowledge Library ingest** and **research** both use this fetch ladder so hard-page fixes apply once. Product pipelines stay separate (KB → index; research → digest/report). LLM APIs never use this stack (they use `http_pool`).
 
-### Deep pipeline quality (R0 / R1)
+### Deep pipeline quality (R0 / R1 / R2)
 
 `run_research_pipeline` / `/research deep`:
 
-1. Multi-query **search** via `web_acquire`  
-2. **Rank** URLs (`rank_urls`) before acquire  
-3. Full-page acquire → **`sources.json`** metadata  
-4. **Fail-closed** in deep mode if fewer than min sources (override: `KAZMA_RESEARCH_ALLOW_THIN=1`)  
-5. Digests + heuristic **evidence claims** (`claims.json` / `claims.md`)  
-6. LLM synthesis + structural **rubric** (`rubric.json`)  
+1. **Adaptive plan** (`research_planner`) — LLM sub-questions + queries (`plan.json`); template fallback  
+2. Multi-query **search** via `web_acquire`  
+3. **Rank** URLs (`rank_urls`) before acquire  
+4. Full-page acquire → **`sources.json`** metadata  
+5. **Fail-closed** in deep mode if fewer than min sources (override: `KAZMA_RESEARCH_ALLOW_THIN=1`)  
+6. Digests + heuristic **evidence claims** (`claims.json` / `claims.md`)  
+7. LLM synthesis (cite materials only)  
+8. **Gap critic** — follow-up search/acquire + re-synthesize (`gap_loop_0.json`; off: `KAZMA_RESEARCH_GAP_LOOP=0`)  
+9. Structural **rubric** (`rubric.json`)  
 
-Golden topics / scoring helpers: `kazma_core.tools.research_eval`.
+| Env | Default | Role |
+|-----|---------|------|
+| `KAZMA_RESEARCH_LLM_PLANNER` | on | Adaptive search plan |
+| `KAZMA_RESEARCH_GAP_LOOP` | on for deep | Verification pass |
+| `KAZMA_RESEARCH_LLM_CRITIC` | on | LLM gap critique |
+| `KAZMA_RESEARCH_ALLOW_THIN` | off | Allow deep under min sources |
+
+Golden topics / scoring: `kazma_core.tools.research_eval`.
 
 > **Arabic brand:** product name is **Kazma** / **كاظمه** (or **كاظمة**). Never **كازما**.
 

@@ -346,21 +346,33 @@ async def run_research_pipeline(
     log.append(f"Output dir: `{rel_dir}`")
     log.append("Acquisition stack: kazma_core.web_acquire (shared with KB fetch ladder)")
 
-    base = topic if not language else f"{topic} {language}"
-    queries = [
-        base,
-        f"{topic} overview analysis",
-        f"{topic} benefits risks",
-        f"{topic} latest developments",
-        f"{topic} comparison alternatives",
-        f"{topic} official documentation",
-        f"{topic} research paper study",
-        f"{topic} criticism limitations",
-    ]
-    queries = queries[: 3 if not is_deep else max_queries]
-    log.append(f"### Plan — {len(queries)} search queries")
+    # ── Stage 1: adaptive planner (R2) ────────────────────────────────
+    from kazma_core.tools.research_planner import (
+        critique_synthesis_gaps,
+        plan_research_queries,
+    )
+
+    plan = await plan_research_queries(
+        topic,
+        language=language,
+        max_queries=max_queries if is_deep else min(4, max_queries),
+        is_deep=is_deep,
+    )
+    queries = list(plan.search_queries)
+    try:
+        (out_dir / "plan.json").write_text(
+            json.dumps(plan.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    log.append(f"### Plan — method={plan.method} · {len(queries)} search queries")
     for i, q in enumerate(queries, 1):
         log.append(f"{i}. {q}")
+    if plan.sub_questions:
+        log.append("Sub-questions: " + "; ".join(plan.sub_questions[:6]))
+    if plan.success_criteria:
+        log.append("Success criteria: " + "; ".join(plan.success_criteria[:5]))
 
     # ── Stage 2: discover (parallel searches via web_acquire) ─────────
     await _emit(progress_cb, "discover", f"Searching {len(queries)} queries…")
@@ -608,13 +620,113 @@ async def run_research_pipeline(
     )
     log.append(f"Synthesis length={len(synthesis)}")
 
+    # ── Stage 5b: gap critic + optional second acquire (R2) ────────────
+    import os as _os
+
+    gap_loops = 0
+    _gap_env = (_os.environ.get("KAZMA_RESEARCH_GAP_LOOP") or "1").strip().lower()
+    max_gap_loops = 0
+    if _gap_env not in ("0", "false", "no", "off"):
+        max_gap_loops = 1 if is_deep else 0
+
+    while gap_loops < max_gap_loops and len(saved) < max_sources:
+        await _emit(progress_cb, "verify", "Checking gaps in draft…")
+        src_summary = "\n".join(
+            f"- {m.get('url')} ({m.get('path')})"
+            for m in acquire_meta
+            if m.get("ok")
+        )
+        gap = await critique_synthesis_gaps(
+            topic,
+            synthesis,
+            sources_summary=src_summary,
+            max_followups=3,
+        )
+        try:
+            (out_dir / f"gap_loop_{gap_loops}.json").write_text(
+                json.dumps(gap.to_dict(), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        log.append(
+            f"Gap loop {gap_loops}: method={gap.method} needs_more={gap.needs_more} "
+            f"followups={len(gap.followup_queries)}"
+        )
+        if gap.gaps:
+            log.append("Gaps: " + "; ".join(gap.gaps[:5]))
+        if not gap.needs_more or not gap.followup_queries:
+            break
+
+        gap_loops += 1
+        await _emit(
+            progress_cb,
+            "discover",
+            f"Gap fill: {len(gap.followup_queries)} follow-up searches…",
+        )
+        await asyncio.gather(*[_one_search(q) for q in gap.followup_queries])
+        # Re-rank remaining unused URLs
+        already = {m.get("url") for m in acquire_meta if m.get("url")}
+        new_cands = [u for u in candidates if u not in already]
+        ranked2 = rank_urls(
+            new_cands, topic, max_per_domain=2, limit=max(2, max_sources - len(saved)) * 2
+        )
+        more_urls = [r.url for r in ranked2]
+        if not more_urls:
+            log.append("Gap loop: no new ranked URLs")
+            break
+        start_idx = len(saved) + 1
+        await _emit(progress_cb, "acquire", f"Gap fill acquire {len(more_urls)}…")
+        await asyncio.gather(
+            *[_acquire(u, start_idx + i) for i, u in enumerate(more_urls)]
+        )
+        # Digest any new raw sources not yet covered
+        digested_stems = {Path(d).stem.replace("digest-", "") for d in digests}
+        to_digest: list[str] = []
+        for m in acquire_meta:
+            if not m.get("ok") or not m.get("path"):
+                continue
+            stem = Path(str(m["path"])).stem
+            if stem not in digested_stems:
+                to_digest.append(str(m["path"]))
+                # keep url map fresh for claim extract
+                url_by_path[str(m["path"])] = str(m.get("url") or "")
+                url_by_path[f"digest-{stem}.md"] = str(m.get("url") or "")
+        if to_digest:
+            extra = list(await asyncio.gather(*[_digest_one(p) for p in to_digest]))
+            digests.extend(extra)
+            for p in extra:
+                src_url = url_by_path.get(p) or url_by_path.get(Path(p).name) or ""
+                all_claims.extend(
+                    extract_claims_from_file(p, source_url=src_url, max_claims=6)
+                )
+            try:
+                write_claims_json(claims_path, all_claims)
+                claims_md = claims_to_markdown(all_claims)
+                (out_dir / "claims.md").write_text(claims_md, encoding="utf-8")
+            except Exception:
+                pass
+            synth_paths = digests + (
+                [_rel(out_dir / "claims.md")] if (out_dir / "claims.md").is_file() else []
+            )
+            await _emit(progress_cb, "reduce", "Re-synthesizing after gap fill…")
+            synthesis = await synthesize_from_digests(
+                synth_paths,
+                question=topic,
+                outline=outline,
+                max_chars=24_000 if is_deep else 12_000,
+            )
+            log.append(f"Re-synthesis length={len(synthesis)} after gap loop")
+        break  # one gap loop max
+
     # ── Stage 6: assemble + rubric ────────────────────────────────────
     await _emit(progress_cb, "assemble", "Writing report…")
     elapsed = time.time() - t0
     report = (
         f"# Research report: {topic}\n\n"
         f"_Generated by Kazma research pipeline · depth={depth_l} · "
-        f"{len(saved)} sources · ranked · {elapsed:.0f}s_\n\n"
+        f"{len(saved)} sources · ranked · plan={plan.method} · "
+        f"gap_loops={gap_loops} · {elapsed:.0f}s_\n\n"
         f"{synthesis}\n\n"
     )
     if claims_md:
@@ -659,6 +771,8 @@ async def run_research_pipeline(
             "docx_path": docx_rel,
             "sources": len(saved),
             "claims": len(all_claims),
+            "plan_method": plan.method,
+            "gap_loops": gap_loops,
             "rubric_score": rubric_dict.get("score"),
             "created_at": datetime.now(UTC).isoformat(),
             "elapsed_seconds": round(elapsed, 1),
