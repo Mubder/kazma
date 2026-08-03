@@ -1404,6 +1404,7 @@ async def ingest_site(
     chunks_new = 0
     chunks_skipped = 0
 
+    pages_unchanged = 0
     async with _pw_browser_scope():
         for i, url in enumerate(pages):
             yield ProgressUpdate(
@@ -1445,9 +1446,13 @@ async def ingest_site(
                 )
                 if chunks:
                     chunk_dicts = [chunk_to_dict(c) for c in chunks]
+                    # Smart re-index: unchanged page hash sequence → skip embed
+                    before_skip = chunks_skipped
                     new, skipped = index.index(library_id, chunk_dicts)
                     chunks_new += new
                     chunks_skipped += skipped
+                    if new == 0 and skipped > before_skip and skipped >= len(chunk_dicts):
+                        pages_unchanged += 1
                 fetched += 1
                 result.pages_fetched += 1
             except Exception as exc:
@@ -1458,6 +1463,24 @@ async def ingest_site(
 
             if delay_ms:
                 await asyncio.sleep(delay_ms / 1000.0)
+
+    # Prune URLs that were in-scope under this seed but disappeared from discovery
+    # (site shrink) — keeps orphan safety at the *site* level, not only page shrink.
+    pruned_urls = 0
+    try:
+        discovered_set = set(pages)
+        existing = set(store.list_source_urls(library_id))
+        scope_mode = _kb_scope_mode()
+        candidates = {
+            u for u in existing if u and _in_scope(seed_url, u, scope_mode)
+        }
+        pruned_urls = index.prune_sources_not_in(
+            library_id,
+            discovered_set,
+            candidate_urls=candidates,
+        )
+    except Exception as exc:
+        logger.debug("[kb_ingest] gone-URL prune skipped: %s", exc)
 
     # Persist final chunk_count on the library row (index() also updates it,
     # but this is the authoritative post-crawl value).
@@ -1471,8 +1494,10 @@ async def ingest_site(
     # "0/1 pages, 0 chunks, 1 failed" without a reason is unactionable.
     done_msg = (
         f"done: {fetched}/{len(pages)} pages, "
-        f"{chunks_new} new chunks (+{chunks_skipped} deduped), "
-        f"{failed} failed"
+        f"{chunks_new} new chunks (+{chunks_skipped} deduped"
+        + (f", {pages_unchanged} pages unchanged" if pages_unchanged else "")
+        + (f", {pruned_urls} gone URLs pruned" if pruned_urls else "")
+        + f"), {failed} failed"
     )
     if failed > 0 and fetched == 0 and result.errors:
         # All pages failed — append the first reason to the summary so the

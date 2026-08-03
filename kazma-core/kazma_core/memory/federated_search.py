@@ -15,7 +15,65 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["federated_search", "format_source_footer"]
+__all__ = [
+    "federated_search",
+    "format_source_footer",
+    "format_kb_hits_for_prompt",
+    "promote_kb_hits_to_episodes",
+    "resolve_kb_library_ids",
+]
+
+
+def resolve_kb_library_ids(
+    user_message: str = "",
+    *,
+    mode: str = "all_active",
+) -> list[str]:
+    """Resolve which Knowledge Libraries participate in retrieval.
+
+    Modes (industry product paths):
+
+    * ``all_active`` — every non-archived lib with chunks (federated / tool RAG)
+    * ``inject`` — auto_inject libs; expands to all active with chunks when
+      smart-search is on and the message looks technical (chat inject SoT)
+
+    Tenant + archive filters live in KnowledgeStore list methods.
+    """
+    from kazma_core.stores.knowledge import get_knowledge_store
+    from kazma_core.stores.knowledge_index import (
+        kb_auto_inject_enabled,
+        kb_smart_search_enabled,
+        _looks_technical,
+    )
+
+    store = get_knowledge_store()
+    mode_l = (mode or "all_active").strip().lower()
+
+    if mode_l == "inject":
+        if not kb_auto_inject_enabled():
+            return []
+        libs = list(store.list_auto_inject_libraries() or [])
+        msg = (user_message or "").strip()
+        if kb_smart_search_enabled() and _looks_technical(msg):
+            by_id = {str(l.get("id")): l for l in libs if l.get("id")}
+            for lib in store.list_libraries(include_archived=False) or []:
+                if int(lib.get("chunk_count") or 0) <= 0:
+                    continue
+                lid = str(lib.get("id") or "")
+                if lid:
+                    by_id.setdefault(lid, lib)
+            libs = list(by_id.values())
+        return [str(l["id"]) for l in libs if l.get("id")]
+
+    # all_active (default federated / tool)
+    out: list[str] = []
+    for lib in store.list_libraries(include_archived=False) or []:
+        if int(lib.get("chunk_count") or 0) <= 0:
+            continue
+        lid = str(lib.get("id") or "")
+        if lid:
+            out.append(lid)
+    return out
 
 
 def federated_search(
@@ -27,27 +85,19 @@ def federated_search(
     limit_kb: int = 5,
     include_memory: bool = True,
     include_knowledge: bool = True,
+    kb_mode: str = "all_active",
 ) -> dict[str, Any]:
     """Search cognitive memory and/or Knowledge Libraries.
+
+    KB side uses the same **RRF** path as auto-inject / ``knowledge_search``
+    (semantic Chroma + FTS5), not FTS-only — industry hybrid retrieval.
 
     Returns::
 
         {
           "ok": True,
           "query": str,
-          "hits": [
-            {
-              "store": "memory"|"knowledge",
-              "kind": "belief"|"episode"|"chunk",
-              "id": str,
-              "content": str,
-              "score": float,
-              "source": str,
-              "sources": list[str]|None,
-              "provenance": dict,  # library_id, url, title for KB; meta for memory
-            },
-            ...
-          ],
+          "hits": [...],
           "summary": {"memory": int, "knowledge": int, "total": int},
         }
     """
@@ -115,21 +165,22 @@ def federated_search(
 
     if include_knowledge:
         try:
-            kb_hits = _search_knowledge(q, limit=max(1, min(limit_kb, 20)))
+            kb_hits = _search_knowledge(
+                q,
+                limit=max(1, min(limit_kb, 20)),
+                mode=kb_mode,
+                user_message=q,
+            )
             hits.extend(kb_hits)
             kb_n = len(kb_hits)
         except Exception as exc:
             logger.debug("[federated] knowledge search failed: %s", exc, exc_info=True)
 
-    # Sort: knowledge BM25 is often negative — normalize for display ranking
     def _rank_key(h: dict[str, Any]) -> float:
-        s = float(h.get("score") or 0)
-        if h.get("store") == "knowledge" and s < 0:
-            return -s  # more negative BM25 → higher rank
-        return s
+        return float(h.get("score") or 0)
 
     hits.sort(key=_rank_key, reverse=True)
-    # Cap total while preserving store diversity (don't let one store wipe the other)
+    # Cap total while preserving store diversity
     cap = max(limit_memory, 0) + max(limit_kb, 0)
     if len(hits) > cap > 0:
         hits = hits[:cap]
@@ -146,70 +197,46 @@ def federated_search(
     }
 
 
-def _search_knowledge(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
-    """Lexical KB search across active libraries (sync, no store merge)."""
-    from kazma_core.stores.knowledge import get_knowledge_store
-
-    store = get_knowledge_store()
-    libraries = store.list_libraries(include_archived=False) or []
-    if not libraries:
+def _search_knowledge(
+    query: str,
+    *,
+    limit: int = 5,
+    mode: str = "all_active",
+    user_message: str = "",
+) -> list[dict[str, Any]]:
+    """Hybrid RRF KB search (semantic + FTS) via KnowledgeIndex — single SoT."""
+    lib_ids = resolve_kb_library_ids(user_message or query, mode=mode)
+    if not lib_ids:
         return []
 
-    # Pool FTS hits across libraries, then hydrate once
-    pooled: list[tuple[str, float, str]] = []  # chunk_id, score, library_id
-    per_lib = max(2, (limit * 2) // max(1, len(libraries)))
-    for lib in libraries:
-        lib_id = str(lib.get("id") or "")
-        if not lib_id:
-            continue
-        try:
-            rows = store.fts_search(query, lib_id, limit=per_lib)
-        except Exception:
-            rows = []
-        for chunk_id, score in rows:
-            pooled.append((chunk_id, float(score), lib_id))
+    from kazma_core.stores.knowledge_index import get_knowledge_index
 
-    if not pooled:
-        return []
-
-    # Prefer stronger BM25 (more negative) then take top
-    pooled.sort(key=lambda x: x[1])  # ascending: more negative first
-    top = pooled[: limit * 2]
-    chunk_ids = [c for c, _, _ in top]
-    full = store.get_chunks_by_ids(chunk_ids)
-
+    index = get_knowledge_index()
+    khits = index.search_all_sync(query, lib_ids, top_k=max(1, min(limit, 20)))
     out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for chunk_id, score, lib_id in top:
-        if chunk_id in seen:
-            continue
-        seen.add(chunk_id)
-        row = full.get(chunk_id) or {}
-        content = (row.get("content") or "")[:500]
+    for h in khits:
+        content = (h.content or "")[:2000]
         if not content:
             continue
-        # Display score: invert BM25 for "higher is better" UI
-        disp = -score if score < 0 else score
         out.append(
             {
                 "store": "knowledge",
                 "kind": "chunk",
-                "id": chunk_id,
+                "id": h.chunk_id,
                 "content": content,
-                "score": disp,
-                "source": "kb_fts",
-                "sources": ["kb_fts"],
+                "score": float(h.score or 0),
+                "source": "kb_rrf",
+                "sources": ["kb_semantic", "kb_fts"],
                 "provenance": {
-                    "library_id": row.get("library_id") or lib_id,
-                    "source_url": row.get("source_url"),
-                    "document_title": row.get("document_title"),
-                    "section_header": row.get("section_header"),
-                    "chunk_index": row.get("chunk_index"),
+                    "library_id": h.library_id,
+                    "source_url": h.source_url,
+                    "document_title": h.document_title,
+                    "section_header": h.section_header,
+                    "chunk_index": h.chunk_index,
+                    "has_code": h.has_code,
                 },
             }
         )
-        if len(out) >= limit:
-            break
     return out
 
 

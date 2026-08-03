@@ -31,19 +31,37 @@ When you give Kazma a seed URL (e.g. `https://developers.facebook.com/docs/whats
 1. **Discovery (sitemap-first).** Kazma reads `robots.txt` for `Sitemap:` directives, then tries `/sitemap.xml`, `/sitemap_index.xml`, `/docs/sitemap.xml`. The resulting URLs are filtered to the **seed's path prefix** (`/docs/whatsapp/overview` → `/docs/whatsapp/`), so the crawl stays inside the doc subtree and doesn't wander into unrelated docs. Fallback: BFS link-walk using Playwright-rendered HTML (so SPA nav links are captured).
 2. **Fetch (tiered + tab-aware).** Each page is fetched via the shared tiered extractor (Jina → Firecrawl → httpx+trafilatura → Playwright). Tabbed/JS pages get a Playwright full-DOM pass that pulls text from **all** elements including hidden panels, so per-tab content isn't lost.
 3. **Chunk (hierarchy-aware).** Markdown is split on `#`/`##`/`###`/`####` headers with a section breadcrumb (`"Messages > Send Text Message"`). **Fenced code blocks are atomic** — never split, even when oversized.
-4. **Embed + index.** Each chunk is embedded (local `BAAI/bge-m3` by default, or any OpenAI-compatible `/embeddings`) and stored in a per-library ChromaDB collection + a dedicated FTS5 table + SQLite (source of truth). Re-ingest dedups via `content_hash`.
+4. **Embed + index.** Each chunk is embedded (local `BAAI/bge-m3` by default, or any OpenAI-compatible `/embeddings`) and stored in a per-library ChromaDB collection + a dedicated FTS5 table + SQLite (source of truth).
 
 Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZMA_KB_MAX_DEPTH` (default 10), `KAZMA_KB_DELAY_MS` (default 300), `KAZMA_KB_SCOPE_MODE` (`tree` | `prefix` | `domain` | `exact`, default **`tree`**).
 
-**Re-ingest hygiene:** indexing a URL **purges** prior chunks for that URL first (SQLite + FTS + Chroma) so page shrinks never leave orphan sections. **Refresh** jobs are durable (same ConfigStore job store as crawl). Agent tool `knowledge_ingest_site` is capped lower (~15 pages) than UI crawls — use `/knowledge` or `/kb crawl` for large trees.
+### Smart re-index (refresh hygiene)
+
+| Case | Behavior |
+|------|----------|
+| Page **unchanged** (same ordered `content_hash` list) | **Skip** purge + embed (cheap refresh) |
+| Page **changed** or shrank | Purge that URL (SQLite + FTS + Chroma), then write new chunks — no orphan sections |
+| URL **gone** from discovery (in seed scope) | Pruned on full-site crawl/refresh |
+| **Refresh** jobs | Durable (ConfigStore `kb_jobs`, same as crawl) |
+
+Agent tool `knowledge_ingest_site` is capped lower (~15 pages) than UI crawls — use `/knowledge` or `/kb crawl` for large trees.
+
+### Recall + inject (one hybrid stack)
+
+Chat does **not** merge KB into the memory schema. Product path:
+
+1. **Hybrid RRF** — per-library Chroma semantic + FTS5 BM25, fused once (`KnowledgeIndex.search_all_sync`)  
+2. **Federated search** — labels hits `store=knowledge` next to V2 memory hits (no one-table merge)  
+3. **Inject mode** — `auto_inject` libraries (tenant + non-archived); optional smart expansion  
+4. **Fence** — all inject goes through `format_untrusted_block` (docs are untrusted)  
+5. **Kill switches** — `KAZMA_KB_AUTO_INJECT=0`, `merge_knowledge_into_chat` in memory config  
 
 **Auto-inject** only includes **non-archived** libraries for the **current tenant** (when multi-user/prod tenant filter is on).
 
 **Smart search (optional):** set `KAZMA_KB_SMART_SEARCH=1` (or ConfigStore
 `knowledge.smart_search=true`) to also retrieve from **active libraries with
 chunks** when the user message looks technical (API/docs/how-to), even if
-per-library auto-inject is off. Kill switch `KAZMA_KB_AUTO_INJECT=0` still
-disables all injection.
+per-library auto-inject is off.
 
 ## Use it
 

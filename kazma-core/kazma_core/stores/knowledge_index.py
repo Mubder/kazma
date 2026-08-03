@@ -145,30 +145,71 @@ class KnowledgeIndex:
             )
         return n
 
-    def index(self, library_id: str, chunks: list[dict[str, Any]]) -> tuple[int, int]:
-        """Index a batch of chunks for one library.
+    def index(
+        self,
+        library_id: str,
+        chunks: list[dict[str, Any]],
+        *,
+        force: bool = False,
+    ) -> tuple[int, int]:
+        """Index a batch of chunks for one library (smart re-index).
 
         Each chunk dict carries: ``id``, ``content``, ``content_hash``,
         ``source_url``, ``document_title``, ``section_header``,
         ``chunk_index``, ``has_code`` (see ``chunk_to_dict``).
 
-        When the batch is for known source URL(s), existing chunks for those
-        URLs are **purged first** so re-ingest never leaves orphan indices.
+        Per ``source_url``:
 
-        Returns ``(new_count, skipped_count)`` where ``skipped`` counts
-        chunks that were already present with the same hash (dedup) — after
-        a purge this is usually 0 for that page.
+        * If the ordered list of ``content_hash`` values matches what is
+          already stored → **skip** (no purge, no embed). Cheap refresh.
+        * If changed (or ``force=True``) → purge that URL first (orphan-safe
+          shrink), then upsert + Chroma only for written rows.
+
+        Returns ``(new_count, skipped_count)`` where skipped includes both
+        unchanged full pages and per-chunk dedup.
         """
         if not chunks:
             return (0, 0)
 
-        # Purge per source_url so shrinks don't leave stale M..N-1 indices.
-        urls = {
-            str(c.get("source_url") or "").strip()
-            for c in chunks
-            if c.get("source_url")
-        }
-        for url in urls:
+        # Group by source URL for page-level fingerprint compare
+        by_url: dict[str, list[dict[str, Any]]] = {}
+        for c in chunks:
+            url = str(c.get("source_url") or "").strip()
+            if not url:
+                continue
+            by_url.setdefault(url, []).append(c)
+
+        vs = self._vector_store_for(library_id)
+        new_count = 0
+        skipped = 0
+        wrote_chunks: list[dict[str, Any]] = []
+        pages_unchanged = 0
+        pages_updated = 0
+
+        for url, url_chunks in by_url.items():
+            url_chunks = sorted(
+                url_chunks, key=lambda x: int(x.get("chunk_index") or 0)
+            )
+            new_hashes = [str(c.get("content_hash") or "") for c in url_chunks]
+            if not force:
+                try:
+                    old_hashes = self._store.list_source_content_hashes(
+                        library_id, url
+                    )
+                except Exception:
+                    old_hashes = []
+                if old_hashes and old_hashes == new_hashes:
+                    skipped += len(url_chunks)
+                    pages_unchanged += 1
+                    logger.debug(
+                        "[KnowledgeIndex] unchanged page skip library=%s url=%s (%d chunks)",
+                        library_id,
+                        url[:80],
+                        len(url_chunks),
+                    )
+                    continue
+
+            # Changed page (or first ingest): purge orphans then write
             try:
                 self.purge_source(library_id, url)
             except Exception as exc:
@@ -178,33 +219,28 @@ class KnowledgeIndex:
                     url[:80],
                     exc,
                 )
+            pages_updated += 1
 
-        vs = self._vector_store_for(library_id)
-        new_count = 0
-        skipped = 0
-        wrote_chunks: list[dict[str, Any]] = []
+            for chunk in url_chunks:
+                try:
+                    wrote = self._store.upsert_chunk(chunk)
+                except Exception as exc:
+                    logger.warning(
+                        "[KnowledgeIndex] upsert failed library=%s url=%s idx=%s: %s",
+                        library_id,
+                        url[:80],
+                        chunk.get("chunk_index"),
+                        exc,
+                    )
+                    skipped += 1
+                    continue
+                if wrote:
+                    new_count += 1
+                    wrote_chunks.append(chunk)
+                else:
+                    skipped += 1
 
-        # SQLite (source of truth) + FTS5 first.
-        for chunk in chunks:
-            try:
-                wrote = self._store.upsert_chunk(chunk)
-            except Exception as exc:
-                logger.warning(
-                    "[KnowledgeIndex] upsert failed library=%s url=%s idx=%s: %s",
-                    library_id,
-                    (chunk.get("source_url") or "")[:80],
-                    chunk.get("chunk_index"),
-                    exc,
-                )
-                skipped += 1
-                continue
-            if wrote:
-                new_count += 1
-                wrote_chunks.append(chunk)
-            else:
-                skipped += 1
-
-        # ChromaDB: only embed chunks that actually changed (skip deduped).
+        # ChromaDB: only embed chunks that actually changed
         if vs.available:
             for chunk in wrote_chunks:
                 if not chunk.get("content"):
@@ -225,9 +261,10 @@ class KnowledgeIndex:
                 except Exception as exc:
                     logger.warning(
                         "[KnowledgeIndex] ChromaDB index failed for %s: %s",
-                        chunk.get("id"), exc,
+                        chunk.get("id"),
+                        exc,
                     )
-        else:
+        elif wrote_chunks:
             logger.info(
                 "[KnowledgeIndex] ChromaDB unavailable — chunks stored in SQLite+FTS5 only"
             )
@@ -235,10 +272,66 @@ class KnowledgeIndex:
         total = self._store.count_chunks(library_id)
         self._store.set_chunk_count(library_id, total)
         logger.info(
-            "[KnowledgeIndex] Indexed library=%s: %d new, %d skipped, %d total",
-            library_id, new_count, skipped, total,
+            "[KnowledgeIndex] Indexed library=%s: %d new, %d skipped "
+            "(%d pages updated, %d pages unchanged), %d total",
+            library_id,
+            new_count,
+            skipped,
+            pages_updated,
+            pages_unchanged,
+            total,
         )
         return (new_count, skipped)
+
+    def prune_sources_not_in(
+        self,
+        library_id: str,
+        keep_urls: set[str] | list[str],
+        *,
+        candidate_urls: set[str] | list[str] | None = None,
+    ) -> int:
+        """Delete indexed URLs that are no longer in the keep set.
+
+        Args:
+            library_id: Library to prune.
+            keep_urls: URLs that must remain (e.g. just discovered).
+            candidate_urls: If set, only consider pruning URLs in this set
+                (typically: previously indexed URLs that fall under the seed
+                scope). When None, any library URL not in keep_urls is removed.
+
+        Returns:
+            Number of source URLs purged.
+        """
+        keep = {str(u).strip() for u in (keep_urls or set()) if str(u).strip()}
+        if candidate_urls is None:
+            try:
+                existing = set(self._store.list_source_urls(library_id))
+            except Exception:
+                existing = set()
+            to_drop = existing - keep
+        else:
+            cand = {str(u).strip() for u in candidate_urls if str(u).strip()}
+            to_drop = cand - keep
+        dropped = 0
+        for url in sorted(to_drop):
+            try:
+                n = self.purge_source(library_id, url)
+                if n:
+                    dropped += 1
+            except Exception as exc:
+                logger.warning(
+                    "[KnowledgeIndex] prune failed library=%s url=%s: %s",
+                    library_id,
+                    url[:80],
+                    exc,
+                )
+        if dropped:
+            logger.info(
+                "[KnowledgeIndex] Pruned %d gone URLs from library=%s",
+                dropped,
+                library_id,
+            )
+        return dropped
 
     def delete_library(self, library_id: str) -> bool:
         """Drop the ChromaDB collection + all SQLite/FTS5 rows for a library."""
@@ -367,6 +460,12 @@ class KnowledgeIndex:
     async def search_all(
         self, query: str, library_ids: list[str], *, top_k: int = 5
     ) -> list[KnowledgeHit]:
+        """Cross-library search with a single fused RRF pass (async façade)."""
+        return self.search_all_sync(query, library_ids, top_k=top_k)
+
+    def search_all_sync(
+        self, query: str, library_ids: list[str], *, top_k: int = 5
+    ) -> list[KnowledgeHit]:
         """Cross-library search with a single fused RRF pass.
 
         Unlike :meth:`search_across`, this pools the raw per-layer (semantic
@@ -374,6 +473,8 @@ class KnowledgeIndex:
         that ranks high across multiple libraries/layers gets the combined
         score.  Fusing already-blended per-library results would double-count
         the RRF contribution, which is why we go back to the raw layers here.
+
+        Sync entry point used by federated search + inject (industry single path).
 
         Returns a single ranked :class:`KnowledgeHit` list, best first.
         """
@@ -550,15 +651,15 @@ def _auto_inject_top_k() -> int:
 async def get_knowledge_auto_inject_block(user_message: str) -> str:
     """Return the raw markdown to fence+inject for the latest user message.
 
-    Returns ``""`` when:
-      - the kill switch is off (``KAZMA_KB_AUTO_INJECT=0``),
-      - no library has ``auto_inject = 1``,
-      - there is no user message to retrieve against, or
-      - retrieval yields no hits.
+    Uses the **same** hybrid RRF retrieval + library resolution as federated
+    search (``kb_mode=inject``), so chat inject and tool/federated RAG stay
+    industry-aligned (one stack, tenant/archive filters, fence at caller).
+
+    Returns ``""`` when kill switch is off, no inject libraries, empty
+    message, or no hits.
 
     The caller MUST wrap the returned text in
-    :func:`kazma_core.safety.prompt_fence.format_untrusted_block` before
-    injecting — doc content is untrusted.
+    :func:`kazma_core.safety.prompt_fence.format_untrusted_block`.
     """
     if not kb_auto_inject_enabled():
         return ""
@@ -567,60 +668,52 @@ async def get_knowledge_auto_inject_block(user_message: str) -> str:
         return ""
 
     try:
-        store = get_knowledge_store()
-        libs = store.list_auto_inject_libraries()
-        # Smart search: also consult active libraries with chunks when the
-        # question looks technical (opt-in via KAZMA_KB_SMART_SEARCH).
-        if kb_smart_search_enabled() and _looks_technical(msg):
-            active = store.list_libraries(include_archived=False)
-            by_id = {l["id"]: l for l in libs}
-            for lib in active:
-                if int(lib.get("chunk_count") or 0) <= 0:
-                    continue
-                by_id.setdefault(lib["id"], lib)
-            libs = list(by_id.values())
-        if not libs:
-            return ""
-        index = get_knowledge_index()
-        hits = await index.search_all(
-            msg, [l["id"] for l in libs], top_k=_auto_inject_top_k()
+        from kazma_core.memory.federated_search import (
+            federated_search,
+            format_kb_hits_for_prompt,
         )
+
+        fed = federated_search(
+            msg,
+            limit_memory=0,
+            limit_kb=_auto_inject_top_k(),
+            include_memory=False,
+            include_knowledge=True,
+            kb_mode="inject",
+        )
+        hits = fed.get("hits") or []
         if not hits:
             return ""
+        block = format_kb_hits_for_prompt(hits, max_hits=_auto_inject_top_k())
+        if not block:
+            return ""
+        # Citation footer for chat answers (product convention)
+        cited_libs = sorted(
+            {
+                str((h.get("provenance") or {}).get("library_id") or "")
+                for h in hits
+                if (h.get("provenance") or {}).get("library_id")
+            }
+        )
+        if len(cited_libs) == 1:
+            lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
+        elif cited_libs:
+            lib_footer = (
+                "📚 This data is from Knowledge libraries: "
+                + ", ".join(f'"{l}"' for l in cited_libs)
+                + "."
+            )
+        else:
+            lib_footer = "📚 This data is from the Knowledge Library."
+        return (
+            block
+            + "\n"
+            + lib_footer
+            + "\nWhen you use this material in your answer, append the library footer verbatim."
+        )
     except Exception:
         logger.debug("[kb_auto_inject] retrieval failed", exc_info=True)
         return ""
-
-    # Build a compact attribution block.  Per-chunk provenance is mandatory
-    # so the model can cite sources (and so a reader of the prompt can tell
-    # where each fact came from).
-    lines = [f"# Knowledge context (auto-injected, {len(hits)} chunk(s))"]
-    for i, h in enumerate(hits, start=1):
-        cite = h.source_url
-        if h.section_header:
-            cite += f" — {h.section_header}"
-        lines.append(f"\n## [{i}] {cite}")
-        if h.document_title:
-            lines.append(f"_(page: {h.document_title})_")
-        lines.append(h.content)
-    # Citation directive (matches the knowledge_search tool path): every
-    # answer derived from this auto-injected context must carry a footer
-    # naming the source library, so the user can tell where the info came
-    # from even when they didn't explicitly invoke knowledge_search.
-    cited_libs = sorted({h.library_id for h in hits})
-    if len(cited_libs) == 1:
-        lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
-    else:
-        lib_footer = (
-            "📚 This data is from Knowledge libraries: "
-            + ", ".join(f'"{l}"' for l in cited_libs) + "."
-        )
-    lines.append(
-        "\n---\n"
-        + lib_footer + "\n"
-        "When you use this material in your answer, append this footer verbatim."
-    )
-    return "\n".join(lines)
 
 
 def get_knowledge_auto_inject_block_sync(user_message: str) -> str:

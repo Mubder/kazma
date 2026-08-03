@@ -616,6 +616,9 @@ async def supervisor_node(
                             promote_kb_hits_to_episodes,
                         )
 
+                        # Industry path: hybrid RRF over inject-scoped libs first
+                        # (auto_inject + optional smart search), same stack as
+                        # get_knowledge_auto_inject_block — not a parallel FTS path.
                         fed = federated_search(
                             last_user_content,
                             tenant_id=state.get("tenant_id", "default"),
@@ -624,10 +627,14 @@ async def supervisor_node(
                             limit_kb=3,
                             include_memory=False,
                             include_knowledge=True,
+                            kb_mode="inject",
                         )
-                        kb_md = format_kb_hits_for_prompt(fed.get("hits") or [], max_hits=3)
+                        kb_md = format_kb_hits_for_prompt(
+                            fed.get("hits") or [], max_hits=3
+                        )
                         if not kb_md:
-                            # Fall back to classic KB auto-inject (per-library flags)
+                            # Fallback: explicit inject helper (same RRF; handles
+                            # footer wording if federated returned empty edge case)
                             try:
                                 from kazma_core.stores.knowledge_index import (
                                     get_knowledge_auto_inject_block,

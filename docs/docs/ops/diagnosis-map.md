@@ -54,6 +54,8 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Memory forgets / search ≠ chat recall | UnifiedMemoryAdapter vs VectorMemory fallback | per-turn RAG flag | §9 Memory |
 | Empty `web_search` | SearXNG URL + JSON format | Backend chain notes in tool output | §10 Research |
 | Thin `read_url` / bot wall | Recovery cascade Firecrawl→Jina→Playwright | Keys / `KAZMA_JINA_READER=0` | §10 Research |
+| Stale KB hits after docs shrink | Smart re-index: page hash skip vs purge-on-change; gone-URL prune | `KnowledgeIndex.index` / `purge_source` / site prune | §10 Knowledge |
+| KB inject empty / wrong tenant | `list_auto_inject_libraries` + `kb_mode=inject` federated RRF | `KAZMA_KB_AUTO_INJECT`, smart search, archive flag | §10 Knowledge |
 | Swarm task stuck “paused” | HITL C checkpoint manager | Not A or B | §4 C |
 | `/replay` empty on one channel | `snapshot_recorder` at **all** graph build sites | Capture in supervisor node | §3 Time travel |
 | Session in sidebar only after F5 | WS must refresh/upsert sessions like SSE | SessionManager shared? | §2 Sessions |
@@ -274,6 +276,16 @@ Backlog: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob
 | `read_url` / KB ingest | optional pre-backends → httpx → **recovery** Firecrawl → Jina → Playwright | `KAZMA_FETCH_BACKEND`, `KAZMA_FIRECRAWL_*`, `KAZMA_JINA_READER` (`0` = never) |
 
 KB ingest and research use **`kazma_core.web_acquire`** (`fetch_text` / `search` / `crawl` profiles) over the shared recovery ladder in `read_url` — one I/O stack, product sinks stay separate.
+
+### Knowledge Library (recall / inject — one hybrid stack)
+
+| Path | Role |
+|------|------|
+| `KnowledgeIndex.search_all_sync` | **SoT retrieval** — Chroma semantic + FTS5 BM25 → RRF |
+| `federated_search(..., kb_mode=inject\|all_active)` | Chat merge + tools; labels `store=knowledge` (no schema merge with V2) |
+| `get_knowledge_auto_inject_block` | Same RRF via federated `kb_mode=inject` + prompt fence at caller |
+| Smart re-index | Unchanged page hashes → skip; change → purge URL; gone scoped URLs pruned |
+| Isolation | Per-lib Chroma `kazma_kb_*`; SQLite SoT; tenant/archive on list/inject |
 
 Live smoke: `scripts/smoke_research_stack.py`.
 

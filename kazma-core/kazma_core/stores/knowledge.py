@@ -449,6 +449,43 @@ class KnowledgeStore:
             ).fetchall()
         return [r["id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows]
 
+    def list_source_urls(self, library_id: str) -> list[str]:
+        """Distinct source URLs indexed for a library (for refresh prune)."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT DISTINCT source_url FROM knowledge_chunks
+                   WHERE library_id = ? AND source_url != ''
+                   ORDER BY source_url""",
+                (library_id,),
+            ).fetchall()
+        return [
+            (r["source_url"] if isinstance(r, sqlite3.Row) else r[0]) or ""
+            for r in rows
+            if (r["source_url"] if isinstance(r, sqlite3.Row) else r[0])
+        ]
+
+    def list_source_content_hashes(
+        self, library_id: str, source_url: str
+    ) -> list[str]:
+        """Ordered content hashes for one URL (chunk_index order).
+
+        Used by smart re-index: if the new page produces the same hash
+        sequence, skip purge/embed entirely.
+        """
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT content_hash FROM knowledge_chunks
+                   WHERE library_id = ? AND source_url = ?
+                   ORDER BY chunk_index ASC""",
+                (library_id, source_url),
+            ).fetchall()
+        return [
+            (r["content_hash"] if isinstance(r, sqlite3.Row) else r[0]) or ""
+            for r in rows
+        ]
+
     # ------------------------------------------------------------------
     # Chunk CRUD
     # ------------------------------------------------------------------
