@@ -614,6 +614,14 @@
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
                 Default is local SQLite + local embeddings. Switch to remote embedders or vector DBs without editing YAML.
             </p>
+            <div x-show="memoryBackendsCapability.vector_status"
+                 style="margin-bottom:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);font-size:0.78rem;"
+                 :style="memoryBackendsCapability.vector_write_ready
+                   ? 'background:rgba(46,213,115,0.08);border-color:rgba(46,213,115,0.3)'
+                   : 'background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.35)'">
+              <strong x-text="memoryBackendsCapability.vector_write_ready ? 'Vector: full (search + write)' : 'Vector: probe only'"></strong>
+              <span style="color:var(--text-muted)" x-text="' — ' + (memoryBackendsCapability.vector_status_detail || '')"></span>
+            </div>
             <div class="form-group">
                 <label>Mode</label>
                 <select class="form-select" x-model="memoryBackends.mode">

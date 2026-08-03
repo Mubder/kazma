@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — Memory priority max batch (P0/P1) (2026-08-03)
+
+- **VectorBackend protocol** + `LocalSqliteVectorBackend` + `get_vector_backend()`
+  factory; recall dense path uses factory. Remote providers are **probe-only**
+  with honest Settings capability matrix and failover (local/empty/raise).
+- **Working TTL** `memory.v2.working_ttl_hours` (default 24h) demoted in
+  macro_sleep.
+- **Dashboard:** sticky alert banner, probe empty hints, belief detail drawer
+  + invalidate, last reconsolidation meta.
+- **Tenant isolation tests** (beliefs + episodes + resolve_tenant_id).
+- **Smoke:** `scripts/memory_smoke.ps1`; backlog lock in
+  `docs/plans/MEMORY_PRIORITY_NEXT.md` + `MEMORY_REMAINING.md`.
+- Tests: `test_memory_priority_batch.py`.
+
 ## Unreleased — Memory V2 Phases C–D + Dashboard + Eval (2026-08-03)
 
 - **Phase C — Cognitive completeness**

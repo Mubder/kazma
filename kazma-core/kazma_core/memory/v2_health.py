@@ -72,12 +72,28 @@ def build_v2_health() -> dict[str, Any]:
         "post_turn": {},
         "embedder_ready": False,
         "last_error": None,
+        "last_reconsolidation": None,
+        "vector_capability": {},
     }
     try:
         from kazma_core.memory.consolidator import get_post_turn_metrics
 
         out["post_turn"] = get_post_turn_metrics()
         out["last_error"] = out["post_turn"].get("last_error")
+    except Exception:
+        pass
+    try:
+        from kazma_core.memory.backends import vector_capability
+
+        out["vector_capability"] = vector_capability()
+    except Exception:
+        pass
+    try:
+        from kazma_core.config_store import get_config_store
+
+        lr = get_config_store().get("memory.v2.last_reconsolidation")
+        if isinstance(lr, dict):
+            out["last_reconsolidation"] = lr
     except Exception:
         pass
     try:

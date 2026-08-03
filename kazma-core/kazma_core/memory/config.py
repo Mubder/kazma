@@ -62,6 +62,8 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "explain_recall": False,
         # Phase B: max belief rows scanned for dense cosine (prefilter cap)
         "dense_belief_candidate_cap": 400,
+        # Working-tier TTL (hours) — macro_sleep demotes stale working → episodic
+        "working_ttl_hours": 24,
         # Source trust weights (W_trust in V_retention formula §4.1)
         "trust_weight_user": 1.0,
         "trust_weight_tool": 0.85,
@@ -171,6 +173,7 @@ def _read_store_overlay() -> dict[str, Any]:
             "session_boost",
             "explain_recall",
             "dense_belief_candidate_cap",
+            "working_ttl_hours",
             "trust_weight_user",
             "trust_weight_tool",
             "trust_weight_llm",
@@ -296,6 +299,7 @@ _V2_INT_KEYS = (
     "ppr_seed_k",
     "extraction_every_n_turns",
     "dense_belief_candidate_cap",
+    "working_ttl_hours",
 )
 
 

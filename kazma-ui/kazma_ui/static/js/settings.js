@@ -62,6 +62,11 @@ function settingsApp() {
         },
         memoryBackendsSaving: false,
         memoryBackendsStatus: '',
+        memoryBackendsCapability: {
+            vector_write_ready: true,
+            vector_status: 'full',
+            vector_status_detail: '',
+        },
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -316,6 +321,11 @@ function settingsApp() {
                             graph: Object.assign({}, this.memoryBackends.graph, b.graph || {}),
                             failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
                         };
+                    }
+                    if (mb && mb.capability) {
+                        this.memoryBackendsCapability = Object.assign(
+                            {}, this.memoryBackendsCapability, mb.capability
+                        );
                     }
                 } catch (e) { /* optional */ }
 

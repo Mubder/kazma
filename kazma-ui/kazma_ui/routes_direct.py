@@ -293,9 +293,51 @@ def register_direct_routes(self: Any) -> None:
                 tenant_id=tenant_id,
                 explain=True,
             )
+            hints: list[str] = []
+            if result.empty:
+                try:
+                    import os
+                    import sqlite3 as _sq
+
+                    from kazma_core.memory.embedder import get_embedder
+                    from kazma_core.paths import primary_memory_db
+
+                    if get_embedder() is None:
+                        hints.append("embedder unavailable — dense search offline; FTS/LIKE only")
+                    dbp = primary_memory_db()
+                    if not os.path.exists(dbp):
+                        hints.append("memory_state.db not initialized — no rows yet")
+                    else:
+                        c = _sq.connect(dbp)
+                        try:
+                            ep_n = c.execute(
+                                "SELECT COUNT(*) FROM episodes WHERE tenant_id=?",
+                                (tenant_id,),
+                            ).fetchone()[0]
+                            bel_n = c.execute(
+                                "SELECT COUNT(*) FROM beliefs WHERE tenant_id=? "
+                                "AND valid_until IS NULL AND invalidated_at IS NULL",
+                                (tenant_id,),
+                            ).fetchone()[0]
+                        finally:
+                            c.close()
+                        if ep_n == 0 and bel_n == 0:
+                            hints.append(
+                                "no episodes or beliefs for this tenant — try chat: "
+                                "“Remember my favorite color is teal.”"
+                            )
+                        else:
+                            hints.append(
+                                f"store has {bel_n} beliefs / {ep_n} episodes but none matched — "
+                                "try different keywords or check tenant_mode"
+                            )
+                except Exception:
+                    hints.append("empty recall — check memory health on Dashboard")
             return {
                 "ok": True,
                 "query": query,
+                "empty": result.empty,
+                "hints": hints,
                 "beliefs": [
                     {
                         "id": h.id,
@@ -546,9 +588,18 @@ def register_direct_routes(self: Any) -> None:
     # ── Phase D: Memory backends Settings API ─────────────────────────
     @self.app.get("/api/settings/memory/backends")
     async def _settings_memory_backends_get():
-        from kazma_core.memory.backends import get_backends_cfg, mask_backends_cfg
+        from kazma_core.memory.backends import (
+            get_backends_cfg,
+            mask_backends_cfg,
+            vector_capability,
+        )
 
-        return {"ok": True, "backends": mask_backends_cfg(get_backends_cfg())}
+        cfg = get_backends_cfg()
+        return {
+            "ok": True,
+            "backends": mask_backends_cfg(cfg),
+            "capability": vector_capability(cfg),
+        }
 
     @self.app.put("/api/settings/memory/backends")
     async def _settings_memory_backends_put(request: Request):

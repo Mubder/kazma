@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_BACKENDS_CFG",
+    "VectorBackend",
+    "LocalSqliteVectorBackend",
     "get_backends_cfg",
+    "get_vector_backend",
+    "vector_capability",
     "save_backends_cfg",
     "mask_backends_cfg",
     "test_embedder_backend",
@@ -49,8 +53,209 @@ DEFAULT_BACKENDS_CFG: dict[str, Any] = {
     },
     "failover": {
         "on_remote_error": "local",  # local | empty | raise
+        "timeout_ms": 5000,
     },
 }
+
+# Providers that fully support search+upsert today (local path only).
+_WRITE_READY_VECTOR = frozenset({"sqlite_vec", "local", "local_sqlite"})
+
+
+@runtime_checkable
+class VectorBackend(Protocol):
+    """Pluggable dense-vector store for memory recall (SaaS base).
+
+    Remote implementations (pgvector / Qdrant) should implement the same
+    surface; until write path lands they may raise or return empty while
+    :func:`get_vector_backend` failovers to local.
+    """
+
+    name: str
+    write_ready: bool
+
+    @property
+    def available(self) -> bool: ...
+
+    def search(
+        self,
+        query_vec: list[float] | None,
+        *,
+        tenant_id: str = "default",
+        tier: str | list[str] | None = "recall",
+        limit: int = 10,
+    ) -> list[tuple[str, float]]: ...
+
+    def upsert(
+        self,
+        item_id: str,
+        vec: list[float],
+        *,
+        tenant_id: str = "default",
+        meta: dict[str, Any] | None = None,
+    ) -> bool: ...
+
+    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool: ...
+
+
+class LocalSqliteVectorBackend:
+    """Default VectorBackend — wraps :class:`VectorEngine` on primary DB."""
+
+    name = "sqlite_vec"
+    write_ready = True
+
+    def __init__(self, conn: Any) -> None:
+        from kazma_core.memory.vector_engine import VectorEngine
+
+        self._engine = VectorEngine(conn)
+        self._conn = conn
+
+    @property
+    def available(self) -> bool:
+        return bool(self._engine.available)
+
+    def search(
+        self,
+        query_vec: list[float] | None,
+        *,
+        tenant_id: str = "default",
+        tier: str | list[str] | None = "recall",
+        limit: int = 10,
+    ) -> list[tuple[str, float]]:
+        return self._engine.search(
+            query_vec, tenant_id=tenant_id, tier=tier, limit=limit
+        )
+
+    def upsert(
+        self,
+        item_id: str,
+        vec: list[float],
+        *,
+        tenant_id: str = "default",
+        meta: dict[str, Any] | None = None,
+    ) -> bool:
+        """Store float32 embedding on the episode row (local path)."""
+        del tenant_id, meta  # row id is global PK
+        if not item_id or not vec:
+            return False
+        try:
+            import struct
+
+            blob = struct.pack(f"{len(vec)}f", *vec)
+            self._conn.execute(
+                "UPDATE episodes SET embedding=? WHERE id=?",
+                (blob, item_id),
+            )
+            self._conn.commit()
+            return True
+        except Exception:
+            logger.debug("[vector_backend] local upsert failed", exc_info=True)
+            return False
+
+    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
+        del tenant_id
+        try:
+            self._conn.execute(
+                "UPDATE episodes SET embedding=NULL WHERE id=?", (item_id,)
+            )
+            self._conn.commit()
+            return True
+        except Exception:
+            return False
+
+
+class _EmptyVectorBackend:
+    """Fail-open empty results (failover policy ``empty``)."""
+
+    name = "empty"
+    write_ready = False
+
+    @property
+    def available(self) -> bool:
+        return False
+
+    def search(self, query_vec, *, tenant_id="default", tier=None, limit=10):
+        return []
+
+    def upsert(self, item_id, vec, *, tenant_id="default", meta=None):
+        return False
+
+    def delete(self, item_id, *, tenant_id="default"):
+        return False
+
+
+def vector_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Honest capability matrix for Settings / Dashboard."""
+    c = cfg or get_backends_cfg()
+    provider = str((c.get("vector") or {}).get("provider") or "sqlite_vec")
+    write_ready = provider in _WRITE_READY_VECTOR
+    mode = c.get("mode") or "local"
+    return {
+        "mode": mode,
+        "vector_provider": provider,
+        "vector_write_ready": write_ready,
+        "vector_search_ready": write_ready,  # remote search not wired yet
+        "vector_status": "full" if write_ready else "probe_only",
+        "vector_status_detail": (
+            "Local sqlite-vec: search + write"
+            if write_ready
+            else f"{provider}: connection probe only — remote write path not shipped yet"
+        ),
+        "embedder_provider": (c.get("embedder") or {}).get("provider") or "local",
+        "failover": dict(c.get("failover") or {}),
+    }
+
+
+def get_vector_backend(conn: Any | None = None) -> Any:
+    """Return the active VectorBackend (live ConfigStore read).
+
+    Local by default. Remote providers without a write path **failover**
+    to local (or empty) per ``failover.on_remote_error`` so chat never
+    hangs waiting for an unimplemented backend.
+    """
+    cfg = get_backends_cfg()
+    provider = str((cfg.get("vector") or {}).get("provider") or "sqlite_vec")
+    failover = str(
+        (cfg.get("failover") or {}).get("on_remote_error") or "local"
+    ).lower()
+    timeout_ms = int((cfg.get("failover") or {}).get("timeout_ms") or 5000)
+    del timeout_ms  # reserved for remote HTTP clients when write path lands
+
+    def _local() -> Any:
+        if conn is not None:
+            return LocalSqliteVectorBackend(conn)
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        c = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        ensure_primary_schema(c)
+        return LocalSqliteVectorBackend(c)
+
+    if provider in _WRITE_READY_VECTOR or (cfg.get("mode") or "local") == "local":
+        try:
+            return _local()
+        except Exception:
+            logger.debug("[vector_backend] local open failed", exc_info=True)
+            return _EmptyVectorBackend()
+
+    # Remote selected but write/search not implemented — honest failover
+    logger.info(
+        "[vector_backend] provider=%s not write-ready; failover=%s",
+        provider,
+        failover,
+    )
+    if failover == "raise":
+        raise RuntimeError(
+            f"Vector provider {provider!r} is probe-only; remote write path not shipped"
+        )
+    if failover == "empty":
+        return _EmptyVectorBackend()
+    # default: local
+    try:
+        return _local()
+    except Exception:
+        return _EmptyVectorBackend()
 
 _SENSITIVE_SUFFIXES = ("api_key", "password", "token", "secret")
 
@@ -138,10 +343,15 @@ def save_backends_cfg(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(sec, dict):
             continue
         for k, v in sec.items():
-            if is_sensitive_backend_key(str(k)) and (
-                v is None or str(v).strip() in ("", "***")
-            ):
-                continue  # keep existing secret
+            if is_sensitive_backend_key(str(k)):
+                try:
+                    from kazma_core.config_store import is_masked_secret_placeholder
+
+                    if v is None or is_masked_secret_placeholder(v) or str(v).strip() == "":
+                        continue  # keep existing secret
+                except Exception:
+                    if v is None or str(v).strip() in ("", "***"):
+                        continue
             pairs.append((f"memory.backends.{section}.{k}", v))
 
     # Mirror embedder into embedding.* so get_embedder() sees the change

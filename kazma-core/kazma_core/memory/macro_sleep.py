@@ -85,9 +85,11 @@ def run_macro_sleep(
     promote_min_importance = int(v2.get("promote_to_recall_min_importance", 3))
     promote_min_access = int(v2.get("promote_to_recall_min_access", 2))
 
+    working_ttl = float(v2.get("working_ttl_hours", 24)) * 3600
     stats = {
         "demoted_recall": 0,
         "demoted_episodic": 0,
+        "demoted_working": 0,
         "archived_beliefs": 0,
         "scored_episodes": 0,
         "promoted_to_recall": 0,
@@ -108,6 +110,7 @@ def run_macro_sleep(
             access = int(r["access_count"])
             last_touch = float(r["last_touch"] or now)
             age = max(0.0, now - last_touch)
+            created_age = max(0.0, now - float(r["created_at"] or now))
             # Derive memory_class from importance (episodes have no predicate_type)
             mem_class = (
                 "identity" if importance >= int(v2.get("identity_min_importance", 4))
@@ -121,8 +124,14 @@ def run_macro_sleep(
             )
             stats["scored_episodes"] += 1
 
+            # Working-tier TTL → episodic (active buffer must not grow forever)
+            if tier == "working" and created_age > working_ttl:
+                primary_conn.execute(
+                    "UPDATE episodes SET tier='episodic' WHERE id=?", (eid,)
+                )
+                stats["demoted_working"] += 1
             # Promote episodic→recall when important + accessed
-            if tier == "episodic" and importance >= promote_min_importance and access >= promote_min_access:
+            elif tier == "episodic" and importance >= promote_min_importance and access >= promote_min_access:
                 primary_conn.execute(
                     "UPDATE episodes SET tier='recall' WHERE id=?", (eid,)
                 )

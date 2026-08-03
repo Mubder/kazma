@@ -220,13 +220,21 @@
         </div>
       </div>
 
+      <!-- Sticky alert when post-turn failed or queue has dead-letters -->
+      <div id="v2-alert-banner" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;border:1px solid rgba(248,113,113,0.45);background:rgba(248,113,113,0.1);font-size:0.8rem;color:#fecaca;">
+        <strong>Memory needs attention.</strong>
+        <span id="v2-alert-banner-text"></span>
+        <a href="#v2-queue-table" style="margin-left:8px;color:#fca5a5;">Jump to queue ↓</a>
+      </div>
+
       <!-- Post-turn health strip -->
       <div id="v2-post-turn-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.78rem;">
         <span style="font-weight:600;color:var(--text-secondary);">Post-turn</span>
         <span id="v2-post-turn-ok" style="color:var(--text-muted);">ok: –</span>
         <span id="v2-post-turn-err" style="color:var(--text-muted);">last error: –</span>
         <span id="v2-embedder-ready" style="color:var(--text-muted);">embedder: –</span>
-        <a href="/settings#embedder" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
+        <span id="v2-reconsol-meta" style="color:var(--text-muted);">reconsol: –</span>
+        <a href="/settings?tab=agent" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
       </div>
 
       <!-- Live recall probe -->
@@ -268,6 +276,15 @@
             <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
           </div>
           <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:500px;padding:6px 8px;"></div>
+          <!-- Belief detail drawer -->
+          <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:10px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:200px;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="color:var(--text-secondary);">Belief detail</strong>
+              <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;">✕</button>
+            </div>
+            <div id="v2-belief-drawer-body" style="color:var(--text-primary);line-height:1.45;"></div>
+            <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">Invalidate belief</button>
+          </div>
         </div>
 
         <!-- RIGHT: V2 Belief Topology Graph -->
@@ -1256,9 +1273,36 @@
       }
       const embEl = document.getElementById('v2-embedder-ready');
       if (embEl) embEl.textContent = 'embedder: ' + (h.embedder_ready ? 'ready' : 'unavailable');
+      const rc = document.getElementById('v2-reconsol-meta');
+      if (rc) {
+        const lr = h.last_reconsolidation;
+        if (lr && lr.finished_at) {
+          rc.textContent = 'reconsol: merged ' + (lr.duplicate_beliefs_merged||0) +
+            ' · emb ' + ((lr.episodes_embedded||0)+(lr.beliefs_embedded||0));
+        } else {
+          rc.textContent = 'reconsol: never';
+        }
+      }
       const strip = document.getElementById('v2-post-turn-strip');
-      if (strip && ((h.queue && h.queue.failed > 0) || pt.last_error || h.status_detail)) {
+      const failedQ = (h.queue && h.queue.failed) || 0;
+      const hasErr = !!(pt.last_error || h.last_error || h.status_detail);
+      if (strip && (failedQ > 0 || hasErr)) {
         strip.style.borderColor = 'rgba(248,113,113,0.35)';
+      }
+      // Sticky alert banner (P0-2)
+      const banner = document.getElementById('v2-alert-banner');
+      const bannerText = document.getElementById('v2-alert-banner-text');
+      if (banner) {
+        if (failedQ > 0 || hasErr || h.status === 'DEGRADED') {
+          banner.style.display = 'block';
+          const parts = [];
+          if (failedQ > 0) parts.push(failedQ + ' failed queue task(s)');
+          if (pt.last_error || h.last_error) parts.push('last post-turn error recorded');
+          if (h.status === 'DEGRADED') parts.push('status DEGRADED');
+          if (bannerText) bannerText.textContent = ' ' + (parts.join(' · ') || 'Check queue and post-turn strip.');
+        } else {
+          banner.style.display = 'none';
+        }
       }
       // Tier breakdown bars
       const tb = document.getElementById('v2-tier-breakdown');
@@ -1317,11 +1361,66 @@
         lines.push('<div style="margin-bottom:4px;"><span style="color:#60a5fa;font-size:0.65rem;font-weight:700;">EPISODE</span> ' +
           _esc((h.content || '').slice(0, 200)) + ' <span style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(src) + ']</span></div>');
       });
-      out.innerHTML = lines.length ? lines.join('') : '<span style="color:var(--text-muted);">No hits.</span>';
+      if (!lines.length) {
+        const hints = (data.hints || []).map(function(hh) {
+          return '<div style="color:#fbbf24;margin-top:4px;">• ' + _esc(hh) + '</div>';
+        }).join('');
+        out.innerHTML = '<span style="color:var(--text-muted);">No hits.</span>' + hints;
+      } else {
+        out.innerHTML = lines.join('');
+      }
     } catch (e) {
       out.textContent = 'Probe error: ' + e;
     }
   }
+
+  var _openBeliefId = null;
+  async function openBeliefDrawer(beliefId) {
+    _openBeliefId = beliefId;
+    const drawer = document.getElementById('v2-belief-drawer');
+    const body = document.getElementById('v2-belief-drawer-body');
+    if (!drawer || !body) return;
+    drawer.style.display = 'block';
+    body.textContent = 'Loading…';
+    try {
+      const resp = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId));
+      const data = await resp.json();
+      if (!data.ok || !data.belief) {
+        body.textContent = data.error || 'Not found';
+        return;
+      }
+      const b = data.belief;
+      const chain = (data.chain || []).slice(1).map(function(c) {
+        return _esc(c.subject) + ' ' + _esc(c.predicate) + ' ' + _esc(c.object);
+      }).join(' ← ');
+      body.innerHTML =
+        '<div><b>' + _esc(b.subject) + '</b> ' + _esc((b.predicate||'').replace(/_/g,' ')) +
+        ' <b>' + _esc(b.object) + '</b></div>' +
+        '<div style="color:var(--text-muted);margin-top:4px;">id: ' + _esc(b.id) +
+        ' · conf ' + Math.round((b.confidence||0)*100) + '%' +
+        ' · imp ' + (b.structural_importance||'?') +
+        ' · access ' + (b.access_count||0) + '</div>' +
+        (chain ? '<div style="margin-top:6px;color:var(--text-muted);">supersedes chain: ' + chain + '</div>' : '');
+    } catch (e) {
+      body.textContent = 'Load failed';
+    }
+  }
+  document.getElementById('v2-belief-drawer-close')?.addEventListener('click', function() {
+    const d = document.getElementById('v2-belief-drawer');
+    if (d) d.style.display = 'none';
+  });
+  document.getElementById('v2-belief-invalidate')?.addEventListener('click', async function() {
+    if (!_openBeliefId) return;
+    const ok = window.kazmaConfirm
+      ? await window.kazmaConfirm({ title: 'Invalidate belief?', message: 'Soft-delete this fact from active memory.' })
+      : confirm('Invalidate belief?');
+    if (!ok) return;
+    await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
+    const d = document.getElementById('v2-belief-drawer');
+    if (d) d.style.display = 'none';
+    loadV2Beliefs();
+    pollV2Health();
+  });
 
   async function loadV2Queue() {
     const el = document.getElementById('v2-queue-table');
@@ -1418,20 +1517,20 @@
         const objRaw = String(b.object || '');
         const objFull = _esc(objRaw);
         const objShown = objRaw.length > 160 ? objFull.slice(0, 160) + '…' : objFull;
-        return '<div class="v2-belief-row" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
+        return '<div class="v2-belief-row" data-id="' + _esc(b.id) + '" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
                '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + (b.predicate_type||'?') + '</span>' +
                '<div style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
                '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
                '</div>';
       }).join('');
-      // Make each belief row clickable — highlight subject+object in the graph
+      // Make each belief row clickable — drawer + highlight graph
       list.querySelectorAll('.v2-belief-row').forEach(function(row) {
         row.addEventListener('click', function() {
           var subj = row.getAttribute('data-subject');
           var obj = row.getAttribute('data-object');
-          // Highlight in the graph: select the subject node + scroll to it
+          var bid = row.getAttribute('data-id');
+          if (bid) openBeliefDrawer(bid);
           _v2gSelectByBelief(subj, obj);
-          // Visual feedback: highlight the clicked row
           list.querySelectorAll('.v2-belief-row').forEach(function(r) { r.style.background = 'transparent'; r.style.borderLeft = ''; });
           row.style.background = 'rgba(99,102,241,0.12)';
           row.style.borderLeft = '3px solid #6366f1';

@@ -680,15 +680,26 @@ def _episode_dense(
     tenant_id: str,
     limit: int,
 ) -> list[RecallHit]:
-    """Dense vector search via the VectorEngine."""
-    if vector_engine is None:
-        try:
-            from kazma_core.memory.vector_engine import VectorEngine
+    """Dense vector search via VectorBackend factory (local sqlite-vec default).
 
-            vector_engine = VectorEngine(conn)
+    ``vector_engine`` remains accepted for tests that inject a VectorEngine;
+    production path uses :func:`get_vector_backend` so remote backends can
+    plug in later without changing this call site.
+    """
+    backend: Any = vector_engine
+    if backend is None:
+        try:
+            from kazma_core.memory.backends import get_vector_backend
+
+            backend = get_vector_backend(conn)
         except Exception:
-            return []
-    if not getattr(vector_engine, "available", False):
+            try:
+                from kazma_core.memory.vector_engine import VectorEngine
+
+                backend = VectorEngine(conn)
+            except Exception:
+                return []
+    if not getattr(backend, "available", False):
         return []
     # Encode the query
     try:
@@ -703,7 +714,7 @@ def _episode_dense(
     except Exception:
         return []
     # Search working + episodic + recall so fresh turns and active buffer hit.
-    results = vector_engine.search(
+    results = backend.search(
         qvec,
         tenant_id=tenant_id,
         tier=["working", "recall", "episodic"],

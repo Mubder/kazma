@@ -55,7 +55,19 @@ def run_global_reconsolidation(
         stats["errors"] += 1
         logger.warning("[reconsolidation] reembed failed", exc_info=True)
     stats["duration_s"] = round(time.time() - t0, 3)
+    stats["finished_at"] = time.time()
     logger.info("[reconsolidation] done: %s", stats)
+    # Persist last-run for Dashboard (best-effort ConfigStore)
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(
+            "memory.v2.last_reconsolidation",
+            stats,
+            category="memory",
+        )
+    except Exception:
+        pass
     return stats
 
 
