@@ -322,18 +322,16 @@
               <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
             </div>
           </div>
-          <!-- Legend (filled dynamically from live type counts) -->
-          <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);">
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:4px;"></span>person</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#06b6d4;margin-right:4px;"></span>tool</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6366f1;margin-right:4px;"></span>concept</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ec4899;margin-right:4px;"></span>location</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:4px;"></span>project</span>
+          <!-- Legend (filled dynamically — site accent + distinct You/user) -->
+          <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);align-items:center;">
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--warning,#f59e0b);margin-right:4px;box-shadow:0 0 6px rgba(245,158,11,0.45);"></span>You</span>
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>entity</span>
+            <span style="opacity:0.75;">edges · accent blue</span>
           </div>
           <!-- Canvas -->
-          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at center, rgba(99,102,241,0.06), rgba(0,0,0,0.25));overflow:hidden;">
+          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
             <canvas id="v2g-canvas" width="800" height="400" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;"></canvas>
-            <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:260px;padding:6px 10px;border-radius:6px;background:rgba(15,23,32,0.95);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:0.75rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,0.4);"></div>
+            <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
             <div id="v2g-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">No beliefs yet — the graph populates as Kazma learns.</div>
           </div>
         </div>
@@ -1746,11 +1744,76 @@
   // Cache the last full dataset so client-side filters don't need a re-fetch
   var _v2gRawNodes = [], _v2gRawLinks = [];
 
-  var _V2G_TYPE_COLORS = {
-    person: '#10b981', tool: '#06b6d4', concept: '#6366f1',
-    location: '#ec4899', project: '#f59e0b', entity: '#94a3b8',
-  };
-  var _V2G_PRED_COLORS = { functional: '#10b981', set: '#06b6d4', state: '#f59e0b' };
+  // Palette follows site tokens (cyan accent + blue secondary).
+  // The "user" node is intentionally warm amber so it stands out.
+  function _v2gCss(name, fallback) {
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    } catch (e) { return fallback; }
+  }
+  function _v2gTheme() {
+    var accent = _v2gCss('--accent', '#22d3ee');
+    var accentLight = _v2gCss('--accent-light', '#67e8f9');
+    var secondary = _v2gCss('--secondary', '#3b82f6');
+    var secondaryLight = _v2gCss('--secondary-light', '#93c5fd');
+    var user = _v2gCss('--warning', '#f59e0b');
+    return {
+      accent: accent,
+      accentLight: accentLight,
+      secondary: secondary,
+      secondaryLight: secondaryLight,
+      user: user,
+      // Soft type variation — all stay in site blue/cyan family
+      type: {
+        person: secondary,
+        tool: accent,
+        concept: accentLight,
+        location: secondaryLight,
+        project: '#38bdf8',
+        entity: '#7dd3fc',
+      },
+      pred: {
+        functional: accent,
+        set: secondaryLight,
+        state: '#38bdf8',
+      },
+    };
+  }
+  // Legacy maps rebuilt from theme (filters / legend)
+  function _v2gTypeColors() {
+    var t = _v2gTheme();
+    return Object.assign({ user: t.user }, t.type);
+  }
+  function _v2gPredColors() {
+    return _v2gTheme().pred;
+  }
+  // Keep symbols for older call sites that read the maps directly
+  var _V2G_TYPE_COLORS = _v2gTypeColors();
+  var _V2G_PRED_COLORS = _v2gPredColors();
+  function _v2gRefreshPalette() {
+    _V2G_TYPE_COLORS = _v2gTypeColors();
+    _V2G_PRED_COLORS = _v2gPredColors();
+  }
+  function _v2gIsUser(p) {
+    if (!p) return false;
+    var id = String(p.id || '').toLowerCase();
+    return id === 'user' || id === 'you' || !!p.isUser;
+  }
+  function _v2gNodeColor(p) {
+    var t = _v2gTheme();
+    if (_v2gIsUser(p)) return t.user;
+    return (t.type[p.type] || t.accent);
+  }
+  function _v2gHexAlpha(hex, a) {
+    // #rgb / #rrggbb → rgba()
+    if (!hex || hex[0] !== '#') return hex;
+    var h = hex.slice(1);
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (h.length !== 6) return hex;
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
 
   function _v2gSX(wx) { return wx * _v2gView.scale + _v2gView.ox; }
   function _v2gSY(wy) { return wy * _v2gView.scale + _v2gView.oy; }
@@ -1852,14 +1915,18 @@
         var ang = i * 2.39996, r = 20 + (i % 6) * 24;
         var bc = nd.beliefCount || 1;
         var fullName = String(nd.name || nd.id);
+        var isUser = String(nd.id || '').toLowerCase() === 'user';
+        // Place the user slightly toward center for visual hierarchy
+        var rad = isUser ? 8 : r;
         return {
-          x: W / 2 + Math.cos(ang) * r, y: H / 2 + Math.sin(ang) * r,
+          x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad,
           vx: 0, vy: 0, id: nd.id,
-          label: fullName.slice(0, 22),
-          fullLabel: fullName,
+          label: isUser ? 'You' : fullName.slice(0, 22),
+          fullLabel: isUser ? 'You (user)' : fullName,
           type: nd.type || 'entity',
+          isUser: isUser,
           isHighStakes: !!nd.isHighStakes,
-          r: _v2gNodeBaseR + Math.min(8, Math.sqrt(bc) * 1.5),
+          r: (isUser ? _v2gNodeBaseR + 4 : _v2gNodeBaseR) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
         };
       });
@@ -1882,37 +1949,71 @@
     var ctx = size.ctx, W = size.w, H = size.h;
     if (_v2gAlpha > 0) _v2gStep(W, H);
     _v2gPaint(ctx, W, H);
-    if (_v2gAlpha > 0 || _v2gDrag) { _v2gAnim = requestAnimationFrame(_v2gTick); }
-    else { _v2gAnim = null; }
+    // Keep a low-FPS idle loop for You/user breath + high-stakes pulse
+    var idle = false;
+    for (var i = 0; i < _v2gPts.length; i++) {
+      if (_v2gIsUser(_v2gPts[i]) || _v2gPts[i].isHighStakes) { idle = true; break; }
+    }
+    if (_v2gAlpha > 0 || _v2gDrag || idle) {
+      _v2gAnim = requestAnimationFrame(_v2gTick);
+    } else {
+      _v2gAnim = null;
+    }
   }
 
   function _v2gRepaint() { if (!_v2gAnim) _v2gAnim = requestAnimationFrame(_v2gTick); }
 
   function _v2gPaint(ctx, W, H) {
+    _v2gRefreshPalette();
+    var theme = _v2gTheme();
     ctx.clearRect(0, 0, W, H);
-    // Edges
+    // Soft ambient glow (site accent)
+    var amb = ctx.createRadialGradient(W * 0.5, H * 0.42, 8, W * 0.5, H * 0.5, Math.max(W, H) * 0.55);
+    amb.addColorStop(0, _v2gHexAlpha(theme.accent, 0.07));
+    amb.addColorStop(0.45, _v2gHexAlpha(theme.secondary, 0.03));
+    amb.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = amb;
+    ctx.fillRect(0, 0, W, H);
+
+    // Edges — accent family, gradient along the link when connected to You
     ctx.font = _v2gFont(10);
     for (var e = 0; e < _v2gEdges.length; e++) {
       var ed = _v2gEdges[e]; var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
       if (!A || !B) continue;
       var ax = _v2gSX(A.x), ay = _v2gSY(A.y), bx = _v2gSX(B.x), by = _v2gSY(B.y);
       var hot = _v2gSelectedId && (A.id === _v2gSelectedId || B.id === _v2gSelectedId);
-      // Also highlight the specific edge between the belief-click pair
       var beliefHot = _v2gHighlightSubj && _v2gHighlightObj &&
         ((A.id === _v2gHighlightSubj && B.id === _v2gHighlightObj) ||
          (A.id === _v2gHighlightObj && B.id === _v2gHighlightSubj));
-      var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
+      var pcolor = _V2G_PRED_COLORS[ed.type] || theme.accent;
+      var touchesUser = _v2gIsUser(A) || _v2gIsUser(B);
+      ctx.lineCap = 'round';
       if (beliefHot) {
-        ctx.strokeStyle = '#a5b4fc'; ctx.lineWidth = 3.5;
+        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 3.4;
+        ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.55); ctx.shadowBlur = 10;
       } else if (hot) {
-        ctx.strokeStyle = 'rgba(56,189,248,0.9)'; ctx.lineWidth = 2.2;
+        ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.3;
+        ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.4); ctx.shadowBlur = 8;
+      } else if (ed.superseded) {
+        ctx.strokeStyle = 'rgba(148,163,184,0.28)'; ctx.lineWidth = 1;
+        ctx.shadowBlur = 0;
       } else {
-        ctx.strokeStyle = ed.superseded ? 'rgba(148,163,184,0.3)' : pcolor + '88';
-        ctx.lineWidth = 1 + (ed.confidence || 0.5) * 1.5;
+        var grad = ctx.createLinearGradient(ax, ay, bx, by);
+        if (touchesUser) {
+          grad.addColorStop(0, _v2gHexAlpha(theme.user, 0.75));
+          grad.addColorStop(1, _v2gHexAlpha(theme.accent, 0.55));
+        } else {
+          grad.addColorStop(0, _v2gHexAlpha(pcolor, 0.55));
+          grad.addColorStop(1, _v2gHexAlpha(theme.accentLight, 0.4));
+        }
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1 + (ed.confidence || 0.5) * 1.6;
+        ctx.shadowBlur = 0;
       }
       if (ed.superseded) ctx.setLineDash([4, 3]); else ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
       ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
       // Arrowhead
       var ang = Math.atan2(by - ay, bx - ax);
       var ah = 6;
@@ -1921,46 +2022,97 @@
       ctx.lineTo(bx - ah * Math.cos(ang - 0.4), by - ah * Math.sin(ang - 0.4));
       ctx.lineTo(bx - ah * Math.cos(ang + 0.4), by - ah * Math.sin(ang + 0.4));
       ctx.closePath();
-      ctx.fillStyle = hot ? '#7dd3fc' : (ed.superseded ? 'rgba(148,163,184,0.4)' : pcolor + 'aa');
+      ctx.fillStyle = hot || beliefHot ? theme.accentLight : (ed.superseded ? 'rgba(148,163,184,0.4)' : _v2gHexAlpha(pcolor, 0.85));
       ctx.fill();
       // Label
       if (_v2gView.scale > 0.7 && ed.label) {
         var mx = (ax + bx) / 2, my = (ay + by) / 2;
         var tw = ctx.measureText(ed.label).width;
-        ctx.fillStyle = 'rgba(15,23,32,0.78)';
-        ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 14);
-        ctx.fillStyle = hot ? '#7dd3fc' : (ed.superseded ? 'rgba(148,163,184,0.7)' : 'rgba(186,198,214,0.95)');
+        ctx.fillStyle = 'rgba(10,15,20,0.82)';
+        ctx.beginPath();
+        // rounded pill
+        var px = mx - tw / 2 - 5, py = my - 9, pw = tw + 10, ph = 15, pr = 4;
+        ctx.moveTo(px + pr, py); ctx.arcTo(px + pw, py, px + pw, py + ph, pr);
+        ctx.arcTo(px + pw, py + ph, px, py + ph, pr); ctx.arcTo(px, py + ph, px, py, pr);
+        ctx.arcTo(px, py, px + pw, py, pr); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = _v2gHexAlpha(theme.accent, 0.2); ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = hot || beliefHot ? theme.accentLight : 'rgba(200,220,235,0.95)';
         ctx.textAlign = 'center'; ctx.fillText(ed.label, mx, my + 3);
       }
     }
     // Nodes
     var showLabels = _v2gView.scale > 0.55;
     ctx.font = _v2gFont(11);
+    var tNow = Date.now();
     for (var i = 0; i < _v2gPts.length; i++) {
       var p = _v2gPts[i];
       var x = _v2gSX(p.x), y = _v2gSY(p.y);
       var r = p.r;
       var isHover = (i === _v2gHover), isSel = (p.id === _v2gSelectedId);
+      var isUser = _v2gIsUser(p);
       if (isSel || isHover) r += 3;
-      var color = _V2G_TYPE_COLORS[p.type] || '#94a3b8';
-      // High-stakes pulsing red halo
+      if (isUser) r += 1;
+      var color = _v2gNodeColor(p);
+      // Soft outer glow
+      var glowR = r + (isUser ? 10 : 7);
+      var glow = ctx.createRadialGradient(x, y, r * 0.2, x, y, glowR);
+      glow.addColorStop(0, _v2gHexAlpha(color, isUser || isSel ? 0.45 : 0.22));
+      glow.addColorStop(1, _v2gHexAlpha(color, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(x, y, glowR, 0, 2 * Math.PI); ctx.fill();
+      // High-stakes red halo (above glow)
       if (p.isHighStakes) {
-        var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 400);
-        ctx.beginPath(); ctx.arc(x, y, r + 4 + pulse * 2, 0, 2 * Math.PI);
+        var pulse = 0.5 + 0.5 * Math.sin(tNow / 400);
+        ctx.beginPath(); ctx.arc(x, y, r + 5 + pulse * 2, 0, 2 * Math.PI);
         ctx.strokeStyle = 'rgba(239,68,68,' + (0.4 + pulse * 0.3) + ')'; ctx.lineWidth = 2; ctx.stroke();
       }
-      // Selected ring
-      if (isSel) {
-        ctx.beginPath(); ctx.arc(x, y, r + 4, 0, 2 * Math.PI);
-        ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2; ctx.stroke();
+      // User: gentle amber breath
+      if (isUser) {
+        var up = 0.5 + 0.5 * Math.sin(tNow / 650);
+        ctx.beginPath(); ctx.arc(x, y, r + 5 + up * 2.5, 0, 2 * Math.PI);
+        ctx.strokeStyle = _v2gHexAlpha(theme.user, 0.35 + up * 0.25); ctx.lineWidth = 2; ctx.stroke();
       }
+      // Selected ring (accent)
+      if (isSel) {
+        ctx.beginPath(); ctx.arc(x, y, r + 5, 0, 2 * Math.PI);
+        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 2.2; ctx.stroke();
+      }
+      // Body — radial highlight for depth
+      var body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, 0, x, y, r);
+      body.addColorStop(0, _v2gHexAlpha('#ffffff', isUser ? 0.45 : 0.28));
+      body.addColorStop(0.35, color);
+      body.addColorStop(1, _v2gHexAlpha(color, 0.85));
       ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = color; ctx.globalAlpha = isHover || isSel ? 1 : 0.88; ctx.fill();
+      ctx.fillStyle = body;
+      ctx.globalAlpha = p.isVirtual && !isSel && !isHover ? 0.72 : 1;
+      ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.stroke();
+      if (p.isVirtual) {
+        ctx.setLineDash([3, 2]);
+        ctx.strokeStyle = _v2gHexAlpha(theme.accentLight, 0.55);
+      } else {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = isUser ? _v2gHexAlpha('#fff7ed', 0.55) : 'rgba(255,255,255,0.28)';
+      }
+      ctx.lineWidth = isUser ? 1.6 : 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // User center mark
+      if (isUser && r > 8) {
+        ctx.beginPath(); ctx.arc(x, y, Math.max(2.2, r * 0.22), 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+      }
       if (showLabels) {
-        ctx.fillStyle = '#e4e4e7'; ctx.textAlign = 'center';
-        ctx.fillText(p.label, x, y + r + 12);
+        var lab = p.label;
+        // Canvas font: weight + size/family
+        ctx.font = (isUser ? '600 ' : '') + _v2gFont(isUser ? 12 : 11);
+        // subtle label plate for readability
+        var lw = ctx.measureText(lab).width;
+        ctx.fillStyle = 'rgba(10,15,20,0.55)';
+        ctx.fillRect(x - lw / 2 - 4, y + r + 3, lw + 8, 14);
+        ctx.fillStyle = isUser ? theme.user : '#e6edf3';
+        ctx.textAlign = 'center';
+        ctx.fillText(lab, x, y + r + 13);
       }
     }
   }
@@ -2015,8 +2167,14 @@
         var tip = document.getElementById('v2g-tooltip');
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
-          tip.innerHTML = '<b style="color:' + (_V2G_TYPE_COLORS[p.type] || '#fff') + ';word-break:break-word;">' + _v2gEsc(_v2gTitle(p.fullLabel || p.label)) + '</b><br><span style="color:var(--text-muted);">type: ' + p.type + (p.isHighStakes ? ' · ⚠ high-stakes' : '') + '</span>';
+          var tc = _v2gNodeColor(p);
+          var tLabel = _v2gIsUser(p) ? 'You' : _v2gTitle(p.fullLabel || p.label);
+          tip.innerHTML = '<b style="color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b><br><span style="color:var(--text-muted);">' +
+            (_v2gIsUser(p) ? 'you · center of memory' : ('type: ' + p.type)) +
+            (p.isHighStakes ? ' · ⚠ high-stakes' : '') +
+            (p.isVirtual ? ' · fact' : '') + '</span>';
           tip.style.display = 'block';
+          tip.style.borderColor = _v2gHexAlpha(tc, 0.35);
           var rect = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect.width - 200) + 'px';
           tip.style.top = (c.sy + 12) + 'px';
@@ -2087,12 +2245,15 @@
   function _v2gInspect(p) {
     var el = document.getElementById('v2g-inspect');
     if (!el || !p) return;
-    var color = _V2G_TYPE_COLORS[p.type] || '#94a3b8';
+    _v2gRefreshPalette();
+    var color = _v2gNodeColor(p);
     var fullName = p.fullLabel || p.label || p.id;
-    var title = _v2gTitle(fullName);
+    var title = _v2gIsUser(p) ? 'You' : _v2gTitle(fullName);
     var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;margin-bottom:4px;word-break:break-word;">' + _v2gEsc(title) + '</div>';
-    html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">type: ' + p.type;
+    html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">';
+    html += _v2gIsUser(p) ? 'you · memory hub' : ('type: ' + p.type);
     if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
+    if (p.isVirtual) html += ' · fact node';
     html += '</div>';
     // Contents — the full text of this belief/entity, shown exactly once.
     if (fullName !== title) {
@@ -2105,13 +2266,13 @@
       var ed = _v2gEdges[i];
       var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
       if (!A || !B) continue;
-      var pcolor = _V2G_PRED_COLORS[ed.type] || '#94a3b8';
+      var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
       var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
       // Neighbor labels only — never repeat THIS node's own text in the row.
-      var targetName = _v2gEsc(_v2gShortLabel(B.fullLabel || B.label || B.id || ed.objectText));
-      var sourceName = _v2gEsc(_v2gShortLabel(A.fullLabel || A.label || A.id || ed.objectText));
+      var targetName = _v2gEsc(_v2gIsUser(B) ? 'You' : _v2gShortLabel(B.fullLabel || B.label || B.id || ed.objectText));
+      var sourceName = _v2gEsc(_v2gIsUser(A) ? 'You' : _v2gShortLabel(A.fullLabel || A.label || A.id || ed.objectText));
       if (A.id === p.id) {
-        rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + pcolor + '22;">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
+        rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + _v2gHexAlpha(pcolor, 0.15) + ';">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
       } else if (B.id === p.id) {
         rels.push('<span style="color:var(--text-muted);font-size:0.68rem;">←</span> ' + sourceName + ' ' + predLabel + ' <b>(this)</b>');
       }
@@ -2193,18 +2354,37 @@
   function _v2gUpdateLegend(entCounts) {
     var leg = document.getElementById('v2g-legend');
     if (!leg) return;
+    _v2gRefreshPalette();
+    var theme = _v2gTheme();
+    var hasUser = (_v2gRawNodes || []).some(function(n) {
+      return String(n.id || '').toLowerCase() === 'user';
+    });
+    var parts = [];
+    if (hasUser) {
+      parts.push(
+        '<span title="You"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
+        theme.user + ';margin-right:4px;box-shadow:0 0 6px ' + _v2gHexAlpha(theme.user, 0.5) +
+        ';"></span>You</span>'
+      );
+    }
     var order = ['person', 'tool', 'concept', 'location', 'project', 'entity'];
     var keys = order.filter(function(k) { return (entCounts[k] || 0) > 0; });
-    Object.keys(entCounts).forEach(function(k) {
+    Object.keys(entCounts || {}).forEach(function(k) {
       if (keys.indexOf(k) < 0 && entCounts[k] > 0) keys.push(k);
     });
-    if (!keys.length) keys = ['person', 'tool', 'concept', 'location', 'project'];
-    leg.innerHTML = keys.map(function(k) {
-      var c = _V2G_TYPE_COLORS[k] || '#94a3b8';
+    if (!keys.length) keys = ['concept'];
+    keys.forEach(function(k) {
+      // person count includes user — still show type chip in accent family
+      var c = _V2G_TYPE_COLORS[k] || theme.accent;
       var n = entCounts[k] || 0;
-      return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c + ';margin-right:4px;"></span>' +
-        k + (n ? ' <span style="opacity:0.7">(' + n + ')</span>' : '') + '</span>';
-    }).join('');
+      parts.push(
+        '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
+        c + ';margin-right:4px;box-shadow:0 0 5px ' + _v2gHexAlpha(c, 0.35) +
+        ';"></span>' + k + (n ? ' <span style="opacity:0.7">(' + n + ')</span>' : '') + '</span>'
+      );
+    });
+    parts.push('<span style="opacity:0.7;margin-left:2px;">· site accent</span>');
+    leg.innerHTML = parts.join('');
   }
 
   function _v2gApplyFilters() {
