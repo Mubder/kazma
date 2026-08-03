@@ -2593,7 +2593,7 @@
           // indicator and start polling for the background-completed result.
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
-            // Poll for the completed background turn.
+            // Poll — if server is not generating, poller will resolve dead pending.
             _pollBackgroundTurn(sessionId, messages.length);
           } else {
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
@@ -2617,13 +2617,16 @@
           _showGeneratingIndicator();
           _pollBackgroundTurn(sessionId, messages.length);
         } else if (
+          lastMsg && lastMsg.role === 'assistant' && lastMsg.pending &&
+          !(lastMsg.content || '').trim()
+        ) {
+          // Empty pending — poller decides live vs dead (via /status generating).
+          _pollBackgroundTurn(sessionId, messages.length);
+        } else if (
           lastMsg && lastMsg.role === 'assistant' && !lastMsg.pending &&
           !(lastMsg.content || '').trim()
         ) {
-          // WS-path fallback: a turn is running but the trailing assistant
-          // bubble has no pending flag (e.g. recovery notice already popped
-          // it). Keep the indicator alive and poll for the completion.
-          _showGeneratingIndicator();
+          // Empty non-pending bubble — only poll if server still generating.
           _pollBackgroundTurn(sessionId, messages.length);
         }
 
@@ -2731,6 +2734,26 @@
           // Server still working — never give up solely on attempt count.
           delayMs = Math.min(delayMs + 1000, 10000);
           _schedule(delayMs);
+          return;
+        }
+
+        // Dead pending: server not generating but bubble still pending/empty.
+        // Common after a crash that showed an error live but never cleared
+        // SessionStore — refresh would stick on "still processing…" forever.
+        if (
+          lastMsg && lastMsg.role === 'assistant' &&
+          lastMsg.pending && !(lastMsg.content || '').trim() &&
+          attempts >= 2
+        ) {
+          _bgPollingSession = null;
+          var stuck = messagesEl ? messagesEl.querySelectorAll('[data-role="assistant"]') : [];
+          if (stuck.length > 0) {
+            var stuckEl = stuck[stuck.length - 1];
+            var textNode = stuckEl.querySelector('.message-text') || stuckEl;
+            textNode.innerHTML = (window.KS && KS.markdown)
+              ? KS.markdown('⚠️ Previous turn ended without a stored reply (it may have failed). Send a new message to continue.')
+              : '<p><em>Previous turn ended without a stored reply. Send a new message to continue.</em></p>';
+          }
           return;
         }
 

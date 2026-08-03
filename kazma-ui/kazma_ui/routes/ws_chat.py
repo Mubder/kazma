@@ -1157,38 +1157,49 @@ def create_ws_chat_router(
                             logger.info(
                                 "[WS-Chat] Prompt stream cancelled for session=%s", session_id
                             )
-                            if assistant_content_acc:
-                                try:
-                                    await _persist_final_assistant_message(
-                                        graph_inst,
-                                        config,
-                                        session_id,
-                                        prefer_text=assistant_content_acc,
-                                        activity=activity_log,
-                                    )
-                                except Exception as e:
-                                    logger.warning(
-                                        "[WS-Chat] Failed to persist partial assistant on cancel: %s",
-                                        e,
-                                    )
+                            # Always clear pending bubble — empty cancel must not
+                            # leave "still processing in the background" on reload.
+                            try:
+                                await _persist_final_assistant_message(
+                                    graph_inst,
+                                    config,
+                                    session_id,
+                                    prefer_text=(
+                                        assistant_content_acc.strip()
+                                        or "⚠️ Turn cancelled."
+                                    ),
+                                    activity=activity_log,
+                                    model=_resolve_active_model(),
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "[WS-Chat] Failed to persist assistant on cancel: %s",
+                                    e,
+                                )
                             raise
                         except Exception as exc:
                             logger.exception("[WS-Chat] Error in prompt stream: %s", exc)
-                            if assistant_content_acc:
-                                try:
-                                    await _persist_final_assistant_message(
-                                        graph_inst,
-                                        config,
-                                        session_id,
-                                        prefer_text=assistant_content_acc,
-                                        activity=activity_log,
-                                    )
-                                except Exception as e:
-                                    logger.warning(
-                                        "[WS-Chat] Failed to persist partial assistant on error: %s",
-                                        e,
-                                    )
                             err_msg = _friendly_graph_error(exc)
+                            recovery = f"⚠️ {err_msg}"
+                            # ALWAYS persist + clear pending — live UI may show the
+                            # error, but SessionStore still had pending=True empty
+                            # content, so refresh showed "still processing…".
+                            try:
+                                await _persist_final_assistant_message(
+                                    graph_inst,
+                                    config,
+                                    session_id,
+                                    prefer_text=(
+                                        assistant_content_acc.strip() or recovery
+                                    ),
+                                    activity=activity_log,
+                                    model=_resolve_active_model(),
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "[WS-Chat] Failed to persist assistant on error: %s",
+                                    e,
+                                )
                             # Safe sends: no-op after the client disconnected.
                             await send(
                                 TelemetryEvent(
@@ -1201,7 +1212,21 @@ def create_ws_chat_router(
                             await send(
                                 TelemetryEvent(
                                     type="llm_delta",
-                                    data={"content": f"⚠️ {err_msg}"},
+                                    data={"content": recovery},
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
+                            await send(
+                                TelemetryEvent(
+                                    type="turn_complete",
+                                    data={
+                                        "content": recovery,
+                                        "interrupted": False,
+                                        "empty": False,
+                                        "error": True,
+                                        "model": _resolve_active_model(),
+                                        "session_id": session_id,
+                                    },
                                     thread_id=thread_id,
                                 ).to_dict()
                             )
@@ -1259,7 +1284,10 @@ def create_ws_chat_router(
                     }
 
                     from kazma_ui.sse_utils import ApprovalEventBridge
-                    import time
+                    # Use module-level `import time` — a nested import here makes
+                    # `time` a local of chat_websocket and breaks free-variable
+                    # lookup in _run_prompt_stream / heartbeat (UnboundLocalError:
+                    # "cannot access free variable 'time'...").
 
                     approval_start_time = time.monotonic()
                     tool_name = "unknown"
