@@ -259,9 +259,12 @@
       <!-- Queue + entity merges + procedural + quality -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px;">
         <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
             <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Task queue</span>
-            <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            <span style="display:inline-flex;gap:4px;">
+              <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="Delete failed dead-letter tasks">Clear failed</button>
+              <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            </span>
           </div>
           <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
           <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">Run reconsolidation</button>
@@ -288,15 +291,19 @@
       </div>
 
       <!-- ── Row: Known Beliefs List (left) + Topology Graph (right) ── -->
-      <div style="display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);gap:14px;margin-bottom:16px;">
+      <div id="v2-beliefs-graph-row" style="display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);gap:14px;margin-bottom:16px;">
 
         <!-- LEFT: Known Beliefs (currently valid) -->
         <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:500px;">
-          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             Known Beliefs (currently valid)
             <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
           </div>
           <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:500px;padding:6px 8px;"></div>
+          <div id="v2-belief-empty-cta" style="display:none;padding:16px;text-align:center;border-top:1px solid var(--border-subtle);">
+            <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">No beliefs yet — teach Kazma a fact.</div>
+            <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
+          </div>
           <!-- Belief detail drawer -->
           <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:10px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:200px;overflow-y:auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -315,9 +322,15 @@
               <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">V2 Belief Topology</span>
               <div id="v2g-stats-line" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">–</div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <input id="v2g-search" type="search" placeholder="filter…" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
+              <button id="v2g-path-query" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="Highlight entities from last probe/federated search">Path from query</button>
+              <label style="font-size:0.68rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;">
+                <input type="checkbox" id="v2g-episode-overlay" style="accent-color:var(--accent);"> Episodes
+              </label>
               <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">↻</button>
+              <button id="v2g-export-png" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">PNG</button>
+              <button id="v2g-export-svg" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">SVG</button>
               <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">JSON</a>
               <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
             </div>
@@ -330,12 +343,27 @@
           </div>
           <!-- Canvas -->
           <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
-            <canvas id="v2g-canvas" width="800" height="400" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;"></canvas>
+            <canvas id="v2g-canvas" width="800" height="400" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
             <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
-            <div id="v2g-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;">No beliefs yet — the graph populates as Kazma learns.</div>
+            <div id="v2g-empty" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
+              <div>No beliefs yet — the graph populates as Kazma learns.</div>
+              <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
+            </div>
+            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">←↑↓→ pan · +/− zoom · Home reset · Tab to focus</div>
           </div>
         </div>
       </div>
+      <style>
+        @media (max-width: 900px) {
+          #v2-beliefs-graph-row {
+            grid-template-columns: 1fr !important;
+          }
+          #v2-beliefs-graph-row > div {
+            min-height: 360px !important;
+          }
+          #v2-belief-list { max-height: 280px !important; }
+        }
+      </style>
 
       <!-- ── Bottom row: Entity Types + Predicate Types + Tier Breakdown + Time Scrub ── -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
@@ -1379,6 +1407,22 @@
     }
   }
 
+  var _v2gLastQuerySeeds = []; // entity/id strings from last probe/federated hit
+  function _v2gCollectSeedsFromHits(hits) {
+    var seeds = [];
+    (hits || []).forEach(function(h) {
+      var c = String(h.content || h.preview || '');
+      // belief format often "subject predicate object" or SPO fields
+      if (h.subject) seeds.push(String(h.subject));
+      if (h.object) seeds.push(String(h.object));
+      if (h.entity_id) seeds.push(String(h.entity_id));
+      // tokenize content for slug match
+      c.split(/[\s\|·\[\]:,]+/).forEach(function(tok) {
+        if (tok && tok.length > 2 && tok.length < 48) seeds.push(tok);
+      });
+    });
+    _v2gLastQuerySeeds = seeds;
+  }
   async function runV2Probe() {
     const input = document.getElementById('v2-probe-input');
     const out = document.getElementById('v2-probe-results');
@@ -1394,6 +1438,9 @@
       });
       const data = await resp.json();
       if (!data.ok) { out.textContent = data.error || 'Probe failed'; return; }
+      _v2gCollectSeedsFromHits([].concat(data.beliefs || [], data.episodes || []));
+      // also seed from query words
+      q.split(/\s+/).forEach(function(w) { if (w.length > 2) _v2gLastQuerySeeds.push(w); });
       const lines = [];
       (data.beliefs || []).forEach(function(h) {
         const src = (h.sources && h.sources.join(',')) || h.source || '';
@@ -1412,7 +1459,9 @@
         }).join('');
         out.innerHTML = '<span style="color:var(--text-muted);">No hits.</span>' + hints;
       } else {
-        out.innerHTML = lines.join('');
+        out.innerHTML = lines.join('') +
+          '<button type="button" class="btn btn-sm" id="v2-probe-path-btn" style="margin-top:8px;font-size:0.72rem;">Show path on graph →</button>';
+        document.getElementById('v2-probe-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
       }
     } catch (e) {
       out.textContent = 'Probe error: ' + e;
@@ -1492,6 +1541,19 @@
       });
     } catch (e) { el.textContent = 'Queue load failed'; }
   }
+  document.getElementById('v2-queue-clear-failed')?.addEventListener('click', async function() {
+    const ok = window.kazmaConfirm
+      ? await window.kazmaConfirm({ title: 'Clear failed tasks?', message: 'Permanently delete dead-letter queue rows.' })
+      : confirm('Clear all failed queue tasks?');
+    if (!ok) return;
+    try {
+      const r = await fetch('/api/memory/v2/queue/clear-failed', { method: 'POST' });
+      const d = await r.json();
+      if (window.showToast) window.showToast(d.ok ? ('Cleared ' + (d.deleted || 0) + ' failed') : (d.error || 'Failed'), d.ok ? 'success' : 'error');
+      loadV2Queue();
+      pollV2Health();
+    } catch (e) { /* silent */ }
+  });
 
   async function loadV2Merges() {
     const el = document.getElementById('v2-merges-list');
@@ -1568,7 +1630,16 @@
           (extra ? ' <span style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
           '</div>';
       });
-      out.innerHTML = lines.length ? lines.join('') : '<span style="color:var(--text-muted);">No hits in either store.</span>';
+      _v2gCollectSeedsFromHits(data.hits || []);
+      const qWords = (document.getElementById('v2-probe-input') || {}).value || '';
+      qWords.split(/\s+/).forEach(function(w) { if (w.length > 2) _v2gLastQuerySeeds.push(w); });
+      if (lines.length) {
+        out.innerHTML = lines.join('') +
+          '<button type="button" class="btn btn-sm" id="v2-fed-path-btn" style="margin-top:8px;font-size:0.72rem;">Show path on graph →</button>';
+        document.getElementById('v2-fed-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
+      } else {
+        out.innerHTML = '<span style="color:var(--text-muted);">No hits in either store.</span>';
+      }
     } catch (e) {
       out.textContent = 'Federated search error: ' + e;
     }
@@ -1638,10 +1709,13 @@
       const list = document.getElementById('v2-belief-list');
       if (!list) return;
       const beliefs = data.beliefs || [];
+      const emptyCta = document.getElementById('v2-belief-empty-cta');
       if (!beliefs.length) {
         list.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:0.78rem;">No active beliefs yet.</div>';
+        if (emptyCta) emptyCta.style.display = 'block';
         return;
       }
+      if (emptyCta) emptyCta.style.display = 'none';
       const ptypeColor = { functional:'#2ed573', set:'#60a5fa', state:'#fbbf24' };
       list.innerHTML = beliefs.map((b, idx) => {
         const conf = Math.round((b.confidence||0) * 100);
@@ -1899,7 +1973,7 @@
     var wrap = document.getElementById('v2g-canvas-wrap');
     if (!nodes || !nodes.length) {
       ctx.clearRect(0, 0, W, H);
-      if (empty) empty.style.display = 'flex';
+      if (empty) { empty.style.display = 'flex'; empty.style.flexDirection = 'column'; }
       _v2gPts = []; _v2gEdges = []; _v2gIds = {};
       if (_v2gAnim) { cancelAnimationFrame(_v2gAnim); _v2gAnim = null; }
       return;
@@ -1926,8 +2000,9 @@
           type: nd.type || 'entity',
           isUser: isUser,
           isHighStakes: !!nd.isHighStakes,
-          r: (isUser ? _v2gNodeBaseR + 4 : _v2gNodeBaseR) + Math.min(8, Math.sqrt(bc) * 1.5),
+          r: (isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
+          isEpisode: !!nd.isEpisode,
         };
       });
       _v2gEdges = [];
@@ -1988,8 +2063,9 @@
       var pcolor = _V2G_PRED_COLORS[ed.type] || theme.accent;
       var touchesUser = _v2gIsUser(A) || _v2gIsUser(B);
       ctx.lineCap = 'round';
-      if (beliefHot) {
-        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 3.4;
+      var pathHot = !!ed.pathHot || (_v2gPathIds[A.id] && _v2gPathIds[B.id]);
+      if (beliefHot || pathHot) {
+        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = pathHot ? 3.0 : 3.4;
         ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.55); ctx.shadowBlur = 10;
       } else if (hot) {
         ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.3;
@@ -2050,16 +2126,21 @@
       var r = p.r;
       var isHover = (i === _v2gHover), isSel = (p.id === _v2gSelectedId);
       var isUser = _v2gIsUser(p);
-      if (isSel || isHover) r += 3;
+      var onPath = !!_v2gPathIds[p.id];
+      if (isSel || isHover || onPath) r += 3;
       if (isUser) r += 1;
-      var color = _v2gNodeColor(p);
+      var color = p.isEpisode ? _v2gHexAlpha(theme.secondary, 0.55) : _v2gNodeColor(p);
       // Soft outer glow
-      var glowR = r + (isUser ? 10 : 7);
+      var glowR = r + (isUser || onPath ? 10 : 7);
       var glow = ctx.createRadialGradient(x, y, r * 0.2, x, y, glowR);
-      glow.addColorStop(0, _v2gHexAlpha(color, isUser || isSel ? 0.45 : 0.22));
+      glow.addColorStop(0, _v2gHexAlpha(color, isUser || isSel || onPath ? 0.5 : 0.22));
       glow.addColorStop(1, _v2gHexAlpha(color, 0));
       ctx.fillStyle = glow;
       ctx.beginPath(); ctx.arc(x, y, glowR, 0, 2 * Math.PI); ctx.fill();
+      if (onPath) {
+        ctx.beginPath(); ctx.arc(x, y, r + 6, 0, 2 * Math.PI);
+        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 2; ctx.stroke();
+      }
       // High-stakes red halo (above glow)
       if (p.isHighStakes) {
         var pulse = 0.5 + 0.5 * Math.sin(tNow / 400);
@@ -2325,6 +2406,14 @@
         if (!n.name && n.label) n.name = n.label;
         if (!n.type) n.type = 'concept';
       });
+      // Episode overlay — faint virtual nodes (not edges)
+      if (_v2gShowEpisodes && _v2gEpisodeNodes.length) {
+        var existing = {};
+        _v2gRawNodes.forEach(function(n) { existing[n.id] = true; });
+        _v2gEpisodeNodes.forEach(function(ep) {
+          if (!existing[ep.id]) _v2gRawNodes.push(ep);
+        });
+      }
       if (stats.earliest && stats.latest && stats.latest > stats.earliest) {
         _v2gTimeRange = { min: stats.earliest, max: Math.max(stats.latest, Date.now() / 1000) };
       }
@@ -2563,11 +2652,164 @@
     if (playBtn) playBtn.textContent = playBtn.getAttribute('data-play-label') || 'Play';
   }
 
+  var _v2gPathIds = {};
+  var _v2gEpisodeNodes = [];
+  var _v2gShowEpisodes = false;
+
+  function _v2gApplyPathFromQuery() {
+    var seeds = (_v2gLastQuerySeeds || []).map(function(s) { return String(s).toLowerCase(); });
+    if (!seeds.length) {
+      var q = ((document.getElementById('v2g-search') || {}).value || (document.getElementById('v2-probe-input') || {}).value || '').trim();
+      if (q) seeds = q.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+    }
+    _v2gPathIds = {};
+    var matched = 0;
+    for (var i = 0; i < _v2gPts.length; i++) {
+      var p = _v2gPts[i];
+      var hay = ((p.id || '') + ' ' + (p.fullLabel || '') + ' ' + (p.label || '')).toLowerCase();
+      for (var s = 0; s < seeds.length; s++) {
+        if (seeds[s] && hay.indexOf(seeds[s]) >= 0) {
+          _v2gPathIds[p.id] = true;
+          matched++;
+          break;
+        }
+      }
+    }
+    // Also mark edges between path nodes
+    for (var e = 0; e < _v2gEdges.length; e++) {
+      var ed = _v2gEdges[e], A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+      if (A && B && _v2gPathIds[A.id] && _v2gPathIds[B.id]) ed.pathHot = true;
+      else ed.pathHot = false;
+    }
+    if (window.showToast) {
+      window.showToast(matched ? ('Path: highlighted ' + matched + ' nodes') : 'No matching nodes for query path', matched ? 'success' : 'info');
+    }
+    // Zoom to first path node
+    for (var j = 0; j < _v2gPts.length; j++) {
+      if (_v2gPathIds[_v2gPts[j].id]) {
+        _v2gSelectedId = _v2gPts[j].id;
+        var size = _v2gCanvasSize();
+        if (size) {
+          _v2gView.scale = 1.8;
+          _v2gView.ox = size.w / 2 - _v2gPts[j].x * 1.8;
+          _v2gView.oy = size.h / 2 - _v2gPts[j].y * 1.8;
+        }
+        break;
+      }
+    }
+    _v2gHeated();
+    _v2gRepaint();
+  }
+
+  async function _v2gLoadEpisodes() {
+    try {
+      var resp = await fetch('/api/memory/v2/episodes?limit=30');
+      var data = await resp.json();
+      _v2gEpisodeNodes = (data.episodes || []).map(function(ep) {
+        return {
+          id: 'ep:' + ep.id,
+          name: (ep.preview || ep.id).slice(0, 40),
+          type: 'entity',
+          beliefCount: 1,
+          isHighStakes: false,
+          isVirtual: true,
+          isEpisode: true,
+          tier: ep.tier || '',
+        };
+      });
+    } catch (e) {
+      _v2gEpisodeNodes = [];
+    }
+  }
+
+  function _v2gExportPng() {
+    var canvas = document.getElementById('v2g-canvas');
+    if (!canvas) return;
+    try {
+      var a = document.createElement('a');
+      a.download = 'kazma-v2-topology.png';
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+      if (window.showToast) window.showToast('PNG downloaded', 'success');
+    } catch (e) {
+      if (window.showToast) window.showToast('PNG export failed', 'error');
+    }
+  }
+
+  function _v2gExportSvg() {
+    var W = 800, H = 500;
+    var size = _v2gCanvasSize();
+    if (size) { W = size.w; H = size.h; }
+    var parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">',
+      '<rect width="100%" height="100%" fill="#0a0f14"/>'];
+    for (var e = 0; e < _v2gEdges.length; e++) {
+      var ed = _v2gEdges[e], A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+      if (!A || !B) continue;
+      parts.push('<line x1="' + _v2gSX(A.x).toFixed(1) + '" y1="' + _v2gSY(A.y).toFixed(1) +
+        '" x2="' + _v2gSX(B.x).toFixed(1) + '" y2="' + _v2gSY(B.y).toFixed(1) +
+        '" stroke="#22d3ee" stroke-opacity="0.45" stroke-width="1.5"/>');
+    }
+    for (var i = 0; i < _v2gPts.length; i++) {
+      var p = _v2gPts[i];
+      var col = _v2gNodeColor(p);
+      parts.push('<circle cx="' + _v2gSX(p.x).toFixed(1) + '" cy="' + _v2gSY(p.y).toFixed(1) +
+        '" r="' + p.r + '" fill="' + col + '" fill-opacity="0.9"/>');
+      parts.push('<text x="' + _v2gSX(p.x).toFixed(1) + '" y="' + (_v2gSY(p.y) + p.r + 12).toFixed(1) +
+        '" fill="#e6edf3" font-size="11" text-anchor="middle" font-family="sans-serif">' +
+        _v2gEsc(p.label || p.id).replace(/&/g, '&amp;') + '</text>');
+    }
+    parts.push('</svg>');
+    var blob = new Blob([parts.join('')], { type: 'image/svg+xml' });
+    var a = document.createElement('a');
+    a.download = 'kazma-v2-topology.svg';
+    a.href = URL.createObjectURL(blob);
+    a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 2000);
+    if (window.showToast) window.showToast('SVG downloaded', 'success');
+  }
+
   function _v2gWireControls() {
     var refresh = document.getElementById('v2g-refresh');
     if (refresh) refresh.addEventListener('click', _v2gLoad);
     var search = document.getElementById('v2g-search');
     if (search) { var sto; search.addEventListener('input', function() { clearTimeout(sto); sto = setTimeout(_v2gApplyFilters, 250); }); }
+    document.getElementById('v2g-path-query')?.addEventListener('click', _v2gApplyPathFromQuery);
+    document.getElementById('v2g-export-png')?.addEventListener('click', _v2gExportPng);
+    document.getElementById('v2g-export-svg')?.addEventListener('click', _v2gExportSvg);
+    var epToggle = document.getElementById('v2g-episode-overlay');
+    if (epToggle) {
+      epToggle.addEventListener('change', async function() {
+        _v2gShowEpisodes = !!epToggle.checked;
+        if (_v2gShowEpisodes && !_v2gEpisodeNodes.length) await _v2gLoadEpisodes();
+        _v2gLoad();
+      });
+    }
+    // Keyboard a11y: pan / zoom / reset
+    var canvas = document.getElementById('v2g-canvas');
+    if (canvas && !canvas._v2gKeys) {
+      canvas._v2gKeys = true;
+      canvas.addEventListener('keydown', function(ev) {
+        var step = 28;
+        var handled = true;
+        if (ev.key === 'ArrowLeft') _v2gView.ox += step;
+        else if (ev.key === 'ArrowRight') _v2gView.ox -= step;
+        else if (ev.key === 'ArrowUp') _v2gView.oy += step;
+        else if (ev.key === 'ArrowDown') _v2gView.oy -= step;
+        else if (ev.key === '+' || ev.key === '=') {
+          _v2gView.scale = Math.min(_v2gMaxScale, _v2gView.scale * 1.15);
+        } else if (ev.key === '-' || ev.key === '_') {
+          _v2gView.scale = Math.max(_v2gMinScale, _v2gView.scale / 1.15);
+        } else if (ev.key === 'Home') {
+          _v2gView = { scale: 1, ox: 0, oy: 0 };
+        } else if (ev.key === 'Escape') {
+          _v2gSelectedId = null; _v2gPathIds = {};
+        } else {
+          handled = false;
+        }
+        if (handled) { ev.preventDefault(); _v2gRepaint(); }
+      });
+    }
     // Time slider + play/pause scrub
     var slider = document.getElementById('v2g-time-slider');
     var label = document.getElementById('v2g-time-label');

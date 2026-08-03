@@ -1,6 +1,6 @@
 /**
  * Settings.js — Alpine.js state management for the Kazma Settings panel.
- * Tabs: providers_connectors, agent, connectors, mcp, skills, appearance,
+ * Tabs: providers_connectors, agent, memory (+embedder), mcp, skills, appearance,
  * shortcuts, account, tools, system, packages, import.
  * Each tab section is a separate method/object for clean separation.
  * Deep-link: /settings?tab=packages
@@ -2785,6 +2785,15 @@ function settingsApp() {
          * Keeps ?tab= in the URL for deep-linking / refresh.
          */
         async onTabChange(newTab) {
+            // Legacy deep-links → consolidated homes
+            var scrollEmbedder = false;
+            if (newTab === 'connectors' || newTab === 'provider_connectors') {
+                this.hubSubtab = 'connectors';
+                newTab = 'providers_connectors';
+            } else if (newTab === 'embedder') {
+                scrollEmbedder = true;
+                newTab = 'memory';
+            }
             this.tab = newTab;
             try {
                 const url = new URL(window.location.href);
@@ -2792,6 +2801,9 @@ function settingsApp() {
                     url.searchParams.set('tab', newTab);
                 } else {
                     url.searchParams.delete('tab');
+                }
+                if (scrollEmbedder) {
+                    url.hash = 'memory-embedder-section';
                 }
                 history.replaceState(null, '', url.pathname + url.search + url.hash);
             } catch (e) {
@@ -2808,14 +2820,21 @@ function settingsApp() {
                     break;
                 case 'models': break; // Loaded on init
                 case 'agent': break;
-                case 'connectors': break;
+                case 'memory':
+                    await Promise.all([this.loadEmbedder(), this.loadTimeTravel()]);
+                    if (scrollEmbedder || (window.location.hash || '').includes('embedder')) {
+                        setTimeout(function() {
+                            var el = document.getElementById('memory-embedder-section');
+                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 80);
+                    }
+                    break;
                 case 'mcp': await this.loadMcpServers(); break;
                 case 'skills': await this.loadSkills(); break;
                 case 'appearance': break;
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'embedder': await this.loadEmbedder(); await this.loadTimeTravel(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

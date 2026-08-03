@@ -607,6 +607,73 @@ def register_direct_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:300]}
 
+    @self.app.post("/api/memory/v2/queue/clear-failed")
+    async def _memory_v2_queue_clear_failed():
+        """Delete dead-letter (failed) tasks from the durable queue."""
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_ops_schema
+        from kazma_core.paths import memory_ops_db
+
+        try:
+            import os
+
+            if not os.path.exists(memory_ops_db()):
+                return {"ok": True, "deleted": 0}
+            conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+            ensure_ops_schema(conn)
+            cur = conn.execute("DELETE FROM memory_task_queue WHERE status='failed'")
+            conn.commit()
+            n = int(cur.rowcount or 0)
+            conn.close()
+            return {"ok": True, "deleted": n}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.get("/api/memory/v2/episodes")
+    async def _memory_v2_episodes(limit: int = 40, tier: str = ""):
+        """Recent episodes for Dashboard overlay (id, tier, preview text)."""
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            sql = (
+                "SELECT id, tier, user_text, assistant_text, created_at, session_id "
+                "FROM episodes WHERE 1=1"
+            )
+            params: list = []
+            if tier and tier.strip():
+                sql += " AND tier = ?"
+                params.append(tier.strip())
+            else:
+                sql += " AND tier IN ('working','episodic','recall')"
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(max(1, min(int(limit or 40), 100)))
+            rows = conn.execute(sql, params).fetchall()
+            conn.close()
+            out = []
+            for r in rows:
+                ut = (r["user_text"] or "")[:120]
+                at = (r["assistant_text"] or "")[:80]
+                preview = ut or at or r["id"]
+                out.append(
+                    {
+                        "id": r["id"],
+                        "tier": r["tier"],
+                        "preview": preview,
+                        "created_at": r["created_at"],
+                        "session_id": r["session_id"] or "",
+                    }
+                )
+            return {"ok": True, "episodes": out}
+        except Exception as exc:
+            return {"ok": False, "episodes": [], "error": str(exc)[:300]}
+
     @self.app.post("/api/memory/v2/reconsolidate")
     async def _memory_v2_reconsolidate():
         """Enqueue a global_reconsolidation task (Dashboard / Settings trigger)."""
