@@ -127,6 +127,20 @@ def recall(
             vector_engine=vector_engine,
             explain=bool(do_explain),
         )
+        # Multi-replica assist: merge sparse hits from Postgres state mirror
+        # when local results are thin (does not replace SQLite FTS/dense).
+        if len(episodes) < limit or len(beliefs) < limit:
+            try:
+                episodes, beliefs = _merge_remote_state_hits(
+                    query,
+                    tenant_id=tenant_id,
+                    limit=limit,
+                    episodes=episodes,
+                    beliefs=beliefs,
+                    explain=bool(do_explain),
+                )
+            except Exception:
+                logger.debug("[recall] remote state merge skipped", exc_info=True)
         result = RecallResult(beliefs=beliefs, episodes=episodes)
         # Phase A: bump access so macro_sleep promotion/retention is real.
         if not result.empty:
@@ -141,6 +155,106 @@ def recall(
                 conn.close()
             except Exception:
                 pass
+
+
+def _merge_remote_state_hits(
+    query: str,
+    *,
+    tenant_id: str,
+    limit: int,
+    episodes: list[RecallHit],
+    beliefs: list[RecallHit],
+    explain: bool,
+) -> tuple[list[RecallHit], list[RecallHit]]:
+    """Augment local recall with Postgres dual-mirror sparse results."""
+    from kazma_core.memory.state_backend import (
+        get_state_backend,
+        search_state_beliefs,
+        search_state_episodes,
+    )
+
+    be = get_state_backend()
+    if not getattr(be, "available", False) or getattr(be, "name", "") == "null":
+        return episodes, beliefs
+
+    seen_ep = {h.id for h in episodes}
+    if len(episodes) < limit:
+        for i, row in enumerate(
+            search_state_episodes(query, tenant_id=tenant_id, limit=limit * 2)
+        ):
+            eid = str(row.get("id") or "")
+            if not eid or eid in seen_ep:
+                continue
+            text = (
+                row.get("summary_text")
+                or row.get("user_text")
+                or row.get("assistant_text")
+                or ""
+            )[:400]
+            if not text:
+                continue
+            meta: dict[str, Any] = {"tier": row.get("tier"), "remote_state": True}
+            if explain:
+                meta["sources"] = ["postgres_state"]
+            episodes.append(
+                RecallHit(
+                    id=eid,
+                    content=text,
+                    score=0.5 / (i + 1),
+                    kind="episode",
+                    source="postgres_state",
+                    metadata=meta,
+                )
+            )
+            seen_ep.add(eid)
+            if len(episodes) >= limit:
+                break
+
+    seen_b = {h.id for h in beliefs}
+    if len(beliefs) < limit:
+        for i, row in enumerate(
+            search_state_beliefs(query, tenant_id=tenant_id, limit=limit * 2)
+        ):
+            bid = str(row.get("id") or "")
+            if not bid or bid in seen_b:
+                continue
+            sub = row.get("subject") or ""
+            pred = (row.get("predicate") or "").replace("_", " ")
+            obj = row.get("object") or ""
+            content = f"{sub} {pred} {obj}".strip()
+            if not content:
+                continue
+            try:
+                score = float(row.get("structural_importance") or 1) * float(
+                    row.get("confidence") or 0.5
+                )
+            except Exception:
+                score = 0.5 / (i + 1)
+            meta = {
+                "subject": sub,
+                "predicate": row.get("predicate"),
+                "object": obj,
+                "remote_state": True,
+            }
+            if explain:
+                meta["sources"] = ["postgres_state"]
+            beliefs.append(
+                RecallHit(
+                    id=bid,
+                    content=content,
+                    score=score,
+                    kind="belief",
+                    source="postgres_state",
+                    metadata=meta,
+                )
+            )
+            seen_b.add(bid)
+            if len(beliefs) >= limit:
+                break
+
+    episodes.sort(key=lambda h: h.score, reverse=True)
+    beliefs.sort(key=lambda h: h.score, reverse=True)
+    return episodes[:limit], beliefs[:limit]
 
 
 # ── Dict-shape compat shim ────────────────────────────────────────────────

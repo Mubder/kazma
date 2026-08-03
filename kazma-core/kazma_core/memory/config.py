@@ -422,7 +422,12 @@ def memory_tenant_mode(cfg: dict[str, Any] | None = None) -> str:
 
 
 def resolve_tenant_id(
-    platform: str, sender_id: str = "", session_id: str = ""
+    platform: str,
+    sender_id: str = "",
+    session_id: str = "",
+    *,
+    auth_user_id: str = "",
+    prefer_context: bool = True,
 ) -> str:
     """Resolve the tenant_id for the current request based on the active mode.
 
@@ -433,15 +438,29 @@ def resolve_tenant_id(
     Args:
         platform: Platform name (``"telegram"``, ``"discord"``, ``"web"`` …).
         sender_id: Platform-prefixed sender identity (``"telegram:12345"``).
-            Empty for the Web path (which has no sender identity).
         session_id: The Web/browser session ID (empty for gateway paths).
+        auth_user_id: Authenticated user id when available (SaaS binding).
+        prefer_context: When True and mode is ``per_user``, honor
+            ``get_current_tenant_id()`` if set by auth middleware (JWT/principal).
     """
     mode = memory_tenant_mode()
     if mode == "shared":
         return "default"
     if mode == "per_platform":
         return platform or "default"
-    # per_user: each sender/session gets their own isolated memory
+    # per_user: auth-bound identity first (SaaS), then ContextVar, then sender/session
+    if auth_user_id and str(auth_user_id).strip():
+        uid = str(auth_user_id).strip()
+        return f"{platform}:{uid}" if platform else uid
+    if prefer_context:
+        try:
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            ctx = (get_current_tenant_id() or "").strip()
+            if ctx and ctx != "default":
+                return ctx
+        except Exception:
+            pass
     return sender_id or (f"{platform}:{session_id}" if session_id else "default")
 
 

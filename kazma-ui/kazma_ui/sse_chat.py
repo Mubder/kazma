@@ -1546,9 +1546,35 @@ def create_sse_chat_router(
         from kazma_core.agent.state import initial_supervisor_state
         from kazma_core.memory.config import resolve_tenant_id
 
+        # SaaS: bind memory tenant to authenticated principal when present
+        _auth_uid = ""
+        try:
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            _ctx = (get_current_tenant_id() or "").strip()
+            if _ctx and _ctx != "default":
+                # principal tenant already set by middleware — resolve_tenant_id
+                # will prefer ContextVar in per_user mode
+                pass
+            # Optional user claim for per_user platform:user keys
+            principal = getattr(request.state, "principal", None) or getattr(
+                request.state, "user", None
+            )
+            if isinstance(principal, dict):
+                _auth_uid = str(
+                    principal.get("user_id")
+                    or principal.get("sub")
+                    or principal.get("id")
+                    or ""
+                )
+        except Exception:
+            pass
+
         input_state = initial_supervisor_state(
             thread_id=thread_id,
-            tenant_id=resolve_tenant_id("web", "", session_id),
+            tenant_id=resolve_tenant_id(
+                "web", "", session_id, auth_user_id=_auth_uid
+            ),
         )
         input_state["messages"] = messages
 

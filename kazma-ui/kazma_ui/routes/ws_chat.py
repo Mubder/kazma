@@ -932,9 +932,25 @@ def create_ws_chat_router(
                             logger.debug("[WS-Chat] attachment content build failed", exc_info=True)
                     # Stamp durable thread_id into state so YOLO/HITL grants
                     # resolve even if the ContextVar is lost mid-graph.
+                    _auth_uid = ""
+                    try:
+                        principal = getattr(websocket.state, "principal", None) or getattr(
+                            websocket.state, "user", None
+                        )
+                        if isinstance(principal, dict):
+                            _auth_uid = str(
+                                principal.get("user_id")
+                                or principal.get("sub")
+                                or principal.get("id")
+                                or ""
+                            )
+                    except Exception:
+                        pass
                     input_state = initial_supervisor_state(
                         thread_id=thread_id,
-                        tenant_id=resolve_tenant_id("web", "", session_id),
+                        tenant_id=resolve_tenant_id(
+                            "web", "", session_id, auth_user_id=_auth_uid
+                        ),
                     )
                     input_state["messages"] = full_messages
 

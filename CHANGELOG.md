@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — Memory SaaS assist: Postgres sparse recall + auth tenants (2026-08-03)
+
+- **Postgres sparse recall assist:** when state dual-mirror is available and
+  local hits are thin, merge ILIKE episode/belief rows from Postgres
+  (`source=postgres_state`). Local FTS/dense remains primary.
+- **Auth-bound tenants:** `resolve_tenant_id(..., auth_user_id=, prefer_context=)`
+  prefers JWT/ContextVar principal, then auth user id, then session; SSE/WS
+  pass authenticated principal when present.
+- Tests: `test_memory_tenant_auth.py`.
+
 ## Unreleased — Memory scale foundation (2026-08-03)
 
 - **Postgres state dual-mirror** (`state_backend.py`): optional

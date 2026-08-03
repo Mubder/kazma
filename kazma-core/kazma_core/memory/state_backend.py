@@ -24,6 +24,8 @@ __all__ = [
     "state_capability",
     "mirror_episode_to_state",
     "mirror_belief_to_state",
+    "search_state_episodes",
+    "search_state_beliefs",
 ]
 
 
@@ -42,6 +44,14 @@ class StateBackend(Protocol):
     def count_episodes(self, *, tenant_id: str = "default") -> int: ...
 
     def count_beliefs(self, *, tenant_id: str = "default") -> int: ...
+
+    def search_episodes(
+        self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]: ...
+
+    def search_beliefs(
+        self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]: ...
 
 
 class NullStateBackend:
@@ -65,6 +75,16 @@ class NullStateBackend:
 
     def count_beliefs(self, *, tenant_id: str = "default") -> int:
         return 0
+
+    def search_episodes(
+        self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def search_beliefs(
+        self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return []
 
 
 class PostgresStateBackend:
@@ -266,6 +286,101 @@ class PostgresStateBackend:
     def count_beliefs(self, *, tenant_id: str = "default") -> int:
         return self._count("kazma_beliefs", tenant_id)
 
+    def search_episodes(
+        self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """ILIKE sparse search over mirrored episode text (multi-replica read)."""
+        terms = [t for t in (query or "").lower().split() if len(t) >= 2][:8]
+        if not terms or not self._dsn:
+            return []
+        try:
+            conn = self._connect()
+            try:
+                self._ensure(conn)
+                cur = conn.cursor()
+                clauses = " OR ".join(
+                    [
+                        "(LOWER(COALESCE(user_text,'')) LIKE %s OR "
+                        "LOWER(COALESCE(assistant_text,'')) LIKE %s OR "
+                        "LOWER(COALESCE(summary_text,'')) LIKE %s)"
+                        for _ in terms
+                    ]
+                )
+                params: list[Any] = [tenant_id]
+                for t in terms:
+                    pat = f"%{t}%"
+                    params.extend([pat, pat, pat])
+                params.append(max(1, min(int(limit), 50)))
+                cur.execute(
+                    f"""
+                    SELECT id, session_id, user_text, assistant_text, summary_text,
+                           tier, structural_importance, created_at
+                    FROM kazma_episodes
+                    WHERE tenant_id = %s AND ({clauses})
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                cur.close()
+                return rows
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[state_backend] postgres episode search failed", exc_info=True)
+            return []
+
+    def search_beliefs(
+        self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """ILIKE sparse search over mirrored active beliefs."""
+        terms = [t for t in (query or "").lower().split() if len(t) >= 2][:8]
+        if not terms or not self._dsn:
+            return []
+        try:
+            conn = self._connect()
+            try:
+                self._ensure(conn)
+                cur = conn.cursor()
+                clauses = " OR ".join(
+                    [
+                        "(LOWER(COALESCE(subject,'')) LIKE %s OR "
+                        "LOWER(COALESCE(predicate,'')) LIKE %s OR "
+                        "LOWER(COALESCE(object,'')) LIKE %s)"
+                        for _ in terms
+                    ]
+                )
+                params: list[Any] = [tenant_id]
+                for t in terms:
+                    pat = f"%{t}%"
+                    params.extend([pat, pat, pat])
+                params.append(max(1, min(int(limit), 50)))
+                cur.execute(
+                    f"""
+                    SELECT id, subject, predicate, object, predicate_type,
+                           confidence, structural_importance, source_trust_weight,
+                           valid_from
+                    FROM kazma_beliefs
+                    WHERE tenant_id = %s
+                      AND valid_until IS NULL AND invalidated_at IS NULL
+                      AND ({clauses})
+                    ORDER BY (structural_importance * confidence) DESC NULLS LAST
+                    LIMIT %s
+                    """,
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                cur.close()
+                return rows
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[state_backend] postgres belief search failed", exc_info=True)
+            return []
+
     def _count(self, table: str, tenant_id: str) -> int:
         if not self.available:
             return 0
@@ -313,8 +428,11 @@ def state_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "provider": "postgres",
             "write_ready": True,
-            "status": "dual_mirror",
-            "detail": "Postgres dual-mirror for episodes/beliefs (recall still SQLite)",
+            "status": "dual_mirror_and_sparse_read",
+            "detail": (
+                "Postgres dual-mirror + sparse ILIKE recall assist "
+                "(local SQLite FTS/dense still primary)"
+            ),
         }
     if provider in ("postgres", "postgresql", "pg"):
         return {
@@ -360,3 +478,27 @@ def mirror_belief_to_state(row: dict[str, Any]) -> bool:
         return bool(get_state_backend().mirror_belief(row))
     except Exception:
         return False
+
+
+def search_state_episodes(
+    query: str, *, tenant_id: str = "default", limit: int = 10
+) -> list[dict[str, Any]]:
+    try:
+        return list(
+            get_state_backend().search_episodes(
+                query, tenant_id=tenant_id, limit=limit
+            )
+        )
+    except Exception:
+        return []
+
+
+def search_state_beliefs(
+    query: str, *, tenant_id: str = "default", limit: int = 10
+) -> list[dict[str, Any]]:
+    try:
+        return list(
+            get_state_backend().search_beliefs(query, tenant_id=tenant_id, limit=limit)
+        )
+    except Exception:
+        return []

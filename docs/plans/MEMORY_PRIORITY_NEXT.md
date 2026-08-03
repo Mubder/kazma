@@ -52,9 +52,16 @@ Full execution plan: session plan / this file. Backlog SoT: `MEMORY_REMAINING.md
 | P2-3 Neo4j GraphBackend | **Done** — dual-write when driver+URL available |
 | P2-5 LLM entity tier-3 | **Done** — opt-in `entity_llm_disambiguate` |
 
+## SaaS / multi-replica assist (follow-on)
+
+| Item | Status |
+|------|--------|
+| Postgres sparse ILIKE recall assist | **Done** — merges when local thin |
+| Auth-bound `resolve_tenant_id` (JWT ContextVar + auth_user_id) | **Done** — SSE/WS wired |
+
 ## Still deferred
 
-Full cutover of recall to Postgres · multi-region · graph animation polish · auth-bound SaaS tenants
+Full FTS/dense cutover of recall to Postgres · multi-region · graph animation polish
 
 ## P3 Trigger-only
 
