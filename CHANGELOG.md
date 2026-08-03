@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Chat markdown: tables, lists, quotes (2026-08-03)
+
+- **Rich markdown in chat** (`streaming.js` `mdRender`): GFM pipe tables
+  (with alignment), unordered/ordered/task lists (nested), blockquotes,
+  images, `__bold__` — still line-oriented + `dir="auto"` for bidi/streaming.
+- **CSS polish** for scrollable table wrappers, zebra rows, task checkboxes,
+  accent-bordered quotes. Smoke: `node tests/js/test_markdown_render.js`.
+
 ## Unreleased — Reliability Sprint 2 (2026-08-03)
 
 - **WS long-turn heartbeat** every 15s idle → `status_update` “Still working…

@@ -218,6 +218,9 @@ var KazmaStream = (function() {
   }
 
   // ── Markdown Renderer ─────────────────────────────────
+  // Line-oriented, streaming-safe, bidi-safe (dir=auto on blocks).
+  // Supports: code fences, headers, hr, paragraphs, bold/italic/strike,
+  // inline code, links, auto-URLs, GFM tables, lists (ul/ol/task), blockquotes.
   var mdRender = (function() {
     var entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
     function esc(str) {
@@ -232,10 +235,83 @@ var KazmaStream = (function() {
         '<button class="copy-btn" onclick="KazmaStream.copyCode(this)" title="Copy">\u2398</button></pre>';
     }
 
+    function isTableAlignRow(line) {
+      // | --- | :---: | ---: |
+      return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+    }
+
+    function isTableRow(line) {
+      if (!line || line.indexOf('|') < 0) return false;
+      // Must look like a pipe-row (not a lone | or prose with one |)
+      var t = line.trim();
+      if (t.charAt(0) === '|' || t.charAt(t.length - 1) === '|') {
+        return (t.match(/\|/g) || []).length >= 2;
+      }
+      // a | b | c (no leading pipe)
+      return (t.match(/\|/g) || []).length >= 2;
+    }
+
+    function splitTableCells(line) {
+      var t = line.trim();
+      if (t.charAt(0) === '|') t = t.slice(1);
+      if (t.charAt(t.length - 1) === '|') t = t.slice(0, -1);
+      return t.split('|').map(function(c) { return c.trim(); });
+    }
+
+    function parseAlignments(alignLine, colCount) {
+      var cells = splitTableCells(alignLine);
+      var aligns = [];
+      for (var i = 0; i < colCount; i++) {
+        var c = (cells[i] || '').replace(/\s/g, '');
+        if (/^:-+:$/.test(c)) aligns.push('center');
+        else if (/^-+:$/.test(c)) aligns.push('end');
+        else if (/^:-+$/.test(c)) aligns.push('start');
+        else aligns.push('');
+      }
+      return aligns;
+    }
+
+    function listItemMatch(line) {
+      // task: - [ ] / - [x]
+      var task = line.match(/^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/);
+      if (task) {
+        return {
+          indent: task[1].length,
+          ordered: false,
+          task: true,
+          checked: task[3].toLowerCase() === 'x',
+          text: task[4],
+        };
+      }
+      var ul = line.match(/^(\s*)([-*+])\s+(.*)$/);
+      if (ul) {
+        return { indent: ul[1].length, ordered: false, task: false, text: ul[3] };
+      }
+      var ol = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+      if (ol) {
+        return {
+          indent: ol[1].length,
+          ordered: true,
+          task: false,
+          start: parseInt(ol[2], 10) || 1,
+          text: ol[3],
+        };
+      }
+      return null;
+    }
+
+    function isBlockquote(line) {
+      return /^\s{0,3}>\s?/.test(line);
+    }
+
+    function stripBlockquote(line) {
+      return line.replace(/^\s{0,3}>\s?/, '');
+    }
+
     function render(text) {
       if (!text) return '';
-      // Process line-oriented markdown first (headers, rules) so # markers
-      // never sit inside an LTR paragraph next to Arabic (bidi disaster).
+      // Process line-oriented markdown first (headers, rules, tables, lists)
+      // so structural markers never sit inside an LTR paragraph next to Arabic.
       var lines = String(text).replace(/\r\n/g, '\n').split('\n');
       var blocks = [];
       var para = [];
@@ -252,7 +328,7 @@ var KazmaStream = (function() {
 
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
-        var fence = line.match(/^```(\w*)\s*$/);
+        var fence = line.match(/^```([\w+-]*)\s*$/);
         if (fence) {
           if (inCode) {
             blocks.push({ type: 'code', lang: codeLang, text: codeBuf.join('\n') });
@@ -270,13 +346,96 @@ var KazmaStream = (function() {
           codeBuf.push(line);
           continue;
         }
+
+        // ── GFM table ────────────────────────────────────────────
+        // Header row + optional align row + body rows. Streaming-safe:
+        // partial tables (header only) still render as a table.
+        if (isTableRow(line) && !isTableAlignRow(line)) {
+          var next = lines[i + 1] || '';
+          var looksTable = isTableAlignRow(next) || isTableRow(next);
+          if (looksTable || (i + 1 < lines.length && isTableAlignRow(next))) {
+            flushPara();
+            var headerCells = splitTableCells(line);
+            var aligns = [];
+            i++;
+            if (i < lines.length && isTableAlignRow(lines[i])) {
+              aligns = parseAlignments(lines[i], headerCells.length);
+              i++;
+            }
+            var rows = [];
+            while (i < lines.length && isTableRow(lines[i]) && !isTableAlignRow(lines[i])) {
+              rows.push(splitTableCells(lines[i]));
+              i++;
+            }
+            i--; // outer for-loop will ++
+            blocks.push({
+              type: 'table',
+              header: headerCells,
+              aligns: aligns,
+              rows: rows,
+            });
+            continue;
+          }
+        }
+
+        // ── Blockquote (consecutive > lines) ─────────────────────
+        if (isBlockquote(line)) {
+          flushPara();
+          var bq = [stripBlockquote(line)];
+          while (i + 1 < lines.length && isBlockquote(lines[i + 1])) {
+            i++;
+            bq.push(stripBlockquote(lines[i]));
+          }
+          // Nested markdown in quotes: recurse on inner text (no tables to
+          // avoid deep nesting issues; simple paragraphs/lists via re-render).
+          blocks.push({ type: 'blockquote', text: bq.join('\n') });
+          continue;
+        }
+
+        // ── Lists (ul / ol / task) ────────────────────────────────
+        var lm = listItemMatch(line);
+        if (lm) {
+          flushPara();
+          var items = [lm];
+          var baseIndent = lm.indent;
+          while (i + 1 < lines.length) {
+            var peek = lines[i + 1];
+            if (peek.trim() === '') {
+              // blank line ends list only if next non-blank isn't a list item
+              var j = i + 2;
+              while (j < lines.length && lines[j].trim() === '') j++;
+              if (j < lines.length && listItemMatch(lines[j])) {
+                i++;
+                continue;
+              }
+              break;
+            }
+            var cont = listItemMatch(peek);
+            if (cont && cont.indent >= baseIndent) {
+              i++;
+              items.push(cont);
+              continue;
+            }
+            // Continuation line of previous item (indented prose)
+            if (/^\s{2,}\S/.test(peek) && !listItemMatch(peek) && !isTableRow(peek)) {
+              i++;
+              items[items.length - 1].text += '\n' + peek.trim();
+              continue;
+            }
+            break;
+          }
+          blocks.push({ type: 'list', items: items, ordered: lm.ordered });
+          continue;
+        }
+
         var hm = line.match(/^(#{1,6})\s+(.+)$/);
         if (hm) {
           flushPara();
           blocks.push({ type: 'h', level: hm[1].length, text: hm[2] });
           continue;
         }
-        if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) {
+        // HR: don't confuse with table align rows (already handled)
+        if (/^(\s*[-*_]){3,}\s*$/.test(line) && !isTableAlignRow(line) && line.indexOf('|') < 0) {
           flushPara();
           blocks.push({ type: 'hr' });
           continue;
@@ -294,8 +453,18 @@ var KazmaStream = (function() {
 
       function inline(s) {
         var html = esc(s);
+        // Images first (so ![a](u) isn't partially eaten by links)
+        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(_, alt, url) {
+          var decodedUrl = url.replace(/&amp;/g, '&');
+          if (/^(https?:\/\/|\/)/i.test(decodedUrl)) {
+            return '<img src="' + esc(decodedUrl) + '" alt="' + esc(alt) + '" loading="lazy" class="md-img">';
+          }
+          return esc(alt || '');
+        });
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+        // Single * italic only (underscore italic breaks snake_case / model ids)
+        html = html.replace(/(^|[^\*])\*([^\*\n]+?)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
         html = html.replace(/`([^`]+)`/g, '<code class="inline-code" dir="ltr">$1</code>');
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
@@ -321,16 +490,87 @@ var KazmaStream = (function() {
         return html;
       }
 
+      function renderList(block) {
+        // Group consecutive items by indent into nested lists (one level deep).
+        var base = block.items.length ? block.items[0].indent : 0;
+        var tag = block.ordered ? 'ol' : 'ul';
+        var startAttr = '';
+        if (block.ordered && block.items[0] && block.items[0].start > 1) {
+          startAttr = ' start="' + block.items[0].start + '"';
+        }
+        var html = '<' + tag + startAttr + ' class="md-list" dir="auto">';
+        var k = 0;
+        while (k < block.items.length) {
+          var it = block.items[k];
+          var nested = [];
+          k++;
+          while (k < block.items.length && block.items[k].indent > base) {
+            nested.push(block.items[k]);
+            k++;
+          }
+          var liClass = it.task ? ' class="md-task"' : '';
+          var check = '';
+          if (it.task) {
+            check = '<input type="checkbox" disabled' +
+              (it.checked ? ' checked' : '') +
+              ' class="md-task-check" aria-hidden="true"> ';
+          }
+          html += '<li' + liClass + ' dir="auto">' + check +
+            inline(it.text).replace(/\n/g, '<br>');
+          if (nested.length) {
+            html += renderList({
+              type: 'list',
+              ordered: nested[0].ordered,
+              items: nested.map(function(n) {
+                return { indent: base, ordered: n.ordered, task: n.task, checked: n.checked, text: n.text, start: n.start };
+              }),
+            });
+          }
+          html += '</li>';
+        }
+        html += '</' + tag + '>';
+        return html;
+      }
+
+      function renderTable(block) {
+        var cols = block.header.length;
+        var html = '<div class="md-table-wrap" dir="auto"><table class="md-table">';
+        html += '<thead><tr>';
+        for (var c = 0; c < cols; c++) {
+          var al = (block.aligns && block.aligns[c]) ? ' style="text-align:' + block.aligns[c] + '"' : '';
+          html += '<th' + al + ' dir="auto">' + inline(block.header[c] || '') + '</th>';
+        }
+        html += '</tr></thead><tbody>';
+        for (var r = 0; r < block.rows.length; r++) {
+          html += '<tr>';
+          for (var c2 = 0; c2 < cols; c2++) {
+            var al2 = (block.aligns && block.aligns[c2]) ? ' style="text-align:' + block.aligns[c2] + '"' : '';
+            html += '<td' + al2 + ' dir="auto">' + inline(block.rows[r][c2] || '') + '</td>';
+          }
+          html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        return html;
+      }
+
       var out = [];
       for (var j = 0; j < blocks.length; j++) {
         var b = blocks[j];
         if (b.type === 'code') {
           out.push(codeBlock(b.lang || null, b.text));
         } else if (b.type === 'h') {
-          var tag = 'h' + Math.min(6, Math.max(1, b.level));
-          out.push('<' + tag + ' dir="auto">' + inline(b.text) + '</' + tag + '>');
+          var htag = 'h' + Math.min(6, Math.max(1, b.level));
+          out.push('<' + htag + ' dir="auto">' + inline(b.text) + '</' + htag + '>');
         } else if (b.type === 'hr') {
           out.push('<hr>');
+        } else if (b.type === 'table') {
+          out.push(renderTable(b));
+        } else if (b.type === 'list') {
+          out.push(renderList(b));
+        } else if (b.type === 'blockquote') {
+          // Re-render inner content so lists/paragraphs inside quotes work
+          var inner = render(b.text);
+          out.push('<blockquote class="md-quote" dir="auto">' + inner + '</blockquote>');
         } else {
           out.push('<p dir="auto">' + inline(b.text).replace(/\n/g, '<br>') + '</p>');
         }

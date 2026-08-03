@@ -1501,15 +1501,35 @@ tbody tr:last-child td {
 .message-text h2 { font-size: 1.15rem; }
 .message-text h3 { font-size: 1.02rem; }
 .message-text h4 { font-size: 0.95rem; }
-.message-text ul, .message-text ol { margin: 0 0 var(--sp-3); padding-inline-start: 1.4em; }
-.message-text li { margin: 4px 0; }
+.message-text ul, .message-text ol,
+.message-text .md-list { margin: 0 0 var(--sp-3); padding-inline-start: 1.4em; }
+.message-text li { margin: 4px 0; line-height: 1.55; }
 .message-text li > ul, .message-text li > ol { margin: 4px 0; }
+.message-text li.md-task {
+  list-style: none;
+  margin-inline-start: -0.4em;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4em;
+}
+.message-text .md-task-check {
+  margin-top: 0.35em;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
 .message-text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .message-text a:hover { color: var(--accent-hover); }
-.message-text blockquote {
-  margin: var(--sp-3) 0; padding: 4px 14px; border-inline-start: 3px solid var(--border-strong);
-  color: var(--text-secondary); background: var(--tint); border-radius: var(--radius-xs);
+.message-text blockquote,
+.message-text .md-quote {
+  margin: var(--sp-3) 0;
+  padding: 8px 14px;
+  border-inline-start: 3px solid var(--accent);
+  color: var(--text-secondary);
+  background: var(--tint, rgba(255,255,255,0.03));
+  border-radius: var(--radius-xs, 6px);
 }
+.message-text blockquote p:last-child,
+.message-text .md-quote p:last-child { margin-bottom: 0; }
 .message-text code {
   font-family: var(--font-mono); font-size: 0.85em; background: rgba(0,0,0,0.3);
   padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border-subtle);
@@ -1519,11 +1539,59 @@ tbody tr:last-child td {
   border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; line-height: 1.5;
 }
 .message-text pre code { background: none; border: none; padding: 0; font-size: 0.85rem; }
-.message-text table { width: 100%; border-collapse: collapse; margin: var(--sp-3) 0; font-size: 0.85rem; }
-.message-text th, .message-text td { border: 1px solid var(--border); padding: 6px 10px; text-align: start; }
-.message-text th { background: var(--bg-surface); font-weight: 600; }
+
+/* GFM tables — scroll wrapper for wide audit / summary grids */
+.message-text .md-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: var(--sp-3) 0;
+  border-radius: var(--radius, 8px);
+  border: 1px solid var(--border);
+  background: var(--bg-surface, rgba(0,0,0,0.15));
+}
+.message-text table,
+.message-text .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 0.85rem;
+  min-width: 280px;
+}
+.message-text th,
+.message-text td {
+  border: 1px solid var(--border);
+  border-width: 0 0 1px 0;
+  padding: 8px 12px;
+  text-align: start;
+  vertical-align: top;
+}
+.message-text thead th {
+  background: var(--bg-elevated, rgba(255,255,255,0.06));
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-strong, var(--border));
+  white-space: nowrap;
+}
+.message-text tbody tr:nth-child(even) td {
+  background: rgba(255,255,255,0.02);
+}
+.message-text tbody tr:hover td {
+  background: rgba(255,255,255,0.04);
+}
+[data-theme="light"] .message-text tbody tr:nth-child(even) td {
+  background: rgba(0,0,0,0.02);
+}
+[data-theme="light"] .message-text tbody tr:hover td {
+  background: rgba(0,0,0,0.04);
+}
 .message-text hr { border: none; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
-.message-text img { max-width: 100%; border-radius: var(--radius-sm); }
+.message-text img,
+.message-text .md-img {
+  max-width: 100%;
+  border-radius: var(--radius-sm, 6px);
+  margin: var(--sp-2) 0;
+  display: block;
+}
 
 .tool-call-box {
   margin-top: var(--sp-2);

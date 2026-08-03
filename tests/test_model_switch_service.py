@@ -114,6 +114,26 @@ class TestSwitchProviderNoMask:
         assert entry.get("api_key") == "sk-real-keep-me"
 
 
+class TestMarkdownRendererContracts:
+    def test_streaming_js_supports_tables_lists_quotes(self):
+        from pathlib import Path
+
+        js = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui"
+            / "kazma_ui"
+            / "static"
+            / "js"
+            / "streaming.js"
+        ).read_text(encoding="utf-8")
+        assert "type: 'table'" in js or 'type: "table"' in js or "type: 'table'" in js
+        assert "md-table" in js
+        assert "isTableRow" in js
+        assert "listItemMatch" in js
+        assert "blockquote" in js
+        assert "md-task" in js
+
+
 class TestSourceContracts:
     def test_chat_js_no_wall_clock_force_done(self):
         js = _CHAT_JS.read_text(encoding="utf-8")
