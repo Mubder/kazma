@@ -38,6 +38,11 @@ Chat turn
 
 ## Settings that matter
 
+**UI location:** Settings → **Memory** tab  
+(deep link: `/settings?tab=memory`)
+
+Also: Settings → **Embedder** for model rebuild / vector-space composition.
+
 | Setting | Effect |
 |---------|--------|
 | `merge_knowledge_into_chat` | Inject labeled KB into supervisor next to V2 memory |

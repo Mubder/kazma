@@ -351,6 +351,33 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tab_services": {"en": "Services", "ar": "الخدمات"},
     "settings.tab_models": {"en": "Models", "ar": "النماذج"},
     "settings.tab_agent": {"en": "Agent", "ar": "الوكيل"},
+    "settings.tab_memory": {"en": "Memory", "ar": "الذاكرة"},
+    "settings.memory_moved_hint": {
+        "en": "Memory isolation, Knowledge merge, and backends (Neo4j, Qdrant, Postgres) live on the Memory tab.",
+        "ar": "عزل الذاكرة ودمج المعرفة والخلفيات (Neo4j وQdrant وPostgres) في تبويب الذاكرة.",
+    },
+    "settings.memory_isolation_title": {"en": "Memory Isolation", "ar": "عزل الذاكرة"},
+    "settings.memory_tenant_mode": {"en": "Tenant Mode", "ar": "وضع المستأجر"},
+    "settings.memory_tenant_shared": {
+        "en": "Share everything (single-user) — all platforms share one memory pool",
+        "ar": "مشاركة الكل (مستخدم واحد) — كل المنصات تشترك في ذاكرة واحدة",
+    },
+    "settings.memory_tenant_platform": {
+        "en": "Per platform — each platform isolates (Telegram ≠ Web)",
+        "ar": "لكل منصة — عزل كل منصة (تيليجرام ≠ الويب)",
+    },
+    "settings.memory_tenant_user": {
+        "en": "Per user — each sender/session gets fully isolated memory",
+        "ar": "لكل مستخدم — ذاكرة معزولة لكل مرسل/جلسة",
+    },
+    "settings.memory_tenant_hint": {
+        "en": "Controls whether memories are shared or isolated. Share everything is best for single-user Web+Telegram. Per user is for multi-user SaaS. Takes effect next turn.",
+        "ar": "يتحكم بمشاركة أو عزل الذكريات. المشاركة مناسبة لمستخدم واحد. لكل مستخدم لمواقع متعددة. يسري من الدور التالي.",
+    },
+    "settings.memory_embedder_crosslink": {
+        "en": "For model rebuild and vector-space composition, open Embedder.",
+        "ar": "لإعادة بناء النموذج وتركيبة فضاء المتجهات، افتح المُضمِّن.",
+    },
     "settings.tab_connectors": {"en": "Connectors", "ar": "الموصلات"},
     "settings.tab_mcp": {"en": "MCP", "ar": "MCP"},
     "settings.tab_skills": {"en": "Skills", "ar": "المهارات"},

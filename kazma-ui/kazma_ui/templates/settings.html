@@ -10,6 +10,7 @@
     <nav class="settings-nav">
         <button class="settings-tab" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'memory' }" @click="onTabChange('memory')">{{ t('settings.tab_memory') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="onTabChange('connectors')">{{ t('settings.tab_connectors') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
@@ -588,22 +589,30 @@
             <button class="btn btn-primary" @click="saveContext()">{{ t('settings.save_context') }}</button>
         </div>
 
+        <div class="settings-group" style="padding:12px 16px;background:rgba(94,106,210,0.06);border:1px solid var(--border);border-radius:var(--radius-card);">
+            <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
+                {{ t('settings.memory_moved_hint') }}
+                <button type="button" class="btn btn-sm btn-primary" style="margin-left:8px;" @click="onTabChange('memory')">{{ t('settings.tab_memory') }} →</button>
+            </p>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB: MEMORY (isolation, KB merge, backends, Neo4j)
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'memory'" x-transition>
         <!-- Memory Tenant Mode -->
         <div class="settings-group">
-            <h3>Memory Isolation</h3>
+            <h3>{{ t('settings.memory_isolation_title') }}</h3>
             <div class="form-group">
-                <label>Tenant Mode</label>
+                <label>{{ t('settings.memory_tenant_mode') }}</label>
                 <select class="form-select" x-model="memoryTenantMode" @change="saveTenantMode()">
-                    <option value="shared">Share everything (single-user) — all platforms share one memory pool</option>
-                    <option value="per_platform">Per platform — each platform isolates (Telegram ≠ Web)</option>
-                    <option value="per_user">Per user — each sender/session gets fully isolated memory</option>
+                    <option value="shared">{{ t('settings.memory_tenant_shared') }}</option>
+                    <option value="per_platform">{{ t('settings.memory_tenant_platform') }}</option>
+                    <option value="per_user">{{ t('settings.memory_tenant_user') }}</option>
                 </select>
                 <p style="font-size:0.75rem;color:var(--text-muted);margin-top:6px;">
-                    Controls whether memories (beliefs, episodes) are shared or isolated across platforms/users.
-                    <strong>Share everything</strong> is the default — best for single-user setups where you chat
-                    from both Web and Telegram and want unified memory.
-                    <strong>Per user</strong> is for multi-user SaaS deployments.
-                    Changes take effect on the next turn (no restart needed).
+                    {{ t('settings.memory_tenant_hint') }}
                 </p>
             </div>
         </div>
@@ -624,7 +633,7 @@
             </div>
         </div>
 
-        <!-- Phase D: Memory backends -->
+        <!-- Memory backends -->
         <div class="settings-group" id="memory-backends-section">
             <h3>{{ t('settings.memory_backends_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
@@ -721,6 +730,10 @@
                 <button class="btn" @click="rebuildMemoryEmbeddings()" x-text="t('settings.memory_rebuild')"></button>
             </div>
             <p style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;" x-text="memoryBackendsStatus"></p>
+            <p style="font-size:0.75rem;color:var(--text-muted);margin-top:10px;">
+                {{ t('settings.memory_embedder_crosslink') }}
+                <button type="button" class="btn btn-sm" style="margin-left:6px;" @click="onTabChange('embedder')">{{ t('settings.tab_embedder') }} →</button>
+            </p>
         </div>
     </div>
 
@@ -1367,6 +1380,7 @@
             <div style="margin-bottom:12px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
                 <span class="ki" data-icon="info" aria-hidden="true"></span>
                 {{ t('settings.embedder_hint') }}
+                <button type="button" class="btn btn-sm" style="margin-left:8px;" @click="onTabChange('memory')">{{ t('settings.tab_memory') }} →</button>
             </div>
             <div class="metrics-row" style="margin-bottom:16px">
                 <div class="metric-card">
