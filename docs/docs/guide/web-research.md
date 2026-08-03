@@ -7,7 +7,19 @@ description: Search, scrape, crawl, and digest public web content with Kazma too
 
 # Web research
 
-Kazma can search the web, fetch pages, page through long documents, crawl a site within bounds, and digest saved extracts — all from **normal chat** (or `/swarm`). There is **no** `/research` slash command.
+Kazma can search the web, fetch pages, page through long documents, crawl a site within bounds, and digest saved extracts — all from **normal chat**, `/swarm`, or **`/research deep <topic>`**.
+
+## Shared web acquisition stack
+
+Search, scrape, and crawl I/O are centralized under **`kazma_core.web_acquire`**:
+
+| API | Role |
+|-----|------|
+| `search()` | Multi-backend SERP (same as `web_search` tool) |
+| `fetch_text()` | Full-page text (Jina / Firecrawl / httpx / Playwright recovery) |
+| `crawl()` | Bounded multi-page crawl with **profiles** (`research_brief`, `research_deep`, `kb_site`, …) |
+
+**Knowledge Library ingest** and **research** both use this fetch ladder so hard-page fixes apply once. Product pipelines stay separate (KB → index; research → digest/report). LLM APIs never use this stack (they use `http_pool`).
 
 > **Arabic brand:** product name is **Kazma** / **كاظمه** (or **كاظمة**). Never **كازما**.
 
@@ -18,7 +30,8 @@ Kazma can search the web, fetch pages, page through long documents, crawl a site
 | Quick research with sources | Chat: *“Research X, use the web, cite URLs”* |
 | Deep multi-page research | Chat: *“Crawl `https://docs…` and digest the pages”* |
 | Multi-worker parallel research | `/swarm research …` or *“use the swarm to research X”* |
-| Force a pipeline | Name tools: *“`web_search`, then `read_url_to_file`, then `digest_research_file`”* |
+| Deep multi-source paper | Chat *“deep research on X”* or **`/research deep X`** (runs `run_research_pipeline`) |
+| Force tool chain | Name tools: *“`web_search`, then `read_url_to_file`, then `digest_research_file`”* |
 
 The supervisor chooses tools; you do not need to name them unless you want control.
 

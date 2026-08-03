@@ -31,6 +31,12 @@ from kazma_core.tools.read_url import (
 
 __all__ = ["crawl_site"]
 
+# Prefer centralized fetch when available (same ladder as KB ingest)
+try:
+    from kazma_core.web_acquire import fetch_text as _central_fetch
+except Exception:  # pragma: no cover
+    _central_fetch = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 _SKIP_EXT = (
@@ -209,7 +215,12 @@ async def crawl_site(
             await asyncio.sleep(delay_ms / 1000.0)
 
         html, final_url = await _fetch_html(url)
-        text = await _fetch_full_text(final_url if final_url else url)
+        fetch_url = final_url if final_url else url
+        if _central_fetch is not None:
+            fr = await _central_fetch(fetch_url, purpose="crawl")
+            text = fr.text if (fr.ok or fr.text) else f"Error: {fr.error or 'empty'}"
+        else:
+            text = await _fetch_full_text(fetch_url)
         status = "ok"
         chars = 0
         rel = ""

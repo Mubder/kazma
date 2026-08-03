@@ -34,7 +34,7 @@ The ingestion runs as a background ``asyncio`` task that yields progress
 records (discovered / fetched / ingested / failed / current_url) which the
 UI and the ``/kb`` slash commands surface live.
 
-The fetch tiering reuses :func:`kazma_core.tools.read_url._fetch_full_text`
+The fetch tiering reuses :func:`kazma_core.web_acquire.fetch_text` (shared with research)
 (SSRF-safe, with optional Jina/Firecrawl/Playwright fallbacks) so we do
 not reinvent extraction.  The Playwright *full-DOM* extractor is new and
 lives here because trafilatura's "main visible article" assumption is
@@ -57,7 +57,12 @@ from urllib.parse import urldefrag, urljoin, urlparse
 from kazma_core.stores.knowledge import get_knowledge_store
 from kazma_core.stores.knowledge_chunker import chunk_markdown_doc, chunk_to_dict
 from kazma_core.stores.knowledge_index import get_knowledge_index
-from kazma_core.tools.read_url import _fetch_full_text
+# Prefer public web_acquire façade (shared recovery ladder with research)
+try:
+    from kazma_core.web_acquire import fetch_text as _web_fetch_text
+except Exception:  # pragma: no cover
+    _web_fetch_text = None  # type: ignore[assignment]
+from kazma_core.tools.read_url import _fetch_full_text  # fallback / private ladder
 
 __all__ = [
     "IngestResult",
@@ -739,17 +744,15 @@ async def _jina_expand_seed(seed: str) -> list[str] | None:
     Returns ``None`` on failure, or the raw (unscoped) link list.
     """
     try:
-        from kazma_core.tools.read_url import _try_jina_reader
-    except Exception:
-        return None
-    try:
-        text = await _try_jina_reader(seed)
+        from kazma_core.web_acquire.fetch import jina_reader
+
+        text = await jina_reader(seed)
     except Exception as exc:
         logger.debug("[kb_discover] Jina expand failed: %s", exc)
         return None
     if not text or len(text) < MIN_USEFUL_CHARS:
         return None
-    return _extract_links_from_text(text, seed)
+    return _extract_links_from_text(text, seed)  # type: ignore[arg-type]
 
 
 async def _safe_progress(on_progress: Any, msg: str) -> None:
@@ -817,9 +820,9 @@ async def _fetch_discovery_document(url: str, *, depth: int) -> str | None:
     # Bot-walled: try Jina for markdown (nav links survive conversion).
     if _jina_opt_in() or _kb_jina_fallback_allowed():
         try:
-            from kazma_core.tools.read_url import _try_jina_reader
+            from kazma_core.web_acquire.fetch import jina_reader
 
-            text = await _try_jina_reader(url)
+            text = await jina_reader(url)
             if text and len(text) >= MIN_USEFUL_CHARS:
                 return text
         except Exception as exc:
@@ -1101,7 +1104,11 @@ async def _extract_page(url: str) -> tuple[str | None, str, str]:
       tell *why* a page failed (bot-wall vs. Chromium-missing vs. timeout)
       instead of seeing an opaque "1 failed".
     """
-    text = await _fetch_full_text(url)
+    if _web_fetch_text is not None:
+        fr = await _web_fetch_text(url, purpose="kb")
+        text = fr.text if fr.ok or fr.text else (f"Error: {fr.error}" if fr.error else "Error: empty")
+    else:
+        text = await _fetch_full_text(url)
     # Only treat *Error:* strings as hard failures — never re-scan extracted
     # plain text with HTML bot-wall heuristics (false-positive on example.com).
     if isinstance(text, str) and text.startswith("Error:"):

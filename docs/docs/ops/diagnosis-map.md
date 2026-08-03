@@ -273,7 +273,7 @@ Backlog: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob
 | `web_search` | SearXNG → DDG → Bing → Wikipedia | `KAZMA_SEARXNG_URL`, ConfigStore `search.searxng_url`, compose profile `search` :8088 |
 | `read_url` / KB ingest | optional pre-backends → httpx → **recovery** Firecrawl → Jina → Playwright | `KAZMA_FETCH_BACKEND`, `KAZMA_FIRECRAWL_*`, `KAZMA_JINA_READER` (`0` = never) |
 
-KB ingest reuses `_fetch_full_text` — one fetch stack.
+KB ingest and research use **`kazma_core.web_acquire`** (`fetch_text` / `search` / `crawl` profiles) over the shared recovery ladder in `read_url` — one I/O stack, product sinks stay separate.
 
 Live smoke: `scripts/smoke_research_stack.py`.
 

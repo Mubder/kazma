@@ -333,7 +333,7 @@ async def run_research_pipeline(
 
     from kazma_core.tools.read_url import digest_research_file, read_url_to_file
     from kazma_core.tools.research_synthesize import synthesize_from_digests
-    from kazma_core.tools.web_search import web_search
+    from kazma_core.web_acquire import search as web_acquire_search
 
     t0 = time.time()
     log: list[str] = []
@@ -344,6 +344,7 @@ async def run_research_pipeline(
     log.append(f"## Pipeline start — depth={depth_l} max_sources={max_sources}")
     log.append(f"Topic: {topic}")
     log.append(f"Output dir: `{rel_dir}`")
+    log.append("Acquisition stack: kazma_core.web_acquire (shared with KB fetch ladder)")
 
     base = topic if not language else f"{topic} {language}"
     queries = [
@@ -361,7 +362,7 @@ async def run_research_pipeline(
     for i, q in enumerate(queries, 1):
         log.append(f"{i}. {q}")
 
-    # ── Stage 2: discover (parallel searches) ─────────────────────────
+    # ── Stage 2: discover (parallel searches via web_acquire) ─────────
     await _emit(progress_cb, "discover", f"Searching {len(queries)} queries…")
     candidates: list[str] = []
     domain_count: dict[str, int] = {}
@@ -370,10 +371,15 @@ async def run_research_pipeline(
     async def _one_search(q: str) -> None:
         nonlocal candidates, domain_count
         try:
-            md = await web_search(q, max_results=8 if is_deep else 5)
+            sr = await web_acquire_search(
+                q, max_results=8 if is_deep else 5, purpose="research"
+            )
             async with lock:
-                log.append(f"Search `{q}` → {len(md)} chars")
-                for u in _extract_urls_from_search(md):
+                log.append(
+                    f"Search `{q}` → ok={sr.ok} urls={len(sr.urls)} "
+                    f"latency={sr.latency_ms}ms"
+                )
+                for u in sr.urls:
                     d = _domain(u)
                     if d and domain_count.get(d, 0) >= 2:
                         continue
