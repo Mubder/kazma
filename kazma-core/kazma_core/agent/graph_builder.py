@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from contextvars import ContextVar
 from typing import Any
@@ -72,7 +73,18 @@ from kazma_core.tracing import KazmaTracer
 from kazma_core.config_schema import TracingConfig
 from kazma_core.summarizer import _normalize_msg
 
-__all__ = ["TOOL_RESULT_MAX_CHARS", "build_supervisor_graph", "check_saturation_node", "respond_node", "sanitize_tool_chains", "summarize_node", "supervisor_node", "tool_worker_node", "truncate_tool_result"]
+__all__ = [
+    "TOOL_RESULT_MAX_CHARS",
+    "build_supervisor_graph",
+    "check_saturation_node",
+    "is_unusable_assistant_content",
+    "respond_node",
+    "sanitize_tool_chains",
+    "summarize_node",
+    "supervisor_node",
+    "tool_worker_node",
+    "truncate_tool_result",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +163,57 @@ def truncate_tool_result(
         original_len = len(content)
         return content[:max_chars] + f"\n[truncated {original_len - max_chars} chars]"
     return content
+
+
+def is_unusable_assistant_content(text: str | None) -> bool:
+    """True when *text* must not be shown as a final user-facing answer.
+
+    DeepSeek and other models sometimes:
+      - return empty content (handled separately), or
+      - "recover" from empty via nudge with leaked tool-call markup
+        (DSML / invoke XML / raw ``tool_calls``) instead of a real answer
+        (2026-08-03: memory cleanup ended with 315 chars of DSML junk).
+    """
+    if text is None:
+        return True
+    s = str(text).strip()
+    if not s:
+        return True
+    low = s.lower()
+    # Leaked tool-call / protocol markup (structured, not prose "tool calls")
+    leak_markers = (
+        "dsml",
+        "<|",
+        "|>",
+        "invoke name=",
+        "</invoke",
+        "function_call",
+        "```tool",
+        "<tool_call",
+        "</tool_call",
+        "arguments>{}",
+        "tool_calls>",
+        '"tool_calls"',
+    )
+    if any(m in low for m in leak_markers):
+        return True
+    if re.search(r"<\s*\|?\s*dsml", low) or re.search(r"invoke\s+name\s*=", low):
+        return True
+    # Mid-task planning with no substance (ends with open colon / "let me")
+    if len(s) < 80 and any(
+        s.rstrip().endswith(p)
+        for p in (":", "…", "...", "—", "-")
+    ):
+        return True
+    if re.search(
+        r"\b(let me (probe|check|verify|look)|i(?:'ll| will) (?:now )?(?:call|use|run))\b"
+        r".{0,80}$",
+        low,
+    ) and len(s) < 400:
+        # Short "Let me probe whether tools are exposed:" style stubs
+        if not re.search(r"\b(status:|summary:|result:|done|completed|found:)\b", low):
+            return True
+    return False
 
 
 def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -951,9 +1014,10 @@ async def supervisor_node(
             # Prune context specifically for nudge call to prevent sending bloated prompt
             pruned_nudge_msgs = prune_tool_outputs(messages, max_tokens=14000, keep_recent_tool_outputs=2) + [
                 {"role": "system", "content": (
-                    "Your previous response was empty. Please provide a "
-                    "clear, helpful text answer to the user based on the "
-                    "conversation and tool results above."
+                    "Your previous response was empty. Provide a clear, helpful "
+                    "TEXT answer only (no tools, no XML, no DSML, no tool_calls). "
+                    "Based on the conversation and tool results above, tell the "
+                    "user what you found and what remains unfinished."
                 )},
             ]
             try:
@@ -970,6 +1034,16 @@ async def supervisor_node(
                     logger.warning("[Supervisor] Nudge retry returned empty content — routing to synthesis fallback")
             except Exception as nudge_exc:
                 logger.warning("[Supervisor] Nudge retry failed: %s — routing to synthesis fallback", nudge_exc)
+
+        # Reject leaked tool-call markup / mid-thought stubs (not a real answer)
+        if content and is_unusable_assistant_content(content):
+            logger.warning(
+                "[Supervisor] Unusable assistant content (%d chars) — "
+                "forcing synthesis (leak/stub), iteration=%d",
+                len(content),
+                iteration,
+            )
+            content = ""
 
         # Auto-continuation guard for multi-step goals/tasks
         is_auto = state.get("auto_continue", False)
@@ -992,9 +1066,13 @@ async def supervisor_node(
                 "last_cost_usd": response.cost_usd,
             }
 
-        # If content is still empty after nudge, force synthesis in respond_node
+        # If content is still empty or unusable after nudge, force synthesis
         if not content:
-            logger.warning("[Supervisor] Turn finished with no text content (iteration=%d) — forcing respond_node synthesis", iteration)
+            logger.warning(
+                "[Supervisor] Turn finished with no usable text (iteration=%d) — "
+                "forcing respond_node synthesis",
+                iteration,
+            )
             return {
                 **breaker_reset,
                 "messages": messages,
@@ -1461,9 +1539,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     _max_hit = iteration >= state.get("max_iterations", 15)
     _final_text = _final_assistant_text_after_tools(messages)
     _force_synth = bool(state.get("force_synthesis"))
-    # Always synthesize on max-iter or explicit force — never ship a
-    # mid-loop draft as the final answer.
-    _needs_synthesis = bool(_max_hit or _force_synth)
+    _junk_final = bool(_final_text and is_unusable_assistant_content(_final_text))
+    # Always synthesize on max-iter, explicit force, or leaked/stub final text.
+    _needs_synthesis = bool(_max_hit or _force_synth or _junk_final)
+    if _junk_final:
+        logger.warning(
+            "[Respond] Final draft unusable (leak/stub, %d chars) — forcing synthesis",
+            len(_final_text or ""),
+        )
     # If the supervisor's LLM call failed (after retries), the assistant
     # message above is an honest error notice, NOT a real answer. Never
     # synthesize a plausible-looking final answer over a broken turn — that
@@ -1483,13 +1566,21 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             try:
                 from kazma_core.summarizer import prune_tool_outputs
                 pruned_for_synth = prune_tool_outputs(messages, max_tokens=18000)
+                _reason = (
+                    "tool-round / long-horizon limit"
+                    if _max_hit
+                    else "unusable draft (leaked tool markup or incomplete stub)"
+                    if _junk_final
+                    else "forced finalization"
+                )
                 _wrap_msg = {
                     "role": "user",
                     "content": (
-                        "SYSTEM: You hit the tool-round / long-horizon limit. "
+                        f"SYSTEM: Finalization required ({_reason}). "
                         "Write the COMPLETE final answer for the user NOW.\n"
                         "Rules:\n"
                         "- Do not call any more tools.\n"
+                        "- Do not emit tool XML/DSML/markup.\n"
                         "- Do not continue mid-thought ('let me check…', 'next I will…').\n"
                         "- Summarize what you DID find/complete from tool results.\n"
                         "- Explicitly list what you did NOT finish and the next step "
@@ -1500,14 +1591,30 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 }
                 _resp = await _llm.chat(pruned_for_synth + [_wrap_msg], tools=None)
                 _content = getattr(_resp, "content", "") or ""
-                if _content.strip():
+                if _content.strip() and not is_unusable_assistant_content(_content):
                     # Prefer synthesis as the terminal message; keep prior
                     # drafts in history but surface the complete answer last.
                     messages.append({"role": "assistant", "content": _content})
                     logger.info(
-                        "[Respond] Max-iter synthesized final answer (%d chars, prior_draft=%d)",
+                        "[Respond] Synthesized final answer (%d chars, prior_draft=%d)",
                         len(_content),
                         len(_final_text or ""),
+                    )
+                elif _content.strip() and is_unusable_assistant_content(_content):
+                    logger.warning(
+                        "[Respond] Synthesis still unusable (%d chars) — fallback notice",
+                        len(_content),
+                    )
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": (
+                                "⚠️ Partial result: I finished tools but could not "
+                                "produce a clean final report (model returned tool "
+                                "markup instead of text). Send **continue** or a "
+                                "narrower request (e.g. list entities / invalidate X)."
+                            ),
+                        }
                     )
                 else:
                     logger.warning(

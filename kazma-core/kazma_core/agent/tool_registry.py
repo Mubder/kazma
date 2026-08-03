@@ -839,6 +839,122 @@ class LocalToolRegistry:
 
         @self.register(
             description=(
+                "List memory graph entities (person/project/tool/concept/location) with "
+                "belief counts. Use for entity-graph junk (duplicate ShipX nodes, "
+                "literal 'true'/'false' concept nodes). Prefer this over SQL. "
+                "Filter with q. To remove junk entities use memory_delete_entity."
+            ),
+            category="memory",
+        )
+        async def memory_list_entities(q: str = "", limit: int = 40) -> str:
+            import sqlite3
+
+            from kazma_core.memory.schema_v2 import ensure_primary_schema
+            from kazma_core.paths import primary_memory_db
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            try:
+                conn = sqlite3.connect(
+                    primary_memory_db(), check_same_thread=False
+                )
+                conn.row_factory = sqlite3.Row
+                ensure_primary_schema(conn)
+                tenant = get_current_tenant_id()
+                lim = max(1, min(int(limit or 40), 100))
+                # Belief count via subject/object slug match (best-effort)
+                sql = """
+                    SELECT e.id, e.type, e.name, e.is_high_stakes,
+                           (
+                             SELECT COUNT(*) FROM beliefs b
+                             WHERE b.tenant_id = e.tenant_id
+                               AND b.valid_until IS NULL AND b.invalidated_at IS NULL
+                               AND (b.subject = e.id OR b.object = e.name
+                                    OR b.object = e.id OR b.subject = e.name)
+                           ) AS belief_count
+                    FROM entities e
+                    WHERE e.tenant_id = ?
+                """
+                params: list[Any] = [tenant]
+                if (q or "").strip():
+                    ql = f"%{q.strip().lower()}%"
+                    sql += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
+                    params.extend([ql, ql, ql])
+                sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"
+                params.append(lim)
+                rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+                conn.close()
+                return json.dumps(
+                    {"count": len(rows), "entities": rows},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            except Exception as exc:
+                logger.warning("[memory_list_entities] failed: %s", exc)
+                return f"Error: memory_list_entities failed — {exc}"
+
+        @self.register(
+            description=(
+                "Delete a junk memory entity by id (from memory_list_entities). "
+                "Use for garbage concept nodes like literal 'true'/'false' or "
+                "duplicate empty shells. Does not wipe beliefs automatically — "
+                "invalidate beliefs first if needed. Never use execute_db_query."
+            ),
+            category="memory",
+        )
+        async def memory_delete_entity(entity_id: str) -> str:
+            import sqlite3
+
+            from kazma_core.memory.schema_v2 import ensure_primary_schema
+            from kazma_core.paths import primary_memory_db
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            eid = (entity_id or "").strip()
+            if not eid:
+                return "Error: entity_id required"
+            # Protect high-value ids
+            blocked = {"user", "assistant", "kazma", "mubder"}
+            if eid.lower() in blocked:
+                return f"Error: refusing to delete protected entity '{eid}'"
+            try:
+                conn = sqlite3.connect(
+                    primary_memory_db(), check_same_thread=False
+                )
+                conn.row_factory = sqlite3.Row
+                ensure_primary_schema(conn)
+                tenant = get_current_tenant_id()
+                row = conn.execute(
+                    "SELECT id, type, name FROM entities WHERE id=? AND tenant_id=?",
+                    (eid, tenant),
+                ).fetchone()
+                if not row:
+                    conn.close()
+                    return json.dumps({"ok": False, "error": "not_found", "entity_id": eid})
+                # Drop pending merges referencing this entity
+                conn.execute(
+                    "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
+                    (eid, eid),
+                )
+                conn.execute(
+                    "DELETE FROM entities WHERE id=? AND tenant_id=?",
+                    (eid, tenant),
+                )
+                conn.commit()
+                conn.close()
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "deleted": eid,
+                        "type": row["type"],
+                        "name": row["name"],
+                    },
+                    ensure_ascii=False,
+                )
+            except Exception as exc:
+                logger.warning("[memory_delete_entity] failed: %s", exc)
+                return f"Error: memory_delete_entity failed — {exc}"
+
+        @self.register(
+            description=(
                 "Store a fact, preference, or conversation fragment in long-term memory. "
                 "Use when the user shares personal info, preferences, or important context "
                 "that should be remembered across sessions. "
