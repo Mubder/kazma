@@ -367,6 +367,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.cpu": {"en": "CPU", "ar": "المعالج"},
     "dashboard.memory": {"en": "Memory", "ar": "الذاكرة"},
     "dashboard.session_management": {"en": "Session Management", "ar": "إدارة الجلسات"},
+    "dashboard.show_more_sessions": {"en": "Show more sessions", "ar": "عرض المزيد من الجلسات"},
+    "dashboard.show_less_sessions": {"en": "Show less", "ar": "عرض أقل"},
     "dashboard.clear_all": {"en": "Clear All", "ar": "مسح الكل"},
     "dashboard.no_active_sessions": {"en": "No active sessions", "ar": "لا توجد جلسات نشطة"},
     "dashboard.sessions_hint": {"en": "Sessions appear here when users start chatting", "ar": "تظهر الجلسات هنا عندما يبدأ المستخدمون بالمحادثة"},

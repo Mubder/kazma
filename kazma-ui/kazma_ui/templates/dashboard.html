@@ -4,23 +4,27 @@
 {% block page_title %}{{ t('dashboard.title') }}{% endblock %}
 
 {% block content %}
-<div class="dashboard-container" style="max-width:1400px;margin:0 auto;">
+<div class="dashboard-container dash-pro" style="max-width:1440px;margin:0 auto;padding:0 0.25rem 2rem;width:100%;box-sizing:border-box;">
 
   <!-- ── Header ── -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+  <div class="dash-pro-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.25rem;gap:16px;flex-wrap:wrap;">
     <div>
-      <h1 style="font-size:1.5rem;font-weight:500;letter-spacing:-0.02em;color:var(--text-primary);">
+      <p style="margin:0 0 4px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);font-weight:600;">Control plane</p>
+      <h1 style="font-size:1.45rem;font-weight:600;letter-spacing:-0.03em;color:var(--text-primary);margin:0;">
         {{ t('dashboard.observability') }}
       </h1>
+      <p style="margin:6px 0 0;font-size:0.82rem;color:var(--text-muted);max-width:36rem;line-height:1.4;">
+        Live cost, tokens, sessions, and system health — memory ops live on the Memory page.
+      </p>
     </div>
-    <div style="display:flex;gap:12px;align-items:center;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <div class="range-selector">
         <button class="range-btn active" data-range="hour">{{ t('dashboard.range_hour') }}</button>
         <button class="range-btn" data-range="day">{{ t('dashboard.range_day') }}</button>
         <button class="range-btn" data-range="week">{{ t('dashboard.range_week') }}</button>
       </div>
       <button id="dash-refresh" class="btn btn-sm btn-secondary" title="{{ t('dashboard.refresh') }}"><span x-html="KazmaIcons.refresh()"></span> {{ t('dashboard.refresh') }}</button>
-      <span id="connection-status" style="font-size:0.8rem;color:var(--text-muted);">● {{ t('dashboard.connecting') }}</span>
+      <span id="connection-status" class="dash-live-pill" style="font-size:0.78rem;color:var(--text-muted);padding:4px 10px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">● {{ t('dashboard.connecting') }}</span>
     </div>
   </div>
 
@@ -103,56 +107,55 @@
     </div>
   </div>
 
-  <!-- ── System Resources ── -->
-  <div id="resources-section" class="chart-card" style="margin-bottom:1.5rem;">
-    <h3 class="chart-title">{{ t('dashboard.system_resources') }}</h3>
-    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-      <div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.cpu') }}</span>
-          <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-cpu">–</span>
+  <!-- ── Two-column: Memory hub + System resources ── -->
+  <div class="dash-pro-split" style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:16px;margin-bottom:1.25rem;">
+    <div id="memory-hub-card" class="chart-card dash-pro-card" style="margin:0;padding:18px 20px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+          <h3 class="chart-title" style="margin:0 0 6px 0;display:flex;align-items:center;gap:8px;">
+            <span class="ki" data-icon="brain" aria-hidden="true"></span>
+            {{ t('dashboard.memory_governance') }}
+          </h3>
+          <p style="margin:0;font-size:0.82rem;color:var(--text-secondary);line-height:1.45;">
+            {{ t('memory.hub_blurb') }}
+          </p>
+          <div id="memory-hub-kpis" class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;">
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">Beliefs</div><div class="dash-kpi-val" id="hub-beliefs">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">Entities</div><div class="dash-kpi-val" id="hub-entities">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">Empty</div><div class="dash-kpi-val" id="hub-empty">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">Isolated</div><div class="dash-kpi-val" id="hub-isolated">–</div></div>
+          </div>
         </div>
-        <div class="progress-bar">
-          <div id="cpu-bar" class="progress-fill" style="width:0%;"></div>
-        </div>
-      </div>
-      <div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.memory') }}</span>
-          <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-memory">–</span>
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:140px;">
+          <a href="/memory" class="btn btn-primary btn-sm" style="text-decoration:none;text-align:center;padding:10px 16px;font-weight:600;">
+            {{ t('memory.open_console') }} →
+          </a>
+          <a href="/memory#hygiene" class="btn btn-secondary btn-sm" style="text-decoration:none;text-align:center;">
+            {{ t('memory.tab_hygiene') }}
+          </a>
+          <a href="/settings?tab=memory" class="btn btn-secondary btn-sm" style="text-decoration:none;text-align:center;font-size:0.75rem;">
+            {{ t('settings.tab_memory') }}
+          </a>
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- ── Memory hub (full console lives on /memory) ── -->
-  <div id="memory-hub-card" class="chart-card" style="margin-bottom:1.5rem;padding:18px 20px;">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:220px;">
-        <h3 class="chart-title" style="margin:0 0 8px 0;display:flex;align-items:center;gap:8px;">
-          <span class="ki" data-icon="brain" aria-hidden="true"></span>
-          {{ t('dashboard.memory_governance') }}
-        </h3>
-        <p style="margin:0;font-size:0.85rem;color:var(--text-secondary);line-height:1.45;">
-          {{ t('memory.hub_blurb') }}
-        </p>
-        <div id="memory-hub-kpis" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);">
-          <span id="hub-beliefs">beliefs: –</span>
-          <span id="hub-entities">entities: –</span>
-          <span id="hub-empty">empty: –</span>
-          <span id="hub-isolated">isolated: –</span>
+    <div id="resources-section" class="chart-card dash-pro-card" style="margin:0;padding:18px 20px;">
+      <h3 class="chart-title" style="margin:0 0 12px 0;">{{ t('dashboard.system_resources') }}</h3>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.cpu') }}</span>
+            <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-cpu">–</span>
+          </div>
+          <div class="progress-bar"><div id="cpu-bar" class="progress-fill" style="width:0%;"></div></div>
         </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;align-items:stretch;">
-        <a href="/memory" class="btn btn-primary btn-sm" style="text-decoration:none;text-align:center;padding:10px 18px;font-weight:600;">
-          {{ t('memory.open_console') }} →
-        </a>
-        <a href="/memory#hygiene" class="btn btn-secondary btn-sm" style="text-decoration:none;text-align:center;">
-          {{ t('memory.tab_hygiene') }}
-        </a>
-        <a href="/settings?tab=memory" class="btn btn-secondary btn-sm" style="text-decoration:none;text-align:center;font-size:0.75rem;">
-          {{ t('settings.tab_memory') }}
-        </a>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.memory') }} (RAM)</span>
+            <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-memory">–</span>
+          </div>
+          <div class="progress-bar"><div id="mem-bar" class="progress-fill" style="width:0%;background:var(--accent,#22d3ee);"></div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -163,57 +166,67 @@
       .then(function(d) {
         if (!d || !d.ok) return;
         var el = function(id, t) { var n = document.getElementById(id); if (n) n.textContent = t; };
-        el('hub-beliefs', 'beliefs: ' + (d.beliefs_live ?? '–'));
-        el('hub-entities', 'entities: ' + (d.entities ?? '–'));
-        el('hub-empty', 'empty: ' + (d.entities_empty ?? '–'));
-        el('hub-isolated', 'isolated: ' + (d.entities_isolated ?? '–'));
+        el('hub-beliefs', String(d.beliefs_live ?? '–'));
+        el('hub-entities', String(d.entities ?? '–'));
+        el('hub-empty', String(d.entities_empty ?? '–'));
+        el('hub-isolated', String(d.entities_isolated ?? '–'));
       }).catch(function() {});
   })();
   </script>
 
-
-  <!-- ── Session Management ── -->
-  <div class="card" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
-      <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
-        {{ t('dashboard.session_management') }}
-      </h2>
-      <button id="clear-all-btn" class="btn btn-sm btn-danger">{{ t('dashboard.clear_all') }}</button>
+  <!-- ── Session Management (show 5, expand rest) ── -->
+  <div class="card dash-pro-card" style="padding:0;overflow:hidden;margin-bottom:1.25rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border-subtle);gap:12px;flex-wrap:wrap;">
+      <div>
+        <h2 style="font-size:0.8rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin:0;">
+          {{ t('dashboard.session_management') }}
+        </h2>
+        <p id="sessions-summary" style="margin:4px 0 0;font-size:0.75rem;color:var(--text-muted);">—</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <a href="/chat" class="btn btn-sm btn-secondary" style="text-decoration:none;font-size:0.75rem;">Open chat</a>
+        <button id="clear-all-btn" class="btn btn-sm btn-danger">{{ t('dashboard.clear_all') }}</button>
+      </div>
     </div>
-    <div style="padding:16px 20px;">
+    <div style="padding:12px 16px 8px;">
       <div id="sessions-loading" style="text-align:center;padding:20px;color:var(--text-muted);">
         <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
         <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
         <div class="skeleton" style="height:40px;"></div>
       </div>
-      <div id="sessions-empty" style="display:none;text-align:center;padding:40px 20px;color:var(--text-muted);">
+      <div id="sessions-empty" style="display:none;text-align:center;padding:36px 20px;color:var(--text-muted);">
         <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
         <p>{{ t('dashboard.no_active_sessions') }}</p>
         <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.sessions_hint') }}</p>
       </div>
-      <div style="overflow-x:auto;">
+      <div style="overflow-x:auto;width:100%;">
         <table id="sessions-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;display:none;">
           <thead>
             <tr style="border-bottom:1px solid var(--border-subtle);">
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_thread_id') }}</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_platform') }}</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_user') }}</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_messages') }}</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_tokens') }}</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_created') }}</th>
-              <th style="padding:10px 16px;text-align:center;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_actions') }}</th>
+              <th style="padding:10px 12px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_thread_id') }}</th>
+              <th style="padding:10px 12px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_platform') }}</th>
+              <th style="padding:10px 12px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_user') }}</th>
+              <th style="padding:10px 12px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_messages') }}</th>
+              <th style="padding:10px 12px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_tokens') }}</th>
+              <th style="padding:10px 12px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_created') }}</th>
+              <th style="padding:10px 12px;text-align:center;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_actions') }}</th>
             </tr>
           </thead>
           <tbody id="sessions-tbody"></tbody>
         </table>
       </div>
+      <div id="sessions-expand-wrap" style="display:none;padding:10px 4px 6px;text-align:center;border-top:1px solid var(--border-subtle);margin-top:4px;">
+        <button type="button" id="sessions-expand-btn" class="btn btn-sm btn-secondary" style="font-size:0.78rem;min-width:12rem;">
+          {{ t('dashboard.show_more_sessions') }}
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- ── Recent Traces ── -->
-  <div class="card" style="padding:0;overflow:hidden;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
-      <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
+  <div class="card dash-pro-card" style="padding:0;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border-subtle);">
+      <h2 style="font-size:0.8rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin:0;">
         {{ t('dashboard.recent_traces') }}
       </h2>
       <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ traces|length }} {{ t('dashboard.traces_count') }}</span>
@@ -336,120 +349,8 @@
     }
   };
 
-  async function _loadSessions() {
-    try {
-      const resp = await fetch('/api/sessions');
-      const data = await resp.json();
-      document.getElementById('sessions-loading').style.display = 'none';
-      if (data.error || !data.sessions || data.sessions.length === 0) {
-        document.getElementById('sessions-empty').style.display = 'block';
-        document.getElementById('sessions-table').style.display = 'none';
-        return;
-      }
-      document.getElementById('sessions-empty').style.display = 'none';
-      document.getElementById('sessions-table').style.display = 'table';
-      const tbody = document.getElementById('sessions-tbody');
-      tbody.innerHTML = '';
-      data.sessions.forEach(function(s) {
-        const tr = document.createElement('tr');
-        tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
-
-        function makeTd(inner, style) {
-          const td = document.createElement('td');
-          td.style.cssText = style;
-          td.textContent = inner;
-          return td;
-        }
-
-        // thread_id — safe text
-        const tidTd = makeTd(s.thread_id||'unknown', 'padding:10px 16px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
-        tidTd.title = s.thread_id||'';
-        tr.appendChild(tidTd);
-
-        // platform — safe text inside badge
-        const platTd = document.createElement('td');
-        platTd.style.cssText = 'padding:10px 16px;';
-        const badge = document.createElement('span');
-        badge.className = 'badge badge-basic';
-        badge.style.cssText = 'font-size:0.7rem;';
-        badge.textContent = s.platform||'unknown';
-        platTd.appendChild(badge);
-        tr.appendChild(platTd);
-
-        // display_name — safe text (was XSS vector)
-        tr.appendChild(makeTd(s.display_name||'anonymous', 'padding:10px 16px;font-weight:500;'));
-
-        // message_count — safe number
-        tr.appendChild(makeTd(String(s.message_count||0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
-
-        // context_tokens — safe number
-        tr.appendChild(makeTd(String(s.context_tokens||0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
-
-        // created_at — safe date
-        tr.appendChild(makeTd(s.created_at?new Date(s.created_at).toLocaleString():I18N.na, 'padding:10px 16px;font-size:0.75rem;color:var(--text-muted);'));
-
-        // delete button
-        const delTd = document.createElement('td');
-        delTd.style.cssText = 'padding:10px 16px;text-align:center;';
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-sm btn-danger';
-        btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
-        btn.textContent = I18N.delete;
-        btn.onclick = function() { window._deleteSession(s.thread_id); };
-        delTd.appendChild(btn);
-        tr.appendChild(delTd);
-
-        tbody.appendChild(tr);
-      });
-    } catch(e) {
-      document.getElementById('sessions-loading').style.display = 'none';
-      document.getElementById('sessions-empty').style.display = 'block';
-    }
-  }
-
-  window._deleteSession = async function(threadId) {
-    if (!(await window.kazmaConfirm({
-      title: 'Delete session',
-      message: I18N.confirmDelete + threadId + '?',
-      confirmText: 'Delete',
-      danger: true,
-    }))) return;
-    try {
-      await fetch('/api/sessions/' + threadId, { method: 'DELETE' });
-      _loadSessions();
-    } catch(e) { window.kazmaAlert({ title: 'Error', message: I18N.errorDeleting, variant: 'btn-danger' }); }
-  };
-
-  window._clearAllSessions = async function() {
-    if (!(await window.kazmaConfirm({
-      title: 'Clear all sessions',
-      message: I18N.confirmClearAll,
-      confirmText: 'Clear all',
-      danger: true,
-    }))) return;
-    try {
-      await fetch('/api/sessions/clear-all', { method: 'POST' });
-      _loadSessions();
-    } catch(e) { window.kazmaAlert({ title: 'Error', message: I18N.errorClearing, variant: 'btn-danger' }); }
-  };
-
-  // Prefer dashboard.js handlers (survives soft-nav); fall back to inline.
-  var clearAllBtn = document.getElementById('clear-all-btn');
-  if (clearAllBtn && !window.KazmaDashboard) {
-    clearAllBtn.addEventListener('click', window._clearAllSessions);
-  }
-  // Always run once; dashboard.js boot also calls initSessionManagement.
-  // Guard against missing nodes when soft-nav partially swaps the DOM.
-  try {
-    if (window.KazmaDashboard && typeof window.KazmaDashboard.loadSessions === 'function') {
-      window.KazmaDashboard.loadSessions();
-    } else {
-      _loadSessions();
-    }
-  } catch (e) {
-    try { _loadSessions(); } catch (e2) { /* ignore */ }
-  }
-  // Fail-safe: never leave skeleton forever (first soft-nav race).
+  // Sessions UI: dashboard.js owns load + 5-row expand/collapse.
+  // Fail-safe: never leave skeleton forever.
   setTimeout(function() {
     var loadingEl = document.getElementById('sessions-loading');
     var emptyEl = document.getElementById('sessions-empty');
@@ -462,4 +363,49 @@
 
 })();
 </script>
+<style>
+  /* Industry-grade dashboard polish */
+  .dash-pro .metric-card {
+    border-radius: 12px;
+    border: 1px solid var(--border-subtle);
+    background: linear-gradient(165deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
+    padding: 14px 16px;
+    min-height: 100px;
+  }
+  .dash-pro .charts-row {
+    gap: 16px;
+    margin-bottom: 1.25rem;
+  }
+  .dash-pro .chart-card,
+  .dash-pro-card {
+    border-radius: 12px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255,255,255,0.02);
+  }
+  .dash-kpi-tile {
+    background: rgba(0,0,0,0.18);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 10px 12px;
+    min-width: 0;
+  }
+  .dash-kpi-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    font-weight: 600;
+  }
+  .dash-kpi-val {
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    margin-top: 4px;
+    color: var(--text-primary);
+  }
+  @media (max-width: 900px) {
+    .dash-pro-split { grid-template-columns: 1fr !important; }
+    .dash-kpi-row { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  }
+</style>
 {% endblock %}

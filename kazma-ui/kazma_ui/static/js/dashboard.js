@@ -372,8 +372,17 @@
         if (data.cpu_percent !== undefined) {
           setMetric('res-cpu', data.cpu_percent.toFixed(1) + '%');
           var cpuBar = $('cpu-bar');
-          if (cpuBar) cpuBar.style.width = data.cpu_percent + '%';
-          setMetric('res-memory', data.memory_mb ? data.memory_mb.toFixed(0) + ' MB' : '–');
+          if (cpuBar) cpuBar.style.width = Math.min(100, data.cpu_percent) + '%';
+          var memLabel = data.memory_mb ? data.memory_mb.toFixed(0) + ' MB' : '–';
+          if (data.memory_percent != null) memLabel += ' (' + Number(data.memory_percent).toFixed(0) + '%)';
+          setMetric('res-memory', memLabel);
+          var memBar = $('mem-bar');
+          if (memBar) {
+            var mp = data.memory_percent != null
+              ? Number(data.memory_percent)
+              : (data.memory_mb != null ? Math.min(100, (data.memory_mb / 8192) * 100) : 0);
+            memBar.style.width = Math.min(100, Math.max(0, mp)) + '%';
+          }
         }
       } catch(e) {}
     };
@@ -394,13 +403,84 @@
   // ── Session Management + Memory board (moved out of inline HTML so
   // soft-nav / re-entry always re-bind. Soft-nav to /dashboard is now a
   // hard reload, but keep this in the bundle for F5 and future soft-nav.)
+  var SESSION_PREVIEW = 5;
+  var _sessionsExpanded = false;
+  var _sessionsCache = [];
+
   function initSessionManagement() {
     var loadingEl = $('sessions-loading');
     var emptyEl = $('sessions-empty');
     var tableEl = $('sessions-table');
     var tbody = $('sessions-tbody');
     var clearBtn = $('clear-all-btn');
+    var expandWrap = $('sessions-expand-wrap');
+    var expandBtn = $('sessions-expand-btn');
+    var summaryEl = $('sessions-summary');
     if (!loadingEl && !tableEl) return; // not on dashboard page
+
+    function renderSessionRows() {
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      var list = _sessionsCache || [];
+      var showAll = _sessionsExpanded || list.length <= SESSION_PREVIEW;
+      var visible = showAll ? list : list.slice(0, SESSION_PREVIEW);
+      visible.forEach(function(s) {
+        var tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
+        function makeTd(inner, style) {
+          var td = document.createElement('td');
+          td.style.cssText = style;
+          td.textContent = inner;
+          return td;
+        }
+        var tidTd = makeTd(s.thread_id || 'unknown', 'padding:10px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+        tidTd.title = s.thread_id || '';
+        tr.appendChild(tidTd);
+        var platTd = document.createElement('td');
+        platTd.style.cssText = 'padding:10px 12px;';
+        var badge = document.createElement('span');
+        badge.className = 'badge badge-basic';
+        badge.style.cssText = 'font-size:0.7rem;';
+        badge.textContent = s.platform || 'unknown';
+        platTd.appendChild(badge);
+        tr.appendChild(platTd);
+        tr.appendChild(makeTd(s.display_name || 'anonymous', 'padding:10px 12px;font-weight:500;'));
+        tr.appendChild(makeTd(String(s.message_count || 0), 'padding:10px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
+        tr.appendChild(makeTd(String(s.context_tokens || 0), 'padding:10px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
+        tr.appendChild(makeTd(s.created_at ? new Date(s.created_at).toLocaleString() : '—', 'padding:10px 12px;font-size:0.75rem;color:var(--text-muted);'));
+        var delTd = document.createElement('td');
+        delTd.style.cssText = 'padding:10px 12px;text-align:center;';
+        var btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-danger';
+        btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
+        btn.textContent = 'Delete';
+        btn.onclick = function() { window._deleteSession && window._deleteSession(s.thread_id); };
+        delTd.appendChild(btn);
+        tr.appendChild(delTd);
+        tbody.appendChild(tr);
+      });
+      if (expandWrap) {
+        if (list.length > SESSION_PREVIEW) {
+          expandWrap.style.display = 'block';
+          if (expandBtn) {
+            var hidden = list.length - SESSION_PREVIEW;
+            expandBtn.textContent = _sessionsExpanded
+              ? 'Show less'
+              : ('Show ' + hidden + ' more session' + (hidden === 1 ? '' : 's'));
+          }
+        } else {
+          expandWrap.style.display = 'none';
+        }
+      }
+      if (summaryEl) {
+        summaryEl.textContent = list.length
+          ? (list.length + ' session' + (list.length === 1 ? '' : 's')
+            + (list.length > SESSION_PREVIEW && !_sessionsExpanded
+              ? ' · showing first ' + SESSION_PREVIEW
+              : ''))
+          : 'No sessions';
+      }
+    }
 
     async function loadSessions() {
       try {
@@ -409,54 +489,31 @@
         try { data = await resp.json(); } catch (e) { data = {}; }
         if (loadingEl) loadingEl.style.display = 'none';
         if (!resp.ok || data.error || !data.sessions || data.sessions.length === 0) {
+          _sessionsCache = [];
           if (emptyEl) emptyEl.style.display = 'block';
           if (tableEl) tableEl.style.display = 'none';
+          if (expandWrap) expandWrap.style.display = 'none';
+          if (summaryEl) summaryEl.textContent = 'No sessions';
           return;
         }
         if (emptyEl) emptyEl.style.display = 'none';
         if (tableEl) tableEl.style.display = 'table';
-        if (!tbody) return;
-        tbody.innerHTML = '';
-        data.sessions.forEach(function(s) {
-          var tr = document.createElement('tr');
-          tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
-          function makeTd(inner, style) {
-            var td = document.createElement('td');
-            td.style.cssText = style;
-            td.textContent = inner;
-            return td;
-          }
-          var tidTd = makeTd(s.thread_id || 'unknown', 'padding:10px 16px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
-          tidTd.title = s.thread_id || '';
-          tr.appendChild(tidTd);
-          var platTd = document.createElement('td');
-          platTd.style.cssText = 'padding:10px 16px;';
-          var badge = document.createElement('span');
-          badge.className = 'badge badge-basic';
-          badge.style.cssText = 'font-size:0.7rem;';
-          badge.textContent = s.platform || 'unknown';
-          platTd.appendChild(badge);
-          tr.appendChild(platTd);
-          tr.appendChild(makeTd(s.display_name || 'anonymous', 'padding:10px 16px;font-weight:500;'));
-          tr.appendChild(makeTd(String(s.message_count || 0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
-          tr.appendChild(makeTd(String(s.context_tokens || 0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
-          tr.appendChild(makeTd(s.created_at ? new Date(s.created_at).toLocaleString() : '—', 'padding:10px 16px;font-size:0.75rem;color:var(--text-muted);'));
-          var delTd = document.createElement('td');
-          delTd.style.cssText = 'padding:10px 16px;text-align:center;';
-          var btn = document.createElement('button');
-          btn.className = 'btn btn-sm btn-danger';
-          btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
-          btn.textContent = 'Delete';
-          btn.onclick = function() { window._deleteSession && window._deleteSession(s.thread_id); };
-          delTd.appendChild(btn);
-          tr.appendChild(delTd);
-          tbody.appendChild(tr);
-        });
+        _sessionsCache = data.sessions.slice();
+        renderSessionRows();
       } catch (e) {
         if (loadingEl) loadingEl.style.display = 'none';
         if (emptyEl) emptyEl.style.display = 'block';
         if (tableEl) tableEl.style.display = 'none';
+        if (expandWrap) expandWrap.style.display = 'none';
       }
+    }
+
+    if (expandBtn && !expandBtn._bound) {
+      expandBtn._bound = true;
+      expandBtn.addEventListener('click', function() {
+        _sessionsExpanded = !_sessionsExpanded;
+        renderSessionRows();
+      });
     }
 
     window._deleteSession = async function(threadId) {
