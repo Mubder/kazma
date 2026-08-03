@@ -1,8 +1,8 @@
-"""Belief graph backend — SQLite default + Neo4j optional (P2-3).
+"""Belief graph backend — SQLite default + Neo4j optional dual-write (P2-3).
 
-The live Dashboard graph reads SQLite beliefs today. This module adds a
-pluggable surface so Neo4j (or another graph DB) can receive dual-written
-triples and serve probes without rewriting the canvas immediately.
+Dashboard V2 Belief Topology paints from SQLite (entity types, bi-temporal).
+Neo4j receives dual-written triples for scale / neighbors and optional
+``?source=neo4j`` probes. Beliefs remain SoT in SQLite.
 """
 
 from __future__ import annotations
@@ -271,26 +271,76 @@ class Neo4jGraphBackend:
                     lim=max(10, min(int(limit), 2000)),
                 )
                 rows = [dict(rec) for rec in result]
+            # Optional SQLite entity-type enrich so probe path matches canvas schema
+            ent_types: dict[str, str] = {}
+            try:
+                import sqlite3 as _sq
+
+                from kazma_core.paths import primary_memory_db
+
+                c = _sq.connect(primary_memory_db(), check_same_thread=False)
+                for er in c.execute("SELECT id, type FROM entities").fetchall():
+                    ent_types[str(er[0])] = str(er[1] or "concept")
+                c.close()
+            except Exception:
+                pass
+            # Belief id → predicate_type for edge colors
+            bid_ptype: dict[str, str] = {}
+            try:
+                import sqlite3 as _sq2
+
+                from kazma_core.paths import primary_memory_db as _pdb
+
+                c2 = _sq2.connect(_pdb(), check_same_thread=False)
+                for br in c2.execute(
+                    "SELECT id, predicate_type FROM beliefs WHERE invalidated_at IS NULL"
+                ).fetchall():
+                    bid_ptype[str(br[0])] = str(br[1] or "set")
+                c2.close()
+            except Exception:
+                pass
             nodes: dict[str, dict] = {}
             links = []
+            belief_count: dict[str, int] = {}
             for r in rows:
-                for ent in (r.get("subject"), r.get("object")):
-                    if ent and ent not in nodes:
-                        nodes[ent] = {
-                            "id": ent,
-                            "label": ent,
-                            "type": "entity",
-                            "group": "neo4j",
-                        }
+                sub = r.get("subject") or ""
+                obj = r.get("object") or ""
+                if sub:
+                    belief_count[sub] = belief_count.get(sub, 0) + 1
+                for ent, is_obj in ((sub, False), (obj, True)):
+                    if not ent or ent in nodes:
+                        continue
+                    etype = ent_types.get(ent) or (
+                        "person" if ent == "user" else ("concept" if is_obj else "concept")
+                    )
+                    long_obj = is_obj and len(str(ent)) > 80
+                    nodes[ent] = {
+                        "id": ent,
+                        "name": ent,
+                        "label": ent,
+                        "type": etype,
+                        "beliefCount": 0,
+                        "isHighStakes": False,
+                        "isVirtual": bool(long_obj),
+                        "group": "neo4j",
+                    }
+                pred = r.get("pred_label") or r.get("predicate") or "related_to"
+                bid = str(r.get("id") or "")
                 links.append(
                     {
-                        "source": r.get("subject"),
-                        "target": r.get("object"),
-                        "predicate": r.get("pred_label") or r.get("predicate"),
+                        "id": bid,
+                        "source": sub,
+                        "target": obj,
+                        "label": pred,
+                        "predicate": pred,
+                        "object_text": obj,
+                        "type": bid_ptype.get(bid) or "set",
                         "confidence": float(r.get("confidence") or 0.5),
-                        "id": r.get("id") or "",
+                        "superseded": False,
                     }
                 )
+            for n in nodes.values():
+                n["beliefCount"] = belief_count.get(n["id"], 0) or (1 if n.get("isVirtual") else 0)
             return {
                 "nodes": list(nodes.values()),
                 "links": links,
@@ -298,7 +348,8 @@ class Neo4jGraphBackend:
                     "source": "neo4j",
                     "node_count": len(nodes),
                     "link_count": len(links),
-                    "primary": True,
+                    "primary": False,
+                    "paint_source": "neo4j",
                 },
             }
         except Exception:

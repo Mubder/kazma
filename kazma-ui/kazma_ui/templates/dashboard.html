@@ -234,6 +234,8 @@
         <span id="v2-post-turn-err" style="color:var(--text-muted);">last error: –</span>
         <span id="v2-embedder-ready" style="color:var(--text-muted);">embedder: –</span>
         <span id="v2-reconsol-meta" style="color:var(--text-muted);">reconsol: –</span>
+        <span id="v2-graph-backend" style="color:var(--text-muted);">graph: –</span>
+        <span id="v2-backends-mode" style="color:var(--text-muted);">backends: –</span>
         <a href="/settings?tab=memory" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
       </div>
 
@@ -320,8 +322,8 @@
               <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
             </div>
           </div>
-          <!-- Legend -->
-          <div style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);">
+          <!-- Legend (filled dynamically from live type counts) -->
+          <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);">
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:4px;"></span>person</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#06b6d4;margin-right:4px;"></span>tool</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6366f1;margin-right:4px;"></span>concept</span>
@@ -1307,6 +1309,27 @@
           rc.textContent = 'reconsol: never';
         }
       }
+      const gEl = document.getElementById('v2-graph-backend');
+      if (gEl) {
+        const g = h.graph || {};
+        const prov = g.provider || 'sqlite';
+        if (prov === 'neo4j') {
+          const on = g.online ? 'online' : 'offline→sqlite fallback';
+          gEl.textContent = 'graph: neo4j dual-write · ' + on + ' · paint sqlite';
+          gEl.style.color = g.online ? '#2ed573' : '#fbbf24';
+        } else {
+          gEl.textContent = 'graph: sqlite';
+          gEl.style.color = 'var(--text-muted)';
+        }
+      }
+      const bmEl = document.getElementById('v2-backends-mode');
+      if (bmEl) {
+        bmEl.textContent = 'backends: ' + (h.backends_mode || 'local');
+        const vc = h.vector_capability || {};
+        if (vc.provider || vc.status) {
+          bmEl.textContent += ' · vector ' + (vc.provider || vc.status || '');
+        }
+      }
       const strip = document.getElementById('v2-post-turn-strip');
       const failedQ = (h.queue && h.queue.failed) || 0;
       const hasErr = !!(pt.last_error || h.last_error || h.status_detail);
@@ -2120,18 +2143,68 @@
     return '/api/memory/v2/graph' + (qs ? ('?' + qs) : '');
   }
 
+  var _v2gLastStats = {};
+
   async function _v2gLoad() {
     try {
       var resp = await fetch(_v2gBuildUrl());
       var data = await resp.json();
       var stats = data.stats || {};
+      _v2gLastStats = stats;
       _v2gRawNodes = data.nodes || [];
       _v2gRawLinks = data.links || [];
+      // Normalize link fields (neo4j probe may use predicate instead of label)
+      _v2gRawLinks.forEach(function(l) {
+        if (!l.label && l.predicate) l.label = l.predicate;
+        if (!l.type) l.type = 'set';
+        if (!l.source && l.subject) l.source = l.subject;
+        if (!l.target && l.object) l.target = l.object;
+      });
+      _v2gRawNodes.forEach(function(n) {
+        if (!n.name && n.label) n.name = n.label;
+        if (!n.type) n.type = 'concept';
+      });
       if (stats.earliest && stats.latest && stats.latest > stats.earliest) {
         _v2gTimeRange = { min: stats.earliest, max: Math.max(stats.latest, Date.now() / 1000) };
       }
+      _v2gRenderFilters();
       _v2gApplyFilters();
     } catch (e) { /* silent */ }
+  }
+
+  function _v2gTypeCountsFromData() {
+    var counts = {};
+    (_v2gRawNodes || []).forEach(function(n) {
+      var t = n.type || 'concept';
+      counts[t] = (counts[t] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function _v2gPredCountsFromData() {
+    var counts = {};
+    (_v2gRawLinks || []).forEach(function(l) {
+      var t = l.type || 'set';
+      counts[t] = (counts[t] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function _v2gUpdateLegend(entCounts) {
+    var leg = document.getElementById('v2g-legend');
+    if (!leg) return;
+    var order = ['person', 'tool', 'concept', 'location', 'project', 'entity'];
+    var keys = order.filter(function(k) { return (entCounts[k] || 0) > 0; });
+    Object.keys(entCounts).forEach(function(k) {
+      if (keys.indexOf(k) < 0 && entCounts[k] > 0) keys.push(k);
+    });
+    if (!keys.length) keys = ['person', 'tool', 'concept', 'location', 'project'];
+    leg.innerHTML = keys.map(function(k) {
+      var c = _V2G_TYPE_COLORS[k] || '#94a3b8';
+      var n = entCounts[k] || 0;
+      return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c + ';margin-right:4px;"></span>' +
+        k + (n ? ' <span style="opacity:0.7">(' + n + ')</span>' : '') + '</span>';
+    }).join('');
   }
 
   function _v2gApplyFilters() {
@@ -2160,9 +2233,10 @@
     if (activePred.length || search) {
       links = links.filter(function(l) {
         if (activePred.length && activePred.indexOf(l.type) < 0) return false;
-        if (search && (l.label || '').toLowerCase().indexOf(search) < 0 &&
-            (l.source || '').toLowerCase().indexOf(search) < 0 &&
-            (l.target || '').toLowerCase().indexOf(search) < 0) return false;
+        if (search) {
+          var hay = ((l.label || '') + ' ' + (l.source || '') + ' ' + (l.target || '') + ' ' + (l.object_text || '')).toLowerCase();
+          if (hay.indexOf(search) < 0) return false;
+        }
         return true;
       });
     }
@@ -2171,7 +2245,8 @@
     links.forEach(function(l) { nodeIds.add(l.source); nodeIds.add(l.target); });
     if (search) {
       nodes.forEach(function(n) {
-        if ((n.name || '').toLowerCase().indexOf(search) >= 0) nodeIds.add(n.id);
+        var nm = (n.name || n.label || n.id || '').toLowerCase();
+        if (nm.indexOf(search) >= 0) nodeIds.add(n.id);
       });
     }
     // Filter nodes by entity type + membership
@@ -2189,10 +2264,20 @@
 
     var sl = document.getElementById('v2g-stats-line');
     if (sl) {
-      var suffix = '';
-      if (activeEnt.length || activePred.length || search) suffix = ' (filtered from ' + _v2gRawNodes.length + ')';
-      sl.textContent = nodes.length + ' nodes · ' + links.length + ' beliefs' + suffix;
+      var st = _v2gLastStats || {};
+      var paint = st.paint_source || st.source || 'sqlite';
+      var gprov = st.graph_provider || paint;
+      var parts = [nodes.length + ' nodes · ' + links.length + ' beliefs'];
+      parts.push('paint ' + paint);
+      if (gprov === 'neo4j') {
+        parts.push(st.graph_online ? 'neo4j dual-write online' : 'neo4j offline');
+      }
+      if (activeEnt.length || activePred.length || search) {
+        parts.push('filtered from ' + _v2gRawNodes.length);
+      }
+      sl.textContent = parts.join(' · ');
     }
+    _v2gUpdateLegend(_v2gTypeCountsFromData());
     // Invalidate the layout signature so drawCanvas re-layouts on every
     // filter change/reset, not just when node count differs.
     _v2gSig = '';
@@ -2202,17 +2287,46 @@
   function _v2gRenderFilters() {
     var entBox = document.getElementById('v2g-filters-entity');
     var predBox = document.getElementById('v2g-filters-predicate');
-    var entTypes = [['person','person'],['tool','tool'],['concept','concept'],['location','location'],['project','project']];
-    var predTypes = [['functional','functional'],['set','set'],['state','state']];
-    function makeToggle(label, group, key, color) {
+    var entCounts = _v2gTypeCountsFromData();
+    var predCounts = _v2gPredCountsFromData();
+    // Prefer types present in data; always offer the core set so empty graphs stay usable
+    var coreEnt = ['person', 'tool', 'concept', 'location', 'project'];
+    var entTypes = coreEnt.slice();
+    Object.keys(entCounts).forEach(function(k) {
+      if (entTypes.indexOf(k) < 0) entTypes.push(k);
+    });
+    // Drop core types that never appear once we have data (except keep all until first load)
+    if (_v2gRawNodes.length) {
+      entTypes = entTypes.filter(function(k) {
+        return (entCounts[k] || 0) > 0 || !!_v2gFilters.entity[k];
+      });
+      if (!entTypes.length) entTypes = coreEnt.slice();
+    }
+    var corePred = ['functional', 'set', 'state'];
+    var predTypes = corePred.slice();
+    Object.keys(predCounts).forEach(function(k) {
+      if (predTypes.indexOf(k) < 0) predTypes.push(k);
+    });
+    if (_v2gRawLinks.length) {
+      predTypes = predTypes.filter(function(k) {
+        return (predCounts[k] || 0) > 0 || !!_v2gFilters.predicate[k];
+      });
+      if (!predTypes.length) predTypes = corePred.slice();
+    }
+    function makeToggle(label, group, key, color, count) {
       var id = 'v2g-ft-' + group + '-' + key;
       var active = !!_v2gFilters[group][key];
+      var cnt = (count != null && count > 0) ? ' <span style="opacity:0.65;font-family:var(--font-mono);">(' + count + ')</span>' : '';
       return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.75rem;' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
              '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (active ? color : 'transparent') + ';border:1px solid ' + color + ';"></span>' +
-             '<input type="checkbox" id="' + id + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + '</label>';
+             '<input type="checkbox" id="' + id + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + cnt + '</label>';
     }
-    if (entBox) entBox.innerHTML = entTypes.map(function(t) { return makeToggle(t[0], 'entity', t[1], _V2G_TYPE_COLORS[t[0]] || '#94a3b8'); }).join('');
-    if (predBox) predBox.innerHTML = predTypes.map(function(t) { return makeToggle(t[0], 'predicate', t[1], _V2G_PRED_COLORS[t[0]] || '#94a3b8'); }).join('');
+    if (entBox) entBox.innerHTML = entTypes.map(function(t) {
+      return makeToggle(t, 'entity', t, _V2G_TYPE_COLORS[t] || '#94a3b8', entCounts[t] || 0);
+    }).join('');
+    if (predBox) predBox.innerHTML = predTypes.map(function(t) {
+      return makeToggle(t, 'predicate', t, _V2G_PRED_COLORS[t] || '#94a3b8', predCounts[t] || 0);
+    }).join('');
     // Wire change handlers — multi-select (toggle each independently)
     document.querySelectorAll('[id^="v2g-ft-entity-"]').forEach(function(cb) {
       cb.addEventListener('change', function() {
@@ -2233,18 +2347,18 @@
     // Active filter chips + reset button
     var chips = document.getElementById('v2g-active-filters');
     if (chips) {
-      var all = Object.keys(_v2gFilters.entity).map(function(k) { return 'entity:' + k; })
-        .concat(Object.keys(_v2gFilters.predicate).map(function(k) { return 'pred:' + k; }));
-      var html = all.map(function(c) {
-        return '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.15);color:#a5b4fc;cursor:pointer;">' + c + ' ✕</span>';
+      var all = Object.keys(_v2gFilters.entity).map(function(k) { return { group: 'entity', key: k, label: 'entity:' + k }; })
+        .concat(Object.keys(_v2gFilters.predicate).map(function(k) { return { group: 'predicate', key: k, label: 'pred:' + k }; }));
+      var html = all.map(function(c, idx) {
+        return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.15);color:#a5b4fc;cursor:pointer;">' + c.label + ' ✕</span>';
       }).join('');
       if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">Reset all</span>';
       chips.innerHTML = html;
-      // Click a chip to remove that filter
-      chips.querySelectorAll('span:not(#v2g-reset-filters)').forEach(function(span, i) {
+      chips.querySelectorAll('span[data-fg]').forEach(function(span) {
         span.addEventListener('click', function() {
-          var parts = span.textContent.replace(' ✕','').split(':');
-          delete _v2gFilters[parts[0]][parts[1]];
+          var g = span.getAttribute('data-fg');
+          var k = span.getAttribute('data-fk');
+          if (g && k && _v2gFilters[g]) delete _v2gFilters[g][k];
           _v2gRenderFilters(); _v2gApplyFilters();
         });
       });

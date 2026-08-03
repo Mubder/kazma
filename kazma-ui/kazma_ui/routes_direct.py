@@ -1002,9 +1002,9 @@ def register_direct_routes(self: Any) -> None:
     ):
         """V2 belief graph as {nodes, links, stats} for the canvas.
 
-        When Neo4j is configured and available (and ``source`` is not
-        ``sqlite``), topology is served from Neo4j as primary. Bi-temporal
-        scrubbing still uses SQLite. Beliefs remain SoT in SQLite.
+        Dashboard paint is always from SQLite by default (entity types,
+        predicate_type, bi-temporal scrub). Neo4j remains dual-write + optional
+        probe via ``source=neo4j``. Beliefs remain SoT in SQLite.
 
         Params:
             at: unix timestamp for bi-temporal scrubbing. When >0, returns
@@ -1016,28 +1016,59 @@ def register_direct_routes(self: Any) -> None:
             type: filter by predicate_type ('functional'|'set'|'state').
             entity_type: filter entities by type (person|tool|concept|...).
             limit: max nodes (default 200).
-            source: ``neo4j`` | ``sqlite`` | empty (auto).
+            source: ``sqlite`` (default) | ``neo4j`` (operator probe).
         """
         import sqlite3
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
 
-        # ── Neo4j primary topology (when configured + online) ──
-        src_pref = (source or "").strip().lower()
-        if src_pref != "sqlite" and float(at or 0) <= 0:
+        def _graph_backend_meta() -> dict:
+            """Neo4j/sqlite dual-write status for stats line (never raises)."""
+            meta = {
+                "paint_source": "sqlite",
+                "graph_provider": "sqlite",
+                "graph_online": True,
+                "dual_write": False,
+            }
             try:
                 from kazma_core.memory.backends import get_backends_cfg
                 from kazma_core.memory.graph_backend import get_graph_backend
 
                 gcfg = (get_backends_cfg().get("graph") or {})
-                if str(gcfg.get("provider") or "").lower() == "neo4j" or src_pref == "neo4j":
+                provider = str(gcfg.get("provider") or "sqlite").lower()
+                meta["graph_provider"] = provider or "sqlite"
+                if provider == "neo4j":
+                    meta["dual_write"] = True
                     gb = get_graph_backend()
-                    if getattr(gb, "name", "") == "neo4j" and getattr(gb, "available", False):
-                        if hasattr(gb, "export_topology"):
-                            topo = gb.export_topology(limit=limit)
-                            if topo.get("nodes") or topo.get("links"):
-                                return topo
+                    meta["graph_online"] = (
+                        getattr(gb, "name", "") == "neo4j"
+                        and bool(getattr(gb, "available", False))
+                    )
+                else:
+                    meta["graph_online"] = True
+            except Exception:
+                pass
+            return meta
+
+        # ── Optional Neo4j probe only (not default Dashboard paint) ──
+        src_pref = (source or "").strip().lower()
+        if src_pref == "neo4j" and float(at or 0) <= 0:
+            try:
+                from kazma_core.memory.graph_backend import get_graph_backend
+
+                gb = get_graph_backend()
+                if getattr(gb, "name", "") == "neo4j" and getattr(gb, "available", False):
+                    if hasattr(gb, "export_topology"):
+                        topo = gb.export_topology(limit=limit)
+                        if topo.get("nodes") or topo.get("links"):
+                            meta = _graph_backend_meta()
+                            meta["paint_source"] = "neo4j"
+                            stats = dict(topo.get("stats") or {})
+                            stats.update(meta)
+                            stats.setdefault("source", "neo4j")
+                            topo["stats"] = stats
+                            return topo
             except Exception:
                 pass
 
@@ -1161,16 +1192,35 @@ def register_direct_routes(self: Any) -> None:
             links = [l for l in links if l["source"] in kept_ids and l["target"] in kept_ids]
 
             valid_froms = [l["valid_from"] for l in links if l["valid_from"]]
+            type_counts: dict[str, int] = {}
+            for n in nodes[:limit]:
+                t = str(n.get("type") or "concept")
+                type_counts[t] = type_counts.get(t, 0) + 1
+            pred_counts: dict[str, int] = {}
+            for l in links:
+                t = str(l.get("type") or "set")
+                pred_counts[t] = pred_counts.get(t, 0) + 1
+            meta = _graph_backend_meta()
+            meta["paint_source"] = "sqlite"
             stats = {
                 "nodes": len(nodes[:limit]),
                 "links": len(links),
                 "superseded": sum(1 for l in links if l["superseded"]),
                 "earliest": min(valid_froms, default=0),
                 "latest": max(valid_froms, default=0),
+                "source": "sqlite",
+                "entity_type_counts": type_counts,
+                "predicate_type_counts": pred_counts,
             }
+            stats.update(meta)
             return {"nodes": nodes[:limit], "links": links, "stats": stats}
         except Exception as exc:
-            return {"nodes": [], "links": [], "stats": {}, "error": str(exc)}
+            return {
+                "nodes": [],
+                "links": [],
+                "stats": {**_graph_backend_meta(), "source": "sqlite", "error": True},
+                "error": str(exc),
+            }
 
     import kazma_core.time_travel as _tt_mod
 

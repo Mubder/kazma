@@ -74,6 +74,14 @@ def build_v2_health() -> dict[str, Any]:
         "last_error": None,
         "last_reconsolidation": None,
         "vector_capability": {},
+        "graph": {
+            "provider": "sqlite",
+            "online": True,
+            "dual_write": False,
+            "paint_source": "sqlite",
+            "detail": "",
+        },
+        "backends_mode": "local",
     }
     try:
         from kazma_core.memory.consolidator import get_post_turn_metrics
@@ -86,6 +94,33 @@ def build_v2_health() -> dict[str, Any]:
         from kazma_core.memory.backends import vector_capability
 
         out["vector_capability"] = vector_capability()
+    except Exception:
+        pass
+    try:
+        from kazma_core.memory.backends import get_backends_cfg
+        from kazma_core.memory.graph_backend import get_graph_backend, graph_capability
+
+        cfg = get_backends_cfg()
+        out["backends_mode"] = str(cfg.get("mode") or "local")
+        gcfg = cfg.get("graph") or {}
+        provider = str(gcfg.get("provider") or "sqlite").lower() or "sqlite"
+        gcap = graph_capability(cfg)
+        online = True
+        dual = provider == "neo4j"
+        if provider == "neo4j":
+            gb = get_graph_backend()
+            online = getattr(gb, "name", "") == "neo4j" and bool(
+                getattr(gb, "available", False)
+            )
+        out["graph"] = {
+            "provider": provider,
+            "online": online,
+            "dual_write": dual,
+            "paint_source": "sqlite",
+            "url": str(gcfg.get("url") or "") if dual else "",
+            "detail": str(gcap.get("detail") or ""),
+            "status": str(gcap.get("status") or ("online" if online else "offline")),
+        }
     except Exception:
         pass
     try:
