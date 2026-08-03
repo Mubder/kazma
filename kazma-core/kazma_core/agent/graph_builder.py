@@ -47,7 +47,14 @@ import json
 import logging
 import os
 import time
+from contextvars import ContextVar
 from typing import Any
+
+# Per-turn memory explain payload (chat UI panel). Set on iteration 0 inject;
+# read by the thin ``_supervisor`` wrapper so every return path is covered.
+_memory_explain_cv: ContextVar[dict[str, Any] | None] = ContextVar(
+    "kazma_memory_explain", default=None
+)
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph
@@ -604,6 +611,7 @@ async def supervisor_node(
                         )
                 # Merge Knowledge Library into chat path (labeled, fenced).
                 # Product merge: inject KB next to memory; optional promote to episodes.
+                _kb_hits_for_explain: list[dict[str, Any]] = []
                 try:
                     from kazma_core.memory.config import read_memory_cfg
                     from kazma_core.safety.prompt_fence import format_untrusted_block
@@ -629,8 +637,9 @@ async def supervisor_node(
                             include_knowledge=True,
                             kb_mode="inject",
                         )
+                        _kb_hits_for_explain = list(fed.get("hits") or [])
                         kb_md = format_kb_hits_for_prompt(
-                            fed.get("hits") or [], max_hits=3
+                            _kb_hits_for_explain, max_hits=3
                         )
                         if not kb_md:
                             # Fallback: explicit inject helper (same RRF; handles
@@ -659,7 +668,7 @@ async def supervisor_node(
                             if _v2m.get("promote_kb_to_episodes", True):
                                 try:
                                     promote_kb_hits_to_episodes(
-                                        fed.get("hits") or [],
+                                        _kb_hits_for_explain,
                                         session_id=str(state.get("thread_id") or "kb"),
                                         tenant_id=state.get("tenant_id", "default"),
                                         max_promote=2,
@@ -673,6 +682,24 @@ async def supervisor_node(
                     logger.debug(
                         "[Supervisor] knowledge merge inject skipped", exc_info=True
                     )
+                # Chat-turn explain panel payload (SSE/WS ``memory_explain``)
+                if _explain:
+                    try:
+                        from kazma_core.memory.recall import build_memory_explain_payload
+
+                        _payload = build_memory_explain_payload(
+                            query=last_user_content,
+                            result=result if not result.empty else None,
+                            kb_hits=_kb_hits_for_explain,
+                            explain=True,
+                        )
+                        if _payload is not None:
+                            _memory_explain_cv.set(_payload)
+                    except Exception:
+                        logger.debug(
+                            "[Supervisor] memory explain payload skipped",
+                            exc_info=True,
+                        )
                 # Phase C: procedural skill hints (fenced, untrusted)
                 try:
                     import sqlite3
@@ -1714,6 +1741,11 @@ def build_supervisor_graph(
         return None
 
     async def _supervisor(state: SupervisorState) -> dict[str, Any]:
+        # Clear prior turn's explain so we don't leak across concurrent tasks
+        try:
+            _memory_explain_cv.set(None)
+        except Exception:
+            pass
         result = await supervisor_node(
             state,
             llm=llm,
@@ -1726,6 +1758,14 @@ def build_supervisor_graph(
             model_router=model_router,
             personality_prompt=_resolve_personality_prompt(),
         )
+        # Attach memory explain once (iteration 0 inject) for SSE/WS clients
+        try:
+            explain_payload = _memory_explain_cv.get()
+            if explain_payload:
+                result["memory_explain"] = explain_payload
+                _memory_explain_cv.set(None)
+        except Exception:
+            pass
         # ── Time Travel: capture snapshot after supervisor iteration ──
         if snapshot_recorder is not None and snapshot_recorder.enabled:
             # Merge current state with result to get the full picture

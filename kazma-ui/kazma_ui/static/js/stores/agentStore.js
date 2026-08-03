@@ -397,6 +397,15 @@ document.addEventListener('alpine:init', () => {
       } catch (e) { /* ignore */ }
 
       switch (type) {
+        case 'memory_explain': {
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.applyMemoryExplain === 'function') {
+              window.KazmaChat.applyMemoryExplain(data || frame || {});
+            }
+          } catch (e) { /* ignore */ }
+          break;
+        }
+
         case 'status':
         case 'status_update': {
           const statusVal = frame.status || data.status;

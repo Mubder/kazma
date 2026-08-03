@@ -97,6 +97,10 @@ var KazmaStream = (function() {
               window.KazmaReplay.onLiveSnapshot(data);
             }
             break;
+          case 'memory_explain':
+            if (callbacks.onMemoryExplain) callbacks.onMemoryExplain(data || {});
+            else if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'status_update':
           case 'status':
             if (callbacks.onStatus) callbacks.onStatus(data || {});

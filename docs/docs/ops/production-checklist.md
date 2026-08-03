@@ -9,6 +9,8 @@ description: Go-live checklist for single-node and multi-user Kazma deployments
 
 Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (Phases 0–4 shipped in code).
 
+**Feature smoke (research / KB / proxy / memory explain):** see [Smoke test matrix](./smoke-matrix) — run after related deploys.
+
 ## P0 — Secrets & bind
 
 - [ ] `KAZMA_HOST` is intentional (`127.0.0.1` or proxy-only `0.0.0.0`)

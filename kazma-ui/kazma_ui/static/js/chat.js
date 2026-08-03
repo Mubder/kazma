@@ -978,6 +978,11 @@
         scrollToBottom();
       },
 
+      onMemoryExplain: function(data) {
+        noteTurnActivity();
+        try { applyMemoryExplain(data || {}); } catch (e) { /* ignore */ }
+      },
+
       // SSE CoT parity with WS agentStore — routing / synthesizing / heartbeats
       onStatus: function(data) {
         noteTurnActivity();
@@ -1126,7 +1131,7 @@
   }
 
   // ── Turn workbench (one solid progress surface) ───────
-  // Plan (sticky checklist) + Activity (tools/status/thoughts).
+  // Plan (sticky checklist) + Memory explain + Activity (tools/status/thoughts).
   // Tool results stay expanded; panel does NOT auto-collapse on finish.
   var _progressEl = null;
   var _progressStepCount = 0;
@@ -1134,6 +1139,7 @@
   var _planParsedFromText = false;
   var _progressStartedAt = 0;
   var _progressTimerId = null;
+  var _lastMemoryExplain = null;
   var TOOL_DETAIL_MAX = 900;
 
   var _TOOL_FRIENDLY = {
@@ -1168,6 +1174,71 @@
     var low = n.toLowerCase();
     if (_TOOL_FRIENDLY[low]) return _TOOL_FRIENDLY[low];
     return n.replace(/_/g, ' ');
+  }
+
+  function _srcChipHtml(srcs) {
+    var arr = Array.isArray(srcs) ? srcs : (srcs ? [srcs] : []);
+    if (!arr.length) return '';
+    return arr.map(function(s) {
+      var key = String(s || '').toLowerCase();
+      var color = '#94a3b8';
+      if (key.indexOf('ppr') >= 0) color = '#a78bfa';
+      else if (key.indexOf('dense') >= 0) color = '#38bdf8';
+      else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = '#34d399';
+      else if (key.indexOf('session') >= 0) color = '#fbbf24';
+      else if (key.indexOf('kb') >= 0) color = '#f472b6';
+      return '<span class="mem-src-chip" style="color:' + color + ';">' + escapeHtml(String(s)) + '</span>';
+    }).join('');
+  }
+
+  function applyMemoryExplain(data) {
+    _lastMemoryExplain = data || null;
+    var panel = ensureProgressPanel();
+    if (!panel || !data) return;
+    var wrap = panel.querySelector('.agent-memory-explain');
+    var body = panel.querySelector('.agent-memory-explain-body');
+    var meta = panel.querySelector('.agent-memory-explain-meta');
+    if (!wrap || !body) return;
+    var sum = data.summary || {};
+    var nB = sum.beliefs || (data.beliefs || []).length || 0;
+    var nE = sum.episodes || (data.episodes || []).length || 0;
+    var nK = sum.knowledge || (data.knowledge || []).length || 0;
+    if (meta) {
+      meta.textContent = nB + ' beliefs · ' + nE + ' episodes · ' + nK + ' KB';
+    }
+    if (data.empty) {
+      body.innerHTML = '<div class="agent-memory-explain-empty">' +
+        escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) +
+        (data.query ? ' <span class="muted">«' + escapeHtml(String(data.query).slice(0, 80)) + '»</span>' : '') +
+        '</div>';
+      wrap.hidden = false;
+      return;
+    }
+    var lines = [];
+    function row(kind, h) {
+      var label = kind === 'belief' ? 'BELIEF' : (kind === 'episode' ? 'EPISODE' : 'KB');
+      var cls = kind === 'belief' ? 'is-belief' : (kind === 'episode' ? 'is-episode' : 'is-kb');
+      var score = (h.score != null && h.score !== '') ? Number(h.score).toFixed(3) : '';
+      lines.push(
+        '<div class="agent-memory-hit ' + cls + '">' +
+          '<span class="agent-memory-kind">' + label + '</span> ' +
+          '<span class="agent-memory-text">' + escapeHtml((h.content || '').slice(0, 180)) + '</span>' +
+          '<div class="agent-memory-chips">' + _srcChipHtml(h.sources) +
+          (score ? ' <span class="muted">score ' + score + '</span>' : '') +
+          '</div></div>'
+      );
+    }
+    (data.beliefs || []).forEach(function(h) { row('belief', h); });
+    (data.episodes || []).forEach(function(h) { row('episode', h); });
+    (data.knowledge || []).forEach(function(h) { row('knowledge', h); });
+    body.innerHTML = lines.join('') ||
+      '<div class="agent-memory-explain-empty">' + escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) + '</div>';
+    wrap.hidden = false;
+    logProgress({
+      kind: 'status',
+      title: ti('memory_context', 'Memory context') + ' · ' + nB + 'B / ' + nE + 'E / ' + nK + 'KB',
+      state: 'info',
+    });
   }
 
   function _formatElapsed(ms) {
@@ -1251,6 +1322,13 @@
           '</div>' +
           '<div class="agent-plan-bar" aria-hidden="true"><div class="agent-plan-bar-fill"></div></div>' +
           '<ol class="agent-plan-list"></ol>' +
+        '</div>' +
+        '<div class="agent-memory-explain" hidden>' +
+          '<div class="agent-memory-explain-head">' +
+            '<div class="agent-memory-explain-label">' + escapeHtml(ti('memory_context', 'Memory context')) + '</div>' +
+            '<div class="agent-memory-explain-meta"></div>' +
+          '</div>' +
+          '<div class="agent-memory-explain-body"></div>' +
         '</div>' +
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
         '<ul class="agent-progress-steps"></ul>' +
@@ -3019,6 +3097,7 @@
     logProgress: logProgress,
     finalizeProgress: finalizeProgress,
     noteTurnActivity: noteTurnActivity,
+    applyMemoryExplain: applyMemoryExplain,
     pollBackgroundTurn: _pollBackgroundTurn,
     stopBackgroundPoll: _stopBackgroundPoll,
     applyFinalAssistantText: function(content, model) {

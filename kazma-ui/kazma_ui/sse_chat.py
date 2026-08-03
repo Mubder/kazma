@@ -476,6 +476,17 @@ async def _stream_langgraph_events(
                                 },
                             )
 
+                        # ── supervisor node end: memory explain panel ──────────
+                        elif kind == "on_chain_end" and (
+                            name in ("supervisor", "Supervisor", "_supervisor")
+                            or "supervisor" in str(name).lower()
+                        ):
+                            output = data.get("output", {})
+                            if isinstance(output, dict) and output.get("memory_explain"):
+                                yield _sse_frame(
+                                    "memory_explain", output["memory_explain"]
+                                )
+
                         # ── on_chain_end at graph terminal: graph finished ─────
                         elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
                             # Emit synthesizing status so the client keeps the
@@ -504,6 +515,11 @@ async def _stream_langgraph_events(
                                         "iteration": output.get("snapshot_iteration", 0),
                                         "model": output.get("last_model", ""),
                                     }
+                                # Late explain if only present on terminal state
+                                if output.get("memory_explain"):
+                                    yield _sse_frame(
+                                        "memory_explain", output["memory_explain"]
+                                    )
 
                                 # CRITICAL: LLMProvider uses custom httpx (not
                                 # BaseChatModel), so on_chat_model_stream never fires.

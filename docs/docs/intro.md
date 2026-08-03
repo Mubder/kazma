@@ -18,7 +18,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Install and send a first message | [Quickstart](guide/quickstart) |
 | Understand the engine | [Architecture](guide/architecture) |
 | Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
-| Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) |
+| Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) · [Smoke matrix](ops/smoke-matrix) |
 | Debug multi-path bugs (“X related to Y”) | [Diagnosis map](ops/diagnosis-map) · [System map](reference/system-map) |
 | Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) |
 | Use built-in skills (browser, calendar, docs, …) | [Native skills](guide/native-skills) |
@@ -53,7 +53,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 ### Ops (production)
 
-- [Production checklist](ops/production-checklist) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
+- [Production checklist](ops/production-checklist) · [Smoke matrix](ops/smoke-matrix) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
 - [Postgres & SaaS](ops/postgres-and-saas) · [Disaster recovery](ops/disaster-recovery)
 - [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
 - [Portability](ops/portability) · [WSL fixed access](ops/wsl-fixed-access)

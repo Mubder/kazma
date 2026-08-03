@@ -53,6 +53,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | GET | `/api/research/sessions/{id}` | Session | Session status / log / report path |
 | GET | `/api/research/sessions/{id}/stream` | Session | SSE progress (`snapshot` / `progress` / `done`) |
 | GET | `/api/research/eval` | Session | Structural rubric for `?path=` or `?session_id=` |
+| POST | `/api/memory/v2/eval/golden` | Session | Run golden memory recall cases (pass rate) |
 | GET | `/research` | Session | Research panel page (start form + live progress) |
 
 ## Memory / RAG

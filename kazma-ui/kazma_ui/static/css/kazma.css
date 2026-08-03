@@ -1879,6 +1879,85 @@ tbody tr:last-child td {
   display: none;
 }
 
+/* Turn memory explain panel (fts5 / dense / ppr / KB chips) */
+.agent-memory-explain {
+  padding: 8px 12px;
+  background: color-mix(in srgb, #a78bfa 7%, transparent);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.agent-memory-explain-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.agent-memory-explain-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.agent-memory-explain-meta {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.agent-memory-explain-body {
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.agent-memory-explain-empty {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+.agent-memory-hit {
+  margin-bottom: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.agent-memory-hit.is-belief {
+  border-left: 2px solid #2ed573;
+}
+.agent-memory-hit.is-episode {
+  border-left: 2px solid #60a5fa;
+}
+.agent-memory-hit.is-kb {
+  border-left: 2px solid #f472b6;
+}
+.agent-memory-kind {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.agent-memory-text {
+  color: var(--text-primary);
+}
+.agent-memory-chips {
+  margin-top: 3px;
+}
+.mem-src-chip {
+  display: inline-block;
+  margin-right: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+}
+.agent-memory-chips .muted,
+.agent-memory-explain-empty .muted {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
 /* Sticky plan checklist */
 .agent-plan {
   padding: 8px 12px 8px;

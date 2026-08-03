@@ -125,6 +125,19 @@ class EventBridge:
                         thread_id=thread_id,
                     )
 
+                # 3b. Supervisor finished inject — memory explain panel payload
+                elif ev_type == "on_chain_end" and (
+                    ev_name in ("supervisor", "Supervisor", "_supervisor")
+                    or "supervisor" in str(ev_name).lower()
+                ):
+                    output = data.get("output", {})
+                    if isinstance(output, dict) and output.get("memory_explain"):
+                        yield TelemetryEvent(
+                            type="memory_explain",
+                            data=output["memory_explain"],
+                            thread_id=thread_id,
+                        )
+
                 # 4. Terminal chain end — the graph is done, the final answer
                 # is about to be backfilled. Emit a "synthesizing" status so
                 # the client keeps the thinking indicator alive until the
@@ -132,6 +145,13 @@ class EventBridge:
                 # instant the graph loop ends, creating the "Done 0s" silence
                 # gap before the backfilled answer appears.
                 elif ev_type == "on_chain_end" and ev_name in ("__end__", "LangGraph"):
+                    output = data.get("output", {})
+                    if isinstance(output, dict) and output.get("memory_explain"):
+                        yield TelemetryEvent(
+                            type="memory_explain",
+                            data=output["memory_explain"],
+                            thread_id=thread_id,
+                        )
                     yield TelemetryEvent(
                         type="status_update",
                         data={"status": "synthesizing", "active_node": "Respond"},
