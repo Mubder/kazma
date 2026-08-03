@@ -1,26 +1,20 @@
 """V2 Recall engine — unified hybrid retrieval over beliefs + episodes.
 
 This is the single read-path entry point for the V2 cognitive memory
-stack. It replaces the legacy 4-layer RRF adapter when
-``memory.v2.use_new_stack`` is True.
+stack when ``memory.v2.use_new_stack`` is True.
 
 Pipeline:
-  1. **Belief lookup** — exact/FTS match of (subject, predicate) for
-     entities surfaced by the query. Highest priority; injected as
-     "Known Facts". Only ``valid_until IS NULL`` (currently-believed).
-  2. **Episode hybrid search** — FTS5 (sparse) + VectorEngine (dense)
-     over recall-tier episodes, fused via Reciprocal Rank Fusion (RRF).
-  3. **PPR boost** — Local Ego-Graph Personalized PageRank over the
-     belief graph, seeded by the top-K hybrid hits, adds multi-hop
-     associative weight.
-  4. **Deterministic gate** — dedup by content hash + cosine threshold
-     (drops near-identical hits that RRF didn't merge).
-  5. **Format** — beliefs first, then ranked episodes, wrapped in the
-     untrusted prompt fence (``format_untrusted_block(source=...)``).
+  1. **Episode hybrid search** — FTS5 MATCH+bm25 (LIKE fallback) + dense
+     vector over episodic+recall tiers, session-clique PPR, RRF fusion,
+     optional same-session bias.
+  2. **Belief lookup** — FTS5/LIKE + episode-bridge + dense cosine (capped)
+     + belief-graph PPR multi-hop. Only currently-valid beliefs.
+  3. **Access bump** — on non-empty hits, increment access_count /
+     last_accessed (Phase A; toggle ``access_bump_enabled``).
+  4. **Format** — beliefs first, then episodes, prompt-fenced.
 
-The engine is **read-only** — it never mutates the schema. Access-count
-bumping happens in the consolidation worker (Phase 3), not here, to keep
-the read path lock-free.
+Optional ``explain=True`` (or ``memory.v2.explain_recall``) tags each hit
+with source channels: fts5 / dense / ppr / session_boost / belief_match.
 """
 
 from __future__ import annotations
@@ -73,6 +67,7 @@ def recall(
     tenant_id: str = "default",
     limit: int = 5,
     session_id: str | None = None,
+    explain: bool | None = None,
 ) -> RecallResult:
     """Unified V2 recall — beliefs first, then ranked episodes.
 
@@ -86,6 +81,9 @@ def recall(
         tenant_id: Tenant isolation filter.
         limit: Max episodes to return (beliefs are returned separately).
         session_id: Optional — bias toward the current session's episodes.
+        explain: When True, each hit's ``metadata["sources"]`` lists the
+            channels that contributed (fts5/dense/ppr/session_boost).
+            ``None`` reads ``memory.v2.explain_recall`` (default False).
 
     Returns:
         :class:`RecallResult` with ``beliefs`` and ``episodes`` lists.
@@ -103,6 +101,17 @@ def recall(
             logger.debug("[recall] could not open primary DB", exc_info=True)
             return RecallResult([], [])
 
+    do_explain = explain
+    if do_explain is None:
+        try:
+            from kazma_core.memory.config import read_memory_cfg
+
+            do_explain = bool(
+                ((read_memory_cfg() or {}).get("v2") or {}).get("explain_recall", False)
+            )
+        except Exception:
+            do_explain = False
+
     try:
         # Two-phase: episodes first (hybrid FTS5+dense+PPR), then beliefs
         # bridged by the entities the episodes surface. This is how
@@ -111,10 +120,12 @@ def recall(
         episodes = _recall_episodes(
             conn, query, vector_engine, tenant_id, limit,
             session_id=session_id,
+            explain=bool(do_explain),
         )
         beliefs = _recall_beliefs(
             conn, query, tenant_id, limit, seed_episodes=episodes,
             vector_engine=vector_engine,
+            explain=bool(do_explain),
         )
         result = RecallResult(beliefs=beliefs, episodes=episodes)
         # Phase A: bump access so macro_sleep promotion/retention is real.
@@ -195,18 +206,18 @@ def _recall_beliefs(
     *,
     seed_episodes: list[RecallHit] | None = None,
     vector_engine: Any = None,
+    explain: bool = False,
 ) -> list[RecallHit]:
     """Find currently-valid beliefs relevant to the query.
 
-    Two-stage matching (a real query like "where do I live" rarely
-    contains the literal answer "Paris", so naive token-LIKE fails):
+    Matching stages (a real query like "where do I live" rarely
+    contains the literal answer "Paris", so naive token match fails):
 
-    1. **Direct match** — query tokens against object/predicate/subject.
-    2. **Episode-bridged match** — when retrieved episodes mention an
-       entity that appears as a belief subject/object, surface that
-       belief too. This is how "I just moved to Paris" (episode) pulls
-       in ``user lives_in Paris`` (belief) even though the query had no
-       "Paris" token.
+    1. **FTS5 / LIKE** — query tokens against subject/predicate/object.
+    2. **Episode-bridged match** — entities in retrieved episodes surface
+       matching beliefs (e.g. "moved to Paris" → ``user lives_in Paris``).
+    3. **Belief-graph PPR** — multi-hop over subject–object edges.
+    4. **Dense cosine** — capped candidate scan when sparse results are thin.
 
     Only ``valid_until IS NULL`` beliefs are returned. For functional
     predicates, the highest-scoring active belief per (subject,
@@ -225,52 +236,101 @@ def _recall_beliefs(
                 if len(cleaned) >= 3:
                     bridge_entities.add(cleaned)
 
-    try:
-        if terms:
-            clauses = " OR ".join(
-                "(LOWER(b.object) LIKE ? OR LOWER(b.predicate) LIKE ? OR LOWER(b.subject) LIKE ?)"
-                for _ in terms
-            )
-            term_params: list[Any] = []
-            for t in terms:
-                term_params.extend([f"%{t}%", f"%{t}%", f"%{t}%"])
-            sql = f"""
-                SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
-                       b.confidence, b.structural_importance, b.valid_from,
-                       b.source_trust_weight
-                FROM beliefs b
-                WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
-                  AND b.tenant_id = ?
-                  AND ({clauses})
-            """
-            params: list[Any] = [tenant_id] + term_params
-            # Add episode-bridged entities as an OR
-            if bridge_entities:
+    source_by_id: dict[str, list[str]] = {}
+    rows: list[Any] = []
+
+    # ── Stage 1: FTS5 MATCH (preferred) or LIKE fallback ──
+    fts_rows = _belief_fts(conn, q, tenant_id, limit * 3) if q else []
+    if fts_rows:
+        rows = list(fts_rows)
+        for r in fts_rows:
+            source_by_id.setdefault(r["id"], []).append("belief_fts")
+    else:
+        try:
+            if terms:
+                clauses = " OR ".join(
+                    "(LOWER(b.object) LIKE ? OR LOWER(b.predicate) LIKE ? OR LOWER(b.subject) LIKE ?)"
+                    for _ in terms
+                )
+                term_params: list[Any] = []
+                for t in terms:
+                    term_params.extend([f"%{t}%", f"%{t}%", f"%{t}%"])
+                sql = f"""
+                    SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
+                           b.confidence, b.structural_importance, b.valid_from,
+                           b.source_trust_weight
+                    FROM beliefs b
+                    WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
+                      AND b.tenant_id = ?
+                      AND ({clauses})
+                """
+                params: list[Any] = [tenant_id] + term_params
+                if bridge_entities:
+                    ent_clauses = " OR ".join(
+                        "(LOWER(b.object) LIKE ? OR LOWER(b.subject) LIKE ?)"
+                        for _ in bridge_entities
+                    )
+                    ent_params: list[Any] = []
+                    for e in bridge_entities:
+                        ent_params.extend([f"%{e}%", f"%{e}%"])
+                    sql = (
+                        f"SELECT * FROM ({sql} UNION SELECT b.id, b.subject, b.predicate, "
+                        f"b.object, b.predicate_type, b.confidence, b.structural_importance, "
+                        f"b.valid_from, b.source_trust_weight FROM beliefs b WHERE "
+                        f"b.valid_until IS NULL AND b.invalidated_at IS NULL AND "
+                        f"b.tenant_id = ? AND ({ent_clauses}))"
+                    )
+                    params.extend([tenant_id] + ent_params)
+                sql += (
+                    " ORDER BY (structural_importance * confidence * source_trust_weight) "
+                    "DESC LIMIT ?"
+                )
+                params.append(limit * 3)
+                rows = list(conn.execute(sql, params).fetchall())
+                for r in rows:
+                    source_by_id.setdefault(r["id"], []).append("belief_like")
+            elif bridge_entities:
                 ent_clauses = " OR ".join(
                     "(LOWER(b.object) LIKE ? OR LOWER(b.subject) LIKE ?)"
                     for _ in bridge_entities
                 )
-                ent_params: list[Any] = []
+                ent_params = []
                 for e in bridge_entities:
                     ent_params.extend([f"%{e}%", f"%{e}%"])
-                # Wrap UNION in a subquery so ORDER BY can reference column names
-                # (SQLite UNION requires ORDER BY on the outer query, not the
-                #  table alias — without this, "1st ORDER BY term does not match
-                #  any column in the result set" is raised).
-                sql = f"SELECT * FROM ({sql} UNION SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type, b.confidence, b.structural_importance, b.valid_from, b.source_trust_weight FROM beliefs b WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL AND b.tenant_id = ? AND ({ent_clauses}))"
-                params.extend([tenant_id] + ent_params)
-            sql += " ORDER BY (structural_importance * confidence * source_trust_weight) DESC LIMIT ?"
-            params.append(limit * 3)
-            rows = conn.execute(sql, params).fetchall()
-        elif bridge_entities:
+                rows = list(
+                    conn.execute(
+                        f"""
+                        SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
+                               b.confidence, b.structural_importance, b.valid_from,
+                               b.source_trust_weight
+                        FROM beliefs b
+                        WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
+                          AND b.tenant_id = ?
+                          AND ({ent_clauses})
+                        ORDER BY (b.structural_importance * b.confidence * b.source_trust_weight) DESC
+                        LIMIT ?
+                        """,
+                        [tenant_id] + ent_params + [limit * 3],
+                    ).fetchall()
+                )
+                for r in rows:
+                    source_by_id.setdefault(r["id"], []).append("belief_bridge")
+        except Exception:
+            logger.debug("[recall] belief query failed", exc_info=True)
+            rows = []
+
+    # Bridge entities even when FTS already returned rows
+    if bridge_entities and terms:
+        try:
+            existing_ids = {r["id"] for r in rows}
             ent_clauses = " OR ".join(
                 "(LOWER(b.object) LIKE ? OR LOWER(b.subject) LIKE ?)"
                 for _ in bridge_entities
             )
-            ent_params: list[Any] = []
+            ent_params = []
             for e in bridge_entities:
                 ent_params.extend([f"%{e}%", f"%{e}%"])
-            rows = conn.execute(
+            bridged = conn.execute(
                 f"""
                 SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
                        b.confidence, b.structural_importance, b.valid_from,
@@ -279,22 +339,51 @@ def _recall_beliefs(
                 WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
                   AND b.tenant_id = ?
                   AND ({ent_clauses})
-                ORDER BY (b.structural_importance * b.confidence * b.source_trust_weight) DESC
                 LIMIT ?
                 """,
                 [tenant_id] + ent_params + [limit * 3],
             ).fetchall()
-        else:
-            return []
-    except Exception:
-        logger.debug("[recall] belief query failed", exc_info=True)
-        return []
+            for r in bridged:
+                if r["id"] not in existing_ids:
+                    rows.append(r)
+                    existing_ids.add(r["id"])
+                source_by_id.setdefault(r["id"], []).append("belief_bridge")
+        except Exception:
+            logger.debug("[recall] belief bridge failed", exc_info=True)
 
-    # Dense (semantic) belief match — when FTS/bridge yielded few hits, augment
-    # with beliefs whose embedding is cosine-close to the query. This catches
-    # "where do I live" → "user lives_in Paris" even when no token overlaps and
-    # the episode bridge hasn't fired. Best-effort: skipped if no embedder /
-    # no belief embeddings exist (falls back to the FTS results above).
+    # ── Stage 3: belief-graph PPR multi-hop ──
+    ppr_scores = _belief_graph_ppr(
+        conn, q, tenant_id, seed_episodes=seed_episodes or []
+    )
+    if ppr_scores:
+        try:
+            existing_ids = {r["id"] for r in rows}
+            top_ppr = sorted(ppr_scores.items(), key=lambda x: x[1], reverse=True)[
+                : limit * 2
+            ]
+            missing = [bid for bid, _ in top_ppr if bid not in existing_ids]
+            if missing:
+                placeholders = ",".join("?" for _ in missing)
+                ppr_rows = conn.execute(
+                    f"""
+                    SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
+                           b.confidence, b.structural_importance, b.valid_from,
+                           b.source_trust_weight
+                    FROM beliefs b
+                    WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
+                      AND b.tenant_id = ?
+                      AND b.id IN ({placeholders})
+                    """,
+                    [tenant_id] + missing,
+                ).fetchall()
+                for r in ppr_rows:
+                    rows.append(r)
+            for bid in ppr_scores:
+                source_by_id.setdefault(bid, []).append("belief_ppr")
+        except Exception:
+            logger.debug("[recall] belief PPR hydrate failed", exc_info=True)
+
+    # ── Stage 4: dense (capped) when sparse is thin ──
     if q and len(rows) < limit:
         try:
             dense_rows = _belief_dense(conn, q, vector_engine, tenant_id, limit)
@@ -302,17 +391,16 @@ def _recall_beliefs(
             for dr in dense_rows:
                 if dr["id"] not in existing_ids:
                     rows.append(dr)
+                source_by_id.setdefault(dr["id"], []).append("dense")
         except Exception:
             logger.debug("[recall] belief dense search failed", exc_info=True)
+
+    if not rows:
+        return []
 
     hits: list[RecallHit] = []
     seen_subjects: dict[str, RecallHit] = {}
     for r in rows:
-        # Dedup: for FUNCTIONAL predicates (single-valued), keep only the
-        # highest-scoring belief per (subject, predicate). For SET and STATE
-        # predicates (multi-valued), each belief is unique — use the belief
-        # id as the key so they ALL survive dedup. This prevents 8 different
-        # 'noted' beliefs from collapsing to 1 in recall results.
         ptype = r["predicate_type"] if "predicate_type" in r.keys() else "set"
         if ptype == "functional":
             key = f"{r['subject']}|{r['predicate']}"
@@ -322,21 +410,28 @@ def _recall_beliefs(
         score = float(r["structural_importance"]) * float(r["confidence"]) * float(
             r["source_trust_weight"]
         )
+        # PPR multi-hop boost (additive on structural score)
+        if r["id"] in ppr_scores:
+            score = score + float(ppr_scores[r["id"]]) * 2.0
+        srcs = source_by_id.get(r["id"]) or ["belief_match"]
+        meta: dict[str, Any] = {
+            "subject": r["subject"],
+            "predicate": r["predicate"],
+            "object": r["object"],
+            "predicate_type": r["predicate_type"],
+            "confidence": r["confidence"],
+            "importance": r["structural_importance"],
+            "valid_from": r["valid_from"],
+        }
+        if explain:
+            meta["sources"] = list(dict.fromkeys(srcs))
         hit = RecallHit(
             id=r["id"],
             content=content,
             score=score,
             kind="belief",
-            source="belief_match",
-            metadata={
-                "subject": r["subject"],
-                "predicate": r["predicate"],
-                "object": r["object"],
-                "predicate_type": r["predicate_type"],
-                "confidence": r["confidence"],
-                "importance": r["structural_importance"],
-                "valid_from": r["valid_from"],
-            },
+            source=srcs[0],
+            metadata=meta,
         )
         prev = seen_subjects.get(key)
         if prev is None or hit.score > prev.score:
@@ -364,28 +459,50 @@ def _recall_episodes(
     limit: int,
     *,
     session_id: str | None = None,
+    explain: bool = False,
 ) -> list[RecallHit]:
     """Hybrid episode search: FTS5 + dense + PPR, fused via RRF."""
     q = (query or "").strip()
     if not q:
         return []
 
-    # ── Sparse: FTS5-style LIKE over user/assistant text ──
+    # Track contributing channels per episode id for explain mode
+    sources: dict[str, list[str]] = {}
+
+    # ── Sparse: real FTS5 MATCH+bm25 (LIKE fallback) ──
     sparse = _episode_fts(conn, q, tenant_id, limit * 3)
+    for h in sparse:
+        sources.setdefault(h.id, []).append(h.source or "fts5")
 
     # ── Dense: cosine over recall + episodic (fresh turns) ──
     dense = _episode_dense(conn, q, vector_engine, tenant_id, limit * 3)
+    for h in dense:
+        sources.setdefault(h.id, []).append("dense")
 
     # ── PPR boost over session cliques seeded by top hybrid hits ──
     ppr_seeds = [h.id for h in (sparse + dense)[:10]]
     ppr_scores = _episode_ppr(conn, ppr_seeds, tenant_id)
+    for eid in ppr_scores:
+        sources.setdefault(eid, []).append("ppr")
 
     # ── RRF fusion ──
     fused = _rrf_fuse(sparse, dense, ppr_scores, limit * 2)
 
     # ── Session bias: boost same-thread episodes (Phase A) ──
     if session_id:
-        fused = _apply_session_bias(conn, fused, session_id)
+        boost = 0.35
+        try:
+            from kazma_core.memory.config import read_memory_cfg
+
+            boost = float(
+                ((read_memory_cfg() or {}).get("v2") or {}).get("session_boost", 0.35)
+            )
+        except Exception:
+            pass
+        fused = _apply_session_bias(conn, fused, session_id, boost=boost)
+        for h in fused:
+            if (h.metadata or {}).get("session_boost"):
+                sources.setdefault(h.id, []).append("session_boost")
 
     # ── Deterministic dedup gate ──
     deduped = _dedup_gate(fused)
@@ -395,6 +512,9 @@ def _recall_episodes(
     for hit in deduped[:limit]:
         text = _episode_text(conn, hit.id)
         if text:
+            meta = dict(hit.metadata or {})
+            if explain:
+                meta["sources"] = list(dict.fromkeys(sources.get(hit.id) or [hit.source or ""]))
             out.append(
                 RecallHit(
                     id=hit.id,
@@ -402,10 +522,34 @@ def _recall_episodes(
                     score=hit.score,
                     kind="episode",
                     source=hit.source,
-                    metadata=dict(hit.metadata or {}),
+                    metadata=meta,
                 )
             )
     return out
+
+
+def _fts_match_query(query: str) -> str:
+    """Build a safe FTS5 MATCH expression from free text.
+
+    Tokens are alphanumeric-only (punctuation stripped). Joined with OR so
+    any term can hit. Empty when no usable tokens remain.
+    """
+    raw = (query or "").lower()
+    tokens: list[str] = []
+    for part in raw.replace("-", " ").split():
+        cleaned = "".join(c for c in part if c.isalnum())
+        if len(cleaned) >= 2:
+            tokens.append(cleaned)
+    # De-dupe preserving order
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for t in tokens:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    if not uniq:
+        return ""
+    return " OR ".join(uniq)
 
 
 def _episode_fts(
@@ -414,7 +558,45 @@ def _episode_fts(
     tenant_id: str,
     limit: int,
 ) -> list[RecallHit]:
-    """Lexical search over episode user/assistant text (LIKE-based)."""
+    """Lexical search over episodes — FTS5 MATCH+bm25, LIKE fallback."""
+    match_q = _fts_match_query(query)
+    if match_q:
+        try:
+            rows = conn.execute(
+                """
+                SELECT e.id, e.tier, e.user_text, e.assistant_text,
+                       bm25(episodes_fts) AS rank
+                FROM episodes_fts
+                JOIN episodes e ON e.rowid = episodes_fts.rowid
+                WHERE episodes_fts MATCH ?
+                  AND e.tenant_id = ?
+                  AND e.tier IN ('recall', 'episodic')
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (match_q, tenant_id, limit),
+            ).fetchall()
+            hits: list[RecallHit] = []
+            for r in rows:
+                text = (r["user_text"] or r["assistant_text"] or "")[:300]
+                # bm25: more negative = better match → invert for higher-is-better
+                bm = float(r["rank"] if r["rank"] is not None else 0.0)
+                score = max(0.0, -bm) if bm < 0 else 1.0 / (1.0 + abs(bm))
+                hits.append(
+                    RecallHit(
+                        id=r["id"],
+                        content=text,
+                        score=score if score > 0 else 0.01,
+                        source="fts5",
+                        metadata={"tier": r["tier"], "bm25": bm},
+                    )
+                )
+            if hits:
+                return hits
+        except Exception:
+            logger.debug("[recall] episodes_fts MATCH failed — LIKE fallback", exc_info=True)
+
+    # ── LIKE fallback (FTS missing / empty / error) ──
     terms = [t for t in query.lower().split() if len(t) >= 2]
     if not terms:
         return []
@@ -424,7 +606,8 @@ def _episode_fts(
     )
     params: list[Any] = []
     for t in terms:
-        params.extend([f"%{t}%", f"%{t}%"])
+        cleaned = "".join(c for c in t if c.isalnum()) or t
+        params.extend([f"%{cleaned}%", f"%{cleaned}%"])
     params.extend([limit])
     try:
         rows = conn.execute(
@@ -440,22 +623,54 @@ def _episode_fts(
             [tenant_id] + params,
         ).fetchall()
     except Exception as e:
-        logger.error("[recall] episode FTS binding failed: %s", e, exc_info=True)
+        logger.error("[recall] episode LIKE fallback failed: %s", e, exc_info=True)
         return []
-    # Assign descending pseudo-scores (rank-based for RRF)
-    hits: list[RecallHit] = []
+    hits = []
     for i, r in enumerate(rows):
         text = (r["user_text"] or r["assistant_text"] or "")[:300]
         hits.append(
             RecallHit(
                 id=r["id"],
                 content=text,
-                score=1.0 / (i + 1),  # rank-based
-                source="fts5",
+                score=1.0 / (i + 1),
+                source="fts_like",
                 metadata={"tier": r["tier"]},
             )
         )
     return hits
+
+
+def _belief_fts(
+    conn: sqlite3.Connection,
+    query: str,
+    tenant_id: str,
+    limit: int,
+) -> list[Any]:
+    """FTS5 MATCH over beliefs; empty list if FTS unavailable."""
+    match_q = _fts_match_query(query)
+    if not match_q:
+        return []
+    try:
+        return list(
+            conn.execute(
+                """
+                SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
+                       b.confidence, b.structural_importance, b.valid_from,
+                       b.source_trust_weight, bm25(beliefs_fts) AS rank
+                FROM beliefs_fts
+                JOIN beliefs b ON b.rowid = beliefs_fts.rowid
+                WHERE beliefs_fts MATCH ?
+                  AND b.tenant_id = ?
+                  AND b.valid_until IS NULL AND b.invalidated_at IS NULL
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (match_q, tenant_id, limit),
+            ).fetchall()
+        )
+    except Exception:
+        logger.debug("[recall] beliefs_fts MATCH failed", exc_info=True)
+        return []
 
 
 def _episode_dense(
@@ -509,13 +724,13 @@ def _belief_dense(
     tenant_id: str,
     limit: int,
 ) -> list[sqlite3.Row]:
-    """Dense (semantic) belief match via cosine similarity over belief embeddings.
+    """Dense (semantic) belief match via cosine over a **capped** candidate set.
 
-    Returns belief rows (same shape as the FTS query) whose embedding is
-    cosine-close to the query vector. Used to augment the FTS/bridge belief
-    results when they're sparse. Best-effort: returns [] if no embedder or no
-    belief embeddings exist.
+    Phase B: never full-scan every belief embedding. Prefer high-importance
+    rows up to ``memory.v2.dense_belief_candidate_cap`` (default 400).
+    Best-effort: returns [] if no embedder or no belief embeddings exist.
     """
+    del vector_engine  # reserved for future sqlite-vec belief path
     try:
         from kazma_core.memory.embedder import get_embedder
 
@@ -536,15 +751,30 @@ def _belief_dense(
     except Exception:
         return []  # numpy required for cosine; degrade silently
 
-    # Read all active beliefs WITH embeddings + their metadata in one pass.
+    cap = 400
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        cap = int(
+            ((read_memory_cfg() or {}).get("v2") or {}).get(
+                "dense_belief_candidate_cap", 400
+            )
+        )
+        cap = max(50, min(cap, 5000))
+    except Exception:
+        pass
+
+    # Cap + importance prefilter (Phase B scale guard)
     rows = conn.execute(
         """SELECT id, subject, predicate, object, predicate_type,
                   confidence, structural_importance, valid_from,
                   source_trust_weight, embedding
            FROM beliefs
            WHERE valid_until IS NULL AND invalidated_at IS NULL
-             AND tenant_id = ? AND embedding IS NOT NULL""",
-        (tenant_id,),
+             AND tenant_id = ? AND embedding IS NOT NULL
+           ORDER BY structural_importance DESC, confidence DESC
+           LIMIT ?""",
+        (tenant_id, cap),
     ).fetchall()
     if not rows:
         return []
@@ -562,6 +792,133 @@ def _belief_dense(
     return [r for _sim, r in scored[:limit]]
 
 
+def _belief_graph_ppr(
+    conn: sqlite3.Connection,
+    query: str,
+    tenant_id: str,
+    *,
+    seed_episodes: list[RecallHit] | None = None,
+) -> dict[str, float]:
+    """Multi-hop PPR over the belief triple graph (subject ↔ object edges).
+
+    Seeds: query tokens that match entity names + entities from seed
+    episodes. Returns ``{belief_id: ppr_mass}`` for beliefs incident to
+    high-PPR entities — so ``user works_at Acme`` + ``Acme located_in
+    Paris`` can surface Paris from a user-centric seed.
+    """
+    try:
+        from kazma_core.memory.ppr import compute_local_ppr
+    except Exception:
+        return {}
+    alpha, max_iter, max_nodes = 0.15, 15, 200
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        v2 = (read_memory_cfg() or {}).get("v2") or {}
+        alpha = float(v2.get("ppr_alpha", 0.15))
+        max_iter = int(v2.get("ppr_max_iter", 15))
+        max_nodes = int(v2.get("ppr_max_nodes", 200))
+    except Exception:
+        pass
+
+    # Load active beliefs as graph edges (capped)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, subject, predicate, object
+            FROM beliefs
+            WHERE valid_until IS NULL AND invalidated_at IS NULL
+              AND tenant_id = ?
+            ORDER BY structural_importance DESC, confidence DESC
+            LIMIT ?
+            """,
+            (tenant_id, max(max_nodes * 3, 300)),
+        ).fetchall()
+    except Exception:
+        return {}
+    if not rows:
+        return {}
+
+    edges: list[tuple[str, str, float]] = []
+    entity_to_beliefs: dict[str, list[str]] = {}
+    node_set: set[str] = set()
+
+    def _norm(s: str) -> str:
+        return " ".join((s or "").strip().lower().split())
+
+    for r in rows:
+        sub = _norm(r["subject"])
+        obj = _norm(r["object"])
+        if not sub or not obj:
+            continue
+        bid = r["id"]
+        # Directed subject→object (strong) + reverse (weaker) for undirected walk
+        edges.append((sub, obj, 1.0))
+        edges.append((obj, sub, 0.5))
+        node_set.add(sub)
+        node_set.add(obj)
+        entity_to_beliefs.setdefault(sub, []).append(bid)
+        entity_to_beliefs.setdefault(obj, []).append(bid)
+
+    if not edges:
+        return {}
+
+    # Seeds: query tokens + multi-word entity names that appear in the graph
+    seeds: list[str] = []
+    q_low = (query or "").lower()
+    tokens = [
+        "".join(c for c in t if c.isalnum())
+        for t in q_low.replace("-", " ").split()
+    ]
+    tokens = [t for t in tokens if len(t) >= 3]
+    for t in tokens:
+        if t in node_set:
+            seeds.append(t)
+        # Also seed entities that contain the token (e.g. "acmecorp")
+        for node in node_set:
+            if t in node.split() or t == node:
+                seeds.append(node)
+    # Full-string entity match when query mentions the entity name
+    for node in node_set:
+        if len(node) >= 3 and node in q_low:
+            seeds.append(node)
+    if seed_episodes:
+        for ep in seed_episodes:
+            text = (ep.content or "").lower()
+            for node in node_set:
+                if len(node) >= 3 and node in text:
+                    seeds.append(node)
+
+    # De-dupe seeds
+    seen_s: set[str] = set()
+    uniq_seeds: list[str] = []
+    for s in seeds:
+        if s not in seen_s:
+            seen_s.add(s)
+            uniq_seeds.append(s)
+    if not uniq_seeds:
+        return {}
+
+    try:
+        entity_scores = compute_local_ppr(
+            uniq_seeds,
+            edges,
+            alpha=alpha,
+            max_iter=max_iter,
+            max_nodes=max_nodes,
+        )
+    except Exception:
+        return {}
+
+    belief_scores: dict[str, float] = {}
+    for entity, mass in entity_scores.items():
+        for bid in entity_to_beliefs.get(entity, []):
+            prev = belief_scores.get(bid, 0.0)
+            if mass > prev:
+                belief_scores[bid] = float(mass)
+    return belief_scores
+
+
 def _episode_ppr(
     conn: sqlite3.Connection,
     seed_episode_ids: list[str],
@@ -569,22 +926,51 @@ def _episode_ppr(
 ) -> dict[str, float]:
     """PPR boost: treat episodes as nodes, shared sessions as edges.
 
-    Builds a transient graph where episodes in the same session are
-    connected, runs PPR seeded by the hybrid hits, and returns the
-    stationary distribution. Episodes strongly connected to the seeds
-    get a boost.
+    Secondary to belief-graph PPR — keeps same-session episode cliques
+    in the hybrid RRF fusion. Bounded by ``ppr_max_nodes``.
     """
     if not seed_episode_ids:
         return {}
     try:
+        from kazma_core.memory.config import read_memory_cfg
         from kazma_core.memory.ppr import compute_local_ppr
+
+        v2 = (read_memory_cfg() or {}).get("v2") or {}
+        alpha = float(v2.get("ppr_alpha", 0.15))
+        max_iter = int(v2.get("ppr_max_iter", 10))
+        max_nodes = int(v2.get("ppr_max_nodes", 200))
     except Exception:
         return {}
-    # Build edges: episodes sharing a session_id are linked.
+    # Cap seed set
+    seed_k = 10
     try:
+        from kazma_core.memory.config import read_memory_cfg as _rmc
+
+        seed_k = int(((_rmc() or {}).get("v2") or {}).get("ppr_seed_k", 10))
+    except Exception:
+        pass
+    seeds = seed_episode_ids[:seed_k]
+
+    # Build edges: only sessions that touch seeds (avoid full-tenant clique load)
+    try:
+        placeholders = ",".join("?" for _ in seeds)
+        seed_sessions = conn.execute(
+            f"SELECT DISTINCT session_id FROM episodes WHERE id IN ({placeholders})",
+            seeds,
+        ).fetchall()
+        session_ids = [r[0] for r in seed_sessions if r[0]]
+        if not session_ids:
+            return {}
+        sph = ",".join("?" for _ in session_ids)
         rows = conn.execute(
-            "SELECT id, session_id FROM episodes WHERE tenant_id = ? AND tier IN ('recall','episodic')",
-            (tenant_id,),
+            f"""
+            SELECT id, session_id FROM episodes
+            WHERE tenant_id = ?
+              AND tier IN ('recall','episodic')
+              AND session_id IN ({sph})
+            LIMIT ?
+            """,
+            [tenant_id] + session_ids + [max_nodes * 2],
         ).fetchall()
     except Exception:
         return {}
@@ -593,14 +979,15 @@ def _episode_ppr(
         by_session.setdefault(r["session_id"], []).append(r["id"])
     edges: list[tuple[str, str, float]] = []
     for session_eps in by_session.values():
-        # Connect each episode to its session-mates (undirected cliques)
         for i, a in enumerate(session_eps):
             for b in session_eps[i + 1 :]:
                 edges.append((a, b, 1.0))
     if not edges:
         return {}
     try:
-        return compute_local_ppr(seed_episode_ids, edges, alpha=0.15, max_iter=10, max_nodes=200)
+        return compute_local_ppr(
+            seeds, edges, alpha=alpha, max_iter=max_iter, max_nodes=max_nodes
+        )
     except Exception:
         return {}
 

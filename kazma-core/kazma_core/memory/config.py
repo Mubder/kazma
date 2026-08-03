@@ -58,6 +58,10 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "access_bump_enabled": True,
         # Phase A: score boost for same-session episodes (RRF units)
         "session_boost": 0.35,
+        # Phase B: tag hit sources (fts5/dense/ppr/session_boost) in metadata
+        "explain_recall": False,
+        # Phase B: max belief rows scanned for dense cosine (prefilter cap)
+        "dense_belief_candidate_cap": 400,
         # Source trust weights (W_trust in V_retention formula §4.1)
         "trust_weight_user": 1.0,
         "trust_weight_tool": 0.85,
@@ -163,6 +167,10 @@ def _read_store_overlay() -> dict[str, Any]:
         v2: dict[str, Any] = {}
         for sub in (
             "use_new_stack",
+            "access_bump_enabled",
+            "session_boost",
+            "explain_recall",
+            "dense_belief_candidate_cap",
             "trust_weight_user",
             "trust_weight_tool",
             "trust_weight_llm",
@@ -251,7 +259,12 @@ def _coerce(cfg: dict[str, Any]) -> dict[str, Any]:
 # ── V2 tunable coercion ───────────────────────────────────────────────────
 
 # Booleans (use_new_stack is the dual-write → V2 recall rollback flag)
-_V2_BOOL_KEYS = ("use_new_stack", "skip_llm_if_heuristic_extracted")
+_V2_BOOL_KEYS = (
+    "use_new_stack",
+    "skip_llm_if_heuristic_extracted",
+    "access_bump_enabled",
+    "explain_recall",
+)
 # Floats (trust weights, retention blend, decay λ, thresholds)
 _V2_FLOAT_KEYS = (
     "trust_weight_user",
@@ -265,6 +278,7 @@ _V2_FLOAT_KEYS = (
     "procedural_quarantine_threshold",
     "entity_vector_merge_threshold",
     "ppr_alpha",
+    "session_boost",
 )
 # Integers (TTLs, days, counts, iteration caps)
 _V2_INT_KEYS = (
@@ -281,6 +295,7 @@ _V2_INT_KEYS = (
     "ppr_max_nodes",
     "ppr_seed_k",
     "extraction_every_n_turns",
+    "dense_belief_candidate_cap",
 )
 
 

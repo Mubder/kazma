@@ -270,10 +270,115 @@ def ensure_primary_schema(conn: Any) -> None:
             conn.execute(col_sql)
         except Exception:
             pass  # column already exists
+    # Phase B: real FTS5 indexes (MATCH + bm25) with LIKE fallback in recall.
+    _ensure_fts5(conn)
     # FK enforcement must be set per-connection in SQLite.
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] primary schema ensured")
+
+
+def _ensure_fts5(conn: Any) -> None:
+    """Create episodes_fts + beliefs_fts and keep them in sync via triggers.
+
+    External-content FTS5 over ``episodes`` / ``beliefs`` so lexical search
+    uses ``MATCH`` + ``bm25()`` instead of multi-term ``LIKE``. Idempotent.
+    On first create (or empty index with existing rows) runs a rebuild.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts USING fts5(
+                user_text,
+                assistant_text,
+                summary_text,
+                content='episodes',
+                content_rowid='rowid',
+                tokenize='unicode61 remove_diacritics 2'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS beliefs_fts USING fts5(
+                subject,
+                predicate,
+                object,
+                content='beliefs',
+                content_rowid='rowid',
+                tokenize='unicode61 remove_diacritics 2'
+            )
+            """
+        )
+    except Exception:
+        logger.debug("[schema_v2] FTS5 create failed (engine may lack fts5)", exc_info=True)
+        return
+
+    # Sync triggers — external content tables require explicit maintainence.
+    for sql in (
+        """
+        CREATE TRIGGER IF NOT EXISTS episodes_fts_ai AFTER INSERT ON episodes BEGIN
+          INSERT INTO episodes_fts(rowid, user_text, assistant_text, summary_text)
+          VALUES (new.rowid, new.user_text, new.assistant_text, new.summary_text);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS episodes_fts_ad AFTER DELETE ON episodes BEGIN
+          INSERT INTO episodes_fts(episodes_fts, rowid, user_text, assistant_text, summary_text)
+          VALUES ('delete', old.rowid, old.user_text, old.assistant_text, old.summary_text);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS episodes_fts_au AFTER UPDATE ON episodes BEGIN
+          INSERT INTO episodes_fts(episodes_fts, rowid, user_text, assistant_text, summary_text)
+          VALUES ('delete', old.rowid, old.user_text, old.assistant_text, old.summary_text);
+          INSERT INTO episodes_fts(rowid, user_text, assistant_text, summary_text)
+          VALUES (new.rowid, new.user_text, new.assistant_text, new.summary_text);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS beliefs_fts_ai AFTER INSERT ON beliefs BEGIN
+          INSERT INTO beliefs_fts(rowid, subject, predicate, object)
+          VALUES (new.rowid, new.subject, new.predicate, new.object);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS beliefs_fts_ad AFTER DELETE ON beliefs BEGIN
+          INSERT INTO beliefs_fts(beliefs_fts, rowid, subject, predicate, object)
+          VALUES ('delete', old.rowid, old.subject, old.predicate, old.object);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS beliefs_fts_au AFTER UPDATE ON beliefs BEGIN
+          INSERT INTO beliefs_fts(beliefs_fts, rowid, subject, predicate, object)
+          VALUES ('delete', old.rowid, old.subject, old.predicate, old.object);
+          INSERT INTO beliefs_fts(rowid, subject, predicate, object)
+          VALUES (new.rowid, new.subject, new.predicate, new.object);
+        END
+        """,
+    ):
+        try:
+            conn.execute(sql)
+        except Exception:
+            logger.debug("[schema_v2] FTS trigger create failed", exc_info=True)
+
+    # Rebuild when index is empty but base table has rows (upgrade path).
+    try:
+        ep_n = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+        fts_n = conn.execute("SELECT COUNT(*) FROM episodes_fts").fetchone()[0]
+        if ep_n and not fts_n:
+            conn.execute("INSERT INTO episodes_fts(episodes_fts) VALUES('rebuild')")
+            logger.info("[schema_v2] rebuilt episodes_fts (%d rows)", ep_n)
+    except Exception:
+        logger.debug("[schema_v2] episodes_fts rebuild skipped", exc_info=True)
+    try:
+        bel_n = conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0]
+        fts_n = conn.execute("SELECT COUNT(*) FROM beliefs_fts").fetchone()[0]
+        if bel_n and not fts_n:
+            conn.execute("INSERT INTO beliefs_fts(beliefs_fts) VALUES('rebuild')")
+            logger.info("[schema_v2] rebuilt beliefs_fts (%d rows)", bel_n)
+    except Exception:
+        logger.debug("[schema_v2] beliefs_fts rebuild skipped", exc_info=True)
 
 
 def ensure_ops_schema(conn: Any) -> None:

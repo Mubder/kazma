@@ -66,6 +66,9 @@ Bi-temporal beliefs, episodes, PPR, durable queue, macro_sleep, backup/export.
 Phase A (Sprint 1): access bump on recall, dense search over episodic+recall,
 session bias, post-turn metrics, explicit-remember → recall tier.
 
+Phase B (Sprint 2): real FTS5 (episodes+beliefs), belief-graph multi-hop PPR,
+capped dense belief scan, `explain_recall` source tags.
+
 ### Product / scale (only if required)
 
 | # | Item | Trigger |

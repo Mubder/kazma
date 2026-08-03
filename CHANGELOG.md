@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — Memory V2 Phase B: retrieval intelligence (2026-08-03)
+
+- **Real FTS5:** `episodes_fts` + `beliefs_fts` (external content, unicode61)
+  with insert/update/delete triggers and rebuild-on-upgrade in
+  `schema_v2.ensure_primary_schema`. Recall uses `MATCH` + `bm25()`;
+  multi-term `LIKE` remains the fallback.
+- **Belief-graph PPR:** multi-hop over subject↔object edges seeded by
+  query entities + episode mentions (e.g. works_at → located_in).
+  Session-clique episode PPR kept as secondary RRF channel; both respect
+  `ppr_max_nodes` / `ppr_seed_k`.
+- **Dense belief scale:** cosine scan capped by
+  `memory.v2.dense_belief_candidate_cap` (default 400), importance-ordered.
+- **Explain mode:** `recall(..., explain=True)` or `memory.v2.explain_recall`
+  tags `metadata["sources"]` (fts5 / dense / ppr / session_boost / …).
+- Config overlay: Phase A/B keys (`access_bump_enabled`, `session_boost`,
+  `explain_recall`, `dense_belief_candidate_cap`) readable from ConfigStore.
+- Tests: `kazma-core/tests/test_memory_v2_phase_b.py`.
+
 ## Unreleased — Memory V2 Phase A: remember actually works (2026-08-03)
 
 - **Access accounting:** successful `recall()` bumps `access_count` /

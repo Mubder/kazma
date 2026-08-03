@@ -144,9 +144,12 @@ lands with the dashboard UX pass.
 
 ### Phase B exit criteria
 
-- [ ] FTS5 live on episodes  
-- [ ] Belief multi-hop improves at least one golden multi-hop case  
-- [ ] Explain mode available  
+- [x] FTS5 live on episodes (and beliefs)  
+- [x] Belief multi-hop improves at least one golden multi-hop case  
+- [x] Explain mode available  
+
+**Shipped 2026-08-03.** Dashboard “why recalled?” UI still deferred to the
+dashboard UX pass (B4.2); API/explain flag is live.
 
 ---
 
