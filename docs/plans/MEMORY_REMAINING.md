@@ -87,20 +87,21 @@ Federated search API remains for operator UI: `POST /api/memory/v2/federated-sea
 
 ---
 
-## 3b. Optional polish (not blockers)
+## 3b. Optional polish
 
-| Item | Notes |
+| Item | Status |
 |------|--------|
-| DUI-6 Path-from-query | Seed graph from federated/probe hits + PPR highlight |
-| DUI-7 Episode overlay | Session clusters as faint nodes |
-| DUI-8 Graph PNG/SVG | JSON/GraphML already shipped |
-| DUI-9 Queue Retry/Clear | List exists; actions partial |
-| DUI-11 Responsive stack | Beliefs + graph on narrow screens |
-| DUI-13 Empty-state CTA | “Teach me a fact” → chat |
-| DUI-14 Graph a11y | Keyboard pan/zoom beyond reduced-motion scrub |
-| Extraction hygiene | Guard against confusing “memory V2” with product version (e.g. `kazma_v2_4_0`) |
-| Neo4j re-sync after invalidate | Optional: delete edges for invalidated beliefs or re-Sync after bulk invalidation |
-| beliefs_fts self-heal | Rebuild FTS when UPDATE hits “malformed” (seen once on long-lived WAL) |
+| DUI-6 Path-from-query | **Done** — probe/federated → “Show path on graph” |
+| DUI-7 Episode overlay | **Done** — Episodes toggle on topology |
+| DUI-8 Graph PNG/SVG | **Done** (+ JSON/GraphML) |
+| DUI-9 Queue Retry/Clear | **Done** — per-task retry + Clear failed |
+| DUI-11 Responsive stack | **Done** — stack ≤900px |
+| DUI-13 Empty-state CTA | **Done** — Teach me a fact → chat |
+| DUI-14 Graph a11y | **Done** — arrows / ± / Home / Escape |
+| Settings consolidation | **Done** — Memory+Embedder one tab; connectors under LLM hub; Refresh Gateway on Platform Connectors |
+| Extraction hygiene | Still open (e.g. `kazma_v2_4_0` guard) |
+| Neo4j re-sync after invalidate | Still open |
+| beliefs_fts self-heal | Still open |
 
 ---
 
