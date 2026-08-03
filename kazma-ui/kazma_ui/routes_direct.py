@@ -269,6 +269,59 @@ def register_direct_routes(self: Any) -> None:
 
         return build_v2_health()
 
+    @self.app.post("/api/memory/v2/probe")
+    async def _memory_v2_probe(request: Request):
+        """Live recall dry-run for the dashboard probe panel."""
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+        query = str((body or {}).get("query") or "").strip()
+        limit = int((body or {}).get("limit") or 5)
+        session_id = (body or {}).get("session_id") or None
+        tenant_id = str((body or {}).get("tenant_id") or "default")
+        if not query:
+            return {"ok": False, "error": "query required", "beliefs": [], "episodes": []}
+        try:
+            from kazma_core.memory.recall import recall
+
+            result = recall(
+                query,
+                limit=max(1, min(limit, 20)),
+                session_id=session_id,
+                tenant_id=tenant_id,
+                explain=True,
+            )
+            return {
+                "ok": True,
+                "query": query,
+                "beliefs": [
+                    {
+                        "id": h.id,
+                        "content": h.content,
+                        "score": h.score,
+                        "source": h.source,
+                        "sources": (h.metadata or {}).get("sources"),
+                        "metadata": h.metadata,
+                    }
+                    for h in result.beliefs
+                ],
+                "episodes": [
+                    {
+                        "id": h.id,
+                        "content": h.content,
+                        "score": h.score,
+                        "source": h.source,
+                        "sources": (h.metadata or {}).get("sources"),
+                        "metadata": h.metadata,
+                    }
+                    for h in result.episodes
+                ],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300], "beliefs": [], "episodes": []}
+
     @self.app.get("/api/memory/v2/beliefs")
     async def _memory_v2_beliefs(q: str = "", limit: int = 50):
         """Active V2 beliefs (currently valid only), optional FTS filter."""
@@ -283,7 +336,8 @@ def register_direct_routes(self: Any) -> None:
             ensure_primary_schema(conn)
             sql = (
                 "SELECT id, subject, predicate, predicate_type, object, confidence, "
-                "structural_importance, valid_from, source_trust_weight, extraction_method "
+                "structural_importance, valid_from, source_trust_weight, extraction_method, "
+                "access_count, last_accessed, supersedes_id "
                 "FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
             )
             params: list = []
@@ -298,6 +352,255 @@ def register_direct_routes(self: Any) -> None:
             return {"beliefs": [dict(r) for r in rows]}
         except Exception as exc:
             return {"beliefs": [], "error": str(exc)}
+
+    @self.app.get("/api/memory/v2/beliefs/{belief_id}")
+    async def _memory_v2_belief_detail(belief_id: str):
+        """Belief detail + supersede chain."""
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            row = conn.execute("SELECT * FROM beliefs WHERE id=?", (belief_id,)).fetchone()
+            if not row:
+                conn.close()
+                return {"ok": False, "error": "not_found"}
+            chain = [dict(row)]
+            # Walk supersedes_id ancestors
+            cur = row
+            for _ in range(20):
+                sid = cur["supersedes_id"] if "supersedes_id" in cur.keys() else None
+                if not sid:
+                    break
+                prev = conn.execute("SELECT * FROM beliefs WHERE id=?", (sid,)).fetchone()
+                if not prev:
+                    break
+                chain.append(dict(prev))
+                cur = prev
+            # Children that supersede this belief
+            kids = conn.execute(
+                "SELECT id, subject, predicate, object, valid_from, valid_until "
+                "FROM beliefs WHERE supersedes_id=?",
+                (belief_id,),
+            ).fetchall()
+            conn.close()
+            return {
+                "ok": True,
+                "belief": dict(row),
+                "chain": chain,
+                "superseded_by": [dict(k) for k in kids],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.post("/api/memory/v2/beliefs/{belief_id}/invalidate")
+    async def _memory_v2_belief_invalidate(belief_id: str):
+        """Soft-invalidate a belief (sets valid_until + invalidated_at)."""
+        import sqlite3
+        import time as _time
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            ensure_primary_schema(conn)
+            now = _time.time()
+            cur = conn.execute(
+                """
+                UPDATE beliefs SET valid_until=?, invalidated_at=?
+                WHERE id=? AND valid_until IS NULL
+                """,
+                (now, now, belief_id),
+            )
+            conn.commit()
+            n = int(cur.rowcount or 0)
+            conn.close()
+            return {"ok": n > 0, "updated": n}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.get("/api/memory/v2/entity-merges")
+    async def _memory_v2_entity_merges(limit: int = 50):
+        """Pending entity merge quarantine list."""
+        import sqlite3
+
+        from kazma_core.memory.entity_resolution import list_pending_merges
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            merges = list_pending_merges(conn, limit=limit)
+            conn.close()
+            return {"merges": merges}
+        except Exception as exc:
+            return {"merges": [], "error": str(exc)[:300]}
+
+    @self.app.post("/api/memory/v2/entity-merges/{merge_id}")
+    async def _memory_v2_entity_merge_decide(merge_id: str, request: Request):
+        """Approve or reject a pending entity merge. Body: {action: approve|reject}."""
+        import sqlite3
+
+        from kazma_core.memory.entity_resolution import decide_entity_merge
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+        action = str((body or {}).get("action") or "approve").strip().lower()
+        approve = action in ("approve", "approved", "yes", "true", "1")
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            result = decide_entity_merge(conn, merge_id, approve=approve)
+            conn.close()
+            return result
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.get("/api/memory/v2/queue")
+    async def _memory_v2_queue(status: str = "", limit: int = 50):
+        """Memory task queue rows for the dashboard table."""
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_ops_schema
+        from kazma_core.paths import memory_ops_db
+
+        try:
+            import os
+
+            if not os.path.exists(memory_ops_db()):
+                return {"tasks": []}
+            conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_ops_schema(conn)
+            sql = (
+                "SELECT id, task_type, status, attempts, max_attempts, "
+                "created_at, updated_at, error_log FROM memory_task_queue"
+            )
+            params: list = []
+            if status and status.strip():
+                sql += " WHERE status = ?"
+                params.append(status.strip())
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(max(1, min(limit, 200)))
+            rows = conn.execute(sql, params).fetchall()
+            conn.close()
+            return {"tasks": [dict(r) for r in rows]}
+        except Exception as exc:
+            return {"tasks": [], "error": str(exc)[:300]}
+
+    @self.app.post("/api/memory/v2/queue/{task_id}/retry")
+    async def _memory_v2_queue_retry(task_id: str):
+        """Re-queue a failed/dead-letter task as pending."""
+        import sqlite3
+        import time as _time
+
+        from kazma_core.memory.schema_v2 import ensure_ops_schema
+        from kazma_core.paths import memory_ops_db
+
+        try:
+            conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+            ensure_ops_schema(conn)
+            now = _time.time()
+            cur = conn.execute(
+                """
+                UPDATE memory_task_queue
+                SET status='pending', attempts=0, error_log=NULL, updated_at=?
+                WHERE id=? AND status IN ('failed', 'pending')
+                """,
+                (now, task_id),
+            )
+            conn.commit()
+            n = int(cur.rowcount or 0)
+            conn.close()
+            return {"ok": n > 0, "updated": n}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.post("/api/memory/v2/reconsolidate")
+    async def _memory_v2_reconsolidate():
+        """Enqueue a global_reconsolidation task (Dashboard / Settings trigger)."""
+        try:
+            from kazma_core.memory.task_queue import enqueue_task
+
+            tid = enqueue_task(
+                "global_reconsolidation",
+                {"tenant_id": "default", "max_merges": 50, "reembed_limit": 100},
+            )
+            return {"ok": True, "task_id": tid}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    # ── Phase D: Memory backends Settings API ─────────────────────────
+    @self.app.get("/api/settings/memory/backends")
+    async def _settings_memory_backends_get():
+        from kazma_core.memory.backends import get_backends_cfg, mask_backends_cfg
+
+        return {"ok": True, "backends": mask_backends_cfg(get_backends_cfg())}
+
+    @self.app.put("/api/settings/memory/backends")
+    async def _settings_memory_backends_put(request: Request):
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            return {"ok": False, "error": "invalid JSON"}
+        try:
+            from kazma_core.memory.backends import save_backends_cfg
+
+            masked = save_backends_cfg(body if isinstance(body, dict) else {})
+            return {"ok": True, "backends": masked}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.post("/api/settings/memory/backends/test-embed")
+    async def _settings_memory_test_embed():
+        from kazma_core.memory.backends import test_embedder_backend
+
+        return test_embedder_backend()
+
+    @self.app.post("/api/settings/memory/backends/test-vector")
+    async def _settings_memory_test_vector():
+        from kazma_core.memory.backends import test_vector_backend
+
+        return test_vector_backend()
+
+    @self.app.post("/api/settings/memory/backends/reset-local")
+    async def _settings_memory_reset_local():
+        from kazma_core.memory.backends import reset_backends_to_local
+
+        return {"ok": True, "backends": reset_backends_to_local()}
+
+    @self.app.post("/api/settings/memory/backends/rebuild")
+    async def _settings_memory_rebuild():
+        """Kick off embedding rebuild (reuses reembed module)."""
+        try:
+            import asyncio
+
+            from kazma_core.memory.reembed import rebuild_embeddings
+
+            asyncio.create_task(asyncio.to_thread(rebuild_embeddings))
+            return {"ok": True, "started": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.get("/api/settings/memory/backends/rebuild/status")
+    async def _settings_memory_rebuild_status():
+        from kazma_core.memory.reembed import get_rebuild_status
+
+        return get_rebuild_status()
 
     @self.app.get("/api/memory/v2/graph")
     async def _memory_v2_graph(

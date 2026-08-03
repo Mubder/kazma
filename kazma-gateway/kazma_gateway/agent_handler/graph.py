@@ -448,6 +448,14 @@ def create_graph_handler(
             except Exception as exc:
                 logger.debug("[agent-handler] Failed to create empty Web UI session: %s", exc)
                 
+            # Phase C: drop working-tier buffer for the old thread
+            try:
+                from kazma_core.memory.consolidator import clear_working_memory
+
+                clear_working_memory(thread_id)
+            except Exception:
+                logger.debug("[agent-handler] clear_working_memory on /new failed", exc_info=True)
+
             reply_msg = (
                 f"🆕 Created a brand new season/session!\n\n"
                 f"All your future messages here will be kept in a separate thread.\n"

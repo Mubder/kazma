@@ -146,22 +146,22 @@
       </button>
     </div>
 
-    <!-- KPI strip: store sizes + graph -->
+    <!-- KPI strip: V2-aligned labels (embeddings / FTS / beliefs / health) -->
     <div id="memory-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px;">
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.vector_store') }}</div>
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Embeddings</div>
         <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l1_chroma') }}</div>
+        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">vector backend</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.fts5_db') }}</div>
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">FTS index</div>
         <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l3_bm25') }}</div>
+        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">episodes + working</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_graph_title') }}</div>
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Belief graph</div>
         <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.kpi_l2_graph') }}</div>
+        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">active triples</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
@@ -217,6 +217,44 @@
           <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Queue</div>
           <div id="v2-kpi-queue" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
           <div id="v2-kpi-queue-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+      </div>
+
+      <!-- Post-turn health strip -->
+      <div id="v2-post-turn-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.78rem;">
+        <span style="font-weight:600;color:var(--text-secondary);">Post-turn</span>
+        <span id="v2-post-turn-ok" style="color:var(--text-muted);">ok: –</span>
+        <span id="v2-post-turn-err" style="color:var(--text-muted);">last error: –</span>
+        <span id="v2-embedder-ready" style="color:var(--text-muted);">embedder: –</span>
+        <a href="/settings#embedder" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
+      </div>
+
+      <!-- Live recall probe -->
+      <div style="margin-bottom:16px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
+        <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);margin-bottom:8px;">Live recall probe</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="v2-probe-input" type="text" placeholder="What color do I like?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
+          <button id="v2-probe-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;">Probe</button>
+        </div>
+        <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:180px;overflow-y:auto;"></div>
+      </div>
+
+      <!-- Queue + entity merges -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px;">
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Task queue</span>
+            <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+          </div>
+          <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+          <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">Run reconsolidation</button>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Pending entity merges</span>
+            <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+          </div>
+          <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
         </div>
       </div>
 
@@ -1205,6 +1243,23 @@
       const qPending = (h.queue.pending||0) + (h.queue.processing||0);
       setEl('v2-kpi-queue', fmtNum(qPending));
       setEl('v2-kpi-queue-meta', (h.queue.failed||0) + ' failed · ' + (h.recent_audits||0) + ' audits/24h');
+      // Post-turn / embedder strip
+      const pt = h.post_turn || {};
+      const okEl = document.getElementById('v2-post-turn-ok');
+      if (okEl) okEl.textContent = 'ok: ' + (pt.ok || 0) + ' · fail m/e/q: ' +
+        (pt.mirror_fail||0) + '/' + (pt.extract_fail||0) + '/' + (pt.enqueue_fail||0);
+      const errEl = document.getElementById('v2-post-turn-err');
+      if (errEl) {
+        const le = pt.last_error || h.last_error;
+        errEl.textContent = le ? ('last error: ' + String(le).slice(0, 80)) : 'last error: none';
+        errEl.style.color = le ? '#f87171' : 'var(--text-muted)';
+      }
+      const embEl = document.getElementById('v2-embedder-ready');
+      if (embEl) embEl.textContent = 'embedder: ' + (h.embedder_ready ? 'ready' : 'unavailable');
+      const strip = document.getElementById('v2-post-turn-strip');
+      if (strip && ((h.queue && h.queue.failed > 0) || pt.last_error || h.status_detail)) {
+        strip.style.borderColor = 'rgba(248,113,113,0.35)';
+      }
       // Tier breakdown bars
       const tb = document.getElementById('v2-tier-breakdown');
       if (tb) {
@@ -1234,6 +1289,115 @@
       // silent — panel just stays stale
     }
   }
+
+  async function runV2Probe() {
+    const input = document.getElementById('v2-probe-input');
+    const out = document.getElementById('v2-probe-results');
+    if (!input || !out) return;
+    const q = (input.value || '').trim();
+    if (!q) { out.textContent = 'Enter a query.'; return; }
+    out.textContent = 'Probing…';
+    try {
+      const resp = await fetch('/api/memory/v2/probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, limit: 5 }),
+      });
+      const data = await resp.json();
+      if (!data.ok) { out.textContent = data.error || 'Probe failed'; return; }
+      const lines = [];
+      (data.beliefs || []).forEach(function(h) {
+        const src = (h.sources && h.sources.join(',')) || h.source || '';
+        lines.push('<div style="margin-bottom:4px;"><span style="color:#2ed573;font-size:0.65rem;font-weight:700;">BELIEF</span> ' +
+          _esc(h.content || '') + ' <span style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(src) + ' · ' +
+          (h.score != null ? Number(h.score).toFixed(3) : '') + ']</span></div>');
+      });
+      (data.episodes || []).forEach(function(h) {
+        const src = (h.sources && h.sources.join(',')) || h.source || '';
+        lines.push('<div style="margin-bottom:4px;"><span style="color:#60a5fa;font-size:0.65rem;font-weight:700;">EPISODE</span> ' +
+          _esc((h.content || '').slice(0, 200)) + ' <span style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(src) + ']</span></div>');
+      });
+      out.innerHTML = lines.length ? lines.join('') : '<span style="color:var(--text-muted);">No hits.</span>';
+    } catch (e) {
+      out.textContent = 'Probe error: ' + e;
+    }
+  }
+
+  async function loadV2Queue() {
+    const el = document.getElementById('v2-queue-table');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/queue?limit=20');
+      const data = await resp.json();
+      const tasks = data.tasks || [];
+      if (!tasks.length) { el.textContent = 'Queue empty.'; return; }
+      el.innerHTML = tasks.map(function(t) {
+        const st = t.status || '';
+        const retry = st === 'failed'
+          ? ' <button type="button" data-retry="' + _esc(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">retry</button>'
+          : '';
+        return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+          _esc(t.task_type) + ' · ' + _esc(st) + ' · a' + (t.attempts||0) + retry + '</div>';
+      }).join('');
+      el.querySelectorAll('.v2-queue-retry').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          const id = btn.getAttribute('data-retry');
+          await fetch('/api/memory/v2/queue/' + encodeURIComponent(id) + '/retry', { method: 'POST' });
+          loadV2Queue();
+        });
+      });
+    } catch (e) { el.textContent = 'Queue load failed'; }
+  }
+
+  async function loadV2Merges() {
+    const el = document.getElementById('v2-merges-list');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/entity-merges?limit=20');
+      const data = await resp.json();
+      const merges = data.merges || [];
+      if (!merges.length) { el.textContent = 'No pending merges.'; return; }
+      el.innerHTML = merges.map(function(m) {
+        return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+          '<span>' + _esc(m.source_entity_id) + ' → ' + _esc(m.target_entity_id) +
+          ' <span style="color:var(--text-muted);">(' + _esc(m.merge_tier) + ' · ' +
+          (m.confidence != null ? Number(m.confidence).toFixed(2) : '') + ')</span></span>' +
+          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;">✓</button>' +
+          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;">✗</button>' +
+          '</div>';
+      }).join('');
+      el.querySelectorAll('.v2-merge-act').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          const id = btn.getAttribute('data-mid');
+          const act = btn.getAttribute('data-act');
+          await fetch('/api/memory/v2/entity-merges/' + encodeURIComponent(id), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: act }),
+          });
+          loadV2Merges();
+        });
+      });
+    } catch (e) { el.textContent = 'Merges load failed'; }
+  }
+
+  document.getElementById('v2-probe-btn')?.addEventListener('click', runV2Probe);
+  document.getElementById('v2-probe-input')?.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Enter') runV2Probe();
+  });
+  document.getElementById('v2-queue-refresh')?.addEventListener('click', loadV2Queue);
+  document.getElementById('v2-merges-refresh')?.addEventListener('click', loadV2Merges);
+  document.getElementById('v2-reconsolidate-btn')?.addEventListener('click', async function() {
+    try {
+      const r = await fetch('/api/memory/v2/reconsolidate', { method: 'POST' });
+      const d = await r.json();
+      if (window.showToast) window.showToast(d.ok ? 'Reconsolidation enqueued' : (d.error || 'Failed'), d.ok ? 'success' : 'error');
+      loadV2Queue();
+    } catch (e) { /* silent */ }
+  });
+  loadV2Queue();
+  loadV2Merges();
+  setInterval(function() { loadV2Queue(); loadV2Merges(); }, 15000);
 
   async function loadV2Beliefs(q) {
     try {

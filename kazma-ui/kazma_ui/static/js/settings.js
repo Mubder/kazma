@@ -53,6 +53,15 @@ function settingsApp() {
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
         memoryTenantMode: 'shared',
+        memoryBackends: {
+            mode: 'local',
+            embedder: { provider: 'local', model: 'BAAI/bge-m3', base_url: '', api_key: '', dim: 1024 },
+            vector: { provider: 'sqlite_vec', url: '', api_key: '', collection: 'kazma_memory', dimension: 1024 },
+            graph: { provider: 'sqlite', url: '' },
+            failover: { on_remote_error: 'local' },
+        },
+        memoryBackendsSaving: false,
+        memoryBackendsStatus: '',
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -294,6 +303,21 @@ function settingsApp() {
                 } else {
                     this.providerPresets = [];
                 }
+
+                // Phase D: memory backends profile
+                try {
+                    const mb = await this._fetch('/api/settings/memory/backends');
+                    if (mb && mb.backends) {
+                        const b = mb.backends;
+                        this.memoryBackends = {
+                            mode: b.mode || 'local',
+                            embedder: Object.assign({}, this.memoryBackends.embedder, b.embedder || {}),
+                            vector: Object.assign({}, this.memoryBackends.vector, b.vector || {}),
+                            graph: Object.assign({}, this.memoryBackends.graph, b.graph || {}),
+                            failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
+                        };
+                    }
+                } catch (e) { /* optional */ }
 
                 // Load unified hub data
                 await Promise.all([
@@ -655,6 +679,112 @@ function settingsApp() {
                 showToast('Save failed', 'error');
             }
             this.saving = false;
+        },
+
+        async saveMemoryBackends() {
+            this.memoryBackendsSaving = true;
+            this.memoryBackendsStatus = 'Saving…';
+            try {
+                const resp = await fetch('/api/settings/memory/backends', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.memoryBackends),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    if (data.backends) {
+                        const b = data.backends;
+                        this.memoryBackends.embedder = Object.assign({}, this.memoryBackends.embedder, b.embedder || {});
+                        this.memoryBackends.vector = Object.assign({}, this.memoryBackends.vector, b.vector || {});
+                    }
+                    this.memoryBackendsStatus = 'Saved. Embedder reloaded for this process.';
+                    showToast('Memory backends saved', 'success');
+                } else {
+                    this.memoryBackendsStatus = data.error || 'Save failed';
+                    showToast('Save failed', 'error');
+                }
+            } catch (e) {
+                this.memoryBackendsStatus = 'Save failed';
+                showToast('Save failed', 'error');
+            }
+            this.memoryBackendsSaving = false;
+        },
+
+        async testMemoryEmbed() {
+            this.memoryBackendsStatus = 'Testing embedder…';
+            try {
+                const resp = await fetch('/api/settings/memory/backends/test-embed', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                this.memoryBackendsStatus = data.ok
+                    ? ('Embed OK · ' + (data.latency_ms || 0) + 'ms · dim ' + (data.dim || '?'))
+                    : ('Embed failed: ' + (data.error || 'unknown'));
+            } catch (e) {
+                this.memoryBackendsStatus = 'Embed test error';
+            }
+        },
+
+        async testMemoryVector() {
+            this.memoryBackendsStatus = 'Testing vector backend…';
+            try {
+                const resp = await fetch('/api/settings/memory/backends/test-vector', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                this.memoryBackendsStatus = data.ok
+                    ? ('Vector OK · ' + (data.provider || '') + ' · ' + (data.latency_ms || 0) + 'ms')
+                    : ('Vector failed: ' + (data.error || 'unknown'));
+            } catch (e) {
+                this.memoryBackendsStatus = 'Vector test error';
+            }
+        },
+
+        async resetMemoryBackendsLocal() {
+            try {
+                const resp = await fetch('/api/settings/memory/backends/reset-local', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (data.backends) {
+                    const b = data.backends;
+                    this.memoryBackends = {
+                        mode: b.mode || 'local',
+                        embedder: Object.assign({}, this.memoryBackends.embedder, b.embedder || {}),
+                        vector: Object.assign({}, this.memoryBackends.vector, b.vector || {}),
+                        graph: Object.assign({}, this.memoryBackends.graph, b.graph || {}),
+                        failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
+                    };
+                }
+                this.memoryBackendsStatus = 'Reset to local defaults';
+                showToast('Memory backends reset to local', 'success');
+            } catch (e) {
+                showToast('Reset failed', 'error');
+            }
+        },
+
+        async rebuildMemoryEmbeddings() {
+            const ok = window.kazmaConfirm
+                ? await window.kazmaConfirm({
+                    title: 'Rebuild embeddings?',
+                    message: 'Re-embed episodes/beliefs for the current model. May take minutes.',
+                })
+                : confirm('Rebuild embeddings?');
+            if (!ok) return;
+            try {
+                const resp = await fetch('/api/settings/memory/backends/rebuild', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                this.memoryBackendsStatus = data.ok ? 'Rebuild started (see status on Embedder page)' : (data.error || 'Failed');
+                showToast(data.ok ? 'Rebuild started' : 'Rebuild failed', data.ok ? 'success' : 'error');
+            } catch (e) {
+                showToast('Rebuild failed', 'error');
+            }
         },
 
         async saveLogging() {

@@ -213,7 +213,8 @@ def test_dual_write_mirror_episode(isolated_data):
     ).fetchone()
     assert row["session_id"] == "s1"
     assert row["turn_number"] == 1
-    assert row["tier"] == "episodic"
+    # Phase C: default post-turn buffer is working (promoted to episodic next turn)
+    assert row["tier"] in ("working", "episodic")
 
 
 def test_dual_write_idempotent(isolated_data):

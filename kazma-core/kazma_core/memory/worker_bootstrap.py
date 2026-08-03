@@ -43,6 +43,7 @@ def register_v2_handlers() -> None:
     register_handler("macro_sleep", _handle_macro_sleep)
     register_handler("entity_merge", _handle_entity_merge)
     register_handler("micro_consolidation", _handle_micro_consolidation)
+    register_handler("global_reconsolidation", _handle_global_reconsolidation)
     _registered = True
     logger.info("[memory_worker] V2 task handlers registered")
 
@@ -74,53 +75,72 @@ async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
 async def _handle_entity_merge(payload: dict[str, Any]) -> bool:
     """Resolve a pending entity merge (approve/reject via configured policy).
 
-    Currently auto-approves vector-tier merges that exceed confidence and
-    leaves the rest pending for human review. Returns True once a decision
-    is recorded.
+    ``entity_merges`` lives on the primary memory DB (not ops). Auto-approves
+    tier1_exact always and tier2_vector above 0.85; else leaves pending.
     """
     try:
         merge_id = payload.get("merge_id")
         if not merge_id:
             return False
-        from kazma_core.paths import memory_ops_db, primary_memory_db
+        from kazma_core.memory.entity_resolution import decide_entity_merge
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
 
-        # Read the pending merge
-        ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
-        ops.row_factory = sqlite3.Row
+        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         try:
-            row = ops.execute(
+            ensure_primary_schema(conn)
+            row = conn.execute(
                 "SELECT * FROM entity_merges WHERE id=? AND status='pending'",
                 (merge_id,),
             ).fetchone()
             if not row:
                 return True  # already resolved / gone
-            # Auto-approve tier1_exact always; tier2_vector above 0.85; else leave pending
             conf = float(row["confidence"])
             tier = row["merge_tier"]
             if tier == "tier1_exact" or (tier == "tier2_vector" and conf >= 0.85):
-                import time
-
-                ops.execute(
-                    "UPDATE entity_merges SET status='approved', resolved_at=? WHERE id=?",
-                    (time.time(), merge_id),
+                result = decide_entity_merge(conn, merge_id, approve=True)
+                logger.info(
+                    "[memory_worker] auto-approved merge %s (conf=%.2f ok=%s)",
+                    merge_id, conf, result.get("ok"),
                 )
-                # Apply: merge source aliases into target
-                _apply_merge(
-                    sqlite3.connect(primary_memory_db(), check_same_thread=False),
-                    row["source_entity_id"], row["target_entity_id"],
-                )
-                logger.info("[memory_worker] auto-approved merge %s (conf=%.2f)", merge_id, conf)
             else:
                 logger.info(
                     "[memory_worker] merge %s left pending (tier=%s conf=%.2f < 0.85)",
                     merge_id, tier, conf,
                 )
-            ops.commit()
             return True
         finally:
-            ops.close()
+            conn.close()
     except Exception:
         logger.debug("[memory_worker] entity_merge handler failed", exc_info=True)
+        return False
+
+
+async def _handle_global_reconsolidation(payload: dict[str, Any]) -> bool:
+    """Nightly/global re-consolidation (dedupe beliefs + re-embed missing)."""
+    try:
+        from kazma_core.memory.global_reconsolidation import run_global_reconsolidation
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        tenant_id = payload.get("tenant_id", "default")
+        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        try:
+            ensure_primary_schema(conn)
+            stats = run_global_reconsolidation(
+                conn,
+                tenant_id=tenant_id,
+                max_merges=int(payload.get("max_merges") or 50),
+                reembed_limit=int(payload.get("reembed_limit") or 100),
+            )
+            logger.info("[memory_worker] global_reconsolidation: %s", stats)
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("[memory_worker] global_reconsolidation failed", exc_info=True)
         return False
 
 
@@ -260,6 +280,7 @@ def start_memory_worker() -> None:
         start_worker()
         _start_macro_sleep_scheduler()
         _start_backup_export_scheduler()
+        _start_reconsolidation_scheduler()
     except Exception:
         logger.debug("[memory_worker] could not start worker", exc_info=True)
 
@@ -269,6 +290,9 @@ _MACRO_SLEEP_INTERVAL_HOURS = 6
 # macro_sleep loop so decay still runs on its own cycle even if the
 # backup step stalls on a slow disk.
 _BACKUP_EXPORT_INTERVAL_HOURS = 24
+# Global reconsolidation: once per day, offset from backup so they don't
+# contend for the same disk I/O window.
+_RECONSOLIDATION_INTERVAL_HOURS = 24
 
 
 def _start_macro_sleep_scheduler() -> None:
@@ -350,6 +374,46 @@ def _start_backup_export_scheduler() -> None:
         )
     except Exception:
         logger.debug("[memory_worker] could not start backup/export scheduler", exc_info=True)
+
+
+def _start_reconsolidation_scheduler() -> None:
+    """Enqueue global_reconsolidation every 24h (offset from backup)."""
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("[memory_worker] no loop — reconsolidation scheduler deferred")
+        return
+
+    async def _loop() -> None:
+        # Offset first run from backup (180s) so they don't stampede disk
+        await asyncio.sleep(180)
+        while True:
+            try:
+                from kazma_core.memory.task_queue import enqueue_task
+
+                enqueue_task(
+                    "global_reconsolidation",
+                    {"tenant_id": "default", "max_merges": 50, "reembed_limit": 100},
+                )
+                logger.debug("[memory_worker] enqueued global_reconsolidation")
+            except Exception:
+                logger.debug(
+                    "[memory_worker] reconsolidation enqueue failed", exc_info=True
+                )
+            await asyncio.sleep(_RECONSOLIDATION_INTERVAL_HOURS * 3600)
+
+    try:
+        loop.create_task(_loop())
+        logger.info(
+            "[memory_worker] reconsolidation scheduler started (every %dh)",
+            _RECONSOLIDATION_INTERVAL_HOURS,
+        )
+    except Exception:
+        logger.debug(
+            "[memory_worker] could not start reconsolidation scheduler", exc_info=True
+        )
 
 
 def register_backup_export_handlers() -> None:

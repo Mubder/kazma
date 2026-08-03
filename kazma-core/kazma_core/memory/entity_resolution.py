@@ -29,6 +29,8 @@ __all__ = [
     "resolve_entity",
     "alias_hash",
     "slug",
+    "list_pending_merges",
+    "decide_entity_merge",
 ]
 
 _HIGH_STAKES_TYPES = frozenset({"person", "project"})
@@ -226,3 +228,119 @@ def _record_merge(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (mid, tenant_id, source_id, target_id, status, tier, confidence, time.time(), time.time()),
     )
+
+
+def list_pending_merges(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List pending entity merges from the quarantine ledger."""
+    try:
+        if tenant_id:
+            rows = conn.execute(
+                """
+                SELECT id, tenant_id, source_entity_id, target_entity_id,
+                       status, merge_tier, confidence, requested_at, metadata_json
+                FROM entity_merges
+                WHERE status = 'pending' AND tenant_id = ?
+                ORDER BY requested_at DESC
+                LIMIT ?
+                """,
+                (tenant_id, max(1, min(limit, 200))),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, tenant_id, source_entity_id, target_entity_id,
+                       status, merge_tier, confidence, requested_at, metadata_json
+                FROM entity_merges
+                WHERE status = 'pending'
+                ORDER BY requested_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        logger.debug("[entity_resolve] list_pending failed", exc_info=True)
+        return []
+
+
+def decide_entity_merge(
+    conn: sqlite3.Connection,
+    merge_id: str,
+    *,
+    approve: bool,
+) -> dict[str, Any]:
+    """Approve or reject a pending entity merge. Returns status dict."""
+    try:
+        row = conn.execute(
+            "SELECT * FROM entity_merges WHERE id=? AND status='pending'",
+            (merge_id,),
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": "not_found_or_resolved"}
+        now = time.time()
+        if approve:
+            source_id = row["source_entity_id"]
+            target_id = row["target_entity_id"]
+            # Merge aliases + redirect beliefs (same as worker path)
+            src = conn.execute(
+                "SELECT aliases_json, name FROM entities WHERE id=?", (source_id,)
+            ).fetchone()
+            tgt = conn.execute(
+                "SELECT aliases_json FROM entities WHERE id=?", (target_id,)
+            ).fetchone()
+            if src and tgt:
+                try:
+                    src_aliases = json.loads(src["aliases_json"] or "[]")
+                except Exception:
+                    src_aliases = []
+                try:
+                    tgt_aliases = json.loads(tgt["aliases_json"] or "[]")
+                except Exception:
+                    tgt_aliases = []
+                for a in src_aliases:
+                    if a not in tgt_aliases:
+                        tgt_aliases.append(a)
+                if src["name"] and src["name"] not in tgt_aliases:
+                    tgt_aliases.append(src["name"])
+                conn.execute(
+                    "UPDATE entities SET aliases_json=? WHERE id=?",
+                    (json.dumps(tgt_aliases), target_id),
+                )
+                conn.execute(
+                    "UPDATE beliefs SET subject=? WHERE subject=?",
+                    (target_id, source_id),
+                )
+                conn.execute(
+                    "UPDATE beliefs SET object=? WHERE object=?",
+                    (target_id, source_id),
+                )
+                # Soft-retire source (keep row — entity_merges FKs still reference it)
+                conn.execute(
+                    """UPDATE entities
+                       SET metadata_json = json_set(
+                         COALESCE(NULLIF(metadata_json,''), '{}'),
+                         '$.merged_into', ?
+                       )
+                       WHERE id = ?""",
+                    (target_id, source_id),
+                )
+            conn.execute(
+                "UPDATE entity_merges SET status='approved', resolved_at=? WHERE id=?",
+                (now, merge_id),
+            )
+            conn.commit()
+            return {"ok": True, "status": "approved", "merge_id": merge_id}
+        conn.execute(
+            "UPDATE entity_merges SET status='rejected', resolved_at=? WHERE id=?",
+            (now, merge_id),
+        )
+        conn.commit()
+        return {"ok": True, "status": "rejected", "merge_id": merge_id}
+    except Exception as exc:
+        logger.debug("[entity_resolve] decide failed", exc_info=True)
+        return {"ok": False, "error": str(exc)[:200]}

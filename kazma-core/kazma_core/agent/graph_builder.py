@@ -590,6 +590,38 @@ async def supervisor_node(
                             "[Supervisor] V2 recall: %d beliefs, %d episodes for turn",
                             len(result.beliefs), len(result.episodes),
                         )
+                # Phase C: procedural skill hints (fenced, untrusted)
+                try:
+                    import sqlite3
+
+                    from kazma_core.memory.procedural import (
+                        format_procedural_hints,
+                        match_procedural_dags,
+                    )
+                    from kazma_core.memory.schema_v2 import ensure_primary_schema
+                    from kazma_core.paths import primary_memory_db
+
+                    pconn = sqlite3.connect(
+                        primary_memory_db(), check_same_thread=False
+                    )
+                    try:
+                        ensure_primary_schema(pconn)
+                        dags = match_procedural_dags(
+                            pconn,
+                            last_user_content,
+                            tenant_id=state.get("tenant_id", "default"),
+                            limit=3,
+                        )
+                        if dags:
+                            hint = format_procedural_hints(dags)
+                            if hint:
+                                messages.insert(1, {"role": "system", "content": hint})
+                    finally:
+                        pconn.close()
+                except Exception:
+                    logger.debug(
+                        "[Supervisor] procedural inject skipped", exc_info=True
+                    )
             except Exception:
                 logger.warning(
                     "[Supervisor] V2 recall failed — skipping memory injection",

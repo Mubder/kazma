@@ -29,6 +29,7 @@ from typing import Any
 __all__ = [
     "reset_turn_counter",
     "schedule_post_turn_memory",
+    "clear_working_memory",
     "extract_turn_texts",
     "get_post_turn_metrics",
 ]
@@ -196,6 +197,11 @@ def schedule_post_turn_memory(
              the httpx client is valid, so complex/nuanced beliefs that the
              heuristic misses still get extracted — just not synchronously.
         """
+        # ── Phase C: promote prior working → episodic for this session ─
+        try:
+            _promote_working_to_episodic(session_id=session_id, tenant_id=tenant_id)
+        except Exception:
+            logger.debug("[post_turn] working→episodic promote failed", exc_info=True)
         # ── V2 dual-write mirror ─────────────────────────────────────
         try:
             _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
@@ -252,6 +258,75 @@ def schedule_post_turn_memory(
         _metric_fail("thread", exc)
 
 
+def _promote_working_to_episodic(
+    *,
+    session_id: str | None,
+    tenant_id: str = "default",
+) -> int:
+    """Promote existing working-tier episodes for a session → episodic.
+
+    Called before writing the new turn as ``working`` so the active thread
+    keeps a short buffer of the latest turn only. Returns rows updated.
+    """
+    if not session_id:
+        return 0
+    import sqlite3
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+    try:
+        ensure_primary_schema(conn)
+        cur = conn.execute(
+            """
+            UPDATE episodes SET tier = 'episodic'
+            WHERE session_id = ? AND tenant_id = ? AND tier = 'working'
+            """,
+            (session_id, tenant_id),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    finally:
+        conn.close()
+
+
+def clear_working_memory(
+    session_id: str,
+    *,
+    tenant_id: str = "default",
+) -> int:
+    """Drop working-tier episodes for a session (e.g. on ``/new``).
+
+    Episodic/recall tiers are retained. Returns deleted row count.
+    """
+    if not session_id:
+        return 0
+    import sqlite3
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    try:
+        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        try:
+            ensure_primary_schema(conn)
+            cur = conn.execute(
+                """
+                DELETE FROM episodes
+                WHERE session_id = ? AND tenant_id = ? AND tier = 'working'
+                """,
+                (session_id, tenant_id),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("[post_turn] clear_working_memory failed", exc_info=True)
+        return 0
+
+
 def _mirror_turn_to_v2(
     messages: list[dict[str, Any]],
     *,
@@ -261,9 +336,8 @@ def _mirror_turn_to_v2(
 ) -> None:
     """Best-effort mirror of the just-finished turn into the V2 schema.
 
-    Extracts the last user/assistant pair and writes a V2 episode. Belief
-    extraction proper happens in the Phase 3 consolidator; here we only
-    capture the raw turn so recall can find it once ``use_new_stack`` flips.
+    Extracts the last user/assistant pair and writes a V2 episode (working
+    tier by default; explicit-remember → recall).
     """
     from kazma_core.memory.dual_write import mirror_episode
 

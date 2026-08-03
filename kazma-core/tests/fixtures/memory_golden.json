@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "description": "Memory V2 golden set — setup turns then query must contain expected substring",
+  "cases": [
+    {
+      "id": "favorite_color",
+      "setup": [
+        {"role": "user", "content": "Remember my favorite color is teal."}
+      ],
+      "query": "What color do I like?",
+      "expect_contains": ["teal"]
+    },
+    {
+      "id": "lives_in_bridge",
+      "setup": [
+        {"role": "user", "content": "I just moved to Paris last month."}
+      ],
+      "query": "where do I live",
+      "expect_contains": ["paris"],
+      "optional": true
+    },
+    {
+      "id": "multi_hop_work",
+      "setup_beliefs": [
+        {"subject": "user", "predicate": "works_at", "object": "AcmeCorp"},
+        {"subject": "AcmeCorp", "predicate": "located_in", "object": "Paris"}
+      ],
+      "query": "where does the user company sit",
+      "expect_contains": ["paris", "acme"],
+      "match_any": true
+    }
+  ]
+}

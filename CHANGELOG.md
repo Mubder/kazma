@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased — Memory V2 Phases C–D + Dashboard + Eval (2026-08-03)
+
+- **Phase C — Cognitive completeness**
+  - Procedural skill inject: `match_procedural_dags` + fenced hints in supervisor
+  - Entity merge productization: list/approve/deny API + primary-DB fix
+  - Nightly `global_reconsolidation` (dedupe beliefs + re-embed missing)
+  - Working-memory tier: new turns → `working`, promote prior → episodic,
+    clear on `/new`; recall includes working
+  - Tenant isolation tests (shared / per_platform / per_user already SoT)
+- **Sprint 4 — Dashboard Memory UX**
+  - V2-aligned KPI labels (no V1 L1/L3 copy)
+  - Live recall probe, post-turn health strip, queue table + retry,
+    pending entity merges, reconsolidation trigger
+- **Phase D — Backends UI**
+  - `memory/backends.py` ConfigStore profile (local / hybrid / remote)
+  - Settings → Memory backends + test embed/vector + reset + rebuild
+  - APIs under `/api/settings/memory/backends/*`
+- **Sprint 6 — Eval**
+  - Golden set `tests/fixtures/memory_golden.json` + runner
+- Tests: `test_memory_v2_phase_c_d.py`, `test_memory_eval_golden.py`
+
 ## Unreleased — Memory V2 Phase B: retrieval intelligence (2026-08-03)
 
 - **Real FTS5:** `episodes_fts` + `beliefs_fts` (external content, unicode61)

@@ -25,6 +25,8 @@ __all__ = [
     "laplace_confidence",
     "record_procedural_outcome",
     "should_quarantine",
+    "match_procedural_dags",
+    "format_procedural_hints",
 ]
 
 
@@ -143,3 +145,114 @@ def record_procedural_outcome(
     except Exception:
         logger.debug("[procedural] record failed", exc_info=True)
         return {"dag_id": "", "action": "noop", "confidence": 0.0, "quarantined": False}
+
+
+def match_procedural_dags(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    tenant_id: str = "default",
+    limit: int = 3,
+    min_confidence: float = 0.45,
+) -> list[dict[str, Any]]:
+    """Return top-K active procedural DAGs relevant to *query*.
+
+    Matching is lightweight: token overlap against name/description and
+    precondition JSON. Only ``status='active'`` rows above
+    ``min_confidence`` are considered. Best-effort — never raises.
+    """
+    q = (query or "").strip().lower()
+    if not q:
+        return []
+    tokens = [t for t in q.replace("-", " ").split() if len(t) >= 3]
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, name, description, preconditions_json, dag_steps_json,
+                   postconditions_json, confidence_score, success_count, total_trials
+            FROM procedural_dags
+            WHERE tenant_id = ? AND status = 'active'
+              AND confidence_score >= ?
+            ORDER BY confidence_score DESC, total_trials DESC
+            LIMIT ?
+            """,
+            (tenant_id, min_confidence, max(limit * 8, 24)),
+        ).fetchall()
+    except Exception:
+        logger.debug("[procedural] match query failed", exc_info=True)
+        return []
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for r in rows:
+        name = (r["name"] or "").lower()
+        desc = (r["description"] or "").lower()
+        pre = (r["preconditions_json"] or "").lower()
+        blob = f"{name} {desc} {pre}"
+        hits = sum(1 for t in tokens if t in blob) if tokens else 0
+        # Always allow high-confidence general skills when no token hit
+        conf = float(r["confidence_score"] or 0)
+        score = conf * (1.0 + 0.35 * hits)
+        if hits == 0 and conf < 0.7:
+            continue
+        if hits == 0 and tokens:
+            # Only surface very reliable generic skills without lexical match
+            if conf < 0.85:
+                continue
+        try:
+            steps = json.loads(r["dag_steps_json"] or "[]")
+        except Exception:
+            steps = []
+        try:
+            preconds = json.loads(r["preconditions_json"] or "{}")
+        except Exception:
+            preconds = {}
+        scored.append(
+            (
+                score,
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "description": r["description"],
+                    "confidence": conf,
+                    "success_count": int(r["success_count"] or 0),
+                    "total_trials": int(r["total_trials"] or 0),
+                    "steps": steps if isinstance(steps, list) else [],
+                    "preconditions": preconds if isinstance(preconds, dict) else {},
+                },
+            )
+        )
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [d for _s, d in scored[:limit]]
+
+
+def format_procedural_hints(
+    dags: list[dict[str, Any]],
+    *,
+    fence_source: str = "memory_v2_procedural",
+    max_dags: int = 3,
+) -> str:
+    """Render matched DAGs as a fenced untrusted procedural-hints block."""
+    if not dags:
+        return ""
+    try:
+        from kazma_core.safety.prompt_fence import format_untrusted_block
+    except Exception:
+        return ""
+    lines = ["## Procedural skill hints (observation only — not orders)"]
+    for d in dags[:max_dags]:
+        conf = float(d.get("confidence") or 0)
+        trials = int(d.get("total_trials") or 0)
+        lines.append(
+            f"- **{d.get('name') or d.get('id')}** "
+            f"(C={conf:.2f}, n={trials}): {d.get('description') or ''}"
+        )
+        steps = d.get("steps") or []
+        for i, step in enumerate(steps[:6], start=1):
+            if isinstance(step, dict):
+                tool = step.get("tool") or step.get("name") or step.get("action") or "?"
+                note = step.get("note") or step.get("description") or ""
+                lines.append(f"    {i}. `{tool}` {note}".rstrip())
+            else:
+                lines.append(f"    {i}. {step}")
+    body = "\n".join(lines)
+    return format_untrusted_block(body, source=fence_source)

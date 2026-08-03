@@ -570,7 +570,7 @@ def _episode_fts(
                 JOIN episodes e ON e.rowid = episodes_fts.rowid
                 WHERE episodes_fts MATCH ?
                   AND e.tenant_id = ?
-                  AND e.tier IN ('recall', 'episodic')
+                  AND e.tier IN ('working', 'recall', 'episodic')
                 ORDER BY rank
                 LIMIT ?
                 """,
@@ -615,7 +615,7 @@ def _episode_fts(
             SELECT e.id, e.tier, e.user_text, e.assistant_text
             FROM episodes e
             WHERE e.tenant_id = ?
-              AND e.tier IN ('recall', 'episodic')
+              AND e.tier IN ('working', 'recall', 'episodic')
               AND ({clauses})
             ORDER BY e.created_at DESC
             LIMIT ?
@@ -702,13 +702,11 @@ def _episode_dense(
             return []
     except Exception:
         return []
-    # Search both recall (promoted) and episodic (fresh post-turn writes).
-    # Searching only tier=recall was the main "semantic amnesia" footgun:
-    # dual_write defaults to tier=episodic, so new memories never dense-hit.
+    # Search working + episodic + recall so fresh turns and active buffer hit.
     results = vector_engine.search(
         qvec,
         tenant_id=tenant_id,
-        tier=["recall", "episodic"],
+        tier=["working", "recall", "episodic"],
         limit=limit,
     )
     return [

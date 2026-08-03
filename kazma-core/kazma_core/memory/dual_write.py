@@ -259,6 +259,8 @@ class DualWriteMirror:
         meta = {"source": source}
         # Explicit "remember" turns go straight to recall tier so dense search
         # finds them immediately (Phase A — avoid episodic-only dense miss).
+        # Phase C: default new turns land in working (short-term buffer);
+        # post-turn promotes prior working → episodic for the session.
         effective_tier = tier
         effective_importance = int(importance)
         ut_low = (user_text or "").strip().lower()
@@ -276,6 +278,11 @@ class DualWriteMirror:
             effective_tier = "recall"
             effective_importance = max(effective_importance, 3)
             meta["promote_reason"] = "explicit_remember"
+        elif tier == "episodic":
+            # Default post-turn path uses tier=episodic — promote to working
+            # buffer so active-thread recall prefers the current session.
+            effective_tier = "working"
+            meta["promote_reason"] = "working_buffer"
         try:
             with self._lock:
                 self._primary.execute(

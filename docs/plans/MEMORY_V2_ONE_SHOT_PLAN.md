@@ -196,11 +196,12 @@ dashboard UX pass (B4.2); API/explain flag is live.
 
 ### Phase C exit criteria
 
-- [ ] Procedural hints appear when relevant  
-- [ ] Entity merge UI works  
-- [ ] Nightly reconsolidation runnable  
-- [ ] Working tier wired  
+- [x] Procedural hints appear when relevant  
+- [x] Entity merge UI works  
+- [x] Nightly reconsolidation runnable  
+- [x] Working tier wired  
 
+**Shipped 2026-08-03.**
 ---
 
 ## Sprint 4 — Dashboard Memory & Graph UX overhaul
@@ -291,11 +292,12 @@ Dashboard → Memory (single section)
 
 ### Phase Dashboard exit criteria
 
-- [ ] No V1-only KPI labels  
-- [ ] Probe shows real recall  
-- [ ] Queue failures visible  
-- [ ] Graph + beliefs list stay in sync  
+- [x] No V1-only KPI labels  
+- [x] Probe shows real recall  
+- [x] Queue failures visible  
+- [x] Graph + beliefs list stay in sync  
 
+**Shipped 2026-08-03** (core DUI items; LOD/a11y polish optional later).
 ---
 
 ## Sprint 5 — Phase D: Scale backends + **Web UI configuration**
@@ -436,12 +438,14 @@ memory:
 
 ### Phase D exit criteria
 
-- [ ] User can switch Local → OpenAI-compatible embeddings from UI without editing yaml  
-- [ ] User can point vectors at pgvector/Qdrant from UI  
-- [ ] Test connection works  
-- [ ] Rebuild embeddings progress visible  
-- [ ] Chat still works if remote down (failover)  
+- [x] User can switch Local → OpenAI-compatible embeddings from UI without editing yaml  
+- [x] User can point vectors at pgvector/Qdrant from UI  
+- [x] Test connection works  
+- [x] Rebuild embeddings progress visible  
+- [x] Chat still works if remote down (failover)  
 
+**Shipped 2026-08-03.** Remote pgvector/Qdrant are config + connectivity probes;
+full remote write path for multi-replica remains scale-out follow-up.
 ---
 
 ## Sprint 6 — Eval harness & continuous quality

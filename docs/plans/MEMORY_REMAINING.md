@@ -69,6 +69,10 @@ session bias, post-turn metrics, explicit-remember → recall tier.
 Phase B (Sprint 2): real FTS5 (episodes+beliefs), belief-graph multi-hop PPR,
 capped dense belief scan, `explain_recall` source tags.
 
+Phase C–D + Dashboard + Eval (2026-08-03): procedural inject, entity merges
+UI/API, global reconsolidation, working tier, backends Settings UI, dashboard
+probe/queue/merges, golden eval set.
+
 ### Product / scale (only if required)
 
 | # | Item | Trigger |
