@@ -240,6 +240,22 @@ def create_research_router() -> APIRouter:
             logger.exception("[research] get session failed")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
+    @router.post("/api/research/sessions/{session_id}/cancel")
+    async def cancel_research_session(session_id: str) -> JSONResponse:
+        """Cancel a running deep-research session (best-effort)."""
+        try:
+            from kazma_core.tools.research_session import cancel_session, get_session
+
+            if get_session(session_id) is None:
+                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            sess = cancel_session(session_id)
+            return JSONResponse(
+                {"ok": True, "session": sess.to_dict() if sess else None}
+            )
+        except Exception as exc:
+            logger.exception("[research] cancel session failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
     @router.get("/api/research/eval")
     async def eval_research_report(
         path: str = "",

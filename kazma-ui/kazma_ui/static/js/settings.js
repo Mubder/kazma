@@ -72,6 +72,8 @@ function settingsApp() {
         memoryBackendsGraphCap: { detail: '' },
         memoryMergeKb: true,
         memoryPromoteKb: true,
+        memorySmartSearch: false,
+        memoryExplainRecall: false,
         memoryNeo4jStatus: '',
         memoryNeo4jOk: false,
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
@@ -326,6 +328,8 @@ function settingsApp() {
                     if (cfg) {
                         if (cfg.merge_knowledge_into_chat != null) this.memoryMergeKb = !!cfg.merge_knowledge_into_chat;
                         if (cfg.promote_kb_to_episodes != null) this.memoryPromoteKb = !!cfg.promote_kb_to_episodes;
+                        if (cfg.smart_search != null) this.memorySmartSearch = !!cfg.smart_search;
+                        if (cfg.explain_recall != null) this.memoryExplainRecall = !!cfg.explain_recall;
                     }
                 } catch (e) { /* optional */ }
 
@@ -726,9 +730,11 @@ function settingsApp() {
                     body: JSON.stringify({
                         merge_knowledge_into_chat: !!this.memoryMergeKb,
                         promote_kb_to_episodes: !!this.memoryPromoteKb,
+                        smart_search: !!this.memorySmartSearch,
+                        explain_recall: !!this.memoryExplainRecall,
                     }),
                 });
-                showToast('Knowledge merge settings saved', 'success');
+                showToast('Memory / Knowledge settings saved', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
             }

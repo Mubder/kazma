@@ -305,6 +305,32 @@ def register_direct_routes(self: Any) -> None:
                 "summary": {"memory": 0, "knowledge": 0, "total": 0},
             }
 
+    @self.app.post("/api/memory/v2/eval/golden")
+    async def _memory_v2_eval_golden(request: Request):
+        """Run the in-repo golden memory cases (no live LLM; seeds DB fixtures).
+
+        Body optional: ``{"include_optional": false}``.
+        """
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+        include_optional = bool((body or {}).get("include_optional", False))
+        try:
+            from kazma_core.memory.eval_golden import run_golden_eval
+
+            return run_golden_eval(include_optional=include_optional)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": str(exc)[:400],
+                "passed": 0,
+                "failed": 0,
+                "total": 0,
+                "cases": [],
+            }
+
     @self.app.post("/api/memory/v2/probe")
     async def _memory_v2_probe(request: Request):
         """Live recall dry-run for the dashboard probe panel."""
@@ -880,12 +906,21 @@ def register_direct_routes(self: Any) -> None:
     # ── Phase D: Memory backends Settings API ─────────────────────────
     @self.app.get("/api/settings/memory/merge-kb")
     async def _settings_memory_merge_kb_get():
+        from kazma_core.config_store import get_config_store
         from kazma_core.memory.config import read_memory_cfg
 
         v2 = (read_memory_cfg() or {}).get("v2") or {}
+        # Knowledge smart search lives under knowledge.* (ConfigStore)
+        smart = False
+        try:
+            smart = bool(get_config_store().get("knowledge.smart_search") or False)
+        except Exception:
+            smart = False
         return {
             "merge_knowledge_into_chat": bool(v2.get("merge_knowledge_into_chat", True)),
             "promote_kb_to_episodes": bool(v2.get("promote_kb_to_episodes", True)),
+            "explain_recall": bool(v2.get("explain_recall", False)),
+            "smart_search": smart,
         }
 
     @self.app.put("/api/settings/memory/merge-kb")
@@ -914,6 +949,22 @@ def register_direct_routes(self: Any) -> None:
                         "memory.v2.promote_kb_to_episodes",
                         bool(body["promote_kb_to_episodes"]),
                         "memory",
+                    )
+                )
+            if "explain_recall" in (body or {}):
+                items.append(
+                    (
+                        "memory.v2.explain_recall",
+                        bool(body["explain_recall"]),
+                        "memory",
+                    )
+                )
+            if "smart_search" in (body or {}):
+                items.append(
+                    (
+                        "knowledge.smart_search",
+                        bool(body["smart_search"]),
+                        "knowledge",
                     )
                 )
             if items and hasattr(store, "batch_set"):

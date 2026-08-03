@@ -209,8 +209,10 @@ class ProgressUpdate:
     discovered: int = 0
     fetched: int = 0
     ingested: int = 0        # chunks written (after dedup)
-    skipped: int = 0         # chunks skipped (dedup)
+    skipped: int = 0         # chunks skipped (dedup / unchanged pages)
     failed: int = 0          # pages that failed
+    pages_unchanged: int = 0  # smart re-index full-page skips
+    pruned_urls: int = 0      # gone URLs removed at end of site crawl
     current_url: str = ""
     message: str = ""
     errors: list[str] = field(default_factory=list)  # per-page failure reasons
@@ -1509,6 +1511,8 @@ async def ingest_site(
         phase="done",
         discovered=len(pages), fetched=fetched, ingested=chunks_new,
         skipped=chunks_skipped, failed=failed,
+        pages_unchanged=pages_unchanged,
+        pruned_urls=pruned_urls,
         message=done_msg,
         started_at=started,
     )

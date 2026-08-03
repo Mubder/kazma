@@ -170,6 +170,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "research.start_done": {"en": "Research complete", "ar": "اكتمل البحث"},
     "research.start_error": {"en": "Research failed", "ar": "فشل البحث"},
     "research.view_report": {"en": "View report", "ar": "عرض التقرير"},
+    "research.cancel": {"en": "Cancel", "ar": "إلغاء"},
+    "research.cancelled": {"en": "Research cancelled", "ar": "أُلغي البحث"},
     "replay.about_title": {"en": "🕰️ Time Travel Replay", "ar": "🕰️ السفر عبر الزمن"},
     "replay.about_desc": {"en": "Kazma captures a snapshot of the agent's state after every supervisor iteration. This lets you:", "ar": "يلتقط Kazma لقطة من حالة الوكيل بعد كل تكرار للإشراف. يمكنك من:"},
     "replay.about_browse": {"en": "<strong>Browse</strong> the timeline of every decision point in a conversation.", "ar": "<strong>تصفّح</strong> الجدول الزمني لكل نقطة قرار في المحادثة."},
@@ -1667,6 +1669,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.memory_kb_promote": {
         "en": "Promote top KB hits into episodic memory (soft merge for later recall)",
         "ar": "ترقية أفضل نتائج المكتبة إلى الذاكرة العرضية (دمج مرن للاستدعاء لاحقًا)",
+    },
+    "settings.memory_kb_smart_search": {
+        "en": "Smart Knowledge search — inject from all active libraries on technical questions",
+        "ar": "بحث معرفة ذكي — حقن من كل المكتبات النشطة عند الأسئلة التقنية",
+    },
+    "settings.memory_kb_smart_search_hint": {
+        "en": "Smart search expands inject beyond per-library auto-inject when the message looks like docs/API. Explain-recall tags hits (fts5/dense/ppr) for the Dashboard probe and debug.",
+        "ar": "البحث الذكي يوسّع الحقن خارج auto-inject لكل مكتبة عندما تبدو الرسالة وثائق/API. شرح الاستدعاء يوسِم المصادر (fts5/dense/ppr) لمسبار لوحة التحكم.",
+    },
+    "settings.memory_explain_recall": {
+        "en": "Explain recall — tag hits with retrieval channels (fts5 / dense / ppr / session)",
+        "ar": "شرح الاستدعاء — وسم النتائج بقنوات الاسترجاع (fts5 / dense / ppr / session)",
     },
     "settings.memory_backends_title": {"en": "Memory backends", "ar": "خلفيات الذاكرة"},
     "settings.memory_backends_hint": {

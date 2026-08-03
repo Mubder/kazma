@@ -147,7 +147,18 @@ def test_session_router_import():
     assert "/api/research/sessions" in paths
     assert "/api/research/sessions/{session_id}" in paths
     assert "/api/research/sessions/{session_id}/stream" in paths
+    assert "/api/research/sessions/{session_id}/cancel" in paths
     assert "/api/research/eval" in paths
+
+
+def test_cancel_session(session_db):
+    rs = session_db
+    s = rs.create_session("cancel me")
+    rs.update_session(s.id, status="running", stage="plan", message="Planning")
+    out = rs.cancel_session(s.id)
+    assert out is not None
+    assert out.status == "cancelled"
+    assert out.stage == "cancelled"
 
 
 def test_evaluate_report_path(tmp_path: Path):

@@ -28,6 +28,37 @@
       "query": "where does the user company sit",
       "expect_contains": ["paris", "acme"],
       "match_any": true
+    },
+    {
+      "id": "multi_hop_three",
+      "setup_beliefs": [
+        {"subject": "user", "predicate": "reports_to", "object": "Jordan Lee"},
+        {"subject": "Jordan Lee", "predicate": "manages", "object": "Platform Team"},
+        {"subject": "Platform Team", "predicate": "owns", "object": "Kazma Gateway"}
+      ],
+      "query": "what product does my manager team own",
+      "expect_contains": ["gateway", "kazma", "platform"],
+      "match_any": true
+    },
+    {
+      "id": "preference_stack",
+      "setup_beliefs": [
+        {"subject": "user", "predicate": "prefers", "object": "dark mode"},
+        {"subject": "user", "predicate": "timezone", "object": "Asia/Riyadh"}
+      ],
+      "query": "what is my timezone preference",
+      "expect_contains": ["riyadh", "asia"],
+      "match_any": true
+    },
+    {
+      "id": "project_name",
+      "setup": [
+        {"role": "user", "content": "Remember that Project Orion is our Q4 launch codename."}
+      ],
+      "query": "what is Project Orion",
+      "expect_contains": ["orion", "q4", "launch"],
+      "match_any": true,
+      "optional": true
     }
   ]
 }

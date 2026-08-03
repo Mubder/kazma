@@ -95,6 +95,7 @@ def compute_local_ppr(
     max_iter: int = 15,
     max_nodes: int = 200,
     tol: float = 1e-5,
+    hop_radius: int = 3,
 ) -> dict[str, float]:
     """Local Ego-Graph Personalized PageRank via power iteration.
 
@@ -105,6 +106,7 @@ def compute_local_ppr(
         max_iter: Maximum power-iteration steps.
         max_nodes: Hard cap on subgraph size.
         tol: L1 convergence tolerance.
+        hop_radius: BFS neighborhood depth (default 3 for multi-hop beliefs).
 
     Returns:
         ``{node_id: stationary_probability}`` over the ego-graph. Seeds
@@ -114,9 +116,10 @@ def compute_local_ppr(
     if not seed_node_ids:
         return {}
 
+    hop = max(1, min(5, int(hop_radius or 3)))
     # Build the bounded ego-graph first
     nodes, edges = build_ego_graph(
-        graph_edges, seed_node_ids, max_nodes=max_nodes, hop_radius=2
+        graph_edges, seed_node_ids, max_nodes=max_nodes, hop_radius=hop
     )
     if not nodes:
         # Seeds aren't in the graph at all — return uniform on seeds

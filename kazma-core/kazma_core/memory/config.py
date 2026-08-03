@@ -101,6 +101,8 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "ppr_max_iter": 15,
         "ppr_max_nodes": 200,
         "ppr_seed_k": 10,
+        # BFS neighborhood for belief multi-hop (HippoRAG-style; 3 captures A→B→C)
+        "ppr_hop_radius": 3,
         # LLM extraction cost-gate. The micro_consolidation queue task runs
         # the LLM belief extractor; these knobs throttle it so it doesn't
         # fire on every single turn (one extra LLM call per turn is costly

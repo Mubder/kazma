@@ -23,6 +23,7 @@ __all__ = [
     "list_sessions",
     "update_session",
     "start_deep_research",
+    "cancel_session",
     "subscribe_progress",
     "unsubscribe_progress",
 ]
@@ -326,6 +327,38 @@ def unsubscribe_progress(session_id: str, q: asyncio.Queue) -> None:
         del _SUBS[session_id]
 
 
+def cancel_session(session_id: str) -> ResearchSession | None:
+    """Cancel a running session (best-effort). Returns updated session or None."""
+    sess = get_session(session_id)
+    if not sess:
+        return None
+    if sess.status in ("done", "error", "cancelled"):
+        return sess
+    task = _RUNNING.get(session_id)
+    if task is not None and not task.done():
+        task.cancel()
+    update_session(
+        session_id,
+        status="cancelled",
+        stage="cancelled",
+        message="Cancelled by user",
+        error="",
+    )
+    for q in list(_SUBS.get(session_id, [])):
+        try:
+            q.put_nowait(
+                {
+                    "type": "done",
+                    "session_id": session_id,
+                    "status": "cancelled",
+                    "session": (get_session(session_id) or sess).to_dict(),
+                }
+            )
+        except Exception:
+            pass
+    return get_session(session_id)
+
+
 async def start_deep_research(
     topic: str,
     *,
@@ -465,14 +498,28 @@ async def start_deep_research(
                     )
                 except Exception:
                     pass
+        except asyncio.CancelledError:
+            cur = get_session(sess.id)
+            if cur and cur.status != "cancelled":
+                update_session(
+                    sess.id,
+                    status="cancelled",
+                    stage="cancelled",
+                    message="Cancelled",
+                )
+            raise
         except Exception as exc:
             logger.exception("[research_session] pipeline failed")
+            # Friendly short message for UI; full detail in error
+            brief = str(exc)[:200]
+            if "Error:" in brief:
+                brief = brief.split("Error:", 1)[-1].strip()[:200]
             update_session(
                 sess.id,
                 status="error",
                 stage="error",
                 error=str(exc)[:2000],
-                message=str(exc)[:200],
+                message=f"Failed: {brief}" if brief else "Pipeline failed",
             )
             err_sess = get_session(sess.id)
             for q in list(_SUBS.get(sess.id, [])):

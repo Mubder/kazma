@@ -623,7 +623,7 @@
             </div>
         </div>
 
-        <!-- Knowledge merge into chat (left-aligned toggles) -->
+        <!-- Knowledge merge + recall UX (left-aligned toggles) -->
         <div class="settings-group" id="memory-kb-merge-section" style="text-align:left;">
             <h3 style="justify-content:flex-start;">{{ t('settings.memory_kb_merge_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;text-align:left;">
@@ -638,7 +638,18 @@
                     <input type="checkbox" id="mem-promote-kb" x-model="memoryPromoteKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
                     <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_promote') }}</span>
                 </label>
+                <label for="mem-smart-search" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:left;">
+                    <input type="checkbox" id="mem-smart-search" x-model="memorySmartSearch" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
+                    <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_smart_search') }}</span>
+                </label>
+                <label for="mem-explain-recall" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:left;">
+                    <input type="checkbox" id="mem-explain-recall" x-model="memoryExplainRecall" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
+                    <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_explain_recall') }}</span>
+                </label>
             </div>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin-top:10px;text-align:left;">
+                {{ t('settings.memory_kb_smart_search_hint') }}
+            </p>
         </div>
 
         <!-- Memory backends -->

@@ -175,20 +175,25 @@ function knowledgePage() {
             const discovered = j.discovered || 0;
             const ingested = j.ingested || 0;
             const failed = j.failed || 0;
+            const unchanged = j.pages_unchanged || 0;
+            const pruned = j.pruned_urls || 0;
+            const extra =
+              (unchanged ? " · " + unchanged + " unchanged" : "") +
+              (pruned ? " · " + pruned + " pruned" : "");
             if (ingested === 0 && fetched === 0) {
               toast(S.crawl_finished_empty || "Crawl finished but no pages were ingested.", "warning");
             } else if (failed > 0) {
               toast(
                 (S.crawl_finished_partial || "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks · {failed} failed")
                   .replace("{fetched}", fetched).replace("{discovered}", discovered)
-                  .replace("{ingested}", ingested).replace("{failed}", failed),
+                  .replace("{ingested}", ingested).replace("{failed}", failed) + extra,
                 "warning",
               );
             } else {
               toast(
                 (S.crawl_finished_ok || "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks")
                   .replace("{fetched}", fetched).replace("{discovered}", discovered)
-                  .replace("{ingested}", ingested),
+                  .replace("{ingested}", ingested) + extra,
                 "success",
               );
             }

@@ -933,7 +933,7 @@ def _belief_graph_ppr(
         from kazma_core.memory.ppr import compute_local_ppr
     except Exception:
         return {}
-    alpha, max_iter, max_nodes = 0.15, 15, 200
+    alpha, max_iter, max_nodes, hop_radius = 0.15, 15, 200, 3
     try:
         from kazma_core.memory.config import read_memory_cfg
 
@@ -941,6 +941,7 @@ def _belief_graph_ppr(
         alpha = float(v2.get("ppr_alpha", 0.15))
         max_iter = int(v2.get("ppr_max_iter", 15))
         max_nodes = int(v2.get("ppr_max_nodes", 200))
+        hop_radius = int(v2.get("ppr_hop_radius", 3))
     except Exception:
         pass
 
@@ -948,14 +949,14 @@ def _belief_graph_ppr(
     try:
         rows = conn.execute(
             """
-            SELECT id, subject, predicate, object
+            SELECT id, subject, predicate, object, confidence, structural_importance
             FROM beliefs
             WHERE valid_until IS NULL AND invalidated_at IS NULL
               AND tenant_id = ?
             ORDER BY structural_importance DESC, confidence DESC
             LIMIT ?
             """,
-            (tenant_id, max(max_nodes * 3, 300)),
+            (tenant_id, max(max_nodes * 4, 400)),
         ).fetchall()
     except Exception:
         return {}
@@ -975,9 +976,16 @@ def _belief_graph_ppr(
         if not sub or not obj:
             continue
         bid = r["id"]
+        # Weight edges by confidence × importance (stronger multi-hop paths)
+        try:
+            conf = float(r["confidence"] or 0.5)
+            imp = float(r["structural_importance"] or 1.0)
+            w = max(0.15, min(2.0, conf * (0.5 + imp / 5.0)))
+        except Exception:
+            w = 1.0
         # Directed subject→object (strong) + reverse (weaker) for undirected walk
-        edges.append((sub, obj, 1.0))
-        edges.append((obj, sub, 0.5))
+        edges.append((sub, obj, w))
+        edges.append((obj, sub, w * 0.5))
         node_set.add(sub)
         node_set.add(obj)
         entity_to_beliefs.setdefault(sub, []).append(bid)
@@ -1029,6 +1037,7 @@ def _belief_graph_ppr(
             alpha=alpha,
             max_iter=max_iter,
             max_nodes=max_nodes,
+            hop_radius=hop_radius,
         )
     except Exception:
         return {}
@@ -1037,8 +1046,8 @@ def _belief_graph_ppr(
     for entity, mass in entity_scores.items():
         for bid in entity_to_beliefs.get(entity, []):
             prev = belief_scores.get(bid, 0.0)
-            if mass > prev:
-                belief_scores[bid] = float(mass)
+            # Accumulate mass across multi-entity beliefs (richer multi-hop)
+            belief_scores[bid] = prev + float(mass)
     return belief_scores
 
 

@@ -66,6 +66,32 @@
       if (name === 'archived') this.loadArchived();
     },
 
+    cancelDeep: function () {
+      if (!liveSessionId) {
+        toast('No running session', 'info');
+        return;
+      }
+      var id = liveSessionId;
+      fetch('/api/research/sessions/' + encodeURIComponent(id) + '/cancel', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) {
+            toast(data.error, 'error');
+            return;
+          }
+          toast(i18n('research_cancelled') || 'Research cancelled', 'info');
+          if (data.session) applyLiveSession(data.session);
+          closeLiveStream();
+          var cancelBtn = $('research-cancel-btn');
+          if (cancelBtn) cancelBtn.style.display = 'none';
+          window.KazmaResearch.load();
+        })
+        .catch(function () { toast('Cancel failed', 'error'); });
+    },
+
     startDeep: function () {
       var topicEl = $('research-topic');
       var topic = topicEl ? (topicEl.value || '').trim() : '';
@@ -608,11 +634,22 @@
     var statusEl = $('research-live-status');
     var stageEl = $('research-live-stage');
     var msgEl = $('research-live-message');
+    var errEl = $('research-live-error');
     var srcEl = $('research-live-sources');
     var logEl = $('research-live-log');
+    var cancelBtn = $('research-cancel-btn');
     if (statusEl) statusEl.textContent = s.status || '—';
     if (stageEl) stageEl.textContent = s.stage ? ('· ' + s.stage) : '';
     if (msgEl) msgEl.textContent = s.message || '';
+    if (errEl) {
+      if (s.status === 'error' && (s.error || s.message)) {
+        errEl.style.display = 'block';
+        errEl.textContent = s.error || s.message;
+      } else {
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+      }
+    }
     if (srcEl) {
       srcEl.textContent = (s.sources != null && s.sources > 0)
         ? (s.sources + ' sources')
@@ -622,7 +659,11 @@
       logEl.textContent = s.log.slice(-40).join('\n');
       logEl.scrollTop = logEl.scrollHeight;
     }
-    if (s.status === 'done' || s.status === 'error') {
+    if (cancelBtn) {
+      cancelBtn.style.display =
+        (s.status === 'running' || s.status === 'pending') ? '' : 'none';
+    }
+    if (s.status === 'done' || s.status === 'error' || s.status === 'cancelled') {
       var actions = $('research-live-actions');
       if (actions) {
         actions.style.display = 'flex';
@@ -637,7 +678,14 @@
         actions.innerHTML = html;
       }
       if (s.status === 'done') toast(i18n('research_start_done'), 'success');
-      if (s.status === 'error') toast(i18n('research_start_error') + (s.error ? ': ' + s.error : ''), 'error');
+      if (s.status === 'error') {
+        toast(
+          (i18n('research_start_error') || 'Research failed') +
+            (s.error ? ': ' + String(s.error).slice(0, 120) : ''),
+          'error',
+        );
+      }
+      if (s.status === 'cancelled') toast(i18n('research_cancelled') || 'Cancelled', 'info');
     }
   }
 

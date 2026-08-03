@@ -45,7 +45,11 @@
           <span id="research-live-sources" style="font-size:0.8rem;color:var(--text-muted);"></span>
         </div>
         <div id="research-live-message" style="font-size:0.85rem;color:var(--text-primary);margin-bottom:6px;"></div>
+        <div id="research-live-error" style="display:none;font-size:0.82rem;color:var(--danger,#e53935);margin-bottom:6px;"></div>
         <div id="research-live-log" style="max-height:140px;overflow-y:auto;font-size:0.78rem;font-family:ui-monospace,monospace;color:var(--text-muted);background:var(--surface-2);padding:8px 10px;border-radius:6px;line-height:1.45;"></div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <button type="button" class="btn btn-secondary btn-sm" id="research-cancel-btn" style="display:none;" onclick="KazmaResearch.cancelDeep()">{{ t('research.cancel') }}</button>
+        </div>
         <div id="research-live-actions" style="display:none;margin-top:8px;gap:8px;"></div>
       </div>
     </div>
@@ -150,6 +154,7 @@ window.KAZMA_I18N = Object.assign({}, window.KAZMA_I18N || {}, {
   research_start_done: "{{ t('research.start_done') }}",
   research_start_error: "{{ t('research.start_error') }}",
   research_view_report: "{{ t('research.view_report') }}",
+  research_cancelled: "{{ t('research.cancelled') }}",
 });
 </script>
 <script src="/static/js/research.js?v={{ js_version() }}"></script>

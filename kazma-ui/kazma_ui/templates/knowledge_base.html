@@ -108,6 +108,9 @@
         discovered=<span x-text="activeJob.discovered || 0"></span> ·
         fetched=<span x-text="activeJob.fetched || 0"></span> ·
         ingested=<span x-text="activeJob.ingested || 0"></span> ·
+        skipped=<span x-text="activeJob.skipped || 0"></span> ·
+        unchanged=<span x-text="activeJob.pages_unchanged || 0"></span> ·
+        pruned=<span x-text="activeJob.pruned_urls || 0"></span> ·
         failed=<span x-text="activeJob.failed || 0"></span>
       </div>
       <div x-show="activeJob.current_url" style="margin-top:4px;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;">
