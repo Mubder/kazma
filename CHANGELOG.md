@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Docs: Recent features operator guide (2026-08-03)
+
+- **Guide:** `docs/docs/guide/recent-features.md` — tour of deep research
+  sessions, proxy coverage, KB smart re-index, memory explain panel, Settings
+  toggles, API cheat sheet, and recipes.
+- Cross-links from intro, Web UI, web-research, knowledge-library, memory
+  best-path, smoke matrix; sidebar entries for knowledge-library + memory-best-path.
+
 ## Unreleased — Memory polish: i18n, graph play scrub, best-path guide (2026-08-03)
 
 - **i18n (en/ar)** for Knowledge+chat merge and memory backends Settings, plus

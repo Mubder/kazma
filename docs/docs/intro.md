@@ -27,6 +27,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Ingest documentation into a knowledge corpus | [Knowledge Library](guide/knowledge-library) |
 | Run V2 memory + KB inject the recommended way | [Memory best path](guide/memory-best-path) · [Memory & RAG](guide/memory-and-rag) |
 | Web search / scrape / research | [Web research](guide/web-research) |
+| **New features tour** (research sessions, KB re-index, explain panel, proxy) | [Recent features](guide/recent-features) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 
 ## Documentation map

@@ -33,9 +33,11 @@ Chat turn
 1. **Personal memory** — defaults; chat “Remember my favorite color is teal.” then “What color?”  
 2. **Docs** — ingest Knowledge Library; keep **Inject Knowledge into chat** on (Settings → **Memory**).  
 3. **Federated search** — Dashboard → Search all knowledge → **Federated** (`MEM` / `KB` chips).  
-4. **Smoke** — `pwsh -File scripts/memory_smoke.ps1`  
-5. **Optional Neo4j** — only if you want graph dual-write (below).  
-6. **Scale** — multi-replica only: configure backends; do **not** drop SQLite until a real cutover plan ([#76](https://github.com/Mubder/kazma/issues/76)).
+4. **Explain recall** (optional) — Settings → Memory → **Explain recall**; chat workbench shows **Memory context** with channel chips.  
+5. **Smart Knowledge search** (optional) — expand inject to all active libs on technical questions.  
+6. **Smoke** — `pwsh -File scripts/memory_smoke.ps1` · [Smoke matrix](../ops/smoke-matrix) · [Recent features](./recent-features)  
+7. **Optional Neo4j** — only if you want graph dual-write (below).  
+8. **Scale** — multi-replica only: configure backends; do **not** drop SQLite until a real cutover plan ([#76](https://github.com/Mubder/kazma/issues/76)).
 
 ## Settings that matter
 

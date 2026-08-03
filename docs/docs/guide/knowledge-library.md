@@ -9,6 +9,8 @@ description: Ingest whole documentation sites once, then have the agent reason o
 
 A **Knowledge Library** is a named, managed corpus of ingested documentation — for example, the Meta WhatsApp Cloud API. You point Kazma at a doc root once; it crawls the whole tree, chunks it hierarchy-aware, embeds it, and indexes it. The agent then **reasons over** the corpus and **cites sources** when you ask questions.
 
+**Operator tour (smart re-index, inject, Settings toggles):** [Recent features](./recent-features#3-knowledge-library-hardening).
+
 This is RAG (Retrieval-Augmented Generation) over a curated, updatable corpus — not live scraping, and not fine-tuning. Doc content lives in its own per-library namespace, completely isolated from chat memory.
 
 > **Arabic brand:** product name is **Kazma** / **كاظمه** (or **كاظمة**). Never **كازما**.

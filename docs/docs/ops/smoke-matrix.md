@@ -85,4 +85,4 @@ Check off each row; note environment (local / Docker / SearXNG / proxy).
 | Tester | |
 | Notes | |
 
-Related: [Production checklist](./production-checklist), [Web research](../guide/web-research), [Knowledge library](../guide/knowledge-library), [Diagnosis map](./diagnosis-map).
+Related: [Recent features guide](../guide/recent-features) · [Production checklist](./production-checklist) · [Web research](../guide/web-research) · [Knowledge library](../guide/knowledge-library) · [Diagnosis map](./diagnosis-map).
