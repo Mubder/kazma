@@ -65,6 +65,7 @@ _FUNCTIONAL_PREDICATES = frozenset(
         "favorite_color",
         # Weekly entitlement / quota current values (one active per service)
         "next_reset",
+        "next_reset_time",
         "weekly_reset",
         "quota_reset",
         "grok_next_reset",

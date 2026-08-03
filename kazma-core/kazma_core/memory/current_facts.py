@@ -37,6 +37,7 @@ __all__ = [
 FUNCTIONAL_CURRENT_PREDICATES = frozenset(
     {
         "next_reset",
+        "next_reset_time",
         "weekly_reset",
         "quota_reset",
         "grok_next_reset",
@@ -52,6 +53,7 @@ FUNCTIONAL_CURRENT_PREDICATES = frozenset(
 
 _FUNCTIONAL_SUFFIXES = (
     "_next_reset",
+    "_next_reset_time",
     "_weekly_reset",
     "_quota_reset",
     "_reset_at",
