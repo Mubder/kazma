@@ -610,25 +610,25 @@
 
         <!-- Knowledge merge into chat -->
         <div class="settings-group" id="memory-kb-merge-section">
-            <h3>Knowledge + chat memory</h3>
+            <h3>{{ t('settings.memory_kb_merge_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
-                Merge Knowledge Library into the chat path (labeled inject). Stores stay separate; hits are fenced as untrusted docs.
+                {{ t('settings.memory_kb_merge_hint') }}
             </p>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;">
                 <input type="checkbox" id="mem-merge-kb" x-model="memoryMergeKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);">
-                <label for="mem-merge-kb">Inject Knowledge Library into every chat turn (with personal memory)</label>
+                <label for="mem-merge-kb">{{ t('settings.memory_kb_inject') }}</label>
             </div>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;">
                 <input type="checkbox" id="mem-promote-kb" x-model="memoryPromoteKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);">
-                <label for="mem-promote-kb">Promote top KB hits into episodic memory (soft merge for later recall)</label>
+                <label for="mem-promote-kb">{{ t('settings.memory_kb_promote') }}</label>
             </div>
         </div>
 
         <!-- Phase D: Memory backends -->
         <div class="settings-group" id="memory-backends-section">
-            <h3>Memory backends</h3>
+            <h3>{{ t('settings.memory_backends_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
-                Default is local SQLite + local embeddings. Switch to remote embedders or vector DBs without editing YAML.
+                {{ t('settings.memory_backends_hint') }}
             </p>
             <div x-show="memoryBackendsCapability.vector_status"
                  style="margin-bottom:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);font-size:0.78rem;"
@@ -639,34 +639,34 @@
               <span style="color:var(--text-muted)" x-text="' — ' + (memoryBackendsCapability.vector_status_detail || '')"></span>
             </div>
             <div class="form-group">
-                <label>Mode</label>
+                <label>{{ t('settings.memory_mode') }}</label>
                 <select class="form-select" x-model="memoryBackends.mode">
-                    <option value="local">Local only</option>
-                    <option value="hybrid">Hybrid</option>
-                    <option value="remote">Remote-first</option>
+                    <option value="local">{{ t('settings.memory_mode_local') }}</option>
+                    <option value="hybrid">{{ t('settings.memory_mode_hybrid') }}</option>
+                    <option value="remote">{{ t('settings.memory_mode_remote') }}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>Embedder provider</label>
+                <label>{{ t('settings.embedder_provider') }}</label>
                 <select class="form-select" x-model="memoryBackends.embedder.provider">
-                    <option value="local">Local (MiniLM / BGE)</option>
-                    <option value="openai_compat">OpenAI-compatible</option>
+                    <option value="local">{{ t('settings.embedder_provider_local') }}</option>
+                    <option value="openai_compat">{{ t('settings.embedder_provider_remote') }}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>Embedder model</label>
+                <label>{{ t('settings.embedder_model') }}</label>
                 <input type="text" class="form-input" x-model="memoryBackends.embedder.model" placeholder="BAAI/bge-m3">
             </div>
             <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'">
-                <label>Embedder base URL</label>
+                <label>{{ t('settings.embedder_base_url') }}</label>
                 <input type="text" class="form-input" x-model="memoryBackends.embedder.base_url" placeholder="https://…">
             </div>
             <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'">
-                <label>Embedder API key</label>
+                <label>API key</label>
                 <input type="password" class="form-input" x-model="memoryBackends.embedder.api_key" placeholder="leave blank to keep">
             </div>
             <div class="form-group">
-                <label>Vector provider</label>
+                <label>{{ t('settings.memory_vector_provider') }}</label>
                 <select class="form-select" x-model="memoryBackends.vector.provider">
                     <option value="sqlite_vec">SQLite-vec (local)</option>
                     <option value="pgvector">pgvector</option>
@@ -678,7 +678,7 @@
                 <input type="text" class="form-input" x-model="memoryBackends.vector.url" placeholder="postgresql://… or http://qdrant:6333">
             </div>
             <div class="form-group">
-                <label>Shared state (multi-replica mirror)</label>
+                <label>{{ t('settings.memory_state_provider') }}</label>
                 <select class="form-select" x-model="memoryBackends.state.provider">
                     <option value="sqlite">Local SQLite only</option>
                     <option value="postgres">Postgres dual-mirror</option>
@@ -689,7 +689,7 @@
                 <input type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
             </div>
             <div class="form-group">
-                <label>Graph store</label>
+                <label>{{ t('settings.memory_graph_provider') }}</label>
                 <select class="form-select" x-model="memoryBackends.graph.provider">
                     <option value="sqlite">Local SQLite beliefs</option>
                     <option value="neo4j">Neo4j dual-write</option>
@@ -704,21 +704,21 @@
                 <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="leave blank to keep">
             </div>
             <div class="form-group">
-                <label>Failover if remote down</label>
+                <label>{{ t('settings.memory_failover') }}</label>
                 <select class="form-select" x-model="memoryBackends.failover.on_remote_error">
-                    <option value="local">Fall back to local</option>
-                    <option value="empty">Empty results</option>
-                    <option value="raise">Surface error</option>
+                    <option value="local">{{ t('settings.memory_failover_local') }}</option>
+                    <option value="empty">{{ t('settings.memory_failover_empty') }}</option>
+                    <option value="raise">{{ t('settings.memory_failover_raise') }}</option>
                 </select>
             </div>
             <p style="font-size:0.72rem;color:var(--text-muted);margin:4px 0 8px;"
                x-text="(memoryBackendsStateCap.detail || '') + ' · ' + (memoryBackendsGraphCap.detail || '')"></p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
-                <button class="btn btn-primary" @click="saveMemoryBackends()" :disabled="memoryBackendsSaving" x-text="memoryBackendsSaving ? '…' : 'Save backends'"></button>
-                <button class="btn" @click="testMemoryEmbed()">Test embed</button>
-                <button class="btn" @click="testMemoryVector()">Test vector</button>
-                <button class="btn" @click="resetMemoryBackendsLocal()">Reset to local</button>
-                <button class="btn" @click="rebuildMemoryEmbeddings()">Rebuild embeddings…</button>
+                <button class="btn btn-primary" @click="saveMemoryBackends()" :disabled="memoryBackendsSaving" x-text="memoryBackendsSaving ? '…' : t('settings.memory_save_backends')"></button>
+                <button class="btn" @click="testMemoryEmbed()" x-text="t('settings.memory_test_embed')"></button>
+                <button class="btn" @click="testMemoryVector()" x-text="t('settings.memory_test_vector')"></button>
+                <button class="btn" @click="resetMemoryBackendsLocal()" x-text="t('settings.memory_reset_local')"></button>
+                <button class="btn" @click="rebuildMemoryEmbeddings()" x-text="t('settings.memory_rebuild')"></button>
             </div>
             <p style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;" x-text="memoryBackendsStatus"></p>
         </div>

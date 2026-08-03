@@ -2,6 +2,7 @@
 
 **Status date:** 2026-08-03  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)  
+**Best-path operator guide:** [`docs/docs/guide/memory-best-path.md`](../docs/guide/memory-best-path.md)  
 **Priority lock:** [`MEMORY_PRIORITY_NEXT.md`](MEMORY_PRIORITY_NEXT.md)
 
 Use this file when picking up memory work. Do **not** start a greenfield rewrite.

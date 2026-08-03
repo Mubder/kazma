@@ -67,10 +67,18 @@ Full execution plan: session plan / this file. Backlog SoT: `MEMORY_REMAINING.md
 | A2 Source footer on injected memory block | **Done** |
 | A4 CI memory smoke step | **Done** |
 | A3 Docs / boundary wording | **Done** |
+| A5 i18n (en/ar) memory backends + federated UI | **Done** |
+| Graph play/pause scrub + reduced-motion | **Done** |
+| Operator best-path guide | **Done** (`memory-best-path.md`) |
 
-## Still deferred (scale)
+## Trust path complete
 
-Full FTS/dense cutover of recall to Postgres · multi-region · graph animation polish
+Single-node + optional adapters + product merge of KB inject. **No further
+must-have memory work** unless a scale trigger fires.
+
+## Still deferred (scale — trigger only)
+
+Full FTS/dense cutover of recall to Postgres · multi-region · hosted embed fleet
 
 ## P3 Trigger-only
 

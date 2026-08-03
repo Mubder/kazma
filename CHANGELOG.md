@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Memory polish: i18n, graph play scrub, best-path guide (2026-08-03)
+
+- **i18n (en/ar)** for Knowledge+chat merge and memory backends Settings, plus
+  Dashboard federated search / bi-temporal labels.
+- **Graph UX:** bi-temporal **Play/Pause** scrub; respects
+  `prefers-reduced-motion` (step instead of animate).
+- **Operator guide:** `docs/docs/guide/memory-best-path.md` — recommended
+  architecture and what not to do.
+
 ## Unreleased — KB↔chat merge + Neo4j primary graph (2026-08-03)
 
 - **Knowledge into chat path:** supervisor injects labeled Knowledge Library

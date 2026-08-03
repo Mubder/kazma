@@ -240,15 +240,15 @@
       <!-- Live recall probe + federated search (memory + KB, labeled) -->
       <div style="margin-bottom:16px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">Search all knowledge</div>
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
           <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> Include Knowledge Library
+            <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> {{ t('dashboard.memory_include_kb') }}
           </label>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <input id="v2-probe-input" type="text" placeholder="What color do I like? / How does the API auth work?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
-          <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">Memory</button>
-          <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">Federated</button>
+          <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">{{ t('dashboard.memory_probe_memory') }}</button>
+          <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">{{ t('dashboard.memory_probe_federated') }}</button>
         </div>
         <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
         <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
@@ -359,12 +359,15 @@
         </div>
         <!-- Bi-Temporal Scrub + Inspect -->
         <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Bi-Temporal Scrub</div>
-          <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">Drag to see past states.</div>
-          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
-            <span id="v2g-time-label" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">Live (now)</span>
-            <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">Live</button>
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">{{ t('dashboard.memory_bitemporal') }}</div>
+          <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">{{ t('dashboard.memory_bitemporal_hint') }}</div>
+          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);" aria-label="Bi-temporal scrub">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:6px;flex-wrap:wrap;">
+            <span id="v2g-time-label" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
+            <span style="display:inline-flex;gap:4px;">
+              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="Play scrub">{{ t('dashboard.memory_play') }}</button>
+              <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
+            </span>
           </div>
           <div id="v2g-inspect" style="margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:8px;font-size:0.72rem;color:var(--text-muted);min-height:40px;">Click a node to inspect.</div>
         </div>
@@ -2254,33 +2257,76 @@
     }
   }
 
+  var _v2gPlayTimer = null;
+  var _v2gPreferReducedMotion = false;
+  try {
+    _v2gPreferReducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch (e) { _v2gPreferReducedMotion = false; }
+
+  function _v2gStopPlay() {
+    if (_v2gPlayTimer) { clearInterval(_v2gPlayTimer); _v2gPlayTimer = null; }
+    var playBtn = document.getElementById('v2g-time-play');
+    if (playBtn) playBtn.textContent = playBtn.getAttribute('data-play-label') || 'Play';
+  }
+
   function _v2gWireControls() {
     var refresh = document.getElementById('v2g-refresh');
     if (refresh) refresh.addEventListener('click', _v2gLoad);
     var search = document.getElementById('v2g-search');
     if (search) { var sto; search.addEventListener('input', function() { clearTimeout(sto); sto = setTimeout(_v2gApplyFilters, 250); }); }
-    // Time slider
+    // Time slider + play/pause scrub
     var slider = document.getElementById('v2g-time-slider');
     var label = document.getElementById('v2g-time-label');
     var liveBtn = document.getElementById('v2g-time-live');
+    var playBtn = document.getElementById('v2g-time-play');
+    if (playBtn) playBtn.setAttribute('data-play-label', playBtn.textContent || 'Play');
+    function _updateTimeLabel() {
+      if (!slider || !label) return;
+      var v = parseFloat(slider.value);
+      if (v >= 99.5) label.textContent = 'Live (now)';
+      else if (_v2gTimeRange.max > 0) {
+        var ts = _v2gTimeRange.min + (v / 100) * (_v2gTimeRange.max - _v2gTimeRange.min);
+        label.textContent = new Date(ts * 1000).toLocaleDateString();
+      } else label.textContent = '—';
+    }
     if (slider) {
-      slider.addEventListener('input', function() {
-        var v = parseFloat(slider.value);
-        if (label) {
-          if (v >= 99.5) label.textContent = 'Live (now)';
-          else if (_v2gTimeRange.max > 0) {
-            var ts = _v2gTimeRange.min + (v / 100) * (_v2gTimeRange.max - _v2gTimeRange.min);
-            label.textContent = new Date(ts * 1000).toLocaleDateString();
-          } else label.textContent = '—';
-        }
-      });
-      slider.addEventListener('change', _v2gLoad);
+      slider.addEventListener('input', _updateTimeLabel);
+      slider.addEventListener('change', function() { _v2gStopPlay(); _v2gLoad(); });
     }
     if (liveBtn) liveBtn.addEventListener('click', function() {
+      _v2gStopPlay();
       if (slider) slider.value = 100;
       if (label) label.textContent = 'Live (now)';
       _v2gLoad();
     });
+    if (playBtn && slider) {
+      playBtn.addEventListener('click', function() {
+        if (_v2gPreferReducedMotion) {
+          // One-step instead of animation when user prefers reduced motion
+          var v = parseFloat(slider.value);
+          slider.value = String(Math.min(100, v + 10));
+          _updateTimeLabel();
+          _v2gLoad();
+          return;
+        }
+        if (_v2gPlayTimer) {
+          _v2gStopPlay();
+          return;
+        }
+        playBtn.textContent = playBtn.getAttribute('data-pause-label') || 'Pause';
+        if (parseFloat(slider.value) >= 99) slider.value = '0';
+        _v2gPlayTimer = setInterval(function() {
+          var cur = parseFloat(slider.value);
+          if (cur >= 100) {
+            _v2gStopPlay();
+            return;
+          }
+          slider.value = String(Math.min(100, cur + 2));
+          _updateTimeLabel();
+          _v2gLoad();
+        }, 400);
+      });
+    }
     // Resize debouncer
     var rto;
     window.addEventListener('resize', function() { clearTimeout(rto); rto = setTimeout(function() { if (_v2gPts.length) _v2gRepaint(); }, 200); });

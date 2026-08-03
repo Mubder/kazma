@@ -35,7 +35,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 - [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
-- [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Security](guide/security-and-safety)
+- [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety)
 - [Web research](guide/web-research) · [Email](guide/email-integration) · [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
 
