@@ -1,3 +1,5 @@
+# CHANGELOG
+
 ## Unreleased — Memory scale foundation (2026-08-03)
 
 - **Postgres state dual-mirror** (`state_backend.py`): optional
