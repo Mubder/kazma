@@ -1,6 +1,6 @@
 # Memory — Done vs Remaining
 
-**Status date:** 2026-08-03 (docs pack: memory-and-rag + best-path + README aligned)  
+**Status date:** 2026-08-04 (admin UI: graph dedupe, rename, list↔graph, hub identity)  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)  
 **Best-path operator guide:** [`docs/docs/guide/memory-best-path.md`](../docs/guide/memory-best-path.md)  
 **Priority lock:** [`MEMORY_PRIORITY_NEXT.md`](MEMORY_PRIORITY_NEXT.md)
@@ -22,6 +22,7 @@ Dashboard polish**, or **ops hardening** — not another memory rewrite.
 | Phase B | Real FTS5, belief-graph PPR, explain_recall, dense cap |
 | Phase C–D + Dash + Eval | Procedural inject, entity merges API/UI, reconsolidation, working tier, backends UI, probe/queue, golden set |
 | Priority max batch | VectorBackend factory, failover honesty, tenant tests, working TTL, dashboard alerts, belief drawer, smoke script |
+| Admin UI ops (2026-08-04) | Graph entity/virtual id dedupe; entity display rename; list↔graph bridge; belief PATCH edit; self hub (`self_hub.py` User/Mubder → `user`); `/memory` docs |
 
 **V1 RRF is gone.** `use_new_stack=false` only disables V2 inject/post-turn.
 

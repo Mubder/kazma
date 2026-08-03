@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Unreleased — Memory UI ops: graph dedupe, rename, list↔graph, hub identity (2026-08-04)
+
+- **Graph id collision fix:** `GET /api/memory/v2/graph` no longer emits a virtual
+  fact node when the belief object text equals an entity id (e.g.
+  `user → has_project → shipx`). That dual node + canvas last-write-wins map
+  orphaned one of the two `shipx` nodes. Contract:
+  `tests/test_memory_v2_graph_route.py`.
+- **Client canvas guard:** `memory_console.js` dedupes by node id (prefer
+  non-virtual / higher belief count); soft label updates when only names change.
+- **Display rename:** `POST /api/memory/v2/entities/{id}/rename` — canonical id
+  stays stable; name + `aliases_json` update. Graph inspect **Rename** +
+  Entities table **Rename**.
+- **List ↔ graph bridge:** click entity/belief row → select/zoom on canvas;
+  click graph node → highlight list row (`kazma:memory-graph-select`). Merge /
+  link / invalidate / rename refresh the canvas.
+- **Belief edit:** `PATCH /api/memory/v2/beliefs/{id}` for operator triple
+  correction (subject/predicate/object); clears embedding when object changes.
+- **Self / hub identity** (`memory/self_hub.py`): person shells like
+  `ent_*` named User (or aliases User/You) map to canvas hub `id=user`.
+  Renaming User → Mubder syncs `entities.user` display name so the hub shows
+  **Mubder** not hardcoded **You**. List exposes `is_self` + `graph_id`.
+- **Docs:** Memory & RAG, Memory best path, API routes, Web UI, Recent features.
+- Tests: `test_memory_admin_api.py`, `test_memory_v2_graph_route.py`.
+
 ## Unreleased — Industry caveats closed (smoke, explain, research, SERP) (2026-08-03)
 
 - **Automated smoke:** `scripts/industry_smoke.ps1` + `tests/test_industry_smoke_matrix.py`

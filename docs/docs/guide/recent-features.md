@@ -2,14 +2,15 @@
 id: recent-features
 title: Recent features guide
 sidebar_label: Recent features
-description: Operator guide for deep research, KB hardening, proxy coverage, memory explain, and Settings toggles added in the research/KB/memory tranche
+description: Operator guide for deep research, KB hardening, proxy coverage, memory explain, /memory admin (rename, list↔graph, hub), and Settings toggles
 ---
 
 # Recent features guide
 
 This page is the **operator-facing tour** of the features landed in the
-research → KB → memory polish tranche. Use it to turn features on, try them
-once, and find the deep docs when you need detail.
+research → KB → memory polish tranche (including the **/memory** admin
+graph/rename/hub work). Use it to turn features on, try them once, and find
+the deep docs when you need detail.
 
 **Smoke checklist (when you test later):** [Smoke matrix](../ops/smoke-matrix).  
 **Architecture context:** [Web research](./web-research) · [Knowledge Library](./knowledge-library) · [Memory best path](./memory-best-path).
@@ -23,6 +24,7 @@ once, and find the deep docs when you need detail.
 | Deep research | Multi-source pipeline, live sessions, routing, rubric | `/research`, chat, `/research deep` |
 | Proxy Provider | Residential proxy for scrape/crawl/Playwright/SERP | Settings → System |
 | Knowledge Library | Smart re-index, gone-URL prune, hybrid inject | `/knowledge`, Settings → Memory |
+| Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand | `/memory` |
 | Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |
 
@@ -185,6 +187,22 @@ like `user → works_at → Acme → located_in → Paris` can surface.
 
 ---
 
+## 4b. Memory admin UI — graph, rename, list bridge (2026-08)
+
+Operator page **`/memory`**: graph on top, entities/beliefs/merge/hygiene below.
+
+| Capability | Behavior |
+|------------|----------|
+| **No duplicate graph ids** | Object text that equals an entity id (e.g. `shipx`) is one real node, not entity + virtual fact |
+| **Display rename** | Id stable; name + aliases change (`ShipX`, hub **Mubder**) |
+| **List ↔ graph** | Click row ⇄ click node; rename/merge/invalidate refresh canvas |
+| **Edit belief** | Beliefs → **Edit** → PATCH triple (object/predicate/subject) |
+| **Hub identity** | `ent_*` person User shells map to hub `user`; rename syncs hub label |
+
+**Deep dive:** [Memory & RAG — admin UI](./memory-and-rag.md#memory-admin-ui-memory) · [Memory best path](./memory-best-path).
+
+---
+
 ## 5. Quick operator recipes
 
 ### A. First deep research paper
@@ -218,6 +236,19 @@ like `user → works_at → Acme → located_in → Paris` can surface.
 2. **Test Connection**.  
 3. Retry a blocked `read_url` / KB crawl.
 
+### F. Brand the memory hub (You → Mubder)
+
+1. Open **`/memory`**.  
+2. Entities tab → find person **User** or `ent_…` (or hub).  
+3. **Rename** → `Mubder` (or `Kazma`).  
+4. Hard-refresh; canvas center label should match. Click the row → hub zooms.
+
+### G. Fix a bad belief without SQL
+
+1. `/memory` → Beliefs → search.  
+2. **Edit** → correct object (then predicate/subject if needed).  
+3. Graph refresh should show the new edge text.
+
 ---
 
 ## 6. API cheat sheet
@@ -235,6 +266,11 @@ like `user → works_at → Acme → located_in → Paris` can surface.
 | POST | `/api/memory/v2/probe` | Recall dry-run (explain on) |
 | POST | `/api/memory/v2/federated-search` | Memory + KB labeled |
 | POST | `/api/memory/v2/eval/golden` | Golden recall suite |
+| GET | `/api/memory/v2/graph` | Belief canvas payload (unique ids, hub label) |
+| GET | `/api/memory/v2/entities` | Entity list (`is_self`, `graph_id`) |
+| POST | `/api/memory/v2/entities/{id}/rename` | Display rename (+ hub sync for self) |
+| PATCH | `/api/memory/v2/beliefs/{id}` | Operator edit triple |
+| GET | `/memory` | Memory admin HTML page |
 
 Full tables: [API routes](../reference/api-routes).
 

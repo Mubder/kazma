@@ -2,7 +2,7 @@
 id: memory-and-rag
 title: Memory & RAG
 sidebar_label: Memory & RAG
-description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, optional Neo4j/Postgres adapters (2026-08)
+description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, /memory admin (rename, graph, hub), optional Neo4j/Postgres adapters (2026-08)
 ---
 
 > **Live SoT (2026-08).** V2 is the **only** chat memory stack.
@@ -141,6 +141,79 @@ If unset, default graph provider stays **sqlite**. Server down → topology fall
 
 ---
 
+## Memory admin UI (`/memory`)
+
+Single operator surface for **topology + entities + beliefs + hygiene**
+(`memory.html` + `memory_console.js` + `memory.js` + `memory_api.py`).
+
+### Layout
+
+1. **Graph & health** (top) — V2 belief canvas, KPIs, probe, backups.  
+2. **Ops tabs** — Entities, Beliefs, Pending merges, Hygiene.
+
+### Graph invariants (canvas SoT)
+
+| Rule | Why |
+|------|-----|
+| **Unique node ids** in the payload | Canvas `_v2gIds[id]` is last-write-wins; duplicate ids orphan one node (the old “two shipx” bug). |
+| **Entity wins over virtual fact** | When a belief object text equals an entity id (`user → has_project → shipx`), emit **one** real entity node — never a second `isVirtual` twin with the same id. |
+| **No dangling links** | Link source/target must both survive filters (`entity_type`, limit). |
+| **Hub is always `id=user`** | Center “You” styling; display name comes from `entities.user.name` (e.g. **Mubder**). |
+
+### Display rename (not id rewrite)
+
+- **API:** `POST /api/memory/v2/entities/{id}/rename` body `{ "name": "ShipX" }`.  
+- Canonical **id** stays stable so belief subjects/objects keep linking.  
+- Previous labels go into `aliases_json` (resolution still finds old nicknames).  
+- UI: graph inspect **Rename**, Entities table **Rename**.  
+- Canvas soft-updates labels when only names change (does not reset layout).
+
+### Self / hub identity (User → Mubder)
+
+Backfill and extractors often create a **person shell** (`ent_<hash>` named
+`User`) separate from the synthetic hub `user`. Those are the same *operator
+identity* for the UI:
+
+| Concept | Behavior |
+|---------|----------|
+| `memory/self_hub.py` | Detects self labels (`user` / `you` / aliases) and person shells |
+| Rename self shell → brand | Also upserts `entities.id=user` with that display name |
+| List row | `is_self: true`, `graph_id: "user"` — click focuses the hub |
+| Graph paint | Collapses self ids onto one hub node; label = hub display name |
+
+So renaming **User → Mubder** on `ent_…` makes the canvas hub show **Mubder**,
+not a hardcoded “You”.
+
+### List ↔ graph bridge
+
+| From | To |
+|------|-----|
+| Click entity / belief row | Select + zoom on canvas (`_v2gSelectEntity` / `_v2gSelectBelief`) |
+| Click graph node | Highlight matching list row (`kazma:memory-graph-select`) |
+| Inspect **In list** | Same as graph → list |
+| Merge / link / invalidate / rename | Force-refresh graph payload |
+
+### Belief operator edit
+
+- **API:** `PATCH /api/memory/v2/beliefs/{id}` with any of
+  `subject` / `predicate` / `object` / `predicate_type`.  
+- Active beliefs only (not invalidated/superseded).  
+- Sets `extraction_method=user_explicit`; clears embedding when object text
+  changes (FTS triggers keep search in sync).  
+- UI: Beliefs tab → **Edit** (guided prompts for object → predicate → subject).
+
+### Other entity ops (unchanged contract)
+
+| Action | Route |
+|--------|--------|
+| List / filter | `GET /api/memory/v2/entities` |
+| Merge shells | `POST /api/memory/v2/entities/merge` |
+| Link two entities | `POST /api/memory/v2/entities/link` |
+| Delete empty shell | `DELETE /api/memory/v2/entities/{id}` (not protected hub ids) |
+| Invalidate belief | `POST /api/memory/v2/beliefs/{id}/invalidate` (+ batch) |
+
+---
+
 ## Key modules
 
 | Module | Purpose |
@@ -148,12 +221,16 @@ If unset, default graph provider stays **sqlite**. Server down → topology fall
 | `memory/recall.py` | Unified recall |
 | `memory/belief_mutation.py` / `belief_extractor.py` | Write path + fence/hygiene |
 | `memory/hygiene.py` | Blocked subjects, FTS self-heal, invalidate + graph delete |
+| `memory/self_hub.py` | Hub display name + self person-shell collapse |
 | `memory/graph_backend.py` | SQLite default + Neo4j dual-write |
 | `memory/backends.py` | Vector / state / graph factory + env Neo4j defaults |
 | `memory/federated_search.py` | Memory + KB labeled search |
 | `memory/global_reconsolidation.py` | Dedup + re-embed (partitioned) |
 | `memory/worker_bootstrap.py` | Queue handlers + schedulers |
 | `memory/v2_health.py` / `health.py` | Health APIs for Dashboard / Packages |
+| `kazma_ui/memory_api.py` | `/memory` admin routes (rename, edit, merge, hygiene) |
+| `kazma_ui/static/js/memory_console.js` | V2 canvas + inspect rename |
+| `kazma_ui/static/js/memory.js` | Entities/beliefs list + list↔graph bridge |
 
 ---
 

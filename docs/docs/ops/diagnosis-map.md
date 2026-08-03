@@ -260,7 +260,14 @@ Precedence (high → low):
 | Post-turn | `schedule_post_turn_memory` → auto_store + consolidator |
 | Compaction | `compaction.py` / ContextAuthority → same adapter |
 | Health | `build_memory_health()` on Dashboard |
-| Graph UI | `GET/POST /api/memory/graph*` |
+| Graph UI (V2) | `GET /api/memory/v2/graph` · admin page `/memory` · `memory_console.js` |
+| Entity rename / hub | `POST …/entities/{id}/rename` · `memory/self_hub.py` (User shells → hub `user`) |
+| Belief edit | `PATCH /api/memory/v2/beliefs/{id}` |
+
+**Orphaned duplicate node on canvas (same label twice):** belief object text
+equaled an entity id → dual entity + virtual node. Fixed by server dedupe;
+unique ids required. **Hub still says “You” after renaming person User:**
+rename must sync `entities.user` (self_hub); list `graph_id` focuses hub.
 
 If chat recall is empty: install `.[rag]`, check Dashboard health (embedder / L1 / L3), confirm `memory.enabled`.  
 If chat ≠ tool results: both should hit the adapter; look for fail-closed empty store or DEMO mode.  

@@ -48,11 +48,22 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 
 ### Memory & Governance (Dashboard)
 
-- **Component health** from `build_memory_health()` (embedder, VectorMemory, L1–L4, consolidator, packages).
-- **Property graph (L2)** canvas: search, refresh, clear; APIs under `/api/memory/graph*`.
-- Backups/maintenance for FTS + vector stores.
+- **Component health** from `build_memory_health()` (V2 stack, embedder, packages, optional Neo4j/KB inject).
+- **V2 topology** on the Dashboard canvas (belief graph; SQLite paint by default).
+- Backups/maintenance for memory stores.
 
-Full guide: [Memory & RAG](../guide/memory-and-rag). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
+### Memory admin (`/memory`)
+
+Dedicated ops page (not the chat sidebar):
+
+| Area | What you can do |
+|------|-----------------|
+| Graph & health (top) | Belief canvas, KPIs, probe, refresh/export |
+| Entities | Rename display labels, merge/link shells, delete empty, **click row → focus graph** |
+| Beliefs | Search, **Edit** triple, invalidate batch; click row → focus edge endpoints |
+| Hub identity | Person **User** / `ent_…` rename to **Mubder** updates canvas hub (not a second “You” node) |
+
+APIs under `/api/memory/v2/*` (rename, PATCH belief, entities, hygiene). Full guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)). Tour of the latest stack: [Recent features](../guide/recent-features).
 

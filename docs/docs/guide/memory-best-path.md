@@ -35,9 +35,34 @@ Chat turn
 3. **Federated search** — Dashboard → Search all knowledge → **Federated** (`MEM` / `KB` chips).  
 4. **Explain recall** (optional) — Settings → Memory → **Explain recall**; chat workbench shows **Memory context** with channel chips.  
 5. **Smart Knowledge search** (optional) — expand inject to all active libs on technical questions.  
-6. **Smoke** — `pwsh -File scripts/memory_smoke.ps1` · [Smoke matrix](../ops/smoke-matrix) · [Recent features](./recent-features)  
-7. **Optional Neo4j** — only if you want graph dual-write (below).  
-8. **Scale** — multi-replica only: configure backends; do **not** drop SQLite until a real cutover plan ([#76](https://github.com/Mubder/kazma/issues/76)).
+6. **Memory admin (`/memory`)** — graph + entities/beliefs (below).  
+7. **Smoke** — `pwsh -File scripts/memory_smoke.ps1` · [Smoke matrix](../ops/smoke-matrix) · [Recent features](./recent-features)  
+8. **Optional Neo4j** — only if you want graph dual-write (below).  
+9. **Scale** — multi-replica only: configure backends; do **not** drop SQLite until a real cutover plan ([#76](https://github.com/Mubder/kazma/issues/76)).
+
+## Memory admin page (`/memory`)
+
+Use this page to clean topology without raw SQL.
+
+| Goal | How |
+|------|-----|
+| See the belief graph | Top **Graph & health** canvas; Refresh if labels look stale |
+| Rename hub “You” → brand name | Entities: find person **User** / `ent_…` or hub → **Rename** → e.g. `Mubder`. Canvas hub should show that name. |
+| Rename a project node | Click node or entity row → **Rename** (id stays `shipx`; label becomes `ShipX`) |
+| Focus list ↔ graph | Click a row to zoom the canvas; click a node to highlight the list |
+| Fix a wrong belief | Beliefs tab → **Edit** (object / predicate / subject) |
+| Merge duplicate shells | Set Src + Tgt → **Merge** (beliefs rewired to target) |
+| Link two entities | Src + Tgt + predicate → **Link** |
+| Drop junk beliefs | Select → **Invalidate** |
+
+### Hub identity note
+
+The canvas center node is always **`id=user`**. A separate person shell
+(`ent_…` named User) is treated as the **same self**: rename updates the hub
+display name, and list click focuses the hub (`graph_id: user`). Do not expect
+a second “You” node for that shell.
+
+Deep dive: [Memory & RAG — Memory admin UI](./memory-and-rag.md#memory-admin-ui-memory).
 
 ## Settings that matter
 
@@ -83,7 +108,9 @@ Dashboard: **Run reconsolidation**, queue **retry** / **Clear failed**, componen
 - Do **not** dump KB chunks into the `beliefs` table as raw SPO without provenance.  
 - Do **not** require Neo4j for a normal install.  
 - Do **not** run full Postgres-primary recall until multi-replica is a real product need.  
-- Do **not** treat “memory V2” as a product version entity (hygiene blocks subjects like `kazma_v2_4_0`).
+- Do **not** treat “memory V2” as a product version entity (hygiene blocks subjects like `kazma_v2_4_0`).  
+- Do **not** rewrite belief **subject** ids by hand to “fix” labels — use **Rename** (display) or **Merge** (identity).  
+- Do **not** expect empty person shells with zero beliefs to appear as extra graph nodes — self shells focus the hub.
 
 ## Related
 

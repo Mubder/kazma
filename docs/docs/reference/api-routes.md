@@ -76,9 +76,24 @@ on error (never a bare 500); non-numeric params yield a FastAPI 422.
 |--------|------|------|-------------|
 | GET | `/api/memory/v2/health` | Session | V2 health snapshot — active/superseded/archived belief counts, episode/entity/procedural stats, queue depth. Drives the dashboard KPI grid (`pollV2Health`, 5s cadence). |
 | GET | `/api/memory/v2/beliefs` | Session | Active beliefs list. `?q=` FTS filter, `?limit=` (default 50, clamped 1–200). |
-| GET | `/api/memory/v2/graph` | Session | Belief graph `{nodes, links, stats}` for the canvas. Bi-temporal + filter params: `?at=<unix_ts>` (point-in-time scrub; superseded beliefs marked `superseded=true`), `?type=` (`functional`/`set`/`state` predicate_type), `?entity_type=` (person/tool/concept/…), `?limit=` (default 200). Links whose source or target is filtered out are dropped at emission, so the payload is always self-consistent (no dangling edges). |
+| GET | `/api/memory/v2/beliefs/{id}` | Session | Belief detail + supersede chain. |
+| POST | `/api/memory/v2/beliefs/{id}/invalidate` | Session | Soft-invalidate one belief (+ best-effort Neo4j edge delete). |
+| POST | `/api/memory/v2/beliefs/invalidate-batch` | Session | Soft-invalidate many (`{ "ids": [...] }`). |
+| PATCH | `/api/memory/v2/beliefs/{id}` | Session | Operator edit of active triple: optional `subject`, `predicate`, `object`, `predicate_type`. Sets `extraction_method=user_explicit`; clears embedding if object changes. |
+| GET | `/api/memory/v2/graph` | Session | Belief graph `{nodes, links, stats}` for the canvas. Bi-temporal + filter params: `?at=<unix_ts>` (point-in-time scrub; superseded beliefs marked `superseded=true`), `?type=` (`functional`/`set`/`state` predicate_type), `?entity_type=` (person/tool/concept/…), `?limit=` (default 200), `?source=neo4j` (optional probe). **Invariants:** unique node ids; no virtual fact node when object text equals an entity id; no dangling links; hub node `id=user` with display `name` from `entities.user` (self person shells collapsed onto hub). |
+| GET | `/api/memory/v2/entities` | Session | Entity list for `/memory` ops. Flags: `empty`, `isolated`, `protected`, **`is_self`**, **`graph_id`** (self shells → `"user"`). Query: `?q=`, `?empty_only=`, `?isolated_only=`, `?limit=`. |
+| POST | `/api/memory/v2/entities/{id}/rename` | Session | Display rename only (`{ "name": "…" }`). Id stable; aliases preserved. Self/person User shells also upsert hub `entities.user`. Returns `hub_synced`, `graph_id`. |
+| POST | `/api/memory/v2/entities/merge` | Session | Merge source into target (beliefs rewired, aliases union). |
+| POST | `/api/memory/v2/entities/link` | Session | Create belief edge (`subject`, `predicate`, `object`). |
+| DELETE | `/api/memory/v2/entities/{id}` | Session | Delete entity shell (blocked for protected ids: `user`, `assistant`, …). |
+| GET | `/api/memory/v2/admin/summary` | Session | Counts for ops chips (live/invalidated beliefs, empty/isolated entities). |
+| GET/POST | `/api/memory/v2/hygiene/*` | Session | Preview + run empty purge / near-dup invalidate / archive. |
+| GET/POST | `/api/memory/v2/entity-merges*` | Session | Quarantine merge list + approve/reject. |
+| POST | `/api/memory/v2/probe` | Session | Recall dry-run (explain chips). |
+| POST | `/api/memory/v2/federated-search` | Session | Memory + KB labeled search. |
+| POST | `/api/memory/v2/eval/golden` | Session | Golden recall suite. |
 
-Guide: [Memory & RAG](../guide/memory-and-rag).
+Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path).
 
 ## Settings & config
 
