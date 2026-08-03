@@ -204,9 +204,12 @@ class PostTaskSuggester:
 # Compiled patterns: (regex, suggestion, implied_tool)
 _PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     # "search for X" / "look up X" / "find X" / "google X"
+    # Require intent-like phrasing — bare "search products" in product docs
+    # must not trigger (bulk paste guard also applies above 480 chars).
     (
         re.compile(
-            r"\b(?:search|look\s*up|find|google|查询|搜索)\s+(?:for\s+)?(.+)",
+            r"^\s*(?:please\s+)?(?:can\s+you\s+|could\s+you\s+)?"
+            r"(?:search|look\s*up|find|google|查询|搜索)\s+(?:for\s+)?(.+)",
             re.IGNORECASE,
         ),
         "💡 You can use the web_search tool to find that.",
@@ -271,6 +274,20 @@ def detect_tool_intent(
     if not message_text or not message_text.strip():
         return []
 
+    text = message_text.strip()
+    # Bulk pastes (architecture dumps, "add to memory" docs) contain incidental
+    # phrases like "search products" that falsely match web_search hints.
+    # Only hint on short, intent-like messages.
+    if len(text) > 480:
+        return []
+    try:
+        from kazma_core.agent.turn_input import is_memory_store_intent
+
+        if is_memory_store_intent(text):
+            return []
+    except Exception:
+        pass
+
     used = set(used_tools or [])
     hints: list[str] = []
     seen_tools: set[str] = set()
@@ -283,7 +300,7 @@ def detect_tool_intent(
         if implied_tool in seen_tools:
             continue
 
-        if pattern.search(message_text):
+        if pattern.search(text):
             hints.append(suggestion)
             seen_tools.add(implied_tool)
 

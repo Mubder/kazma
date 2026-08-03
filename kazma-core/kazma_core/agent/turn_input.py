@@ -18,6 +18,7 @@ Use :func:`build_turn_messages` for every new user turn.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 __all__ = [
@@ -26,6 +27,10 @@ __all__ = [
     "contentful_turn_count",
     "normalize_history_messages",
     "is_short_continuation",
+    "is_memory_store_intent",
+    "is_bulk_document_message",
+    "extract_store_focus_query",
+    "latest_turn_priority_note",
 ]
 
 logger = logging.getLogger(__name__)
@@ -55,6 +60,29 @@ _CONTINUATION_PHRASES = frozenset(
     }
 )
 
+# User wants the agent to *write* this turn into memory (not answer from memory).
+_STORE_INTENT_RE = re.compile(
+    r"(?is)"
+    r"("
+    r"\b(?:add|save|store|put)\b.{0,80}\b(?:to|into|in)\b.{0,40}\bmemory\b"
+    r"|"
+    r"\bremember\s+(?:this|that|the following)\b"
+    r"|"
+    r"\b(?:write|persist|ingest)\b.{0,40}\b(?:to|into)\b.{0,40}\bmemory\b"
+    r"|"
+    r"\badd\s+(?:this|it|these|the following)\s+to\b"
+    r")"
+)
+
+# "… to the ShipX memory" / "ShipX memory:"
+_STORE_SUBJECT_RE = re.compile(
+    r"(?is)\b(?:to|into|in)\s+(?:the\s+)?([A-Za-z][\w .-]{1,40}?)\s+memory\b"
+)
+_NAMED_PROJECT_RE = re.compile(
+    r"(?is)\b(?:overview|about|regarding)\s+(?:of\s+)?([A-Za-z][\w]{1,32})\b"
+    r"|\b([A-Za-z][\w]{1,32})\s+is\s+an?\s+"
+)
+
 
 def is_short_continuation(text: str) -> bool:
     """True for short same-session continuations like 'Proceed' / 'try now'."""
@@ -66,6 +94,94 @@ def is_short_continuation(text: str) -> bool:
     # "proceed with cleanup", "continue please"
     head = s.split()[0] if s.split() else ""
     return head in ("proceed", "continue", "resume", "retry") and len(s) < 40
+
+
+def is_bulk_document_message(text: str, *, min_chars: int = 600) -> bool:
+    """True for long paste payloads (architecture dumps, handoffs, etc.)."""
+    return len((text or "").strip()) >= min_chars
+
+
+def is_memory_store_intent(text: str) -> bool:
+    """True when the user is asking to *save* content into memory this turn.
+
+    Distinguishes store tasks from "what do you remember about X?" questions so
+    we do not let session-boosted prior topics (e.g. reminders) hijack a bulk
+    "add this to ShipX memory" paste.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _STORE_INTENT_RE.search(t):
+        return True
+    # Long document with an explicit project memory target in the first lines
+    head = t[:400]
+    if is_bulk_document_message(t) and re.search(
+        r"(?i)\b(?:memory|remember|save|store)\b", head
+    ):
+        return True
+    return False
+
+
+def extract_store_focus_query(text: str) -> str:
+    """Build a short recall query for store intents (subject, not full paste).
+
+    Full multi-KB pastes match unrelated FTS terms poorly and still get
+    *session_boost* on the prior reminder thread — so we prefer the named
+    subject (ShipX) + first heading line.
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    parts: list[str] = []
+    m = _STORE_SUBJECT_RE.search(t)
+    if m:
+        subj = (m.group(1) or "").strip(" .:-")
+        if subj and subj.lower() not in ("your", "the", "my", "our"):
+            parts.append(subj)
+    # First non-empty line often "Now read this…" or "Overview of ShipX"
+    for line in t.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts.append(line[:120])
+        break
+    m2 = _NAMED_PROJECT_RE.search(t[:800])
+    if m2:
+        name = (m2.group(1) or m2.group(2) or "").strip()
+        if name and name not in parts:
+            parts.append(name)
+    # Unique preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        k = p.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(p)
+    q = " ".join(out).strip()
+    return q[:240] if q else t[:200]
+
+
+def latest_turn_priority_note(*, store_intent: bool = False, focus: str = "") -> str:
+    """System note so the model does not pivot to an old recalled topic."""
+    base = (
+        "LATEST USER MESSAGE PRIORITY: Your job this turn is to fulfill the "
+        "user's *most recent* message. Recalled memory and earlier chat are "
+        "supporting context only. Do NOT change subject to an unrelated "
+        "recalled topic (e.g. reminders, quota resets, prior tools) when the "
+        "latest message is about something else."
+    )
+    if store_intent:
+        focus_bit = f" Subject focus: {focus}." if focus else ""
+        base += (
+            " MEMORY STORE TASK: The user wants the content of their latest "
+            "message saved into long-term memory (use memory_store / belief "
+            "tools as appropriate). Extract structured facts from *that* "
+            f"payload{focus_bit} Do not answer as if they asked about "
+            "unrelated prior conversation topics."
+        )
+    return base
 
 
 def contentful_turn_count(msgs: list[dict[str, Any]]) -> int:

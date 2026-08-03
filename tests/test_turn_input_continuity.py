@@ -7,6 +7,8 @@ import pytest
 from kazma_core.agent.turn_input import (
     build_turn_messages,
     contentful_turn_count,
+    extract_store_focus_query,
+    is_memory_store_intent,
     is_short_continuation,
     normalize_history_messages,
 )
@@ -17,6 +19,20 @@ def test_is_short_continuation():
     assert is_short_continuation("try now") is True
     assert is_short_continuation("continue") is True
     assert is_short_continuation("clean up memory garbage please") is False
+
+
+def test_is_memory_store_intent_shipx_paste():
+    msg = (
+        "Now read this and add it to the ShipX memory:\n\n"
+        "Overview of ShipX\n"
+        "ShipX is an end-to-end Kuwaiti commerce platform...\n"
+        + ("x" * 700)
+    )
+    assert is_memory_store_intent(msg) is True
+    focus = extract_store_focus_query(msg)
+    assert "ShipX" in focus or "shipx" in focus.lower()
+    # Not a pure Q&A about reminders
+    assert is_memory_store_intent("When is my ZCode reset?") is False
 
 
 def test_contentful_ignores_empty_pending():

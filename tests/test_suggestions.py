@@ -232,6 +232,23 @@ class TestDetectToolIntent:
         hints = detect_tool_intent("hello, how are you?")
         assert hints == []
 
+    def test_bulk_paste_suppresses_incidental_search(self) -> None:
+        """Architecture dumps with 'search products' must not hint web_search."""
+        bulk = (
+            "Now read this and add it to the ShipX memory:\n"
+            "Shippers can search products, place orders, track shipments.\n"
+            + ("detail " * 120)
+        )
+        assert len(bulk) > 480
+        assert detect_tool_intent(bulk) == []
+
+    def test_mid_sentence_search_products_no_hint(self) -> None:
+        """Incidental 'search products' not at message start is not an intent."""
+        hints = detect_tool_intent(
+            "The customer experience lets users search products via WhatsApp."
+        )
+        assert not any("web_search" in h for h in hints)
+
     def test_multiple_intents(self) -> None:
         """Message with URL gives URL hint."""
         hints = detect_tool_intent(

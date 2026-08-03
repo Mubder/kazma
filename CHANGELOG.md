@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Unreleased — Turn priority: stop memory/session hijack on store pastes (2026-08-04)
+
+- **Root cause:** After a long reminder thread, a Telegram bulk paste
+  (“add it to the ShipX memory” + document) still ran *session-boosted*
+  recall over the same thread, flooding ZCode reset facts. The model
+  answered the *old* topic. A second message
+  (“You can use the web_search tool…”) was a false
+  `detect_tool_intent` hit on incidental “search products” in the dump.
+- **Fix:** Detect memory-store intents; focus recall on the named subject
+  (e.g. ShipX); disable `session_id` boost for those turns; inject a
+  LATEST USER MESSAGE PRIORITY (+ MEMORY STORE TASK) system note.
+  Suppress tool-intent hints on bulk pastes (>480 chars) and tighten
+  web_search pattern to intent-like message starts.
+- Tests: `test_turn_input_continuity.py`, `test_suggestions.py`.
+
 ## Unreleased — Memory UI ops: graph dedupe, rename, list↔graph, hub identity (2026-08-04)
 
 - **Graph id collision fix:** `GET /api/memory/v2/graph` no longer emits a virtual

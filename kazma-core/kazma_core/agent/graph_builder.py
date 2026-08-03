@@ -601,11 +601,33 @@ async def supervisor_node(
 
     # Same-session short continuations ("Proceed", "try now") must inherit
     # the prior task — expand recall query + pin a continuity system note.
+    # Opposite case: bulk "add this to ShipX memory" after a reminder thread
+    # must NOT inherit ZCode/session topics via recall session_boost.
     _recall_query = last_user_content
+    _store_intent = False
+    _store_focus = ""
+    _recall_session_id = state.get("thread_id")
     try:
-        from kazma_core.agent.turn_input import is_short_continuation
+        from kazma_core.agent.turn_input import (
+            extract_store_focus_query,
+            is_memory_store_intent,
+            is_short_continuation,
+            latest_turn_priority_note,
+        )
 
-        if is_short_continuation(last_user_content):
+        _store_intent = is_memory_store_intent(last_user_content)
+        if _store_intent:
+            _store_focus = extract_store_focus_query(last_user_content)
+            if _store_focus:
+                _recall_query = _store_focus
+            # Drop same-thread session boost so prior reminder turns do not
+            # drown a document-store request in ZCode/Grok quota facts.
+            _recall_session_id = None
+            logger.info(
+                "[Supervisor] Memory-store intent — focused recall %r (no session_boost)",
+                (_recall_query or "")[:80],
+            )
+        elif is_short_continuation(last_user_content):
             prev_users: list[str] = []
             for m in messages:
                 if not isinstance(m, dict) or m.get("role") != "user":
@@ -642,8 +664,18 @@ async def supervisor_node(
                     1 if messages and messages[0].get("role") == "system" else 0,
                     {"role": "system", "content": _cont_note},
                 )
+
+        # Pin latest-turn priority for every non-empty turn (and stronger on store).
+        if last_user_content.strip() and (
+            _store_intent or len(last_user_content.strip()) >= 80
+        ):
+            _prio = latest_turn_priority_note(
+                store_intent=_store_intent, focus=_store_focus
+            )
+            _ins = 1 if messages and messages[0].get("role") == "system" else 0
+            messages.insert(_ins, {"role": "system", "content": _prio})
     except Exception:
-        logger.debug("[Supervisor] continuation expand skipped", exc_info=True)
+        logger.debug("[Supervisor] continuation/store intent expand skipped", exc_info=True)
 
     # Classify and route to optimal model if router is available
     routed_model = None
@@ -708,7 +740,7 @@ async def supervisor_node(
                 result = recall(
                     _recall_query or last_user_content,
                     limit=_top_k,
-                    session_id=state.get("thread_id"),
+                    session_id=_recall_session_id,
                     tenant_id=state.get("tenant_id", "default"),
                     explain=_explain,
                 )
