@@ -118,7 +118,11 @@ async def _handle_entity_merge(payload: dict[str, Any]) -> bool:
 
 
 async def _handle_global_reconsolidation(payload: dict[str, Any]) -> bool:
-    """Nightly/global re-consolidation (dedupe beliefs + re-embed missing)."""
+    """Nightly/global re-consolidation (dedupe beliefs + re-embed missing).
+
+    Huge corpora auto-partition by subject hash; remaining shards are
+    enqueued as follow-up ``global_reconsolidation`` tasks.
+    """
     try:
         from kazma_core.memory.global_reconsolidation import run_global_reconsolidation
         from kazma_core.memory.schema_v2 import ensure_primary_schema
@@ -134,8 +138,40 @@ async def _handle_global_reconsolidation(payload: dict[str, Any]) -> bool:
                 tenant_id=tenant_id,
                 max_merges=int(payload.get("max_merges") or 50),
                 reembed_limit=int(payload.get("reembed_limit") or 100),
+                partition_index=int(payload.get("partition_index") or 0),
+                partition_count=int(payload.get("partition_count") or 1),
+                auto_partition=bool(payload.get("auto_partition", True)),
             )
             logger.info("[memory_worker] global_reconsolidation: %s", stats)
+            # Chain next subject-hash partition for huge corpora
+            if stats.get("has_more") and stats.get("next_partition_index") is not None:
+                try:
+                    from kazma_core.memory.task_queue import enqueue_task
+
+                    nxt = {
+                        "tenant_id": tenant_id,
+                        "max_merges": int(payload.get("max_merges") or 50),
+                        "reembed_limit": int(payload.get("reembed_limit") or 100),
+                        "partition_index": int(stats["next_partition_index"]),
+                        "partition_count": int(
+                            stats.get("partition_count")
+                            or payload.get("partition_count")
+                            or 1
+                        ),
+                        # Follow-up shards must not re-expand the grid
+                        "auto_partition": False,
+                    }
+                    enqueue_task("global_reconsolidation", nxt)
+                    logger.info(
+                        "[memory_worker] enqueued reconsolidation partition %s/%s",
+                        nxt["partition_index"],
+                        nxt["partition_count"],
+                    )
+                except Exception:
+                    logger.debug(
+                        "[memory_worker] reconsolidation chain enqueue failed",
+                        exc_info=True,
+                    )
             return True
         finally:
             conn.close()

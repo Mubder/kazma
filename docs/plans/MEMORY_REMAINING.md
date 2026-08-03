@@ -63,23 +63,25 @@ User turn
 | P2-5 | LLM tier-3 entity disambiguation (opt-in) | **Done** |
 | SaaS | Auth-bound `resolve_tenant_id` (JWT/ContextVar/user) | **Done** |
 
-### P3 — Still deferred (true cutover / ops)
+### P3 — Scale (issues filed)
 
-| Trigger | Build |
-|---------|--------|
-| Full multi-replica recall | Port FTS/dense primary path entirely to Postgres |
-| Multi-region | Geo replication + conflict policy |
-| No local embeddings | Hosted embed-only fleet defaults |
-| Huge corpus | Scaled reconsolidation / partition |
-| Graph UX | Animation / a11y polish |
+| Item | Tracking |
+|------|----------|
+| Full Postgres-primary recall | [#76](https://github.com/Mubder/kazma/issues/76) |
+| Multi-region + conflict policy | [#77](https://github.com/Mubder/kazma/issues/77) |
+| Hosted embed-only fleet defaults | [#78](https://github.com/Mubder/kazma/issues/78) |
+| Huge-corpus reconsolidation partition | **Done** — subject-hash shards + worker chain |
+| Neo4j install default (env/compose) | **Done** — `KAZMA_NEO4J_DEFAULT` / URL env; fail-open SQLite; `deploy/docker-compose.neo4j.yml` |
+| Physical KB+beliefs one-table merge | **Wontfix** — unified chat via inject/federated only ([#79](https://github.com/Mubder/kazma/issues/79)) |
 
 ### Architecture boundaries (updated)
 
 | Choice | Status |
 |--------|--------|
 | **KB + chat product merge** | **Done** — inject labeled KB into supervisor; optional promote to episodes (`merge_knowledge_into_chat`, `promote_kb_to_episodes`) |
-| **Schema merge** (one table for KB+beliefs) | Still **not** done — stores stay separate files (correct) |
+| **Schema merge** (one table for KB+beliefs) | **Wontfix** (#79) — stores stay separate; chat unifies via inject |
 | **Neo4j dual-write** | **Done** — Settings Test/Sync; Docker optional |
+| **Neo4j install default** | **Env opt-in** — `KAZMA_NEO4J_DEFAULT=1` / URL env; never hard-require server |
 | **Dashboard topology paint** | **SQLite SoT** (entity types, bi-temporal, accent UI). Neo4j online shown in health strip; `?source=neo4j` probe only |
 | **Neo4j as only install default** | Still **not** default — SQLite zero-config remains |
 

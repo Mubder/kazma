@@ -1,0 +1,34 @@
+# Optional Neo4j for Kazma belief dual-write (not required for single-node).
+#
+#   docker compose -f deploy/docker-compose.neo4j.yml up -d
+#
+# Then either:
+#   export KAZMA_NEO4J_DEFAULT=1
+#   export KAZMA_NEO4J_PASSWORD=YOUR_PASSWORD_HERE
+#   # optional: KAZMA_NEO4J_URL=bolt://localhost:7687
+#
+# Or Settings → Memory → Graph store = Neo4j, Save, Test, Sync.
+#
+# Kazma still paints Dashboard topology from SQLite; Neo4j receives dual-writes.
+
+services:
+  kazma-neo4j:
+    image: neo4j:5
+    container_name: kazma-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${KAZMA_NEO4J_PASSWORD:-YOUR_PASSWORD_HERE}
+    volumes:
+      - kazma-neo4j-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+volumes:
+  kazma-neo4j-data:

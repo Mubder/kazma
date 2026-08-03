@@ -834,7 +834,79 @@ def get_backends_cfg() -> dict[str, Any]:
     # Normalize mode
     if out["mode"] not in ("local", "hybrid", "remote"):
         out["mode"] = "local"
+    # Install / env defaults for Neo4j (fail-open: still sqlite if unset)
+    _apply_neo4j_env_defaults(out)
     return out
+
+
+def _apply_neo4j_env_defaults(out: dict[str, Any]) -> None:
+    """Prefer Neo4j when install env opts in — never require a live server.
+
+    Triggers (any):
+      - ``KAZMA_GRAPH_PROVIDER=neo4j``
+      - ``KAZMA_NEO4J_URL`` / ``NEO4J_URI`` set
+      - ``KAZMA_NEO4J_DEFAULT=1`` (docker-compose.neo4j profile)
+
+    If ConfigStore already has an explicit non-sqlite graph.provider, leave it.
+    Password/url from env only fill empty fields.
+    """
+    import os
+
+    g = out.get("graph")
+    if not isinstance(g, dict):
+        return
+    prov = str(g.get("provider") or "sqlite").strip().lower()
+    # Respect explicit user choice of non-sqlite / non-empty remote already saved
+    stored_explicit = prov not in ("sqlite", "local", "")
+    env_prov = (os.environ.get("KAZMA_GRAPH_PROVIDER") or "").strip().lower()
+    env_url = (
+        os.environ.get("KAZMA_NEO4J_URL")
+        or os.environ.get("NEO4J_URI")
+        or os.environ.get("NEO4J_URL")
+        or ""
+    ).strip()
+    want_default = (os.environ.get("KAZMA_NEO4J_DEFAULT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not stored_explicit and (env_prov == "neo4j" or env_url or want_default):
+        g["provider"] = "neo4j"
+        if env_url:
+            g["url"] = env_url
+        elif not str(g.get("url") or "").strip():
+            g["url"] = "bolt://localhost:7687"
+        user = (
+            os.environ.get("KAZMA_NEO4J_USER")
+            or os.environ.get("NEO4J_USER")
+            or ""
+        ).strip()
+        if user:
+            g["user"] = user
+        elif not str(g.get("user") or "").strip():
+            g["user"] = "neo4j"
+        pw = (
+            os.environ.get("KAZMA_NEO4J_PASSWORD")
+            or os.environ.get("NEO4J_PASSWORD")
+            or ""
+        ).strip()
+        if pw and not str(g.get("password") or "").strip():
+            g["password"] = pw
+        out["graph"] = g
+    elif prov == "neo4j":
+        # Fill missing URL from env when provider already neo4j
+        if not str(g.get("url") or "").strip() and env_url:
+            g["url"] = env_url
+        if not str(g.get("password") or "").strip():
+            pw = (
+                os.environ.get("KAZMA_NEO4J_PASSWORD")
+                or os.environ.get("NEO4J_PASSWORD")
+                or ""
+            ).strip()
+            if pw:
+                g["password"] = pw
+        out["graph"] = g
 
 
 def mask_backends_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
