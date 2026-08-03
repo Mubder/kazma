@@ -121,6 +121,9 @@ async def execute_db_query(
 ) -> str:
     """Execute a read-only SQL SELECT query against a local SQLite database file.
 
+    READ-ONLY. Cannot INSERT/UPDATE/DELETE/DROP. Not for V2 memory cleanup —
+    use ``memory_list_beliefs`` / ``memory_invalidate`` / ``memory_search``.
+
     Args:
         db_uri: Path to the local sqlite database file, or ':memory:'.
         query: SQL statement (SELECT only).

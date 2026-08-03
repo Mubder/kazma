@@ -1432,17 +1432,11 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     )
 
     # If max iterations forced us here mid-tool-loop, there is often no
-    # *final* user-visible answer after the last tool results.
-    #
-    # Bugs this guards against:
-    # 1. Early assistant chatter (pre-tool "ممتاز…") counted as final.
-    # 2. Sanitize strips dangling tool_calls from the last supervisor
-    #    turn, leaving a short preamble (~100 chars) that looked like a
-    #    final answer — smoke test "done" with no real reply (2026-07-27).
-    # Only treat **substantial** plain assistant text AFTER the last tool
-    # as a real final answer when max-iter forces stop.
-    _MIN_FINAL_CHARS_ON_MAX = 250
-
+    # *complete* user-visible answer. Industry rule: ALWAYS run a final
+    # synthesis LLM call on max-iter (unless turn_failed). Char-count
+    # heuristics failed in production — a 382-char mid-diagnosis ("Let me
+    # verify…") looked "substantial" and the UI showed Done with no
+    # finished report (2026-08-03 long-horizon cleanup).
     def _final_assistant_text_after_tools(msgs: list[dict[str, Any]]) -> str:
         last_tool_idx = -1
         for i, m in enumerate(msgs):
@@ -1462,24 +1456,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 candidates.append(content.strip())
         return candidates[-1] if candidates else ""
 
-    def _has_final_assistant_after_tools(
-        msgs: list[dict[str, Any]], *, min_chars: int = 1
-    ) -> bool:
-        text = _final_assistant_text_after_tools(msgs)
-        return len(text) >= min_chars
-
     _last = messages[-1] if messages else {}
     _last_role = _last.get("role") if isinstance(_last, dict) else None
     _max_hit = iteration >= state.get("max_iterations", 15)
-    # Always synthesize when we stop on a tool result, or when there is no
-    # *substantial* plain assistant text after the last tool.
     _final_text = _final_assistant_text_after_tools(messages)
     _force_synth = bool(state.get("force_synthesis"))
-    _needs_synthesis = (_max_hit and (
-        _last_role in ("tool", "function")
-        or len(_final_text) < _MIN_FINAL_CHARS_ON_MAX
-        or bool(isinstance(_last, dict) and _last.get("tool_calls"))
-    )) or _force_synth
+    # Always synthesize on max-iter or explicit force — never ship a
+    # mid-loop draft as the final answer.
+    _needs_synthesis = bool(_max_hit or _force_synth)
     # If the supervisor's LLM call failed (after retries), the assistant
     # message above is an honest error notice, NOT a real answer. Never
     # synthesize a plausible-looking final answer over a broken turn — that
@@ -1502,20 +1486,28 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 _wrap_msg = {
                     "role": "user",
                     "content": (
-                        "You hit the tool-round limit. Based on ALL tool results "
-                        "and conversation history above, write the final answer to the user NOW. "
-                        "Do not call any more tools. Do not dig into source code. "
-                        "Summarize what was found or completed clearly. "
-                        "Match the user's language (Arabic if they wrote Arabic)."
+                        "SYSTEM: You hit the tool-round / long-horizon limit. "
+                        "Write the COMPLETE final answer for the user NOW.\n"
+                        "Rules:\n"
+                        "- Do not call any more tools.\n"
+                        "- Do not continue mid-thought ('let me check…', 'next I will…').\n"
+                        "- Summarize what you DID find/complete from tool results.\n"
+                        "- Explicitly list what you did NOT finish and the next step "
+                        "the user can ask for.\n"
+                        "- Start with a one-line status (done / partial / blocked).\n"
+                        "- Match the user's language (Arabic if they wrote Arabic)."
                     ),
                 }
                 _resp = await _llm.chat(pruned_for_synth + [_wrap_msg], tools=None)
                 _content = getattr(_resp, "content", "") or ""
                 if _content.strip():
+                    # Prefer synthesis as the terminal message; keep prior
+                    # drafts in history but surface the complete answer last.
                     messages.append({"role": "assistant", "content": _content})
                     logger.info(
-                        "[Respond] Synthesized final answer (%d chars)",
+                        "[Respond] Max-iter synthesized final answer (%d chars, prior_draft=%d)",
                         len(_content),
+                        len(_final_text or ""),
                     )
                 else:
                     logger.warning(
@@ -1529,13 +1521,18 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                         for m in messages if isinstance(m, dict) and m.get("tool_calls")
                         for tc in (m.get("tool_calls") or []) if isinstance(tc, dict)
                     ]
-                    tool_summary_str = f" executed tools ({', '.join(sorted(set(tools_used)))})" if tools_used else " completed tool operations"
+                    tool_summary_str = (
+                        f" used tools ({', '.join(sorted(set(tools_used)))})"
+                        if tools_used
+                        else " hit the tool-round limit"
+                    )
                     messages.append(
                         {
                             "role": "assistant",
                             "content": (
-                                f"I{tool_summary_str} and completed processing. "
-                                "If you would like a detailed breakdown or have follow-up questions, please ask!"
+                                f"⚠️ Partial result:{tool_summary_str}. "
+                                "I could not finish a full report before the step limit. "
+                                "Send **continue** or a narrower request to finish."
                             ),
                         }
                     )
@@ -1545,14 +1542,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                     {
                         "role": "assistant",
                         "content": (
-                            "I completed tool processing for your request. "
-                            "Please ask if you would like me to explain any specific part of the results!"
+                            "⚠️ Turn stopped at the tool-round limit. "
+                            "Send **continue** with a shorter goal so I can finish."
                         ),
                     }
                 )
         else:
             logger.warning(
-                "[Respond] Max iterations with no assistant text and no LLM bound "
+                "[Respond] Max iterations with no LLM bound "
                 "(last_role=%s) — injecting recovery notice",
                 _last_role,
             )
@@ -1565,13 +1562,6 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                     ),
                 }
             )
-    elif _max_hit:
-        logger.info(
-            "[Respond] Max iterations but substantial final text already present "
-            "(last_role=%s chars=%d) — skipping synthesis",
-            _last_role,
-            len(_final_text),
-        )
 
     # ── Final empty-answer safety net ───────────────────────────────
     # The supervisor's nudge recovery (supervisor_node) handles empty LLM

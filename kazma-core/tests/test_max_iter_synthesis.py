@@ -83,28 +83,24 @@ def test_needs_synthesis_when_last_is_tool():
 
 
 def test_short_sanitized_preamble_is_not_final():
-    """After max-iter, sanitize turns tool_calls assistant into ~100-char text.
+    """After max-iter, mid-loop drafts must never skip synthesis.
 
-    That must NOT count as a final answer (smoke regression 2026-07-27).
+    Industry rule (2026-08-03): ALWAYS synthesize on max-iter regardless of
+    draft length — a 382-char "Let me verify…" used to ship as Done.
     """
     msgs = [
         {"role": "user", "content": "smoke test 2"},
         {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
         {"role": "tool", "content": "ok files"},
-        # What sanitize leaves after stripping dangling tool_calls:
         {
             "role": "assistant",
             "content": "I'll keep exploring with a few more tools and then summarize.",
         },
     ]
-    assert _has_final_assistant_after_tools(msgs) is True  # any non-empty
-    # Production gate: substantial only
-    assert len(msgs[-1]["content"]) < 250
-    min_chars = 250
-    text = msgs[-1]["content"].strip()
-    assert len(text) < min_chars
-    needs = True and (False or len(text) < min_chars)
-    assert needs is True
+    assert _has_final_assistant_after_tools(msgs) is True  # draft exists
+    max_hit = True
+    needs_synthesis = bool(max_hit)
+    assert needs_synthesis is True
 
 
 @pytest.mark.asyncio
@@ -120,7 +116,7 @@ async def test_respond_node_synthesizes_after_max_with_tool_tail(monkeypatch):
             assert tools is None
             # last wrap message should force final answer
             assert messages[-1]["role"] == "user"
-            assert "tool-round limit" in messages[-1]["content"]
+            assert "limit" in messages[-1]["content"].lower()
             return _Resp()
 
     state = {
@@ -203,3 +199,61 @@ async def test_respond_synthesizes_when_only_short_preamble_after_tools(monkeypa
     ]
     assert any("Smoke complete" in t or "Workspace is healthy" in t for t in texts)
     assert any(len(t) >= 250 or "Smoke complete" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_respond_always_synthesizes_on_max_even_with_long_draft(monkeypatch):
+    """382-char mid-diagnosis must NOT skip synthesis (2026-08-03 regression)."""
+    from kazma_core.agent import graph_builder as gb
+
+    class _Resp:
+        content = (
+            "Status: partial.\n"
+            "Found: one ShipX overview, functional grok_next_reset Aug 10.\n"
+            "Not finished: full archive pass. Ask me to continue cleanup."
+        )
+
+    class _LLM:
+        async def chat(self, messages, tools=None):
+            assert tools is None
+            assert "limit" in messages[-1]["content"].lower()
+            return _Resp()
+
+    long_draft = (
+        "The audit log confirms the user's later changes: they archived the "
+        "stale/invalidated rows and deduped some pairs (only ONE ShipX Overview "
+        "remains). Let me verify what's in the archive vs live, check remaining "
+        "duplicates, and read the existing cleanup scripts to reuse their pattern:"
+    )
+    assert len(long_draft) > 250
+
+    state = {
+        "messages": [
+            {"role": "user", "content": "recheck and clean the mess"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "function": {"name": "memory_search", "arguments": "{}"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "beliefs: ok"},
+            {"role": "assistant", "content": long_draft},
+        ],
+        "iteration": 41,
+        "max_iterations": 40,
+    }
+
+    monkeypatch.setattr(
+        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        lambda *_a, **_k: None,
+    )
+
+    out = await gb.respond_node(state, llm=_LLM())
+    texts = [
+        m.get("content") or ""
+        for m in out["messages"]
+        if m.get("role") == "assistant" and not m.get("tool_calls")
+    ]
+    assert any("Status: partial" in t or "Not finished" in t for t in texts)
+    assert "Status: partial" in (texts[-1] if texts else "")

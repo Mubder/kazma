@@ -13,13 +13,18 @@ tools:
       - "افحص هيكل ومخطط قاعدة البيانات لعرض الجداول والحقول"
   execute_db_query:
     arabic_name: "تنفيذ استعلام قاعدة البيانات"
-    description: "Execute a read-only SQL SELECT query against a local SQLite database file."
+    description: >
+      READ-ONLY SQL SELECT/WITH against a local SQLite file. Cannot INSERT/UPDATE/DELETE.
+      NOT for memory cleanup — use memory_list_beliefs / memory_invalidate / memory_search instead.
+      Writes return authorization denied.
     category: "database"
     prompt_chain:
       - "قم بتنفيذ استعلام القراءة (SELECT) من قاعدة البيانات"
   sqlite_query:
     arabic_name: "استعلام إس كيو لايت"
-    description: "Execute a read-only SQL query against the local SQLite database. SELECT queries only. Returns rows as JSON."
+    description: >
+      READ-ONLY SELECT against a local SQLite file. SELECT only — no memory cleanup,
+      no DELETE/UPDATE. Use memory_* tools for long-term memory maintenance.
     category: "database"
     prompt_chain:
       - "قم بتنفيذ استعلام القراءة (SELECT) من قاعدة بيانات إس كيو لايت المحلية"

@@ -765,6 +765,80 @@ class LocalToolRegistry:
 
         @self.register(
             description=(
+                "List active long-term memory beliefs (V2). Optional filter q matches "
+                "subject/predicate/object. Use this for memory audit/cleanup inspection — "
+                "NOT execute_db_query (SQL cannot delete or fix memory)."
+            ),
+            category="memory",
+        )
+        async def memory_list_beliefs(q: str = "", limit: int = 30) -> str:
+            import sqlite3
+
+            from kazma_core.memory.schema_v2 import ensure_primary_schema
+            from kazma_core.paths import primary_memory_db
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            try:
+                conn = sqlite3.connect(
+                    primary_memory_db(), check_same_thread=False
+                )
+                conn.row_factory = sqlite3.Row
+                ensure_primary_schema(conn)
+                tenant = get_current_tenant_id()
+                lim = max(1, min(int(limit or 30), 100))
+                sql = (
+                    "SELECT id, subject, predicate, predicate_type, "
+                    "substr(object,1,240) AS object, confidence, structural_importance "
+                    "FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL "
+                    "AND tenant_id=?"
+                )
+                params: list[Any] = [tenant]
+                if (q or "").strip():
+                    ql = f"%{q.strip().lower()}%"
+                    sql += (
+                        " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? "
+                        "OR LOWER(object) LIKE ?)"
+                    )
+                    params.extend([ql, ql, ql])
+                sql += (
+                    " ORDER BY (structural_importance * confidence) DESC LIMIT ?"
+                )
+                params.append(lim)
+                rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+                conn.close()
+                return json.dumps(
+                    {"count": len(rows), "beliefs": rows},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            except Exception as exc:
+                logger.warning("[memory_list_beliefs] failed: %s", exc)
+                return f"Error: memory_list_beliefs failed — {exc}"
+
+        @self.register(
+            description=(
+                "Soft-invalidate one memory belief by id (from memory_list_beliefs / "
+                "memory_search). Correct tool for removing stale/duplicate facts. "
+                "Does NOT hard-delete; does NOT use SQL. Never use execute_db_query "
+                "for memory cleanup — it is SELECT-only and will return authorization denied."
+            ),
+            category="memory",
+        )
+        async def memory_invalidate(belief_id: str) -> str:
+            from kazma_core.memory.hygiene import invalidate_belief
+
+            bid = (belief_id or "").strip()
+            if not bid:
+                return "Error: belief_id required"
+            try:
+                result = invalidate_belief(bid, remove_graph=True)
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            except Exception as exc:
+                logger.warning("[memory_invalidate] failed: %s", exc)
+                return f"Error: memory_invalidate failed — {exc}"
+
+        @self.register(
+            description=(
                 "Store a fact, preference, or conversation fragment in long-term memory. "
                 "Use when the user shares personal info, preferences, or important context "
                 "that should be remembered across sessions. "
@@ -773,7 +847,8 @@ class LocalToolRegistry:
                 '{"predicate":"grok_next_reset","object":"<when>"} or '
                 '{"service":"grok","next_reset":"<when>"} so the new value SUPERSEDES '
                 "the previous one instead of stacking duplicates. Free text that mentions "
-                "a product next/weekly reset is auto-classified the same way."
+                "a product next/weekly reset is auto-classified the same way. "
+                "To remove stale beliefs use memory_invalidate — never raw SQL."
             ),
             category="memory",
         )
