@@ -110,10 +110,37 @@ def resolve_entity(
                     best_dist = dist
                     best_id = eid
             if best_id is not None and best_dist < threshold:
-                # High-stakes → quarantine; low-stakes → auto-merge
+                # High-stakes → tier-3 LLM when enabled, else quarantine
                 if is_high_stakes:
-                    _quarantine_merge(conn, canonical, best_id, tenant_id, best_dist, tier="tier2_vector")
-                    # Still create the new entity so it exists pending review
+                    llm_decision = _tier3_llm_disambiguate(
+                        norm_name,
+                        best_id,
+                        entity_type=entity_type,
+                        distance=best_dist,
+                        cfg=cfg,
+                    )
+                    if llm_decision == "merge":
+                        _auto_merge(
+                            conn, canonical, best_id, norm_name, ahash, tenant_id, entity_type
+                        )
+                        return {
+                            "canonical_id": best_id,
+                            "action": "llm_merge",
+                        }
+                    if llm_decision == "distinct":
+                        # Create as separate entity; no quarantine
+                        pass
+                    else:
+                        # unknown / llm off → quarantine for human review
+                        _quarantine_merge(
+                            conn,
+                            canonical,
+                            best_id,
+                            tenant_id,
+                            best_dist,
+                            tier="tier2_vector",
+                        )
+                        # Still create the new entity so it exists pending review
                 else:
                     _auto_merge(conn, canonical, best_id, norm_name, ahash, tenant_id, entity_type)
                     return {"canonical_id": best_id, "action": "auto_merge"}
@@ -125,6 +152,80 @@ def resolve_entity(
     # ── No match: create a new canonical entity ──
     _create_entity(conn, canonical, norm_name, ahash, entity_type, tenant_id, is_high_stakes)
     return {"canonical_id": canonical, "action": "create"}
+
+
+def _tier3_llm_disambiguate(
+    name: str,
+    candidate_id: str,
+    *,
+    entity_type: str,
+    distance: float,
+    cfg: dict[str, Any] | None,
+) -> str:
+    """Tier-3 LLM: return ``merge`` | ``distinct`` | ``skip``.
+
+    Gated by ``memory.v2.entity_llm_disambiguate`` (default False) so we
+    never spend LLM tokens without an explicit opt-in.
+    """
+    v2 = (cfg or {}).get("v2") or {}
+    if not bool(v2.get("entity_llm_disambiguate", False)):
+        return "skip"
+    try:
+        # Prefer sync config read if cfg was partial
+        if "entity_llm_disambiguate" not in v2:
+            from kazma_core.memory.config import read_memory_cfg
+
+            v2 = (read_memory_cfg() or {}).get("v2") or v2
+            if not bool(v2.get("entity_llm_disambiguate", False)):
+                return "skip"
+    except Exception:
+        pass
+
+    prompt = (
+        "You are an entity-resolution assistant. Reply with exactly one word: "
+        "MERGE or DISTINCT.\n"
+        f"New mention: {name!r} (type={entity_type})\n"
+        f"Candidate canonical id: {candidate_id!r}\n"
+        f"Vector distance: {distance:.4f}\n"
+        "MERGE if they refer to the same real-world entity; DISTINCT otherwise."
+    )
+    try:
+        # Use active model — one-shot, no tools
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            client = get_model_registry().get_client()
+        except Exception:
+            return "skip"
+        if client is None:
+            return "skip"
+        # Support both .chat and simple call patterns
+        if hasattr(client, "chat"):
+            resp = client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=8,
+            )
+            text = ""
+            if isinstance(resp, dict):
+                text = (
+                    ((resp.get("choices") or [{}])[0].get("message") or {}).get("content")
+                    or resp.get("content")
+                    or ""
+                )
+            else:
+                text = str(resp or "")
+        else:
+            return "skip"
+        low = (text or "").strip().lower()
+        if "merge" in low and "distinct" not in low:
+            return "merge"
+        if "distinct" in low:
+            return "distinct"
+        return "skip"
+    except Exception:
+        logger.debug("[entity_resolve] tier-3 LLM failed", exc_info=True)
+        return "skip"
 
 
 def _create_entity(

@@ -44,9 +44,17 @@ Full execution plan: session plan / this file. Backlog SoT: `MEMORY_REMAINING.md
 | P2-8 Memory quality score API + card | **Done** |
 | P2-9 explain_recall in chat inject + format chips | **Done** |
 
-## P2 remaining / P3 (still deferred)
+## Scale foundation shipped (follow-on)
 
-Shared Postgres **state** DB · Neo4j · LLM entity tier-3 · full graph animation polish · multi-region
+| ID | Status |
+|----|--------|
+| P2-2 Postgres state dual-mirror | **Done** — episodes/beliefs mirror; recall remains SQLite |
+| P2-3 Neo4j GraphBackend | **Done** — dual-write when driver+URL available |
+| P2-5 LLM entity tier-3 | **Done** — opt-in `entity_llm_disambiguate` |
+
+## Still deferred
+
+Full cutover of recall to Postgres · multi-region · graph animation polish · auth-bound SaaS tenants
 
 ## P3 Trigger-only
 

@@ -48,8 +48,16 @@ DEFAULT_BACKENDS_CFG: dict[str, Any] = {
         "dim": 1024,
     },
     "graph": {
-        "provider": "sqlite",
+        "provider": "sqlite",  # sqlite | neo4j
         "url": "",
+        "user": "neo4j",
+        "password": "",
+        "api_key": "",
+    },
+    # Shared cognitive state dual-mirror (multi-replica base)
+    "state": {
+        "provider": "sqlite",  # sqlite | postgres
+        "url": "",  # Postgres DSN when provider=postgres
     },
     "failover": {
         "on_remote_error": "local",  # local | empty | raise
@@ -787,6 +795,7 @@ def get_backends_cfg() -> dict[str, Any]:
         "vector": dict(DEFAULT_BACKENDS_CFG["vector"]),
         "embedder": dict(DEFAULT_BACKENDS_CFG["embedder"]),
         "graph": dict(DEFAULT_BACKENDS_CFG["graph"]),
+        "state": dict(DEFAULT_BACKENDS_CFG["state"]),
         "failover": dict(DEFAULT_BACKENDS_CFG["failover"]),
     }
     try:
@@ -796,7 +805,7 @@ def get_backends_cfg() -> dict[str, Any]:
         mode = store.get("memory.backends.mode")
         if mode is not None:
             out["mode"] = str(mode).strip().lower() or "local"
-        for section in ("vector", "embedder", "graph", "failover"):
+        for section in ("vector", "embedder", "graph", "state", "failover"):
             for k, default in DEFAULT_BACKENDS_CFG[section].items():
                 val = store.get(f"memory.backends.{section}.{k}")
                 if val is not None:
@@ -833,7 +842,7 @@ def mask_backends_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     import copy
 
     c = copy.deepcopy(cfg if cfg is not None else get_backends_cfg())
-    for section in ("vector", "embedder", "graph"):
+    for section in ("vector", "embedder", "graph", "state"):
         sec = c.get(section) or {}
         for k, v in list(sec.items()):
             if is_sensitive_backend_key(k) and v:
@@ -853,7 +862,7 @@ def save_backends_cfg(payload: dict[str, Any]) -> dict[str, Any]:
         mode = "local"
     pairs.append(("memory.backends.mode", mode))
 
-    for section in ("vector", "embedder", "graph", "failover"):
+    for section in ("vector", "embedder", "graph", "state", "failover"):
         sec = payload.get(section) or {}
         if not isinstance(sec, dict):
             continue
@@ -910,6 +919,7 @@ def reset_backends_to_local() -> dict[str, Any]:
             "vector": dict(DEFAULT_BACKENDS_CFG["vector"]),
             "embedder": dict(DEFAULT_BACKENDS_CFG["embedder"]),
             "graph": dict(DEFAULT_BACKENDS_CFG["graph"]),
+            "state": dict(DEFAULT_BACKENDS_CFG["state"]),
             "failover": dict(DEFAULT_BACKENDS_CFG["failover"]),
         }
     )

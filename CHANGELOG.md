@@ -1,4 +1,14 @@
-# CHANGELOG
+## Unreleased — Memory scale foundation (2026-08-03)
+
+- **Postgres state dual-mirror** (`state_backend.py`): optional
+  `memory.backends.state.provider=postgres` + DSN mirrors episodes/beliefs
+  for multi-process share; chat recall stays on SQLite.
+- **GraphBackend** (`graph_backend.py`): SQLite default + Neo4j dual-write
+  when bolt URL/driver available; belief mutations call `upsert_belief_edge`.
+- **Entity tier-3 LLM** (opt-in `memory.v2.entity_llm_disambiguate`): MERGE vs
+  DISTINCT for high-stakes vector candidates before quarantine.
+- Settings: state + Neo4j fields; capability details on backends GET.
+- Tests: `test_memory_scale_foundation.py`.
 
 ## Unreleased — Memory P2 wave: remote vectors + ops polish (2026-08-03)
 

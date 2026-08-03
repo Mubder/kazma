@@ -804,10 +804,20 @@ def register_direct_routes(self: Any) -> None:
         )
 
         cfg = get_backends_cfg()
+        try:
+            from kazma_core.memory.graph_backend import graph_capability
+            from kazma_core.memory.state_backend import state_capability
+
+            gcap = graph_capability(cfg)
+            scap = state_capability(cfg)
+        except Exception:
+            gcap, scap = {}, {}
         return {
             "ok": True,
             "backends": mask_backends_cfg(cfg),
             "capability": vector_capability(cfg),
+            "graph_capability": gcap,
+            "state_capability": scap,
         }
 
     @self.app.put("/api/settings/memory/backends")

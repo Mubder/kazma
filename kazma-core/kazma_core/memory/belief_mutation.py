@@ -261,7 +261,7 @@ def mutate_belief(
     try:
         with _mutation_lock:
             if ptype == "functional":
-                return _mutate_functional(
+                result = _mutate_functional(
                     primary_conn, ops_conn, sub, pred, obj,
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
@@ -269,7 +269,7 @@ def mutate_belief(
                     mem_class=mem_class, now=now,
                 )
             elif ptype == "state":
-                return _mutate_state(
+                result = _mutate_state(
                     primary_conn, ops_conn, sub, pred, obj,
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
@@ -277,13 +277,47 @@ def mutate_belief(
                     mem_class=mem_class, now=now,
                 )
             else:
-                return _mutate_set(
+                result = _mutate_set(
                     primary_conn, ops_conn, sub, pred, obj,
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now,
                 )
+        # Best-effort dual-write to shared state / graph backends (P2-2/P2-3)
+        if result.get("action") not in ("noop", None) and result.get("belief_id"):
+            try:
+                from kazma_core.memory.graph_backend import upsert_belief_edge
+                from kazma_core.memory.state_backend import mirror_belief_to_state
+
+                bid = str(result["belief_id"])
+                mirror_belief_to_state(
+                    {
+                        "id": bid,
+                        "tenant_id": tenant_id,
+                        "subject": sub,
+                        "predicate": pred,
+                        "predicate_type": ptype,
+                        "object": obj,
+                        "confidence": confidence,
+                        "structural_importance": importance,
+                        "source_trust_weight": trust,
+                        "valid_from": now,
+                        "valid_until": None,
+                        "invalidated_at": None,
+                    }
+                )
+                upsert_belief_edge(
+                    subject=sub,
+                    predicate=pred,
+                    obj=obj,
+                    belief_id=bid,
+                    tenant_id=tenant_id,
+                    confidence=float(confidence or 0.5),
+                )
+            except Exception:
+                logger.debug("[belief_mutate] dual-write backends failed", exc_info=True)
+        return result
     except Exception:
         logger.debug("[belief_mutate] mutation failed", exc_info=True)
         return {"action": "noop", "belief_id": "", "superseded_id": None}

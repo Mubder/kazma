@@ -353,6 +353,27 @@ class DualWriteMirror:
                 except Exception:
                     logger.debug("[dual_write] episode embedding failed for %s", eid, exc_info=True)
                 self._primary.commit()
+                # Optional multi-replica state dual-mirror (Postgres)
+                try:
+                    from kazma_core.memory.state_backend import mirror_episode_to_state
+
+                    mirror_episode_to_state(
+                        {
+                            "id": eid,
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "turn_number": int(turn_number),
+                            "user_text": (user_text or "")[:4000],
+                            "assistant_text": (assistant_text or "")[:4000],
+                            "summary_text": (summary_text or "")[:2000],
+                            "tier": effective_tier,
+                            "structural_importance": effective_importance,
+                            "created_at": now,
+                            "metadata": meta,
+                        }
+                    )
+                except Exception:
+                    logger.debug("[dual_write] state mirror failed", exc_info=True)
             return eid
         except Exception:
             logger.debug("[dual_write] episode mirror failed", exc_info=True)

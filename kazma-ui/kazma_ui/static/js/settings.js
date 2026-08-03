@@ -57,8 +57,9 @@ function settingsApp() {
             mode: 'local',
             embedder: { provider: 'local', model: 'BAAI/bge-m3', base_url: '', api_key: '', dim: 1024 },
             vector: { provider: 'sqlite_vec', url: '', api_key: '', collection: 'kazma_memory', dimension: 1024 },
-            graph: { provider: 'sqlite', url: '' },
-            failover: { on_remote_error: 'local' },
+            graph: { provider: 'sqlite', url: '', user: 'neo4j', password: '', api_key: '' },
+            state: { provider: 'sqlite', url: '' },
+            failover: { on_remote_error: 'local', timeout_ms: 5000 },
         },
         memoryBackendsSaving: false,
         memoryBackendsStatus: '',
@@ -67,6 +68,8 @@ function settingsApp() {
             vector_status: 'full',
             vector_status_detail: '',
         },
+        memoryBackendsStateCap: { detail: '' },
+        memoryBackendsGraphCap: { detail: '' },
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -319,6 +322,7 @@ function settingsApp() {
                             embedder: Object.assign({}, this.memoryBackends.embedder, b.embedder || {}),
                             vector: Object.assign({}, this.memoryBackends.vector, b.vector || {}),
                             graph: Object.assign({}, this.memoryBackends.graph, b.graph || {}),
+                            state: Object.assign({}, this.memoryBackends.state, b.state || {}),
                             failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
                         };
                     }
@@ -326,6 +330,12 @@ function settingsApp() {
                         this.memoryBackendsCapability = Object.assign(
                             {}, this.memoryBackendsCapability, mb.capability
                         );
+                    }
+                    if (mb && mb.state_capability) {
+                        this.memoryBackendsStateCap = mb.state_capability;
+                    }
+                    if (mb && mb.graph_capability) {
+                        this.memoryBackendsGraphCap = mb.graph_capability;
                     }
                 } catch (e) { /* optional */ }
 
@@ -766,6 +776,7 @@ function settingsApp() {
                         embedder: Object.assign({}, this.memoryBackends.embedder, b.embedder || {}),
                         vector: Object.assign({}, this.memoryBackends.vector, b.vector || {}),
                         graph: Object.assign({}, this.memoryBackends.graph, b.graph || {}),
+                        state: Object.assign({}, this.memoryBackends.state, b.state || {}),
                         failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
                     };
                 }

@@ -662,6 +662,32 @@
                 <input type="text" class="form-input" x-model="memoryBackends.vector.url" placeholder="postgresql://… or http://qdrant:6333">
             </div>
             <div class="form-group">
+                <label>Shared state (multi-replica mirror)</label>
+                <select class="form-select" x-model="memoryBackends.state.provider">
+                    <option value="sqlite">Local SQLite only</option>
+                    <option value="postgres">Postgres dual-mirror</option>
+                </select>
+            </div>
+            <div class="form-group" x-show="memoryBackends.state.provider === 'postgres'">
+                <label>Postgres DSN</label>
+                <input type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
+            </div>
+            <div class="form-group">
+                <label>Graph store</label>
+                <select class="form-select" x-model="memoryBackends.graph.provider">
+                    <option value="sqlite">Local SQLite beliefs</option>
+                    <option value="neo4j">Neo4j dual-write</option>
+                </select>
+            </div>
+            <div class="form-group" x-show="memoryBackends.graph.provider === 'neo4j'">
+                <label>Neo4j bolt URL</label>
+                <input type="text" class="form-input" x-model="memoryBackends.graph.url" placeholder="bolt://localhost:7687">
+            </div>
+            <div class="form-group" x-show="memoryBackends.graph.provider === 'neo4j'">
+                <label>Neo4j password</label>
+                <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="leave blank to keep">
+            </div>
+            <div class="form-group">
                 <label>Failover if remote down</label>
                 <select class="form-select" x-model="memoryBackends.failover.on_remote_error">
                     <option value="local">Fall back to local</option>
@@ -669,6 +695,8 @@
                     <option value="raise">Surface error</option>
                 </select>
             </div>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin:4px 0 8px;"
+               x-text="(memoryBackendsStateCap.detail || '') + ' · ' + (memoryBackendsGraphCap.detail || '')"></p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
                 <button class="btn btn-primary" @click="saveMemoryBackends()" :disabled="memoryBackendsSaving" x-text="memoryBackendsSaving ? '…' : 'Save backends'"></button>
                 <button class="btn" @click="testMemoryEmbed()">Test embed</button>

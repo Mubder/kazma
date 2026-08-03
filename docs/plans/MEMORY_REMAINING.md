@@ -52,9 +52,9 @@ User turn
 | P2-7 | Stuck-queue reclaim chaos test | **Done** |
 | P2-8 | Memory quality score API + card | **Done** |
 | P2-9 | explain_recall in chat format | **Done** |
-| P2-2 | Shared Postgres **state** for multi-process | Next |
-| P2-3 | Neo4j / external graph | Next |
-| P2-5 | LLM tier-3 entity disambiguation | Next |
+| P2-2 | Shared Postgres **state** dual-mirror | **Done** (recall still SQLite) |
+| P2-3 | Neo4j graph dual-write + GraphBackend | **Done** |
+| P2-5 | LLM tier-3 entity disambiguation (opt-in) | **Done** |
 
 ### P3 — Trigger-only scale
 

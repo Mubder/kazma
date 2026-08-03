@@ -64,6 +64,8 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "dense_belief_candidate_cap": 400,
         # Working-tier TTL (hours) — macro_sleep demotes stale working → episodic
         "working_ttl_hours": 24,
+        # Tier-3 LLM entity disambiguation (opt-in; costs tokens)
+        "entity_llm_disambiguate": False,
         # Source trust weights (W_trust in V_retention formula §4.1)
         "trust_weight_user": 1.0,
         "trust_weight_tool": 0.85,
@@ -174,6 +176,7 @@ def _read_store_overlay() -> dict[str, Any]:
             "explain_recall",
             "dense_belief_candidate_cap",
             "working_ttl_hours",
+            "entity_llm_disambiguate",
             "trust_weight_user",
             "trust_weight_tool",
             "trust_weight_llm",
@@ -267,6 +270,7 @@ _V2_BOOL_KEYS = (
     "skip_llm_if_heuristic_extracted",
     "access_bump_enabled",
     "explain_recall",
+    "entity_llm_disambiguate",
 )
 # Floats (trust weights, retention blend, decay λ, thresholds)
 _V2_FLOAT_KEYS = (
