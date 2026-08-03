@@ -2543,17 +2543,20 @@
       try { activeStream.abort(); } catch (e) {}
       activeStream = null;
     }
+    // Stop any background poller from the previous session (prevents blink loop).
+    _stopBackgroundPoll();
     endTurn();
 
     chatSessionId = sessionId;
     persistSessionId();
 
     // Connect to Central WebSocket Telemetry Bus for THIS session
+    // (connect is a no-op if already OPEN on the same sessionId).
     if (window.Alpine && Alpine.store && Alpine.store('agent')) {
       Alpine.store('agent').connect(sessionId);
     }
 
-    // Clear messages and show loading state
+    // Clear messages and show loading state (only for explicit session loads)
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
@@ -2593,8 +2596,7 @@
           // indicator and start polling for the background-completed result.
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
-            // Poll — if server is not generating, poller will resolve dead pending.
-            _pollBackgroundTurn(sessionId, messages.length);
+            // Poller is armed once after the loop (only for trailing pending).
           } else {
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
               activity: msg.activity,
@@ -2603,32 +2605,18 @@
           }
         });
 
-        // Also check: if last message is a user message with no assistant
-        // response at all, the background turn may still be running.
+        // Only arm background poller when a turn may still be in flight.
+        // Do NOT poll completed chats — that re-fetched messages every 2s and
+        // re-rendered the whole transcript (page blink).
         var lastMsg = messages[messages.length - 1];
-        if (lastMsg && lastMsg.role === 'user') {
+        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.pending) {
+          if ((lastMsg.content || '').trim()) _showGeneratingIndicator();
           _pollBackgroundTurn(sessionId, messages.length);
-        } else if (
-          lastMsg && lastMsg.role === 'assistant' && lastMsg.pending &&
-          (lastMsg.content || '').trim()
-        ) {
-          // Partial content mid-stream — poll until the final persist pops
-          // pending, then reload shows the complete response.
-          _showGeneratingIndicator();
-          _pollBackgroundTurn(sessionId, messages.length);
-        } else if (
-          lastMsg && lastMsg.role === 'assistant' && lastMsg.pending &&
-          !(lastMsg.content || '').trim()
-        ) {
-          // Empty pending — poller decides live vs dead (via /status generating).
-          _pollBackgroundTurn(sessionId, messages.length);
-        } else if (
-          lastMsg && lastMsg.role === 'assistant' && !lastMsg.pending &&
-          !(lastMsg.content || '').trim()
-        ) {
-          // Empty non-pending bubble — only poll if server still generating.
+        } else if (lastMsg && lastMsg.role === 'user') {
+          // May have a detached turn with no assistant row yet — check status once via poller.
           _pollBackgroundTurn(sessionId, messages.length);
         }
+        // Complete assistant (content, not pending) → idle UI, no poller.
 
         scrollToBottom();
         checkPendingApprovals();
@@ -2647,45 +2635,82 @@
 
   /**
    * Poll for a background-completed turn after refresh / idle-watchdog / WS drop.
-   * While the server reports generating=true, keep polling (no hard 90s death).
-   * Otherwise poll with backoff up to ~DETACHED_TTL (5 min).
+   *
+   * CRITICAL: never call full loadSession() on every tick — that wiped the
+   * chat DOM ("Loading…"), reconnected WS, and re-armed this poller → 2s blink
+   * loop (status + messages + sessions + pending-approvals in the access log).
+   *
+   * Soft-update only: when a pending bubble gains content, paint it in place.
    */
   var _bgPollingSession = null;
+  var _bgPollTimer = null;
+
+  function _stopBackgroundPoll() {
+    _bgPollingSession = null;
+    if (_bgPollTimer) {
+      clearTimeout(_bgPollTimer);
+      _bgPollTimer = null;
+    }
+  }
+
+  function _softApplyFinalAssistant(content, model) {
+    if (!content) return;
+    // Prefer existing live helpers — do not wipe the whole transcript.
+    if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+      window.KazmaChat.applyFinalAssistantText(content, model || '');
+      return;
+    }
+    var nodes = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
+    var last = nodes.length ? nodes[nodes.length - 1] : null;
+    if (!last) {
+      appendMessage('assistant', content, null, null, { model: model || '' });
+      return;
+    }
+    var textEl = last.querySelector('.message-text');
+    if (textEl) {
+      textEl.innerHTML = (window.KS && KS.markdown) ? KS.markdown(content) : escapeHtml(content);
+    }
+    if (model) {
+      var meta = last.querySelector('.message-meta');
+      if (meta && meta.textContent.indexOf(model) < 0) {
+        meta.textContent = (meta.textContent ? meta.textContent + ' · ' : '') + model;
+      }
+    }
+    scrollToBottom();
+  }
 
   function _pollBackgroundTurn(sessionId, originalCount) {
-    if (_bgPollingSession === sessionId) return;  // already polling
+    if (!sessionId) return;
+    // Already polling this session — do not stack timers.
+    if (_bgPollingSession === sessionId && _bgPollTimer) return;
+    _stopBackgroundPoll();
     _bgPollingSession = sessionId;
     var attempts = 0;
-    var maxIdleAttempts = 60;  // ~5–10 min with backoff when not generating
+    var maxIdleAttempts = 40;
     var lastMessageHash = '';
-    var _savedScrollPos = 0;
-    var delayMs = 2000;
+    var delayMs = 2500;
+    var sawPending = false;
 
     function _hashMessages(msgs) {
-      var last = msgs[msgs.length - 1];
-      var lastLen = last && last.content ? last.content.length : 0;
-      return msgs.length + ':' + lastLen + ':' + !!(last && last.pending);
-    }
-
-    function _saveScrollPosition() {
-      _savedScrollPos = messagesEl ? messagesEl.scrollTop : 0;
-    }
-
-    function _restoreScrollPosition() {
-      if (messagesEl) messagesEl.scrollTop = _savedScrollPos;
+      var last = msgs[msgs.length - 1] || {};
+      var lastLen = last.content ? String(last.content).length : 0;
+      return msgs.length + ':' + lastLen + ':' + !!last.pending + ':' + (last.role || '');
     }
 
     function _schedule(next) {
-      setTimeout(poll, next);
+      if (_bgPollTimer) clearTimeout(_bgPollTimer);
+      _bgPollTimer = setTimeout(poll, next);
     }
 
     function poll() {
-      if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
-      if (activeStream) { _bgPollingSession = null; return; }
-      // WS turn still live — keep waiting
+      _bgPollTimer = null;
+      if (chatSessionId !== sessionId) { _stopBackgroundPoll(); return; }
+      if (activeStream) { _stopBackgroundPoll(); return; }
+      // Live WS turn — do not hammer SessionStore; wait for stream frames.
       try {
-        if (window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive) {
-          _schedule(Math.min(delayMs, 5000));
+        var store = window.Alpine && Alpine.store && Alpine.store('agent');
+        if (store && store.connectionStatus === 'connected' && store._turnActive) {
+          _schedule(Math.min(delayMs, 8000));
           return;
         }
       } catch (e) { /* ignore */ }
@@ -2699,57 +2724,65 @@
           .then(function(r) { return r.ok ? r.json() : []; })
           .catch(function() { return []; }),
       ]).then(function(pair) {
-        if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
+        if (chatSessionId !== sessionId) { _stopBackgroundPoll(); return; }
         var status = pair[0] || {};
         var messages = pair[1] || [];
         var generating = !!status.generating;
         var currentHash = _hashMessages(messages);
         var lastMsg = messages[messages.length - 1];
 
-        if (originalCount > 0 && messages.length > originalCount) {
-          _bgPollingSession = null;
-          _saveScrollPosition();
-          loadSession(sessionId);
-          setTimeout(_restoreScrollPosition, 100);
+        if (lastMsg && lastMsg.pending) sawPending = true;
+
+        // ── Turn finished with content: soft-apply, never full loadSession ──
+        if (
+          lastMsg && lastMsg.role === 'assistant' &&
+          (lastMsg.content || '').trim() && !lastMsg.pending
+        ) {
+          // Only paint if we were watching a pending/background turn, or the
+          // count grew (new reply). Avoid re-render loops on already-complete chats.
+          var grew = originalCount > 0 && messages.length > originalCount;
+          if (sawPending || grew || attempts <= 2) {
+            _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
+          }
+          _stopBackgroundPoll();
           return;
         }
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content && !lastMsg.pending) {
-          _bgPollingSession = null;
-          _saveScrollPosition();
-          loadSession(sessionId);
-          setTimeout(_restoreScrollPosition, 100);
+
+        // Message count grew with non-pending assistant earlier in the list
+        if (originalCount > 0 && messages.length > originalCount && !generating) {
+          var newest = messages[messages.length - 1];
+          if (newest && newest.role === 'assistant' && (newest.content || '').trim()) {
+            _softApplyFinalAssistant(newest.content, newest.model || '');
+          }
+          _stopBackgroundPoll();
           return;
         }
 
         if (currentHash !== lastMessageHash && lastMsg && lastMsg.pending) {
           lastMessageHash = currentHash;
-          var pendingEl = messagesEl && messagesEl.querySelector('[data-role="assistant"]:last-child .message-text');
-          if (pendingEl && pendingEl.textContent.indexOf('⏳') !== -1) {
-            var progress = lastMsg.content ? ' (' + lastMsg.content.length + ' chars)' : '';
+          var pendingEl = messagesEl && messagesEl.querySelector('.message-assistant:last-child .message-text');
+          if (pendingEl && (pendingEl.textContent || '').indexOf('⏳') !== -1) {
+            var progress = lastMsg.content ? ' (' + String(lastMsg.content).length + ' chars)' : '';
             pendingEl.innerHTML = '<p>⏳ <em>Previous turn still processing in the background' + progress + '…</em></p>';
           }
         }
 
         if (generating) {
-          // Server still working — never give up solely on attempt count.
-          delayMs = Math.min(delayMs + 1000, 10000);
+          delayMs = Math.min(delayMs + 500, 10000);
           _schedule(delayMs);
           return;
         }
 
-        // Dead pending: server not generating but bubble still pending/empty.
-        // Common after a crash that showed an error live but never cleared
-        // SessionStore — refresh would stick on "still processing…" forever.
+        // Dead pending: not generating, empty pending bubble
         if (
           lastMsg && lastMsg.role === 'assistant' &&
           lastMsg.pending && !(lastMsg.content || '').trim() &&
           attempts >= 2
         ) {
-          _bgPollingSession = null;
-          var stuck = messagesEl ? messagesEl.querySelectorAll('[data-role="assistant"]') : [];
+          _stopBackgroundPoll();
+          var stuck = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
           if (stuck.length > 0) {
-            var stuckEl = stuck[stuck.length - 1];
-            var textNode = stuckEl.querySelector('.message-text') || stuckEl;
+            var textNode = stuck[stuck.length - 1].querySelector('.message-text') || stuck[stuck.length - 1];
             textNode.innerHTML = (window.KS && KS.markdown)
               ? KS.markdown('⚠️ Previous turn ended without a stored reply (it may have failed). Send a new message to continue.')
               : '<p><em>Previous turn ended without a stored reply. Send a new message to continue.</em></p>';
@@ -2757,27 +2790,48 @@
           return;
         }
 
+        // Idle complete conversation (assistant done, or empty session): STOP.
+        // Do not keep polling forever — that was the blink loop.
+        if (
+          !generating &&
+          lastMsg &&
+          lastMsg.role === 'assistant' &&
+          !lastMsg.pending
+        ) {
+          _stopBackgroundPoll();
+          return;
+        }
+        if (!generating && (!messages || messages.length === 0)) {
+          _stopBackgroundPoll();
+          return;
+        }
+        // Last message is user, server idle — no background turn; stop quickly.
+        if (!generating && lastMsg && lastMsg.role === 'user' && attempts >= 2) {
+          _stopBackgroundPoll();
+          return;
+        }
+
         if (attempts > maxIdleAttempts) {
-          _bgPollingSession = null;
-          var msgs = messagesEl ? messagesEl.querySelectorAll('[data-role="assistant"]') : [];
+          _stopBackgroundPoll();
+          var msgs = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
           if (msgs.length > 0) {
             var lastAsst = msgs[msgs.length - 1];
-            if (lastAsst.textContent.indexOf('⏳') !== -1 || lastAsst.textContent.indexOf('background') !== -1) {
-              lastAsst.innerHTML = '<p><em>Could not confirm the previous turn finished. '
-                + 'Refresh the session or resend if needed.</em></p>';
+            if ((lastAsst.textContent || '').indexOf('⏳') !== -1) {
+              lastAsst.querySelector('.message-text').innerHTML =
+                '<p><em>Could not confirm the previous turn finished. Send a new message if needed.</em></p>';
             }
           }
           return;
         }
 
-        delayMs = Math.min(delayMs + 1000, 10000);
+        delayMs = Math.min(delayMs + 500, 10000);
         _schedule(delayMs);
       }).catch(function() {
         _schedule(5000);
       });
     }
 
-    setTimeout(poll, 1500);
+    _schedule(800);
   }
 
   function checkPendingApprovals() {
@@ -2966,6 +3020,7 @@
     finalizeProgress: finalizeProgress,
     noteTurnActivity: noteTurnActivity,
     pollBackgroundTurn: _pollBackgroundTurn,
+    stopBackgroundPoll: _stopBackgroundPoll,
     applyFinalAssistantText: function(content, model) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;

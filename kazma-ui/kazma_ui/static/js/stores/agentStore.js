@@ -103,6 +103,8 @@ document.addEventListener('alpine:init', () => {
     _maxReconnectDelay: 16000,
     /** True while a send_prompt / approve_tool turn is in flight on this bus. */
     _turnActive: false,
+    /** True when we close the socket on purpose (session switch / reconnect). */
+    _intentionalClose: false,
 
     // ── UI bridge helpers ────────────────────────────────────
     _chat() {
@@ -180,6 +182,14 @@ document.addEventListener('alpine:init', () => {
       if (this.sessionId === sessionId && this._socket && this._socket.readyState === WebSocket.OPEN) {
         return;
       }
+      // Already connecting to the same session — avoid close/reopen thrash.
+      if (
+        this.sessionId === sessionId &&
+        this._socket &&
+        this._socket.readyState === WebSocket.CONNECTING
+      ) {
+        return;
+      }
 
       // Switching sessions must never inherit a stuck turn from the previous one.
       if (this.sessionId && this.sessionId !== sessionId) {
@@ -189,6 +199,9 @@ document.addEventListener('alpine:init', () => {
       }
 
       this.sessionId = sessionId;
+      // Intentional close for reconnect/switch — do not treat as a drop that
+      // starts the SessionStore poller (that caused chat blink every 2s).
+      this._intentionalClose = true;
       this._closeSocket();
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -208,11 +221,13 @@ document.addEventListener('alpine:init', () => {
         this._socket = new WebSocket(wsUrl);
       } catch (err) {
         console.error('[AgentStore] Failed creating WebSocket:', err);
+        this._intentionalClose = false;
         this._scheduleReconnect();
         return;
       }
 
       this._socket.onopen = () => {
+        this._intentionalClose = false;
         this.connectionStatus = 'connected';
         this._reconnectDelay = 1000;
         if (this._reconnectTimer) {
@@ -239,11 +254,13 @@ document.addEventListener('alpine:init', () => {
         this.connectionStatus = 'disconnected';
         const code = evt ? evt.code : 0;
         const reason = evt ? evt.reason : '';
+        const intentional = !!this._intentionalClose;
+        this._intentionalClose = false;
         console.warn(`[AgentStore] Telemetry socket closed for session ${sessionId} (code=${code}, reason=${reason || 'none'})`);
 
-        // Socket died mid-turn → unlock UI and catch up from SessionStore
-        // (do not paint false "Done"; server may still finish the graph).
-        if (this._turnActive) {
+        // Only catch-up-poll on unexpected drops mid-turn — not intentional
+        // close/reconnect (loadSession/connect), which caused a 2s blink loop.
+        if (!intentional && this._turnActive) {
           this._endTurn();
           try {
             if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
@@ -257,11 +274,14 @@ document.addEventListener('alpine:init', () => {
           return;
         }
 
-        this._scheduleReconnect();
+        if (!intentional) {
+          this._scheduleReconnect();
+        }
       };
     },
 
     disconnect() {
+      this._intentionalClose = true;
       this._closeSocket();
       this._resetTurnState();
       this.sessionId = null;
