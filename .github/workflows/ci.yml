@@ -97,6 +97,14 @@ jobs:
       - name: Run Core Tests
         run: python -m pytest kazma-core/kazma_core_tests kazma-core/tests -v --tb=short
 
+      - name: Memory smoke (golden + federated + priority)
+        run: |
+          python -m pytest \
+            kazma-core/tests/test_memory_eval_golden.py \
+            kazma-core/tests/test_memory_federated_search.py \
+            kazma-core/tests/test_memory_priority_batch.py \
+            -q --tb=line
+
       - name: Run Docs Sync Check
         run: python scripts/check_docs_sync.py
 

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Memory Horizon A: federated search (2026-08-03)
+
+- **Federated search** (`federated_search.py`): one query across V2 memory +
+  Knowledge Library FTS with explicit `store` labels (no schema merge).
+  `POST /api/memory/v2/federated-search`; Dashboard **Search all knowledge**
+  (Memory / Federated buttons).
+- **Source footer** on injected memory blocks (`Sources used: N beliefs…`).
+- **CI:** dedicated memory smoke pytest step; `scripts/memory_smoke.ps1`
+  includes federated tests.
+- Docs: explicitly-not-planned boundaries + federated alternative.
+
 ## Unreleased — Memory SaaS assist: Postgres sparse recall + auth tenants (2026-08-03)
 
 - **Postgres sparse recall assist:** when state dual-mirror is available and

@@ -237,14 +237,21 @@
         <a href="/settings?tab=agent" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
       </div>
 
-      <!-- Live recall probe -->
+      <!-- Live recall probe + federated search (memory + KB, labeled) -->
       <div style="margin-bottom:16px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
-        <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);margin-bottom:8px;">Live recall probe</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input id="v2-probe-input" type="text" placeholder="What color do I like?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
-          <button id="v2-probe-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;">Probe</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">Search all knowledge</div>
+          <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> Include Knowledge Library
+          </label>
         </div>
-        <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:180px;overflow-y:auto;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="v2-probe-input" type="text" placeholder="What color do I like? / How does the API auth work?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
+          <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">Memory</button>
+          <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">Federated</button>
+        </div>
+        <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
+        <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
       </div>
 
       <!-- Queue + entity merges + procedural + quality -->
@@ -1494,9 +1501,61 @@
     } catch (e) { el.textContent = 'Merges load failed'; }
   }
 
+  async function runFederatedSearch() {
+    const input = document.getElementById('v2-probe-input');
+    const out = document.getElementById('v2-probe-results');
+    const sum = document.getElementById('v2-fed-summary');
+    if (!input || !out) return;
+    const q = (input.value || '').trim();
+    if (!q) { out.textContent = 'Enter a query.'; return; }
+    out.textContent = 'Searching memory + knowledge…';
+    if (sum) sum.textContent = '';
+    const includeKb = !!(document.getElementById('v2-fed-include-kb') || {}).checked;
+    try {
+      const resp = await fetch('/api/memory/v2/federated-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: q,
+          limit_memory: 5,
+          limit_kb: 5,
+          include_memory: true,
+          include_knowledge: includeKb,
+        }),
+      });
+      const data = await resp.json();
+      if (!data.ok) { out.textContent = data.error || 'Search failed'; return; }
+      const s = data.summary || {};
+      if (sum) {
+        sum.textContent = 'memory: ' + (s.memory || 0) + ' · knowledge: ' + (s.knowledge || 0) +
+          ' · total: ' + (s.total || 0) + '  (stores stay separate — labels only)';
+      }
+      const lines = (data.hits || []).map(function(h) {
+        const store = h.store === 'knowledge' ? 'KB' : 'MEM';
+        const color = h.store === 'knowledge' ? '#fbbf24' : '#2ed573';
+        const kind = (h.kind || '').toUpperCase();
+        const prov = h.provenance || {};
+        const extra = h.store === 'knowledge'
+          ? (prov.document_title || prov.source_url || prov.library_id || '')
+          : ((h.sources && h.sources.join(',')) || h.source || '');
+        return '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+          '<span style="color:' + color + ';font-size:0.65rem;font-weight:700;">' + store + '/' + kind + '</span> ' +
+          _esc((h.content || '').slice(0, 220)) +
+          (extra ? ' <span style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
+          '</div>';
+      });
+      out.innerHTML = lines.length ? lines.join('') : '<span style="color:var(--text-muted);">No hits in either store.</span>';
+    } catch (e) {
+      out.textContent = 'Federated search error: ' + e;
+    }
+  }
   document.getElementById('v2-probe-btn')?.addEventListener('click', runV2Probe);
+  document.getElementById('v2-federated-btn')?.addEventListener('click', runFederatedSearch);
   document.getElementById('v2-probe-input')?.addEventListener('keydown', function(ev) {
-    if (ev.key === 'Enter') runV2Probe();
+    if (ev.key === 'Enter') {
+      if (ev.shiftKey) runV2Probe();
+      else runFederatedSearch();
+    }
   });
   document.getElementById('v2-queue-refresh')?.addEventListener('click', loadV2Queue);
   document.getElementById('v2-merges-refresh')?.addEventListener('click', loadV2Merges);

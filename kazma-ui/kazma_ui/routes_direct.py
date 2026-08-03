@@ -269,6 +269,42 @@ def register_direct_routes(self: Any) -> None:
 
         return build_v2_health()
 
+    @self.app.post("/api/memory/v2/federated-search")
+    async def _memory_v2_federated_search(request: Request):
+        """Federated search: cognitive memory + Knowledge Library (labeled, not merged)."""
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+        query = str((body or {}).get("query") or "").strip()
+        if not query:
+            return {
+                "ok": False,
+                "error": "query required",
+                "hits": [],
+                "summary": {"memory": 0, "knowledge": 0, "total": 0},
+            }
+        try:
+            from kazma_core.memory.federated_search import federated_search
+
+            return federated_search(
+                query,
+                tenant_id=str((body or {}).get("tenant_id") or "default"),
+                session_id=(body or {}).get("session_id") or None,
+                limit_memory=int((body or {}).get("limit_memory") or 5),
+                limit_kb=int((body or {}).get("limit_kb") or 5),
+                include_memory=bool((body or {}).get("include_memory", True)),
+                include_knowledge=bool((body or {}).get("include_knowledge", True)),
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": str(exc)[:300],
+                "hits": [],
+                "summary": {"memory": 0, "knowledge": 0, "total": 0},
+            }
+
     @self.app.post("/api/memory/v2/probe")
     async def _memory_v2_probe(request: Request):
         """Live recall dry-run for the dashboard probe panel."""

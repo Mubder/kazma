@@ -68,10 +68,14 @@ User turn
 | Huge corpus | Scaled reconsolidation / partition |
 | Graph UX | Animation / a11y polish |
 
-### Explicitly not planned
+### Explicitly not planned (architecture boundaries)
 
-- Merging Knowledge Library into chat agent memory  
-- Dropping SQLite for Neo4j on single-node by default  
+- **Merging** Knowledge Library schema into chat agent memory  
+- **Neo4j as default** graph store on single-node  
+
+**Best alternative (shipped Horizon A):** *federated* search — one query, labeled
+hits (`memory` | `knowledge`), stores stay separate.  
+API: `POST /api/memory/v2/federated-search` · Dashboard **Search all knowledge**.
 
 ---
 
@@ -81,7 +85,11 @@ User turn
 pwsh -File scripts/memory_smoke.ps1
 ```
 
-Manual: Chat “Remember my favorite color is teal.” → new turn “What color?” → Dashboard probe same query → health ACTIVE.
+Manual:
+1. Chat “Remember my favorite color is teal.” → “What color?”  
+2. Dashboard → **Federated** search same query (memory hits)  
+3. After KB ingest: federated query shows **KB** chips with source URL  
+4. Health ACTIVE
 
 ---
 

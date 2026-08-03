@@ -9,6 +9,7 @@ if (-not (Test-Path $py)) { $py = "python" }
 & $py -m pytest `
   kazma-core/tests/test_memory_eval_golden.py `
   kazma-core/tests/test_memory_priority_batch.py `
+  kazma-core/tests/test_memory_federated_search.py `
   kazma-core/tests/test_memory_v2_phase_a.py `
   kazma-core/tests/test_memory_v2_phase_b.py `
   -q --tb=line

@@ -59,7 +59,16 @@ Full execution plan: session plan / this file. Backlog SoT: `MEMORY_REMAINING.md
 | Postgres sparse ILIKE recall assist | **Done** — merges when local thin |
 | Auth-bound `resolve_tenant_id` (JWT ContextVar + auth_user_id) | **Done** — SSE/WS wired |
 
-## Still deferred
+## Horizon A — product excellence (best options)
+
+| ID | Status |
+|----|--------|
+| A1 Federated search (memory + KB, labeled) | **Done** |
+| A2 Source footer on injected memory block | **Done** |
+| A4 CI memory smoke step | **Done** |
+| A3 Docs / boundary wording | **Done** |
+
+## Still deferred (scale)
 
 Full FTS/dense cutover of recall to Postgres · multi-region · graph animation polish
 

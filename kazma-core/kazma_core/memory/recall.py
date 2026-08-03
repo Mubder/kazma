@@ -1335,6 +1335,9 @@ def format_recall_block(
     parts: list[str] = []
     used = 0
 
+    n_beliefs = 0
+    n_episodes = 0
+
     if result.beliefs:
         lines: list[str] = []
         for h in result.beliefs[:max_beliefs]:
@@ -1343,6 +1346,7 @@ def format_recall_block(
                 break
             lines.append(line)
             used += len(line) + 1
+            n_beliefs += 1
         if lines:
             header = "## Known Facts\n"
             parts.append(header + "\n".join(lines))
@@ -1356,11 +1360,25 @@ def format_recall_block(
                 break
             lines.append(line)
             used += len(line) + 1
+            n_episodes += 1
         if lines:
             header = "## Relevant History\n"
             parts.append(header + "\n".join(lines))
 
     if not parts:
         return ""
+    # Turn-level source footer (Horizon A2) — always when anything injected;
+    # detailed per-line chips only when explain is on.
+    try:
+        from kazma_core.memory.federated_search import format_source_footer
+
+        footer = format_source_footer(beliefs=n_beliefs, episodes=n_episodes)
+        if footer:
+            parts.append(footer)
+    except Exception:
+        parts.append(
+            f"Sources used: {n_beliefs} beliefs, {n_episodes} episodes "
+            "(memory stack — untrusted observation)."
+        )
     body = "\n\n".join(parts)
     return format_untrusted_block(body, source=fence_source)
