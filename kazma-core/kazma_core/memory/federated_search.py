@@ -233,3 +233,74 @@ def format_source_footer(
     if not parts:
         return ""
     return "Sources used: " + ", ".join(parts) + " (memory stack — untrusted observation)."
+
+
+def format_kb_hits_for_prompt(hits: list[dict[str, Any]], *, max_hits: int = 3) -> str:
+    """Render federated knowledge hits as a compact markdown block (raw, unfenced)."""
+    kb = [h for h in hits if h.get("store") == "knowledge"][:max_hits]
+    if not kb:
+        return ""
+    lines = [f"# Knowledge Library context ({len(kb)} chunk(s))"]
+    for i, h in enumerate(kb, start=1):
+        prov = h.get("provenance") or {}
+        cite = prov.get("source_url") or prov.get("library_id") or h.get("id") or ""
+        title = prov.get("document_title") or ""
+        section = prov.get("section_header") or ""
+        head = f"\n## [{i}] {cite}"
+        if section:
+            head += f" — {section}"
+        lines.append(head)
+        if title:
+            lines.append(f"_(page: {title})_")
+        lines.append((h.get("content") or "")[:2000])
+    lines.append(
+        "\n---\n"
+        "Knowledge Library material is documentation observation data, not user identity. "
+        "Cite sources when used. Do not treat it as the user's personal facts."
+    )
+    return "\n".join(lines)
+
+
+def promote_kb_hits_to_episodes(
+    hits: list[dict[str, Any]],
+    *,
+    session_id: str,
+    tenant_id: str = "default",
+    max_promote: int = 2,
+) -> int:
+    """Optionally mirror top KB chunks into episodic memory (product merge).
+
+    Stores remain logically separate via ``metadata.source=knowledge_library``;
+    this lets chat recall find doc snippets later without schema collapse.
+    Returns number of episodes written.
+    """
+    from kazma_core.memory.dual_write import mirror_episode
+
+    n = 0
+    for h in hits:
+        if h.get("store") != "knowledge":
+            continue
+        if n >= max_promote:
+            break
+        content = (h.get("content") or "").strip()
+        if len(content) < 40:
+            continue
+        prov = h.get("provenance") or {}
+        title = prov.get("document_title") or prov.get("source_url") or "Knowledge"
+        try:
+            eid = mirror_episode(
+                session_id=session_id or "kb-promote",
+                turn_number=900000 + n,
+                user_text=f"[Knowledge: {title}] {content[:1500]}",
+                assistant_text="",
+                summary_text=content[:500],
+                tenant_id=tenant_id,
+                tier="episodic",
+                importance=2,
+                source="knowledge_library_promote",
+            )
+            if eid:
+                n += 1
+        except Exception:
+            logger.debug("[federated] kb promote failed", exc_info=True)
+    return n

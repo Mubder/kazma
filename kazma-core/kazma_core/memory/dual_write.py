@@ -278,9 +278,13 @@ class DualWriteMirror:
             effective_tier = "recall"
             effective_importance = max(effective_importance, 3)
             meta["promote_reason"] = "explicit_remember"
-        elif tier == "episodic":
+        elif tier == "episodic" and source not in (
+            "knowledge_library_promote",
+            "kb_promote",
+        ):
             # Default post-turn path uses tier=episodic — promote to working
             # buffer so active-thread recall prefers the current session.
+            # KB soft-merge promotes stay episodic so they are not session-buffer.
             effective_tier = "working"
             meta["promote_reason"] = "working_buffer"
         try:

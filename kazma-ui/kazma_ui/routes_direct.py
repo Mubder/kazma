@@ -831,6 +831,53 @@ def register_direct_routes(self: Any) -> None:
             return {"ok": False, "error": str(exc)[:300]}
 
     # ── Phase D: Memory backends Settings API ─────────────────────────
+    @self.app.get("/api/settings/memory/merge-kb")
+    async def _settings_memory_merge_kb_get():
+        from kazma_core.memory.config import read_memory_cfg
+
+        v2 = (read_memory_cfg() or {}).get("v2") or {}
+        return {
+            "merge_knowledge_into_chat": bool(v2.get("merge_knowledge_into_chat", True)),
+            "promote_kb_to_episodes": bool(v2.get("promote_kb_to_episodes", True)),
+        }
+
+    @self.app.put("/api/settings/memory/merge-kb")
+    async def _settings_memory_merge_kb_put(request: Request):
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            return {"ok": False, "error": "invalid JSON"}
+        try:
+            from kazma_core.config_store import get_config_store
+
+            store = get_config_store()
+            items = []
+            if "merge_knowledge_into_chat" in (body or {}):
+                items.append(
+                    (
+                        "memory.v2.merge_knowledge_into_chat",
+                        bool(body["merge_knowledge_into_chat"]),
+                        "memory",
+                    )
+                )
+            if "promote_kb_to_episodes" in (body or {}):
+                items.append(
+                    (
+                        "memory.v2.promote_kb_to_episodes",
+                        bool(body["promote_kb_to_episodes"]),
+                        "memory",
+                    )
+                )
+            if items and hasattr(store, "batch_set"):
+                store.batch_set(items)
+            else:
+                for k, v, c in items:
+                    store.set(k, v, category=c)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
     @self.app.get("/api/settings/memory/backends")
     async def _settings_memory_backends_get():
         from kazma_core.memory.backends import (
@@ -914,8 +961,13 @@ def register_direct_routes(self: Any) -> None:
         type: str = "",
         entity_type: str = "",
         limit: int = 200,
+        source: str = "",
     ):
         """V2 belief graph as {nodes, links, stats} for the canvas.
+
+        When Neo4j is configured and available (and ``source`` is not
+        ``sqlite``), topology is served from Neo4j as primary. Bi-temporal
+        scrubbing still uses SQLite. Beliefs remain SoT in SQLite.
 
         Params:
             at: unix timestamp for bi-temporal scrubbing. When >0, returns
@@ -927,11 +979,30 @@ def register_direct_routes(self: Any) -> None:
             type: filter by predicate_type ('functional'|'set'|'state').
             entity_type: filter entities by type (person|tool|concept|...).
             limit: max nodes (default 200).
+            source: ``neo4j`` | ``sqlite`` | empty (auto).
         """
         import sqlite3
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
+
+        # ── Neo4j primary topology (when configured + online) ──
+        src_pref = (source or "").strip().lower()
+        if src_pref != "sqlite" and float(at or 0) <= 0:
+            try:
+                from kazma_core.memory.backends import get_backends_cfg
+                from kazma_core.memory.graph_backend import get_graph_backend
+
+                gcfg = (get_backends_cfg().get("graph") or {})
+                if str(gcfg.get("provider") or "").lower() == "neo4j" or src_pref == "neo4j":
+                    gb = get_graph_backend()
+                    if getattr(gb, "name", "") == "neo4j" and getattr(gb, "available", False):
+                        if hasattr(gb, "export_topology"):
+                            topo = gb.export_topology(limit=limit)
+                            if topo.get("nodes") or topo.get("links"):
+                                return topo
+            except Exception:
+                pass
 
         try:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)

@@ -602,6 +602,70 @@ async def supervisor_node(
                             "[Supervisor] V2 recall: %d beliefs, %d episodes for turn",
                             len(result.beliefs), len(result.episodes),
                         )
+                # Merge Knowledge Library into chat path (labeled, fenced).
+                # Product merge: inject KB next to memory; optional promote to episodes.
+                try:
+                    from kazma_core.memory.config import read_memory_cfg
+                    from kazma_core.safety.prompt_fence import format_untrusted_block
+
+                    _v2m = (read_memory_cfg() or {}).get("v2") or {}
+                    if _v2m.get("merge_knowledge_into_chat", True):
+                        from kazma_core.memory.federated_search import (
+                            federated_search,
+                            format_kb_hits_for_prompt,
+                            promote_kb_hits_to_episodes,
+                        )
+
+                        fed = federated_search(
+                            last_user_content,
+                            tenant_id=state.get("tenant_id", "default"),
+                            session_id=state.get("thread_id"),
+                            limit_memory=0,
+                            limit_kb=3,
+                            include_memory=False,
+                            include_knowledge=True,
+                        )
+                        kb_md = format_kb_hits_for_prompt(fed.get("hits") or [], max_hits=3)
+                        if not kb_md:
+                            # Fall back to classic KB auto-inject (per-library flags)
+                            try:
+                                from kazma_core.stores.knowledge_index import (
+                                    get_knowledge_auto_inject_block,
+                                )
+
+                                kb_md = await get_knowledge_auto_inject_block(
+                                    last_user_content
+                                )
+                            except Exception:
+                                kb_md = ""
+                        if kb_md:
+                            messages.insert(
+                                1,
+                                {
+                                    "role": "system",
+                                    "content": format_untrusted_block(
+                                        kb_md, source="knowledge"
+                                    ),
+                                },
+                            )
+                            logger.info("[Supervisor] Knowledge Library merged into chat inject")
+                            if _v2m.get("promote_kb_to_episodes", True):
+                                try:
+                                    promote_kb_hits_to_episodes(
+                                        fed.get("hits") or [],
+                                        session_id=str(state.get("thread_id") or "kb"),
+                                        tenant_id=state.get("tenant_id", "default"),
+                                        max_promote=2,
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "[Supervisor] kb promote skipped",
+                                        exc_info=True,
+                                    )
+                except Exception:
+                    logger.debug(
+                        "[Supervisor] knowledge merge inject skipped", exc_info=True
+                    )
                 # Phase C: procedural skill hints (fenced, untrusted)
                 try:
                     import sqlite3

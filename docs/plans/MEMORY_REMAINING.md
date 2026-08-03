@@ -68,14 +68,16 @@ User turn
 | Huge corpus | Scaled reconsolidation / partition |
 | Graph UX | Animation / a11y polish |
 
-### Explicitly not planned (architecture boundaries)
+### Architecture boundaries (updated)
 
-- **Merging** Knowledge Library schema into chat agent memory  
-- **Neo4j as default** graph store on single-node  
+| Choice | Status |
+|--------|--------|
+| **KB + chat product merge** | **Done** — inject labeled KB into supervisor; optional promote to episodes (`merge_knowledge_into_chat`, `promote_kb_to_episodes`) |
+| **Schema merge** (one table for KB+beliefs) | Still **not** done — stores stay separate files |
+| **Neo4j primary topology** | **Done** when configured — Dashboard graph prefers Neo4j; SQLite remains bi-temporal SoT |
+| **Neo4j as only install default** | Still **not** default — SQLite zero-config remains |
 
-**Best alternative (shipped Horizon A):** *federated* search — one query, labeled
-hits (`memory` | `knowledge`), stores stay separate.  
-API: `POST /api/memory/v2/federated-search` · Dashboard **Search all knowledge**.
+Federated search API remains for operator UI: `POST /api/memory/v2/federated-search`.
 
 ---
 

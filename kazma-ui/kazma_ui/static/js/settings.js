@@ -70,6 +70,8 @@ function settingsApp() {
         },
         memoryBackendsStateCap: { detail: '' },
         memoryBackendsGraphCap: { detail: '' },
+        memoryMergeKb: true,
+        memoryPromoteKb: true,
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -311,6 +313,19 @@ function settingsApp() {
                 } else {
                     this.providerPresets = [];
                 }
+
+                // Knowledge merge toggles
+                try {
+                    const mm = await this._fetch('/api/settings');
+                    // settings bag may nest memory.v2 keys
+                } catch (e) { /* optional */ }
+                try {
+                    const cfg = await this._fetch('/api/settings/memory/merge-kb');
+                    if (cfg) {
+                        if (cfg.merge_knowledge_into_chat != null) this.memoryMergeKb = !!cfg.merge_knowledge_into_chat;
+                        if (cfg.promote_kb_to_episodes != null) this.memoryPromoteKb = !!cfg.promote_kb_to_episodes;
+                    }
+                } catch (e) { /* optional */ }
 
                 // Phase D: memory backends profile
                 try {
@@ -699,6 +714,22 @@ function settingsApp() {
                 showToast('Save failed', 'error');
             }
             this.saving = false;
+        },
+
+        async saveMemoryKbMerge() {
+            try {
+                await fetch('/api/settings/memory/merge-kb', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        merge_knowledge_into_chat: !!this.memoryMergeKb,
+                        promote_kb_to_episodes: !!this.memoryPromoteKb,
+                    }),
+                });
+                showToast('Knowledge merge settings saved', 'success');
+            } catch (e) {
+                showToast('Save failed', 'error');
+            }
         },
 
         async saveMemoryBackends() {

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — KB↔chat merge + Neo4j primary graph (2026-08-03)
+
+- **Knowledge into chat path:** supervisor injects labeled Knowledge Library
+  context next to V2 memory (`memory.v2.merge_knowledge_into_chat`, default
+  on). Optional **promote** top KB hits to episodic rows with
+  `source=knowledge_library_promote` (`promote_kb_to_episodes`).
+- **Settings:** Knowledge + chat memory toggles + API
+  `GET/PUT /api/settings/memory/merge-kb`.
+- **Neo4j primary topology:** when provider=neo4j and online,
+  `GET /api/memory/v2/graph` serves Neo4j `export_topology`; SQLite keeps
+  bi-temporal beliefs and remains fallback.
+- Tests: `test_memory_kb_merge.py`.
+
 ## Unreleased — Memory Horizon A: federated search (2026-08-03)
 
 - **Federated search** (`federated_search.py`): one query across V2 memory +

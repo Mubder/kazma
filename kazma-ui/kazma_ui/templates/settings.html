@@ -608,6 +608,22 @@
             </div>
         </div>
 
+        <!-- Knowledge merge into chat -->
+        <div class="settings-group" id="memory-kb-merge-section">
+            <h3>Knowledge + chat memory</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
+                Merge Knowledge Library into the chat path (labeled inject). Stores stay separate; hits are fenced as untrusted docs.
+            </p>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+                <input type="checkbox" id="mem-merge-kb" x-model="memoryMergeKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);">
+                <label for="mem-merge-kb">Inject Knowledge Library into every chat turn (with personal memory)</label>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+                <input type="checkbox" id="mem-promote-kb" x-model="memoryPromoteKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);">
+                <label for="mem-promote-kb">Promote top KB hits into episodic memory (soft merge for later recall)</label>
+            </div>
+        </div>
+
         <!-- Phase D: Memory backends -->
         <div class="settings-group" id="memory-backends-section">
             <h3>Memory backends</h3>

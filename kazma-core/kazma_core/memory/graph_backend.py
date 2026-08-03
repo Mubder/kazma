@@ -239,6 +239,65 @@ class Neo4jGraphBackend:
         except Exception:
             return []
 
+    def export_topology(
+        self,
+        *,
+        tenant_id: str = "default",
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Export nodes/links for Dashboard when Neo4j is primary graph."""
+        drv = self._get_driver()
+        if drv is None:
+            return {"nodes": [], "links": [], "stats": {"source": "neo4j", "empty": True}}
+        try:
+            with drv.session(database=self._database) as session:
+                result = session.run(
+                    """
+                    MATCH (a:Entity {tenant_id: $tid})-[r]->(b:Entity {tenant_id: $tid})
+                    RETURN a.name AS subject, type(r) AS predicate, b.name AS object,
+                           coalesce(r.confidence, 0.5) AS confidence,
+                           coalesce(r.belief_id, '') AS id,
+                           coalesce(r.predicate, type(r)) AS pred_label
+                    LIMIT $lim
+                    """,
+                    tid=tenant_id,
+                    lim=max(10, min(int(limit), 2000)),
+                )
+                rows = [dict(rec) for rec in result]
+            nodes: dict[str, dict] = {}
+            links = []
+            for r in rows:
+                for ent in (r.get("subject"), r.get("object")):
+                    if ent and ent not in nodes:
+                        nodes[ent] = {
+                            "id": ent,
+                            "label": ent,
+                            "type": "entity",
+                            "group": "neo4j",
+                        }
+                links.append(
+                    {
+                        "source": r.get("subject"),
+                        "target": r.get("object"),
+                        "predicate": r.get("pred_label") or r.get("predicate"),
+                        "confidence": float(r.get("confidence") or 0.5),
+                        "id": r.get("id") or "",
+                    }
+                )
+            return {
+                "nodes": list(nodes.values()),
+                "links": links,
+                "stats": {
+                    "source": "neo4j",
+                    "node_count": len(nodes),
+                    "link_count": len(links),
+                    "primary": True,
+                },
+            }
+        except Exception:
+            logger.debug("[graph_backend] neo4j export_topology failed", exc_info=True)
+            return {"nodes": [], "links": [], "stats": {"source": "neo4j", "error": True}}
+
 
 def graph_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
@@ -261,8 +320,11 @@ def graph_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "provider": "neo4j",
             "write_ready": True,
-            "status": "dual_write",
-            "detail": "Neo4j dual-write when driver + credentials available",
+            "status": "primary_when_available",
+            "detail": (
+                "Neo4j is primary for Dashboard topology when online; "
+                "beliefs remain bi-temporal in SQLite; dual-write on mutate"
+            ),
         }
     if provider == "neo4j":
         return {
