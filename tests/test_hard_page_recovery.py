@@ -97,7 +97,7 @@ async def test_fetch_full_text_uses_recovery_on_bot_wall(monkeypatch):
 
     class _Client:
         def __init__(self, *a, **k):
-            pass
+            self.headers = {"user-agent": "test"}
 
         async def __aenter__(self):
             return self
@@ -121,7 +121,12 @@ async def test_fetch_full_text_uses_recovery_on_bot_wall(monkeypatch):
         "kazma_core.security.ssrf.validate_url",
         lambda u: u,
     )
+    # get_scraping_client builds the real client; patch it + httpx for safety
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(
+        "kazma_core.proxy.client.get_scraping_client",
+        lambda **k: _Client(),
+    )
     monkeypatch.setattr(ru, "_fetch_via_optional_backends", no_opt)
     monkeypatch.setattr(ru, "_recover_hard_page", recover)
 

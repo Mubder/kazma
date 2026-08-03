@@ -188,22 +188,30 @@ users see zero change.
   (`type_residential`, `country_US`, per-request `sessid_` for rotation or a
   sticky session). Each request exits from a different residential IP unless
   `session_sticky` is set.
-- **Resilience applied transparently** to `read_url`, `crawl_site`, and `web_search`:
+- **Resilience applied transparently** across research + KB scrape paths:
+  | Path | How proxy applies |
+  |------|-------------------|
+  | `read_url` / `web_acquire.fetch_text` (httpx tier) | `get_scraping_client` + 429/403 retry |
+  | **Playwright** recovery (`read_url` + KB ingest) | `playwright_proxy()` → Chromium `launch(proxy=…)` |
+  | `crawl_site` link spider | `get_scraping_client` |
+  | Deep research pipeline acquires | Same fetch ladder as above |
+  | KB page extract | Same ladder |
+  | KB sitemap/robots discovery | `get_scraping_client` |
+  | Remote SERP (Bing HTML, Wikipedia) | `get_scraping_client_sync` |
+  | Local SearXNG | **Direct** (loopback / Docker — must not hairpin through residential) |
+  | DuckDuckGo (`ddgs` lib) | Library-owned sockets (no httpx inject yet) |
+  | Jina / Firecrawl **API** calls | **Direct** (third-party fetches the target; keep API keys off residential) |
+  | LLM APIs | **Never** (`http_pool`) |
   - **IP rotation** — a blocked IP retries from a new residential IP.
-  - **UA rotation** — a curated browser User-Agent pool
-    (`proxy/client.py::USER_AGENT_POOL`) so consecutive requests vary fingerprints.
-  - **429/403 retry with backoff** (1.5 s, 3 s) on the `read_url` httpx path —
-    complementary to the Firecrawl/Jina/Playwright recovery cascade above.
-- **Scraping-scoped only.** The proxy never touches LLM API calls (those use the
-  separate `http_pool.py`), so provider API keys never route through a third party.
-- **Graceful degradation** — an unconfigured/unreachable proxy falls back to
-  direct; a fetch never hard-fails because the proxy is down.
+  - **UA rotation** — curated pool in `proxy/client.py::USER_AGENT_POOL`.
+  - **429/403 retry with backoff** (1.5 s, 3 s) on the `read_url` httpx path.
+- **Scraping-scoped only.** The proxy never touches LLM API calls.
+- **Graceful degradation** — unconfigured provider = direct; fetch does not hard-fail only because proxy is off.
 - **Adding future providers** (BrightData, Oxylabs) = one class under `proxy/` +
-  one registry line (`registry.py::_PROVIDERS`) + one dropdown option. The
-  scraper talks to the `ProxyProvider` interface, not to anyip.io directly.
+  one registry line + one Settings dropdown option.
 
-> **Note:** This does **not** solve CAPTCHAs (only IP/UA rotation + the existing
-> Playwright escalation). A CAPTCHA-solving service could be a future provider type.
+> **Note:** This does **not** solve CAPTCHAs (only IP/UA rotation + Playwright).
+> A CAPTCHA-solving service could be a future provider type.
 
 ## Safety & honesty
 

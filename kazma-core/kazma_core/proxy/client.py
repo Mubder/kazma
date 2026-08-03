@@ -5,6 +5,9 @@ This is the single injection point the scraper uses instead of raw
 provider (opt-in) and can rotate the User-Agent so consecutive requests don't
 share a fingerprint.
 
+Also exposes Playwright proxy dicts and a sync httpx client so KB discover,
+SERP scrapes, and Chromium recovery share the same ConfigStore setting.
+
 Scoped to SCRAPING ONLY — never used for LLM API calls (those go through the
 separate ``http_pool.py`` so provider API keys are never routed through a
 third-party proxy).
@@ -15,12 +18,20 @@ from __future__ import annotations
 import logging
 import random
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import httpx
 
 from kazma_core.proxy.registry import get_proxy_provider
 
-__all__ = ["get_scraping_client", "random_user_agent", "USER_AGENT_POOL"]
+__all__ = [
+    "get_scraping_client",
+    "get_scraping_client_sync",
+    "get_active_proxy_url",
+    "playwright_proxy",
+    "random_user_agent",
+    "USER_AGENT_POOL",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -51,30 +62,60 @@ def random_user_agent() -> str:
     return random.choice(USER_AGENT_POOL)
 
 
-def get_scraping_client(
+def get_active_proxy_url() -> str | None:
+    """Return the live proxy URL, or ``None`` when direct (unconfigured)."""
+    try:
+        provider = get_proxy_provider()
+        if not provider.is_configured():
+            return None
+        url = provider.get_proxy_url()
+        return url if url else None
+    except Exception:
+        logger.debug("[proxy] get_active_proxy_url failed", exc_info=True)
+        return None
+
+
+def playwright_proxy() -> dict[str, str] | None:
+    """Playwright ``proxy=`` dict for ``chromium.launch``, or ``None`` if direct.
+
+    Parses ``http://user:pass@host:port`` from the active provider into
+    Playwright's ``{server, username?, password?}`` shape.
+    """
+    proxy_url = get_active_proxy_url()
+    if not proxy_url:
+        return None
+    try:
+        p = urlparse(proxy_url)
+        if not p.hostname:
+            return None
+        scheme = p.scheme or "http"
+        server = f"{scheme}://{p.hostname}"
+        if p.port:
+            server = f"{server}:{p.port}"
+        out: dict[str, str] = {"server": server}
+        if p.username:
+            out["username"] = unquote(p.username)
+        if p.password:
+            out["password"] = unquote(p.password)
+        logger.debug(
+            "[proxy] Playwright via %s",
+            f"{p.hostname}:{p.port}" if p.port else p.hostname,
+        )
+        return out
+    except Exception:
+        logger.debug("[proxy] playwright_proxy parse failed", exc_info=True)
+        return None
+
+
+def _client_common_kwargs(
     *,
     follow_redirects: bool = True,
     timeout: float = 30.0,
     headers: dict[str, str] | None = None,
     rotate_ua: bool = False,
     **kwargs: Any,
-) -> httpx.AsyncClient:
-    """Build an httpx client wired to the active proxy provider + optional UA rotation.
-
-    Args:
-        follow_redirects: passed to httpx.
-        timeout: passed to httpx.
-        headers: base headers; if ``rotate_ua`` is True a random UA is injected
-            (overriding any ``User-Agent`` in *headers*).
-        rotate_ua: inject a random User-Agent so requests vary their fingerprint.
-        **kwargs: forwarded to ``httpx.AsyncClient``.
-
-    When the proxy provider is unconfigured (the default), this returns a plain
-    client — identical behavior to before, so non-users see no change.
-    """
-    provider = get_proxy_provider()
-    proxy_url = provider.get_proxy_url() if provider.is_configured() else None
-
+) -> dict[str, Any]:
+    proxy_url = get_active_proxy_url()
     final_headers = dict(headers) if headers else {}
     if rotate_ua:
         final_headers["User-Agent"] = random_user_agent()
@@ -86,5 +127,59 @@ def get_scraping_client(
     }
     if proxy_url:
         client_kwargs["proxy"] = proxy_url
-        logger.debug("[proxy] scraping client via %s (%s)", provider.name, proxy_url.split("@")[-1])
-    return httpx.AsyncClient(**client_kwargs, **kwargs)
+        try:
+            provider = get_proxy_provider()
+            name = getattr(provider, "name", "?")
+        except Exception:
+            name = "?"
+        logger.debug(
+            "[proxy] scraping client via %s (%s)",
+            name,
+            proxy_url.split("@")[-1],
+        )
+    client_kwargs.update(kwargs)
+    return client_kwargs
+
+
+def get_scraping_client(
+    *,
+    follow_redirects: bool = True,
+    timeout: float = 30.0,
+    headers: dict[str, str] | None = None,
+    rotate_ua: bool = False,
+    **kwargs: Any,
+) -> httpx.AsyncClient:
+    """Build an async httpx client wired to the active proxy + optional UA rotation.
+
+    When the proxy provider is unconfigured (the default), this returns a plain
+    client — identical behavior to before, so non-users see no change.
+    """
+    return httpx.AsyncClient(
+        **_client_common_kwargs(
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            headers=headers,
+            rotate_ua=rotate_ua,
+            **kwargs,
+        )
+    )
+
+
+def get_scraping_client_sync(
+    *,
+    follow_redirects: bool = True,
+    timeout: float = 30.0,
+    headers: dict[str, str] | None = None,
+    rotate_ua: bool = False,
+    **kwargs: Any,
+) -> httpx.Client:
+    """Sync httpx client (Bing / Wikipedia SERP, smoke scripts) with the same proxy."""
+    return httpx.Client(
+        **_client_common_kwargs(
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            headers=headers,
+            rotate_ua=rotate_ua,
+            **kwargs,
+        )
+    )

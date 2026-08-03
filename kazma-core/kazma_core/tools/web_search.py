@@ -190,22 +190,26 @@ def _ddg_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | No
 
 
 def _bing_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
-    """Bing HTML scrape fallback."""
+    """Bing HTML scrape fallback (via Proxy Provider when configured)."""
     try:
         import base64
         import urllib.parse
         from html.parser import HTMLParser
 
-        import httpx
-        from kazma_core.proxy.client import random_user_agent
+        from kazma_core.proxy.client import get_scraping_client_sync
 
         headers = {
-            "User-Agent": random_user_agent(),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
         url = f"https://www.bing.com/search?q={urllib.parse.quote_plus(query)}"
-        r = httpx.get(url, headers=headers, follow_redirects=True, timeout=10)
+        with get_scraping_client_sync(
+            follow_redirects=True,
+            timeout=10.0,
+            headers=headers,
+            rotate_ua=True,
+        ) as client:
+            r = client.get(url)
         if r.status_code != 200:
             logger.warning("[web_search] Bing status %d", r.status_code)
             return None, f"bing:http_{r.status_code}"
@@ -317,24 +321,27 @@ def _bing_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | N
 def _wikipedia_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
     """Wikipedia OpenSearch — useful when brand queries are soft-blocked by DDG/Bing."""
     try:
-        import httpx
+        from kazma_core.proxy.client import get_scraping_client_sync
 
-        r = httpx.get(
-            "https://en.wikipedia.org/w/api.php",
-            params={
-                "action": "opensearch",
-                "search": query,
-                "limit": max(1, min(max_results, 8)),
-                "namespace": 0,
-                "format": "json",
-            },
+        with get_scraping_client_sync(
+            follow_redirects=True,
+            timeout=10.0,
             headers={
                 "User-Agent": "KazmaAgent/0.6 (web_search; +https://github.com/Mubder/kazma)",
                 "Accept": "application/json",
             },
-            timeout=10,
-            follow_redirects=True,
-        )
+            rotate_ua=False,
+        ) as client:
+            r = client.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "opensearch",
+                    "search": query,
+                    "limit": max(1, min(max_results, 8)),
+                    "namespace": 0,
+                    "format": "json",
+                },
+            )
         if r.status_code != 200:
             return None, f"wikipedia:http_{r.status_code}"
         data = r.json()

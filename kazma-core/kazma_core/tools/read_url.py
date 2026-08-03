@@ -386,15 +386,26 @@ async def _fetch_with_playwright(url: str) -> str | None:
         return None
 
     try:
+        # Route Chromium through Settings → Proxy Provider when configured
+        try:
+            from kazma_core.proxy.client import playwright_proxy
+
+            pw_proxy = playwright_proxy()
+        except Exception:
+            pw_proxy = None
+
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
+            launch_kwargs: dict = {
+                "headless": True,
+                "args": [
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                 ],
-            )
+            }
+            if pw_proxy:
+                launch_kwargs["proxy"] = pw_proxy
+            browser = await p.chromium.launch(**launch_kwargs)
             try:
                 context = await browser.new_context(
                     viewport={"width": 1920, "height": 1080},
@@ -476,6 +487,8 @@ async def _try_jina_reader(url: str) -> str | None:
         }
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        # Direct to Jina (third-party API holds the target fetch). Scraping
+        # proxy is for target-site egress; do not force API keys through it.
         async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
             r = await client.get(jina_url, headers=headers)
             if r.status_code == 200 and r.text and len(r.text.strip()) > 50:
@@ -509,6 +522,7 @@ async def _try_firecrawl(url: str) -> str | None:
             "Content-Type": "application/json",
         }
         body = {"url": url, "formats": ["markdown", "html"]}
+        # Direct to Firecrawl API (same rationale as Jina — not target egress).
         async with httpx.AsyncClient(timeout=60.0) as client:
             last_status = 0
             for attempt in range(3):
@@ -667,7 +681,11 @@ async def _fetch_full_text(url: str) -> str:
                 )
                 await _asyncio.sleep(delay)
                 # Rebuild headers so the proxy rotates UA + exit IP for the retry.
-                client.headers["user-agent"] = _random_ua()
+                try:
+                    if getattr(client, "headers", None) is not None:
+                        client.headers["user-agent"] = _random_ua()
+                except Exception:
+                    pass
                 response = await client.get(final_url)
             for _ in range(3):
                 if response.status_code not in (301, 302, 303, 307, 308):

@@ -408,13 +408,20 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
     """
     try:
         import gzip
-        import httpx
+
+        from kazma_core.proxy.client import get_scraping_client
         from kazma_core.security.ssrf import SSRFError, validate_url
 
         validate_url(url)
-        async with httpx.AsyncClient(
-            follow_redirects=True, timeout=timeout,
-            headers={"User-Agent": _BROWSER_UA, "Accept-Encoding": "gzip, deflate"},
+        # Sitemap/robots discovery uses the same Proxy Provider as page fetch
+        async with get_scraping_client(
+            follow_redirects=True,
+            timeout=timeout,
+            headers={
+                "User-Agent": _BROWSER_UA,
+                "Accept-Encoding": "gzip, deflate",
+            },
+            rotate_ua=True,
         ) as client:
             r = await client.get(url)
             final = str(r.url)
@@ -945,15 +952,24 @@ class _pw_browser_scope:
         except ImportError:
             return self
         try:
+            try:
+                from kazma_core.proxy.client import playwright_proxy
+
+                pw_proxy = playwright_proxy()
+            except Exception:
+                pw_proxy = None
             pw = await async_playwright().start()
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=[
+            launch_kwargs: dict = {
+                "headless": True,
+                "args": [
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                 ],
-            )
+            }
+            if pw_proxy:
+                launch_kwargs["proxy"] = pw_proxy
+            browser = await pw.chromium.launch(**launch_kwargs)
             ctx = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent=_BROWSER_UA,
@@ -1012,15 +1028,24 @@ async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
     try:
         if ctx is None:
             owns_browser = True
+            try:
+                from kazma_core.proxy.client import playwright_proxy
+
+                pw_proxy = playwright_proxy()
+            except Exception:
+                pw_proxy = None
             pw = await async_playwright().start()
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=[
+            launch_kwargs: dict = {
+                "headless": True,
+                "args": [
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                 ],
-            )
+            }
+            if pw_proxy:
+                launch_kwargs["proxy"] = pw_proxy
+            browser = await pw.chromium.launch(**launch_kwargs)
             ctx = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent=_BROWSER_UA,
