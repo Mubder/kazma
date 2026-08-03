@@ -104,7 +104,65 @@
   };
 </script>
 
-<div style="max-width:1200px;margin:0 auto;padding:0 1rem 2.5rem;box-sizing:border-box;">
+<div class="memory-page" style="width:100%;max-width:100%;margin:0;padding:0 0.75rem 2.5rem;box-sizing:border-box;min-width:0;">
+<style>
+  /* Fluid memory ops tables — fill main content, wrap long ids */
+  .memory-page .mem-table-wrap {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .memory-page .mem-table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .memory-page .mem-table th,
+  .memory-page .mem-table td {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+  .memory-page .mem-table th:nth-child(1),
+  .memory-page .mem-table td:nth-child(1) { width: 22%; }
+  .memory-page .mem-table th:nth-child(2),
+  .memory-page .mem-table td:nth-child(2) { width: 10%; }
+  .memory-page .mem-table th:nth-child(3),
+  .memory-page .mem-table td:nth-child(3) { width: 16%; }
+  .memory-page .mem-table th:nth-child(4),
+  .memory-page .mem-table td:nth-child(4) { width: 8%; }
+  .memory-page .mem-table th:nth-child(5),
+  .memory-page .mem-table td:nth-child(5) { width: 8%; }
+  .memory-page .mem-table th:nth-child(6),
+  .memory-page .mem-table td:nth-child(6) { width: 12%; }
+  .memory-page .mem-table th:nth-child(7),
+  .memory-page .mem-table td:nth-child(7) { width: 24%; }
+  .memory-page .mem-table code {
+    white-space: normal;
+    word-break: break-all;
+    font-size: 0.78rem;
+  }
+  .memory-page .mem-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .memory-page .mem-actions .btn { white-space: nowrap; }
+  @media (max-width: 720px) {
+    .memory-page .mem-table th:nth-child(2),
+    .memory-page .mem-table td:nth-child(2),
+    .memory-page .mem-table th:nth-child(5),
+    .memory-page .mem-table td:nth-child(5) { display: none; }
+    .memory-page .mem-table th:nth-child(1),
+    .memory-page .mem-table td:nth-child(1) { width: 28%; }
+    .memory-page .mem-table th:nth-child(7),
+    .memory-page .mem-table td:nth-child(7) { width: 32%; }
+  }
+</style>
 
   {# ── Graph & health first (topology, KPIs, probe, backups) ── #}
   <div id="console" style="margin-bottom:1.75rem;">
@@ -214,8 +272,8 @@
           <button class="btn btn-secondary btn-sm" @click="doLink()" x-text="S.link || 'Link'"></button>
         </div>
       </div>
-      <div class="card" style="padding:0;overflow-x:auto;">
-        <table class="table" style="width:100%;font-size:0.85rem;">
+      <div class="card mem-table-wrap" style="padding:0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
+        <table class="mem-table">
           <thead>
             <tr>
               <th>ID</th><th>Type</th><th>Name</th><th>Beliefs</th><th>Links</th><th>Flags</th><th></th>
@@ -237,10 +295,12 @@
                   <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">isolated</span>
                   <span x-show="e.protected" class="badge">protected</span>
                 </td>
-                <td style="white-space:nowrap;">
-                  <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id">Src</button>
-                  <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id">Tgt</button>
-                  <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
+                <td>
+                  <div class="mem-actions">
+                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id">Src</button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id">Tgt</button>
+                    <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
+                  </div>
                 </td>
               </tr>
             </template>
