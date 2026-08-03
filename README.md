@@ -37,7 +37,7 @@ We engineered Kazma on those same pillars — not as metaphor, but as architectu
 ## 🧩 Features
 
 ### 🧠 Agent Brain & V2 Cognitive Memory
-LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80% context compaction, and **Pure V2 Cognitive Memory** — bi-temporal belief tracking (`valid_from` / `valid_until`), Local Ego-Graph Personalized PageRank (PPR), RRF episode retrieval, and prompt-fenced per-turn context injection on every message.
+LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80% context compaction, and **Pure V2 Cognitive Memory** — bi-temporal belief tracking (`valid_from` / `valid_until`), Local Ego-Graph Personalized PageRank (PPR), hybrid FTS + vector episode retrieval, and prompt-fenced per-turn context injection. **Knowledge Library** stays a separate store but can inject into chat (labeled) with federated search. Optional **Neo4j** dual-write and Postgres/Qdrant adapters — SQLite remains the zero-config default.
 
 ### 🐝 Swarm Orchestration & Autoscaler
 Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with a **Dynamic Swarm Autoscaler** that auto-spawns specialist workers from templates (`coder`, `researcher`, `generalist`) with automatic best-model-per-task routing (coding, reasoning, vision).
@@ -186,21 +186,24 @@ Full diagrams: [Architecture](docs/docs/guide/architecture.md) · [System Map](d
 
 ## 🧠 Pure V2 Cognitive Memory & RAG
 
-Kazma operates on a unified, single-source-of-truth **V2 Cognitive Engine** — combining bi-temporal graph beliefs, hybrid episode retrieval, and associative graph traversal:
+Kazma operates on a **V2 Cognitive Engine** for personal memory (single SoT for chat recall) plus an optional **Knowledge Library** product merge — unified in chat, **not** merged into one schema table:
 
 | Component | Architecture | Role |
 |---|---|---|
-| **Bi-Temporal Beliefs** | SQLite Property Graph | Single-valued functional (`valid_until`), set-valued, and state transition beliefs with temporal scrubbing (`?at=`) |
-| **Episode Retrieval** | FTS5 + `sqlite-vec` | Sparse full-text + dense vector embeddings fused via Reciprocal Rank Fusion (RRF, $k=60$) |
-| **Associative PPR** | Local Ego-Graph | Multi-hop associative weight expansion via Personalized PageRank over the belief graph |
-| **Procedural Memory** | Parametric Action DAGs | Reusable multi-step tool skills with Laplace confidence smoothing $C(d) = \frac{S+1}{N+2}$ and auto-quarantine |
+| **Bi-Temporal Beliefs** | SQLite SoT | Functional / set / state beliefs with temporal scrubbing; Dashboard topology paints from SQLite |
+| **Episode Retrieval** | FTS5 + `sqlite-vec` | Sparse + dense fusion for “what we said” |
+| **Associative PPR** | Local Ego-Graph | Multi-hop weight expansion over the belief graph |
+| **Knowledge Library** | Separate store | Docs + citations; inject / federated search (`MEM` / `KB` labels) |
+| **Optional Neo4j** | Dual-write | Belief triples when configured; never required for install |
+| **Procedural Memory** | Parametric Action DAGs | Tool skills with confidence smoothing and quarantine |
 
-- **Per-Turn Prompt-Fenced RAG** — Relevant beliefs and episodes are retrieved and wrapped in `<kazma:data untrusted>` prompt fences on every turn.
-- **Durable Task Queue (`memory_ops.db`)** — Async micro-consolidation workers extract facts and mutate beliefs post-turn without blocking execution threads.
-- **Automated Nightly Backups & Exports** — 24-hour background schedulers execute native `sqlite3.backup()` snapshot copies and JSONL / GraphML exports automatically.
-- **Prompt-Fenced Soul Engine** — Self-improvement prompt deltas from success/failure outcomes are persisted to `ConfigStore` and safely injected into system prompts.
+- **Per-Turn Prompt-Fenced RAG** — Beliefs/episodes (and optional KB) wrapped in `<kazma:data untrusted>` fences.
+- **Settings → Memory** — Isolation, KB inject toggles, backends, Neo4j Test/Sync, and embedder in one tab.
+- **Durable Task Queue (`memory_ops.db`)** — Post-turn extraction, micro-consolidation, partitioned reconsolidation for large corpora.
+- **Automated Nightly Backups & Exports** — Native `sqlite3.backup()` plus JSONL / GraphML on a 24h scheduler.
+- **Prompt-Fenced Soul Engine** — Self-improvement deltas via `ConfigStore` + untrusted fence.
 
-Deep dive: [Memory & RAG](docs/docs/guide/memory-and-rag.md)
+Deep dive: [Memory & RAG](docs/docs/guide/memory-and-rag.md) · [Memory best path](docs/docs/guide/memory-best-path.md)
 
 ---
 

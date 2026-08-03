@@ -25,6 +25,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Send voice / images / documents | [Voice & media](guide/voice-and-media) |
 | Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
 | Ingest documentation into a knowledge corpus | [Knowledge Library](guide/knowledge-library) |
+| Run V2 memory + KB inject the recommended way | [Memory best path](guide/memory-best-path) · [Memory & RAG](guide/memory-and-rag) |
 | Web search / scrape / research | [Web research](guide/web-research) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 

@@ -1,6 +1,6 @@
 # Memory — Done vs Remaining
 
-**Status date:** 2026-08-03 (updated after Neo4j UX + topology paint polish)  
+**Status date:** 2026-08-03 (docs pack: memory-and-rag + best-path + README aligned)  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)  
 **Best-path operator guide:** [`docs/docs/guide/memory-best-path.md`](../docs/guide/memory-best-path.md)  
 **Priority lock:** [`MEMORY_PRIORITY_NEXT.md`](MEMORY_PRIORITY_NEXT.md)
