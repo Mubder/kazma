@@ -1012,14 +1012,15 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_admin(
-            action: str,
+            action: str = "help",
             id: str = "",
             q: str = "",
             limit: int = 40,
             confirm: bool = False,
         ) -> str:
-            act = (action or "").strip().lower().replace("-", "_")
-            if act in ("help", "", "actions"):
+            # Models often call memory_admin with {} — never require action.
+            act = (action or "help").strip().lower().replace("-", "_")
+            if act in ("help", "", "actions", "none", "null"):
                 return json.dumps(
                     {
                         "actions": [
