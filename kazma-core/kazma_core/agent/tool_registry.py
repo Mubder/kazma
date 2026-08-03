@@ -763,15 +763,8 @@ class LocalToolRegistry:
                 logger.warning("[memory_search] V2 recall failed: %s", exc)
                 return "No relevant memories found."
 
-        @self.register(
-            description=(
-                "List active long-term memory beliefs (V2). Optional filter q matches "
-                "subject/predicate/object. Use this for memory audit/cleanup inspection — "
-                "NOT execute_db_query (SQL cannot delete or fix memory)."
-            ),
-            category="memory",
-        )
-        async def memory_list_beliefs(q: str = "", limit: int = 30) -> str:
+        # ── Memory admin helpers (shared by thin tools + memory_admin) ──
+        def _mem_list_beliefs(q: str = "", limit: int = 30) -> str:
             import sqlite3
 
             from kazma_core.memory.schema_v2 import ensure_primary_schema
@@ -815,38 +808,7 @@ class LocalToolRegistry:
                 logger.warning("[memory_list_beliefs] failed: %s", exc)
                 return f"Error: memory_list_beliefs failed — {exc}"
 
-        @self.register(
-            description=(
-                "Soft-invalidate one memory belief by id (from memory_list_beliefs / "
-                "memory_search). Correct tool for removing stale/duplicate facts. "
-                "Does NOT hard-delete; does NOT use SQL. Never use execute_db_query "
-                "for memory cleanup — it is SELECT-only and will return authorization denied."
-            ),
-            category="memory",
-        )
-        async def memory_invalidate(belief_id: str) -> str:
-            from kazma_core.memory.hygiene import invalidate_belief
-
-            bid = (belief_id or "").strip()
-            if not bid:
-                return "Error: belief_id required"
-            try:
-                result = invalidate_belief(bid, remove_graph=True)
-                return json.dumps(result, ensure_ascii=False, indent=2)
-            except Exception as exc:
-                logger.warning("[memory_invalidate] failed: %s", exc)
-                return f"Error: memory_invalidate failed — {exc}"
-
-        @self.register(
-            description=(
-                "List memory graph entities (person/project/tool/concept/location) with "
-                "belief counts. Use for entity-graph junk (duplicate ShipX nodes, "
-                "literal 'true'/'false' concept nodes). Prefer this over SQL. "
-                "Filter with q. To remove junk entities use memory_delete_entity."
-            ),
-            category="memory",
-        )
-        async def memory_list_entities(q: str = "", limit: int = 40) -> str:
+        def _mem_list_entities(q: str = "", limit: int = 40) -> str:
             import sqlite3
 
             from kazma_core.memory.schema_v2 import ensure_primary_schema
@@ -861,7 +823,6 @@ class LocalToolRegistry:
                 ensure_primary_schema(conn)
                 tenant = get_current_tenant_id()
                 lim = max(1, min(int(limit or 40), 100))
-                # Belief count via subject/object slug match (best-effort)
                 sql = """
                     SELECT e.id, e.type, e.name, e.is_high_stakes,
                            (
@@ -877,7 +838,10 @@ class LocalToolRegistry:
                 params: list[Any] = [tenant]
                 if (q or "").strip():
                     ql = f"%{q.strip().lower()}%"
-                    sql += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
+                    sql += (
+                        " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? "
+                        "OR LOWER(e.type) LIKE ?)"
+                    )
                     params.extend([ql, ql, ql])
                 sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"
                 params.append(lim)
@@ -892,16 +856,20 @@ class LocalToolRegistry:
                 logger.warning("[memory_list_entities] failed: %s", exc)
                 return f"Error: memory_list_entities failed — {exc}"
 
-        @self.register(
-            description=(
-                "Delete a junk memory entity by id (from memory_list_entities). "
-                "Use for garbage concept nodes like literal 'true'/'false' or "
-                "duplicate empty shells. Does not wipe beliefs automatically — "
-                "invalidate beliefs first if needed. Never use execute_db_query."
-            ),
-            category="memory",
-        )
-        async def memory_delete_entity(entity_id: str) -> str:
+        def _mem_invalidate(belief_id: str) -> str:
+            from kazma_core.memory.hygiene import invalidate_belief
+
+            bid = (belief_id or "").strip()
+            if not bid:
+                return "Error: belief_id required (from list_beliefs)"
+            try:
+                result = invalidate_belief(bid, remove_graph=True)
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            except Exception as exc:
+                logger.warning("[memory_invalidate] failed: %s", exc)
+                return f"Error: memory_invalidate failed — {exc}"
+
+        def _mem_delete_entity(entity_id: str) -> str:
             import sqlite3
 
             from kazma_core.memory.schema_v2 import ensure_primary_schema
@@ -911,7 +879,6 @@ class LocalToolRegistry:
             eid = (entity_id or "").strip()
             if not eid:
                 return "Error: entity_id required"
-            # Protect high-value ids
             blocked = {"user", "assistant", "kazma", "mubder"}
             if eid.lower() in blocked:
                 return f"Error: refusing to delete protected entity '{eid}'"
@@ -928,8 +895,9 @@ class LocalToolRegistry:
                 ).fetchone()
                 if not row:
                     conn.close()
-                    return json.dumps({"ok": False, "error": "not_found", "entity_id": eid})
-                # Drop pending merges referencing this entity
+                    return json.dumps(
+                        {"ok": False, "error": "not_found", "entity_id": eid}
+                    )
                 conn.execute(
                     "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
                     (eid, eid),
@@ -952,6 +920,198 @@ class LocalToolRegistry:
             except Exception as exc:
                 logger.warning("[memory_delete_entity] failed: %s", exc)
                 return f"Error: memory_delete_entity failed — {exc}"
+
+        def _mem_purge_empty_entities(*, confirm: bool = False) -> str:
+            """Delete entity shells with zero active beliefs (safe clutter)."""
+            import sqlite3
+
+            from kazma_core.memory.schema_v2 import ensure_primary_schema
+            from kazma_core.paths import primary_memory_db
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            protected = {"user", "assistant", "kazma", "mubder"}
+            try:
+                conn = sqlite3.connect(
+                    primary_memory_db(), check_same_thread=False
+                )
+                conn.row_factory = sqlite3.Row
+                ensure_primary_schema(conn)
+                tenant = get_current_tenant_id()
+                rows = conn.execute(
+                    """
+                    SELECT e.id, e.type, e.name,
+                           (
+                             SELECT COUNT(*) FROM beliefs b
+                             WHERE b.tenant_id = e.tenant_id
+                               AND b.valid_until IS NULL AND b.invalidated_at IS NULL
+                               AND (b.subject = e.id OR b.object = e.name
+                                    OR b.object = e.id OR b.subject = e.name)
+                           ) AS belief_count
+                    FROM entities e
+                    WHERE e.tenant_id = ?
+                    """,
+                    (tenant,),
+                ).fetchall()
+                empty = [
+                    dict(r)
+                    for r in rows
+                    if int(r["belief_count"] or 0) == 0
+                    and str(r["id"] or "").lower() not in protected
+                ]
+                if not confirm:
+                    conn.close()
+                    return json.dumps(
+                        {
+                            "ok": True,
+                            "dry_run": True,
+                            "would_delete": len(empty),
+                            "entities": empty,
+                            "hint": "Call again with confirm=true to delete these shells.",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                deleted: list[str] = []
+                for r in empty:
+                    eid = r["id"]
+                    conn.execute(
+                        "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
+                        (eid, eid),
+                    )
+                    conn.execute(
+                        "DELETE FROM entities WHERE id=? AND tenant_id=?",
+                        (eid, tenant),
+                    )
+                    deleted.append(eid)
+                conn.commit()
+                conn.close()
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "dry_run": False,
+                        "deleted": deleted,
+                        "count": len(deleted),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            except Exception as exc:
+                logger.warning("[memory_purge_empty_entities] failed: %s", exc)
+                return f"Error: memory_purge_empty_entities failed — {exc}"
+
+        @self.register(
+            description=(
+                "MEMORY ADMIN (read+write). Prefer this over SQL for all memory maintenance. "
+                "action=list_beliefs|list_entities|invalidate|delete_entity|purge_empty_entities|help. "
+                "Writes: invalidate (soft-delete belief by id=), delete_entity (id=entity id), "
+                "purge_empty_entities (confirm=true to delete zero-belief shells). "
+                "Reads: list_beliefs/list_entities with optional q and limit. "
+                "Example: action=purge_empty_entities confirm=true. "
+                "Example: action=invalidate id=b_abc123. Never use execute_db_query for memory."
+            ),
+            category="memory",
+        )
+        async def memory_admin(
+            action: str,
+            id: str = "",
+            q: str = "",
+            limit: int = 40,
+            confirm: bool = False,
+        ) -> str:
+            act = (action or "").strip().lower().replace("-", "_")
+            if act in ("help", "", "actions"):
+                return json.dumps(
+                    {
+                        "actions": [
+                            "list_beliefs",
+                            "list_entities",
+                            "invalidate",
+                            "delete_entity",
+                            "purge_empty_entities",
+                            "help",
+                        ],
+                        "writes": [
+                            "invalidate",
+                            "delete_entity",
+                            "purge_empty_entities",
+                        ],
+                        "examples": [
+                            {"action": "list_entities", "q": "shipx"},
+                            {"action": "purge_empty_entities", "confirm": False},
+                            {"action": "purge_empty_entities", "confirm": True},
+                            {"action": "invalidate", "id": "b_…"},
+                            {"action": "delete_entity", "id": "true"},
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            if act in ("list_beliefs", "beliefs"):
+                return _mem_list_beliefs(q=q, limit=limit)
+            if act in ("list_entities", "entities"):
+                return _mem_list_entities(q=q, limit=limit)
+            if act in ("invalidate", "invalidate_belief"):
+                return _mem_invalidate(id)
+            if act in ("delete_entity", "delete"):
+                return _mem_delete_entity(id)
+            if act in ("purge_empty_entities", "purge_empty", "purge"):
+                return _mem_purge_empty_entities(confirm=bool(confirm))
+            return (
+                f"Error: unknown action {action!r}. "
+                "Use action=help for the list."
+            )
+
+        @self.register(
+            description=(
+                "List active long-term memory beliefs (V2). Optional q filter. "
+                "For deletes use memory_admin action=invalidate. Not SQL."
+            ),
+            category="memory",
+        )
+        async def memory_list_beliefs(q: str = "", limit: int = 30) -> str:
+            return _mem_list_beliefs(q=q, limit=limit)
+
+        @self.register(
+            description=(
+                "WRITE: Soft-invalidate one belief by id (from memory_list_beliefs). "
+                "Removes stale/duplicate facts. Also: memory_admin action=invalidate id=…"
+            ),
+            category="memory",
+        )
+        async def memory_invalidate(belief_id: str) -> str:
+            return _mem_invalidate(belief_id)
+
+        @self.register(
+            description=(
+                "List memory entities with belief counts. "
+                "To delete empty shells: memory_admin action=purge_empty_entities confirm=true. "
+                "To delete one: memory_delete_entity or memory_admin action=delete_entity."
+            ),
+            category="memory",
+        )
+        async def memory_list_entities(q: str = "", limit: int = 40) -> str:
+            return _mem_list_entities(q=q, limit=limit)
+
+        @self.register(
+            description=(
+                "WRITE: Delete one memory entity by id (e.g. empty shell). "
+                "Protected: user/assistant/kazma. Also memory_admin action=delete_entity."
+            ),
+            category="memory",
+        )
+        async def memory_delete_entity(entity_id: str) -> str:
+            return _mem_delete_entity(entity_id)
+
+        @self.register(
+            description=(
+                "WRITE: Purge entity shells with zero active beliefs (safe clutter cleanup). "
+                "Dry-run by default (confirm=false). Set confirm=true to delete. "
+                "Also: memory_admin action=purge_empty_entities confirm=true."
+            ),
+            category="memory",
+        )
+        async def memory_purge_empty_entities(confirm: bool = False) -> str:
+            return _mem_purge_empty_entities(confirm=bool(confirm))
 
         @self.register(
             description=(
