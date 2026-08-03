@@ -52,18 +52,21 @@ User turn
 | P2-7 | Stuck-queue reclaim chaos test | **Done** |
 | P2-8 | Memory quality score API + card | **Done** |
 | P2-9 | explain_recall in chat format | **Done** |
-| P2-2 | Shared Postgres **state** dual-mirror | **Done** (recall still SQLite) |
+| P2-2 | Shared Postgres **state** dual-mirror | **Done** |
+| P2-2b | Postgres sparse ILIKE recall assist | **Done** |
 | P2-3 | Neo4j graph dual-write + GraphBackend | **Done** |
 | P2-5 | LLM tier-3 entity disambiguation (opt-in) | **Done** |
+| SaaS | Auth-bound `resolve_tenant_id` (JWT/ContextVar/user) | **Done** |
 
-### P3 — Trigger-only scale
+### P3 — Still deferred (true cutover / ops)
 
 | Trigger | Build |
 |---------|--------|
-| 2+ app replicas | P2-1 then consider P2-2 |
-| SaaS isolation SLAs | Auth-bound tenant + audit reviews |
-| No local embeddings | Hosted embed-only service |
+| Full multi-replica recall | Port FTS/dense primary path entirely to Postgres |
+| Multi-region | Geo replication + conflict policy |
+| No local embeddings | Hosted embed-only fleet defaults |
 | Huge corpus | Scaled reconsolidation / partition |
+| Graph UX | Animation / a11y polish |
 
 ### Explicitly not planned
 
