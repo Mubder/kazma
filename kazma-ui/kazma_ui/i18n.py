@@ -1787,9 +1787,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # Packages extras (group + pkg descriptions)
     "packages.extra.rag.title": {"en": "Memory & RAG", "ar": "الذاكرة وRAG"},
+    "packages.extra.document.title": {"en": "Document generation", "ar": "توليد المستندات"},
+    "packages.extra.document.desc": {
+        "en": "PDF/DOCX/XLSX generation for document_generator skill.",
+        "ar": "توليد PDF/DOCX/XLSX لمهارة توليد المستندات.",
+    },
+    "packages.extra.database.title": {"en": "Extra DB drivers", "ar": "مشغّلات قواعد بيانات إضافية"},
+    "packages.extra.database.desc": {
+        "en": "MySQL/Mongo drivers for database_client skill.",
+        "ar": "مشغّلات MySQL/Mongo لمهارة عميل قاعدة البيانات.",
+    },
     "packages.extra.rag.desc": {
-        "en": "Full chat memory stack: L1 Chroma + MiniLM embeddings + L4 sqlite-vec. Without this, per-turn RAG falls back to L3 FTS5; L2 graph still works.",
-        "ar": "مكوّن ذاكرة الدردشة الكامل: L1 كروما + تضمينات MiniLM + L4 sqlite-vec. بدونها يقتصر RAG على L3 FTS5؛ رسم L2 يعمل.",
+        "en": "V2 cognitive memory: sentence-transformers embeddings + sqlite-vec local vectors. chromadb is optional legacy, not required for V2.",
+        "ar": "ذاكرة V2: تضمينات sentence-transformers + متجهات sqlite-vec محلية. chromadb اختياري قديم وليس مطلوباً لـ V2.",
     },
     "packages.extra.postgres.title": {"en": "Postgres (multi-replica)", "ar": "Postgres (متعدد النسخ)"},
     "packages.extra.postgres.desc": {

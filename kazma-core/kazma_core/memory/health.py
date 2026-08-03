@@ -213,7 +213,8 @@ def build_memory_health() -> dict[str, Any]:
         detail=(
             f"V2 stack active — {bel.get('active', 0)} active beliefs, "
             f"{(ep.get('recall', 0) + ep.get('episodic', 0))} episodes, "
-            f"{v2.get('entities', 0)} entities."
+            f"{v2.get('entities', 0)} entities. "
+            f"Graph dual-write: {(v2.get('graph') or {}).get('provider', 'sqlite')}."
             if v2_ok
             else "V2 memory_state.db unavailable — check kazma-data/ and restart."
         ),
@@ -221,14 +222,16 @@ def build_memory_health() -> dict[str, Any]:
             "active_beliefs": bel.get("active", 0),
             "superseded_beliefs": bel.get("superseded", 0),
             "entities": v2.get("entities", 0),
+            "graph": v2.get("graph") or {},
         },
     ))
     components.append(_comp(
-        "layer_l1", "V2 beliefs",
+        "layer_l1", "V2 beliefs (SQLite SoT)",
         ok=v2_ok, status=v2_status,
         detail=(
-            f"Bi-temporal belief graph: {bel.get('active', 0)} active, "
-            f"{bel.get('superseded', 0)} superseded, {bel.get('archived', 0)} archived."
+            f"Bi-temporal beliefs: {bel.get('active', 0)} active, "
+            f"{bel.get('superseded', 0)} superseded, {bel.get('archived', 0)} archived. "
+            "Dashboard topology paints from SQLite."
             if v2_ok else "Belief store unavailable."
         ),
         meta={"active": bel.get("active", 0), "superseded": bel.get("superseded", 0)},
@@ -237,8 +240,8 @@ def build_memory_health() -> dict[str, Any]:
         "layer_l2", "V2 episodes",
         ok=v2_ok, status=v2_status,
         detail=(
-            f"4-tier episodes: {ep.get('recall', 0)} recall, {ep.get('episodic', 0)} episodic, "
-            f"{ep.get('archived', 0)} archived."
+            f"4-tier episodes: {ep.get('working', 0)} working, {ep.get('recall', 0)} recall, "
+            f"{ep.get('episodic', 0)} episodic, {ep.get('archived', 0)} archived."
             if v2_ok else "Episode store unavailable."
         ),
         meta={"recall": ep.get("recall", 0), "episodic": ep.get("episodic", 0)},
@@ -248,7 +251,8 @@ def build_memory_health() -> dict[str, Any]:
         ok=v2_ok, status=v2_status,
         detail=(
             f"{(v2.get('procedural_dags') or {}).get('active', 0)} procedural DAGs; "
-            f"queue {(v2.get('queue') or {}).get('pending', 0)} pending."
+            f"queue {(v2.get('queue') or {}).get('pending', 0)} pending / "
+            f"{(v2.get('queue') or {}).get('failed', 0)} failed."
             if v2_ok else "Procedural/queue store unavailable."
         ),
         meta={"procedural": (v2.get("procedural_dags") or {}).get("active", 0)},
@@ -262,6 +266,77 @@ def build_memory_health() -> dict[str, Any]:
         ),
         meta={"entities": v2.get("entities", 0)},
     ))
+
+    # Neo4j dual-write / topology adapter
+    gmeta = v2.get("graph") if isinstance(v2.get("graph"), dict) else {}
+    try:
+        from kazma_core.memory.backends import get_backends_cfg
+        from kazma_core.memory.graph_backend import get_graph_backend, graph_capability
+
+        _bcfg = get_backends_cfg()
+        gcap = graph_capability(_bcfg)
+        gprov = str(((_bcfg.get("graph") or {}).get("provider") or "sqlite")).lower()
+        if gprov == "neo4j":
+            gb = get_graph_backend()
+            online = getattr(gb, "name", "") == "neo4j" and bool(getattr(gb, "available", False))
+            components.append(_comp(
+                "graph_neo4j",
+                "Neo4j dual-write",
+                ok=online,
+                status="ok" if online else "warn",
+                detail=(
+                    f"Neo4j online — dual-write on belief mutate; Dashboard paint remains SQLite. "
+                    f"{gcap.get('detail') or ''}"
+                    if online
+                    else (
+                        "Graph provider=neo4j but server/driver auth failed — "
+                        "Settings → Memory → Test Neo4j (re-enter password if masked)."
+                    )
+                ),
+                meta={"provider": "neo4j", "online": online, "paint_source": "sqlite"},
+            ))
+        else:
+            components.append(_comp(
+                "graph_neo4j",
+                "Neo4j dual-write",
+                ok=True,
+                status="off",
+                detail="Optional. Graph store is SQLite (default). Enable Neo4j in Settings → Memory.",
+                meta={"provider": gprov or "sqlite"},
+            ))
+    except Exception as exc:
+        components.append(_comp(
+            "graph_neo4j", "Neo4j dual-write",
+            ok=False, status="warn",
+            detail=f"Graph backend probe failed: {exc}",
+        ))
+
+    # Knowledge Library → chat inject (product merge)
+    try:
+        from kazma_core.memory.config import read_memory_cfg as _rmc
+
+        _v2cfg = (_rmc().get("v2") or {}) if isinstance(_rmc(), dict) else {}
+        kb_merge = bool(_v2cfg.get("merge_knowledge_into_chat", True))
+        kb_promote = bool(_v2cfg.get("promote_kb_to_episodes", True))
+        components.append(_comp(
+            "kb_merge",
+            "KB → chat inject",
+            ok=kb_merge,
+            status="ok" if kb_merge else "off",
+            detail=(
+                f"Labeled Knowledge Library hits inject into supervisor "
+                f"(promote_kb_to_episodes={kb_promote}). Stores stay separate."
+                if kb_merge
+                else "merge_knowledge_into_chat=false — KB not auto-injected into chat."
+            ),
+            meta={"merge": kb_merge, "promote": kb_promote},
+        ))
+    except Exception:
+        components.append(_comp(
+            "kb_merge", "KB → chat inject",
+            ok=True, status="warn",
+            detail="Could not read merge_knowledge_into_chat flag (defaults on).",
+        ))
 
     # Consolidation flag
     cons = cfg.get("consolidation") if isinstance(cfg.get("consolidation"), dict) else {}
@@ -294,26 +369,61 @@ def build_memory_health() -> dict[str, Any]:
             return False
 
     pkgs = [
-        ("pkg_chromadb", "Package: chromadb", "chromadb", "Required for VectorMemory / L1."),
-        ("pkg_st", "Package: sentence-transformers", "sentence_transformers", "Required for local embeddings."),
-        ("pkg_sqlite_vec", "Package: sqlite-vec", "sqlite_vec", "Required for L4 local vectors."),
+        (
+            "pkg_st",
+            "Package: sentence-transformers",
+            "sentence_transformers",
+            "Local embedder (BAAI/bge-m3 etc.). Fix: pip install -e '.[rag]'",
+            "rag",
+        ),
+        (
+            "pkg_sqlite_vec",
+            "Package: sqlite-vec",
+            "sqlite_vec",
+            "Local vector backend for dense recall. Fix: pip install -e '.[rag]'",
+            "rag",
+        ),
+        (
+            "pkg_chromadb",
+            "Package: chromadb",
+            "chromadb",
+            "Optional legacy vector store (not required for V2 SQLite-first stack).",
+            "optional",
+        ),
+        (
+            "pkg_neo4j",
+            "Package: neo4j",
+            "neo4j",
+            "Official Bolt driver for Neo4j dual-write. Fix: pip install neo4j",
+            "neo4j",
+        ),
         (
             "pkg_psycopg",
             "Package: psycopg",
             "psycopg",
-            "Required for Postgres multi-replica stores. Fix: pip install -e '.[postgres]'",
+            "Postgres multi-replica stores. Fix: pip install -e '.[postgres]'",
+            "postgres",
         ),
         (
             "pkg_lg_pg",
             "Package: langgraph-checkpoint-postgres",
             "langgraph.checkpoint.postgres",
-            "Required for Postgres graph checkpoints. Fix: pip install -e '.[postgres]'",
+            "Postgres graph checkpoints. Fix: pip install -e '.[postgres]'",
+            "postgres",
         ),
     ]
-    for id_, name, mod, why in pkgs:
+    # Detect whether Neo4j is configured
+    want_neo4j = False
+    try:
+        from kazma_core.memory.backends import get_backends_cfg as _gbc
+
+        want_neo4j = str(((_gbc().get("graph") or {}).get("provider") or "")).lower() == "neo4j"
+    except Exception:
+        want_neo4j = False
+
+    for id_, name, mod, why, kind in pkgs:
         present = _has_mod(mod)
-        # Postgres packages are optional unless backend is postgres
-        if id_ in ("pkg_psycopg", "pkg_lg_pg"):
+        if kind == "postgres":
             try:
                 from kazma_core.db.backend import is_postgres
 
@@ -334,14 +444,41 @@ def build_memory_health() -> dict[str, Any]:
                     detail=f"{mod} missing while Postgres is configured — {why}",
                 ))
                 continue
+        if kind == "neo4j":
+            if not want_neo4j and not present:
+                components.append(_comp(
+                    id_, name,
+                    ok=True, status="off",
+                    detail="neo4j driver not installed (optional until Graph store = Neo4j).",
+                ))
+                continue
+            if want_neo4j and not present:
+                components.append(_comp(
+                    id_, name,
+                    ok=False, status="error",
+                    detail=f"{mod} missing while Neo4j is configured — {why}",
+                ))
+                continue
+        if kind == "optional":
+            components.append(_comp(
+                id_, name,
+                ok=True,
+                status="ok" if present else "off",
+                detail=(
+                    f"{mod} is installed (optional)."
+                    if present
+                    else f"{mod} not installed — {why}"
+                ),
+            ))
+            continue
         components.append(_comp(
             id_, name,
             ok=present,
-            status="ok" if present else "error",
+            status="ok" if present else ("warn" if kind == "rag" else "error"),
             detail=(
                 f"{mod} is installed."
                 if present
-                else f"{mod} not installed — {why} Fix: pip install -e '.[rag]'"
+                else f"{mod} not installed — {why}"
             ),
         ))
 

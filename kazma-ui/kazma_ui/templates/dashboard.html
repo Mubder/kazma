@@ -910,9 +910,9 @@
       grid.innerHTML = '<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">' + (I18N.noComponentData || 'No component data yet.') + '</div>';
     } else {
       var groups = [
-        { title: I18N.groupFeatures || 'Features', ids: ['memory_enabled', 'per_turn_retrieval', 'auto_store', 'consolidation'] },
-        { title: I18N.groupLayers || 'Memory layers', ids: ['embedder', 'vector_memory', 'layer_l1', 'layer_l2', 'layer_l3', 'layer_l4'] },
-        { title: I18N.groupPackages || 'Packages & stores', ids: ['pkg_chromadb', 'pkg_st', 'pkg_sqlite_vec', 'pkg_psycopg', 'pkg_lg_pg', 'store_config', 'store_checkpoints'] },
+        { title: I18N.groupFeatures || 'Features', ids: ['memory_enabled', 'per_turn_retrieval', 'auto_store', 'consolidation', 'kb_merge'] },
+        { title: I18N.groupLayers || 'V2 cognitive stack', ids: ['embedder', 'vector_memory', 'layer_l1', 'layer_l2', 'layer_l3', 'layer_l4', 'graph_neo4j'] },
+        { title: I18N.groupPackages || 'Packages & stores', ids: ['pkg_st', 'pkg_sqlite_vec', 'pkg_neo4j', 'pkg_chromadb', 'pkg_psycopg', 'pkg_lg_pg', 'store_config', 'store_checkpoints'] },
       ];
       var byId = {};
       components.forEach(function(c) { byId[c.id] = c; });

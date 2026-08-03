@@ -991,8 +991,17 @@ def register_direct_routes(self: Any) -> None:
         cfg = get_backends_cfg()
         if isinstance(body, dict) and (body.get("graph") or body.get("url")):
             g = dict(cfg.get("graph") or {})
+            saved_pw = str(g.get("password") or g.get("api_key") or "")
             if body.get("graph"):
-                g.update(body["graph"])
+                incoming = dict(body["graph"] or {})
+                # UI masks secrets as "***" — never let that overwrite vault password
+                ipw = incoming.get("password")
+                if ipw is None or str(ipw).strip() in ("", "***") or str(ipw).strip().startswith("***"):
+                    incoming.pop("password", None)
+                iak = incoming.get("api_key")
+                if iak is None or str(iak).strip() in ("", "***"):
+                    incoming.pop("api_key", None)
+                g.update(incoming)
             else:
                 if body.get("url") is not None:
                     g["url"] = body["url"]
@@ -1003,6 +1012,12 @@ def register_direct_routes(self: Any) -> None:
                     "***",
                 ):
                     g["password"] = body["password"]
+            # Restore saved secret if client sent mask/empty
+            if not str(g.get("password") or "").strip() or str(g.get("password")).strip() in (
+                "***",
+            ):
+                if saved_pw and saved_pw not in ("***",):
+                    g["password"] = saved_pw
             g["provider"] = "neo4j"
             cfg = {**cfg, "graph": g}
         return test_neo4j_connection(cfg)
@@ -1843,26 +1858,47 @@ def register_direct_routes(self: Any) -> None:
 
         # ── Define the extras groups and their member packages ──
         # Keep package lists aligned with pyproject.toml optional-deps.
+        # Keep package lists aligned with pyproject.toml [project.optional-dependencies]
         EXTRA_GROUPS = {
             "rag": {
                 "title": _i18n("packages.extra.rag.title", "Memory & RAG"),
                 "priority": 0,
                 "description": _i18n(
                     "packages.extra.rag.desc",
-                    "Full chat memory stack: L1 Chroma + MiniLM + L4 sqlite-vec.",
+                    "V2 cognitive memory: local embeddings (sentence-transformers) + sqlite-vec. chromadb optional legacy.",
                 ),
-                "packages": ["chromadb", "sentence-transformers", "sqlite-vec"],
-                "install_cmd": 'uv pip install -e ".[rag]"   # L1+L4 vectors + MiniLM embeddings',
+                "packages": ["sentence-transformers", "sqlite-vec", "chromadb"],
+                "install_cmd": 'uv pip install -e ".[rag]"   # embedder + local vectors',
             },
             "postgres": {
                 "title": _i18n("packages.extra.postgres.title", "Postgres (multi-replica)"),
                 "priority": 1,
                 "description": _i18n(
                     "packages.extra.postgres.desc",
-                    "Multi-replica shared state on Postgres.",
+                    "Multi-replica shared state on Postgres + LangGraph Postgres checkpointer.",
                 ),
                 "packages": ["psycopg", "langgraph-checkpoint-postgres"],
                 "install_cmd": 'uv pip install -e ".[postgres]"   # then set KAZMA_DATABASE_URL + migrate',
+            },
+            "document": {
+                "title": _i18n("packages.extra.document.title", "Document generation"),
+                "priority": 4,
+                "description": _i18n(
+                    "packages.extra.document.desc",
+                    "PDF/DOCX/XLSX generation for document_generator skill.",
+                ),
+                "packages": ["reportlab", "python-docx", "openpyxl", "arabic-reshaper", "python-bidi"],
+                "install_cmd": 'uv pip install -e ".[document]"',
+            },
+            "database": {
+                "title": _i18n("packages.extra.database.title", "Extra DB drivers"),
+                "priority": 5,
+                "description": _i18n(
+                    "packages.extra.database.desc",
+                    "MySQL/Mongo drivers for database_client skill (beyond SQLite/Postgres).",
+                ),
+                "packages": ["psycopg", "pymysql", "pymongo"],
+                "install_cmd": 'uv pip install -e ".[database]"',
             },
             "dev": {
                 "title": _i18n("packages.extra.dev.title", "Development"),
@@ -1881,12 +1917,12 @@ def register_direct_routes(self: Any) -> None:
                     "packages.extra.test.desc",
                     "Test-specific dependencies (lighter than dev).",
                 ),
-                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis"],
+                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis", "httpx"],
                 "install_cmd": 'uv pip install -e ".[test]"   # additive — won\'t remove other extras',
             },
             "tui": {
                 "title": _i18n("packages.extra.tui.title", "TUI dashboard"),
-                "priority": 5,
+                "priority": 6,
                 "description": _i18n(
                     "packages.extra.tui.desc",
                     "Terminal dashboard UI (Textual) with RTL text.",
@@ -1896,7 +1932,7 @@ def register_direct_routes(self: Any) -> None:
             },
             "observability": {
                 "title": _i18n("packages.extra.observability.title", "Observability"),
-                "priority": 6,
+                "priority": 7,
                 "description": _i18n(
                     "packages.extra.observability.desc",
                     "Prometheus metrics export for production monitoring.",
@@ -1906,7 +1942,7 @@ def register_direct_routes(self: Any) -> None:
             },
             "web": {
                 "title": _i18n("packages.extra.web.title", "Browser automation"),
-                "priority": 7,
+                "priority": 8,
                 "description": _i18n(
                     "packages.extra.web.desc",
                     "Browser automation via Playwright for JS-heavy pages.",
@@ -1917,33 +1953,44 @@ def register_direct_routes(self: Any) -> None:
         }
 
         EXTRA_PKG_DESCRIPTIONS = {
-            "chromadb": "L1 semantic vector store (agent_memory collection)",
-            "sentence-transformers": "Local MiniLM embeddings (shared embedder singleton)",
-            "sqlite-vec": "L4 local vector tables for the unified memory adapter",
-            "psycopg": "Postgres driver for multi-replica ConfigStore / sessions",
+            "chromadb": "Optional legacy vector store (not required for V2 SQLite-first memory)",
+            "sentence-transformers": "Local embeddings for V2 dense recall (e.g. BAAI/bge-m3)",
+            "sqlite-vec": "Local vector tables for V2 hybrid dense recall",
+            "neo4j": "Bolt driver for optional Neo4j belief dual-write (pip install neo4j)",
+            "psycopg": "Postgres driver for multi-replica ConfigStore / sessions / dual-mirror",
             "langgraph-checkpoint-postgres": "Shared LangGraph checkpoints across replicas",
             "playwright": "Headless browser for JS-heavy crawl / research",
             "prometheus-client": "Prometheus /metrics exposition",
             "textual": "TUI framework for kazma-tui",
-            "python-bidi": "Bidirectional text for Arabic TUI",
+            "python-bidi": "Bidirectional text for Arabic TUI / documents",
+            "reportlab": "PDF generation",
+            "python-docx": "Word document generation",
+            "openpyxl": "Excel generation",
+            "arabic-reshaper": "Arabic text shaping for PDF/DOCX",
+            "pymysql": "MySQL driver for database_client skill",
+            "pymongo": "MongoDB driver for database_client skill",
+            "fakeredis": "In-memory Redis stub for tests",
+            "httpx": "HTTP client (also listed in test extra for completeness)",
         }
 
-        # ── Core dependencies (always installed) ──
+        # ── Core dependencies (always installed via monorepo packages) ──
         CORE_PACKAGES = [
             "fastapi", "uvicorn", "langgraph", "langgraph-checkpoint-sqlite",
             "aiosqlite", "langfuse", "pyyaml", "httpx", "cryptography",
-            "PyJWT", "jinja2", "python-multipart", "textual", "psutil",
+            "PyJWT", "jinja2", "python-multipart", "psutil",
             "aiogram", "websockets", "duckduckgo-search", "trafilatura",
             "markdown", "tenacity", "networkx", "click", "rich",
             "google-cloud-aiplatform", "python-dotenv",
+            # Workspace packages (editable install)
+            "kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli",
         ]
 
         CORE_DESCRIPTIONS = {
             "fastapi": "Web framework powering the Kazma dashboard + REST API",
             "uvicorn": "ASGI server that runs the FastAPI app",
             "langgraph": "LangGraph supervisor brain — the ReAct loop, checkpointing, interrupt()",
-            "langgraph-checkpoint-sqlite": "SQLite-backed LangGraph checkpoints (default single-node; Postgres uses langgraph-checkpoint-postgres extra)",
-            "aiosqlite": "Async SQLite driver for default local stores (settings, sessions, swarm when not on Postgres)",
+            "langgraph-checkpoint-sqlite": "SQLite-backed LangGraph checkpoints (default single-node)",
+            "aiosqlite": "Async SQLite driver for default local stores",
             "langfuse": "Observability/tracing platform for LLM calls",
             "pyyaml": "YAML parser for kazma.yaml config + skill manifests",
             "httpx": "HTTP client for LLM API calls + web tools",
@@ -1951,20 +1998,38 @@ def register_direct_routes(self: Any) -> None:
             "PyJWT": "JWT token generation for GitHub App authentication",
             "jinja2": "HTML template engine for the web UI",
             "python-multipart": "File upload handling for FastAPI",
-            "textual": "Terminal UI framework (also a core dep for the TUI)",
-            "psutil": "System resource monitoring (CPU, RAM, disk) for telemetry",
+            "psutil": "System resource monitoring for telemetry",
             "aiogram": "Telegram Bot API framework",
             "websockets": "WebSocket support for real-time chat + gateway",
             "duckduckgo-search": "Privacy-focused web search (no API key needed)",
             "trafilatura": "Web content extraction (clean text from URLs)",
             "markdown": "Markdown rendering for chat messages",
             "tenacity": "Retry logic with exponential backoff for LLM calls",
-            "networkx": "Graph algorithms for swarm DAG/topology (+ legacy L2 import helpers)",
+            "networkx": "Graph algorithms for swarm DAG/topology",
             "click": "CLI framework for the `kazma` command",
             "rich": "Beautiful terminal output (colors, tables, progress bars)",
             "google-cloud-aiplatform": "Google Vertex AI provider integration",
             "python-dotenv": ".env file loading for local development",
+            "kazma-core": "Agent brain, LLM providers, swarm, V2 memory, IDE",
+            "kazma-ui": "FastAPI web app + Settings + Dashboard",
+            "kazma-gateway": "Telegram / Discord / Slack adapters",
+            "kazma-cli": "`kazma` CLI entrypoints",
         }
+
+        # Surface neo4j driver if installed (not a pyproject extra — pip install neo4j)
+        try:
+            import importlib.util as _ilu
+
+            if _ilu.find_spec("neo4j") is not None:
+                EXTRA_GROUPS["neo4j"] = {
+                    "title": "Neo4j (graph dual-write)",
+                    "priority": 2,
+                    "description": "Official neo4j Python driver for optional belief graph dual-write.",
+                    "packages": ["neo4j"],
+                    "install_cmd": "pip install neo4j   # then Settings → Memory → Neo4j",
+                }
+        except Exception:
+            pass
 
         # Runtime DB backend badge for the Packages tab
         try:
