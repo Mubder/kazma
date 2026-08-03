@@ -18,8 +18,22 @@ Search, scrape, and crawl I/O are centralized under **`kazma_core.web_acquire`**
 | `search()` | Multi-backend SERP (same as `web_search` tool) |
 | `fetch_text()` | Full-page text (Jina / Firecrawl / httpx / Playwright recovery) |
 | `crawl()` | Bounded multi-page crawl with **profiles** (`research_brief`, `research_deep`, `kb_site`, …) |
+| `rank_urls()` | Heuristic ranking (docs/edu over social/spam) for deep research |
 
 **Knowledge Library ingest** and **research** both use this fetch ladder so hard-page fixes apply once. Product pipelines stay separate (KB → index; research → digest/report). LLM APIs never use this stack (they use `http_pool`).
+
+### Deep pipeline quality (R0 / R1)
+
+`run_research_pipeline` / `/research deep`:
+
+1. Multi-query **search** via `web_acquire`  
+2. **Rank** URLs (`rank_urls`) before acquire  
+3. Full-page acquire → **`sources.json`** metadata  
+4. **Fail-closed** in deep mode if fewer than min sources (override: `KAZMA_RESEARCH_ALLOW_THIN=1`)  
+5. Digests + heuristic **evidence claims** (`claims.json` / `claims.md`)  
+6. LLM synthesis + structural **rubric** (`rubric.json`)  
+
+Golden topics / scoring helpers: `kazma_core.tools.research_eval`.
 
 > **Arabic brand:** product name is **Kazma** / **كاظمه** (or **كاظمة**). Never **كازما**.
 

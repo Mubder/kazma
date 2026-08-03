@@ -122,10 +122,12 @@ async def synthesize_from_digests(
         "You are a research analyst. Using ONLY the source materials provided, "
         "write a rigorous multi-section analysis. Requirements:\n"
         "- Use clear markdown headings (## / ###).\n"
-        "- Cite sources inline with paths or URLs found in the materials.\n"
+        "- Cite sources inline with URLs or file paths from the materials "
+        "(prefer http URLs when present).\n"
+        "- Prefer claims listed under Evidence claims when present; "
+        "do not invent facts not supported by materials.\n"
         "- Call out conflicts between sources.\n"
         "- End with a **Sources** section listing files/URLs used.\n"
-        "- Do not invent facts not supported by the materials.\n"
         f"- Keep under ~{cap_out} characters."
     )
     user = (
