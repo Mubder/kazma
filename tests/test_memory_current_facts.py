@@ -168,3 +168,26 @@ def test_is_functional_suffix():
     assert is_functional_current_predicate("acme_weekly_reset")
     assert not is_functional_current_predicate("has_reminder")
     assert not is_functional_current_predicate("noted")
+
+
+def test_noted_near_dedupe(dbs):
+    """Near-identical noted blobs must not stack (ShipX Overview twice)."""
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    p, o = dbs
+    text_a = "ShipX — Overview: end-to-end Kuwaiti commerce intelligence platform."
+    text_b = "ShipX — Overview:  end-to-end   Kuwaiti commerce intelligence platform."
+    r1 = mutate_belief(
+        p, "user", "noted", text_a, ops_conn=o, predicate_type="set", importance=5
+    )
+    r2 = mutate_belief(
+        p, "user", "noted", text_b, ops_conn=o, predicate_type="set", importance=5
+    )
+    assert r1["action"] == "append"
+    assert r2["action"] == "noop"
+    assert r2.get("deduped") == "noted_near"
+    n = p.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE predicate='noted' "
+        "AND valid_until IS NULL AND invalidated_at IS NULL"
+    ).fetchone()[0]
+    assert n == 1

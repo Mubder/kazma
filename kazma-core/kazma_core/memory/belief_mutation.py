@@ -554,6 +554,13 @@ def _mutate_state(
     return result
 
 
+def _normalize_noted_key(obj: str) -> str:
+    """Stable key for noted near-dedupe (collapse whitespace, lower, trim)."""
+    import re
+
+    return re.sub(r"\s+", " ", (obj or "").strip().lower())[:160]
+
+
 def _mutate_set(
     conn: sqlite3.Connection,
     ops_conn: sqlite3.Connection | None,
@@ -573,6 +580,31 @@ def _mutate_set(
     if dup:
         existing_id = dup["id"] if isinstance(dup, sqlite3.Row) else dup[0]
         return {"action": "noop", "belief_id": existing_id, "superseded_id": None}
+
+    # noted diary blobs: near-dedupe so two "ShipX Overview" saves minutes
+    # apart (whitespace/punctuation drift) do not stack forever.
+    if pred == "noted":
+        key = _normalize_noted_key(obj)
+        if key:
+            candidates = conn.execute(
+                """SELECT id, object FROM beliefs
+                   WHERE subject=? AND predicate='noted' AND tenant_id=?
+                     AND valid_until IS NULL AND invalidated_at IS NULL
+                   ORDER BY valid_from DESC LIMIT 80""",
+                (sub, tenant_id),
+            ).fetchall()
+            for row in candidates:
+                existing_obj = (
+                    row["object"] if isinstance(row, sqlite3.Row) else row[1]
+                )
+                if _normalize_noted_key(str(existing_obj or "")) == key:
+                    eid = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+                    return {
+                        "action": "noop",
+                        "belief_id": eid,
+                        "superseded_id": None,
+                        "deduped": "noted_near",
+                    }
     bid = _belief_id(tenant_id, sub, pred, now)
     # Give set beliefs a unique id suffix to avoid PK collision when the
     # same (s,p) gets multiple objects at the same timestamp.
