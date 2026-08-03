@@ -48,6 +48,8 @@ __all__ = [
 
 # Canonical functional (single-valued) predicates. Anything not in this
 # set defaults to 'set' unless explicitly passed as predicate_type='state'.
+# Current entitlements (grok_next_reset, *_weekly_reset, …) are also
+# functional via :func:`current_facts.is_functional_current_predicate`.
 _FUNCTIONAL_PREDICATES = frozenset(
     {
         "name_is",
@@ -61,6 +63,18 @@ _FUNCTIONAL_PREDICATES = frozenset(
         "current_role",
         "preferred_name",
         "favorite_color",
+        # Weekly entitlement / quota current values (one active per service)
+        "next_reset",
+        "weekly_reset",
+        "quota_reset",
+        "grok_next_reset",
+        "supergrok_next_reset",
+        "zcode_next_reset",
+        "claude_next_reset",
+        "cursor_next_reset",
+        "copilot_next_reset",
+        "openai_next_reset",
+        "chatgpt_next_reset",
     }
 )
 
@@ -144,18 +158,32 @@ def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) 
 
 
 def _classify_predicate(predicate: str, explicit: str | None) -> str:
-    p = (predicate or "").strip().lower()
+    p = (predicate or "").strip().lower().replace(" ", "_")
     # Time-bound predicates are NEVER functional — they accumulate, not replace.
     # This check runs BEFORE the explicit override so even LLM-classified
     # "functional" reminders are forced to 'set' (append-only).
+    # Exception: *_next_reset / entitlement current-facts are single-valued
+    # even if the word "scheduled" appears elsewhere in free text (not in pred).
     if any(pat in p for pat in _NEVER_SUPERSEDE_PATTERNS):
         return "set"
-    if explicit:
+    # Rotating current facts (Grok/ZCode next weekly reset, …) always
+    # supersede — even if the LLM omitted predicate_type.
+    try:
+        from kazma_core.memory.current_facts import is_functional_current_predicate
+
+        if is_functional_current_predicate(p):
+            return "functional"
+    except Exception:
+        pass
+    if explicit in ("functional", "set", "state"):
         return explicit
     if p in _FUNCTIONAL_PREDICATES:
         return "functional"
     if p in _STATE_PREDICATES:
         return "state"
+    # favorite_* stays single-valued
+    if p.startswith("favorite_"):
+        return "functional"
     return "set"
 
 

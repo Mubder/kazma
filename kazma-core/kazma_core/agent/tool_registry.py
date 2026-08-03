@@ -766,8 +766,14 @@ class LocalToolRegistry:
         @self.register(
             description=(
                 "Store a fact, preference, or conversation fragment in long-term memory. "
-                "Use this when the user shares personal info, preferences, or important context "
-                "that should be remembered across sessions."
+                "Use when the user shares personal info, preferences, or important context "
+                "that should be remembered across sessions. "
+                "For rotating single-valued facts (e.g. 'my Grok next weekly reset is …', "
+                "'ZCode next reset is …'), pass metadata JSON with "
+                '{"predicate":"grok_next_reset","object":"<when>"} or '
+                '{"service":"grok","next_reset":"<when>"} so the new value SUPERSEDES '
+                "the previous one instead of stacking duplicates. Free text that mentions "
+                "a product next/weekly reset is auto-classified the same way."
             ),
             category="memory",
         )
@@ -776,13 +782,16 @@ class LocalToolRegistry:
                 meta = json.loads(metadata) if isinstance(metadata, str) else metadata
             except json.JSONDecodeError:
                 meta = {"raw": metadata}
+            if not isinstance(meta, dict):
+                meta = {"raw": meta}
             # V2 native write — the single memory write path (V1 removed).
-            # Stores as a V2 episode (raw text snapshot) + a user-explicit
-            # belief (importance 5, trust 1.0 — the user explicitly asked to
-            # remember it, so it's the highest-confidence source).
+            # Episode = raw text snapshot. Beliefs: rotating current facts
+            # (grok_next_reset, …) use functional supersede; everything else
+            # still lands as additive ``noted`` set-beliefs.
             import sqlite3
 
             from kazma_core.memory.belief_mutation import mutate_belief
+            from kazma_core.memory.current_facts import parse_current_facts
             from kazma_core.memory.dual_write import mirror_episode
             from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
             from kazma_core.paths import memory_ops_db, primary_memory_db
@@ -800,7 +809,7 @@ class LocalToolRegistry:
                 from kazma_core.safety.hitl import get_current_tenant_id
 
                 _tenant = get_current_tenant_id()
-                # Episode (raw text snapshot)
+                # Episode (raw text snapshot) — always keep diary trail
                 eid = mirror_episode(
                     session_id=str(meta.get("session_id", "memory_store")),
                     turn_number=int(meta.get("turn", 0)),
@@ -808,19 +817,49 @@ class LocalToolRegistry:
                     source="memory_store_tool",
                     tenant_id=_tenant,
                 )
-                # User-explicit belief (highest trust/importance)
-                action = mutate_belief(
-                    primary, "user", "noted", text[:1000],
-                    ops_conn=ops,
-                    predicate_type="set",  # noted facts are additive
-                    confidence=1.0, importance=5,
-                    extraction_method="user_explicit",
-                    tenant_id=_tenant,
-                    cfg=None,
-                )
-                bid = action.get("belief_id", "")
-                if eid or bid:
-                    return f"Stored memory (v2 episode={eid or 'n/a'}, belief={bid or 'n/a'})"
+                current = parse_current_facts(text, meta)
+                actions: list[dict] = []
+                if current:
+                    for fact in current:
+                        actions.append(
+                            mutate_belief(
+                                primary,
+                                fact.get("subject") or "user",
+                                fact["predicate"],
+                                fact["object"],
+                                ops_conn=ops,
+                                predicate_type=fact.get("predicate_type") or "functional",
+                                confidence=float(fact.get("confidence") or 1.0),
+                                importance=int(fact.get("importance") or 5),
+                                extraction_method="user_explicit",
+                                tenant_id=_tenant,
+                                cfg=None,
+                            )
+                        )
+                else:
+                    # Generic free-text remember — additive diary belief
+                    actions.append(
+                        mutate_belief(
+                            primary,
+                            "user",
+                            "noted",
+                            text[:1000],
+                            ops_conn=ops,
+                            predicate_type="set",
+                            confidence=1.0,
+                            importance=5,
+                            extraction_method="user_explicit",
+                            tenant_id=_tenant,
+                            cfg=None,
+                        )
+                    )
+                bids = [a.get("belief_id", "") for a in actions if a.get("belief_id")]
+                supersedes = sum(1 for a in actions if a.get("action") == "supersede")
+                if eid or bids:
+                    detail = f"beliefs={','.join(bids) or 'n/a'}"
+                    if supersedes:
+                        detail += f", superseded={supersedes}"
+                    return f"Stored memory (v2 episode={eid or 'n/a'}, {detail})"
                 return "Error: memory store failed — V2 write returned no ids."
             except Exception as exc:
                 logger.warning("[memory_store] V2 write failed: %s", exc)
