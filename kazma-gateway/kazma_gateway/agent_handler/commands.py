@@ -1264,18 +1264,73 @@ async def _try_research_command(
         return True
     await _send_model_reply(
         msg, store, manager, thread_id,
-        f"🔬 Starting deep research on: *{topic}*\nThis may take several minutes…",
+        f"🔬 Starting deep research on: *{topic}*\n"
+        "This may take several minutes — progress updates follow…",
     )
     try:
-        from kazma_core.tools.research_pipeline import run_research_pipeline
+        import asyncio
+        import time as _time
 
-        result = await run_research_pipeline(
+        from kazma_core.tools.research_session import (
+            get_session,
+            start_deep_research,
+        )
+
+        sess = await start_deep_research(
             topic, depth=depth, max_sources=8, export_docx=True
         )
-        # Telegram-friendly length
-        if len(result) > 3500:
-            result = result[:3400] + "\n\n… (truncated — open the report file for full paper)"
-        await _send_model_reply(msg, store, manager, thread_id, result)
+        # Poll session until terminal; emit stage changes (R4 progress UX)
+        last_msg = ""
+        deadline = _time.monotonic() + 900.0  # 15 min hard cap
+        while _time.monotonic() < deadline:
+            cur = get_session(sess.id)
+            if cur is None:
+                break
+            stage_line = f"[{cur.stage}] {cur.message}".strip()
+            if stage_line and stage_line != last_msg and cur.status == "running":
+                last_msg = stage_line
+                try:
+                    await _send_model_reply(
+                        msg, store, manager, thread_id,
+                        f"… {stage_line}",
+                    )
+                except Exception:
+                    pass
+            if cur.status in ("done", "error", "cancelled"):
+                break
+            await asyncio.sleep(4.0)
+
+        final = get_session(sess.id)
+        if final is None:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⚠️ Research session disappeared.",
+            )
+            return True
+        if final.status == "error":
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Research failed: {final.error or final.message or 'unknown'}",
+            )
+            return True
+        result = final.summary or final.message or "Research complete."
+        rubric = ""
+        if final.rubric_score is not None:
+            grade = "pass" if final.rubric_ok else "needs work"
+            rubric = f"\n**Rubric:** {final.rubric_score}/100 ({grade})"
+        header = (
+            f"# Deep research complete\n\n"
+            f"**Session:** `{final.id}`\n"
+            f"**Topic:** {final.topic}\n"
+            f"**Sources:** {final.sources}\n"
+            + (f"**Report:** `{final.report_path}`\n" if final.report_path else "")
+            + rubric
+            + "\n\n"
+        )
+        body = result if result.startswith("#") else header + result
+        if len(body) > 3500:
+            body = body[:3400] + "\n\n… (truncated — open the report / Research panel)"
+        await _send_model_reply(msg, store, manager, thread_id, body)
     except Exception as exc:
         logger.warning("[AgentHandler] /research failed: %s", exc)
         await _send_model_reply(

@@ -38,6 +38,30 @@ def test_deep_intent_and_nudge():
     assert again is None
 
 
+def test_r4_route_hint_and_pipeline_prefer():
+    from kazma_core.agent.research_policy import (
+        deep_research_route_hint,
+        extract_topic_hint,
+        should_prefer_pipeline,
+        should_nudge_more_sources,
+    )
+
+    assert deep_research_route_hint("what is 2+2") is None
+    hint = deep_research_route_hint("Deep research on the Python GIL")
+    assert hint and "run_research_pipeline" in hint
+    assert "Python GIL" in extract_topic_hint("Deep research on the Python GIL")
+
+    msgs = [{"role": "user", "content": "Write a comprehensive report on OAuth PKCE"}]
+    pref = should_prefer_pipeline(msgs, ["web_search"], already_nudged=False)
+    assert pref and "run_research_pipeline" in pref
+    assert should_prefer_pipeline(msgs, ["web_search"], already_nudged=True) is None
+    # Pipeline call: no source nudge
+    assert (
+        should_nudge_more_sources(msgs, ["run_research_pipeline"], already_nudged=False)
+        is None
+    )
+
+
 def test_auto_inject_excludes_archived(tmp_path, monkeypatch):
     from kazma_core.stores import knowledge as kn
 

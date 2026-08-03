@@ -56,6 +56,17 @@ Deep runs can be started from the **Research** page (`/research`) without chat:
 
 Sessions survive restarts for list/detail; live SSE is in-process only (reconnect after restart falls back to polling session status).
 
+### Routing + eval (R4)
+
+| Mechanism | Role |
+|-----------|------|
+| **Soft route hint** | On deep-intent user messages, the supervisor gets a system hint to prefer `run_research_pipeline` once (`KAZMA_RESEARCH_ROUTE=soft`, default; set `0` to disable) |
+| **Pipeline prefer nudge** | If the model starts manual `web_search` / `read_url` on a deep request, one nudge steers it to the pipeline tool |
+| **Source depth nudge** | Still fires when search-only without enough acquires (skipped if pipeline already called) |
+| **Structural rubric** | Pipeline writes `rubric.json`; sessions store `rubric_score` / `rubric_ok`; list cards show score |
+| **Eval API** | `GET /api/research/eval?path=research/reports/…/report.md` or `?session_id=rs_…` |
+| **Gateway `/research deep`** | Uses durable sessions + stage progress messages (not a silent multi-minute hang) |
+
 > **Arabic brand:** product name is **Kazma** / **كاظمه** (or **كاظمة**). Never **كازما**.
 
 ## How you use it

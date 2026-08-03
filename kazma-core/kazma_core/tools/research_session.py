@@ -50,6 +50,8 @@ class ResearchSession:
     error: str = ""
     sources: int = 0
     max_sources: int = 8
+    rubric_score: float | None = None
+    rubric_ok: bool | None = None
     created_at: float = 0.0
     updated_at: float = 0.0
     meta: dict[str, Any] = field(default_factory=dict)
@@ -88,12 +90,26 @@ def _conn() -> sqlite3.Connection:
             error TEXT DEFAULT '',
             sources INTEGER DEFAULT 0,
             max_sources INTEGER DEFAULT 8,
+            rubric_score REAL,
+            rubric_ok INTEGER,
             created_at REAL,
             updated_at REAL,
             meta_json TEXT DEFAULT '{}'
         )
         """
     )
+    # Idempotent migrations for pre-R4 DBs
+    cols = {row[1] for row in c.execute("PRAGMA table_info(research_sessions)").fetchall()}
+    if "rubric_score" not in cols:
+        try:
+            c.execute("ALTER TABLE research_sessions ADD COLUMN rubric_score REAL")
+        except Exception:
+            pass
+    if "rubric_ok" not in cols:
+        try:
+            c.execute("ALTER TABLE research_sessions ADD COLUMN rubric_ok INTEGER")
+        except Exception:
+            pass
     c.commit()
     return c
 
@@ -107,6 +123,16 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
         meta = json.loads(r["meta_json"] or "{}")
     except Exception:
         meta = {}
+    keys = r.keys()
+    rscore = None
+    rok = None
+    if "rubric_score" in keys and r["rubric_score"] is not None:
+        try:
+            rscore = float(r["rubric_score"])
+        except (TypeError, ValueError):
+            rscore = None
+    if "rubric_ok" in keys and r["rubric_ok"] is not None:
+        rok = bool(int(r["rubric_ok"]))
     return ResearchSession(
         id=r["id"],
         topic=r["topic"] or "",
@@ -120,6 +146,8 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
         error=r["error"] or "",
         sources=int(r["sources"] or 0),
         max_sources=int(r["max_sources"] or 8),
+        rubric_score=rscore,
+        rubric_ok=rok,
         created_at=float(r["created_at"] or 0),
         updated_at=float(r["updated_at"] or 0),
         meta=meta if isinstance(meta, dict) else {},
@@ -153,8 +181,9 @@ def create_session(
             """
             INSERT INTO research_sessions
             (id, topic, depth, status, stage, message, log_json, report_path,
-             summary, error, sources, max_sources, created_at, updated_at, meta_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             summary, error, sources, max_sources, rubric_score, rubric_ok,
+             created_at, updated_at, meta_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 sess.id,
@@ -169,6 +198,8 @@ def create_session(
                 "",
                 0,
                 sess.max_sources,
+                None,
+                None,
                 sess.created_at,
                 sess.updated_at,
                 json.dumps(sess.meta),
@@ -222,7 +253,8 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
             UPDATE research_sessions SET
               topic=?, depth=?, status=?, stage=?, message=?,
               log_json=?, report_path=?, summary=?, error=?,
-              sources=?, max_sources=?, updated_at=?, meta_json=?
+              sources=?, max_sources=?, rubric_score=?, rubric_ok=?,
+              updated_at=?, meta_json=?
             WHERE id=?
             """,
             (
@@ -237,6 +269,8 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
                 sess.error,
                 sess.sources,
                 sess.max_sources,
+                sess.rubric_score,
+                (None if sess.rubric_ok is None else (1 if sess.rubric_ok else 0)),
                 sess.updated_at,
                 json.dumps(sess.meta or {}),
                 sess.id,
@@ -254,6 +288,8 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
         "message": sess.message,
         "sources": sess.sources,
         "report_path": sess.report_path,
+        "rubric_score": sess.rubric_score,
+        "rubric_ok": sess.rubric_ok,
         "updated_at": sess.updated_at,
     }
     for q in list(_SUBS.get(sess.id, [])):
@@ -353,6 +389,43 @@ async def start_deep_research(
                 report_path = cur.report_path
             if not sources and cur and cur.sources:
                 sources = cur.sources
+            # Parse rubric from summary line: **Rubric:** 85/100 (pass)
+            rubric_score: float | None = None
+            rubric_ok: bool | None = None
+            m3 = re.search(
+                r"\*\*Rubric:\*\*\s*([\d.]+)/100\s*\(([^)]+)\)", result or ""
+            )
+            if m3:
+                try:
+                    rubric_score = float(m3.group(1))
+                except ValueError:
+                    rubric_score = None
+                rubric_ok = "pass" in (m3.group(2) or "").lower()
+            # Prefer scoring the report file when available
+            if report_path:
+                try:
+                    from kazma_core.tools.research_eval import score_report_file
+                    from kazma_core.tools.research_pipeline import (
+                        _candidate_report_roots,
+                    )
+
+                    scored = None
+                    rp = Path(report_path)
+                    if rp.is_file():
+                        scored = score_report_file(rp)
+                    else:
+                        for root in _candidate_report_roots():
+                            cand = (root / report_path).resolve()
+                            if cand.is_file():
+                                scored = score_report_file(cand)
+                                break
+                    if scored is not None:
+                        rubric_score = float(scored.score)
+                        rubric_ok = bool(scored.ok)
+                except Exception:
+                    logger.debug(
+                        "[research_session] rubric file score skipped", exc_info=True
+                    )
             if (result or "").startswith("Error:"):
                 log = list(cur.log) if cur else []
                 log.append(result[:500])
@@ -364,6 +437,8 @@ async def start_deep_research(
                     error=(result or "")[:2000],
                     summary=(result or "")[:4000],
                     log=log,
+                    rubric_score=rubric_score,
+                    rubric_ok=rubric_ok,
                 )
             else:
                 update_session(
@@ -374,6 +449,8 @@ async def start_deep_research(
                     summary=(result or "")[:8000],
                     report_path=report_path,
                     sources=sources,
+                    rubric_score=rubric_score,
+                    rubric_ok=rubric_ok,
                 )
             final = get_session(sess.id)
             for q in list(_SUBS.get(sess.id, [])):

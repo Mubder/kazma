@@ -240,6 +240,55 @@ def create_research_router() -> APIRouter:
             logger.exception("[research] get session failed")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
+    @router.get("/api/research/eval")
+    async def eval_research_report(
+        path: str = "",
+        session_id: str = "",
+        min_sources: int = 4,
+    ) -> JSONResponse:
+        """Score a report file (or a session's report) with the structural rubric."""
+        try:
+            from kazma_core.tools.research_eval import evaluate_report_path
+            from kazma_core.tools.research_pipeline import _candidate_report_roots
+
+            report_path = (path or "").strip().replace("\\", "/")
+            if session_id and not report_path:
+                from kazma_core.tools.research_session import get_session
+
+                sess = get_session(session_id)
+                if not sess:
+                    return JSONResponse(
+                        {"ok": False, "error": "session not found"}, status_code=404
+                    )
+                report_path = sess.report_path or ""
+            if not report_path:
+                return JSONResponse(
+                    {"ok": False, "error": "path or session_id with report required"},
+                    status_code=400,
+                )
+            if ".." in report_path.split("/"):
+                return JSONResponse({"ok": False, "error": "invalid path"}, status_code=400)
+
+            target: Path | None = None
+            cand = Path(report_path)
+            if cand.is_file():
+                target = cand
+            else:
+                for root in _candidate_report_roots():
+                    p = (root / report_path).resolve()
+                    if p.is_file():
+                        target = p
+                        break
+            if target is None:
+                return JSONResponse(
+                    {"ok": False, "error": "report not found"}, status_code=404
+                )
+            result = evaluate_report_path(target, min_sources=min_sources)
+            return JSONResponse({"ok": True, "eval": result})
+        except Exception as exc:
+            logger.exception("[research] eval failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
     @router.get("/api/research/sessions/{session_id}/stream")
     async def stream_research_session(
         session_id: str, request: Request

@@ -52,6 +52,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | GET | `/api/research/sessions` | Session | List durable research sessions |
 | GET | `/api/research/sessions/{id}` | Session | Session status / log / report path |
 | GET | `/api/research/sessions/{id}/stream` | Session | SSE progress (`snapshot` / `progress` / `done`) |
+| GET | `/api/research/eval` | Session | Structural rubric for `?path=` or `?session_id=` |
 | GET | `/research` | Session | Research panel page (start form + live progress) |
 
 ## Memory / RAG

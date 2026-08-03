@@ -751,6 +751,21 @@ async def supervisor_node(
         ):
             messages.append({"role": "system", "content": _plan_nudge})
 
+    # R4: soft-route deep research intent toward run_research_pipeline
+    if iteration == 0 and tool_definitions and last_user_content:
+        try:
+            from kazma_core.agent.research_policy import deep_research_route_hint
+
+            route = deep_research_route_hint(last_user_content)
+            if route and not any(
+                m.get("role") == "system"
+                and "DEEP RESEARCH ROUTE" in str(m.get("content", ""))
+                for m in messages
+            ):
+                messages.append({"role": "system", "content": route})
+        except Exception:
+            logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
+
     start = time.monotonic()
     try:
         from kazma_core.retry import friendly_llm_error, load_retry_config
@@ -1279,25 +1294,30 @@ async def tool_worker_node(
                 }
             )
 
-        # Soft research-depth gate: deep intent + search-only → nudge once
+        # Soft research-depth gate + R4 pipeline prefer (nudge once each)
         try:
-            from kazma_core.agent.research_policy import should_nudge_more_sources
+            from kazma_core.agent.research_policy import (
+                should_nudge_more_sources,
+                should_prefer_pipeline,
+            )
 
             already = bool(state.get("_research_depth_nudged"))
+            already_pipe = bool(state.get("_research_pipeline_nudged"))
             turn_tools = [str(tc.get("name") or "") for tc in (safe_tools + danger_tools)]
-            # Include prior tool names this iteration chain from cumulative? use turn only
-            nudge = should_nudge_more_sources(
-                messages, turn_tools, already_nudged=already
+            # Prefer pipeline first when deep intent + manual tools
+            pipe_nudge = should_prefer_pipeline(
+                messages, turn_tools, already_nudged=already_pipe
             )
-            if nudge:
-                tool_messages.append(
-                    {
-                        "role": "system",
-                        "content": nudge,
-                    }
+            if pipe_nudge:
+                tool_messages.append({"role": "system", "content": pipe_nudge})
+                state = {**state, "_research_pipeline_nudged": True}
+            else:
+                nudge = should_nudge_more_sources(
+                    messages, turn_tools, already_nudged=already
                 )
-                # mark via state field below
-                state = {**state, "_research_depth_nudged": True}
+                if nudge:
+                    tool_messages.append({"role": "system", "content": nudge})
+                    state = {**state, "_research_depth_nudged": True}
         except Exception:
             pass
 
@@ -1318,6 +1338,8 @@ async def tool_worker_node(
         }
         if state.get("_research_depth_nudged"):
             out["_research_depth_nudged"] = True
+        if state.get("_research_pipeline_nudged"):
+            out["_research_pipeline_nudged"] = True
         return out
     finally:
         # Always restore prior ContextVar values, even if a tool raised or

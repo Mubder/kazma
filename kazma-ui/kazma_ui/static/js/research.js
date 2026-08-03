@@ -168,6 +168,7 @@
             report_path: p.report_path,
             docx_path: p.docx_path,
             sources: p.sources,
+            rubric_score: p.rubric_score,
             metadata: { kind: 'research_paper' },
           };
         });
@@ -187,6 +188,8 @@
             stage: s.stage,
             message: s.message,
             session_id: s.id,
+            rubric_score: s.rubric_score,
+            rubric_ok: s.rubric_ok,
             metadata: { kind: 'research_session' },
           };
         });
@@ -720,14 +723,21 @@
       var isPaper = t.status === 'paper' || (t.id && String(t.id).indexOf('paper:') === 0);
       var isSession = t.id && String(t.id).indexOf('session:') === 0;
       var meta;
+      var rubricBit = (t.rubric_score != null && t.rubric_score !== '')
+        ? (' · rubric ' + Math.round(Number(t.rubric_score)) +
+           (t.rubric_ok === true ? '✓' : (t.rubric_ok === false ? '·' : '')))
+        : '';
       if (isSession) {
         meta = 'session · ' + esc(t.status || '') +
           (t.stage ? ' · ' + esc(t.stage) : '') +
           (t.sources != null && t.sources > 0 ? ' · ' + t.sources + ' sources' : '') +
+          rubricBit +
           ' · ' + timeAgo(t.completed_at || t.created_at);
       } else if (isPaper) {
         meta = 'pipeline · ' + (t.sources != null ? t.sources + ' sources · ' : '') +
-          (t.report_path ? esc(t.report_path) + ' · ' : '') + timeAgo(t.created_at);
+          (t.report_path ? esc(t.report_path) + ' · ' : '') +
+          (rubricBit ? rubricBit.replace(/^ · /, '') + ' · ' : '') +
+          timeAgo(t.created_at);
       } else {
         meta = '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
           '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +

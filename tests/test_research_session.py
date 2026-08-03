@@ -82,6 +82,7 @@ async def test_start_deep_research_success(session_db):
             f"**Topic:** {topic}\n"
             "**Sources acquired:** 4\n"
             "**Report:** `research/reports/x/report.md`\n"
+            "**Rubric:** 82/100 (pass)\n"
         )
 
     with patch(
@@ -100,6 +101,8 @@ async def test_start_deep_research_success(session_db):
     assert final.status == "done"
     assert final.report_path == "research/reports/x/report.md"
     assert final.sources == 4
+    assert final.rubric_score == 82.0
+    assert final.rubric_ok is True
     assert any("plan" in line for line in final.log)
 
 
@@ -144,3 +147,25 @@ def test_session_router_import():
     assert "/api/research/sessions" in paths
     assert "/api/research/sessions/{session_id}" in paths
     assert "/api/research/sessions/{session_id}/stream" in paths
+    assert "/api/research/eval" in paths
+
+
+def test_evaluate_report_path(tmp_path: Path):
+    from kazma_core.tools.research_eval import evaluate_report_path
+
+    p = tmp_path / "report.md"
+    p.write_text(
+        "# Research report: X\n\n## Background\n\n"
+        + ("body " * 400)
+        + "\n\n## Key findings\n\n"
+        + ("more " * 200)
+        + "\n\n## Sources\n\n"
+        "- https://docs.python.org/3/\n"
+        "- https://peps.python.org/pep-0703/\n"
+        "- https://sqlite.org/wal.html\n",
+        encoding="utf-8",
+    )
+    d = evaluate_report_path(p, min_sources=2, min_chars=500)
+    assert d["ok"] is True
+    assert d["score"] >= 70
+    assert d["grade"] == "pass"

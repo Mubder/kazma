@@ -15,6 +15,7 @@ __all__ = [
     "RubricScore",
     "score_report_markdown",
     "score_report_file",
+    "evaluate_report_path",
 ]
 
 # Baseline topics for manual / live deep-research regression (not CI-gated).
@@ -153,3 +154,21 @@ def score_report_file(path: str | Path, **kwargs: Any) -> RubricScore:
             detail=[f"fail:read:{exc}"],
         )
     return score_report_markdown(body, **kwargs)
+
+
+def evaluate_report_path(
+    path: str | Path,
+    *,
+    min_sources: int = 4,
+    min_chars: int = 1500,
+) -> dict[str, Any]:
+    """Score a report and return a UI/API-friendly dict (R4)."""
+    rub = score_report_file(path, min_sources=min_sources, min_chars=min_chars)
+    d = rub.to_dict()
+    d["path"] = str(path)
+    d["grade"] = (
+        "pass"
+        if rub.ok
+        else ("weak" if rub.score >= 40 else "fail")
+    )
+    return d
