@@ -198,6 +198,51 @@ function memoryPage() {
       } else toast(d.error || "Failed", "error");
     },
 
+    async renameEntity(e) {
+      if (!e || !e.id) return;
+      const current = e.name || e.id;
+      let name;
+      if (window.kazmaPrompt) {
+        name = await window.kazmaPrompt({
+          title: S.rename || "Rename entity",
+          message:
+            (S.rename_hint ||
+              "Display name only — id stays the same so beliefs keep linking.") +
+            "\nid: " +
+            e.id,
+          defaultValue: current,
+          confirmText: S.rename || "Rename",
+          placeholder: "e.g. ShipX / Mubder",
+        });
+      } else {
+        name = window.prompt("New display name for " + e.id, current);
+      }
+      if (name == null) return;
+      name = String(name).trim();
+      if (!name) {
+        toast("Name cannot be empty", "error");
+        return;
+      }
+      if (name === current) return;
+      const d = await api(
+        "/api/memory/v2/entities/" + encodeURIComponent(e.id) + "/rename",
+        {
+          method: "POST",
+          body: JSON.stringify({ name: name }),
+        }
+      );
+      if (d.ok) {
+        toast("Renamed to “" + name + "”", "success");
+        await this.loadEntities();
+        // Refresh graph canvas if present on the same page
+        if (typeof window._v2gLoad === "function") {
+          try {
+            await window._v2gLoad();
+          } catch (_) { /* optional */ }
+        }
+      } else toast(d.error || "Rename failed", "error");
+    },
+
     async doMerge() {
       const src = (this.mergeSource || "").trim();
       const tgt = (this.mergeTarget || "").trim();

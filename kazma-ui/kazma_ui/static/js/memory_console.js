@@ -1169,6 +1169,21 @@
     var id = String(p.id || '').toLowerCase();
     return id === 'user' || id === 'you' || !!p.isUser;
   }
+
+  // Display label for a node. Id stays canonical (user, shipx); name is the
+  // user-editable brand/label. Hub defaults to "You" until renamed.
+  function _v2gDisplayName(p) {
+    if (!p) return '';
+    var raw = String(p.name || p.fullLabel || p.label || p.id || '').trim();
+    // Strip legacy "You (user)" fullLabel if still present as sole source
+    if (/^you\s*\(user\)$/i.test(raw)) raw = 'You';
+    if (_v2gIsUser(p)) {
+      var low = raw.toLowerCase();
+      if (!raw || low === 'user' || low === 'you') return 'You';
+      return raw;
+    }
+    return raw || String(p.id || '');
+  }
   function _v2gNodeColor(p) {
     var t = _v2gTheme();
     if (_v2gIsUser(p)) return t.user;
@@ -1278,20 +1293,44 @@
     if (sig !== _v2gSig) {
       _v2gSig = sig;
       var ns = nodes.slice(0, _v2gCap);
+      // Dedupe by id before indexing. Server should already skip virtual
+      // nodes whose id collides with a real entity (e.g. shipx as both
+      // entity and belief object). Last-write-wins on _v2gIds alone would
+      // orphan the earlier node (zero edges, looks like a duplicate alone).
+      // Prefer non-virtual / higher beliefCount when ids collide.
+      var byId = {};
+      ns.forEach(function(nd) {
+        var id = nd && nd.id != null ? String(nd.id) : '';
+        if (!id) return;
+        var prev = byId[id];
+        if (!prev) { byId[id] = nd; return; }
+        var prevVirt = !!prev.isVirtual;
+        var curVirt = !!nd.isVirtual;
+        if (prevVirt && !curVirt) { byId[id] = nd; return; }
+        if (!prevVirt && curVirt) return;
+        if ((nd.beliefCount || 0) > (prev.beliefCount || 0)) byId[id] = nd;
+      });
+      ns = Object.keys(byId).map(function(k) { return byId[k]; });
       _v2gIds = {};
       _v2gPts = ns.map(function(nd, i) {
         _v2gIds[nd.id] = i;
         var ang = i * 2.39996, r = 20 + (i % 6) * 24;
         var bc = nd.beliefCount || 1;
-        var fullName = String(nd.name || nd.id);
+        var rawName = String(nd.name || nd.id || '').trim();
         var isUser = String(nd.id || '').toLowerCase() === 'user';
         // Place the user slightly toward center for visual hierarchy
         var rad = isUser ? 8 : r;
+        var display = rawName;
+        if (isUser) {
+          var low = rawName.toLowerCase();
+          if (!rawName || low === 'user' || low === 'you') display = 'You';
+        }
         return {
           x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad,
           vx: 0, vy: 0, id: nd.id,
-          label: isUser ? 'You' : fullName.slice(0, 22),
-          fullLabel: isUser ? 'You (user)' : fullName,
+          name: rawName,
+          label: display.slice(0, 22),
+          fullLabel: display,
           type: nd.type || 'entity',
           isUser: isUser,
           isHighStakes: !!nd.isHighStakes,
@@ -1544,11 +1583,13 @@
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
           var tc = _v2gNodeColor(p);
-          var tLabel = _v2gIsUser(p) ? 'You' : _v2gTitle(p.fullLabel || p.label);
+          var tLabel = _v2gTitle(_v2gDisplayName(p));
           tip.innerHTML = '<b style="color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b><br><span style="color:var(--text-muted);">' +
             (_v2gIsUser(p) ? 'you · center of memory' : ('type: ' + p.type)) +
             (p.isHighStakes ? ' · ⚠ high-stakes' : '') +
-            (p.isVirtual ? ' · fact' : '') + '</span>';
+            (p.isVirtual ? ' · fact' : '') +
+            (p.id && _v2gDisplayName(p) !== p.id ? ' · id: ' + _v2gEsc(String(p.id).slice(0, 24)) : '') +
+            '</span>';
           tip.style.display = 'block';
           tip.style.borderColor = _v2gHexAlpha(tc, 0.35);
           var rect = canvas.getBoundingClientRect();
@@ -1623,11 +1664,17 @@
     if (!el || !p) return;
     _v2gRefreshPalette();
     var color = _v2gNodeColor(p);
-    var fullName = p.fullLabel || p.label || p.id;
-    var title = _v2gIsUser(p) ? 'You' : _v2gTitle(fullName);
-    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;margin-bottom:4px;word-break:break-word;">' + _v2gEsc(title) + '</div>';
+    var fullName = _v2gDisplayName(p);
+    var title = _v2gTitle(fullName);
+    var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px;">';
+    html += '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;flex:1;min-width:0;">' + _v2gEsc(title) + '</div>';
+    if (!p.isEpisode) {
+      html += '<button type="button" id="v2g-rename-btn" class="btn btn-sm btn-secondary" style="flex-shrink:0;font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
+    }
+    html += '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">';
     html += _v2gIsUser(p) ? 'you · memory hub' : ('type: ' + p.type);
+    if (p.id) html += ' · id: <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
     if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
     if (p.isVirtual) html += ' · fact node';
     html += '</div>';
@@ -1645,8 +1692,8 @@
       var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
       var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
       // Neighbor labels only — never repeat THIS node's own text in the row.
-      var targetName = _v2gEsc(_v2gIsUser(B) ? 'You' : _v2gShortLabel(B.fullLabel || B.label || B.id || ed.objectText));
-      var sourceName = _v2gEsc(_v2gIsUser(A) ? 'You' : _v2gShortLabel(A.fullLabel || A.label || A.id || ed.objectText));
+      var targetName = _v2gEsc(_v2gShortLabel(_v2gDisplayName(B) || ed.objectText));
+      var sourceName = _v2gEsc(_v2gShortLabel(_v2gDisplayName(A) || ed.objectText));
       if (A.id === p.id) {
         rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + _v2gHexAlpha(pcolor, 0.15) + ';">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
       } else if (B.id === p.id) {
@@ -1660,6 +1707,74 @@
       html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — this entity may be referenced indirectly.</div>';
     }
     el.innerHTML = html;
+    var renBtn = document.getElementById('v2g-rename-btn');
+    if (renBtn) {
+      renBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _v2gRenameNode(p);
+      });
+    }
+  }
+
+  async function _v2gRenameNode(p) {
+    if (!p || p.isEpisode) return;
+    var current = _v2gDisplayName(p);
+    var msg = 'Display name for this node. The id stays "' + String(p.id) + '" so all beliefs keep linking correctly.';
+    var name;
+    if (window.kazmaPrompt) {
+      name = await window.kazmaPrompt({
+        title: 'Rename node',
+        message: msg,
+        defaultValue: current === 'You' && _v2gIsUser(p) ? 'You' : current,
+        confirmText: 'Rename',
+        placeholder: _v2gIsUser(p) ? 'e.g. Mubder or Kazma' : 'e.g. ShipX',
+      });
+    } else {
+      name = window.prompt(msg, current);
+    }
+    if (name == null) return;
+    name = String(name).trim();
+    if (!name) {
+      if (window.showToast) window.showToast('Name cannot be empty', 'error');
+      return;
+    }
+    if (name === current) return;
+    try {
+      var resp = await fetch('/api/memory/v2/entities/' + encodeURIComponent(p.id) + '/rename', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ name: name }),
+      });
+      var data = await resp.json().catch(function() { return {}; });
+      if (!resp.ok || !data.ok) {
+        if (window.showToast) window.showToast(data.error || 'Rename failed', 'error');
+        return;
+      }
+      if (window.showToast) window.showToast('Renamed to “' + name + '”', 'success');
+      // Update cached raw node so filters don't flash old label
+      for (var i = 0; i < (_v2gRawNodes || []).length; i++) {
+        if (_v2gRawNodes[i] && _v2gRawNodes[i].id === p.id) {
+          _v2gRawNodes[i].name = name;
+          _v2gRawNodes[i].isVirtual = false;
+        }
+      }
+      // Force canvas rebuild with new labels
+      _v2gSig = '';
+      _v2gApplyFilters();
+      // Re-select + inspect under new name
+      for (var j = 0; j < _v2gPts.length; j++) {
+        if (_v2gPts[j].id === p.id) {
+          _v2gSelectedId = p.id;
+          _v2gInspect(_v2gPts[j]);
+          break;
+        }
+      }
+      _v2gRepaint();
+    } catch (err) {
+      if (window.showToast) window.showToast('Rename failed', 'error');
+    }
   }
 
   // ── Filter logic (CLIENT-SIDE against cached data) ──
@@ -2162,6 +2277,10 @@
     var rto;
     window.addEventListener('resize', function() { clearTimeout(rto); rto = setTimeout(function() { if (_v2gPts.length) _v2gRepaint(); }, 200); });
   }
+
+  // Expose for Memory admin rename / external refresh hooks
+  window._v2gLoad = _v2gLoad;
+  window._v2gRenameNode = _v2gRenameNode;
 
   try {
     _v2gRenderFilters();

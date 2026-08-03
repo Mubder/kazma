@@ -110,3 +110,80 @@ def test_no_filter_returns_full_graph(seeded_client: TestClient) -> None:
     assert "Paris" in node_ids  # virtual concept node present
     targets = {l["target"] for l in payload["links"]}
     assert targets <= node_ids, "every link target must be a node even unfiltered"
+
+
+def test_entity_object_id_collision_emits_one_node(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Belief object text equal to an entity id must not emit a virtual twin.
+
+    Regression for the orphaned-shipx canvas bug: entity ``shipx`` (subject of
+    N beliefs) plus ``user → has_project → shipx`` used to produce two nodes
+    with id ``shipx`` (real entity + virtual fact). The client id→index map
+    last-write-wins orphaned one of them. The route must emit exactly one
+    ``shipx`` node (the real entity, not isVirtual) and keep the inbound link.
+    """
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    primary = sqlite3.connect(primary_memory_db())
+    primary.row_factory = sqlite3.Row
+    ensure_primary_schema(primary)
+    ops = sqlite3.connect(memory_ops_db())
+    ensure_ops_schema(ops)
+
+    now = time.time()
+    primary.execute(
+        "INSERT OR IGNORE INTO entities (id, tenant_id, type, name) VALUES (?, ?, ?, ?)",
+        ("shipx", "default", "concept", "shipx"),
+    )
+    primary.execute(
+        "INSERT OR IGNORE INTO entities (id, tenant_id, type, name) VALUES (?, ?, ?, ?)",
+        ("user", "default", "person", "User"),
+    )
+    # shipx as subject of two beliefs (its "own" graph weight)
+    for i, obj in enumerate(("phase1", "phase2"), start=1):
+        primary.execute(
+            "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, "
+            "confidence, structural_importance, valid_from, ingested_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (f"sx{i}", "default", "shipx", "has_feature", "set", obj, 0.9, 4, now, now),
+        )
+    # user → has_project → shipx  (object text == entity id — the collision)
+    primary.execute(
+        "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, "
+        "confidence, structural_importance, valid_from, ingested_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("hp1", "default", "user", "has_project", "functional", "shipx", 0.95, 5, now, now),
+    )
+    primary.commit()
+    primary.close()
+    ops.close()
+
+    from kazma_ui.app import create_app
+
+    client = TestClient(create_app())
+    resp = client.get("/api/memory/v2/graph")
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    shipx_nodes = [n for n in payload["nodes"] if n["id"] == "shipx"]
+    assert len(shipx_nodes) == 1, (
+        f"expected exactly one shipx node, got {len(shipx_nodes)}: {shipx_nodes}"
+    )
+    shipx = shipx_nodes[0]
+    assert not shipx.get("isVirtual"), "shipx must be the real entity, not a virtual fact"
+    # 2 subject beliefs + 1 inbound has_project
+    assert shipx["beliefCount"] >= 3
+
+    # Inbound link must resolve; no dangling / duplicate target
+    inbound = [
+        l for l in payload["links"]
+        if l["source"] == "user" and l["target"] == "shipx"
+    ]
+    assert len(inbound) == 1
+    assert inbound[0]["label"] == "has_project"
+
+    # Global uniqueness of node ids (canvas map invariant)
+    ids = [n["id"] for n in payload["nodes"]]
+    assert len(ids) == len(set(ids)), f"duplicate node ids in payload: {ids}"

@@ -105,3 +105,58 @@ async def test_hygiene_purge_empty(mem_db):
     assert out["ok"]
     deleted = out["actions"]["purge_empty_entities"]["deleted"]
     assert "empty_shell" in deleted
+
+
+@pytest.mark.asyncio
+async def test_rename_entity_keeps_id_and_aliases(mem_db):
+    """Display rename must not change canonical id; old name becomes alias."""
+    from kazma_ui.memory_api import rename_entity
+
+    class Req:
+        async def json(self):
+            return {"name": "ShipX Brand"}
+
+    out = await rename_entity("shipx", Req())
+    assert out["ok"] is True
+    assert out["id"] == "shipx"
+    assert out["name"] == "ShipX Brand"
+    assert "ShipX" in (out.get("aliases") or [])
+
+    # Persisted
+    conn = sqlite3.connect(mem_db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT name, aliases_json FROM entities WHERE id=?", ("shipx",)
+    ).fetchone()
+    conn.close()
+    assert row["name"] == "ShipX Brand"
+    aliases = json.loads(row["aliases_json"] or "[]")
+    assert "ShipX" in aliases
+
+
+@pytest.mark.asyncio
+async def test_rename_user_hub_upsert(mem_db):
+    """You/user hub can be labeled (Mubder) even when no entities row yet."""
+    from kazma_ui.memory_api import rename_entity
+
+    class Req:
+        async def json(self):
+            return {"name": "Mubder"}
+
+    out = await rename_entity("user", Req())
+    assert out["ok"] is True
+    assert out["id"] == "user"
+    assert out["name"] == "Mubder"
+    assert out.get("created") is True
+    aliases = out.get("aliases") or []
+    assert "You" in aliases or "user" in aliases
+
+    conn = sqlite3.connect(mem_db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT type, name FROM entities WHERE id=?", ("user",)
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert row["name"] == "Mubder"
+    assert row["type"] == "person"

@@ -187,6 +187,93 @@ async def list_entities(
         return {"ok": False, "entities": [], "error": str(exc)[:300]}
 
 
+@router.post("/api/memory/v2/entities/{entity_id}/rename")
+async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
+    """Change an entity's *display* name without rewiring belief ids.
+
+    Canonical ``id`` stays stable (links, subjects, objects keep working).
+    Previous labels are kept in ``aliases_json`` so resolution still maps
+    nicknames (e.g. Mubder / You) onto the same node. Protected hub ids
+    like ``user`` may be renamed for the canvas label ("You" → "Mubder")
+    but cannot be deleted or merged away.
+
+    Missing rows are upserted so graph virtual nodes (and the hardcoded
+    ``user`` hub) can receive a durable label on first rename.
+    """
+    eid = (entity_id or "").strip()
+    if not eid:
+        return {"ok": False, "error": "entity_id required"}
+    if len(eid) > 200:
+        return {"ok": False, "error": "entity_id too long"}
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON"}
+    new_name = str((body or {}).get("name") or "").strip()
+    if not new_name:
+        return {"ok": False, "error": "name required"}
+    if len(new_name) > 120:
+        return {"ok": False, "error": "name too long (max 120)"}
+
+    try:
+        conn = _conn()
+        row = conn.execute(
+            "SELECT id, type, name, aliases_json FROM entities WHERE id=?",
+            (eid,),
+        ).fetchone()
+        created = False
+        if not row:
+            # Promote a graph node / hub id into a real entity so the
+            # display name survives reloads (virtual facts, user hub).
+            etype = "person" if eid.lower() in ("user", "you", "assistant") else "concept"
+            conn.execute(
+                """INSERT INTO entities
+                   (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
+                   VALUES (?, 'default', ?, ?, '[]', ?, '{}')""",
+                (eid, etype, new_name, 1 if etype == "person" else 0),
+            )
+            created = True
+            old_name = eid
+            aliases: list[Any] = []
+            etype_out = etype
+        else:
+            old_name = str(row["name"] or eid)
+            etype_out = str(row["type"] or "concept")
+            try:
+                aliases = json.loads(row["aliases_json"] or "[]")
+            except Exception:
+                aliases = []
+            if not isinstance(aliases, list):
+                aliases = []
+
+        # Preserve identity surface: old display, bare id, and defaults.
+        for a in (old_name, eid, new_name, "You" if eid.lower() == "user" else None):
+            if a and a not in aliases:
+                aliases.append(a)
+        # Cap alias list growth (keep most recent tail)
+        if len(aliases) > 40:
+            aliases = aliases[-40:]
+
+        conn.execute(
+            "UPDATE entities SET name=?, aliases_json=? WHERE id=?",
+            (new_name, json.dumps(aliases, ensure_ascii=False), eid),
+        )
+        conn.commit()
+        conn.close()
+        return {
+            "ok": True,
+            "id": eid,
+            "name": new_name,
+            "previous_name": old_name,
+            "aliases": aliases,
+            "type": etype_out,
+            "created": created,
+        }
+    except Exception as exc:
+        logger.exception("[memory_api] rename entity failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 @router.delete("/api/memory/v2/entities/{entity_id}")
 async def delete_entity(entity_id: str) -> dict[str, Any]:
     eid = (entity_id or "").strip()

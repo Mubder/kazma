@@ -297,6 +297,7 @@
                 </td>
                 <td>
                   <div class="mem-actions">
+                    <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="Change display name (id stays the same)"></button>
                     <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id">Src</button>
                     <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id">Tgt</button>
                     <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>

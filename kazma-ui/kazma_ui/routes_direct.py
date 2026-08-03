@@ -1210,20 +1210,40 @@ def register_direct_routes(self: Any) -> None:
             bparams.append(max(10, min(limit * 4, 800)))
             brows = conn.execute(bsql, bparams).fetchall()
 
-            # ── Entities referenced by the surviving beliefs (subjects only) ──
+            # ── Object texts (belief targets) + subject entity refs ──
+            # When an object text equals an entity id (e.g. user → has_project
+            # → shipx where shipx is a real entity), we must emit ONE node —
+            # the real entity — not a second virtual "fact" node with the same
+            # id. Duplicate ids make the canvas id→index map last-write-wins
+            # and orphan one of the two painted nodes (the shipx-alone bug).
+            obj_texts: set[str] = set()
+            obj_belief_count: dict[str, int] = {}
+            for b in brows:
+                if b["object"]:
+                    obj_texts.add(b["object"])
+                    obj_belief_count[b["object"]] = (
+                        obj_belief_count.get(b["object"], 0) + 1
+                    )
+
             ref_ids: set[str] = set()
             for b in brows:
                 ref_ids.add(b["subject"])
             ref_ids.add("user")
+            # Promote object strings that are real entity ids into the entity
+            # node set so links target the entity, not a colliding virtual.
+            lookup_ids = set(ref_ids) | obj_texts
             nodes: list[dict] = []
             ent_lookup: dict[str, dict] = {}
-            if ref_ids:
-                placeholders = ",".join("?" * len(ref_ids))
+            if lookup_ids:
+                placeholders = ",".join("?" * len(lookup_ids))
                 erows = conn.execute(
                     f"SELECT id, name, type, is_high_stakes FROM entities WHERE id IN ({placeholders})",
-                    tuple(ref_ids),
+                    tuple(lookup_ids),
                 ).fetchall()
                 ent_lookup = {r["id"]: dict(r) for r in erows}
+            for oid in obj_texts:
+                if oid in ent_lookup:
+                    ref_ids.add(oid)
 
             belief_count: dict[str, int] = {}
             for b in brows:
@@ -1240,37 +1260,34 @@ def register_direct_routes(self: Any) -> None:
                     etype = e["type"] if e else "concept"
                 if entity_type and entity_type.strip() and etype != entity_type.strip():
                     continue
+                # Subject assertions + inbound object links that name this entity.
+                bc = belief_count.get(eid, 0) + obj_belief_count.get(eid, 0)
                 nodes.append({
                     "id": eid,
                     "name": (e["name"] if e and e["name"] else eid),
                     "type": etype,
                     "isHighStakes": bool(e["is_high_stakes"]) if e else False,
-                    "beliefCount": belief_count.get(eid, 0),
+                    "beliefCount": bc,
                 })
 
-            # ── Collect unique object texts (facts) to create virtual nodes ──
-            obj_texts: set[str] = set()
-            for b in brows:
-                if b["object"]:
-                    obj_texts.add(b["object"])
-
-            # Add virtual nodes for object texts (facts like "teal", "Kuwait City")
-            obj_belief_count: dict[str, int] = {}
-            for b in brows:
-                if b["object"]:
-                    obj_belief_count[b["object"]] = obj_belief_count.get(b["object"], 0) + 1
+            # Virtual fact nodes only for pure text objects that are NOT
+            # already real entity nodes (id collision → skip; keep entity).
+            existing_ids = {n["id"] for n in nodes}
             for obj_text in obj_texts:
-                # Only add if not filtered out by entity_type (virtual nodes are 'concept')
+                if obj_text in existing_ids:
+                    continue
+                # Virtual nodes are type 'concept'; drop under entity_type filter.
                 if entity_type and entity_type.strip() and "concept" != entity_type.strip():
                     continue
                 nodes.append({
-                    "id": obj_text,  # use the text as the node ID
+                    "id": obj_text,
                     "name": obj_text,
                     "type": "concept",
                     "isHighStakes": False,
                     "beliefCount": obj_belief_count.get(obj_text, 0),
-                    "isVirtual": True,  # mark as virtual node
+                    "isVirtual": True,
                 })
+                existing_ids.add(obj_text)
 
             links: list[dict] = []
             node_ids = {n["id"] for n in nodes}
@@ -1278,18 +1295,16 @@ def register_direct_routes(self: Any) -> None:
                 # Drop a belief link if EITHER endpoint was removed by a
                 # filter (e.g. entity_type). Previously only the subject was
                 # checked, which left dangling edges pointing at filtered-out
-                # virtual object nodes. The object text is the link's target
-                # identifier (facts are not entity IDs), so it must also be a
-                # surviving node id.
+                # virtual object nodes. Object text is the link target id
+                # (entity id when promoted, else virtual fact id).
                 if b["subject"] not in node_ids:
                     continue
                 if b["object"] not in node_ids:
                     continue
-                # object is the fact payload text, not an entity ID
                 links.append({
                     "id": b["id"],
                     "source": b["subject"],
-                    "target": b["object"],  # use object text as target identifier
+                    "target": b["object"],
                     "label": b["predicate"],
                     "object_text": b["object"],
                     "type": b["predicate_type"],
