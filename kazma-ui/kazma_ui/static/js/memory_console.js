@@ -1204,6 +1204,9 @@
 
   var _v2gPts = [], _v2gEdges = [], _v2gIds = {}, _v2gStructSig = '', _v2gLabelSig = '';
   var _v2gView = { scale: 1, ox: 0, oy: 0 };
+  // User-dragged positions survive layout rebuilds / 30s refresh / filter retune.
+  // pinned: physics does not pull the node back after the user places it.
+  var _v2gPosCache = {};
   var _v2gAlpha = 0, _v2gAnim = null, _v2gDrag = null, _v2gHover = -1, _v2gSelectedId = null;
   var _v2gCap = 80, _v2gNodeBaseR = 7;
   var _v2gMinScale = 0.3, _v2gMaxScale = 4;
@@ -1323,6 +1326,19 @@
     return { ctx: ctx, w: w, h: h };
   }
 
+  function _v2gIsPinned(pt) {
+    return !!(pt && (pt.pinned || (_v2gPosCache[pt.id] && _v2gPosCache[pt.id].pinned)));
+  }
+
+  function _v2gRememberPos(pt) {
+    if (!pt || pt.id == null) return;
+    _v2gPosCache[pt.id] = {
+      x: pt.x,
+      y: pt.y,
+      pinned: !!pt.pinned,
+    };
+  }
+
   // Force sim step: repulsion + spring + gravity + collision
   function _v2gStep(W, H) {
     var n = _v2gPts.length; if (!n) return;
@@ -1336,8 +1352,9 @@
         var d = Math.sqrt(d2);
         var force = 900 * _v2gAlpha / d2;
         var fx = (dx / d) * force, fy = (dy / d) * force;
-        if (!(_v2gDrag && _v2gDrag.idx === i)) { a.vx -= fx; a.vy -= fy; }
-        if (!(_v2gDrag && _v2gDrag.idx === j)) { b.vx += fx; b.vy += fy; }
+        // Pinned / dragged nodes are fixed anchors (user layout sticks)
+        if (!(_v2gDrag && _v2gDrag.idx === i) && !_v2gIsPinned(a)) { a.vx -= fx; a.vy -= fy; }
+        if (!(_v2gDrag && _v2gDrag.idx === j) && !_v2gIsPinned(b)) { b.vx += fx; b.vy += fy; }
       }
     }
     // Spring (Hooke) along edges, weighted by confidence
@@ -1350,14 +1367,20 @@
       var k = 0.04 * (0.5 + (ed.confidence || 0.5));
       var f = (d - targetLen) * k * _v2gAlpha;
       var fx = (dx / d) * f, fy = (dy / d) * f;
-      if (!(_v2gDrag && _v2gDrag.idx === ed.a)) { A.vx += fx; A.vy += fy; }
-      if (!(_v2gDrag && _v2gDrag.idx === ed.b)) { B.vx -= fx; B.vy -= fy; }
+      if (!(_v2gDrag && _v2gDrag.idx === ed.a) && !_v2gIsPinned(A)) { A.vx += fx; A.vy += fy; }
+      if (!(_v2gDrag && _v2gDrag.idx === ed.b) && !_v2gIsPinned(B)) { B.vx -= fx; B.vy -= fy; }
     }
     // Gravity + collision-aware integration
     var margin = 30;
     for (var p = 0; p < n; p++) {
       var pt = _v2gPts[p];
       if (_v2gDrag && _v2gDrag.idx === p) { pt.vx = 0; pt.vy = 0; continue; }
+      if (_v2gIsPinned(pt)) {
+        // Stay exactly where the user left it (refresh cache continuously)
+        pt.vx = 0; pt.vy = 0;
+        _v2gRememberPos(pt);
+        continue;
+      }
       pt.vx += (cx - pt.x) * 0.004 * _v2gAlpha;
       pt.vy += (cy - pt.y) * 0.004 * _v2gAlpha;
       if (pt.x < margin) pt.vx += (margin - pt.x) * 0.02 * _v2gAlpha;
@@ -1450,6 +1473,11 @@
       _v2gRepaint();
     } else if (structSig !== _v2gStructSig) {
       var keepSel = _v2gSelectedId;
+      var keepView = { scale: _v2gView.scale, ox: _v2gView.ox, oy: _v2gView.oy };
+      var hadLayout = _v2gPts.length > 0;
+      // Snapshot live positions before rebuild so a data refresh does not
+      // fling user-arranged nodes back to the spiral layout.
+      _v2gPts.forEach(function(p) { _v2gRememberPos(p); });
       _v2gStructSig = structSig;
       _v2gLabelSig = labelSig;
       _v2gIds = {};
@@ -1459,8 +1487,16 @@
         var bc = nd.beliefCount || 1;
         var d = _nodeDisplay(nd);
         var rad = d.isUser ? 8 : r;
+        var cached = _v2gPosCache[nd.id];
+        var x = W / 2 + Math.cos(ang) * rad;
+        var y = H / 2 + Math.sin(ang) * rad;
+        var pinned = false;
+        if (cached && typeof cached.x === 'number' && typeof cached.y === 'number') {
+          x = cached.x; y = cached.y;
+          pinned = !!cached.pinned;
+        }
         return {
-          x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad,
+          x: x, y: y,
           vx: 0, vy: 0, id: nd.id,
           name: d.rawName,
           label: d.display.slice(0, 22),
@@ -1471,6 +1507,7 @@
           r: (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
           isEpisode: !!nd.isEpisode,
+          pinned: pinned,
         };
       });
       _v2gEdges = [];
@@ -1481,9 +1518,16 @@
           _v2gEdges.push({ a: ai, b: bi, label: String(l.label || '').slice(0, 18), objectText: String(l.object_text || ''), type: l.type || 'set', confidence: l.confidence || 0.5, superseded: !!l.superseded });
         }
       });
-      _v2gView = { scale: 1, ox: 0, oy: 0 };
+      // Keep pan/zoom if we already had a layout; only reset on first paint.
+      if (hadLayout) {
+        _v2gView = keepView;
+        // Mild reheat so free (unpinned) nodes settle around pinned anchors
+        _v2gAlpha = Math.max(_v2gAlpha, 0.12);
+      } else {
+        _v2gView = { scale: 1, ox: 0, oy: 0 };
+        _v2gAlpha = 1;
+      }
       _v2gSelectedId = keepSel && _v2gIds[keepSel] !== undefined ? keepSel : null;
-      _v2gAlpha = 1;
     }
     _v2gBindPointer(canvas, wrap);
     if (!_v2gAnim) _v2gTick();
@@ -1687,20 +1731,27 @@
       var c = evToCanvas(ev); var idx = _v2gHit(c.sx, c.sy);
       if (idx >= 0) {
         var p = _v2gPts[idx];
-        _v2gDrag = { idx: idx, wx: _v2gWX(c.sx) - p.x, wy: _v2gWY(c.sy) - p.y };
+        _v2gDrag = {
+          idx: idx,
+          wx: _v2gWX(c.sx) - p.x,
+          wy: _v2gWY(c.sy) - p.y,
+          sx0: c.sx,
+          sy0: c.sy,
+          moved: false,
+        };
         _v2gSelectedId = p.id; _v2gInspect(p); canvas.setPointerCapture(ev.pointerId);
         canvas.style.cursor = 'grabbing';
         // Clear belief-click highlight when selecting a node directly
         _v2gHighlightSubj = null; _v2gHighlightObj = null;
-        if (!p.isEpisode) {
-          _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p) });
-        }
+        // Do NOT jump the page to the entities list on single click —
+        // that blocks free explore/drag. List sync is double-click only.
       } else {
         _v2gDrag = { pan: true, sx: c.sx, sy: c.sy, ox: _v2gView.ox, oy: _v2gView.oy };
         canvas.style.cursor = 'grabbing';
         // Clear selection + belief highlight on empty-space click
         _v2gSelectedId = null; _v2gHighlightSubj = null; _v2gHighlightObj = null;
       }
+      // Heat lightly so free nodes can settle; pinned nodes stay fixed.
       _v2gHeated(); _v2gRepaint();
     });
     canvas.addEventListener('pointermove', function(ev) {
@@ -1711,7 +1762,13 @@
           _v2gView.oy = _v2gDrag.oy + (c.sy - _v2gDrag.sy);
         } else {
           var p = _v2gPts[_v2gDrag.idx];
-          p.x = _v2gWX(c.sx) - _v2gDrag.wx; p.y = _v2gWY(c.sy) - _v2gDrag.wy;
+          if (p) {
+            if (Math.abs(c.sx - _v2gDrag.sx0) + Math.abs(c.sy - _v2gDrag.sy0) > 3) {
+              _v2gDrag.moved = true;
+            }
+            p.x = _v2gWX(c.sx) - _v2gDrag.wx; p.y = _v2gWY(c.sy) - _v2gDrag.wy;
+            p.vx = 0; p.vy = 0;
+          }
         }
         _v2gRepaint();
       } else {
@@ -1738,6 +1795,13 @@
       }
     });
     canvas.addEventListener('pointerup', function(ev) {
+      // After a real drag, pin the node so physics / refresh cannot yank it back.
+      if (_v2gDrag && !_v2gDrag.pan && _v2gDrag.moved && _v2gPts[_v2gDrag.idx]) {
+        var placed = _v2gPts[_v2gDrag.idx];
+        placed.pinned = true;
+        placed.vx = 0; placed.vy = 0;
+        _v2gRememberPos(placed);
+      }
       _v2gDrag = null; canvas.style.cursor = 'grab'; _v2gRepaint();
     });
     canvas.addEventListener('pointercancel', function() { _v2gDrag = null; });
@@ -1752,10 +1816,25 @@
     }, { passive: false });
     canvas.addEventListener('dblclick', function(ev) {
       var c = evToCanvas(ev); var idx = _v2gHit(c.sx, c.sy);
-      if (idx < 0) return; var p = _v2gPts[idx]; _v2gSelectedId = p.id; _v2gInspect(p);
-      var rect = canvas.getBoundingClientRect();
-      _v2gView.scale = 2.5; _v2gView.ox = rect.width / 2 - p.x * 2.5; _v2gView.oy = rect.height / 2 - p.y * 2.5;
-      _v2gHeated(); _v2gRepaint();
+      if (idx < 0) return;
+      var p = _v2gPts[idx];
+      _v2gSelectedId = p.id;
+      _v2gInspect(p);
+      // Double-click: jump to the matching row in the entities/beliefs list.
+      // Single-click deliberately does not (keeps free explore + drag).
+      if (!p.isEpisode) {
+        _v2gNotifyList({
+          type: 'entity',
+          id: p.id,
+          name: _v2gDisplayName(p),
+          scrollOps: true,
+        });
+        try {
+          var ops = document.getElementById('mem-tab-entities');
+          if (ops) ops.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (e) { /* ignore */ }
+      }
+      _v2gRepaint();
     });
   }
 
@@ -2111,10 +2190,9 @@
       sl.textContent = parts.join(' · ');
     }
     _v2gUpdateLegend(_v2gTypeCountsFromData());
-    // Invalidate structure so filter changes re-layout (label-only renames
-    // use the soft path when structure matches).
-    _v2gStructSig = '';
-    _v2gLabelSig = '';
+    // Let _v2gDrawCanvas compare signatures. Clearing always forced a full
+    // spiral re-layout and wiped user-dragged positions on every 30s poll /
+    // filter pass. Positions are restored from _v2gPosCache on rebuild.
     _v2gDrawCanvas(nodes, links);
   }
 

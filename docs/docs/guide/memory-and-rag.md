@@ -189,9 +189,11 @@ not a hardcoded “You”.
 | From | To |
 |------|-----|
 | Click entity / belief row | Select + zoom on canvas (`_v2gSelectEntity` / `_v2gSelectBelief`) |
-| Click graph node | Highlight matching list row (`kazma:memory-graph-select`) |
-| Inspect **In list** | Same as graph → list |
-| Merge / link / invalidate / rename | Force-refresh graph payload |
+| **Double-click** graph node | Highlight matching list row + scroll ops (`kazma:memory-graph-select`) |
+| Single-click / drag node | Select + inspect only — **does not** jump the page (free explore) |
+| Drag node then release | Node is **pinned** at that position (survives refresh / filter retune) |
+| Inspect **In list** | Explicit jump to list (same as double-click) |
+| Merge / link / invalidate / rename | Refresh graph payload; pinned positions restored from client cache |
 
 ### Belief operator edit
 

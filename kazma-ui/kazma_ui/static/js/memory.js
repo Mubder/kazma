@@ -113,7 +113,8 @@ function memoryPage() {
 
     async init() {
       await this.loadAll();
-      // Graph → list: highlight matching entity / belief when a node is clicked
+      // Graph → list: highlight matching entity / belief.
+      // Canvas double-click sends this event (single click stays on the graph).
       this._graphListener = (ev) => {
         const d = (ev && ev.detail) || {};
         if (d.type === "entity" && d.id) {
