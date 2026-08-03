@@ -675,15 +675,33 @@ async def _stream_langgraph_events(
                 except Exception:
                     logger.debug("[SSE] chat self-improvement schedule skipped", exc_info=True)
 
-            yield _sse_frame(
-                "done",
-                {
-                    "tokens": total_tokens,
-                    "cost": round(total_cost, 6),
-                    "duration_ms": round(duration_ms, 0),
-                    "interrupted": interrupted,
-                    "empty": (not content_acc and not interrupted),
-                },
+            _done_model = ""
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                _done_model = str(
+                    get_model_registry().get_active_profile().get("model") or ""
+                )
+            except Exception:
+                pass
+            # Enriched done + turn_complete (content+model) for reliable delivery
+            _done_payload = {
+                "tokens": total_tokens,
+                "cost": round(total_cost, 6),
+                "duration_ms": round(duration_ms, 0),
+                "interrupted": interrupted,
+                "empty": (not content_acc and not interrupted),
+                "content": content_acc or "",
+                "model": _done_model,
+            }
+            yield _sse_frame("done", _done_payload)
+            yield _sse_frame("turn_complete", _done_payload)
+            logger.info(
+                "SSE turn_complete: model=%s tokens=%d content_len=%d interrupted=%s",
+                _done_model or "?",
+                total_tokens,
+                len(content_acc or ""),
+                interrupted,
             )
 
             # Time Travel: notify the UI a snapshot was captured (live
@@ -762,6 +780,8 @@ def create_sse_chat_router(
     tracer: Any = None,
     provider_profile: dict[str, Any] | None = None,
     llm_provider: Any = None,
+    llm_provider_getter: Callable[[], Any] | None = None,
+    agent_getter: Callable[[], Any] | None = None,
     registry: Any = None,
 ) -> APIRouter:
     """Create the SSE chat router wired to the compiled Supervisor graph.
@@ -781,7 +801,10 @@ def create_sse_chat_router(
             - base_url: str (normalized)
             - model: str (normalized)
             - api_key: str (real or dummy)
-        llm_provider: LLMProvider instance — reconfigured on provider switch.
+        llm_provider: LLMProvider instance snapshot (prefer *llm_provider_getter*).
+        llm_provider_getter: Live LLM resolver (``lambda: agent.llm``) so model
+            switches never reconfigure an orphaned mount-time client.
+        agent_getter: Optional ``lambda: agent`` for model-switch rebind.
 
     Returns:
         APIRouter with POST /api/chat/stream registered.
@@ -809,6 +832,25 @@ def create_sse_chat_router(
         if graph_holder and graph_holder.get("graph"):
             return graph_holder.get("graph")
         return graph
+
+    def _get_llm() -> Any:
+        """Resolve the live LLM client (never a stale mount-time snapshot)."""
+        if llm_provider_getter is not None:
+            try:
+                live = llm_provider_getter()
+                if live is not None:
+                    return live
+            except Exception as exc:
+                logger.debug("[SSE] llm_provider_getter failed: %s", exc)
+        return llm_provider
+
+    def _get_agent() -> Any:
+        if agent_getter is not None:
+            try:
+                return agent_getter()
+            except Exception as exc:
+                logger.debug("[SSE] agent_getter failed: %s", exc)
+        return None
 
     r = APIRouter(tags=["chat-sse"])
 
@@ -1248,35 +1290,36 @@ def create_sse_chat_router(
                 )
 
         # ── Apply model from request body ──────────────────────────
-        # The chat frontend sends the selected model so the server can
-        # reconfigure the live LLM provider before streaming. We only
-        # reconfigure the llm_provider for this request — we do NOT call
-        # registry.set_active_model() to avoid mutating global state for
-        # all users (any authenticated user could otherwise change the
-        # model for everyone).
+        # Ensure the process-wide active model matches the UI selection
+        # (single-operator). Uses the switch service so the graph holder
+        # and agent.llm rebind together — never orphan reconfigure.
         requested_model = (body.get("model") or "").strip()
         if requested_model:
-            _resolved_url = None
-            _resolved_key = None
-            if registry is not None:
-                _owner = registry.find_provider_for_model(requested_model)
-                if _owner:
-                    _resolved_url = str(_owner.get("base_url", ""))
-                    _resolved_key = str(_owner.get("api_key", ""))
-                    logger.info(
-                        "SSE chat: model %s routed to provider %s (%s)",
-                        requested_model,
-                        _owner.get("name", "?"),
-                        _resolved_url,
-                    )
-            if llm_provider is not None:
-                llm_provider.reconfigure(
-                    base_url=_resolved_url,
-                    model=requested_model,
-                    api_key=_resolved_key,
+            try:
+                from kazma_core.runtime.model_switch import ensure_active_model
+
+                _sw = ensure_active_model(
+                    requested_model,
+                    agent=_get_agent(),
+                    registry=registry,
                 )
-            elif _resolved_url or _resolved_key:
-                logger.warning("SSE chat: llm_provider is None, cannot reconfigure to %s", _resolved_url)
+                if _sw.ok:
+                    logger.info(
+                        "SSE chat: ensure-active model=%s provider=%s",
+                        _sw.model,
+                        _sw.provider,
+                    )
+                else:
+                    logger.warning(
+                        "SSE chat: ensure-active model %s failed: %s",
+                        requested_model,
+                        _sw.error,
+                    )
+            except Exception as exc:
+                logger.warning("SSE chat: model ensure failed: %s", exc)
+
+        # Live LLM for key validation (getter, not mount snapshot).
+        llm_provider = _get_llm()
 
         # ── Pre-stream API key validation (Bug 4 fix) ───────────────
         # If the provider is a real cloud API but the API key is the
@@ -1982,76 +2025,38 @@ def create_sse_chat_router(
             except Exception as exc:
                 return {"error": f"URL validation failed: {exc}"}
 
-        if registry is not None:
-            result = registry.set_active_provider(
+        # Single switch pipeline: registry + agent.sync + graph recompile.
+        # Never feed a masked "***" api_key into reconfigure (SwitchResult /
+        # get_active_profile mask keys for display only).
+        raw_key = body.get("api_key", "") or ""
+        if str(raw_key).strip() in ("***", "••••", "****"):
+            raw_key = ""
+
+        try:
+            from kazma_core.runtime.model_switch import switch_active_provider
+
+            sw = switch_active_provider(
                 provider=body.get("provider", ""),
-                base_url=body.get("base_url", ""),
-                model=body.get("model", ""),
-                api_key=body.get("api_key", ""),
+                base_url=body.get("base_url", "") or "",
+                model=body.get("model", "") or "",
+                api_key=raw_key,
+                agent=_get_agent(),
+                registry=registry,
             )
-            # Also reconfigure the live llm_provider if passed
-            if llm_provider is not None:
-                llm_provider.reconfigure(
-                    base_url=result.get("base_url", ""),
-                    model=result.get("model", ""),
-                    api_key=result.get("api_key", ""),
-                )
-            return {**result, "status": "ok"}
-
-        # Fallback: old behavior
-        from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
-
-        prov = body.get("provider", "").lower().strip()
-        raw_url = body.get("base_url", "")
-        raw_model = body.get("model", "")
-        raw_key = body.get("api_key", "")
-
-        # Use preset base_url if a known built-in provider
-        from kazma_core.providers import PROVIDER_PRESETS
-        if prov in PROVIDER_PRESETS and not raw_url:
-            url = PROVIDER_PRESETS[prov]["base_url"]
-        elif prov in ("ollama",):
-            url = "http://127.0.0.1:11434/v1"
-        elif prov in ("lm-studio", "lm_studio", "lmstudio"):
-            url = normalize_provider_url(raw_url or "http://localhost:1234/v1")
-        elif prov in ("custom", "openai"):
-            url = normalize_provider_url(raw_url)
-        else:
-            url = normalize_provider_url(raw_url) if raw_url else ""
-
-        # Normalize model name
-        model = normalize_model_name(raw_model, url)
-
-        # Resolve API key
-        api_key = get_dummy_api_key(url, raw_key)
-
-        _active_profile.clear()
-        _active_profile.update(
-            {
-                "provider": prov,
-                "base_url": url,
-                "model": model,
-                "api_key": api_key,
-            }
-        )
-
-        # Reconfigure the graph's LLM provider at runtime
-        if llm_provider is not None:
-            llm_provider.reconfigure(base_url=url, model=model, api_key=api_key)
-
-        logger.info(
-            "Provider switched: %s model=%s base_url=%s",
-            prov,
-            model,
-            url,
-        )
-
-        return {
-            "provider": prov,
-            "base_url": url,
-            "model": model,
-            "status": "ok",
-        }
+            out = sw.to_dict()
+            # Surface unmasked profile fields for the settings UI (key still
+            # masked in get_active_profile-style responses).
+            if registry is not None and sw.ok:
+                try:
+                    prof = registry.get_active_profile()
+                    out["base_url"] = prof.get("base_url", "")
+                    out["api_key"] = "***" if prof.get("api_key") else ""
+                except Exception:
+                    pass
+            return out
+        except Exception as exc:
+            logger.warning("Provider switch failed: %s", exc)
+            return {"error": str(exc), "status": "error", "ok": False}
 
     # ── Stop: cancel the running turn (Stop button) ──────────────────
     @r.post("/api/chat/stop")

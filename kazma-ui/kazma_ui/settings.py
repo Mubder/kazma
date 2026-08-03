@@ -961,9 +961,13 @@ class SettingsRouterBuilder:
 
         @router.put("/api/settings/active_model")
         async def api_set_active_model(req: Request) -> dict[str, Any]:
-            """Set the active chat model and persist it.
+            """Set the active chat model, rebind the agent/graph, and persist it.
 
             Body: ``{"active_model": "deepseek-v4-pro"}`` or ``{"model": "..."}``
+
+            Returns ``status: error`` with ``error_code`` when the switch fails
+            (env lock, invalid model, rebind failure). Callers must not treat a
+            non-ok response as a successful switch.
             """
             try:
                 body = await req.json()
@@ -972,27 +976,30 @@ class SettingsRouterBuilder:
                 body = {}
             model = (body.get("active_model") or body.get("model") or "").strip()
             if not model:
-                return {"error": "active_model is required", "status": "error"}
+                return {
+                    "error": "active_model is required",
+                    "status": "error",
+                    "ok": False,
+                    "error_code": "invalid_model",
+                }
             try:
-                from kazma_core.model_registry import get_model_registry
+                from kazma_core.runtime.model_switch import switch_active_model
 
-                registry = get_model_registry()
-                registry.set_active_model(model)
-                # Also persist for gateways that read registry.active_chat_model
-                _get_sm()._cs.set("registry.active_chat_model", model, category="registry")
-
-                agent = getattr(self, "agent", None)
-                if agent is not None:
-                    if hasattr(agent, "sync_active_model"):
-                        agent.sync_active_model()
-                    elif hasattr(agent, "_streaming_graph"):
-                        agent._streaming_graph = None
-                        agent._graph = None
-                        if hasattr(agent, "llm"):
-                            agent.llm = registry.get_client()
+                result = switch_active_model(
+                    model,
+                    agent=getattr(self, "agent", None),
+                )
+                return result.to_dict()
             except Exception as exc:
                 logger.warning("[Settings] set_active_model failed: %s", exc)
-            return {"active_model": model, "model": model, "status": "ok"}
+                return {
+                    "active_model": model,
+                    "model": model,
+                    "status": "error",
+                    "ok": False,
+                    "error": str(exc),
+                    "error_code": "rebind_failed",
+                }
 
         @router.post("/api/settings/memory/clean")
         async def api_clean_memory() -> dict[str, Any]:

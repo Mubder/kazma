@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — Model stickiness + long-horizon delivery (2026-08-03)
+
+- **Single model-switch pipeline** (`kazma_core.runtime.model_switch`): every
+  entry point (web dropdown, Settings provider switch, gateway `/models`
+  select) rebinds registry → agent.llm → graph holder. Env lock / failures
+  return honest `status: error` (no more silent ok).
+- **No orphan LLM handles:** SSE uses `llm_provider_getter`; WS/SSE
+  `ensure_active_model` on body/payload model; gateway
+  `create_graph_handler(graph_getter=…)` so Telegram/Discord/Slack follow
+  web model switches. Provider switch never feeds masked `***` keys into
+  reconfigure.
+- **Long-horizon delivery:** removed wall-clock 3‑minute false “Done”
+  (`TURN_IDLE_WATCHDOG_MS` progress-idle + SessionStore poller). Terminal
+  `turn_complete` frames carry final content + model on WS and SSE.
+  WS reconnect re-attaches running turns / replays last assistant.
+- Plan + audit: `docs/plans/RELIABILITY_MODEL_AND_TURN_DELIVERY.md`,
+  `docs/audits/AUDIT_MODEL_AND_TURN_DELIVERY_2026-08-03.md`.
+
 ## Unreleased — Ollama discovery fix + snapshot auto-maintenance (2026-08-02)
 
 - **Ollama discovery now respects the configured provider base URL.**

@@ -208,27 +208,62 @@ def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def create_graph_handler(
-    graph: Any,
-    manager: Any,  # GatewayManager (avoid circular import)
+    graph: Any = None,
+    manager: Any = None,  # GatewayManager (avoid circular import)
     system_prompt: str = "",
     cost_breaker: Any = None,
     store: SessionStore | None = None,
+    graph_getter: Callable[[], Any] | None = None,
 ) -> Callable[[IncomingMessage], Awaitable[None]]:
     """Create an async handler that processes messages through LangGraph.
 
     Args:
-        graph:          Compiled LangGraph supervisor graph.
+        graph:          Compiled LangGraph supervisor graph (snapshot; prefer
+                        *graph_getter* so model switches rebind live).
         manager:        GatewayManager instance (for send() routing).
         system_prompt:  System prompt for the agent.
         cost_breaker:   Optional CostCircuitBreaker for budget control.
         store:          SessionStore for platform context persistence.
                         Falls back to in-memory store if not provided.
+        graph_getter:   Optional callable returning the live compiled graph
+                        (e.g. ``lambda: holder["graph"]``). When set, every
+                        turn resolves the graph fresh so web UI model switches
+                        apply to Telegram/Discord/Slack without re-registering
+                        the handler.
 
     Returns:
         Async handler function compatible with manager.on_message().
     """
     # Use provided store or fall back to in-memory
     _store = store or _InMemoryStore()
+    _fallback_graph = graph
+    _graph_getter = graph_getter
+
+    def _resolve_graph() -> Any:
+        if _graph_getter is not None:
+            try:
+                g = _graph_getter()
+                if g is not None:
+                    return g
+            except Exception as exc:
+                logger.debug("[agent-handler] graph_getter failed: %s", exc)
+        return _fallback_graph
+
+    class _LiveGraph:
+        """Proxy so nested helpers always hit the live holder graph."""
+
+        def __getattr__(self, name: str) -> Any:
+            g = _resolve_graph()
+            if g is None:
+                raise RuntimeError("Agent graph execution engine not initialized")
+            return getattr(g, name)
+
+        def __bool__(self) -> bool:
+            return _resolve_graph() is not None
+
+    # Shadow the snapshot with a live proxy — existing graph.ainvoke / aget_state
+    # call sites keep working and follow model rebinds.
+    graph = _LiveGraph()
 
     # Per-sender session tracking (sender_id → thread_id).
     # Guarded by _sessions_lock because concurrent handler invocations for

@@ -739,20 +739,21 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Gateway] Suggestions wiring failed: %s", e)
 
-            # Register brain handler
+            # Register brain handler (live graph_getter so model switches apply)
             try:
                 initial_graph = self.agent.get_streaming_graph()
                 self._graph_holder["graph"] = initial_graph
                 if initial_graph is not None:
                     brain_handler = create_graph_handler(
                         graph=initial_graph,
+                        graph_getter=lambda: self._graph_holder.get("graph"),
                         manager=self.gateway,
                         system_prompt=self.agent.system_prompt,
                         cost_breaker=self.agent.cost_breaker,
                         store=self.session_store,
                     )
                     self.gateway.on_message(brain_handler)
-                    logger.info("[Gateway] Brain handler registered")
+                    logger.info("[Gateway] Brain handler registered (live graph_getter)")
                 else:
                     logger.warning("[Gateway] No graph available — Brain handler not registered")
             except Exception as e:
@@ -946,7 +947,11 @@ class KazmaAppBuilder:
                 authority=self.agent.authority,
                 tracer=self.agent.tracer,
                 provider_profile=self.registry.get_active_profile(),
+                # Live getters — never freeze agent.llm at mount time (model switch
+                # replaces the client instance; mount snapshots become orphans).
                 llm_provider=self.agent.llm,
+                llm_provider_getter=lambda: self.agent.llm,
+                agent_getter=lambda: self.agent,
                 registry=self.registry,
             )
             self.app.include_router(sse_router)
@@ -956,7 +961,7 @@ class KazmaAppBuilder:
             from kazma_ui.routes.ws_chat import create_ws_chat_router
             ws_router = create_ws_chat_router(
                 graph_holder=self._graph_holder,
-                graph_getter=lambda: self.graph,
+                graph_getter=lambda: self._graph_holder.get("graph"),
                 agent_getter=lambda: self.agent,
             )
             self.app.include_router(ws_router)
@@ -1182,7 +1187,8 @@ class KazmaAppBuilder:
                 )
                 self._graph_holder["graph"] = recompiled
                 self._hitl_state["graph"] = recompiled
-                logger.info("[App] Graph recompiled on model switch (model=%s)", getattr(self.agent.llm, "model", "unknown"))
+                _m = getattr(getattr(self.agent.llm, "config", None), "model", None) or "unknown"
+                logger.info("[App] Graph recompiled on model switch (model=%s)", _m)
 
             _recompile_holder_graph()
             if hasattr(self.agent, "set_on_model_change_callback"):
@@ -1219,15 +1225,18 @@ class KazmaAppBuilder:
             if self.gateway is not None:
                 from kazma_gateway.agent_handler import create_graph_handler
 
+                # graph_getter: every platform turn reads the live holder so
+                # web/Telegram model switches rebind without re-registering.
                 brain_handler = create_graph_handler(
                     graph=self._graph_holder.get("graph"),
+                    graph_getter=lambda: self._graph_holder.get("graph"),
                     manager=self.gateway,
                     system_prompt=self.agent.system_prompt,
                     cost_breaker=self.agent.cost_breaker,
                     store=self.session_store,
                 )
                 self.gateway.on_message(brain_handler)
-                logger.info("[Checkpoint] Brain handler re-registered with checkpointed graph")
+                logger.info("[Checkpoint] Brain handler re-registered with live graph_getter")
         except Exception as e:
             logger.warning("[Checkpoint] Checkpointer not available: %s", e)
 

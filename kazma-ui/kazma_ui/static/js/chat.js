@@ -359,11 +359,13 @@
    */
   var _isGenerating = false;
   var _awaitingApproval = false;
-  /** Absolute failsafe so a dropped idle frame can never trap the UI forever. */
+  /** Progress-idle failsafe — only fires when NO activity for IDLE ms (not wall-clock). */
   var _turnWatchdogTimer = null;
   /** Desync healer: if agent store is idle but Stop is still on, release. */
   var _turnSyncTimer = null;
-  var TURN_WATCHDOG_MS = 3 * 60 * 1000;
+  /** No tool/token/status for this long → unlock UI + start catch-up poller (NOT false Done). */
+  var TURN_IDLE_WATCHDOG_MS = 5 * 60 * 1000;
+  var _lastTurnActivityTs = 0;
 
   function _clearTurnTimers() {
     if (_turnWatchdogTimer) {
@@ -372,20 +374,57 @@
     }
   }
 
+  /** Call on every live frame (token/tool/status) so long multi-tool turns stay open. */
+  function noteTurnActivity() {
+    _lastTurnActivityTs = Date.now();
+    lastActivityTs = _lastTurnActivityTs;
+    if (_isGenerating && !_awaitingApproval) {
+      _armTurnWatchdog();
+    }
+  }
+
   function _armTurnWatchdog() {
     _clearTurnTimers();
     _turnWatchdogTimer = setTimeout(function() {
       _turnWatchdogTimer = null;
-      if (_isGenerating && !_awaitingApproval) {
-        console.warn('[KazmaChat] Turn watchdog released a stuck Stop/Enter lock');
-        forceEndTurn();
+      if (!_isGenerating || _awaitingApproval) return;
+      var idleFor = Date.now() - (_lastTurnActivityTs || 0);
+      if (idleFor < TURN_IDLE_WATCHDOG_MS - 500) {
+        // Activity arrived after schedule — re-arm.
+        _armTurnWatchdog();
+        return;
       }
-    }, TURN_WATCHDOG_MS);
+      // Idle too long: unlock Stop without claiming success, then poll for durable result.
+      console.warn('[KazmaChat] Idle turn watchdog — unlocking UI and starting catch-up poller');
+      if (_progressEl) {
+        var titleEl = _progressEl.querySelector('.agent-progress-title');
+        if (titleEl) {
+          titleEl.textContent = ti('still_working_bg', 'Still working in background\u2026');
+        }
+      }
+      _isGenerating = false;
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.classList.remove('stop-mode');
+        sendBtn.title = 'Send (Enter / Ctrl+Enter)';
+        sendBtn.innerHTML = _SEND_SVG;
+      }
+      if (inputEl) {
+        inputEl.disabled = false;
+        inputEl.placeholder = 'Type a message\u2026 (agent may still be finishing)';
+      }
+      // Do NOT finalizeProgress(true) — that paints false "Done".
+      // Catch up from SessionStore when the detached turn finishes.
+      if (chatSessionId) {
+        _pollBackgroundTurn(chatSessionId, 0);
+      }
+    }, TURN_IDLE_WATCHDOG_MS);
   }
 
   function beginTurn() {
     _isGenerating = true;
     _awaitingApproval = false;
+    _lastTurnActivityTs = Date.now();
     _armTurnWatchdog();
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
@@ -727,17 +766,38 @@
 
   function onModelChange() {
     if (!modelSelectorEl) return;
+    var previous = selectedModel;
     selectedModel = modelSelectorEl.value || '';
     try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
-    // Notify other components immediately
+    // Notify other components immediately (optimistic)
     document.dispatchEvent(new CustomEvent('model-changed', { detail: selectedModel }));
-    // Sync to backend so the sidebar dropdown stays in sync
+    // Sync to backend — await ack; revert UI on failure / env lock
     if (selectedModel) {
       fetch('/api/settings/active_model', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active_model: selectedModel }),
-      }).then(function() {}).catch(function() {});
+      }).then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); })
+        .then(function(res) {
+          var data = res.data || {};
+          if (data.status === 'error' || data.ok === false) {
+            selectedModel = previous;
+            if (modelSelectorEl) modelSelectorEl.value = previous || '';
+            try { localStorage.setItem(MODEL_LS_KEY, previous || ''); } catch(e) {}
+            document.dispatchEvent(new CustomEvent('model-changed', { detail: previous || '' }));
+            var msg = data.error || data.error_code || 'Model switch failed';
+            if (window.KS && KS.toast) KS.toast(msg, 'error', 4000);
+            else if (window.showToast) window.showToast(msg, 'error', 4000);
+            return;
+          }
+          if (data.active_model || data.model) {
+            selectedModel = data.active_model || data.model;
+            if (modelSelectorEl) modelSelectorEl.value = selectedModel;
+            try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
+          }
+        }).catch(function() {
+          if (window.KS && KS.toast) KS.toast('Model switch request failed', 'error', 3000);
+        });
     }
   }
 
@@ -866,7 +926,7 @@
       attachments: attachmentsPayload,
     }, {
       onToken: function(data) {
-        lastActivityTs = Date.now();
+        noteTurnActivity();
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         if (!currentMsgEl) {
@@ -884,6 +944,7 @@
       },
 
       onToolCall: function(data) {
+        noteTurnActivity();
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
@@ -898,6 +959,7 @@
       },
 
       onToolResult: function(data) {
+        noteTurnActivity();
         if (!currentMsgEl) return;
         var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
         logProgress({
@@ -921,12 +983,13 @@
         activeStream = null;
         KS.hideTyping(typingEl);
         activeTypingEl = null;
-        // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
-        // Layer 4 of the agent-stopped-talking defense: instead of a bare
-        // "_No response received._" with no recourse, show a Retry button
-        // that re-sends the last user message in one click. Recoverable in
-        // one click instead of looking broken.
         var interrupted = !!(data && data.interrupted);
+        // Enriched done/turn_complete may carry full final content when tokens
+        // never streamed (custom LLM path).
+        if (data && data.content && !tokenAccum) {
+          window.KazmaChat.applyFinalAssistantText(data.content, data.model || '');
+        }
+        // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
         if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval) {
           currentMsgEl = createAssistantMessage();
           var emptyEl = currentMsgEl.querySelector('.message-text');
@@ -948,9 +1011,10 @@
           if (currentMsgEl) {
             var meta = currentMsgEl.querySelector('.message-meta');
             if (meta) {
+              var modelBit = data.model ? (' \u00B7 ' + data.model) : '';
               meta.textContent = KS.formatTokens(data.tokens) + ' tokens \u00B7 ' +
                 KS.formatCost(data.cost) + ' \u00B7 ' +
-                KS.formatDuration(data.duration_ms);
+                KS.formatDuration(data.duration_ms) + modelBit;
             }
           }
         }
@@ -2543,11 +2607,9 @@
   }
 
   /**
-   * Poll for a background-completed turn after a refresh/tab-switch.
-   * Checks every 5s for up to 90s. If the pending assistant message gains
-   * content (the detached graph task completed), reloads the session to
-   * show the response. One poller per session (the pending-bubble branch
-   * and _checkBackgroundGeneration both call this — the guard dedupes).
+   * Poll for a background-completed turn after refresh / idle-watchdog / WS drop.
+   * While the server reports generating=true, keep polling (no hard 90s death).
+   * Otherwise poll with backoff up to ~DETACHED_TTL (5 min).
    */
   var _bgPollingSession = null;
 
@@ -2555,15 +2617,15 @@
     if (_bgPollingSession === sessionId) return;  // already polling
     _bgPollingSession = sessionId;
     var attempts = 0;
-    var maxAttempts = 18;  // 90s at 5s intervals
-    var lastMessageHash = '';  // track changes to avoid re-rendering
-    var _savedScrollPos = 0;  // preserve scroll position
+    var maxIdleAttempts = 60;  // ~5–10 min with backoff when not generating
+    var lastMessageHash = '';
+    var _savedScrollPos = 0;
+    var delayMs = 2000;
 
     function _hashMessages(msgs) {
-      // Simple hash: count + last message content length
       var last = msgs[msgs.length - 1];
       var lastLen = last && last.content ? last.content.length : 0;
-      return msgs.length + ':' + lastLen;
+      return msgs.length + ':' + lastLen + ':' + !!(last && last.pending);
     }
 
     function _saveScrollPosition() {
@@ -2571,77 +2633,92 @@
     }
 
     function _restoreScrollPosition() {
-      if (messagesEl) {
-        messagesEl.scrollTop = _savedScrollPos;
-      }
+      if (messagesEl) messagesEl.scrollTop = _savedScrollPos;
+    }
+
+    function _schedule(next) {
+      setTimeout(poll, next);
     }
 
     function poll() {
-      if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }  // user switched sessions
-      if (activeStream) { _bgPollingSession = null; return; }  // user started a new turn, stop polling
+      if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
+      if (activeStream) { _bgPollingSession = null; return; }
+      // WS turn still live — keep waiting
+      try {
+        if (window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive) {
+          _schedule(Math.min(delayMs, 5000));
+          return;
+        }
+      } catch (e) { /* ignore */ }
+
       attempts++;
-      if (attempts > maxAttempts) {
-        _bgPollingSession = null;
-        // Replace the "still processing" indicator with a helpful message.
-        var msgs = messagesEl.querySelectorAll('[data-role="assistant"]');
-        if (msgs.length > 0) {
-          var lastAsst = msgs[msgs.length - 1];
-          if (lastAsst.textContent.indexOf('⏳') !== -1) {
-            lastAsst.innerHTML = '<p><em>The previous turn took too long. '
-              + 'Please resend your message to start a new turn.</em></p>';
+      Promise.all([
+        fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/status')
+          .then(function(r) { return r.ok ? r.json() : {}; })
+          .catch(function() { return {}; }),
+        fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
+          .then(function(r) { return r.ok ? r.json() : []; })
+          .catch(function() { return []; }),
+      ]).then(function(pair) {
+        if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
+        var status = pair[0] || {};
+        var messages = pair[1] || [];
+        var generating = !!status.generating;
+        var currentHash = _hashMessages(messages);
+        var lastMsg = messages[messages.length - 1];
+
+        if (originalCount > 0 && messages.length > originalCount) {
+          _bgPollingSession = null;
+          _saveScrollPosition();
+          loadSession(sessionId);
+          setTimeout(_restoreScrollPosition, 100);
+          return;
+        }
+        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content && !lastMsg.pending) {
+          _bgPollingSession = null;
+          _saveScrollPosition();
+          loadSession(sessionId);
+          setTimeout(_restoreScrollPosition, 100);
+          return;
+        }
+
+        if (currentHash !== lastMessageHash && lastMsg && lastMsg.pending) {
+          lastMessageHash = currentHash;
+          var pendingEl = messagesEl && messagesEl.querySelector('[data-role="assistant"]:last-child .message-text');
+          if (pendingEl && pendingEl.textContent.indexOf('⏳') !== -1) {
+            var progress = lastMsg.content ? ' (' + lastMsg.content.length + ' chars)' : '';
+            pendingEl.innerHTML = '<p>⏳ <em>Previous turn still processing in the background' + progress + '…</em></p>';
           }
         }
-        return;
-      }
 
-      fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
-        .then(function(r) { return r.ok ? r.json() : []; })
-        .then(function(messages) {
-          if (chatSessionId !== sessionId) { _bgPollingSession = null; return; }
-          
-          var currentHash = _hashMessages(messages);
-          
-          // If message count grew, the background turn completed — reload.
-          // (originalCount 0 = we never knew the baseline — only resolve via
-          // the pending-content check below, never via growth.)
-          if (originalCount > 0 && messages.length > originalCount) {
-            _bgPollingSession = null;
-            _saveScrollPosition();
-            loadSession(sessionId);  // re-renders with the completed response
-            setTimeout(_restoreScrollPosition, 100);
-            return;
-          }
-          // Check if the pending message now has content (final persist popped it)
-          var lastMsg = messages[messages.length - 1];
-          if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content && !lastMsg.pending) {
-            _bgPollingSession = null;
-            _saveScrollPosition();
-            loadSession(sessionId);
-            setTimeout(_restoreScrollPosition, 100);
-            return;
-          }
-          
-          // Only update the "processing" indicator if content actually changed
-          // (prevents flickering when polling returns same data)
-          if (currentHash !== lastMessageHash && lastMsg && lastMsg.pending) {
-            lastMessageHash = currentHash;
-            // Update the processing indicator text if content grew
-            var pendingEl = messagesEl.querySelector('[data-role="assistant"]:last-child .message-text');
-            if (pendingEl && pendingEl.textContent.indexOf('⏳') !== -1) {
-              var progress = lastMsg.content ? ' (' + lastMsg.content.length + ' chars)' : '';
-              pendingEl.innerHTML = '<p>⏳ <em>Previous turn still processing in the background' + progress + '…</em></p>';
+        if (generating) {
+          // Server still working — never give up solely on attempt count.
+          delayMs = Math.min(delayMs + 1000, 10000);
+          _schedule(delayMs);
+          return;
+        }
+
+        if (attempts > maxIdleAttempts) {
+          _bgPollingSession = null;
+          var msgs = messagesEl ? messagesEl.querySelectorAll('[data-role="assistant"]') : [];
+          if (msgs.length > 0) {
+            var lastAsst = msgs[msgs.length - 1];
+            if (lastAsst.textContent.indexOf('⏳') !== -1 || lastAsst.textContent.indexOf('background') !== -1) {
+              lastAsst.innerHTML = '<p><em>Could not confirm the previous turn finished. '
+                + 'Refresh the session or resend if needed.</em></p>';
             }
           }
-          
-          // Not done yet — poll again after 5s
-          setTimeout(poll, 5000);
-        })
-        .catch(function() {
-          setTimeout(poll, 5000);  // network error — keep trying
-        });
+          return;
+        }
+
+        delayMs = Math.min(delayMs + 1000, 10000);
+        _schedule(delayMs);
+      }).catch(function() {
+        _schedule(5000);
+      });
     }
 
-    setTimeout(poll, 5000);  // first check after 5s
+    setTimeout(poll, 1500);
   }
 
   function checkPendingApprovals() {
@@ -2828,7 +2905,28 @@
     // Telemetry WS hooks — called by agentStore
     logProgress: logProgress,
     finalizeProgress: finalizeProgress,
+    noteTurnActivity: noteTurnActivity,
+    pollBackgroundTurn: _pollBackgroundTurn,
+    applyFinalAssistantText: function(content, model) {
+      KS.hideTyping(typingEl);
+      activeTypingEl = null;
+      if (!content) return;
+      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      // Full final answer — replace accum so we don't double-append after partials
+      tokenAccum = String(content);
+      tryIngestPlanFromText(tokenAccum);
+      var textEl = currentMsgEl.querySelector('.message-text');
+      if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+      if (model && currentMsgEl) {
+        var meta = currentMsgEl.querySelector('.message-meta');
+        if (meta && meta.textContent.indexOf(model) < 0) {
+          meta.textContent = (meta.textContent ? meta.textContent + ' · ' : '') + model;
+        }
+      }
+      scrollToBottom();
+    },
     appendLiveToken: function(content) {
+      noteTurnActivity();
       KS.hideTyping(typingEl);
       activeTypingEl = null;
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();

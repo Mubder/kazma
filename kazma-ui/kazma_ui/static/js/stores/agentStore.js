@@ -241,9 +241,15 @@ document.addEventListener('alpine:init', () => {
         const reason = evt ? evt.reason : '';
         console.warn(`[AgentStore] Telemetry socket closed for session ${sessionId} (code=${code}, reason=${reason || 'none'})`);
 
-        // Socket died mid-turn → release UI so user is never trapped.
+        // Socket died mid-turn → unlock UI and catch up from SessionStore
+        // (do not paint false "Done"; server may still finish the graph).
         if (this._turnActive) {
           this._endTurn();
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
+              window.KazmaChat.pollBackgroundTurn(this.sessionId, 0);
+            }
+          } catch (e) { /* ignore */ }
         }
 
         if (code === 4003) {
@@ -362,6 +368,13 @@ document.addEventListener('alpine:init', () => {
 
       const type = frame.type;
       const data = frame.data || {};
+
+      // Keep chat.js idle-watchdog armed on any live frame
+      try {
+        if (window.KazmaChat && typeof window.KazmaChat.noteTurnActivity === 'function') {
+          if (type !== 'pong' && type !== 'ping') window.KazmaChat.noteTurnActivity();
+        }
+      } catch (e) { /* ignore */ }
 
       switch (type) {
         case 'status':
@@ -564,11 +577,22 @@ document.addEventListener('alpine:init', () => {
           break;
 
         case 'done':
-          // SSE-compat frames sometimes arrive over mixed transports
+        case 'turn_complete': {
+          // Authoritative terminal: apply content if present, then unlock.
+          const finalText = data.content || frame.content || '';
+          if (finalText && window.KazmaChat && typeof window.KazmaChat.appendLiveToken === 'function') {
+            // Prefer a full replace-style paint when content is the full final answer
+            if (typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+              window.KazmaChat.applyFinalAssistantText(finalText, data.model || '');
+            } else {
+              window.KazmaChat.appendLiveToken(finalText);
+            }
+          }
           if (!this.pendingApproval) {
             this._endTurn();
           }
           break;
+        }
 
         case 'approval_error':
           console.error('[AgentStore] Approval error:', frame);

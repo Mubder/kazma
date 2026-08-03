@@ -82,7 +82,14 @@ var KazmaStream = (function() {
             if (callbacks.onToolResult) callbacks.onToolResult(data);
             break;
           case 'done':
-            finishStream(data);
+          case 'turn_complete':
+            // Prefer turn_complete / enriched done content when tokens were missed
+            if (data && data.content && callbacks.onToken && !callbacks._sawToken) {
+              try { callbacks.onToken({ content: data.content }); } catch (e) { /* ignore */ }
+            }
+            if (type === 'done' || type === 'turn_complete') {
+              finishStream(data);
+            }
             break;
           case 'snapshot':
             // Time Travel: live snapshot captured — notify the replay panel.

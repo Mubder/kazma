@@ -254,10 +254,11 @@ export function sidebarComponent() {
         async onModelChange(event) {
             const model = event.target ? event.target.value : (event.detail || '');
             if (!model) return;
+            const previous = this.activeModel;
             this.activeModel = model;
             const store = Alpine.store('settings');
             if (store) store.appearance.active_chat_model = model;
-            // Notify other components immediately (before the async PUT)
+            // Notify other components immediately (optimistic)
             document.dispatchEvent(new CustomEvent('model-changed', { detail: model }));
             try {
                 const res = await fetch('/api/settings/active_model', {
@@ -266,11 +267,22 @@ export function sidebarComponent() {
                     body: JSON.stringify({ active_model: model }),
                 });
                 const data = await res.json();
+                if (data && (data.status === 'error' || data.ok === false)) {
+                    this.activeModel = previous;
+                    if (store) store.appearance.active_chat_model = previous;
+                    document.dispatchEvent(new CustomEvent('model-changed', { detail: previous || '' }));
+                    const msg = data.error || data.error_code || 'Model switch failed';
+                    if (window.showToast) window.showToast(msg, 'error', 4000);
+                    else console.warn('[sidebar]', msg);
+                    return;
+                }
                 if (data && data.active_model) {
                     this.activeModel = data.active_model;
+                    if (store) store.appearance.active_chat_model = data.active_model;
                 }
             } catch (e) {
                 console.warn('[sidebar] Failed to sync model:', e);
+                this.activeModel = previous;
             }
         },
 

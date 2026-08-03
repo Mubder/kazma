@@ -467,6 +467,53 @@ def create_ws_chat_router(
         except Exception as init_scan_err:
             logger.debug("[WS-Chat] Initial HITL scan on connect failed: %s", init_scan_err)
 
+        # Reconnect catch-up: if a turn is still running, tell the client to keep
+        # waiting; if the last assistant bubble already has content, push it.
+        try:
+            from kazma_ui.active_turns import get_active_turn
+
+            _alive = get_active_turn(thread_id)
+            if _alive is not None and not _alive.done():
+                await websocket.send_json(
+                    TelemetryEvent(
+                        type="status_update",
+                        data={
+                            "status": "thinking",
+                            "message": "Reconnected — previous turn still running…",
+                            "active_node": "Supervisor",
+                        },
+                        thread_id=thread_id,
+                    ).to_dict()
+                )
+            else:
+                try:
+                    sess = get_session_manager().get(session_id)
+                    if sess and sess.messages:
+                        last = sess.messages[-1]
+                        if (
+                            last.get("role") == "assistant"
+                            and (last.get("content") or "").strip()
+                            and not last.get("pending")
+                        ):
+                            await websocket.send_json(
+                                TelemetryEvent(
+                                    type="turn_complete",
+                                    data={
+                                        "content": last.get("content") or "",
+                                        "interrupted": False,
+                                        "empty": False,
+                                        "model": last.get("model") or "",
+                                        "session_id": session_id,
+                                        "replay": True,
+                                    },
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
+                except Exception:
+                    logger.debug("[WS-Chat] reconnect message catch-up skipped", exc_info=True)
+        except Exception as reconnect_exc:
+            logger.debug("[WS-Chat] reconnect catch-up failed: %s", reconnect_exc)
+
         active_task: asyncio.Task | None = None
 
         try:
@@ -523,6 +570,34 @@ def create_ws_chat_router(
                     text = payload.get("text", "").strip()
                     if not text:
                         continue
+
+                    # Ensure active model matches the UI selection (same as SSE).
+                    requested_model = str(payload.get("model") or "").strip()
+                    if requested_model:
+                        try:
+                            from kazma_core.runtime.model_switch import ensure_active_model
+
+                            _agent = None
+                            if agent_getter is not None:
+                                try:
+                                    _agent = agent_getter()
+                                except Exception:
+                                    _agent = None
+                            _sw = ensure_active_model(requested_model, agent=_agent)
+                            if _sw.ok:
+                                logger.info(
+                                    "[WS-Chat] ensure-active model=%s provider=%s",
+                                    _sw.model,
+                                    _sw.provider,
+                                )
+                            else:
+                                logger.warning(
+                                    "[WS-Chat] ensure-active model %s failed: %s",
+                                    requested_model,
+                                    _sw.error,
+                                )
+                        except Exception as model_exc:
+                            logger.warning("[WS-Chat] model ensure failed: %s", model_exc)
 
                     # Record user interaction on cost circuit breaker to un-halt budget
                     try:
@@ -928,16 +1003,14 @@ def create_ws_chat_router(
                                     continue
                                 await send(ev.to_dict())
 
-                            if not tokens_emitted:
-                                await _backfill_assistant_text_if_needed(
-                                    graph_inst, config, websocket, thread_id, pre_msg_count
-                                )
-                                # Give the client a beat to render the
-                                # backfilled text before we send idle/end —
-                                # prevents the "Done 0s" flash where the
-                                # spinner dies before the text is visible.
-                                if not is_lost():
-                                    await asyncio.sleep(0.1)
+                            # Always backfill from checkpoint at end (custom LLM
+                            # has no on_chat_model_stream). If checkpoint text is
+                            # longer than streamed accum, emit the full final.
+                            await _backfill_assistant_text_if_needed(
+                                graph_inst, config, websocket, thread_id, pre_msg_count
+                            )
+                            if not is_lost():
+                                await asyncio.sleep(0.05)
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, config, websocket, thread_id
@@ -991,8 +1064,30 @@ def create_ws_chat_router(
                             # Always release the UI turn lock. HITL pause is
                             # signalled via pendingApproval; idle still ends
                             # the "generating" state so Stop never sticks.
-                            # Emit both idle + stream_end — agentStore listens
-                            # for either; double endTurn is a no-op.
+                            # turn_complete carries final content so clients
+                            # never depend on racey partial deltas alone.
+                            _active_model = ""
+                            try:
+                                from kazma_core.model_registry import get_model_registry
+
+                                _active_model = str(
+                                    get_model_registry().get_active_profile().get("model") or ""
+                                )
+                            except Exception:
+                                pass
+                            await send(
+                                TelemetryEvent(
+                                    type="turn_complete",
+                                    data={
+                                        "content": (final_text or assistant_content_acc or ""),
+                                        "interrupted": bool(interrupted),
+                                        "empty": not bool((final_text or assistant_content_acc or "").strip()),
+                                        "model": _active_model,
+                                        "session_id": session_id,
+                                    },
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
                             await send(EventBridge.create_idle_event(thread_id).to_dict())
                             await send(
                                 TelemetryEvent(
@@ -1000,6 +1095,13 @@ def create_ws_chat_router(
                                     data={"interrupted": bool(interrupted)},
                                     thread_id=thread_id,
                                 ).to_dict()
+                            )
+                            logger.info(
+                                "[WS-Chat] turn_complete thread=%s model=%s content_len=%d interrupted=%s",
+                                thread_id[:12],
+                                _active_model or "?",
+                                len(final_text or assistant_content_acc or ""),
+                                interrupted,
                             )
                             if interrupted:
                                 logger.info(

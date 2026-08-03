@@ -1398,11 +1398,37 @@ async def _try_model_command(
             return True
 
         try:
-            from kazma_core.model_registry import get_model_registry
-            reg = get_model_registry()
-            reg.set_active_model(model_id)
-            await _send_model_reply(msg, store, manager, thread_id,
-                f"✅ Switched to **{model_id}** (provider: {reg._active_provider})")
+            from kazma_core.runtime.model_switch import switch_active_model
+
+            # Prefer the process agent when the gateway shares the web app
+            # process so graphs recompile; falls back to registry-only rebind.
+            agent = None
+            try:
+                from kazma_core.agent_runner import KazmaAgent
+                from kazma_core.service_container import get_container
+
+                container = get_container()
+                if container.has(KazmaAgent):
+                    agent = container.get(KazmaAgent)
+            except Exception:
+                agent = None
+            result = switch_active_model(model_id, agent=agent)
+            if result.ok:
+                await _send_model_reply(
+                    msg,
+                    store,
+                    manager,
+                    thread_id,
+                    f"✅ Switched to **{result.model}** (provider: {result.provider or '—'})",
+                )
+            else:
+                await _send_model_reply(
+                    msg,
+                    store,
+                    manager,
+                    thread_id,
+                    f"⚠️ Failed to switch model: {result.error or result.error_code or 'unknown'}",
+                )
         except Exception as exc:
             await _send_model_reply(msg, store, manager, thread_id,
                 f"⚠️ Failed to switch model: {exc}")

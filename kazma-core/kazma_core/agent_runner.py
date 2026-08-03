@@ -980,7 +980,12 @@ class KazmaAgent:
         self.llm_config = self.llm.config
         self._graph = None
         self._streaming_graph = None
-        logger.info("[KazmaAgent] Active model synced to %s", getattr(self.llm, "model", "unknown"))
+        _synced_model = (
+            getattr(getattr(self.llm, "config", None), "model", None)
+            or getattr(self.llm, "model", None)
+            or "unknown"
+        )
+        logger.info("[KazmaAgent] Active model synced to %s", _synced_model)
         if getattr(self, "_on_model_change_cb", None) is not None:
             try:
                 self._on_model_change_cb()
