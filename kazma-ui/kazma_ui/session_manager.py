@@ -140,15 +140,23 @@ class ChatSession:
     def auto_title(self) -> str:
         """Derive a human-readable title from the first user message."""
         for msg in self.messages:
-            if msg.get("role") == "user":
-                content = msg.get("content")
-                if isinstance(content, list):
-                    content = " ".join(
-                        b.get("text", "") for b in content
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    )
-                text = str(content or "").strip().replace("\n", " ")
-                return text[:60] + ("\u2026" if len(text) > 60 else "")
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            text = str(content or "").strip().replace("\n", " ")
+            # Skip Soul / inject fences that were ever stored as role=user
+            if "<kazma:data" in text and "untrusted" in text:
+                continue
+            if "[SelfImprovement]" in text and "BEGIN OBSERVATION" in text:
+                continue
+            if not text:
+                continue
+            return text[:60] + ("\u2026" if len(text) > 60 else "")
         return ""
 
     def trim_messages(self, max_messages: int = MAX_MESSAGES_PER_SESSION) -> None:

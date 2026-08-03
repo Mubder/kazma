@@ -1990,12 +1990,26 @@ def create_sse_chat_router(
                         live,
                         {"configurable": {"thread_id": tid, "checkpoint_ns": ""}},
                     )
+                    def _ui_ok(m: dict) -> bool:
+                        if not isinstance(m, dict):
+                            return False
+                        role = (m.get("role") or "").lower()
+                        if role not in ("user", "assistant"):
+                            return False
+                        c = str(m.get("content") or "").strip()
+                        if not c:
+                            return False
+                        # Drop prompt injects if they were ever mis-tagged as user
+                        if "<kazma:data" in c and "untrusted" in c:
+                            return False
+                        if "[SelfImprovement]" in c and "BEGIN OBSERVATION" in c:
+                            return False
+                        return True
+
                     ui = [
-                        {"role": m.get("role", "user"), "content": m.get("content", "")}
+                        {"role": m.get("role"), "content": str(m.get("content") or "").strip()}
                         for m in prior
-                        if isinstance(m, dict)
-                        and m.get("role") in ("user", "assistant", "system")
-                        and (m.get("content") or "").strip()
+                        if _ui_ok(m)
                     ]
                     if ui:
                         session.messages = ui
@@ -2010,6 +2024,17 @@ def create_sse_chat_router(
                     exc_info=True,
                 )
 
+        def _visible(msg: dict) -> bool:
+            role = (msg.get("role") or "").lower()
+            if role not in ("user", "assistant"):
+                return False
+            c = str(msg.get("content") or "")
+            if "<kazma:data" in c and "untrusted" in c:
+                return False
+            if "[SelfImprovement]" in c and "BEGIN OBSERVATION" in c:
+                return False
+            return True
+
         return [
             {
                 "role": msg.get("role", "user"),
@@ -2023,7 +2048,7 @@ def create_sse_chat_router(
                 ),
             }
             for msg in messages
-            if msg.get("role") in ("user", "assistant", "system")
+            if _visible(msg)
         ]
 
     # ── Provider profile management (continued) ───────────────────

@@ -2676,8 +2676,15 @@
 
         var prevAssistantContent = null;
         messages.forEach(function(msg) {
-          var role = msg.role === 'assistant' ? 'assistant' : 'user';
+          // Only human-visible roles. System injects (self-improvement Soul,
+          // knowledge fences, CONTINUITY notes) must never render as "You".
+          var rawRole = (msg.role || '').toLowerCase();
+          if (rawRole === 'system' || rawRole === 'tool') return;
           var content = msg.content || '';
+          if (content.indexOf('<kazma:data') >= 0 && content.indexOf('untrusted') >= 0) return;
+          if (content.indexOf('[SelfImprovement]') >= 0 && content.indexOf('BEGIN OBSERVATION') >= 0) return;
+          var role = rawRole === 'assistant' ? 'assistant' : (rawRole === 'user' ? 'user' : null);
+          if (!role) return;
           // Collapse identical consecutive assistant rows left by older
           // double-persist bugs (same answer twice after YOLO/refresh).
           if (role === 'assistant' && content && prevAssistantContent === content.trim()) {

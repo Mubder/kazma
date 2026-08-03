@@ -59,7 +59,30 @@ def _prepare_tg_outbound(
     return md_to_tg_html(text), out_ctx
 
 
+def _is_internal_prompt_inject(content: str) -> bool:
+    """True for system injects that must never appear as chat bubbles."""
+    c = (content or "").strip()
+    if not c:
+        return True
+    # Fenced observation blocks (Soul / knowledge / memory)
+    if "<kazma:data" in c and "untrusted" in c:
+        return True
+    if c.startswith("CONTINUITY:") or c.startswith("LATEST USER MESSAGE"):
+        return True
+    if c.startswith("MEMORY STORE TASK:") or c.startswith("MEMORY GRAPH CLEANUP"):
+        return True
+    if "[SelfImprovement]" in c and "BEGIN OBSERVATION" in c:
+        return True
+    return False
+
+
 def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
+    """Project graph messages to a Web UI transcript (user/assistant only).
+
+    System injects (self-improvement Soul, knowledge, priority notes) stay in
+    the checkpointer for the model but must not surface as "You" bubbles when
+    a Telegram season is opened in the Web UI.
+    """
     dicts = []
     for m in langgraph_messages:
         role = "user"
@@ -73,17 +96,30 @@ def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
                 role = "assistant"
             elif cls_name == "SystemMessage":
                 role = "system"
+            elif cls_name == "HumanMessage":
+                role = "user"
+            elif cls_name == "ToolMessage":
+                role = "tool"
             else:
                 role = "user"
             content = getattr(m, "content", "")
-        
-        if role in ("system", "user", "assistant") and content:
-            if isinstance(content, list):
-                content = " ".join(
-                    b.get("text", "") if isinstance(b, dict) else str(b)
-                    for b in content
-                )
-            dicts.append({"role": role, "content": str(content).strip()})
+
+        if isinstance(content, list):
+            content = " ".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in content
+            )
+        text = str(content or "").strip()
+        if not text:
+            continue
+        # Never put system/tool injects in the human-readable transcript
+        if role in ("system", "tool"):
+            continue
+        if role not in ("user", "assistant"):
+            continue
+        if _is_internal_prompt_inject(text):
+            continue
+        dicts.append({"role": role, "content": text})
     return dicts
 
 
