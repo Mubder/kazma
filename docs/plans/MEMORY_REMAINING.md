@@ -99,9 +99,9 @@ Federated search API remains for operator UI: `POST /api/memory/v2/federated-sea
 | DUI-13 Empty-state CTA | **Done** — Teach me a fact → chat |
 | DUI-14 Graph a11y | **Done** — arrows / ± / Home / Escape |
 | Settings consolidation | **Done** — Memory+Embedder one tab; connectors under LLM hub; Refresh Gateway on Platform Connectors |
-| Extraction hygiene | Still open (e.g. `kazma_v2_4_0` guard) |
-| Neo4j re-sync after invalidate | Still open |
-| beliefs_fts self-heal | Still open |
+| Extraction hygiene | **Done** — block `kazma_v2_*` / stack-name subjects at extract + mutate |
+| Neo4j edge on invalidate | **Done** — `delete_belief_edge` + supersede path + invalidate API |
+| beliefs_fts self-heal | **Done** — `beliefs_write` rebuilds FTS on malformed DB errors |
 
 ---
 

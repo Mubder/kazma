@@ -251,9 +251,40 @@ def mutate_belief(
 
     Never raises — logs on failure and returns ``{"action": "noop", ...}``.
     """
+    # Hygiene: reject version/stack-name subjects (e.g. kazma_v2_4_0)
+    try:
+        from kazma_core.memory.hygiene import is_blocked_belief_triple
+
+        if is_blocked_belief_triple(subject, predicate, obj):
+            logger.info(
+                "[belief_mutate] rejected blocked subject %r",
+                (subject or "")[:60],
+            )
+            return {
+                "action": "noop",
+                "belief_id": "",
+                "superseded_id": None,
+                "rejected": "blocked_subject",
+            }
+    except Exception:
+        pass
+
     ptype = _classify_predicate(predicate, predicate_type)
     sub = _slug(subject)
     pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
+    # Re-check after slugify (spaces → underscores)
+    try:
+        from kazma_core.memory.hygiene import is_blocked_belief_subject
+
+        if is_blocked_belief_subject(sub):
+            return {
+                "action": "noop",
+                "belief_id": "",
+                "superseded_id": None,
+                "rejected": "blocked_subject",
+            }
+    except Exception:
+        pass
     trust = _trust_weight(extraction_method, cfg)
     mem_class = derive_memory_class(ptype, importance, cfg=cfg)
     now = time.time()
@@ -349,7 +380,10 @@ def _insert_belief(
         emb_version = get_embedding_model_name()
     except Exception:
         emb_version = ""
-    conn.execute(
+    from kazma_core.memory.hygiene import beliefs_write
+
+    beliefs_write(
+        conn,
         """INSERT OR IGNORE INTO beliefs
            (id, tenant_id, subject, predicate, predicate_type, object,
             confidence, structural_importance, source_trust_weight,
@@ -441,10 +475,26 @@ def _mutate_functional(
         if old_obj == obj:
             return {"action": "noop", "belief_id": superseded_id, "superseded_id": None}
         state_before = {"id": superseded_id, "object": old_obj}
-        conn.execute(
+        from kazma_core.memory.hygiene import beliefs_write
+
+        beliefs_write(
+            conn,
             "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
             (now, now, superseded_id),
         )
+        # Dual-write cleanup: drop superseded edge from Neo4j
+        try:
+            from kazma_core.memory.graph_backend import delete_belief_edge
+
+            delete_belief_edge(
+                belief_id=str(superseded_id),
+                subject=sub,
+                predicate=pred,
+                obj=str(old_obj or ""),
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            logger.debug("[belief_mutate] neo4j delete on supersede skipped", exc_info=True)
     bid = _belief_id(tenant_id, sub, pred, now)
     state_after = _insert_belief(
         conn, bid, tenant_id, sub, pred, "functional", obj,

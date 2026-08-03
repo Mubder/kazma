@@ -17,6 +17,7 @@ __all__ = [
     "get_graph_backend",
     "graph_capability",
     "upsert_belief_edge",
+    "delete_belief_edge",
     "test_neo4j_connection",
     "sync_beliefs_to_neo4j",
     "reset_graph_backend_cache",
@@ -217,6 +218,54 @@ class Neo4jGraphBackend:
             return True
         except Exception:
             logger.debug("[graph_backend] neo4j upsert failed", exc_info=True)
+            return False
+
+    def delete_triple(
+        self,
+        *,
+        subject: str = "",
+        predicate: str = "",
+        obj: str = "",
+        belief_id: str = "",
+        tenant_id: str = "default",
+    ) -> bool:
+        """Remove a dual-written edge (by belief_id preferred, else S-P-O)."""
+        drv = self._get_driver()
+        if drv is None:
+            return False
+        try:
+            with drv.session(database=self._database) as session:
+                if belief_id:
+                    session.run(
+                        """
+                        MATCH ()-[r]->()
+                        WHERE r.belief_id = $bid
+                        DELETE r
+                        """,
+                        bid=belief_id,
+                    )
+                    return True
+                if subject and obj:
+                    pred = (predicate or "related_to").replace(" ", "_")
+                    rel = (
+                        "".join(c if c.isalnum() or c == "_" else "_" for c in pred).upper()
+                        or "RELATED"
+                    )
+                    session.run(
+                        f"""
+                        MATCH (a:Entity {{name: $sub, tenant_id: $tid}})
+                              -[r:{rel}]->
+                              (b:Entity {{name: $obj, tenant_id: $tid}})
+                        DELETE r
+                        """,
+                        sub=subject,
+                        obj=obj,
+                        tid=tenant_id,
+                    )
+                    return True
+            return False
+        except Exception:
+            logger.debug("[graph_backend] neo4j delete failed", exc_info=True)
             return False
 
     def neighbors(
@@ -594,6 +643,37 @@ def upsert_belief_edge(
                 belief_id=belief_id,
                 tenant_id=tenant_id,
                 confidence=confidence,
+            )
+        )
+    except Exception:
+        return False
+
+
+def delete_belief_edge(
+    *,
+    belief_id: str = "",
+    subject: str = "",
+    predicate: str = "",
+    obj: str = "",
+    tenant_id: str = "default",
+) -> bool:
+    """Best-effort remove a dual-written edge after soft-invalidate."""
+    try:
+        be = get_graph_backend()
+        if getattr(be, "name", "") != "neo4j":
+            return False
+        if not getattr(be, "available", False):
+            return False
+        delete = getattr(be, "delete_triple", None)
+        if not callable(delete):
+            return False
+        return bool(
+            delete(
+                subject=subject,
+                predicate=predicate,
+                obj=obj,
+                belief_id=belief_id,
+                tenant_id=tenant_id,
             )
         )
     except Exception:

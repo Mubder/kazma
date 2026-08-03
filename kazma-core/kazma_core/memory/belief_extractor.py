@@ -168,6 +168,18 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
         ptype = "set"
     if not (subject and predicate and obj):
         return None
+    # Hygiene: reject stack/version subjects mistaken for product entities
+    try:
+        from kazma_core.memory.hygiene import is_blocked_belief_triple
+
+        if is_blocked_belief_triple(subject, predicate, obj):
+            logger.info(
+                "[belief_extract] rejected blocked subject: %.60s",
+                subject,
+            )
+            return None
+    except Exception:
+        pass
     # Prompt fence: reject injection-like beliefs
     if is_override_delta is not None:
         if is_override_delta(f"{subject} {predicate} {obj}"):

@@ -477,30 +477,10 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.post("/api/memory/v2/beliefs/{belief_id}/invalidate")
     async def _memory_v2_belief_invalidate(belief_id: str):
-        """Soft-invalidate a belief (sets valid_until + invalidated_at)."""
-        import sqlite3
-        import time as _time
+        """Soft-invalidate a belief and best-effort remove its Neo4j edge."""
+        from kazma_core.memory.hygiene import invalidate_belief
 
-        from kazma_core.memory.schema_v2 import ensure_primary_schema
-        from kazma_core.paths import primary_memory_db
-
-        try:
-            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-            ensure_primary_schema(conn)
-            now = _time.time()
-            cur = conn.execute(
-                """
-                UPDATE beliefs SET valid_until=?, invalidated_at=?
-                WHERE id=? AND valid_until IS NULL
-                """,
-                (now, now, belief_id),
-            )
-            conn.commit()
-            n = int(cur.rowcount or 0)
-            conn.close()
-            return {"ok": n > 0, "updated": n}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)[:300]}
+        return invalidate_belief(belief_id, remove_graph=True)
 
     @self.app.get("/api/memory/v2/entity-merges")
     async def _memory_v2_entity_merges(limit: int = 50):
