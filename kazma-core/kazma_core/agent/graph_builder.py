@@ -682,24 +682,34 @@ async def supervisor_node(
                     logger.debug(
                         "[Supervisor] knowledge merge inject skipped", exc_info=True
                     )
-                # Chat-turn explain panel payload (SSE/WS ``memory_explain``)
-                if _explain:
-                    try:
-                        from kazma_core.memory.recall import build_memory_explain_payload
+                # Chat-turn Memory context (always when inject ran; full chips
+                # when explain_recall is on — industry observability default).
+                try:
+                    from kazma_core.memory.recall import build_memory_explain_payload
 
+                    _had_inject = (not result.empty) or bool(_kb_hits_for_explain)
+                    if _explain or _had_inject:
                         _payload = build_memory_explain_payload(
                             query=last_user_content,
                             result=result if not result.empty else None,
                             kb_hits=_kb_hits_for_explain,
-                            explain=True,
+                            explain=True if _explain else "summary",
                         )
                         if _payload is not None:
+                            if not _explain:
+                                _payload["detail"] = "summary"
+                                _payload["hint"] = (
+                                    "Enable Settings → Memory → Explain recall "
+                                    "for full channel chips on every hit."
+                                )
+                            else:
+                                _payload["detail"] = "full"
                             _memory_explain_cv.set(_payload)
-                    except Exception:
-                        logger.debug(
-                            "[Supervisor] memory explain payload skipped",
-                            exc_info=True,
-                        )
+                except Exception:
+                    logger.debug(
+                        "[Supervisor] memory explain payload skipped",
+                        exc_info=True,
+                    )
                 # Phase C: procedural skill hints (fenced, untrusted)
                 try:
                     import sqlite3

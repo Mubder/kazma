@@ -10,11 +10,21 @@ description: Manual verification matrix for research, KB, proxy, memory, and cha
 Run after pulls that touch research, Knowledge Library, proxy, or V2 memory.
 Check off each row; note environment (local / Docker / SearXNG / proxy).
 
-**Prerequisites**
+**Automated (offline) subset — industry CI:**
+
+```powershell
+pwsh -File scripts/industry_smoke.ps1
+```
+
+Runs readiness, re-index skip, session cancel, proxy helpers, golden memory
+eval, and docs presence. **Live network / LLM rows below still need a human.**
+
+**Prerequisites (manual live rows)**
 
 - App up (`uvicorn` / usual serve)
 - At least one LLM configured
 - Optional: SearXNG, Proxy Provider (anyIP), Neo4j
+- Preflight: `GET /api/research/ready` (add `?live=1` for a tiny live search)
 
 ---
 

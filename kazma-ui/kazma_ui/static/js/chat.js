@@ -1206,6 +1206,9 @@
     if (meta) {
       meta.textContent = nB + ' beliefs · ' + nE + ' episodes · ' + nK + ' KB';
     }
+    if (data.hint && data.detail === 'summary') {
+      // Light inject summary when full explain is off
+    }
     if (data.empty) {
       body.innerHTML = '<div class="agent-memory-explain-empty">' +
         escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) +
@@ -1231,8 +1234,11 @@
     (data.beliefs || []).forEach(function(h) { row('belief', h); });
     (data.episodes || []).forEach(function(h) { row('episode', h); });
     (data.knowledge || []).forEach(function(h) { row('knowledge', h); });
-    body.innerHTML = lines.join('') ||
-      '<div class="agent-memory-explain-empty">' + escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) + '</div>';
+    var hintHtml = (data.hint && data.detail === 'summary')
+      ? '<div class="agent-memory-explain-empty" style="margin-bottom:6px;">' + escapeHtml(String(data.hint)) + '</div>'
+      : '';
+    body.innerHTML = hintHtml + (lines.join('') ||
+      '<div class="agent-memory-explain-empty">' + escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) + '</div>');
     wrap.hidden = false;
     logProgress({
       kind: 'status',

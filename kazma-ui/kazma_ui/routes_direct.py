@@ -919,7 +919,7 @@ def register_direct_routes(self: Any) -> None:
         return {
             "merge_knowledge_into_chat": bool(v2.get("merge_knowledge_into_chat", True)),
             "promote_kb_to_episodes": bool(v2.get("promote_kb_to_episodes", True)),
-            "explain_recall": bool(v2.get("explain_recall", False)),
+            "explain_recall": bool(v2.get("explain_recall", True)),
             "smart_search": smart,
         }
 

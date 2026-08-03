@@ -89,8 +89,10 @@ When a provider is configured (e.g. anyIP), it applies to:
 | `crawl_site` link spider | Yes |
 | KB sitemap / robots discover | Yes |
 | Bing / Wikipedia SERP | Yes |
-| Local SearXNG | **No** (loopback) |
-| Jina / Firecrawl **API** calls | **No** (third-party fetch) |
+| DuckDuckGo (`ddgs`) | Yes (when Proxy Provider configured) |
+| Remote SearXNG | Yes |
+| Local / Docker SearXNG | **No** (loopback — no hairpin) |
+| Jina / Firecrawl **API** calls | **No** (they fetch the target server-side) |
 | LLM provider APIs | **Never** |
 
 Config is live (no restart). Password vault-encrypts.
@@ -146,7 +148,11 @@ Kill switch: `KAZMA_KB_AUTO_INJECT=0`.
 
 ### Chat-turn Memory context panel
 
-1. Enable **Explain recall** in Settings → Memory.  
+**Industry default:** `explain_recall` is **on** in config defaults (and Settings
+UI default). When inject happens with explain off, the panel still shows a
+**summary** (counts + short previews) plus a hint to enable full chips.
+
+1. Keep **Explain recall** on (Settings → Memory) for full channel chips.  
 2. Chat as usual (seed a fact, then ask).  
 3. Open the turn **workbench** (progress card).  
 4. **Memory context** lists beliefs / episodes / KB rows with **channel chips**:
@@ -218,6 +224,7 @@ like `user → works_at → Acme → located_in → Paris` can surface.
 
 | Method | Path | Role |
 |--------|------|------|
+| GET | `/api/research/ready` | Preflight (optional `?live=1`) |
 | POST | `/api/research/sessions` | Start deep research |
 | GET | `/api/research/sessions` | List sessions |
 | GET | `/api/research/sessions/{id}/stream` | SSE progress |

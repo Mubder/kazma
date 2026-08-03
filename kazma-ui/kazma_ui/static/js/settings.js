@@ -73,7 +73,7 @@ function settingsApp() {
         memoryMergeKb: true,
         memoryPromoteKb: true,
         memorySmartSearch: false,
-        memoryExplainRecall: false,
+        memoryExplainRecall: true,
         memoryNeo4jStatus: '',
         memoryNeo4jOk: false,
         logging: { level: 'INFO', format: 'text', retention_days: 7 },

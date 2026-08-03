@@ -47,6 +47,13 @@ Search, scrape, and crawl I/O are centralized under **`kazma_core.web_acquire`**
 
 Golden topics / scoring: `kazma_core.tools.research_eval`.
 
+### Preflight (industry)
+
+`GET /api/research/ready` reports SearXNG config, DDG package, proxy, and
+hard-page backends. Deep pipeline runs the same check at start and **fails
+fast** if no search path exists. Optional live micro-search:
+`?live=1` or `KAZMA_RESEARCH_PREFLIGHT_LIVE=1`.
+
 ### Research sessions + panel UX (R3)
 
 Deep runs can be started from the **Research** page (`/research`) without chat:
@@ -200,8 +207,9 @@ users see zero change.
   | KB page extract | Same ladder |
   | KB sitemap/robots discovery | `get_scraping_client` |
   | Remote SERP (Bing HTML, Wikipedia) | `get_scraping_client_sync` |
-  | Local SearXNG | **Direct** (loopback / Docker — must not hairpin through residential) |
-  | DuckDuckGo (`ddgs` lib) | Library-owned sockets (no httpx inject yet) |
+  | Local / Docker SearXNG | **Direct** (loopback — no residential hairpin) |
+  | Remote SearXNG | Scraping client / proxy when configured |
+  | DuckDuckGo (`ddgs`) | **Proxy** via `DDGS(proxy=…)` when Proxy Provider is on |
   | Jina / Firecrawl **API** calls | **Direct** (third-party fetches the target; keep API keys off residential) |
   | LLM APIs | **Never** (`http_pool`) |
   - **IP rotation** — a blocked IP retries from a new residential IP.

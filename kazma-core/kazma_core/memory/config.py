@@ -58,8 +58,9 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "access_bump_enabled": True,
         # Phase A: score boost for same-session episodes (RRF units)
         "session_boost": 0.35,
-        # Phase B: tag hit sources (fts5/dense/ppr/session_boost) in metadata
-        "explain_recall": False,
+        # Phase B: tag hit sources (fts5/dense/ppr/session_boost) in metadata.
+        # Industry default ON so operators see chat Memory context without a hunt.
+        "explain_recall": True,
         # Phase B: max belief rows scanned for dense cosine (prefilter cap)
         "dense_belief_candidate_cap": 400,
         # Working-tier TTL (hours) — macro_sleep demotes stale working → episodic

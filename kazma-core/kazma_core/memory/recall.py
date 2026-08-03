@@ -1405,15 +1405,20 @@ def build_memory_explain_payload(
     query: str,
     result: RecallResult | None = None,
     kb_hits: list[dict[str, Any]] | None = None,
-    explain: bool = False,
+    explain: bool | str = False,
 ) -> dict[str, Any] | None:
     """UI payload for the chat-turn explain panel (SSE ``memory_explain``).
 
-    Returns ``None`` when explain is off. When on, always returns a dict
-    (may be empty) so the client can show "no recall this turn".
+    Args:
+        explain: ``False`` → no payload. ``True`` / ``"full"`` → full chips.
+            ``"summary"`` → counts + short previews (industry light mode when
+            inject happened but full explain is off).
     """
     if not explain:
         return None
+    detail = "full" if explain is True or explain == "full" else "summary"
+    max_items = 8 if detail == "full" else 3
+    content_n = 220 if detail == "full" else 120
 
     def _hit(h: RecallHit) -> dict[str, Any]:
         srcs = (h.metadata or {}).get("sources") or (
@@ -1422,24 +1427,26 @@ def build_memory_explain_payload(
         return {
             "id": h.id,
             "kind": h.kind,
-            "content": (h.content or "")[:220],
+            "content": (h.content or "")[:content_n],
             "score": round(float(h.score or 0), 4),
-            "sources": list(srcs)[:6],
+            "sources": list(srcs)[:6] if detail == "full" else list(srcs)[:2],
         }
 
-    beliefs = [_hit(h) for h in (result.beliefs if result else [])[:8]]
-    episodes = [_hit(h) for h in (result.episodes if result else [])[:8]]
+    beliefs = [_hit(h) for h in (result.beliefs if result else [])[:max_items]]
+    episodes = [_hit(h) for h in (result.episodes if result else [])[:max_items]]
     knowledge: list[dict[str, Any]] = []
-    for h in (kb_hits or [])[:5]:
+    for h in (kb_hits or [])[: max(3, max_items - 2)]:
         if not isinstance(h, dict):
             continue
         knowledge.append(
             {
                 "id": h.get("id") or "",
                 "kind": "knowledge",
-                "content": str(h.get("content") or "")[:220],
+                "content": str(h.get("content") or "")[:content_n],
                 "score": h.get("score"),
-                "sources": list(h.get("sources") or ["kb_rrf"])[:6],
+                "sources": list(h.get("sources") or ["kb_rrf"])[
+                    : (6 if detail == "full" else 2)
+                ],
                 "provenance": h.get("provenance") or {},
             }
         )
@@ -1447,6 +1454,7 @@ def build_memory_explain_payload(
     return {
         "query": (query or "")[:200],
         "empty": empty,
+        "detail": detail,
         "beliefs": beliefs,
         "episodes": episodes,
         "knowledge": knowledge,

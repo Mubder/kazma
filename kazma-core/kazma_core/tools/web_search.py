@@ -99,6 +99,22 @@ def _searxng_candidate_bases() -> list[str]:
     return out
 
 
+def _is_loopback_base(base: str) -> bool:
+    """True for local SearXNG — must not hairpin through residential proxy."""
+    b = (base or "").lower()
+    return any(
+        x in b
+        for x in (
+            "127.0.0.1",
+            "localhost",
+            "0.0.0.0",
+            "[::1]",
+            "host.docker.internal",
+            "searxng:",  # docker service name on internal network
+        )
+    )
+
+
 def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
     """Try SearXNG across candidate bases. Returns (results|None, status_note)."""
     import time as _time
@@ -126,12 +142,19 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
                 "language": "all",
                 "pageno": 1,
             }
-            r = httpx.get(
-                search_url,
-                params=params,
-                timeout=8.0,
-                headers={"Accept": "application/json", "User-Agent": "KazmaSearch/0.6"},
-            )
+            headers = {"Accept": "application/json", "User-Agent": "KazmaSearch/0.6"}
+            # Remote SearXNG can use Proxy Provider; loopback stays direct.
+            if _is_loopback_base(base):
+                r = httpx.get(
+                    search_url, params=params, timeout=8.0, headers=headers
+                )
+            else:
+                from kazma_core.proxy.client import get_scraping_client_sync
+
+                with get_scraping_client_sync(
+                    follow_redirects=True, timeout=8.0, headers=headers
+                ) as client:
+                    r = client.get(search_url, params=params)
             if r.status_code != 200:
                 last_note = f"searxng:http_{r.status_code}@{base}"
                 continue
@@ -173,14 +196,29 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
 
 
 def _ddg_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
-    """DuckDuckGo text search. Empty list → try next backend (not a hard fail)."""
+    """DuckDuckGo text search (Proxy Provider when configured)."""
     try:
         from duckduckgo_search import DDGS
 
-        with DDGS() as ddgs:
+        proxy_url = None
+        try:
+            from kazma_core.proxy.client import get_active_proxy_url
+
+            proxy_url = get_active_proxy_url()
+        except Exception:
+            proxy_url = None
+        # DDGS accepts http/https/socks5 proxy URL
+        kwargs: dict = {}
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+        with DDGS(**kwargs) as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
             if results:
-                logger.info("[web_search] DuckDuckGo returned %d results", len(results))
+                logger.info(
+                    "[web_search] DuckDuckGo returned %d results%s",
+                    len(results),
+                    " (via proxy)" if proxy_url else "",
+                )
                 return results, "duckduckgo:ok"
             logger.info("[web_search] DuckDuckGo returned 0 results for %r", query)
             return None, "duckduckgo:empty"

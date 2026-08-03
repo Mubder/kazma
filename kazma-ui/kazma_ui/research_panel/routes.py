@@ -176,6 +176,21 @@ def create_research_router() -> APIRouter:
 
     # ── Live deep-research sessions (R3) ──────────────────────────────
 
+    @router.get("/api/research/ready")
+    async def research_ready(live: bool = False) -> JSONResponse:
+        """Industry preflight: search backends, proxy, optional live probe."""
+        try:
+            from kazma_core.tools.research_readiness import research_readiness
+
+            report = research_readiness(probe_search=bool(live))
+            return JSONResponse({"ok": True, **report})
+        except Exception as exc:
+            logger.exception("[research] ready probe failed")
+            return JSONResponse(
+                {"ok": False, "ready": False, "error": str(exc), "checks": []},
+                status_code=500,
+            )
+
     @router.post("/api/research/sessions")
     async def start_research_session(body: dict[str, Any]) -> JSONResponse:
         """Start a deep research pipeline run in the background.

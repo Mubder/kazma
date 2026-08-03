@@ -340,6 +340,31 @@ async def run_research_pipeline(
     out_dir = _workspace_research_dir(topic)
     rel_dir = _rel(out_dir)
 
+    # Industry preflight — fail fast when no search path exists
+    await _emit(progress_cb, "preflight", "Checking research stack…")
+    try:
+        from kazma_core.tools.research_readiness import (
+            format_readiness_message,
+            research_readiness,
+        )
+
+        ready = research_readiness(probe_search=False)
+        log.append(f"Preflight: {format_readiness_message(ready)}")
+        for c in ready.get("checks") or []:
+            log.append(f"- [{c.get('level')}] {c.get('id')}: {c.get('message')}")
+        if not ready.get("ready"):
+            msg = format_readiness_message(ready)
+            await _emit(progress_cb, "error", msg)
+            return (
+                "Error: research stack not ready — "
+                f"{msg}. Configure SearXNG (KAZMA_SEARXNG_URL) or install "
+                "duckduckgo_search; see GET /api/research/ready."
+            )
+        await _emit(progress_cb, "preflight", format_readiness_message(ready))
+    except Exception as exc:
+        log.append(f"Preflight skipped: {exc}")
+        logger.debug("[research_pipeline] preflight failed", exc_info=True)
+
     await _emit(progress_cb, "plan", f"Planning research on: {topic}")
     log.append(f"## Pipeline start — depth={depth_l} max_sources={max_sources}")
     log.append(f"Topic: {topic}")

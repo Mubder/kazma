@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Industry caveats closed (smoke, explain, research, SERP) (2026-08-03)
+
+- **Automated smoke:** `scripts/industry_smoke.ps1` + `tests/test_industry_smoke_matrix.py`
+  (offline matrix rows; live rows remain in smoke-matrix.md).
+- **Explain recall** defaults **on**; chat still gets inject **summary** panel when
+  full explain is off.
+- **Research preflight:** `GET /api/research/ready` + pipeline fail-fast when no
+  search path; clearer errors.
+- **SERP proxy:** DuckDuckGo via `DDGS(proxy=…)`; remote SearXNG via scraping
+  client; loopback SearXNG stays direct.
+
 ## Unreleased — Docs: Recent features operator guide (2026-08-03)
 
 - **Guide:** `docs/docs/guide/recent-features.md` — tour of deep research
