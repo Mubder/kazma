@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "is_blocked_belief_subject",
     "is_blocked_belief_triple",
+    "is_junk_entity_token",
     "rebuild_beliefs_fts",
     "beliefs_write",
     "invalidate_belief",
@@ -34,11 +35,47 @@ _BLOCKED_SUBJECT_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"^v2[_-]?\d+[_\-]?\d+", re.I),  # bare v2_4_0 style
 )
 
+# Boolean / null tokens that become orphan graph "entities" when belief
+# objects like memory_needs_cleanup → true are promoted to nodes.
+# Keep them as *object text* on beliefs; never as entity id / virtual node.
+_JUNK_ENTITY_TOKENS = frozenset(
+    {
+        "true",
+        "false",
+        "null",
+        "none",
+        "nil",
+        "undefined",
+        "nan",
+        "yes",
+        "no",
+        "y",
+        "n",
+        "0",
+        "1",
+    }
+)
+
+
+def is_junk_entity_token(text: str) -> bool:
+    """True for tokens that must never be graph entity ids (true/false/…)."""
+    s = (text or "").strip().lower()
+    if not s:
+        return True
+    if s in _JUNK_ENTITY_TOKENS:
+        return True
+    # Bare integers (importance/count shells like entity name "5")
+    if s.isdigit() and len(s) <= 4:
+        return True
+    return False
+
 
 def is_blocked_belief_subject(subject: str) -> bool:
     """True if this subject slug should never become a belief entity."""
     s = (subject or "").strip().lower().replace(" ", "_")
     if not s:
+        return True
+    if is_junk_entity_token(s):
         return True
     for pat in _BLOCKED_SUBJECT_RES:
         if pat.search(s):
@@ -47,8 +84,13 @@ def is_blocked_belief_subject(subject: str) -> bool:
 
 
 def is_blocked_belief_triple(subject: str, predicate: str = "", obj: str = "") -> bool:
-    """Reject triples whose subject is blocked (object alone is not enough)."""
-    del predicate, obj  # reserved for future object-level rules
+    """Reject triples whose subject is blocked.
+
+    Boolean *objects* (``… → true``) are allowed as fact payloads — they are
+    not blocked here. Graph emission must use :func:`is_junk_entity_token` so
+    those objects never become stand-alone entity nodes.
+    """
+    del predicate, obj
     return is_blocked_belief_subject(subject)
 
 

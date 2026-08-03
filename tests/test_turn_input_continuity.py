@@ -22,6 +22,8 @@ def test_is_short_continuation():
 
 
 def test_is_memory_store_intent_shipx_paste():
+    from kazma_core.agent.turn_input import is_memory_graph_cleanup_intent
+
     msg = (
         "Now read this and add it to the ShipX memory:\n\n"
         "Overview of ShipX\n"
@@ -33,6 +35,12 @@ def test_is_memory_store_intent_shipx_paste():
     assert "ShipX" in focus or "shipx" in focus.lower()
     # Not a pure Q&A about reminders
     assert is_memory_store_intent("When is my ZCode reset?") is False
+    cleanup = (
+        "Entities is still not so perfect, it is so messy, the true concept "
+        "I want kazma parts aligned Mubder → Kazma → related entities like ShipX"
+    )
+    assert is_memory_graph_cleanup_intent(cleanup) is True
+    assert is_memory_store_intent(cleanup) is False
 
 
 def test_contentful_ignores_empty_pending():

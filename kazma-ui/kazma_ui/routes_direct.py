@@ -459,11 +459,35 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.get("/api/memory/v2/beliefs/{belief_id}")
     async def _memory_v2_belief_detail(belief_id: str):
-        """Belief detail + supersede chain."""
+        """Belief detail + supersede chain.
+
+        Strips binary ``embedding`` BLOBs — FastAPI's jsonable_encoder tries
+        ``bytes.decode('utf-8')`` and crashes (UnicodeDecodeError) on float32
+        vector payloads (e.g. byte 0xbc is valid float32, not UTF-8).
+        """
         import sqlite3
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
+
+        def _belief_json_safe(row: sqlite3.Row | dict) -> dict:
+            d = dict(row)
+            emb = d.pop("embedding", None)
+            if emb is not None:
+                try:
+                    n = len(emb) if not isinstance(emb, memoryview) else len(bytes(emb))
+                except Exception:
+                    n = 0
+                d["has_embedding"] = n > 0
+                d["embedding_bytes"] = int(n)
+            else:
+                d["has_embedding"] = False
+                d["embedding_bytes"] = 0
+            # Any other non-JSON-friendly values (defensive)
+            for k, v in list(d.items()):
+                if isinstance(v, (bytes, bytearray, memoryview)):
+                    d[k] = f"<binary {len(v)} bytes>"
+            return d
 
         try:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
@@ -473,7 +497,7 @@ def register_direct_routes(self: Any) -> None:
             if not row:
                 conn.close()
                 return {"ok": False, "error": "not_found"}
-            chain = [dict(row)]
+            chain = [_belief_json_safe(row)]
             # Walk supersedes_id ancestors
             cur = row
             for _ in range(20):
@@ -483,7 +507,7 @@ def register_direct_routes(self: Any) -> None:
                 prev = conn.execute("SELECT * FROM beliefs WHERE id=?", (sid,)).fetchone()
                 if not prev:
                     break
-                chain.append(dict(prev))
+                chain.append(_belief_json_safe(prev))
                 cur = prev
             # Children that supersede this belief
             kids = conn.execute(
@@ -494,7 +518,7 @@ def register_direct_routes(self: Any) -> None:
             conn.close()
             return {
                 "ok": True,
-                "belief": dict(row),
+                "belief": _belief_json_safe(row),
                 "chain": chain,
                 "superseded_by": [dict(k) for k in kids],
             }
@@ -1227,6 +1251,13 @@ def register_direct_routes(self: Any) -> None:
                 is_self_label,
                 resolve_hub_display_name,
             )
+            try:
+                from kazma_core.memory.hygiene import is_junk_entity_token
+            except Exception:
+                def is_junk_entity_token(t: str) -> bool:  # type: ignore[misc]
+                    return str(t or "").strip().lower() in (
+                        "true", "false", "null", "none", "yes", "no", "0", "1",
+                    )
 
             obj_texts: set[str] = set()
             obj_belief_count: dict[str, int] = {}
@@ -1278,6 +1309,8 @@ def register_direct_routes(self: Any) -> None:
                 if oid in self_ids:
                     # Object points at a self shell — treat as hub
                     continue
+                if is_junk_entity_token(oid):
+                    continue
                 if oid in ent_lookup:
                     ref_ids.add(oid)
 
@@ -1294,6 +1327,8 @@ def register_direct_routes(self: Any) -> None:
             for eid in ref_ids:
                 if eid in self_ids and eid != HUB_ID:
                     # Never emit a second self person node — hub only
+                    continue
+                if is_junk_entity_token(eid):
                     continue
                 e = ent_lookup.get(eid)
                 if eid == HUB_ID:
@@ -1325,6 +1360,10 @@ def register_direct_routes(self: Any) -> None:
             existing_ids = {n["id"] for n in nodes}
             for obj_text in obj_texts:
                 if obj_text in existing_ids:
+                    continue
+                # Never promote booleans/nulls to graph nodes (orphan "true"
+                # concept with 5 beliefs was pure object-payload pollution).
+                if is_junk_entity_token(obj_text):
                     continue
                 # Virtual nodes are type 'concept'; drop under entity_type filter.
                 if entity_type and entity_type.strip() and "concept" != entity_type.strip():

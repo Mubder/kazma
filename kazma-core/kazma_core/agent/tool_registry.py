@@ -869,6 +869,183 @@ class LocalToolRegistry:
                 logger.warning("[memory_invalidate] failed: %s", exc)
                 return f"Error: memory_invalidate failed — {exc}"
 
+        def _mem_merge_entities(source_id: str, target_id: str) -> str:
+            """Merge source into target (beliefs rewired, aliases union)."""
+            import json as _json
+            import sqlite3
+            import time as _time
+            import uuid as _uuid
+
+            from kazma_core.memory.schema_v2 import ensure_primary_schema
+            from kazma_core.paths import primary_memory_db
+
+            src_id = (source_id or "").strip()
+            tgt_id = (target_id or "").strip()
+            if not src_id or not tgt_id:
+                return "Error: source_id and target_id required"
+            if src_id == tgt_id:
+                return "Error: source and target must differ"
+            protected = {"user", "assistant"}
+            if src_id.lower() in protected:
+                return f"Error: cannot merge protected source {src_id}"
+            try:
+                conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+                conn.row_factory = sqlite3.Row
+                ensure_primary_schema(conn)
+                src = conn.execute(
+                    "SELECT id, name, aliases_json FROM entities WHERE id=?", (src_id,)
+                ).fetchone()
+                tgt = conn.execute(
+                    "SELECT id, name, aliases_json FROM entities WHERE id=?", (tgt_id,)
+                ).fetchone()
+                if not src or not tgt:
+                    conn.close()
+                    return json.dumps(
+                        {"ok": False, "error": "source or target not found"},
+                        ensure_ascii=False,
+                    )
+                try:
+                    src_aliases = _json.loads(src["aliases_json"] or "[]")
+                except Exception:
+                    src_aliases = []
+                try:
+                    tgt_aliases = _json.loads(tgt["aliases_json"] or "[]")
+                except Exception:
+                    tgt_aliases = []
+                if not isinstance(src_aliases, list):
+                    src_aliases = []
+                if not isinstance(tgt_aliases, list):
+                    tgt_aliases = []
+                for a in list(src_aliases) + [src["name"], src_id]:
+                    if a and a not in tgt_aliases:
+                        tgt_aliases.append(a)
+                conn.execute(
+                    "UPDATE entities SET aliases_json=? WHERE id=?",
+                    (_json.dumps(tgt_aliases, ensure_ascii=False), tgt_id),
+                )
+                for old in {src_id, src["name"]}:
+                    if not old:
+                        continue
+                    conn.execute(
+                        "UPDATE beliefs SET subject=? WHERE subject=?", (tgt_id, old)
+                    )
+                    conn.execute(
+                        "UPDATE beliefs SET object=? WHERE object=?", (tgt_id, old)
+                    )
+                conn.execute(
+                    """UPDATE entities
+                       SET metadata_json = json_set(
+                         COALESCE(NULLIF(metadata_json,''), '{}'),
+                         '$.merged_into', ?
+                       )
+                       WHERE id = ?""",
+                    (tgt_id, src_id),
+                )
+                mid = "m_" + _uuid.uuid4().hex[:16]
+                now = _time.time()
+                conn.execute(
+                    """INSERT OR IGNORE INTO entity_merges
+                       (id, tenant_id, source_entity_id, target_entity_id, status,
+                        merge_tier, confidence, requested_at, resolved_at, metadata_json)
+                       VALUES (?, 'default', ?, ?, 'approved', 'agent_tool', 1.0, ?, ?, ?)""",
+                    (
+                        mid,
+                        src_id,
+                        tgt_id,
+                        now,
+                        now,
+                        _json.dumps({"via": "memory_merge_entities"}),
+                    ),
+                )
+                conn.commit()
+                conn.close()
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "merge_id": mid,
+                        "source_id": src_id,
+                        "target_id": tgt_id,
+                        "status": "approved",
+                        "hint": "Beliefs rewired; refresh /memory graph",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            except Exception as exc:
+                logger.warning("[memory_merge_entities] failed: %s", exc)
+                return f"Error: memory_merge_entities failed — {exc}"
+
+        def _mem_link_entities(
+            subject: str, predicate: str, obj: str, *, predicate_type: str = "set"
+        ) -> str:
+            """Create subject --predicate--> object belief (graph edge)."""
+            import sqlite3
+
+            from kazma_core.memory.belief_mutation import mutate_belief
+            from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+            from kazma_core.paths import memory_ops_db, primary_memory_db
+            from kazma_core.safety.hitl import get_current_tenant_id
+
+            sub = (subject or "").strip()
+            pred = (predicate or "related_to").strip() or "related_to"
+            object_ = (obj or "").strip()
+            if not sub or not object_:
+                return "Error: subject and object required"
+            try:
+                primary = sqlite3.connect(
+                    primary_memory_db(), check_same_thread=False
+                )
+                primary.row_factory = sqlite3.Row
+                ensure_primary_schema(primary)
+                ops = sqlite3.connect(
+                    memory_ops_db(), check_same_thread=False
+                )
+                ensure_ops_schema(ops)
+                tenant = get_current_tenant_id()
+                for eid, etype in ((sub, "concept"), (object_, "concept")):
+                    if eid.lower() == "user":
+                        etype = "person"
+                    row = primary.execute(
+                        "SELECT id FROM entities WHERE id=?", (eid,)
+                    ).fetchone()
+                    if not row:
+                        primary.execute(
+                            """INSERT OR IGNORE INTO entities
+                               (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
+                               VALUES (?, ?, ?, ?, '[]', 0, '{}')""",
+                            (eid, tenant, etype, eid.replace("_", " ")),
+                        )
+                primary.commit()
+                result = mutate_belief(
+                    primary,
+                    sub,
+                    pred,
+                    object_,
+                    ops_conn=ops,
+                    predicate_type=predicate_type if predicate_type in ("functional", "set", "state") else "set",
+                    confidence=0.9,
+                    importance=4,
+                    extraction_method="user_explicit",
+                    tenant_id=tenant,
+                )
+                ops.close()
+                primary.close()
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "link": result,
+                        "subject": sub,
+                        "predicate": pred,
+                        "object": object_,
+                        "hint": "Edge created; use has_project / part_of / owns for hierarchy",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            except Exception as exc:
+                logger.warning("[memory_link_entities] failed: %s", exc)
+                return f"Error: memory_link_entities failed — {exc}"
+
         def _mem_delete_entity(entity_id: str) -> str:
             import sqlite3
 
@@ -1002,12 +1179,14 @@ class LocalToolRegistry:
         @self.register(
             description=(
                 "MEMORY ADMIN (read+write). Prefer this over SQL for all memory maintenance. "
-                "action=list_beliefs|list_entities|invalidate|delete_entity|purge_empty_entities|help. "
-                "Writes: invalidate (soft-delete belief by id=), delete_entity (id=entity id), "
-                "purge_empty_entities (confirm=true to delete zero-belief shells). "
-                "Reads: list_beliefs/list_entities with optional q and limit. "
-                "Example: action=purge_empty_entities confirm=true. "
-                "Example: action=invalidate id=b_abc123. Never use execute_db_query for memory."
+                "action=list_beliefs|list_entities|invalidate|delete_entity|purge_empty_entities|"
+                "merge|link|help. "
+                "Graph cleanup: merge (id=source, target=keep), link (subject, predicate, object). "
+                "Example hierarchy: link subject=user predicate=has_project object=kazma; "
+                "link subject=kazma predicate=has_part object=kazma_framework. "
+                "Merge duplicate shells into one: merge id=mubder_kazma target=kazma. "
+                "Delete junk entity true/false: delete_entity id=true. "
+                "DO NOT use memory_store to restructure the graph — store only adds notes."
             ),
             category="memory",
         )
@@ -1017,6 +1196,10 @@ class LocalToolRegistry:
             q: str = "",
             limit: int = 40,
             confirm: bool = False,
+            target: str = "",
+            subject: str = "",
+            predicate: str = "related_to",
+            object: str = "",
         ) -> str:
             # Models often call memory_admin with {} — never require action.
             act = (action or "help").strip().lower().replace("-", "_")
@@ -1029,20 +1212,36 @@ class LocalToolRegistry:
                             "invalidate",
                             "delete_entity",
                             "purge_empty_entities",
+                            "merge",
+                            "link",
                             "help",
                         ],
                         "writes": [
                             "invalidate",
                             "delete_entity",
                             "purge_empty_entities",
+                            "merge",
+                            "link",
                         ],
                         "examples": [
-                            {"action": "list_entities", "q": "shipx"},
-                            {"action": "purge_empty_entities", "confirm": False},
-                            {"action": "purge_empty_entities", "confirm": True},
-                            {"action": "invalidate", "id": "b_…"},
+                            {"action": "list_entities", "q": "kazma"},
+                            {"action": "merge", "id": "mubder_kazma", "target": "kazma"},
+                            {
+                                "action": "link",
+                                "subject": "user",
+                                "predicate": "has_project",
+                                "object": "kazma",
+                            },
+                            {
+                                "action": "link",
+                                "subject": "kazma",
+                                "predicate": "has_part",
+                                "object": "kazma_framework",
+                            },
                             {"action": "delete_entity", "id": "true"},
+                            {"action": "purge_empty_entities", "confirm": True},
                         ],
+                        "graph_shape_goal": "user(Mubder) → has_project → kazma → has_part → …",
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -1057,9 +1256,45 @@ class LocalToolRegistry:
                 return _mem_delete_entity(id)
             if act in ("purge_empty_entities", "purge_empty", "purge"):
                 return _mem_purge_empty_entities(confirm=bool(confirm))
+            if act in ("merge", "merge_entities"):
+                return _mem_merge_entities(id or subject, target or object)
+            if act in ("link", "link_entities", "edge"):
+                return _mem_link_entities(
+                    subject or id, predicate, object or target
+                )
             return (
                 f"Error: unknown action {action!r}. "
                 "Use action=help for the list."
+            )
+
+        @self.register(
+            description=(
+                "WRITE: Merge memory entity source into target. Beliefs rewired; "
+                "use for duplicate shells (mubder_kazma → kazma, kazma_framework → kazma). "
+                "Protected: cannot merge away user. Prefer over memory_store for cleanup."
+            ),
+            category="memory",
+        )
+        async def memory_merge_entities(source_id: str, target_id: str) -> str:
+            return _mem_merge_entities(source_id, target_id)
+
+        @self.register(
+            description=(
+                "WRITE: Link two entities with a belief edge subject--predicate-->object. "
+                "Use for graph hierarchy e.g. user has_project kazma; kazma has_part "
+                "kazma_file_index. Creates missing entity rows. Not for free-text notes "
+                "(use memory_store for notes)."
+            ),
+            category="memory",
+        )
+        async def memory_link_entities(
+            subject: str,
+            object: str,
+            predicate: str = "related_to",
+            predicate_type: str = "set",
+        ) -> str:
+            return _mem_link_entities(
+                subject, predicate, object, predicate_type=predicate_type
             )
 
         @self.register(
@@ -1119,6 +1354,9 @@ class LocalToolRegistry:
                 "Store a fact, preference, or conversation fragment in long-term memory. "
                 "Use when the user shares personal info, preferences, or important context "
                 "that should be remembered across sessions. "
+                "DO NOT use this to restructure/clean the entity graph — for merge shells, "
+                "link Mubder→Kazma→parts, or delete junk nodes (true/false) use "
+                "memory_merge_entities / memory_link_entities / memory_admin / memory_delete_entity. "
                 "For rotating single-valued facts (e.g. 'my Grok next weekly reset is …', "
                 "'ZCode next reset is …'), pass metadata JSON with "
                 '{"predicate":"grok_next_reset","object":"<when>"} or '

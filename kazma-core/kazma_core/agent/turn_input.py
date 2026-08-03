@@ -28,6 +28,7 @@ __all__ = [
     "normalize_history_messages",
     "is_short_continuation",
     "is_memory_store_intent",
+    "is_memory_graph_cleanup_intent",
     "is_bulk_document_message",
     "extract_store_focus_query",
     "latest_turn_priority_note",
@@ -101,6 +102,33 @@ def is_bulk_document_message(text: str, *, min_chars: int = 600) -> bool:
     return len((text or "").strip()) >= min_chars
 
 
+# User wants graph/entity hygiene: merge, link, delete junk — NOT memory_store.
+_GRAPH_CLEANUP_RE = re.compile(
+    r"(?is)"
+    r"("
+    r"\b(?:entities?|beliefs?|graph|nodes?)\b.{0,80}\b(?:messy|missy|clutter|cleanup|clean\s*up|align|restructur|organiz|organise|hierarchy|linked|duplicate)\b"
+    r"|"
+    r"\b(?:merge|link|align|restructur|cleanup|clean\s*up)\b.{0,80}\b(?:entities?|beliefs?|graph|nodes?|kazma|shipx)\b"
+    r"|"
+    r"\b(?:aligned|structure)\b.{0,40}\b(?:this way|like|as)\b"
+    r"|"
+    r"\b(?:mubder|user)\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b"
+    r"|"
+    r"\bjunk\b.{0,40}\b(?:entities?|nodes?|true|false)\b"
+    r"|"
+    r"\bdelete\b.{0,40}\b(?:entities?|entity|true|false)\b"
+    r")"
+)
+
+
+def is_memory_graph_cleanup_intent(text: str) -> bool:
+    """True when the user wants to restructure/clean the belief graph."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    return bool(_GRAPH_CLEANUP_RE.search(t))
+
+
 def is_memory_store_intent(text: str) -> bool:
     """True when the user is asking to *save* content into memory this turn.
 
@@ -110,6 +138,9 @@ def is_memory_store_intent(text: str) -> bool:
     """
     t = (text or "").strip()
     if not t:
+        return False
+    # Graph cleanup wins over store (users say "memory is messy" without meaning store)
+    if is_memory_graph_cleanup_intent(t):
         return False
     if _STORE_INTENT_RE.search(t):
         return True
@@ -163,7 +194,12 @@ def extract_store_focus_query(text: str) -> str:
     return q[:240] if q else t[:200]
 
 
-def latest_turn_priority_note(*, store_intent: bool = False, focus: str = "") -> str:
+def latest_turn_priority_note(
+    *,
+    store_intent: bool = False,
+    graph_cleanup: bool = False,
+    focus: str = "",
+) -> str:
     """System note so the model does not pivot to an old recalled topic."""
     base = (
         "LATEST USER MESSAGE PRIORITY: Your job this turn is to fulfill the "
@@ -172,14 +208,29 @@ def latest_turn_priority_note(*, store_intent: bool = False, focus: str = "") ->
         "recalled topic (e.g. reminders, quota resets, prior tools) when the "
         "latest message is about something else."
     )
-    if store_intent:
+    if graph_cleanup:
+        base += (
+            " MEMORY GRAPH CLEANUP TASK: The user wants the entity/belief graph "
+            "restructured or cleaned — NOT a new free-text memory_store note. "
+            "Use memory_list_entities / memory_list_beliefs, then "
+            "memory_merge_entities (collapse duplicates into one canonical id), "
+            "memory_link_entities (hierarchy edges e.g. user has_project kazma; "
+            "kazma has_part …), memory_delete_entity (junk shells like true/false), "
+            "memory_invalidate (bad beliefs). Target shape often: "
+            "Mubder(user) → has_project → kazma → has_part → related entities. "
+            "Do NOT invent ShipX notes or re-save FILE_INDEX unless they asked."
+        )
+        if focus:
+            base += f" Focus keywords: {focus}."
+    elif store_intent:
         focus_bit = f" Subject focus: {focus}." if focus else ""
         base += (
             " MEMORY STORE TASK: The user wants the content of their latest "
             "message saved into long-term memory (use memory_store / belief "
             "tools as appropriate). Extract structured facts from *that* "
-            f"payload{focus_bit} Do not answer as if they asked about "
-            "unrelated prior conversation topics."
+            f"payload{focus_bit} Prefer structured links "
+            "(memory_link_entities) for project trees over one giant noted blob. "
+            "Do not answer as if they asked about unrelated prior conversation topics."
         )
     return base
 

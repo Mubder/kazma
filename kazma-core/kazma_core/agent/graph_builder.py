@@ -605,18 +605,32 @@ async def supervisor_node(
     # must NOT inherit ZCode/session topics via recall session_boost.
     _recall_query = last_user_content
     _store_intent = False
+    _graph_cleanup = False
     _store_focus = ""
     _recall_session_id = state.get("thread_id")
     try:
         from kazma_core.agent.turn_input import (
             extract_store_focus_query,
+            is_memory_graph_cleanup_intent,
             is_memory_store_intent,
             is_short_continuation,
             latest_turn_priority_note,
         )
 
-        _store_intent = is_memory_store_intent(last_user_content)
-        if _store_intent:
+        _graph_cleanup = is_memory_graph_cleanup_intent(last_user_content)
+        _store_intent = (not _graph_cleanup) and is_memory_store_intent(
+            last_user_content
+        )
+        if _graph_cleanup:
+            # Focus list/merge tools on named projects in the message
+            _store_focus = extract_store_focus_query(last_user_content) or "kazma entities graph"
+            _recall_query = _store_focus
+            _recall_session_id = None
+            logger.info(
+                "[Supervisor] Memory graph-cleanup intent — recall %r (no session_boost)",
+                (_recall_query or "")[:80],
+            )
+        elif _store_intent:
             _store_focus = extract_store_focus_query(last_user_content)
             if _store_focus:
                 _recall_query = _store_focus
@@ -665,12 +679,16 @@ async def supervisor_node(
                     {"role": "system", "content": _cont_note},
                 )
 
-        # Pin latest-turn priority for every non-empty turn (and stronger on store).
+        # Pin latest-turn priority for store, graph cleanup, or long messages.
         if last_user_content.strip() and (
-            _store_intent or len(last_user_content.strip()) >= 80
+            _store_intent
+            or _graph_cleanup
+            or len(last_user_content.strip()) >= 80
         ):
             _prio = latest_turn_priority_note(
-                store_intent=_store_intent, focus=_store_focus
+                store_intent=_store_intent,
+                graph_cleanup=_graph_cleanup,
+                focus=_store_focus,
             )
             _ins = 1 if messages and messages[0].get("role") == "system" else 0
             messages.insert(_ins, {"role": "system", "content": _prio})
