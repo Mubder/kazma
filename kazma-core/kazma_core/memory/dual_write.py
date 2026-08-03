@@ -310,10 +310,13 @@ class DualWriteMirror:
                     ),
                 )
                 # Compute + store the episode embedding so dense vector
-                # recall can find it. Best-effort: a missing/broken
-                # embedder leaves embedding NULL (FTS5 recall still works).
+                # recall can find it. Also dual-write to VectorBackend
+                # (Qdrant/pgvector) when configured (P2-1 remote write path).
                 try:
-                    from kazma_core.memory.embedder import encode_text_to_blob
+                    from kazma_core.memory.embedder import (
+                        encode_text_to_blob,
+                        get_embedder,
+                    )
 
                     ep_text = (summary_text or user_text or assistant_text or "").strip()
                     if ep_text:
@@ -322,6 +325,30 @@ class DualWriteMirror:
                             self._primary.execute(
                                 "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL",
                                 (emb_blob, eid),
+                            )
+                        # Remote / hybrid vector upsert (best-effort)
+                        try:
+                            from kazma_core.memory.backends import get_vector_backend
+
+                            emb = get_embedder()
+                            if emb is not None:
+                                qvec = emb.encode(ep_text)
+                                if qvec:
+                                    be = get_vector_backend(self._primary)
+                                    be.upsert(
+                                        eid,
+                                        qvec,
+                                        tenant_id=tenant_id,
+                                        meta={
+                                            "tier": effective_tier,
+                                            "session_id": session_id,
+                                        },
+                                    )
+                        except Exception:
+                            logger.debug(
+                                "[dual_write] vector backend upsert failed for %s",
+                                eid,
+                                exc_info=True,
                             )
                 except Exception:
                     logger.debug("[dual_write] episode embedding failed for %s", eid, exc_info=True)

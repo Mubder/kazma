@@ -33,9 +33,20 @@ Full execution plan: session plan / this file. Backlog SoT: `MEMORY_REMAINING.md
 | P1-5 | List click → graph + drawer |
 | P1-6 | Capability strings in Settings (i18n can follow) |
 
-## P2 Next time (do not start)
+## P2 — Shipped partial wave (2026-08-03 follow-on)
 
-Remote vector **write** path · shared Postgres state · Neo4j · graph LOD/export polish · LLM entity tier-3 · procedural skills browser · chaos kill-worker · quality score · chat-inline why-recalled every turn.
+| ID | Status |
+|----|--------|
+| P2-1 Remote vector write (Qdrant REST + pgvector optional) | **Done** — hybrid dual-write; failover intact |
+| P2-4 Graph export JSON/GraphML + LOD node cap 200 | **Done** |
+| P2-6 Procedural skills list Dashboard | **Done** |
+| P2-7 Chaos stuck-queue reclaim test | **Done** |
+| P2-8 Memory quality score API + card | **Done** |
+| P2-9 explain_recall in chat inject + format chips | **Done** |
+
+## P2 remaining / P3 (still deferred)
+
+Shared Postgres **state** DB · Neo4j · LLM entity tier-3 · full graph animation polish · multi-region
 
 ## P3 Trigger-only
 

@@ -247,7 +247,7 @@
         <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:180px;overflow-y:auto;"></div>
       </div>
 
-      <!-- Queue + entity merges -->
+      <!-- Queue + entity merges + procedural + quality -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px;">
         <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -263,6 +263,18 @@
             <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
           </div>
           <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Procedural skills</span>
+            <button id="v2-procedural-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+          </div>
+          <div id="v2-procedural-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">Memory quality</div>
+          <div id="v2-quality-score" style="font-size:1.4rem;font-weight:700;font-family:var(--font-mono);">–</div>
+          <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
         </div>
       </div>
 
@@ -297,6 +309,8 @@
             <div style="display:flex;align-items:center;gap:6px;">
               <input id="v2g-search" type="search" placeholder="filter…" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
               <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">↻</button>
+              <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">JSON</a>
+              <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
             </div>
           </div>
           <!-- Legend -->
@@ -1494,9 +1508,44 @@
       loadV2Queue();
     } catch (e) { /* silent */ }
   });
+  async function loadV2Procedural() {
+    const el = document.getElementById('v2-procedural-list');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/procedural?limit=15');
+      const data = await resp.json();
+      const dags = data.dags || [];
+      if (!dags.length) { el.textContent = 'No active skills yet.'; return; }
+      el.innerHTML = dags.map(function(d) {
+        return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+          '<b style="color:var(--text-primary);">' + _esc(d.name || d.id) + '</b> · C=' +
+          (d.confidence != null ? Number(d.confidence).toFixed(2) : '?') +
+          ' · n=' + (d.total_trials || 0) +
+          '<div style="color:var(--text-muted);">' + _esc((d.description || '').slice(0, 80)) + '</div></div>';
+      }).join('');
+    } catch (e) { el.textContent = 'Skills load failed'; }
+  }
+  async function loadV2Quality() {
+    const scoreEl = document.getElementById('v2-quality-score');
+    const detEl = document.getElementById('v2-quality-detail');
+    if (!scoreEl) return;
+    try {
+      const resp = await fetch('/api/memory/v2/quality');
+      const data = await resp.json();
+      if (!data.ok) { scoreEl.textContent = '–'; return; }
+      scoreEl.textContent = (data.grade || '') + ' ' + (data.score != null ? data.score + '%' : '');
+      if (detEl) {
+        detEl.textContent = (data.passed || 0) + '/' + (data.total || 0) + ' checks · ' +
+          (data.checks || []).filter(function(c) { return !c.ok; }).map(function(c) { return c.name; }).join(', ') || 'all green';
+      }
+    } catch (e) { if (scoreEl) scoreEl.textContent = '–'; }
+  }
+  document.getElementById('v2-procedural-refresh')?.addEventListener('click', loadV2Procedural);
   loadV2Queue();
   loadV2Merges();
-  setInterval(function() { loadV2Queue(); loadV2Merges(); }, 15000);
+  loadV2Procedural();
+  loadV2Quality();
+  setInterval(function() { loadV2Queue(); loadV2Merges(); loadV2Procedural(); loadV2Quality(); }, 15000);
 
   async function loadV2Beliefs(q) {
     try {
@@ -2032,6 +2081,18 @@
     if (searchEl) search = searchEl.value.trim().toLowerCase();
 
     var nodes = _v2gRawNodes, links = _v2gRawLinks;
+    // LOD: hard-cap node count for paint performance (P2-4)
+    var _LOD_MAX = 200;
+    if (nodes.length > _LOD_MAX) {
+      nodes = nodes.slice(0, _LOD_MAX);
+      var keep = {};
+      nodes.forEach(function(n) { keep[n.id] = true; });
+      links = links.filter(function(e) {
+        var s = e.source && (e.source.id || e.source);
+        var t = e.target && (e.target.id || e.target);
+        return keep[s] && keep[t];
+      });
+    }
 
     // Filter links by predicate type + search
     if (activePred.length || search) {

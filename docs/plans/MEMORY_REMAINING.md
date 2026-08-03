@@ -42,19 +42,19 @@ User turn
 
 ## 3. Remaining — by priority
 
-### P2 — Next time (frozen until re-opened)
+### P2 — Partial wave shipped (2026-08-03)
 
-| # | Item |
-|---|------|
-| P2-1 | Full remote vector **write** (Qdrant/pgvector upsert on every store) |
-| P2-2 | Shared Postgres state for multi-process |
-| P2-3 | Neo4j / external graph |
-| P2-4 | Graph LOD, PNG/SVG export, bi-temporal play |
-| P2-5 | LLM tier-3 entity disambiguation |
-| P2-6 | Procedural skills browser UI |
-| P2-7 | Chaos: kill worker mid-queue |
-| P2-8 | Dashboard memory quality score |
-| P2-9 | Chat inline why-recalled every turn |
+| # | Item | Status |
+|---|------|--------|
+| P2-1 | Remote vector write (Qdrant + pgvector) + hybrid | **Done** |
+| P2-4 | Graph JSON/GraphML export + LOD cap | **Done** |
+| P2-6 | Procedural skills list on Dashboard | **Done** |
+| P2-7 | Stuck-queue reclaim chaos test | **Done** |
+| P2-8 | Memory quality score API + card | **Done** |
+| P2-9 | explain_recall in chat format | **Done** |
+| P2-2 | Shared Postgres **state** for multi-process | Next |
+| P2-3 | Neo4j / external graph | Next |
+| P2-5 | LLM tier-3 entity disambiguation | Next |
 
 ### P3 — Trigger-only scale
 

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Unreleased — Memory P2 wave: remote vectors + ops polish (2026-08-03)
+
+- **Remote vector write path:** `QdrantVectorBackend` (REST search/upsert/delete),
+  `PgvectorBackend` (optional psycopg), `HybridVectorBackend` dual-write;
+  dual_write upserts via `get_vector_backend`; Settings capability
+  `remote_ready` when URL set.
+- **Graph:** export JSON/GraphML download; client LOD node cap 200.
+- **Dashboard:** procedural skills list, memory quality score card.
+- **Chat:** `explain_recall` tags sources in injected memory block.
+- **Tests:** `test_memory_p2_wave.py` (Qdrant mock, hybrid, stuck reclaim,
+  explain format).
+
 ## Unreleased — Memory priority max batch (P0/P1) (2026-08-03)
 
 - **VectorBackend protocol** + `LocalSqliteVectorBackend` + `get_vector_backend()`

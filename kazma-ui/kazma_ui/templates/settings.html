@@ -619,7 +619,7 @@
                  :style="memoryBackendsCapability.vector_write_ready
                    ? 'background:rgba(46,213,115,0.08);border-color:rgba(46,213,115,0.3)'
                    : 'background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.35)'">
-              <strong x-text="memoryBackendsCapability.vector_write_ready ? 'Vector: full (search + write)' : 'Vector: probe only'"></strong>
+              <strong x-text="memoryBackendsCapability.vector_status === 'full' ? 'Vector: full (local)' : (memoryBackendsCapability.vector_status === 'remote_ready' ? 'Vector: remote search+write' : 'Vector: needs setup')"></strong>
               <span style="color:var(--text-muted)" x-text="' — ' + (memoryBackendsCapability.vector_status_detail || '')"></span>
             </div>
             <div class="form-group">

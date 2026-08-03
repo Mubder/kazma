@@ -585,6 +585,215 @@ def register_direct_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:300]}
 
+    @self.app.get("/api/memory/v2/procedural")
+    async def _memory_v2_procedural(limit: int = 20, q: str = ""):
+        """List active procedural DAGs (skills browser)."""
+        import sqlite3
+
+        from kazma_core.memory.procedural import match_procedural_dags
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            if q and q.strip():
+                dags = match_procedural_dags(conn, q.strip(), limit=max(1, min(limit, 50)))
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, name, description, confidence_score, success_count,
+                           total_trials, status, dag_steps_json
+                    FROM procedural_dags
+                    WHERE status = 'active'
+                    ORDER BY confidence_score DESC, total_trials DESC
+                    LIMIT ?
+                    """,
+                    (max(1, min(limit, 50)),),
+                ).fetchall()
+                dags = []
+                for r in rows:
+                    import json as _json
+
+                    try:
+                        steps = _json.loads(r["dag_steps_json"] or "[]")
+                    except Exception:
+                        steps = []
+                    dags.append(
+                        {
+                            "id": r["id"],
+                            "name": r["name"],
+                            "description": r["description"],
+                            "confidence": float(r["confidence_score"] or 0),
+                            "success_count": int(r["success_count"] or 0),
+                            "total_trials": int(r["total_trials"] or 0),
+                            "steps": steps if isinstance(steps, list) else [],
+                        }
+                    )
+            conn.close()
+            return {"dags": dags}
+        except Exception as exc:
+            return {"dags": [], "error": str(exc)[:300]}
+
+    @self.app.get("/api/memory/v2/quality")
+    async def _memory_v2_quality():
+        """Lightweight memory quality score for Dashboard (no LLM)."""
+        import os
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        checks: list[dict] = []
+        score = 0
+        total = 0
+
+        def _check(name: str, ok: bool, detail: str = "") -> None:
+            nonlocal score, total
+            total += 1
+            if ok:
+                score += 1
+            checks.append({"name": name, "ok": ok, "detail": detail})
+
+        try:
+            dbp = primary_memory_db()
+            _check("db_exists", os.path.exists(dbp), dbp)
+            if os.path.exists(dbp):
+                conn = sqlite3.connect(dbp, check_same_thread=False)
+                ensure_primary_schema(conn)
+                bel = conn.execute(
+                    "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                ).fetchone()[0]
+                ep = conn.execute(
+                    "SELECT COUNT(*) FROM episodes WHERE tier IN ('working','episodic','recall')"
+                ).fetchone()[0]
+                emb = conn.execute(
+                    "SELECT COUNT(*) FROM episodes WHERE embedding IS NOT NULL"
+                ).fetchone()[0]
+                conn.close()
+                _check("has_beliefs_or_episodes", (bel + ep) > 0, f"beliefs={bel} episodes={ep}")
+                _check(
+                    "has_some_embeddings",
+                    emb > 0 or ep == 0,
+                    f"embedded={emb}/{ep}",
+                )
+            try:
+                from kazma_core.memory.embedder import get_embedder
+
+                _check("embedder_ready", get_embedder() is not None)
+            except Exception:
+                _check("embedder_ready", False, "error")
+            try:
+                from kazma_core.memory.backends import vector_capability
+
+                cap = vector_capability()
+                _check(
+                    "vector_capability",
+                    bool(cap.get("vector_search_ready")),
+                    cap.get("vector_status_detail") or "",
+                )
+            except Exception:
+                _check("vector_capability", False)
+            pct = round(100.0 * score / max(1, total), 1)
+            return {
+                "ok": True,
+                "score": pct,
+                "passed": score,
+                "total": total,
+                "checks": checks,
+                "grade": "A" if pct >= 90 else "B" if pct >= 70 else "C" if pct >= 50 else "D",
+            }
+        except Exception as exc:
+            return {"ok": False, "score": 0, "error": str(exc)[:300], "checks": checks}
+
+    @self.app.get("/api/memory/v2/graph/export")
+    async def _memory_v2_graph_export(format: str = "json", limit: int = 500):
+        """Export belief graph as JSON or GraphML for download."""
+        import sqlite3
+        import xml.sax.saxutils as xu
+
+        from fastapi.responses import Response
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        fmt = (format or "json").strip().lower()
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT id, subject, object, predicate, confidence, predicate_type
+                FROM beliefs
+                WHERE valid_until IS NULL AND invalidated_at IS NULL
+                ORDER BY structural_importance DESC, confidence DESC
+                LIMIT ?
+                """,
+                (max(10, min(limit, 2000)),),
+            ).fetchall()
+            conn.close()
+            nodes: dict[str, dict] = {}
+            links = []
+            for r in rows:
+                for ent in (r["subject"], r["object"]):
+                    if ent and ent not in nodes:
+                        nodes[ent] = {"id": ent, "label": ent}
+                links.append(
+                    {
+                        "source": r["subject"],
+                        "target": r["object"],
+                        "predicate": r["predicate"],
+                        "confidence": r["confidence"],
+                        "id": r["id"],
+                    }
+                )
+            if fmt == "graphml":
+                parts = [
+                    '<?xml version="1.0" encoding="UTF-8"?>',
+                    '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
+                    '<key id="label" for="node" attr.name="label" attr.type="string"/>',
+                    '<key id="predicate" for="edge" attr.name="predicate" attr.type="string"/>',
+                    '<graph id="G" edgedefault="directed">',
+                ]
+                for n in nodes.values():
+                    parts.append(
+                        f'<node id="{xu.escape(n["id"])}">'
+                        f'<data key="label">{xu.escape(n["label"])}</data></node>'
+                    )
+                for i, e in enumerate(links):
+                    parts.append(
+                        f'<edge id="e{i}" source="{xu.escape(e["source"])}" '
+                        f'target="{xu.escape(e["target"])}">'
+                        f'<data key="predicate">{xu.escape(str(e["predicate"]))}</data></edge>'
+                    )
+                parts.append("</graph></graphml>")
+                body = "\n".join(parts)
+                return Response(
+                    content=body,
+                    media_type="application/graphml+xml",
+                    headers={
+                        "Content-Disposition": 'attachment; filename="kazma_belief_graph.graphml"'
+                    },
+                )
+            import json as _json
+
+            payload = _json.dumps(
+                {"nodes": list(nodes.values()), "links": links},
+                ensure_ascii=False,
+                indent=2,
+            )
+            return Response(
+                content=payload,
+                media_type="application/json",
+                headers={
+                    "Content-Disposition": 'attachment; filename="kazma_belief_graph.json"'
+                },
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
     # ── Phase D: Memory backends Settings API ─────────────────────────
     @self.app.get("/api/settings/memory/backends")
     async def _settings_memory_backends_get():

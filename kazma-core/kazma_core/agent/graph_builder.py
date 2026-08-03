@@ -577,13 +577,25 @@ async def supervisor_node(
                 _top_k = _rag_top_k()
                 from kazma_core.memory.recall import format_recall_block, recall
 
+                _explain = None
+                try:
+                    from kazma_core.memory.config import read_memory_cfg
+
+                    _explain = bool(
+                        ((read_memory_cfg() or {}).get("v2") or {}).get(
+                            "explain_recall", False
+                        )
+                    )
+                except Exception:
+                    _explain = False
                 result = recall(
                     last_user_content, limit=_top_k,
                     session_id=state.get("thread_id"),
                     tenant_id=state.get("tenant_id", "default"),
+                    explain=_explain,
                 )
                 if not result.empty:
-                    mem_block = format_recall_block(result)
+                    mem_block = format_recall_block(result, explain=_explain)
                     if mem_block:
                         messages.insert(1, {"role": "system", "content": mem_block})
                         logger.info(

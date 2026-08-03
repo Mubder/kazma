@@ -1183,20 +1183,38 @@ def format_recall_block(
     max_beliefs: int = 5,
     max_episodes: int = 5,
     max_tokens: int = 1500,
+    explain: bool | None = None,
 ) -> str:
     """Render a RecallResult into a prompt-fenced context block.
 
     Beliefs are rendered as "Known Facts", episodes as "Relevant
-    History". The whole block is wrapped in the untrusted prompt fence
-    via :func:`format_untrusted_block` (the ``source`` kwarg is
-    REQUIRED per the actual signature — resolution #2).
+    History". When ``explain`` is True (or ``memory.v2.explain_recall``),
+    append compact source chips per line for debug.
 
     A hard ``max_tokens`` budget (default ~1500, ≈4 chars/token) caps
     the total injected context so PPR/RRF can't overrun the prompt.
-    Items are added in priority order (beliefs first, then episodes by
-    score) until the budget is exhausted.
     """
     from kazma_core.safety.prompt_fence import format_untrusted_block
+
+    do_explain = explain
+    if do_explain is None:
+        try:
+            from kazma_core.memory.config import read_memory_cfg
+
+            do_explain = bool(
+                ((read_memory_cfg() or {}).get("v2") or {}).get("explain_recall", False)
+            )
+        except Exception:
+            do_explain = False
+
+    def _line(h: RecallHit) -> str:
+        base = f"- {h.content}"
+        if not do_explain:
+            return base
+        srcs = (h.metadata or {}).get("sources") or ([h.source] if h.source else [])
+        if srcs:
+            return f"{base}  _(via {', '.join(str(s) for s in srcs)})_"
+        return base
 
     # ~4 chars per token is the standard heuristic estimate
     char_budget = max_tokens * 4
@@ -1206,7 +1224,7 @@ def format_recall_block(
     if result.beliefs:
         lines: list[str] = []
         for h in result.beliefs[:max_beliefs]:
-            line = f"- {h.content}"
+            line = _line(h)
             if used + len(line) + 1 > char_budget:
                 break
             lines.append(line)
@@ -1219,7 +1237,7 @@ def format_recall_block(
     if result.episodes and used < char_budget:
         lines = []
         for h in result.episodes[:max_episodes]:
-            line = f"- {h.content}"
+            line = _line(h)
             if used + len(line) + 1 > char_budget:
                 break
             lines.append(line)

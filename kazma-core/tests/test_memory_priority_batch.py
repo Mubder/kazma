@@ -42,7 +42,7 @@ def test_vector_backend_local_search(mem_db):
     )
 
 
-def test_vector_capability_remote_probe_only(monkeypatch):
+def test_vector_capability_remote_ready_with_url(monkeypatch):
     from kazma_core.memory import backends as b
 
     monkeypatch.setattr(
@@ -57,8 +57,27 @@ def test_vector_capability_remote_probe_only(monkeypatch):
         },
     )
     cap = b.vector_capability()
+    assert cap["vector_write_ready"] is True
+    assert cap["vector_status"] == "remote_ready"
+
+
+def test_vector_capability_remote_needs_url(monkeypatch):
+    from kazma_core.memory import backends as b
+
+    monkeypatch.setattr(
+        b,
+        "get_backends_cfg",
+        lambda: {
+            "mode": "remote",
+            "vector": {"provider": "qdrant", "url": ""},
+            "embedder": {"provider": "local"},
+            "graph": {},
+            "failover": {"on_remote_error": "local"},
+        },
+    )
+    cap = b.vector_capability()
     assert cap["vector_write_ready"] is False
-    assert cap["vector_status"] == "probe_only"
+    assert cap["vector_status"] == "needs_url"
 
 
 def test_resolve_tenant_modes(monkeypatch):
