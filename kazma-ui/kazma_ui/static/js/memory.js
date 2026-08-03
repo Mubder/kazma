@@ -52,12 +52,12 @@ function memoryPage() {
     hygieneRunning: false,
 
     get tabs() {
+      // Graph & health is pinned at the top of the page (not a tab).
       return [
         { id: "entities", label: S.tab_entities || "Entities" },
         { id: "beliefs", label: S.tab_beliefs || "Beliefs" },
         { id: "merges", label: S.tab_merges || "Pending merges" },
         { id: "hygiene", label: S.tab_hygiene || "Hygiene" },
-        { id: "console", label: S.tab_console || "Graph & health" },
       ];
     },
 
@@ -100,10 +100,6 @@ function memoryPage() {
       if (this.tab === "entities") this.loadEntities();
       if (this.tab === "merges") this.loadMerges();
       if (this.tab === "hygiene") this.loadHygiene();
-      if (this.tab === "console") {
-        var el = document.getElementById("console");
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
     },
 
     async loadSummary() {

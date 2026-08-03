@@ -106,14 +106,20 @@
 
 <div style="max-width:1200px;margin:0 auto;padding:0 1rem 2.5rem;box-sizing:border-box;">
 
-  {# ── Operator tools (Alpine) ── #}
+  {# ── Graph & health first (topology, KPIs, probe, backups) ── #}
+  <div id="console" style="margin-bottom:1.75rem;">
+    <h2 style="font-size:1rem;margin:0 0 0.75rem;color:var(--text-secondary);">{{ t('memory.tab_console') }}</h2>
+    {% include "components/memory_console.html" %}
+  </div>
+
+  {# ── Operator tools (Alpine): entities, beliefs, merge, hygiene ── #}
   <div
     x-data="memoryPage()"
     x-init="init()"
     style="margin-bottom:1.5rem;"
   >
     <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;">
-      <strong>🧠 <span x-text="S.title || 'Memory'"></span></strong>
+      <strong>🧠 <span x-text="S.title || 'Memory'"></span> — ops</strong>
       — <span x-text="S.intro || ''"></span>
       <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
         <template x-for="chip in summaryChips" :key="chip.k">
@@ -123,6 +129,7 @@
           </span>
         </template>
         <button class="btn btn-secondary btn-sm" @click="loadAll()" :disabled="loading" x-text="S.refresh || 'Refresh'"></button>
+        <a href="#console" class="btn btn-secondary btn-sm" style="text-decoration:none;" x-text="S.tab_console || 'Graph & health'"></a>
       </div>
     </div>
 
@@ -131,7 +138,7 @@
         <button
           class="btn btn-sm"
           :class="tab === t.id ? 'btn-primary' : 'btn-secondary'"
-          @click="tab = t.id; onTab(); if (t.id==='console') { location.hash='console'; }"
+          @click="tab = t.id; onTab()"
           :id="'mem-tab-' + t.id"
           x-text="t.label"
         ></button>
@@ -310,12 +317,6 @@
 
     <div x-show="loading" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">Loading…</div>
     <div x-show="error" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
-  </div>
-
-  {# ── Full console: health, graph, probe, backups (from dashboard) ── #}
-  <div id="console">
-    <h2 style="font-size:1rem;margin:0 0 0.75rem;color:var(--text-secondary);">{{ t('memory.tab_console') }}</h2>
-    {% include "components/memory_console.html" %}
   </div>
 </div>
 {% endblock %}
