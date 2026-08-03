@@ -2,7 +2,8 @@
  * Exposes window.KazmaResearch with:
  *   init()                — bootstrap on page load
  *   switchTab(name)       — tab switcher
- *   load()                — GET /api/research/tasks → render cards
+ *   load()                — GET tasks/papers/sessions → render cards
+ *   startDeep()           — POST /api/research/sessions + SSE progress
  *   search(event)         — filter by search text
  *   viewDetail(id)        — GET /api/research/tasks/{id} → detail
  *   exportCurrent(fmt)    — POST /api/research/{id}/export
@@ -15,6 +16,8 @@
   var archivedTasks = [];
   var currentId = null;
   var pollTimer = null;
+  var liveSource = null;
+  var liveSessionId = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -63,6 +66,69 @@
       if (name === 'archived') this.loadArchived();
     },
 
+    startDeep: function () {
+      var topicEl = $('research-topic');
+      var topic = topicEl ? (topicEl.value || '').trim() : '';
+      if (!topic) {
+        toast('Enter a research topic', 'error');
+        if (topicEl) topicEl.focus();
+        return;
+      }
+      var depthEl = $('research-depth');
+      var srcEl = $('research-max-sources');
+      var depth = depthEl ? depthEl.value : 'deep';
+      var maxSources = srcEl ? parseInt(srcEl.value, 10) || 8 : 8;
+      var btn = $('research-start-btn');
+      var startLabel = (window.KAZMA_I18N && window.KAZMA_I18N.research_start_btn) || 'Start';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+      }
+      closeLiveStream();
+      showLivePanel({
+        status: 'pending',
+        stage: 'queued',
+        message: i18n('research_start_running'),
+        sources: 0,
+        log: [],
+      });
+      fetch('/api/research/sessions', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topic,
+          depth: depth,
+          max_sources: maxSources,
+        }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = startLabel;
+          }
+          if (!res.ok || !res.data || res.data.error) {
+            toast((res.data && res.data.error) || 'Could not start research', 'error');
+            hideLivePanel();
+            return;
+          }
+          var sess = res.data.session || {};
+          liveSessionId = sess.id;
+          applyLiveSession(sess);
+          openLiveStream(sess.id);
+          toast(i18n('research_start_running'), 'info');
+        })
+        .catch(function () {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = startLabel;
+          }
+          toast('Could not start research', 'error');
+          hideLivePanel();
+        });
+    },
+
     load: function () {
       Promise.all([
         fetch('/api/research/tasks?page=1&page_size=50&archived=false', { credentials: 'same-origin' })
@@ -80,9 +146,13 @@
             console.warn('[research] papers fetch failed', err);
             return { papers: [] };
           }),
-      ]).then(function (pair) {
-        var data = pair[0] || {};
-        var papersPayload = pair[1] || {};
+        fetch('/api/research/sessions?limit=30', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { sessions: [] }; })
+          .catch(function () { return { sessions: [] }; }),
+      ]).then(function (triple) {
+        var data = triple[0] || {};
+        var papersPayload = triple[1] || {};
+        var sessionsPayload = triple[2] || {};
         var papers = papersPayload.papers || [];
         var paperTasks = papers.map(function (p) {
           var topic = p.topic || p.report_path || 'report';
@@ -101,7 +171,27 @@
             metadata: { kind: 'research_paper' },
           };
         });
-        allTasks = paperTasks.concat(data.tasks || []);
+        var sessions = sessionsPayload.sessions || [];
+        var sessionTasks = sessions.map(function (s) {
+          return {
+            id: 'session:' + s.id,
+            prompt: '[Deep] ' + (s.topic || s.id),
+            status: s.status || 'pending',
+            workers: ['research_pipeline'],
+            cost: 0,
+            duration: 0,
+            created_at: s.created_at ? new Date(s.created_at * 1000).toISOString() : null,
+            completed_at: s.updated_at ? new Date(s.updated_at * 1000).toISOString() : null,
+            report_path: s.report_path,
+            sources: s.sources,
+            stage: s.stage,
+            message: s.message,
+            session_id: s.id,
+            metadata: { kind: 'research_session' },
+          };
+        });
+        // Prefer session cards over paper dups when both exist for same report
+        allTasks = sessionTasks.concat(paperTasks).concat(data.tasks || []);
         renderList(allTasks);
         populateCompareDropdowns(data.tasks || []);
         if (papersPayload.error) {
@@ -141,6 +231,77 @@
       $('research-list').style.display = 'none';
       $('research-detail').style.display = 'block';
       $('research-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      // Live / durable deep sessions
+      if (String(id).indexOf('session:') === 0) {
+        var sid = String(id).slice('session:'.length);
+        fetch('/api/research/sessions/' + encodeURIComponent(sid), { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (!data || !data.session) {
+              toast('Session not found', 'error');
+              return;
+            }
+            var s = data.session;
+            $('research-detail-title').textContent = (s.topic || 'Deep research').slice(0, 100);
+            $('research-detail-meta').innerHTML =
+              '<span>Session</span> · <span>' + esc(s.status) + '</span> · ' +
+              (s.stage ? '<span>Stage: ' + esc(s.stage) + '</span> · ' : '') +
+              (s.sources != null ? '<span>Sources: ' + s.sources + '</span> · ' : '') +
+              (s.report_path ? '<span dir="ltr">' + esc(s.report_path) + '</span>' : '');
+            var el = $('research-detail-output');
+            el.className = 'markdown-body bidi-content';
+            var body = s.summary || (s.log || []).join('\n') || s.message || '(no output yet)';
+            if (s.report_path) {
+              // Prefer loading the full report when available
+              fetch('/api/research/papers/file?path=' + encodeURIComponent(s.report_path), {
+                credentials: 'same-origin',
+              })
+                .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+                .then(function (md) {
+                  if (window.KazmaStream && KazmaStream.markdown) {
+                    el.innerHTML = KazmaStream.markdown(md);
+                  } else {
+                    el.textContent = md;
+                  }
+                  if (window.KazmaBidi) KazmaBidi.apply(el, md);
+                })
+                .catch(function () {
+                  if (window.KazmaStream && KazmaStream.markdown) {
+                    el.innerHTML = KazmaStream.markdown(body);
+                  } else {
+                    el.textContent = body;
+                  }
+                });
+            } else {
+              el.textContent = body;
+            }
+            var archBtn = $('detail-archive-btn');
+            var restBtn = $('detail-restore-btn');
+            if (archBtn) archBtn.style.display = 'none';
+            if (restBtn) restBtn.style.display = 'none';
+            // Treat as paper for export if report exists
+            if (s.report_path) {
+              currentId = 'paper:session-' + sid;
+              // stash report on allTasks for export
+              allTasks.push({
+                id: currentId,
+                prompt: '[Deep] ' + (s.topic || ''),
+                status: 'paper',
+                report_path: s.report_path,
+                sources: s.sources,
+              });
+            }
+            // Re-attach live stream if still running
+            if (s.status === 'running' || s.status === 'pending') {
+              liveSessionId = s.id;
+              showLivePanel(s);
+              openLiveStream(s.id);
+            }
+          })
+          .catch(function () { toast('Could not load session', 'error'); });
+        return;
+      }
 
       // Pipeline papers (not swarm tasks)
       if (String(id).indexOf('paper:') === 0) {
@@ -422,6 +583,133 @@
     },
   };
 
+  function showLivePanel(s) {
+    var panel = $('research-live');
+    if (!panel) return;
+    panel.style.display = 'block';
+    applyLiveSession(s || {});
+  }
+
+  function hideLivePanel() {
+    var panel = $('research-live');
+    if (panel) panel.style.display = 'none';
+    var actions = $('research-live-actions');
+    if (actions) {
+      actions.style.display = 'none';
+      actions.innerHTML = '';
+    }
+  }
+
+  function applyLiveSession(s) {
+    if (!s) return;
+    var statusEl = $('research-live-status');
+    var stageEl = $('research-live-stage');
+    var msgEl = $('research-live-message');
+    var srcEl = $('research-live-sources');
+    var logEl = $('research-live-log');
+    if (statusEl) statusEl.textContent = s.status || '—';
+    if (stageEl) stageEl.textContent = s.stage ? ('· ' + s.stage) : '';
+    if (msgEl) msgEl.textContent = s.message || '';
+    if (srcEl) {
+      srcEl.textContent = (s.sources != null && s.sources > 0)
+        ? (s.sources + ' sources')
+        : '';
+    }
+    if (logEl && Array.isArray(s.log)) {
+      logEl.textContent = s.log.slice(-40).join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    if (s.status === 'done' || s.status === 'error') {
+      var actions = $('research-live-actions');
+      if (actions) {
+        actions.style.display = 'flex';
+        var html = '';
+        if (s.report_path) {
+          html += '<a class="btn btn-primary btn-sm" href="/api/research/papers/file?path=' +
+            encodeURIComponent(s.report_path) + '" target="_blank">' +
+            esc(i18n('research_view_report') || 'View report') + '</a>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="KazmaResearch.viewDetail(\'session:' +
+            esc(s.id || liveSessionId || '') + '\')">' + esc(i18n('research_open_md') || 'Open') + '</button>';
+        }
+        actions.innerHTML = html;
+      }
+      if (s.status === 'done') toast(i18n('research_start_done'), 'success');
+      if (s.status === 'error') toast(i18n('research_start_error') + (s.error ? ': ' + s.error : ''), 'error');
+    }
+  }
+
+  function closeLiveStream() {
+    if (liveSource) {
+      try { liveSource.close(); } catch (e) { /* ignore */ }
+      liveSource = null;
+    }
+  }
+
+  function openLiveStream(sessionId) {
+    closeLiveStream();
+    if (!sessionId || typeof EventSource === 'undefined') return;
+    var url = '/api/research/sessions/' + encodeURIComponent(sessionId) + '/stream';
+    liveSource = new EventSource(url);
+    function onPayload(raw) {
+      var data;
+      try { data = JSON.parse(raw.data); } catch (e) { return; }
+      if (!data) return;
+      if (data.type === 'snapshot' && data.session) {
+        applyLiveSession(data.session);
+        return;
+      }
+      if (data.type === 'done' || data.type === 'error') {
+        if (data.session) applyLiveSession(data.session);
+        else {
+          // refresh from API
+          fetch('/api/research/sessions/' + encodeURIComponent(sessionId), { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+              if (res && res.session) applyLiveSession(res.session);
+            });
+        }
+        closeLiveStream();
+        window.KazmaResearch.load();
+        return;
+      }
+      if (data.type === 'heartbeat') return;
+      // progress events carry status/stage/message
+      applyLiveSession({
+        id: data.session_id || sessionId,
+        status: data.status || 'running',
+        stage: data.stage,
+        message: data.message,
+        sources: data.sources,
+        report_path: data.report_path,
+        log: (function () {
+          var logEl = $('research-live-log');
+          var prev = logEl ? logEl.textContent.split('\n').filter(Boolean) : [];
+          if (data.stage || data.message) {
+            prev.push('[' + (data.stage || '?') + '] ' + (data.message || ''));
+          }
+          return prev.slice(-40);
+        })(),
+      });
+      if (data.status === 'done' || data.status === 'error') {
+        closeLiveStream();
+        window.KazmaResearch.load();
+      }
+    }
+    liveSource.addEventListener('snapshot', onPayload);
+    liveSource.addEventListener('progress', onPayload);
+    liveSource.addEventListener('done', onPayload);
+    liveSource.addEventListener('error', function (ev) {
+      // Named error event from server, or connection error
+      if (ev && ev.data) onPayload(ev);
+      // Network drop: EventSource auto-reconnects; leave open unless terminal
+    });
+    liveSource.addEventListener('heartbeat', function () { /* keep-alive */ });
+    liveSource.onerror = function () {
+      // If session already terminal, close; else let browser reconnect
+      if (!liveSessionId) closeLiveStream();
+    };
+  }
+
   function renderList(tasks) {
     var el = $('research-list');
     if (!tasks.length) {
@@ -430,22 +718,36 @@
     }
     el.innerHTML = tasks.map(function (t) {
       var isPaper = t.status === 'paper' || (t.id && String(t.id).indexOf('paper:') === 0);
-      var meta = isPaper
-        ? ('pipeline · ' + (t.sources != null ? t.sources + ' sources · ' : '') +
-           (t.report_path ? esc(t.report_path) + ' · ' : '') + timeAgo(t.created_at))
-        : ('<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
-           '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
-           '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
-           '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>');
-      var actions = isPaper
-        ? ((t.report_path
-            ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md') || 'Open report') + '">MD</a>'
-            : '') +
-           (t.docx_path
+      var isSession = t.id && String(t.id).indexOf('session:') === 0;
+      var meta;
+      if (isSession) {
+        meta = 'session · ' + esc(t.status || '') +
+          (t.stage ? ' · ' + esc(t.stage) : '') +
+          (t.sources != null && t.sources > 0 ? ' · ' + t.sources + ' sources' : '') +
+          ' · ' + timeAgo(t.completed_at || t.created_at);
+      } else if (isPaper) {
+        meta = 'pipeline · ' + (t.sources != null ? t.sources + ' sources · ' : '') +
+          (t.report_path ? esc(t.report_path) + ' · ' : '') + timeAgo(t.created_at);
+      } else {
+        meta = '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
+          '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
+          '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
+          '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>';
+      }
+      var actions;
+      if (isPaper || (isSession && t.report_path)) {
+        actions = (t.report_path
+          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md') || 'Open report') + '">MD</a>'
+          : '') +
+          (t.docx_path
             ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
-            : ''))
-        : ('<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
-           '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>');
+            : '');
+      } else if (isSession) {
+        actions = '';
+      } else {
+        actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>';
+      }
       var onclick = ' onclick="KazmaResearch.viewDetail(\'' + String(t.id).replace(/'/g, "\\'") + '\')"';
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;"' + onclick + '>' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +

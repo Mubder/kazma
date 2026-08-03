@@ -48,7 +48,11 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | * | `/api/replay/*` | Session | Time travel: threads, snapshots, restore, fork, compare, clear (`replay_routes.py`) |
 | GET | `/replay` | Session | Time Travel panel page |
 | * | `/api/research/*` | Session | Research: list, detail, compare, export, archive, unarchive (`research_panel/routes.py`) |
-| GET | `/research` | Session | Research panel page |
+| POST | `/api/research/sessions` | Session | Start deep research session (background pipeline) |
+| GET | `/api/research/sessions` | Session | List durable research sessions |
+| GET | `/api/research/sessions/{id}` | Session | Session status / log / report path |
+| GET | `/api/research/sessions/{id}/stream` | Session | SSE progress (`snapshot` / `progress` / `done`) |
+| GET | `/research` | Session | Research panel page (start form + live progress) |
 
 ## Memory / RAG
 

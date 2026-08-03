@@ -45,6 +45,17 @@ Search, scrape, and crawl I/O are centralized under **`kazma_core.web_acquire`**
 
 Golden topics / scoring: `kazma_core.tools.research_eval`.
 
+### Research sessions + panel UX (R3)
+
+Deep runs can be started from the **Research** page (`/research`) without chat:
+
+1. **Start form** — topic, depth (`deep` / `brief`), max sources  
+2. **`POST /api/research/sessions`** creates a durable row in `kazma-data/research_sessions.db` and runs `run_research_pipeline` in a background task  
+3. **SSE** `GET /api/research/sessions/{id}/stream` streams stage/message progress while this process is live  
+4. Finished reports still register as pipeline **papers** under `research/reports/` and appear in the results list  
+
+Sessions survive restarts for list/detail; live SSE is in-process only (reconnect after restart falls back to polling session status).
+
 > **Arabic brand:** product name is **Kazma** / **كاظمه** (or **كاظمة**). Never **كازما**.
 
 ## How you use it
@@ -54,7 +65,7 @@ Golden topics / scoring: `kazma_core.tools.research_eval`.
 | Quick research with sources | Chat: *“Research X, use the web, cite URLs”* |
 | Deep multi-page research | Chat: *“Crawl `https://docs…` and digest the pages”* |
 | Multi-worker parallel research | `/swarm research …` or *“use the swarm to research X”* |
-| Deep multi-source paper | Chat *“deep research on X”* or **`/research deep X`** (runs `run_research_pipeline`) |
+| Deep multi-source paper | **Research panel → Start**, chat *“deep research on X”*, or **`/research deep X`** |
 | Force tool chain | Name tools: *“`web_search`, then `read_url_to_file`, then `digest_research_file`”* |
 
 The supervisor chooses tools; you do not need to name them unless you want control.

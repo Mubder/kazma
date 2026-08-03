@@ -1,13 +1,16 @@
-"""Research panel API routes — list, detail, compare, and export research results.
+"""Research panel API routes — list, detail, compare, export, and live sessions.
 
-All routes reuse the SwarmEngine's TaskStore (no dedicated store needed).
-Research tasks are tagged with ``metadata={"kind": "research"}`` at dispatch
-time (by the ``dispatch_swarm`` tool).
+Swarm research tasks are tagged with ``metadata={"kind": "research"}`` at
+dispatch time. Deep pipeline runs use ``research_session`` (SQLite + SSE).
 
 Routes:
   GET  /api/research/tasks           — list research tasks (filtered)
   GET  /api/research/tasks/{id}      — single research result detail
   GET  /api/research/papers          — deep research pipeline paper runs
+  POST /api/research/sessions        — start a deep research session
+  GET  /api/research/sessions        — list durable research sessions
+  GET  /api/research/sessions/{id}   — session detail / status
+  GET  /api/research/sessions/{id}/stream — SSE progress for a live run
   POST /api/research/compare         — compare two research runs
   POST /api/research/{id}/export     — export to DOCX/PDF/Markdown
   GET  /api/research/download        — download an exported file
@@ -15,13 +18,17 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+
+from kazma_ui.sse_utils import sse_frame
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +173,150 @@ def create_research_router() -> APIRouter:
             else "application/octet-stream"
         )
         return FileResponse(str(target), filename=target.name, media_type=media)
+
+    # ── Live deep-research sessions (R3) ──────────────────────────────
+
+    @router.post("/api/research/sessions")
+    async def start_research_session(body: dict[str, Any]) -> JSONResponse:
+        """Start a deep research pipeline run in the background.
+
+        Body: ``{"topic": "...", "depth": "deep"|"brief", "max_sources": 8,
+        "export_docx": false}``
+        """
+        topic = str(body.get("topic") or "").strip()
+        if not topic:
+            return JSONResponse({"ok": False, "error": "topic required"}, status_code=400)
+        depth = str(body.get("depth") or "deep").strip().lower() or "deep"
+        try:
+            max_sources = int(body.get("max_sources") or 8)
+        except (TypeError, ValueError):
+            max_sources = 8
+        export_docx = bool(body.get("export_docx") or False)
+        try:
+            from kazma_core.tools.research_session import start_deep_research
+
+            sess = await start_deep_research(
+                topic,
+                depth=depth,
+                max_sources=max_sources,
+                export_docx=export_docx,
+            )
+            return JSONResponse({"ok": True, "session": sess.to_dict()})
+        except Exception as exc:
+            logger.exception("[research] start session failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @router.get("/api/research/sessions")
+    async def list_research_sessions(limit: int = 50) -> JSONResponse:
+        """List durable deep-research sessions (newest first)."""
+        try:
+            from kazma_core.tools.research_session import list_sessions
+
+            sessions = list_sessions(limit=limit)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "sessions": [s.to_dict() for s in sessions],
+                    "count": len(sessions),
+                }
+            )
+        except Exception as exc:
+            logger.exception("[research] list sessions failed")
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "sessions": []}, status_code=500
+            )
+
+    @router.get("/api/research/sessions/{session_id}")
+    async def get_research_session(session_id: str) -> JSONResponse:
+        """Get one research session (status, log, report path)."""
+        try:
+            from kazma_core.tools.research_session import get_session
+
+            sess = get_session(session_id)
+            if sess is None:
+                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            return JSONResponse({"ok": True, "session": sess.to_dict()})
+        except Exception as exc:
+            logger.exception("[research] get session failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @router.get("/api/research/sessions/{session_id}/stream")
+    async def stream_research_session(
+        session_id: str, request: Request
+    ) -> StreamingResponse:
+        """SSE stream of progress events for a research session.
+
+        Emits ``snapshot`` (current state), then ``progress`` updates, then
+        ``done`` / ``error``. Heartbeats every 15s while the run is live.
+        """
+        from kazma_core.tools.research_session import (
+            get_session,
+            subscribe_progress,
+            unsubscribe_progress,
+        )
+
+        sess = get_session(session_id)
+        if sess is None:
+            return JSONResponse(  # type: ignore[return-value]
+                {"ok": False, "error": "not found"}, status_code=404
+            )
+
+        async def event_gen() -> AsyncGenerator[str, None]:
+            q = subscribe_progress(session_id)
+            try:
+                # Initial snapshot is already queued by subscribe_progress
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        cur = get_session(session_id)
+                        if cur and cur.status in ("done", "error", "cancelled"):
+                            yield sse_frame(
+                                "done",
+                                {
+                                    "type": "done",
+                                    "session_id": session_id,
+                                    "status": cur.status,
+                                    "session": cur.to_dict(),
+                                },
+                            )
+                            break
+                        yield sse_frame(
+                            "heartbeat",
+                            {"type": "heartbeat", "session_id": session_id},
+                        )
+                        continue
+
+                    etype = str(event.get("type") or "progress")
+                    yield sse_frame(etype, event)
+                    if etype in ("done", "error"):
+                        break
+                    # Terminal via progress payload status
+                    st = str(event.get("status") or "")
+                    if st in ("done", "error", "cancelled"):
+                        yield sse_frame(
+                            "done",
+                            {
+                                "type": "done",
+                                "session_id": session_id,
+                                "status": st,
+                            },
+                        )
+                        break
+            finally:
+                unsubscribe_progress(session_id, q)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     @router.post("/api/research/papers/export")
     async def export_paper(body: dict[str, Any]) -> JSONResponse:

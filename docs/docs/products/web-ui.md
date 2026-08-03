@@ -54,7 +54,7 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 
 Full guide: [Memory & RAG](../guide/memory-and-rag). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
-Research / scrape runs through **chat tools** (see [Web research](../guide/web-research)), not a separate dashboard action.
+Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)).
 
 ## Email (Settings → Email)
 

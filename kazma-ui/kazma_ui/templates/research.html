@@ -15,6 +15,41 @@
 
   <!-- ══ TAB: Results List ══ -->
   <div class="tab-panel" id="panel-list" style="display:block;">
+    <!-- Start deep research (R3 sessions) -->
+    <div class="card" id="research-start-card" style="padding:1rem 1.25rem;margin:1rem 0;">
+      <div style="font-weight:600;margin-bottom:0.75rem;">{{ t('research.start_title') }}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+        <label style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:4px;font-size:0.85rem;color:var(--text-muted);">
+          {{ t('research.topic_label') }}
+          <input type="text" id="research-topic" class="form-input" placeholder="{{ t('research.topic_placeholder') }}" style="width:100%;" onkeydown="if(event.key==='Enter'){event.preventDefault();KazmaResearch.startDeep();}">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.85rem;color:var(--text-muted);">
+          {{ t('research.depth_label') }}
+          <select id="research-depth" class="form-select" style="min-width:110px;">
+            <option value="deep" selected>{{ t('research.depth_deep') }}</option>
+            <option value="brief">{{ t('research.depth_brief') }}</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.85rem;color:var(--text-muted);">
+          {{ t('research.sources_label') }}
+          <input type="number" id="research-max-sources" class="form-input" value="8" min="2" max="15" style="width:72px;">
+        </label>
+        <button class="btn btn-primary" id="research-start-btn" onclick="KazmaResearch.startDeep()">{{ t('research.start_btn') }}</button>
+      </div>
+      <div id="research-live" style="display:none;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+          <div style="font-size:0.9rem;">
+            <span id="research-live-status" style="font-weight:600;color:var(--accent);"></span>
+            <span id="research-live-stage" style="color:var(--text-muted);margin-left:8px;"></span>
+          </div>
+          <span id="research-live-sources" style="font-size:0.8rem;color:var(--text-muted);"></span>
+        </div>
+        <div id="research-live-message" style="font-size:0.85rem;color:var(--text-primary);margin-bottom:6px;"></div>
+        <div id="research-live-log" style="max-height:140px;overflow-y:auto;font-size:0.78rem;font-family:ui-monospace,monospace;color:var(--text-muted);background:var(--surface-2);padding:8px 10px;border-radius:6px;line-height:1.45;"></div>
+        <div id="research-live-actions" style="display:none;margin-top:8px;gap:8px;"></div>
+      </div>
+    </div>
+
     <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
       <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.search(event)">
       <button class="btn btn-secondary" onclick="KazmaResearch.load()">{{ t('research.refresh') }}</button>
@@ -110,6 +145,11 @@ window.KAZMA_I18N = Object.assign({}, window.KAZMA_I18N || {}, {
   research_archived_msg: "{{ t('research.archived_msg') }}",
   research_restored_msg: "{{ t('research.restored_msg') }}",
   research_open_md: "{{ t('research.open_md') }}",
+  research_start_btn: "{{ t('research.start_btn') }}",
+  research_start_running: "{{ t('research.start_running') }}",
+  research_start_done: "{{ t('research.start_done') }}",
+  research_start_error: "{{ t('research.start_error') }}",
+  research_view_report: "{{ t('research.view_report') }}",
 });
 </script>
 <script src="/static/js/research.js?v={{ js_version() }}"></script>
