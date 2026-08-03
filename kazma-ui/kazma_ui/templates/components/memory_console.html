@@ -1,0 +1,346 @@
+  <!-- ── Memory & Governance ── -->
+  <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
+    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;gap:12px;flex-wrap:wrap;">
+      <span><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('dashboard.memory_governance') }}</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
+        <button type="button" id="memory-refresh-btn" class="btn btn-sm" style="font-size:0.72rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="{{ t('dashboard.memory_refresh') }}">{{ t('dashboard.memory_refresh') }}</button>
+      </span>
+    </h3>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.45;" id="memory-status-desc">
+          {{ t('dashboard.memory_desc_active') }}
+        </div>
+        <div id="memory-pipeline" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;"></div>
+      </div>
+      <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
+        {{ t('dashboard.install_ml') }}
+      </button>
+    </div>
+
+    <!-- KPI strip: V2-aligned labels (embeddings / FTS / beliefs / health) -->
+    <div id="memory-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px;">
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Embeddings</div>
+        <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">vector backend</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">FTS index</div>
+        <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">episodes + working</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Belief graph</div>
+        <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
+        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">active triples</div>
+      </div>
+      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
+        <div id="kpi-health-summary" style="font-size:1.05rem;font-weight:700;margin-top:8px;font-family:var(--font-mono);">–</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.memory_components') }}</div>
+      </div>
+    </div>
+
+    <!-- Live component health board (grouped) -->
+    <div style="margin-top:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">{{ t('dashboard.memory_components') }}</span>
+        <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
+      </div>
+      <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:14px;">
+        <div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">
+          {{ t('dashboard.memory_probing') }}
+        </div>
+      </div>
+      <div id="memory-issues-list" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.25);background:rgba(245,158,11,0.06);font-size:0.75rem;color:#fbbf24;line-height:1.45;"></div>
+    </div>
+
+    <!-- V2 Cognitive Engine Panel -->
+    <div id="v2-memory-section" class="chart-card" style="margin-top:18px;padding:18px;">
+      <!-- ── Header ── -->
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">V2 Cognitive Engine</span>
+          <span id="v2-status-badge" style="font-size:0.68rem;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(148,163,184,0.15);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">—</span>
+        </div>
+        <button id="v2-refresh-btn" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);color:var(--text-secondary);font-size:0.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;">Refresh</button>
+      </div>
+      <div id="v2-status-desc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">Loading V2 status…</div>
+
+      <!-- ── KPI grid ── -->
+      <div id="v2-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Active Beliefs</div>
+          <div id="v2-kpi-beliefs-active" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-beliefs-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Recall Episodes</div>
+          <div id="v2-kpi-episodes-recall" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-episodes-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Entities</div>
+          <div id="v2-kpi-entities" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-procedural-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Queue</div>
+          <div id="v2-kpi-queue" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+          <div id="v2-kpi-queue-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        </div>
+      </div>
+
+      <!-- Sticky alert when post-turn failed or queue has dead-letters -->
+      <div id="v2-alert-banner" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;border:1px solid rgba(248,113,113,0.45);background:rgba(248,113,113,0.1);font-size:0.8rem;color:#fecaca;">
+        <strong>Memory needs attention.</strong>
+        <span id="v2-alert-banner-text"></span>
+        <a href="#v2-queue-table" style="margin-left:8px;color:#fca5a5;">Jump to queue ↓</a>
+      </div>
+
+      <!-- Post-turn health strip -->
+      <div id="v2-post-turn-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.78rem;">
+        <span style="font-weight:600;color:var(--text-secondary);">Post-turn</span>
+        <span id="v2-post-turn-ok" style="color:var(--text-muted);">ok: –</span>
+        <span id="v2-post-turn-err" style="color:var(--text-muted);">last error: –</span>
+        <span id="v2-embedder-ready" style="color:var(--text-muted);">embedder: –</span>
+        <span id="v2-reconsol-meta" style="color:var(--text-muted);">reconsol: –</span>
+        <span id="v2-graph-backend" style="color:var(--text-muted);">graph: –</span>
+        <span id="v2-backends-mode" style="color:var(--text-muted);">backends: –</span>
+        <a href="/settings?tab=memory" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
+      </div>
+
+      <!-- Live recall probe + federated search (memory + KB, labeled) -->
+      <div style="margin-bottom:16px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
+          <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> {{ t('dashboard.memory_include_kb') }}
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="v2-probe-input" type="text" placeholder="What color do I like? / How does the API auth work?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
+          <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">{{ t('dashboard.memory_probe_memory') }}</button>
+          <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">{{ t('dashboard.memory_probe_federated') }}</button>
+        </div>
+        <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
+        <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
+      </div>
+
+      <!-- Queue + entity merges + procedural + quality -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px;">
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Task queue</span>
+            <span style="display:inline-flex;gap:4px;">
+              <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="Delete failed dead-letter tasks">Clear failed</button>
+              <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            </span>
+          </div>
+          <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+          <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">Run reconsolidation</button>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Pending entity merges</span>
+            <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+          </div>
+          <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Procedural skills</span>
+            <button id="v2-procedural-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+          </div>
+          <div id="v2-procedural-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+        </div>
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">Memory quality</div>
+          <div id="v2-quality-score" style="font-size:1.4rem;font-weight:700;font-family:var(--font-mono);">–</div>
+          <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
+        </div>
+      </div>
+
+      <!-- ── Row: Known Beliefs List (left) + Topology Graph (right) ── -->
+      <div id="v2-beliefs-graph-row" style="display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);gap:14px;margin-bottom:16px;">
+
+        <!-- LEFT: Known Beliefs (currently valid) -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:500px;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            Known Beliefs (currently valid)
+            <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
+          </div>
+          <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:500px;padding:6px 8px;"></div>
+          <div id="v2-belief-empty-cta" style="display:none;padding:16px;text-align:center;border-top:1px solid var(--border-subtle);">
+            <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">No beliefs yet — teach Kazma a fact.</div>
+            <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
+          </div>
+          <!-- Belief detail drawer -->
+          <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:10px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:200px;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="color:var(--text-secondary);">Belief detail</strong>
+              <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;">✕</button>
+            </div>
+            <div id="v2-belief-drawer-body" style="color:var(--text-primary);line-height:1.45;"></div>
+            <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">Invalidate belief</button>
+          </div>
+        </div>
+
+        <!-- RIGHT: V2 Belief Topology Graph -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+              <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">V2 Belief Topology</span>
+              <div id="v2g-stats-line" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">–</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <input id="v2g-search" type="search" placeholder="filter…" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
+              <button id="v2g-path-query" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="Highlight entities from last probe/federated search">Path from query</button>
+              <label style="font-size:0.68rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;">
+                <input type="checkbox" id="v2g-episode-overlay" style="accent-color:var(--accent);"> Episodes
+              </label>
+              <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">↻</button>
+              <button id="v2g-export-png" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">PNG</button>
+              <button id="v2g-export-svg" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">SVG</button>
+              <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">JSON</a>
+              <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
+            </div>
+          </div>
+          <!-- Legend (filled dynamically — site accent + distinct You/user) -->
+          <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);align-items:center;">
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--warning,#f59e0b);margin-right:4px;box-shadow:0 0 6px rgba(245,158,11,0.45);"></span>You</span>
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>entity</span>
+            <span style="opacity:0.75;">edges · accent blue</span>
+          </div>
+          <!-- Canvas -->
+          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
+            <canvas id="v2g-canvas" width="800" height="400" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
+            <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
+            <div id="v2g-empty" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
+              <div>No beliefs yet — the graph populates as Kazma learns.</div>
+              <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
+            </div>
+            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">←↑↓→ pan · +/− zoom · Home reset · Tab to focus</div>
+          </div>
+        </div>
+      </div>
+      <style>
+        @media (max-width: 900px) {
+          #v2-beliefs-graph-row {
+            grid-template-columns: 1fr !important;
+          }
+          #v2-beliefs-graph-row > div {
+            min-height: 360px !important;
+          }
+          #v2-belief-list { max-height: 280px !important; }
+        }
+      </style>
+
+      <!-- ── Bottom row: Entity Types + Predicate Types + Tier Breakdown + Time Scrub ── -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+        <!-- Entity Types -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Entity Types</div>
+          <div id="v2g-filters-entity" style="display:flex;flex-direction:column;gap:5px;"></div>
+        </div>
+        <!-- Predicate Types + Active Filters -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Predicate Types</div>
+          <div id="v2g-filters-predicate" style="display:flex;flex-direction:column;gap:5px;"></div>
+          <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;min-height:20px;"></div>
+        </div>
+        <!-- Tier Breakdown + Procedural -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Tier Breakdown</div>
+          <div id="v2-tier-breakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin:12px 0 6px;">Procedural Skills</div>
+          <div id="v2-procedural-breakdown" style="font-size:0.75rem;color:var(--text-muted);">–</div>
+        </div>
+        <!-- Bi-Temporal Scrub + Inspect -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
+          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">{{ t('dashboard.memory_bitemporal') }}</div>
+          <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">{{ t('dashboard.memory_bitemporal_hint') }}</div>
+          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);" aria-label="Bi-temporal scrub">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:6px;flex-wrap:wrap;">
+            <span id="v2g-time-label" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
+            <span style="display:inline-flex;gap:4px;">
+              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="Play scrub">{{ t('dashboard.memory_play') }}</button>
+              <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
+            </span>
+          </div>
+          <div id="v2g-inspect" style="margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:8px;font-size:0.72rem;color:var(--text-muted);min-height:40px;">Click a node to inspect.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expansion Deck Toggle -->
+    <div style="margin-top:14px;">
+      <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
+        <span id="deck-toggle-arrow"><span class="ki" data-icon="play" aria-hidden="true"></span></span> {{ t('dashboard.backup_maintenance') }}
+      </button>
+    </div>
+
+    <!-- Collapsible Maintenance Deck -->
+    <div id="maintenance-deck" style="display:none;margin-top:14px;padding-top:10px;animation: fadeIn 0.3s ease;">
+      
+      <!-- Metrics & Actions Grid -->
+      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));gap:16px;margin-bottom:16px;">
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.fts5_db') }}</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="fts5-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 {{ t('dashboard.records') }}</span>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.vector_store') }}</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="vector-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 {{ t('dashboard.vectors') }}</span>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.memory_graph_title') }}</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="graph-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="graph-count-metric">0 {{ t('dashboard.memory_graph_edges') }}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            <span class="ki" data-icon="save" aria-hidden="true"></span> {{ t('dashboard.create_backup') }}
+          </button>
+          <button id="trigger-optimize-btn" class="btn btn-sm btn-primary" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="spinner" id="optimize-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            <span x-html="KazmaIcons.zap()"></span> {{ t('dashboard.optimize_db') }}
+          </button>
+          <button id="trigger-snapshots-btn" class="btn btn-sm" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-subtle);background:rgba(168,85,247,0.08);color:var(--text-secondary);">
+            <span class="spinner" id="snapshots-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            <span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('dashboard.snapshot_maintain') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Backups List Table Container -->
+      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;background:rgba(0,0,0,0.15);">
+        <div style="padding:10px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-subtle);font-weight:600;font-size:0.8rem;color:var(--text-secondary);">
+          {{ t('dashboard.available_backups') }}
+        </div>
+        <div style="max-height:220px;overflow-y:auto;overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border-subtle);background:rgba(255,255,255,0.01);">
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_name') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_keyword') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_vector') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_date') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;text-align:center;">{{ t('dashboard.col_action') }}</th>
+              </tr>
+            </thead>
+            <tbody id="backups-tbody">
+              <tr>
+                <td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">{{ t('dashboard.loading_backups') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>

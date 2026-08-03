@@ -18,6 +18,7 @@
     tab_entities: {{ t('memory.tab_entities') | tojson }},
     tab_merges: {{ t('memory.tab_merges') | tojson }},
     tab_hygiene: {{ t('memory.tab_hygiene') | tojson }},
+    tab_console: {{ t('memory.tab_console') | tojson }},
     refresh: {{ t('memory.refresh') | tojson }},
     search: {{ t('memory.search') | tojson }},
     invalidate: {{ t('memory.invalidate') | tojson }},
@@ -40,252 +41,298 @@
     confirm_hygiene: {{ t('memory.confirm_hygiene') | tojson }},
     isolated_hint: {{ t('memory.isolated_hint') | tojson }},
   };
+  window.__DASH_MEM_I18N = {
+    memoryActive: {{ t('dashboard.memory_active') | tojson }},
+    memoryDescActive: {{ t('dashboard.memory_desc_active') | tojson }},
+    installMl: {{ t('dashboard.install_ml') | tojson }},
+    fts5Db: {{ t('dashboard.fts5_db') | tojson }},
+    records: {{ t('dashboard.records') | tojson }},
+    vectors: {{ t('dashboard.vectors') | tojson }},
+    loadingBackups: {{ t('dashboard.loading_backups') | tojson }},
+    noBackups: {{ t('dashboard.no_backups') | tojson }},
+    restore: {{ t('dashboard.restore') | tojson }},
+    confirmRestore: {{ t('dashboard.confirm_restore') | tojson }},
+    restoreWarning: {{ t('dashboard.restore_warning') | tojson }},
+    restoring: {{ t('dashboard.restoring') | tojson }},
+    restoreSuccess: {{ t('dashboard.restore_success') | tojson }},
+    backupSuccess: {{ t('dashboard.backup_success') | tojson }},
+    backupFailed: {{ t('dashboard.backup_failed') | tojson }},
+    optimizeSuccess: {{ t('dashboard.optimize_success') | tojson }},
+    optimizeFailed: {{ t('dashboard.optimize_failed') | tojson }},
+    snapshotMaintainTitle: {{ t('dashboard.snapshot_maintain_title') | tojson }},
+    snapshotMaintainConfirm: {{ t('dashboard.snapshot_maintain_confirm') | tojson }},
+    memoryInstalling: {{ t('dashboard.memory_installing') | tojson }},
+    installing: {{ t('dashboard.installing') | tojson }},
+    memoryDescInstalling: {{ t('dashboard.memory_desc_installing') | tojson }},
+    memoryDegraded: {{ t('dashboard.memory_degraded') | tojson }},
+    memoryDescDegraded: {{ t('dashboard.memory_desc_degraded') | tojson }},
+    installFailed: {{ t('dashboard.install_failed') | tojson }},
+    issuesHeading: {{ t('dashboard.memory_issues') | tojson }},
+    graphConfirmClear: {{ t('dashboard.memory_graph_confirm_clear') | tojson }},
+    graphCleared: {{ t('dashboard.memory_graph_cleared') | tojson }},
+    graphNodes: {{ t('dashboard.memory_graph_nodes') | tojson }},
+    graphEdges: {{ t('dashboard.memory_graph_edges') | tojson }},
+    graphClickHint: {{ t('dashboard.memory_graph_click_hint') | tojson }},
+    graphTrunc: {{ t('dashboard.memory_graph_truncated') | tojson }},
+    pipeEnabled: {{ t('dashboard.memory_pipe_enabled') | tojson }},
+    pipePerTurn: {{ t('dashboard.memory_pipe_per_turn') | tojson }},
+    pipeAutoStore: {{ t('dashboard.memory_pipe_auto_store') | tojson }},
+    pipeConsolidate: {{ t('dashboard.memory_pipe_consolidator') | tojson }},
+    groupFeatures: {{ t('dashboard.memory_group_features') | tojson }},
+    groupLayers: {{ t('dashboard.memory_group_layers') | tojson }},
+    groupPackages: {{ t('dashboard.memory_group_packages') | tojson }},
+    kpiL1: {{ t('dashboard.kpi_l1_chroma') | tojson }},
+    kpiL3: {{ t('dashboard.kpi_l3_bm25') | tojson }},
+    kpiL2: {{ t('dashboard.kpi_l2_graph') | tojson }},
+    kpiOk: {{ t('dashboard.kpi_ok') | tojson }},
+    noComponentData: {{ t('dashboard.no_component_data') | tojson }},
+    compNames: {
+      memory_enabled: {{ t('dashboard.comp.memory_enabled') | tojson }},
+      per_turn_retrieval: {{ t('dashboard.comp.per_turn_retrieval') | tojson }},
+      auto_store: {{ t('dashboard.comp.auto_store') | tojson }},
+      consolidation: {{ t('dashboard.comp.consolidation') | tojson }},
+      embedder: {{ t('dashboard.comp.embedder') | tojson }},
+      vector_memory: {{ t('dashboard.comp.vector_memory') | tojson }},
+      layer_l1: {{ t('dashboard.comp.layer_l1') | tojson }},
+      layer_l2: {{ t('dashboard.comp.layer_l2') | tojson }},
+      layer_l3: {{ t('dashboard.comp.layer_l3') | tojson }},
+      layer_l4: {{ t('dashboard.comp.layer_l4') | tojson }},
+      pkg_chromadb: {{ t('dashboard.comp.pkg_chromadb') | tojson }},
+      pkg_st: {{ t('dashboard.comp.pkg_st') | tojson }},
+      pkg_sqlite_vec: {{ t('dashboard.comp.pkg_sqlite_vec') | tojson }}
+    }
+  };
 </script>
 
-<div
-  x-data="memoryPage()"
-  x-init="init()"
-  style="max-width:1100px;margin:0 auto;padding:0 1rem 2rem;box-sizing:border-box;"
->
-  {# ── Intro ── #}
-  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;">
-    <strong>🧠 <span x-text="S.title || 'Memory'"></span></strong>
-    — <span x-text="S.intro || 'Browse, invalidate, merge entities, and run hygiene without chat tools.'"></span>
-  </div>
+<div style="max-width:1200px;margin:0 auto;padding:0 1rem 2.5rem;box-sizing:border-box;">
 
-  {# ── Summary chips ── #}
-  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1rem;">
-    <template x-for="chip in summaryChips" :key="chip.k">
-      <div class="card" style="padding:0.5rem 0.85rem;min-width:7rem;">
-        <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;" x-text="chip.k"></div>
-        <div style="font-size:1.15rem;font-weight:600;" x-text="chip.v"></div>
-      </div>
-    </template>
-    <button class="btn btn-secondary btn-sm" @click="loadAll()" :disabled="loading" style="align-self:center;" x-text="S.refresh || 'Refresh'"></button>
-  </div>
-
-  {# ── Tabs ── #}
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1rem;border-bottom:1px solid var(--border-subtle);padding-bottom:0.5rem;">
-    <template x-for="t in tabs" :key="t.id">
-      <button
-        class="btn btn-sm"
-        :class="tab === t.id ? 'btn-primary' : 'btn-secondary'"
-        @click="tab = t.id; onTab()"
-        x-text="t.label"
-      ></button>
-    </template>
-  </div>
-
-  {# ═══════════ BELIEFS ═══════════ #}
-  <div x-show="tab === 'beliefs'" x-cloak>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;">
-      <input type="search" class="form-input" style="flex:1;min-width:180px;" :placeholder="S.search || 'Search…'" x-model="beliefQ" @keydown.enter="loadBeliefs()">
-      <button class="btn btn-secondary btn-sm" @click="loadBeliefs()" x-text="S.search || 'Search'"></button>
-      <button class="btn btn-danger btn-sm" @click="invalidateSelected()" :disabled="!selectedBeliefs.length" x-text="(S.invalidate || 'Invalidate') + ' (' + selectedBeliefs.length + ')'"></button>
-    </div>
-    <div class="card" style="padding:0;overflow:auto;max-height:60vh;">
-      <table class="table" style="width:100%;font-size:0.85rem;">
-        <thead>
-          <tr>
-            <th style="width:2rem;"><input type="checkbox" @change="toggleAllBeliefs($event.target.checked)"></th>
-            <th>Subject</th>
-            <th>Predicate</th>
-            <th>Object</th>
-            <th>Type</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-if="!beliefs.length">
-            <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
-          </template>
-          <template x-for="b in beliefs" :key="b.id">
-            <tr>
-              <td><input type="checkbox" :value="b.id" x-model="selectedBeliefs"></td>
-              <td><code x-text="b.subject"></code></td>
-              <td><code x-text="b.predicate"></code></td>
-              <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="b.object" x-text="b.object"></td>
-              <td x-text="b.predicate_type || ''"></td>
-              <td>
-                <button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" x-text="S.invalidate || 'Invalidate'"></button>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {# ═══════════ ENTITIES ═══════════ #}
-  <div x-show="tab === 'entities'" x-cloak>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;align-items:center;">
-      <input type="search" class="form-input" style="flex:1;min-width:160px;" :placeholder="S.search || 'Search…'" x-model="entityQ" @keydown.enter="loadEntities()">
-      <label style="font-size:0.8rem;display:flex;gap:4px;align-items:center;">
-        <input type="checkbox" x-model="emptyOnly" @change="loadEntities()">
-        <span x-text="S.empty_only || 'Empty only'"></span>
-      </label>
-      <label style="font-size:0.8rem;display:flex;gap:4px;align-items:center;">
-        <input type="checkbox" x-model="isolatedOnly" @change="loadEntities()">
-        <span x-text="S.isolated_only || 'Isolated only'"></span>
-      </label>
-      <button class="btn btn-secondary btn-sm" @click="loadEntities()" x-text="S.search || 'Search'"></button>
-    </div>
-    <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 0.75rem;" x-text="S.isolated_hint || 'Isolated = has beliefs but no edges to other entities. Use Link or Merge to connect them.'"></p>
-
-    {# Merge / Link panel #}
-    <div class="card" style="padding:0.85rem 1rem;margin-bottom:0.75rem;">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px;">
-        <div>
-          <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.source || 'Source'"></label>
-          <input class="form-input" x-model="mergeSource" placeholder="source entity id">
-        </div>
-        <div>
-          <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.target || 'Target'"></label>
-          <input class="form-input" x-model="mergeTarget" placeholder="target entity id">
-        </div>
-        <div>
-          <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.predicate || 'Predicate (link)'"></label>
-          <input class="form-input" x-model="linkPredicate" placeholder="related_to">
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-primary btn-sm" @click="doMerge()" x-text="S.merge || 'Merge source → target'"></button>
-        <button class="btn btn-secondary btn-sm" @click="doLink()" x-text="S.link || 'Link source —pred→ target'"></button>
-      </div>
-    </div>
-
-    <div class="card" style="padding:0;overflow:auto;max-height:55vh;">
-      <table class="table" style="width:100%;font-size:0.85rem;">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Type</th>
-            <th>Name</th>
-            <th>Beliefs</th>
-            <th>Links</th>
-            <th>Flags</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-if="!entities.length">
-            <tr><td colspan="7" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
-          </template>
-          <template x-for="e in entities" :key="e.id">
-            <tr :style="e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : '')">
-              <td>
-                <code style="cursor:pointer;" @click="pickEntity(e.id)" :title="'Click to fill merge fields'" x-text="e.id"></code>
-              </td>
-              <td x-text="e.type"></td>
-              <td x-text="e.name"></td>
-              <td x-text="e.belief_count"></td>
-              <td x-text="e.linked_others"></td>
-              <td style="font-size:0.72rem;">
-                <span x-show="e.empty" class="badge">empty</span>
-                <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">isolated</span>
-                <span x-show="e.protected" class="badge">protected</span>
-              </td>
-              <td style="white-space:nowrap;">
-                <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id" title="Set as source">Src</button>
-                <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id" title="Set as target">Tgt</button>
-                <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {# ═══════════ MERGES (pending quarantine) ═══════════ #}
-  <div x-show="tab === 'merges'" x-cloak>
-    <div class="card" style="padding:0;overflow:auto;max-height:60vh;">
-      <table class="table" style="width:100%;font-size:0.85rem;">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Source</th>
-            <th>Target</th>
-            <th>Tier</th>
-            <th>Conf</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-if="!merges.length">
-            <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No pending merges'"></td></tr>
-          </template>
-          <template x-for="m in merges" :key="m.id">
-            <tr>
-              <td><code x-text="(m.id || '').slice(0,14)"></code></td>
-              <td x-text="m.source_entity_id || m.source_id"></td>
-              <td x-text="m.target_entity_id || m.target_id"></td>
-              <td x-text="m.merge_tier || ''"></td>
-              <td x-text="m.confidence != null ? Number(m.confidence).toFixed(2) : ''"></td>
-              <td>
-                <button class="btn btn-sm btn-primary" @click="decideMerge(m.id, true)">Approve</button>
-                <button class="btn btn-sm btn-secondary" @click="decideMerge(m.id, false)">Reject</button>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {# ═══════════ HYGIENE ═══════════ #}
-  <div x-show="tab === 'hygiene'" x-cloak>
-    <div class="card" style="padding:1rem 1.25rem;margin-bottom:0.75rem;">
-      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:0.75rem;">
-        <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
-          <input type="checkbox" x-model="hygiene.purge_empty_entities">
-          <span x-text="S.purge_empty || 'Purge empty entity shells'"></span>
-          <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.empty_entities || []).length + ')'"></span>
-        </label>
-        <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
-          <input type="checkbox" x-model="hygiene.invalidate_near_dup_noted">
-          <span x-text="S.dedupe_noted || 'Invalidate near-dup noted beliefs'"></span>
-          <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.near_dup_noted || []).length + ')'"></span>
-        </label>
-        <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
-          <input type="checkbox" x-model="hygiene.archive_invalidated">
-          <span x-text="S.archive_dead || 'Archive invalidated beliefs'"></span>
-          <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.invalidated_belief_count || 0) + ')'"></span>
-        </label>
-      </div>
-      <button class="btn btn-primary btn-sm" @click="runHygiene()" :disabled="hygieneRunning" x-text="S.run_hygiene || 'Run selected hygiene'"></button>
-      <button class="btn btn-secondary btn-sm" @click="loadHygiene()" style="margin-left:6px;" x-text="S.refresh || 'Refresh preview'"></button>
-    </div>
-
-    <div class="card" style="padding:1rem;margin-bottom:0.75rem;" x-show="(hygienePreview.isolated_entities || []).length">
-      <strong>Isolated entities</strong>
-      <span style="font-size:0.78rem;color:var(--text-muted);"> — have beliefs but no links to other nodes. Use Entities tab → Link/Merge.</span>
-      <ul style="margin:0.5rem 0 0;padding-left:1.2rem;font-size:0.85rem;">
-        <template x-for="e in (hygienePreview.isolated_entities || []).slice(0,30)" :key="e.id">
-          <li>
-            <code x-text="e.id"></code>
-            <span x-text="' · ' + (e.belief_count || 0) + ' beliefs'"></span>
-            <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">Open</button>
-          </li>
+  {# ── Operator tools (Alpine) ── #}
+  <div
+    x-data="memoryPage()"
+    x-init="init()"
+    style="margin-bottom:1.5rem;"
+  >
+    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;">
+      <strong>🧠 <span x-text="S.title || 'Memory'"></span></strong>
+      — <span x-text="S.intro || ''"></span>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <template x-for="chip in summaryChips" :key="chip.k">
+          <span style="font-size:0.75rem;font-family:var(--font-mono);padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);">
+            <span style="color:var(--text-muted);" x-text="chip.k + ':'"></span>
+            <strong x-text="chip.v"></strong>
+          </span>
         </template>
-      </ul>
+        <button class="btn btn-secondary btn-sm" @click="loadAll()" :disabled="loading" x-text="S.refresh || 'Refresh'"></button>
+      </div>
     </div>
 
-    <div class="card" style="padding:1rem;" x-show="(hygienePreview.empty_entities || []).length">
-      <strong>Empty entity shells</strong>
-      <ul style="margin:0.5rem 0 0;padding-left:1.2rem;font-size:0.85rem;max-height:200px;overflow:auto;">
-        <template x-for="e in (hygienePreview.empty_entities || [])" :key="e.id">
-          <li><code x-text="e.id"></code> <span x-text="e.type"></span></li>
-        </template>
-      </ul>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1rem;border-bottom:1px solid var(--border-subtle);padding-bottom:0.5rem;">
+      <template x-for="t in tabs" :key="t.id">
+        <button
+          class="btn btn-sm"
+          :class="tab === t.id ? 'btn-primary' : 'btn-secondary'"
+          @click="tab = t.id; onTab(); if (t.id==='console') { location.hash='console'; }"
+          :id="'mem-tab-' + t.id"
+          x-text="t.label"
+        ></button>
+      </template>
     </div>
+
+    {# BELIEFS #}
+    <div x-show="tab === 'beliefs'" x-cloak>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <input type="search" class="form-input" style="flex:1;min-width:180px;" :placeholder="S.search || 'Search…'" x-model="beliefQ" @keydown.enter="loadBeliefs()">
+        <button class="btn btn-secondary btn-sm" @click="loadBeliefs()" x-text="S.search || 'Search'"></button>
+        <button class="btn btn-danger btn-sm" @click="invalidateSelected()" :disabled="!selectedBeliefs.length" x-text="(S.invalidate || 'Invalidate') + ' (' + selectedBeliefs.length + ')'"></button>
+      </div>
+      <div class="card" style="padding:0;overflow:auto;max-height:50vh;">
+        <table class="table" style="width:100%;font-size:0.85rem;">
+          <thead>
+            <tr>
+              <th style="width:2rem;"><input type="checkbox" @change="toggleAllBeliefs($event.target.checked)"></th>
+              <th>Subject</th><th>Predicate</th><th>Object</th><th>Type</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="!beliefs.length">
+              <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
+            </template>
+            <template x-for="b in beliefs" :key="b.id">
+              <tr>
+                <td><input type="checkbox" :value="b.id" x-model="selectedBeliefs"></td>
+                <td><code x-text="b.subject"></code></td>
+                <td><code x-text="b.predicate"></code></td>
+                <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="b.object" x-text="b.object"></td>
+                <td x-text="b.predicate_type || ''"></td>
+                <td><button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" x-text="S.invalidate || 'Invalidate'"></button></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ENTITIES #}
+    <div x-show="tab === 'entities'" x-cloak>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;align-items:center;">
+        <input type="search" class="form-input" style="flex:1;min-width:160px;" :placeholder="S.search || 'Search…'" x-model="entityQ" @keydown.enter="loadEntities()">
+        <label style="font-size:0.8rem;display:flex;gap:4px;align-items:center;">
+          <input type="checkbox" x-model="emptyOnly" @change="loadEntities()">
+          <span x-text="S.empty_only || 'Empty only'"></span>
+        </label>
+        <label style="font-size:0.8rem;display:flex;gap:4px;align-items:center;">
+          <input type="checkbox" x-model="isolatedOnly" @change="loadEntities()">
+          <span x-text="S.isolated_only || 'Isolated only'"></span>
+        </label>
+        <button class="btn btn-secondary btn-sm" @click="loadEntities()" x-text="S.search || 'Search'"></button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 0.75rem;" x-text="S.isolated_hint || ''"></p>
+      <div class="card" style="padding:0.85rem 1rem;margin-bottom:0.75rem;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px;">
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.source || 'Source'"></label>
+            <input class="form-input" x-model="mergeSource" placeholder="source entity id">
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.target || 'Target'"></label>
+            <input class="form-input" x-model="mergeTarget" placeholder="target entity id">
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.predicate || 'Predicate'"></label>
+            <input class="form-input" x-model="linkPredicate" placeholder="related_to">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" @click="doMerge()" x-text="S.merge || 'Merge'"></button>
+          <button class="btn btn-secondary btn-sm" @click="doLink()" x-text="S.link || 'Link'"></button>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:auto;max-height:45vh;">
+        <table class="table" style="width:100%;font-size:0.85rem;">
+          <thead>
+            <tr>
+              <th>ID</th><th>Type</th><th>Name</th><th>Beliefs</th><th>Links</th><th>Flags</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="!entities.length">
+              <tr><td colspan="7" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
+            </template>
+            <template x-for="e in entities" :key="e.id">
+              <tr :style="e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : '')">
+                <td><code style="cursor:pointer;" @click="pickEntity(e.id)" x-text="e.id"></code></td>
+                <td x-text="e.type"></td>
+                <td x-text="e.name"></td>
+                <td x-text="e.belief_count"></td>
+                <td x-text="e.linked_others"></td>
+                <td style="font-size:0.72rem;">
+                  <span x-show="e.empty" class="badge">empty</span>
+                  <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">isolated</span>
+                  <span x-show="e.protected" class="badge">protected</span>
+                </td>
+                <td style="white-space:nowrap;">
+                  <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id">Src</button>
+                  <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id">Tgt</button>
+                  <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# MERGES #}
+    <div x-show="tab === 'merges'" x-cloak>
+      <div class="card" style="padding:0;overflow:auto;max-height:50vh;">
+        <table class="table" style="width:100%;font-size:0.85rem;">
+          <thead>
+            <tr><th>ID</th><th>Source</th><th>Target</th><th>Tier</th><th>Conf</th><th></th></tr>
+          </thead>
+          <tbody>
+            <template x-if="!merges.length">
+              <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No pending merges'"></td></tr>
+            </template>
+            <template x-for="m in merges" :key="m.id">
+              <tr>
+                <td><code x-text="(m.id || '').slice(0,14)"></code></td>
+                <td x-text="m.source_entity_id || m.source_id"></td>
+                <td x-text="m.target_entity_id || m.target_id"></td>
+                <td x-text="m.merge_tier || ''"></td>
+                <td x-text="m.confidence != null ? Number(m.confidence).toFixed(2) : ''"></td>
+                <td>
+                  <button class="btn btn-sm btn-primary" @click="decideMerge(m.id, true)">Approve</button>
+                  <button class="btn btn-sm btn-secondary" @click="decideMerge(m.id, false)">Reject</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# HYGIENE #}
+    <div x-show="tab === 'hygiene'" x-cloak>
+      <div class="card" style="padding:1rem 1.25rem;margin-bottom:0.75rem;">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:0.75rem;">
+          <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
+            <input type="checkbox" x-model="hygiene.purge_empty_entities">
+            <span x-text="S.purge_empty || 'Purge empty'"></span>
+            <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.empty_entities || []).length + ')'"></span>
+          </label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
+            <input type="checkbox" x-model="hygiene.invalidate_near_dup_noted">
+            <span x-text="S.dedupe_noted || 'Dedupe noted'"></span>
+            <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.near_dup_noted || []).length + ')'"></span>
+          </label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
+            <input type="checkbox" x-model="hygiene.archive_invalidated">
+            <span x-text="S.archive_dead || 'Archive dead'"></span>
+            <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.invalidated_belief_count || 0) + ')'"></span>
+          </label>
+        </div>
+        <button class="btn btn-primary btn-sm" @click="runHygiene()" :disabled="hygieneRunning" x-text="S.run_hygiene || 'Run hygiene'"></button>
+        <button class="btn btn-secondary btn-sm" @click="loadHygiene()" style="margin-left:6px;" x-text="S.refresh || 'Refresh'"></button>
+      </div>
+      <div class="card" style="padding:1rem;margin-bottom:0.75rem;" x-show="(hygienePreview.isolated_entities || []).length">
+        <strong>Isolated entities</strong>
+        <ul style="margin:0.5rem 0 0;padding-left:1.2rem;font-size:0.85rem;">
+          <template x-for="e in (hygienePreview.isolated_entities || []).slice(0,40)" :key="e.id">
+            <li>
+              <code x-text="e.id"></code>
+              <span x-text="' · ' + (e.belief_count || 0) + ' beliefs'"></span>
+              <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">Open</button>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </div>
+
+    <div x-show="loading" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">Loading…</div>
+    <div x-show="error" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
   </div>
 
-  <div x-show="loading" style="padding:1rem;color:var(--text-muted);">Loading…</div>
-  <div x-show="error" style="padding:0.75rem;color:var(--danger,#ef4444);font-size:0.85rem;" x-text="error"></div>
+  {# ── Full console: health, graph, probe, backups (from dashboard) ── #}
+  <div id="console">
+    <h2 style="font-size:1rem;margin:0 0 0.75rem;color:var(--text-secondary);">{{ t('memory.tab_console') }}</h2>
+    {% include "components/memory_console.html" %}
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/js/memory.js?v={{ js_version() }}"></script>
+<script src="/static/js/memory_console.js?v={{ js_version() }}"></script>
+<script>
+  // Deep-link: /memory#hygiene or #console
+  (function () {
+    var h = (location.hash || '').replace('#', '');
+    if (h === 'hygiene' || h === 'entities' || h === 'beliefs' || h === 'merges') {
+      document.addEventListener('DOMContentLoaded', function () {
+        var btn = document.getElementById('mem-tab-' + h);
+        if (btn) btn.click();
+      });
+    }
+  })();
+</script>
 {% endblock %}
