@@ -1096,15 +1096,32 @@
   /** Focus a node by entity id (from Entities table). Returns true if found. */
   function _v2gSelectEntity(entityId, opts) {
     opts = opts || {};
-    var id = String(entityId || '').trim();
+    var id = String(entityId || opts.graphId || '').trim();
     if (!id) return false;
+    // Self person shells (ent_* User/Mubder) map to hub id=user on the canvas
+    var focusId = String(opts.graphId || id).trim();
+    var tryIds = [focusId, id];
+    if (opts.isSelf || opts.graphId === 'user') {
+      tryIds.unshift('user');
+    }
     // Clear search filter that may hide the node
     var searchEl = document.getElementById('v2g-search');
     if (searchEl && searchEl.value) {
       searchEl.value = '';
       _v2gApplyFilters();
     }
-    var idx = _v2gFindNodeIndex(id);
+    var idx = -1;
+    for (var t = 0; t < tryIds.length && idx < 0; t++) {
+      idx = _v2gFindNodeIndex(tryIds[t]);
+    }
+    // Match by display name (e.g. list says Mubder, hub labeled Mubder)
+    if (idx < 0 && opts.name) {
+      var want = String(opts.name).toLowerCase();
+      for (var i = 0; i < _v2gPts.length; i++) {
+        var dn = _v2gDisplayName(_v2gPts[i]).toLowerCase();
+        if (dn === want) { idx = i; break; }
+      }
+    }
     if (idx < 0) {
       // Node may be outside current filter — clear entity-type filters once
       var hadFilter = Object.keys(_v2gFilters.entity || {}).length > 0;
@@ -1112,8 +1129,38 @@
         _v2gFilters.entity = {};
         _v2gRenderFilters();
         _v2gApplyFilters();
-        idx = _v2gFindNodeIndex(id);
+        for (var t2 = 0; t2 < tryIds.length && idx < 0; t2++) {
+          idx = _v2gFindNodeIndex(tryIds[t2]);
+        }
       }
+    }
+    // Soft-inject hub/self node if still missing (empty person shell)
+    if (idx < 0 && (opts.isSelf || focusId === 'user' || id === 'user')) {
+      var label = opts.name || 'You';
+      _v2gRawNodes = _v2gRawNodes || [];
+      var exists = false;
+      for (var r = 0; r < _v2gRawNodes.length; r++) {
+        if (_v2gRawNodes[r] && String(_v2gRawNodes[r].id) === 'user') {
+          _v2gRawNodes[r].name = label;
+          _v2gRawNodes[r].isHub = true;
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        _v2gRawNodes.push({
+          id: 'user',
+          name: label,
+          type: 'person',
+          beliefCount: 0,
+          isHub: true,
+          isHighStakes: true,
+        });
+      }
+      _v2gStructSig = '';
+      _v2gLabelSig = '';
+      _v2gApplyFilters();
+      idx = _v2gFindNodeIndex('user');
     }
     if (idx < 0) return false;
     var p = _v2gPts[idx];
@@ -1218,12 +1265,13 @@
   }
   function _v2gIsUser(p) {
     if (!p) return false;
+    if (p.isHub || p.isUser) return true;
     var id = String(p.id || '').toLowerCase();
-    return id === 'user' || id === 'you' || !!p.isUser;
+    return id === 'user' || id === 'you';
   }
 
   // Display label for a node. Id stays canonical (user, shipx); name is the
-  // user-editable brand/label. Hub defaults to "You" until renamed.
+  // user-editable brand/label. Hub defaults to "You" until renamed (e.g. Mubder).
   function _v2gDisplayName(p) {
     if (!p) return '';
     var raw = String(p.name || p.fullLabel || p.label || p.id || '').trim();
@@ -1231,8 +1279,8 @@
     if (/^you\s*\(user\)$/i.test(raw)) raw = 'You';
     if (_v2gIsUser(p)) {
       var low = raw.toLowerCase();
-      if (!raw || low === 'user' || low === 'you') return 'You';
-      return raw;
+      if (!raw || low === 'user' || low === 'you' || low === 'me') return 'You';
+      return raw; // e.g. Mubder / Kazma
     }
     return raw || String(p.id || '');
   }
@@ -1361,11 +1409,12 @@
     var ns = Object.keys(byId).map(function(k) { return byId[k]; });
     function _nodeDisplay(nd) {
       var rawName = String(nd.name || nd.id || '').trim();
-      var isUser = String(nd.id || '').toLowerCase() === 'user';
+      var isUser = !!nd.isHub || String(nd.id || '').toLowerCase() === 'user';
       var display = rawName;
       if (isUser) {
         var low = rawName.toLowerCase();
-        if (!rawName || low === 'user' || low === 'you') display = 'You';
+        if (!rawName || low === 'user' || low === 'you' || low === 'me') display = 'You';
+        // else keep branded name (Mubder, Kazma, …)
       }
       return { rawName: rawName, display: display, isUser: isUser };
     }

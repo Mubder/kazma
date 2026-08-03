@@ -226,9 +226,22 @@ function memoryPage() {
         // Soft-pick into merge slots without overwriting both
         this.pickEntity(id);
       }
+      // Prefer full entity row (graph_id maps self shells → user hub)
+      const ent =
+        (this.entities || []).find((e) => e && e.id === id) ||
+        opts.entity ||
+        null;
+      const graphId = (ent && (ent.graph_id || ent.graphId)) || id;
+      const isSelf = !!(ent && (ent.is_self || ent.isSelf || graphId === "user"));
+      const name = (ent && ent.name) || opts.name || "";
       const ok =
         typeof window._v2gSelectEntity === "function"
-          ? window._v2gSelectEntity(id, { notify: false })
+          ? window._v2gSelectEntity(id, {
+              notify: false,
+              graphId: graphId,
+              isSelf: isSelf,
+              name: name,
+            })
           : false;
       if (!ok && !opts.quiet) {
         toast("Node not on graph (filtered out or no beliefs)", "info");
@@ -433,10 +446,16 @@ function memoryPage() {
         toast("Renamed to “" + name + "”", "success");
         this.selectedEntityId = e.id;
         await this.loadEntities();
-        // Force graph reload so labels re-fetch from server (not just cache)
+        // Force graph reload so hub label (You→Mubder) re-fetches from server
         await refreshGraph();
+        const graphId = d.graph_id || e.graph_id || e.id;
         if (typeof window._v2gSelectEntity === "function") {
-          window._v2gSelectEntity(e.id, { notify: false });
+          window._v2gSelectEntity(e.id, {
+            notify: false,
+            graphId: graphId,
+            isSelf: !!d.hub_synced || graphId === "user" || !!e.is_self,
+            name: name,
+          });
         }
       } else toast(d.error || "Rename failed", "error");
     },

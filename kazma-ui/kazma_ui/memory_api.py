@@ -172,6 +172,12 @@ async def list_entities(
         sql += " ORDER BY belief_count DESC, linked_others ASC, e.name ASC LIMIT ?"
         params.append(lim)
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        from kazma_core.memory.self_hub import (
+            graph_focus_id,
+            is_self_entity,
+            parse_aliases,
+        )
+
         for r in rows:
             r["empty"] = int(r.get("belief_count") or 0) == 0
             r["isolated"] = (
@@ -180,6 +186,21 @@ async def list_entities(
                 and str(r.get("id") or "").lower() not in ("user", "assistant")
             )
             r["protected"] = str(r.get("id") or "").lower() in _PROTECTED_ENTITIES
+            aliases = parse_aliases(r.get("aliases_json"))
+            r["aliases"] = aliases
+            r["is_self"] = is_self_entity(
+                entity_id=str(r.get("id") or ""),
+                name=str(r.get("name") or ""),
+                aliases=aliases,
+                entity_type=str(r.get("type") or ""),
+            )
+            # Canvas hub is always id=user — self person shells focus there.
+            r["graph_id"] = graph_focus_id(
+                str(r.get("id") or ""),
+                name=str(r.get("name") or ""),
+                aliases=aliases,
+                entity_type=str(r.get("type") or ""),
+            )
         conn.close()
         return {"ok": True, "count": len(rows), "entities": rows}
     except Exception as exc:
@@ -216,6 +237,13 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "name too long (max 120)"}
 
     try:
+        from kazma_core.memory.self_hub import (
+            ensure_user_hub,
+            is_self_entity,
+            is_self_label,
+            parse_aliases,
+        )
+
         conn = _conn()
         row = conn.execute(
             "SELECT id, type, name, aliases_json FROM entities WHERE id=?",
@@ -239,12 +267,7 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
         else:
             old_name = str(row["name"] or eid)
             etype_out = str(row["type"] or "concept")
-            try:
-                aliases = json.loads(row["aliases_json"] or "[]")
-            except Exception:
-                aliases = []
-            if not isinstance(aliases, list):
-                aliases = []
+            aliases = parse_aliases(row["aliases_json"])
 
         # Preserve identity surface: old display, bare id, and defaults.
         for a in (old_name, eid, new_name, "You" if eid.lower() == "user" else None):
@@ -258,6 +281,32 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
             "UPDATE entities SET name=?, aliases_json=? WHERE id=?",
             (new_name, json.dumps(aliases, ensure_ascii=False), eid),
         )
+
+        # Self person shells (User / You / ent_* backfill) drive the canvas hub
+        # label. Keep entities.id=user in sync so the graph shows Mubder not You.
+        was_self = is_self_entity(
+            entity_id=eid,
+            name=old_name,
+            aliases=aliases,
+            entity_type=etype_out,
+        ) or is_self_label(old_name)
+        hub_synced = False
+        if was_self or eid.lower() == "user":
+            # Keep User/You in aliases so is_self stays true after rename
+            for keep in ("User", "You", "user"):
+                if keep not in aliases:
+                    aliases.append(keep)
+            conn.execute(
+                "UPDATE entities SET aliases_json=? WHERE id=?",
+                (json.dumps(aliases, ensure_ascii=False), eid),
+            )
+            ensure_user_hub(
+                conn,
+                new_name,
+                extra_aliases=list(aliases) + [eid, old_name],
+            )
+            hub_synced = True
+
         conn.commit()
         conn.close()
         return {
@@ -268,6 +317,8 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
             "aliases": aliases,
             "type": etype_out,
             "created": created,
+            "hub_synced": hub_synced,
+            "graph_id": "user" if (was_self or eid.lower() == "user") else eid,
         }
     except Exception as exc:
         logger.exception("[memory_api] rename entity failed")

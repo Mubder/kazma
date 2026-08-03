@@ -311,8 +311,8 @@
                 :data-entity-id="e.id"
                 :class="selectedEntityId === e.id ? 'mem-row-selected' : ''"
                 :style="selectedEntityId === e.id ? '' : (e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : ''))"
-                @click="focusEntity(e.id)"
-                :title="'Show on graph: ' + e.id"
+                @click="focusEntity(e.id, { entity: e })"
+                :title="(e.is_self ? 'Memory hub on graph' : 'Show on graph') + ': ' + (e.graph_id || e.id) + (e.name ? ' (' + e.name + ')' : '')"
               >
                 <td><code x-text="e.id"></code></td>
                 <td x-text="e.type"></td>
@@ -326,7 +326,7 @@
                 </td>
                 <td @click.stop>
                   <div class="mem-actions">
-                    <button class="btn btn-sm btn-secondary" @click="focusEntity(e.id, { skipPick: true })" title="Focus on graph">Graph</button>
+                    <button class="btn btn-sm btn-secondary" @click="focusEntity(e.id, { skipPick: true, entity: e })" title="Focus on graph">Graph</button>
                     <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="Change display name (id stays the same)"></button>
                     <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id">Src</button>
                     <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id">Tgt</button>

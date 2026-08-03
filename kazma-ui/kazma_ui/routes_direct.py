@@ -1216,6 +1216,18 @@ def register_direct_routes(self: Any) -> None:
             # the real entity — not a second virtual "fact" node with the same
             # id. Duplicate ids make the canvas id→index map last-write-wins
             # and orphan one of the two painted nodes (the shipx-alone bug).
+            #
+            # Self / hub: canvas hub is always id=user. Person shells like
+            # ent_* named User/Mubder collapse onto that hub so rename and
+            # list focus land on the same node (not a missing orphan).
+            from kazma_core.memory.self_hub import (
+                HUB_ID,
+                collect_self_entity_ids,
+                ensure_user_hub,
+                is_self_label,
+                resolve_hub_display_name,
+            )
+
             obj_texts: set[str] = set()
             obj_belief_count: dict[str, int] = {}
             for b in brows:
@@ -1225,13 +1237,34 @@ def register_direct_routes(self: Any) -> None:
                         obj_belief_count.get(b["object"], 0) + 1
                     )
 
+            self_ids = collect_self_entity_ids(conn)
+            hub_name = resolve_hub_display_name(conn)
+            # Heal: if a person shell was renamed (User→Mubder) but entities.user
+            # still missing/generic, upsert the hub so the label sticks.
+            try:
+                hub_row = conn.execute(
+                    "SELECT name FROM entities WHERE id=?", (HUB_ID,)
+                ).fetchone()
+                hub_row_name = str(hub_row["name"] if hub_row else "") or ""
+                if hub_name and hub_name != "You" and (
+                    not hub_row or is_self_label(hub_row_name) or hub_row_name.lower() == "user"
+                ):
+                    ensure_user_hub(conn, hub_name)
+                    conn.commit()
+                    self_ids = collect_self_entity_ids(conn)
+                    hub_name = resolve_hub_display_name(conn)
+            except Exception:
+                pass
+
             ref_ids: set[str] = set()
             for b in brows:
-                ref_ids.add(b["subject"])
-            ref_ids.add("user")
+                sub = b["subject"]
+                # Collapse self person shells onto the hub node
+                ref_ids.add(HUB_ID if sub in self_ids else sub)
+            ref_ids.add(HUB_ID)
             # Promote object strings that are real entity ids into the entity
             # node set so links target the entity, not a colliding virtual.
-            lookup_ids = set(ref_ids) | obj_texts
+            lookup_ids = set(ref_ids) | obj_texts | self_ids
             nodes: list[dict] = []
             ent_lookup: dict[str, dict] = {}
             if lookup_ids:
@@ -1242,32 +1275,49 @@ def register_direct_routes(self: Any) -> None:
                 ).fetchall()
                 ent_lookup = {r["id"]: dict(r) for r in erows}
             for oid in obj_texts:
+                if oid in self_ids:
+                    # Object points at a self shell — treat as hub
+                    continue
                 if oid in ent_lookup:
                     ref_ids.add(oid)
 
             belief_count: dict[str, int] = {}
             for b in brows:
-                belief_count[b["subject"]] = belief_count.get(b["subject"], 0) + 1
+                sub = b["subject"]
+                key = HUB_ID if sub in self_ids else sub
+                belief_count[key] = belief_count.get(key, 0) + 1
+            # Inbound objects that name a self id count on the hub
+            for oid, cnt in obj_belief_count.items():
+                if oid in self_ids:
+                    belief_count[HUB_ID] = belief_count.get(HUB_ID, 0) + cnt
 
             for eid in ref_ids:
+                if eid in self_ids and eid != HUB_ID:
+                    # Never emit a second self person node — hub only
+                    continue
                 e = ent_lookup.get(eid)
-                # The "user" node is always a person (it's hardcoded in
-                # ref_ids but has no entities-table row, so it would otherwise
-                # default to "concept" and render the wrong color).
-                if eid == "user":
+                if eid == HUB_ID:
                     etype = "person"
+                    ename = hub_name
+                    stakes = True
+                    if e and e.get("is_high_stakes") is not None:
+                        stakes = bool(e["is_high_stakes"])
                 else:
                     etype = e["type"] if e else "concept"
+                    ename = (e["name"] if e and e["name"] else eid)
+                    stakes = bool(e["is_high_stakes"]) if e else False
                 if entity_type and entity_type.strip() and etype != entity_type.strip():
                     continue
-                # Subject assertions + inbound object links that name this entity.
-                bc = belief_count.get(eid, 0) + obj_belief_count.get(eid, 0)
+                bc = belief_count.get(eid, 0)
+                if eid != HUB_ID:
+                    bc = bc + obj_belief_count.get(eid, 0)
                 nodes.append({
                     "id": eid,
-                    "name": (e["name"] if e and e["name"] else eid),
+                    "name": ename,
                     "type": etype,
-                    "isHighStakes": bool(e["is_high_stakes"]) if e else False,
+                    "isHighStakes": stakes,
                     "beliefCount": bc,
+                    "isHub": eid == HUB_ID,
                 })
 
             # Virtual fact nodes only for pure text objects that are NOT
@@ -1293,18 +1343,19 @@ def register_direct_routes(self: Any) -> None:
             node_ids = {n["id"] for n in nodes}
             for b in brows:
                 # Drop a belief link if EITHER endpoint was removed by a
-                # filter (e.g. entity_type). Previously only the subject was
-                # checked, which left dangling edges pointing at filtered-out
-                # virtual object nodes. Object text is the link target id
-                # (entity id when promoted, else virtual fact id).
-                if b["subject"] not in node_ids:
+                # filter (e.g. entity_type). Map self shells → hub id so
+                # edges attach to the single You/Mubder node.
+                src = HUB_ID if b["subject"] in self_ids else b["subject"]
+                tgt_raw = b["object"] or ""
+                tgt = HUB_ID if tgt_raw in self_ids else tgt_raw
+                if src not in node_ids:
                     continue
-                if b["object"] not in node_ids:
+                if tgt not in node_ids:
                     continue
                 links.append({
                     "id": b["id"],
-                    "source": b["subject"],
-                    "target": b["object"],
+                    "source": src,
+                    "target": tgt,
                     "label": b["predicate"],
                     "object_text": b["object"],
                     "type": b["predicate_type"],

@@ -204,3 +204,50 @@ async def test_edit_belief_object(mem_db):
     conn.close()
     assert row["object"] == "corrected description"
     assert row["extraction_method"] == "user_explicit"
+
+
+@pytest.mark.asyncio
+async def test_rename_person_user_shell_syncs_hub(mem_db):
+    """ent_* person named User → Mubder must drive graph hub label + graph_id."""
+    from kazma_ui.memory_api import list_entities, rename_entity
+
+    conn = sqlite3.connect(mem_db)
+    conn.execute(
+        "INSERT INTO entities (id, tenant_id, type, name, aliases_json) "
+        "VALUES ('ent_9ed7ffa178bef5770403c39a','default','person','User','[\"User\"]')"
+    )
+    conn.commit()
+    conn.close()
+
+    class Req:
+        async def json(self):
+            return {"name": "Mubder"}
+
+    out = await rename_entity("ent_9ed7ffa178bef5770403c39a", Req())
+    assert out["ok"] is True
+    assert out["name"] == "Mubder"
+    assert out.get("hub_synced") is True
+    assert out.get("graph_id") == "user"
+
+    conn = sqlite3.connect(mem_db)
+    conn.row_factory = sqlite3.Row
+    hub = conn.execute(
+        "SELECT name, aliases_json FROM entities WHERE id='user'"
+    ).fetchone()
+    shell = conn.execute(
+        "SELECT name, aliases_json FROM entities WHERE id=?",
+        ("ent_9ed7ffa178bef5770403c39a",),
+    ).fetchone()
+    conn.close()
+    assert hub is not None
+    assert hub["name"] == "Mubder"
+    assert shell["name"] == "Mubder"
+    aliases = json.loads(shell["aliases_json"] or "[]")
+    assert "User" in aliases  # keep self surface for is_self
+
+    listed = await list_entities(limit=50)
+    by_id = {e["id"]: e for e in listed["entities"]}
+    ent = by_id["ent_9ed7ffa178bef5770403c39a"]
+    assert ent["is_self"] is True
+    assert ent["graph_id"] == "user"
+    assert ent["name"] == "Mubder"
