@@ -54,7 +54,14 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 
 Full guide: [Memory & RAG](../guide/memory-and-rag). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
-Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)).
+Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)). Tour of the latest stack: [Recent features](../guide/recent-features).
+
+### Memory context (chat workbench)
+
+With **Settings → Memory → Explain recall** on, each turn’s workbench can show a
+**Memory context** panel (beliefs / episodes / KB hits with channel chips:
+`fts5`, `dense`, `belief_ppr`, `kb_rrf`, …). Dashboard probe uses the same
+explain tags; **Run golden eval** exercises the golden recall set.
 
 ## Email (Settings → Email)
 
@@ -70,9 +77,9 @@ API: `/api/email/status`, OAuth start/callback, `POST /api/email/protocol/connec
 
 ## Proxy Provider (Settings → System)
 
-Opt-in scraping-resilience addon. When enabled, web scraping (`read_url`,
-`crawl_site`, `web_search`) routes through a residential rotating proxy so it
-resists IP blocks/rate limits. Disabled by default — non-users see no change.
+Opt-in scraping-resilience addon. When enabled, scrape/crawl paths route through
+a residential rotating proxy (httpx ladder, Playwright, KB discover, Bing/Wiki
+SERP). Local SearXNG, Jina/Firecrawl APIs, and LLM traffic stay direct.
 
 - **Provider:** `None` (direct) or **anyIP.io** (residential/mobile rotation).
 - Fields: host/port/username/password (password vault-encrypted), network type,
@@ -80,7 +87,8 @@ resists IP blocks/rate limits. Disabled by default — non-users see no change.
 - **Test Connection** fetches `api.ipify.org` through the proxy and shows the exit IP.
 - Live config — a Settings change takes effect without a restart.
 
-API: `GET/PUT /api/settings/proxy`, `POST /api/settings/proxy/test`. Full guide: [Web research → Bulletproof scraping](../guide/web-research#bulletproof-scraping-proxy-provider-addon-ipua-rotation).
+API: `GET/PUT /api/settings/proxy`, `POST /api/settings/proxy/test`.  
+Coverage matrix: [Recent features → Proxy](../guide/recent-features#2-shared-web-acquisition--proxy-provider) · [Web research](../guide/web-research#bulletproof-scraping-proxy-provider-addon-ipua-rotation).
 
 ## Auth
 
