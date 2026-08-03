@@ -1,11 +1,15 @@
 # Memory — Done vs Remaining
 
-**Status date:** 2026-08-03  
+**Status date:** 2026-08-03 (updated after Neo4j UX + topology paint polish)  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)  
 **Best-path operator guide:** [`docs/docs/guide/memory-best-path.md`](../docs/guide/memory-best-path.md)  
 **Priority lock:** [`MEMORY_PRIORITY_NEXT.md`](MEMORY_PRIORITY_NEXT.md)
 
 Use this file when picking up memory work. Do **not** start a greenfield rewrite.
+
+**Trust path:** Single-node V2 + optional scale adapters + KB chat inject is
+**complete**. Remaining work is either **trigger-only scale**, **optional
+Dashboard polish**, or **ops hardening** — not another memory rewrite.
 
 ---
 
@@ -74,11 +78,29 @@ User turn
 | Choice | Status |
 |--------|--------|
 | **KB + chat product merge** | **Done** — inject labeled KB into supervisor; optional promote to episodes (`merge_knowledge_into_chat`, `promote_kb_to_episodes`) |
-| **Schema merge** (one table for KB+beliefs) | Still **not** done — stores stay separate files |
-| **Neo4j primary topology** | **Done** when configured — Dashboard graph prefers Neo4j; SQLite remains bi-temporal SoT |
+| **Schema merge** (one table for KB+beliefs) | Still **not** done — stores stay separate files (correct) |
+| **Neo4j dual-write** | **Done** — Settings Test/Sync; Docker optional |
+| **Dashboard topology paint** | **SQLite SoT** (entity types, bi-temporal, accent UI). Neo4j online shown in health strip; `?source=neo4j` probe only |
 | **Neo4j as only install default** | Still **not** default — SQLite zero-config remains |
 
 Federated search API remains for operator UI: `POST /api/memory/v2/federated-search`.
+
+---
+
+## 3b. Optional polish (not blockers)
+
+| Item | Notes |
+|------|--------|
+| DUI-6 Path-from-query | Seed graph from federated/probe hits + PPR highlight |
+| DUI-7 Episode overlay | Session clusters as faint nodes |
+| DUI-8 Graph PNG/SVG | JSON/GraphML already shipped |
+| DUI-9 Queue Retry/Clear | List exists; actions partial |
+| DUI-11 Responsive stack | Beliefs + graph on narrow screens |
+| DUI-13 Empty-state CTA | “Teach me a fact” → chat |
+| DUI-14 Graph a11y | Keyboard pan/zoom beyond reduced-motion scrub |
+| Extraction hygiene | Guard against confusing “memory V2” with product version (e.g. `kazma_v2_4_0`) |
+| Neo4j re-sync after invalidate | Optional: delete edges for invalidated beliefs or re-Sync after bulk invalidation |
+| beliefs_fts self-heal | Rebuild FTS when UPDATE hits “malformed” (seen once on long-lived WAL) |
 
 ---
 
