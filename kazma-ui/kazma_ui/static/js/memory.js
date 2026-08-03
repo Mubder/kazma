@@ -1,5 +1,6 @@
 /**
  * Memory admin page — beliefs, entities, merge/link, hygiene.
+ * Bidirectional bridge with the V2 graph canvas (memory_console.js).
  * APIs under /api/memory/v2/* (see memory_api.py).
  */
 function memoryPage() {
@@ -26,6 +27,40 @@ function memoryPage() {
     return data;
   }
 
+  async function refreshGraph() {
+    try {
+      if (typeof window._v2gForceReload === "function") {
+        await window._v2gForceReload();
+      } else if (typeof window._v2gLoad === "function") {
+        await window._v2gLoad();
+      }
+    } catch (_) {
+      /* graph optional */
+    }
+  }
+
+  function scrollToConsole() {
+    const el = document.getElementById("console") || document.getElementById("v2g-canvas-wrap");
+    if (el) {
+      try {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
+  function scrollRowIntoView(selector) {
+    const row = document.querySelector(selector);
+    if (row) {
+      try {
+        row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
   return {
     S,
     loading: false,
@@ -35,6 +70,8 @@ function memoryPage() {
     beliefs: [],
     beliefQ: "",
     selectedBeliefs: [],
+    selectedEntityId: null,
+    selectedBeliefId: null,
     entities: [],
     entityQ: "",
     emptyOnly: false,
@@ -50,6 +87,7 @@ function memoryPage() {
       archive_invalidated: false,
     },
     hygieneRunning: false,
+    _graphListener: null,
 
     get tabs() {
       // Graph & health is pinned at the top of the page (not a tab).
@@ -75,6 +113,43 @@ function memoryPage() {
 
     async init() {
       await this.loadAll();
+      // Graph → list: highlight matching entity / belief when a node is clicked
+      this._graphListener = (ev) => {
+        const d = (ev && ev.detail) || {};
+        if (d.type === "entity" && d.id) {
+          this.selectedEntityId = d.id;
+          this.selectedBeliefId = null;
+          if (this.tab !== "entities") {
+            this.tab = "entities";
+            this.onTab();
+          }
+          const eid = String(d.id).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          this.$nextTick(() => {
+            scrollRowIntoView('[data-entity-id="' + eid + '"]');
+          });
+        } else if (d.type === "belief") {
+          if (d.id) this.selectedBeliefId = d.id;
+          if (d.subject) this.selectedEntityId = d.subject;
+          if (this.tab !== "beliefs") {
+            this.tab = "beliefs";
+            this.onTab();
+          }
+          this.$nextTick(() => {
+            if (d.id) {
+              const bid = String(d.id).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+              scrollRowIntoView('[data-belief-id="' + bid + '"]');
+            }
+          });
+        }
+      };
+      window.addEventListener("kazma:memory-graph-select", this._graphListener);
+    },
+
+    destroy() {
+      if (this._graphListener) {
+        window.removeEventListener("kazma:memory-graph-select", this._graphListener);
+        this._graphListener = null;
+      }
     },
 
     async loadAll() {
@@ -139,6 +214,47 @@ function memoryPage() {
       this.selectedBeliefs = on ? this.beliefs.map((b) => b.id) : [];
     },
 
+    /** List → graph: focus entity node on canvas. */
+    focusEntity(id, opts) {
+      opts = opts || {};
+      if (!id) return;
+      this.selectedEntityId = id;
+      this.selectedBeliefId = null;
+      if (opts.asSource) this.mergeSource = id;
+      if (opts.asTarget) this.mergeTarget = id;
+      if (!opts.asSource && !opts.asTarget && !opts.skipPick) {
+        // Soft-pick into merge slots without overwriting both
+        this.pickEntity(id);
+      }
+      const ok =
+        typeof window._v2gSelectEntity === "function"
+          ? window._v2gSelectEntity(id, { notify: false })
+          : false;
+      if (!ok && !opts.quiet) {
+        toast("Node not on graph (filtered out or no beliefs)", "info");
+      }
+      if (opts.scrollGraph !== false) scrollToConsole();
+    },
+
+    /** List → graph: highlight belief edge endpoints. */
+    focusBelief(b, opts) {
+      opts = opts || {};
+      if (!b) return;
+      this.selectedBeliefId = b.id || null;
+      if (b.subject) this.selectedEntityId = b.subject;
+      const ok =
+        typeof window._v2gSelectBelief === "function"
+          ? window._v2gSelectBelief(b.subject, b.object, b.id, {
+              notify: false,
+            })
+          : false;
+      // _v2gSelectBelief notifies list — suppress double-switch by notify path already ok
+      if (!ok && !opts.quiet) {
+        toast("Belief endpoints not on graph (try refresh)", "info");
+      }
+      if (opts.scrollGraph !== false) scrollToConsole();
+    },
+
     async invalidateOne(id) {
       const ok = await confirm({
         title: S.invalidate || "Invalidate",
@@ -150,9 +266,10 @@ function memoryPage() {
         body: "{}",
       });
       if (d.ok) {
-        toast("Invalidated " + id.slice(0, 16), "success");
+        toast("Invalidated " + String(id).slice(0, 16), "success");
         await this.loadBeliefs();
         await this.loadSummary();
+        await refreshGraph();
       } else toast(d.error || "Failed", "error");
     },
 
@@ -160,7 +277,11 @@ function memoryPage() {
       if (!this.selectedBeliefs.length) return;
       const ok = await confirm({
         title: S.invalidate || "Invalidate",
-        message: (S.confirm_invalidate || "Invalidate selected?") + " (" + this.selectedBeliefs.length + ")",
+        message:
+          (S.confirm_invalidate || "Invalidate selected?") +
+          " (" +
+          this.selectedBeliefs.length +
+          ")",
       });
       if (!ok) return;
       const d = await api("/api/memory/v2/beliefs/invalidate-batch", {
@@ -171,7 +292,82 @@ function memoryPage() {
         toast("Invalidated " + d.invalidated, "success");
         await this.loadBeliefs();
         await this.loadSummary();
+        await refreshGraph();
       } else toast(d.error || "Failed", "error");
+    },
+
+    async editBelief(b) {
+      if (!b || !b.id) return;
+      let object = b.object;
+      let predicate = b.predicate;
+      let subject = b.subject;
+      if (window.kazmaPrompt) {
+        object = await window.kazmaPrompt({
+          title: S.edit_belief || "Edit belief — object",
+          message:
+            "Fact / object text (what the belief says). Cancel aborts the whole edit.",
+          defaultValue: b.object || "",
+          confirmText: "Next",
+          placeholder: "e.g. ShipX platform description…",
+        });
+        if (object == null) return;
+        predicate = await window.kazmaPrompt({
+          title: S.edit_belief || "Edit belief — predicate",
+          message: "Relation name (snake_case ok).",
+          defaultValue: b.predicate || "",
+          confirmText: "Next",
+          placeholder: "has_project",
+        });
+        if (predicate == null) return;
+        subject = await window.kazmaPrompt({
+          title: S.edit_belief || "Edit belief — subject",
+          message: "Subject entity id (usually stable slug).",
+          defaultValue: b.subject || "",
+          confirmText: "Save",
+          placeholder: "user",
+        });
+        if (subject == null) return;
+      } else {
+        object = window.prompt("Object (fact text)", b.object || "");
+        if (object == null) return;
+        predicate = window.prompt("Predicate", b.predicate || "");
+        if (predicate == null) return;
+        subject = window.prompt("Subject", b.subject || "");
+        if (subject == null) return;
+      }
+      subject = String(subject).trim();
+      predicate = String(predicate).trim();
+      object = String(object).trim();
+      if (!subject || !predicate || !object) {
+        toast("Subject, predicate, and object are required", "error");
+        return;
+      }
+      if (
+        subject === b.subject &&
+        predicate === b.predicate &&
+        object === b.object
+      ) {
+        return;
+      }
+      const d = await api(
+        "/api/memory/v2/beliefs/" + encodeURIComponent(b.id),
+        {
+          method: "PATCH",
+          body: JSON.stringify({ subject, predicate, object }),
+        }
+      );
+      if (d.ok) {
+        toast("Belief updated", "success");
+        await this.loadBeliefs();
+        await this.loadEntities();
+        await this.loadSummary();
+        await refreshGraph();
+        this.selectedBeliefId = b.id;
+        this.focusBelief(
+          { id: b.id, subject, predicate, object },
+          { quiet: true }
+        );
+      } else toast(d.error || "Edit failed", "error");
     },
 
     pickEntity(id) {
@@ -192,9 +388,11 @@ function memoryPage() {
       });
       if (d.ok) {
         toast("Deleted " + e.id, "success");
+        if (this.selectedEntityId === e.id) this.selectedEntityId = null;
         await this.loadEntities();
         await this.loadSummary();
         await this.loadHygiene();
+        await refreshGraph();
       } else toast(d.error || "Failed", "error");
     },
 
@@ -233,12 +431,12 @@ function memoryPage() {
       );
       if (d.ok) {
         toast("Renamed to “" + name + "”", "success");
+        this.selectedEntityId = e.id;
         await this.loadEntities();
-        // Refresh graph canvas if present on the same page
-        if (typeof window._v2gLoad === "function") {
-          try {
-            await window._v2gLoad();
-          } catch (_) { /* optional */ }
+        // Force graph reload so labels re-fetch from server (not just cache)
+        await refreshGraph();
+        if (typeof window._v2gSelectEntity === "function") {
+          window._v2gSelectEntity(e.id, { notify: false });
         }
       } else toast(d.error || "Rename failed", "error");
     },
@@ -252,8 +450,12 @@ function memoryPage() {
       }
       const ok = await confirm({
         title: S.merge || "Merge",
-        message: (S.confirm_merge || "Merge source into target? Beliefs rewired.") +
-          "\n" + src + " → " + tgt,
+        message:
+          (S.confirm_merge || "Merge source into target? Beliefs rewired.") +
+          "\n" +
+          src +
+          " → " +
+          tgt,
       });
       if (!ok) return;
       const d = await api("/api/memory/v2/entities/merge", {
@@ -263,8 +465,14 @@ function memoryPage() {
       if (d.ok) {
         toast("Merged " + src + " → " + tgt, "success");
         this.mergeSource = "";
+        this.selectedEntityId = tgt;
         await this.loadEntities();
+        await this.loadBeliefs();
         await this.loadSummary();
+        await refreshGraph();
+        if (typeof window._v2gSelectEntity === "function") {
+          window._v2gSelectEntity(tgt, { notify: false });
+        }
       } else toast(d.error || "Merge failed", "error");
     },
 
@@ -285,6 +493,10 @@ function memoryPage() {
         await this.loadEntities();
         await this.loadBeliefs();
         await this.loadSummary();
+        await refreshGraph();
+        if (typeof window._v2gSelectEntity === "function") {
+          window._v2gSelectEntity(tgt, { notify: false });
+        }
       } else toast(d.error || "Link failed", "error");
     },
 
@@ -297,6 +509,7 @@ function memoryPage() {
         toast(approve ? "Merge approved" : "Merge rejected", "success");
         await this.loadMerges();
         await this.loadEntities();
+        await refreshGraph();
       } else toast(d.error || "Failed", "error");
     },
 
@@ -315,6 +528,7 @@ function memoryPage() {
         if (d.ok) {
           toast("Hygiene complete", "success");
           await this.loadAll();
+          await refreshGraph();
         } else toast(d.error || "Hygiene failed", "error");
       } finally {
         this.hygieneRunning = false;

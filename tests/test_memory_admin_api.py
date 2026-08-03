@@ -160,3 +160,47 @@ async def test_rename_user_hub_upsert(mem_db):
     assert row is not None
     assert row["name"] == "Mubder"
     assert row["type"] == "person"
+
+
+@pytest.mark.asyncio
+async def test_edit_belief_object(mem_db):
+    """Operator can fix an active belief triple in place."""
+    import time as _time
+
+    from kazma_ui.memory_api import edit_belief
+
+    conn = sqlite3.connect(mem_db)
+    now = _time.time()
+    conn.execute(
+        """INSERT INTO beliefs
+           (id, tenant_id, subject, predicate, predicate_type, object,
+            confidence, structural_importance, source_trust_weight, extraction_method,
+            valid_from, ingested_at)
+           VALUES ('edit_b1','default','lonely','description','set','wrong text',
+                   1.0, 3, 1.0, 'llm_inferred', ?, ?)""",
+        (now, now),
+    )
+    conn.commit()
+    conn.close()
+
+    class Req:
+        async def json(self):
+            return {
+                "object": "corrected description",
+                "predicate": "description",
+                "subject": "lonely",
+            }
+
+    out = await edit_belief("edit_b1", Req())
+    assert out["ok"] is True
+    assert out["belief"]["object"] == "corrected description"
+    assert out["object_changed"] is True
+
+    conn = sqlite3.connect(mem_db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT object, extraction_method FROM beliefs WHERE id=?", ("edit_b1",)
+    ).fetchone()
+    conn.close()
+    assert row["object"] == "corrected description"
+    assert row["extraction_method"] == "user_explicit"

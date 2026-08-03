@@ -1044,36 +1044,88 @@
   // The object is the interesting entity (e.g. "teal", "Paris"), not
   // the subject (usually "user"). Highlights both endpoints + the edge.
   var _v2gHighlightSubj = null, _v2gHighlightObj = null;
-  function _v2gSelectByBelief(subj, obj) {
-    if (!_v2gPts.length) return;
-    // Find the OBJECT node first (the specific entity, not "user")
-    var objIdx = -1, subjIdx = -1;
+  function _v2gFindNodeIndex(key) {
+    if (key == null || key === '') return -1;
+    var k = String(key);
+    var kLow = k.toLowerCase();
+    var slug = _v2gSlugify(k);
     for (var i = 0; i < _v2gPts.length; i++) {
-      var pid = _v2gPts[i].id;
-      var plabel = (_v2gPts[i].fullLabel || _v2gPts[i].label || '').toLowerCase();
-      // Match by id or by label (the graph node id is a slug; the belief
-      // object may be a display name — try both, case-insensitive)
-      if (objIdx < 0 && (pid === obj || pid === _v2gSlugify(obj) || plabel === obj.toLowerCase())) objIdx = i;
-      if (subjIdx < 0 && (pid === subj || pid === _v2gSlugify(subj) || plabel === subj.toLowerCase())) subjIdx = i;
+      var pid = String(_v2gPts[i].id || '');
+      var plabel = String(_v2gPts[i].fullLabel || _v2gPts[i].label || '').toLowerCase();
+      var pname = String(_v2gPts[i].name || '').toLowerCase();
+      if (pid === k || pid.toLowerCase() === kLow || pid === slug) return i;
+      if (plabel === kLow || pname === kLow) return i;
     }
-    // Prefer the object node (the specific entity); fall back to subject
-    var targetIdx = objIdx >= 0 ? objIdx : subjIdx;
-    if (targetIdx < 0) return;
-    var p = _v2gPts[targetIdx];
-    _v2gSelectedId = p.id;
-    // Store highlight endpoints so _v2gPaint can emphasize the edge
-    _v2gHighlightSubj = subjIdx >= 0 ? _v2gPts[subjIdx].id : null;
-    _v2gHighlightObj = objIdx >= 0 ? _v2gPts[objIdx].id : null;
-    _v2gInspect(p);
-    // Zoom to the target node
+    return -1;
+  }
+
+  function _v2gZoomToIndex(idx) {
+    if (idx < 0 || !_v2gPts[idx]) return;
+    var p = _v2gPts[idx];
     var size = _v2gCanvasSize();
     if (size) {
       _v2gView.scale = 2.5;
       _v2gView.ox = size.w / 2 - p.x * 2.5;
       _v2gView.oy = size.h / 2 - p.y * 2.5;
-      _v2gHeated();
-      _v2gRepaint();
     }
+    _v2gHeated();
+    _v2gRepaint();
+  }
+
+  function _v2gNotifyList(detail) {
+    try {
+      window.dispatchEvent(new CustomEvent('kazma:memory-graph-select', { detail: detail || {} }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function _v2gSelectByBelief(subj, obj, beliefId) {
+    if (!_v2gPts.length) return false;
+    var objIdx = _v2gFindNodeIndex(obj);
+    var subjIdx = _v2gFindNodeIndex(subj);
+    var targetIdx = objIdx >= 0 ? objIdx : subjIdx;
+    if (targetIdx < 0) return false;
+    var p = _v2gPts[targetIdx];
+    _v2gSelectedId = p.id;
+    _v2gHighlightSubj = subjIdx >= 0 ? _v2gPts[subjIdx].id : null;
+    _v2gHighlightObj = objIdx >= 0 ? _v2gPts[objIdx].id : null;
+    _v2gInspect(p);
+    _v2gZoomToIndex(targetIdx);
+    return true;
+  }
+
+  /** Focus a node by entity id (from Entities table). Returns true if found. */
+  function _v2gSelectEntity(entityId, opts) {
+    opts = opts || {};
+    var id = String(entityId || '').trim();
+    if (!id) return false;
+    // Clear search filter that may hide the node
+    var searchEl = document.getElementById('v2g-search');
+    if (searchEl && searchEl.value) {
+      searchEl.value = '';
+      _v2gApplyFilters();
+    }
+    var idx = _v2gFindNodeIndex(id);
+    if (idx < 0) {
+      // Node may be outside current filter — clear entity-type filters once
+      var hadFilter = Object.keys(_v2gFilters.entity || {}).length > 0;
+      if (hadFilter) {
+        _v2gFilters.entity = {};
+        _v2gRenderFilters();
+        _v2gApplyFilters();
+        idx = _v2gFindNodeIndex(id);
+      }
+    }
+    if (idx < 0) return false;
+    var p = _v2gPts[idx];
+    _v2gSelectedId = p.id;
+    _v2gHighlightSubj = null;
+    _v2gHighlightObj = null;
+    _v2gInspect(p);
+    _v2gZoomToIndex(idx);
+    if (opts.notify !== false) {
+      _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p) });
+    }
+    return true;
   }
 
   function _v2gSlugify(s) {
@@ -1103,7 +1155,7 @@
   // belief edges (colored by predicate_type, dashed if superseded),
   // high-stakes red halo, bi-temporal time slider, filter toggles.
 
-  var _v2gPts = [], _v2gEdges = [], _v2gIds = {}, _v2gSig = '';
+  var _v2gPts = [], _v2gEdges = [], _v2gIds = {}, _v2gStructSig = '', _v2gLabelSig = '';
   var _v2gView = { scale: 1, ox: 0, oy: 0 };
   var _v2gAlpha = 0, _v2gAnim = null, _v2gDrag = null, _v2gHover = -1, _v2gSelectedId = null;
   var _v2gCap = 80, _v2gNodeBaseR = 7;
@@ -1285,56 +1337,89 @@
       ctx.clearRect(0, 0, W, H);
       if (empty) { empty.style.display = 'flex'; empty.style.flexDirection = 'column'; }
       _v2gPts = []; _v2gEdges = []; _v2gIds = {};
+      _v2gStructSig = ''; _v2gLabelSig = '';
       if (_v2gAnim) { cancelAnimationFrame(_v2gAnim); _v2gAnim = null; }
       return;
     }
     if (empty) empty.style.display = 'none';
-    var sig = nodes.length + ':' + (links ? links.length : 0) + ':' + (nodes[0] ? nodes[0].id : '');
-    if (sig !== _v2gSig) {
-      _v2gSig = sig;
-      var ns = nodes.slice(0, _v2gCap);
-      // Dedupe by id before indexing. Server should already skip virtual
-      // nodes whose id collides with a real entity (e.g. shipx as both
-      // entity and belief object). Last-write-wins on _v2gIds alone would
-      // orphan the earlier node (zero edges, looks like a duplicate alone).
-      // Prefer non-virtual / higher beliefCount when ids collide.
-      var byId = {};
-      ns.forEach(function(nd) {
-        var id = nd && nd.id != null ? String(nd.id) : '';
-        if (!id) return;
-        var prev = byId[id];
-        if (!prev) { byId[id] = nd; return; }
-        var prevVirt = !!prev.isVirtual;
-        var curVirt = !!nd.isVirtual;
-        if (prevVirt && !curVirt) { byId[id] = nd; return; }
-        if (!prevVirt && curVirt) return;
-        if ((nd.beliefCount || 0) > (prev.beliefCount || 0)) byId[id] = nd;
+    var nsIn = nodes.slice(0, _v2gCap);
+    // Dedupe by id before indexing. Server should already skip virtual
+    // nodes whose id collides with a real entity (e.g. shipx as both
+    // entity and belief object). Prefer non-virtual / higher beliefCount.
+    var byId = {};
+    nsIn.forEach(function(nd) {
+      var id = nd && nd.id != null ? String(nd.id) : '';
+      if (!id) return;
+      var prev = byId[id];
+      if (!prev) { byId[id] = nd; return; }
+      var prevVirt = !!prev.isVirtual;
+      var curVirt = !!nd.isVirtual;
+      if (prevVirt && !curVirt) { byId[id] = nd; return; }
+      if (!prevVirt && curVirt) return;
+      if ((nd.beliefCount || 0) > (prev.beliefCount || 0)) byId[id] = nd;
+    });
+    var ns = Object.keys(byId).map(function(k) { return byId[k]; });
+    function _nodeDisplay(nd) {
+      var rawName = String(nd.name || nd.id || '').trim();
+      var isUser = String(nd.id || '').toLowerCase() === 'user';
+      var display = rawName;
+      if (isUser) {
+        var low = rawName.toLowerCase();
+        if (!rawName || low === 'user' || low === 'you') display = 'You';
+      }
+      return { rawName: rawName, display: display, isUser: isUser };
+    }
+    var idKey = ns.map(function(nd) { return String(nd.id); }).join('\0');
+    var labelKey = ns.map(function(nd) {
+      var d = _nodeDisplay(nd);
+      return String(nd.id) + '=' + d.display + (nd.isVirtual ? 'v' : '');
+    }).join('|');
+    var structSig = ns.length + ':' + ((links && links.length) || 0) + ':' + idKey.slice(0, 600);
+    var labelSig = labelKey.slice(0, 1200);
+    // Rename-only refresh: same topology, new display names — update labels
+    // in place so the graph reflects list renames without resetting layout.
+    if (structSig === _v2gStructSig && _v2gPts.length && labelSig !== _v2gLabelSig) {
+      var nameById = {};
+      ns.forEach(function(nd) { nameById[nd.id] = nd; });
+      _v2gPts.forEach(function(p) {
+        var nd = nameById[p.id];
+        if (!nd) return;
+        var d = _nodeDisplay(nd);
+        p.name = d.rawName;
+        p.label = d.display.slice(0, 22);
+        p.fullLabel = d.display;
+        p.isVirtual = !!nd.isVirtual;
+        p.isHighStakes = !!nd.isHighStakes;
+        p.type = nd.type || p.type;
       });
-      ns = Object.keys(byId).map(function(k) { return byId[k]; });
+      _v2gLabelSig = labelSig;
+      if (_v2gSelectedId) {
+        for (var si = 0; si < _v2gPts.length; si++) {
+          if (_v2gPts[si].id === _v2gSelectedId) { _v2gInspect(_v2gPts[si]); break; }
+        }
+      }
+      _v2gRepaint();
+    } else if (structSig !== _v2gStructSig) {
+      var keepSel = _v2gSelectedId;
+      _v2gStructSig = structSig;
+      _v2gLabelSig = labelSig;
       _v2gIds = {};
       _v2gPts = ns.map(function(nd, i) {
         _v2gIds[nd.id] = i;
         var ang = i * 2.39996, r = 20 + (i % 6) * 24;
         var bc = nd.beliefCount || 1;
-        var rawName = String(nd.name || nd.id || '').trim();
-        var isUser = String(nd.id || '').toLowerCase() === 'user';
-        // Place the user slightly toward center for visual hierarchy
-        var rad = isUser ? 8 : r;
-        var display = rawName;
-        if (isUser) {
-          var low = rawName.toLowerCase();
-          if (!rawName || low === 'user' || low === 'you') display = 'You';
-        }
+        var d = _nodeDisplay(nd);
+        var rad = d.isUser ? 8 : r;
         return {
           x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad,
           vx: 0, vy: 0, id: nd.id,
-          name: rawName,
-          label: display.slice(0, 22),
-          fullLabel: display,
+          name: d.rawName,
+          label: d.display.slice(0, 22),
+          fullLabel: d.display,
           type: nd.type || 'entity',
-          isUser: isUser,
+          isUser: d.isUser,
           isHighStakes: !!nd.isHighStakes,
-          r: (isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
+          r: (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
           isEpisode: !!nd.isEpisode,
         };
@@ -1347,7 +1432,9 @@
           _v2gEdges.push({ a: ai, b: bi, label: String(l.label || '').slice(0, 18), objectText: String(l.object_text || ''), type: l.type || 'set', confidence: l.confidence || 0.5, superseded: !!l.superseded });
         }
       });
-      _v2gView = { scale: 1, ox: 0, oy: 0 }; _v2gSelectedId = null; _v2gAlpha = 1;
+      _v2gView = { scale: 1, ox: 0, oy: 0 };
+      _v2gSelectedId = keepSel && _v2gIds[keepSel] !== undefined ? keepSel : null;
+      _v2gAlpha = 1;
     }
     _v2gBindPointer(canvas, wrap);
     if (!_v2gAnim) _v2gTick();
@@ -1556,6 +1643,9 @@
         canvas.style.cursor = 'grabbing';
         // Clear belief-click highlight when selecting a node directly
         _v2gHighlightSubj = null; _v2gHighlightObj = null;
+        if (!p.isEpisode) {
+          _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p) });
+        }
       } else {
         _v2gDrag = { pan: true, sx: c.sx, sy: c.sy, ox: _v2gView.ox, oy: _v2gView.oy };
         canvas.style.cursor = 'grabbing';
@@ -1669,7 +1759,10 @@
     var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px;">';
     html += '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;flex:1;min-width:0;">' + _v2gEsc(title) + '</div>';
     if (!p.isEpisode) {
-      html += '<button type="button" id="v2g-rename-btn" class="btn btn-sm btn-secondary" style="flex-shrink:0;font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
+      html += '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">';
+      html += '<button type="button" id="v2g-rename-btn" class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
+      html += '<button type="button" id="v2g-show-list-btn" class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:2px 8px;" title="Highlight this entity in the list below">In list</button>';
+      html += '</div>';
     }
     html += '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">';
@@ -1713,6 +1806,18 @@
         ev.preventDefault();
         ev.stopPropagation();
         _v2gRenameNode(p);
+      });
+    }
+    var listBtn = document.getElementById('v2g-show-list-btn');
+    if (listBtn) {
+      listBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p), scrollOps: true });
+        var ops = document.getElementById('mem-tab-entities') || document.querySelector('[id^="mem-tab-"]');
+        if (ops) {
+          try { ops.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+        }
       });
     }
   }
@@ -1760,17 +1865,17 @@
           _v2gRawNodes[i].isVirtual = false;
         }
       }
-      // Force canvas rebuild with new labels
-      _v2gSig = '';
+      // Soft label update (struct same, names changed)
+      _v2gLabelSig = '';
       _v2gApplyFilters();
-      // Re-select + inspect under new name
+      _v2gSelectedId = p.id;
       for (var j = 0; j < _v2gPts.length; j++) {
         if (_v2gPts[j].id === p.id) {
-          _v2gSelectedId = p.id;
           _v2gInspect(_v2gPts[j]);
           break;
         }
       }
+      _v2gNotifyList({ type: 'entity', id: p.id, name: name });
       _v2gRepaint();
     } catch (err) {
       if (window.showToast) window.showToast('Rename failed', 'error');
@@ -1957,9 +2062,10 @@
       sl.textContent = parts.join(' · ');
     }
     _v2gUpdateLegend(_v2gTypeCountsFromData());
-    // Invalidate the layout signature so drawCanvas re-layouts on every
-    // filter change/reset, not just when node count differs.
-    _v2gSig = '';
+    // Invalidate structure so filter changes re-layout (label-only renames
+    // use the soft path when structure matches).
+    _v2gStructSig = '';
+    _v2gLabelSig = '';
     _v2gDrawCanvas(nodes, links);
   }
 
@@ -2278,9 +2384,28 @@
     window.addEventListener('resize', function() { clearTimeout(rto); rto = setTimeout(function() { if (_v2gPts.length) _v2gRepaint(); }, 200); });
   }
 
-  // Expose for Memory admin rename / external refresh hooks
+  // Expose for Memory admin list ↔ graph bridge
   window._v2gLoad = _v2gLoad;
+  window._v2gForceReload = async function() {
+    _v2gStructSig = '';
+    _v2gLabelSig = '';
+    await _v2gLoad();
+  };
   window._v2gRenameNode = _v2gRenameNode;
+  window._v2gSelectEntity = _v2gSelectEntity;
+  window._v2gSelectBelief = function(subj, obj, beliefId, opts) {
+    opts = opts || {};
+    var ok = _v2gSelectByBelief(subj, obj, beliefId);
+    if (ok && opts.notify !== false) {
+      _v2gNotifyList({
+        type: 'belief',
+        id: beliefId || null,
+        subject: subj,
+        object: obj,
+      });
+    }
+    return ok;
+  };
 
   try {
     _v2gRenderFilters();

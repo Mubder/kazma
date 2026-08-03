@@ -152,6 +152,18 @@
     gap: 4px;
   }
   .memory-page .mem-actions .btn { white-space: nowrap; }
+  .memory-page .mem-row-selected {
+    background: rgba(205, 160, 42, 0.14) !important;
+    box-shadow: inset 3px 0 0 var(--accent, #cda02a);
+  }
+  .memory-page tr[data-entity-id],
+  .memory-page tr[data-belief-id] {
+    cursor: pointer;
+  }
+  .memory-page tr[data-entity-id]:hover,
+  .memory-page tr[data-belief-id]:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
   @media (max-width: 720px) {
     .memory-page .mem-table th:nth-child(2),
     .memory-page .mem-table td:nth-child(2),
@@ -223,13 +235,24 @@
               <tr><td colspan="6" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
             </template>
             <template x-for="b in beliefs" :key="b.id">
-              <tr>
-                <td><input type="checkbox" :value="b.id" x-model="selectedBeliefs"></td>
+              <tr
+                :data-belief-id="b.id"
+                :class="selectedBeliefId === b.id ? 'mem-row-selected' : ''"
+                @click="focusBelief(b)"
+                :title="'Show on graph: ' + b.subject + ' → ' + b.object"
+              >
+                <td @click.stop><input type="checkbox" :value="b.id" x-model="selectedBeliefs"></td>
                 <td><code x-text="b.subject"></code></td>
                 <td><code x-text="b.predicate"></code></td>
                 <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="b.object" x-text="b.object"></td>
                 <td x-text="b.predicate_type || ''"></td>
-                <td><button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" x-text="S.invalidate || 'Invalidate'"></button></td>
+                <td @click.stop>
+                  <div class="mem-actions">
+                    <button class="btn btn-sm btn-secondary" @click="focusBelief(b)" title="Focus on graph">Graph</button>
+                    <button class="btn btn-sm btn-secondary" @click="editBelief(b)" x-text="S.edit || 'Edit'" title="Edit subject / predicate / object"></button>
+                    <button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" x-text="S.invalidate || 'Invalidate'"></button>
+                  </div>
+                </td>
               </tr>
             </template>
           </tbody>
@@ -284,8 +307,14 @@
               <tr><td colspan="7" style="padding:1rem;color:var(--text-muted);" x-text="S.no_rows || 'No rows'"></td></tr>
             </template>
             <template x-for="e in entities" :key="e.id">
-              <tr :style="e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : '')">
-                <td><code style="cursor:pointer;" @click="pickEntity(e.id)" x-text="e.id"></code></td>
+              <tr
+                :data-entity-id="e.id"
+                :class="selectedEntityId === e.id ? 'mem-row-selected' : ''"
+                :style="selectedEntityId === e.id ? '' : (e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : ''))"
+                @click="focusEntity(e.id)"
+                :title="'Show on graph: ' + e.id"
+              >
+                <td><code x-text="e.id"></code></td>
                 <td x-text="e.type"></td>
                 <td x-text="e.name"></td>
                 <td x-text="e.belief_count"></td>
@@ -295,11 +324,12 @@
                   <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">isolated</span>
                   <span x-show="e.protected" class="badge">protected</span>
                 </td>
-                <td>
+                <td @click.stop>
                   <div class="mem-actions">
+                    <button class="btn btn-sm btn-secondary" @click="focusEntity(e.id, { skipPick: true })" title="Focus on graph">Graph</button>
                     <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="Change display name (id stays the same)"></button>
-                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id">Src</button>
-                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id">Tgt</button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id">Src</button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id">Tgt</button>
                     <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
                   </div>
                 </td>

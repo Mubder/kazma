@@ -452,7 +452,150 @@ async def link_entities(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
-# ── Beliefs (batch invalidate) ───────────────────────────────────────────
+# ── Beliefs (edit + batch invalidate) ────────────────────────────────────
+
+
+@router.patch("/api/memory/v2/beliefs/{belief_id}")
+async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
+    """Operator correction of an active belief's triple (subject/predicate/object).
+
+    In-place update of a currently-valid row so bad extractions can be fixed
+    without losing the belief id. Clears the embedding when the object text
+    changes (recall will re-embed on next path that needs it). FTS sync is
+    handled by the beliefs_fts UPDATE trigger.
+    """
+    bid = (belief_id or "").strip()
+    if not bid:
+        return {"ok": False, "error": "belief_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON"}
+    body = body or {}
+
+    def _opt(key: str) -> str | None:
+        if key not in body or body[key] is None:
+            return None
+        s = str(body[key]).strip()
+        return s if s else None
+
+    new_subject = _opt("subject")
+    new_predicate = _opt("predicate")
+    new_object = _opt("object")
+    new_ptype = _opt("predicate_type")
+    if not any((new_subject, new_predicate, new_object, new_ptype)):
+        return {
+            "ok": False,
+            "error": "provide subject, predicate, object, and/or predicate_type",
+        }
+    if new_ptype and new_ptype not in ("functional", "set", "state"):
+        return {"ok": False, "error": "predicate_type must be functional|set|state"}
+
+    try:
+        conn = _conn()
+        row = conn.execute(
+            "SELECT id, subject, predicate, predicate_type, object, "
+            "valid_until, invalidated_at, metadata_json "
+            "FROM beliefs WHERE id=?",
+            (bid,),
+        ).fetchone()
+        if not row:
+            conn.close()
+            return {"ok": False, "error": "not_found"}
+        if row["invalidated_at"] is not None or row["valid_until"] is not None:
+            conn.close()
+            return {"ok": False, "error": "belief is not active (invalidated or superseded)"}
+
+        subject = new_subject if new_subject is not None else str(row["subject"])
+        predicate = new_predicate if new_predicate is not None else str(row["predicate"])
+        obj = new_object if new_object is not None else str(row["object"])
+        ptype = new_ptype if new_ptype is not None else str(row["predicate_type"] or "set")
+        if len(subject) > 200 or len(predicate) > 120 or len(obj) > 4000:
+            conn.close()
+            return {"ok": False, "error": "field too long"}
+
+        object_changed = obj != str(row["object"])
+        try:
+            meta = json.loads(row["metadata_json"] or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        meta["operator_edit"] = {
+            "at": time.time(),
+            "previous": {
+                "subject": row["subject"],
+                "predicate": row["predicate"],
+                "object": row["object"],
+                "predicate_type": row["predicate_type"],
+            },
+        }
+
+        # Null embedding when payload text changes so stale vectors don't rank.
+        if object_changed:
+            conn.execute(
+                """UPDATE beliefs
+                   SET subject=?, predicate=?, object=?, predicate_type=?,
+                       extraction_method='user_explicit',
+                       metadata_json=?,
+                       embedding=NULL
+                   WHERE id=?""",
+                (
+                    subject,
+                    predicate,
+                    obj,
+                    ptype,
+                    json.dumps(meta, ensure_ascii=False),
+                    bid,
+                ),
+            )
+        else:
+            conn.execute(
+                """UPDATE beliefs
+                   SET subject=?, predicate=?, object=?, predicate_type=?,
+                       extraction_method='user_explicit',
+                       metadata_json=?
+                   WHERE id=?""",
+                (
+                    subject,
+                    predicate,
+                    obj,
+                    ptype,
+                    json.dumps(meta, ensure_ascii=False),
+                    bid,
+                ),
+            )
+        conn.commit()
+        conn.close()
+
+        # Best-effort Neo4j edge cleanup (stale dual-write after operator edit)
+        try:
+            from kazma_core.memory.graph_backend import delete_belief_edge
+
+            delete_belief_edge(
+                belief_id=bid,
+                subject=str(row["subject"]),
+                predicate=str(row["predicate"]),
+                obj=str(row["object"]),
+            )
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "id": bid,
+            "belief": {
+                "id": bid,
+                "subject": subject,
+                "predicate": predicate,
+                "object": obj,
+                "predicate_type": ptype,
+            },
+            "object_changed": object_changed,
+        }
+    except Exception as exc:
+        logger.exception("[memory_api] edit belief failed")
+        return {"ok": False, "error": str(exc)[:300]}
 
 
 @router.post("/api/memory/v2/beliefs/invalidate-batch")
