@@ -635,13 +635,11 @@
         const total = tiers.reduce((s,t) => s + (t[1]||0), 0) || 1;
         tb.innerHTML = tiers.map(([name, count, color]) => {
           const pct = Math.round(((count||0) / total) * 100);
-          return '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;">' +
-                 '<span style="width:60px;color:var(--text-secondary);">' + name + '</span>' +
-                 '<div style="flex:1;height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;">' +
-                   '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;"></div>' +
-                 '</div>' +
-                 '<span style="width:32px;text-align:right;font-family:var(--font-mono);color:var(--text-primary);">' + (count||0) + '</span>' +
-                 '</div>';
+          return '<span title="' + name + ': ' + (count||0) + ' (' + pct + '%)" style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;padding:2px 6px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">' +
+                 '<span style="width:7px;height:7px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>' +
+                 '<span style="color:var(--text-muted);">' + name.slice(0, 4) + '</span>' +
+                 '<span style="font-family:var(--font-mono);color:var(--text-primary);">' + (count||0) + '</span>' +
+                 '</span>';
         }).join('');
       }
       const pb = document.getElementById('v2-procedural-breakdown');
@@ -2873,9 +2871,9 @@
     function makeToggle(label, group, key, color, count) {
       var id = 'v2g-ft-' + group + '-' + key;
       var active = !!_v2gFilters[group][key];
-      var cnt = (count != null && count > 0) ? ' <span style="opacity:0.65;font-family:var(--font-mono);">(' + count + ')</span>' : '';
-      return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.75rem;' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
-             '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (active ? color : 'transparent') + ';border:1px solid ' + color + ';"></span>' +
+      var cnt = (count != null && count > 0) ? ' <span style="opacity:0.7;font-family:var(--font-mono);">' + count + '</span>' : '';
+      return '<label title="' + label + (count != null ? ': ' + count : '') + '" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.65rem;padding:2px 7px;border-radius:999px;border:1px solid ' + (active ? color : 'var(--border-subtle)') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)') + ';' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
+             '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (active ? color : 'transparent') + ';border:1px solid ' + color + ';flex-shrink:0;"></span>' +
              '<input type="checkbox" id="' + id + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + cnt + '</label>';
     }
     if (entBox) entBox.innerHTML = entTypes.map(function(t) {

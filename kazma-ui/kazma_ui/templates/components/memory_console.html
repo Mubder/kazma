@@ -163,33 +163,9 @@
         </div>
       </div>
 
-      <!-- ── Row: Known Beliefs List (left) + Topology Graph (right) ── -->
-      <div id="v2-beliefs-graph-row" style="display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);gap:14px;margin-bottom:16px;">
-
-        <!-- LEFT: Known Beliefs (currently valid) -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;min-height:500px;">
-          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            Known Beliefs (currently valid)
-            <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:120px;outline:none;">
-          </div>
-          <div id="v2-belief-list" style="flex:1;overflow-y:auto;font-size:0.78rem;max-height:500px;padding:6px 8px;"></div>
-          <div id="v2-belief-empty-cta" style="display:none;padding:16px;text-align:center;border-top:1px solid var(--border-subtle);">
-            <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">No beliefs yet — teach Kazma a fact.</div>
-            <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
-          </div>
-          <!-- Belief detail drawer -->
-          <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:10px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:200px;overflow-y:auto;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <strong style="color:var(--text-secondary);">Belief detail</strong>
-              <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;">✕</button>
-            </div>
-            <div id="v2-belief-drawer-body" style="color:var(--text-primary);line-height:1.45;"></div>
-            <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">Invalidate belief</button>
-          </div>
-        </div>
-
-        <!-- RIGHT: V2 Belief Topology Graph -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;">
+      <!-- ── Full-width V2 Belief Topology Graph ── -->
+      <div id="v2-beliefs-graph-row" style="width:100%;margin-bottom:12px;">
+        <div id="v2g-panel" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;width:100%;">
           <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
               <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">V2 Belief Topology</span>
@@ -208,13 +184,11 @@
               <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
             </div>
           </div>
-          <!-- Legend (filled dynamically — site accent + distinct You/user) -->
           <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);align-items:center;">
             <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--warning,#f59e0b);margin-right:4px;box-shadow:0 0 6px rgba(245,158,11,0.45);"></span>You</span>
             <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>entity</span>
             <span style="opacity:0.75;">edges · accent blue</span>
           </div>
-          <!-- Graph ops bar — link / merge / edit without leaving the canvas -->
           <div id="v2g-ops-bar" style="padding:6px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:rgba(0,0,0,0.18);">
             <span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-tertiary);margin-right:2px;">Ops</span>
             <span id="v2g-ops-source" title="Source entity" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(34,211,238,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">src: —</span>
@@ -224,67 +198,111 @@
             <button type="button" id="v2g-ops-merge" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 10px;" title="Merge source into target">Merge</button>
             <button type="button" id="v2g-ops-swap" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Swap source ↔ target">⇄</button>
             <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Clear source/target and cancel pick mode">Clear</button>
-            <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">Click node → inspect. Click edge → edit/unlink. Link: set src+tgt or use pick mode.</span>
+            <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">Click node → inspect. Click edge → edit/unlink.</span>
           </div>
-          <!-- Canvas -->
-          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
-            <canvas id="v2g-canvas" width="800" height="400" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view. Click edges to edit or unlink beliefs." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
+          <!-- Canvas + floating inspect -->
+          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:min(68vh,720px);height:min(68vh,720px);width:100%;border-radius:0;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
+            <canvas id="v2g-canvas" width="1200" height="700" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view. Click edges to edit or unlink beliefs." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
             <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
             <div id="v2g-empty" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
               <div>No beliefs yet — the graph populates as Kazma learns.</div>
               <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
             </div>
+            <!-- Inspect docked on the canvas (doesn't steal layout from filters) -->
+            <div id="v2g-inspect" style="position:absolute;top:10px;right:10px;z-index:6;width:min(320px,42vw);max-height:calc(100% - 20px);overflow-y:auto;padding:10px 12px;border-radius:10px;background:rgba(10,15,20,0.92);border:1px solid var(--border-subtle);font-size:0.72rem;color:var(--text-muted);box-shadow:0 12px 32px rgba(0,0,0,0.45);backdrop-filter:blur(8px);">Click a node or edge to inspect · Link/Merge from Ops bar.</div>
             <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">←↑↓→ pan · +/− zoom · edge click = edit · Esc cancel · Home reset</div>
           </div>
         </div>
       </div>
-      <style>
-        @media (max-width: 900px) {
-          #v2-beliefs-graph-row {
-            grid-template-columns: 1fr !important;
-          }
-          #v2-beliefs-graph-row > div {
-            min-height: 360px !important;
-          }
-          #v2-belief-list { max-height: 280px !important; }
-        }
-      </style>
 
-      <!-- ── Bottom row: Entity Types + Predicate Types + Tier Breakdown + Time Scrub ── -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
-        <!-- Entity Types -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Entity Types</div>
-          <div id="v2g-filters-entity" style="display:flex;flex-direction:column;gap:5px;"></div>
+      <!-- Compact filter / meta strip (small + informative) -->
+      <div id="v2g-meta-strip" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px;">
+        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Entities</div>
+          <div id="v2g-filters-entity" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
         </div>
-        <!-- Predicate Types + Active Filters -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Predicate Types</div>
-          <div id="v2g-filters-predicate" style="display:flex;flex-direction:column;gap:5px;"></div>
-          <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;min-height:20px;"></div>
+        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Predicates</div>
+          <div id="v2g-filters-predicate" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
+          <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:0;"></div>
         </div>
-        <!-- Tier Breakdown + Procedural -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Tier Breakdown</div>
-          <div id="v2-tier-breakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin:12px 0 6px;">Procedural Skills</div>
-          <div id="v2-procedural-breakdown" style="font-size:0.75rem;color:var(--text-muted);">–</div>
+        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Tiers · procedural</div>
+          <div id="v2-tier-breakdown" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>
+          <div id="v2-procedural-breakdown" style="font-size:0.68rem;color:var(--text-muted);margin-top:4px;line-height:1.3;">–</div>
         </div>
-        <!-- Bi-Temporal Scrub + Inspect -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);padding:12px;font-size:0.78rem;">
-          <div style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">{{ t('dashboard.memory_bitemporal') }}</div>
-          <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">{{ t('dashboard.memory_bitemporal_hint') }}</div>
-          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);" aria-label="Bi-temporal scrub">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:6px;flex-wrap:wrap;">
-            <span id="v2g-time-label" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
-            <span style="display:inline-flex;gap:4px;">
-              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="Play scrub">{{ t('dashboard.memory_play') }}</button>
-              <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
+        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('dashboard.memory_bitemporal') }}</div>
+          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);height:18px;" aria-label="Bi-temporal scrub" title="{{ t('dashboard.memory_bitemporal_hint') }}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;gap:4px;flex-wrap:wrap;">
+            <span id="v2g-time-label" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
+            <span style="display:inline-flex;gap:3px;">
+              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="Play scrub">{{ t('dashboard.memory_play') }}</button>
+              <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
             </span>
           </div>
-          <div id="v2g-inspect" style="margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:8px;font-size:0.72rem;color:var(--text-muted);min-height:80px;max-height:320px;overflow-y:auto;">Click a node or edge to inspect · Link/Merge from the Ops bar above the graph.</div>
         </div>
       </div>
+
+      <!-- Known Beliefs — compact browser below the graph (not competing for width) -->
+      <div id="v2-known-beliefs" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;margin-bottom:8px;">
+        <div style="padding:6px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          Known beliefs
+          <span style="font-weight:400;text-transform:none;color:var(--text-muted);letter-spacing:0;">currently valid · click to focus on graph</span>
+          <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:140px;outline:none;">
+        </div>
+        <div id="v2-belief-list" style="max-height:220px;overflow-y:auto;font-size:0.78rem;padding:4px 8px;"></div>
+        <div id="v2-belief-empty-cta" style="display:none;padding:12px;text-align:center;border-top:1px solid var(--border-subtle);">
+          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px;">No beliefs yet — teach Kazma a fact.</div>
+          <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.75rem;text-decoration:none;">Teach me a fact →</a>
+        </div>
+        <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:8px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:160px;overflow-y:auto;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="color:var(--text-secondary);">Belief detail</strong>
+            <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;">✕</button>
+          </div>
+          <div id="v2-belief-drawer-body" style="color:var(--text-primary);line-height:1.45;"></div>
+          <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">Unlink belief</button>
+        </div>
+      </div>
+      <style>
+        @media (max-width: 720px) {
+          #v2g-canvas-wrap {
+            min-height: 360px !important;
+            height: 50vh !important;
+          }
+          #v2g-inspect {
+            width: min(280px, 88vw) !important;
+            max-height: 45% !important;
+            font-size: 0.68rem !important;
+          }
+          #v2-belief-list { max-height: 160px !important; }
+        }
+        /* Compact filter chips from JS */
+        #v2g-filters-entity label,
+        #v2g-filters-predicate label {
+          display: inline-flex !important;
+          align-items: center;
+          gap: 3px;
+          margin: 0 !important;
+          padding: 2px 7px !important;
+          border-radius: 999px;
+          border: 1px solid var(--border-subtle);
+          background: rgba(255,255,255,0.03);
+          font-size: 0.65rem !important;
+          white-space: nowrap;
+          cursor: pointer;
+        }
+        #v2g-filters-entity input,
+        #v2g-filters-predicate input {
+          margin: 0 !important;
+          width: 12px;
+          height: 12px;
+        }
+        #v2-tier-breakdown > * {
+          font-size: 0.68rem !important;
+        }
+      </style>
     </div>
 
     <!-- Expansion Deck Toggle -->

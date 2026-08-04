@@ -167,6 +167,17 @@
   .memory-page tr[data-belief-id]:hover {
     background: rgba(255, 255, 255, 0.04);
   }
+  .memory-page .mem-ops-strip {
+    border-color: var(--border-subtle);
+  }
+  /* Give the graph console full content width */
+  .memory-page #console,
+  .memory-page #v2-beliefs-graph-row,
+  .memory-page #v2g-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
   @media (max-width: 720px) {
     .memory-page .mem-table th:nth-child(2),
     .memory-page .mem-table td:nth-child(2),
@@ -191,31 +202,30 @@
     x-init="init()"
     style="margin-bottom:1.5rem;"
   >
-    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;">
-      <strong>🧠 <span x-text="S.title || 'Memory'"></span> — ops</strong>
-      — <span x-text="S.intro || ''"></span>
-      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+    {# Compact ops strip — chips + tabs, no long blurb #}
+    <div class="card mem-ops-strip" style="padding:0.55rem 0.85rem;margin-bottom:0.75rem;">
+      <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;">
+        <strong style="font-size:0.85rem;white-space:nowrap;" title="Browse entities, beliefs, merges, hygiene">🧠 Ops</strong>
         <template x-for="chip in summaryChips" :key="chip.k">
-          <span style="font-size:0.75rem;font-family:var(--font-mono);padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);">
-            <span style="color:var(--text-muted);" x-text="chip.k + ':'"></span>
-            <strong x-text="chip.v"></strong>
+          <span style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);" :title="chip.k">
+            <span style="color:var(--text-muted);" x-text="chip.k"></span>
+            <strong style="margin-left:3px;" x-text="chip.v"></strong>
           </span>
         </template>
-        <button class="btn btn-secondary btn-sm" @click="loadAll()" :disabled="loading" x-text="S.refresh || 'Refresh'"></button>
-        <a href="#console" class="btn btn-secondary btn-sm" style="text-decoration:none;" x-text="S.tab_console || 'Graph & health'"></a>
+        <span style="flex:1;min-width:4px;"></span>
+        <template x-for="t in tabs" :key="t.id">
+          <button
+            class="btn btn-sm"
+            :class="tab === t.id ? 'btn-primary' : 'btn-secondary'"
+            style="font-size:0.72rem;padding:3px 10px;"
+            @click="tab = t.id; onTab()"
+            :id="'mem-tab-' + t.id"
+            x-text="t.label"
+          ></button>
+        </template>
+        <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;" @click="loadAll()" :disabled="loading" x-text="S.refresh || 'Refresh'"></button>
+        <a href="#console" class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;text-decoration:none;">Graph ↑</a>
       </div>
-    </div>
-
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1rem;border-bottom:1px solid var(--border-subtle);padding-bottom:0.5rem;">
-      <template x-for="t in tabs" :key="t.id">
-        <button
-          class="btn btn-sm"
-          :class="tab === t.id ? 'btn-primary' : 'btn-secondary'"
-          @click="tab = t.id; onTab()"
-          :id="'mem-tab-' + t.id"
-          x-text="t.label"
-        ></button>
-      </template>
     </div>
 
     {# BELIEFS #}
