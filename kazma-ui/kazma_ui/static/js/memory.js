@@ -88,6 +88,9 @@ function memoryPage() {
     },
     hygieneRunning: false,
     _graphListener: null,
+    _opsListener: null,
+    _opsDoneListener: null,
+    _syncingSlots: false,
 
     get tabs() {
       // Graph & health is pinned at the top of the page (not a tab).
@@ -97,6 +100,10 @@ function memoryPage() {
         { id: "merges", label: S.tab_merges || "Pending merges" },
         { id: "hygiene", label: S.tab_hygiene || "Hygiene" },
       ];
+    },
+
+    get canLinkOrMerge() {
+      return !!(this.mergeSource || "").trim() && !!(this.mergeTarget || "").trim();
     },
 
     get summaryChips() {
@@ -111,6 +118,39 @@ function memoryPage() {
       ];
     },
 
+    /** Push list source/target/predicate into the graph ops bar. */
+    pushSlotsToGraph() {
+      if (this._syncingSlots) return;
+      const src = (this.mergeSource || "").trim() || null;
+      const tgt = (this.mergeTarget || "").trim() || null;
+      const pred = (this.linkPredicate || "related_to").trim() || "related_to";
+      if (typeof window._v2gSetOpsSlots === "function") {
+        window._v2gSetOpsSlots(src, tgt, pred);
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent("kazma:memory-ops-slots", {
+            detail: { sourceId: src, targetId: tgt, predicate: pred, fromList: true },
+          })
+        );
+      } catch (_) {
+        /* ignore */
+      }
+    },
+
+    swapSlots() {
+      const s = this.mergeSource;
+      this.mergeSource = this.mergeTarget;
+      this.mergeTarget = s;
+      this.pushSlotsToGraph();
+    },
+
+    clearSlots() {
+      this.mergeSource = "";
+      this.mergeTarget = "";
+      this.pushSlotsToGraph();
+    },
+
     async init() {
       await this.loadAll();
       // Graph → list: highlight matching entity / belief.
@@ -120,7 +160,7 @@ function memoryPage() {
         if (d.type === "entity" && d.id) {
           this.selectedEntityId = d.id;
           this.selectedBeliefId = null;
-          if (this.tab !== "entities") {
+          if (d.scrollOps && this.tab !== "entities") {
             this.tab = "entities";
             this.onTab();
           }
@@ -131,7 +171,7 @@ function memoryPage() {
         } else if (d.type === "belief") {
           if (d.id) this.selectedBeliefId = d.id;
           if (d.subject) this.selectedEntityId = d.subject;
-          if (this.tab !== "beliefs") {
+          if (d.scrollOps && this.tab !== "beliefs") {
             this.tab = "beliefs";
             this.onTab();
           }
@@ -144,12 +184,49 @@ function memoryPage() {
         }
       };
       window.addEventListener("kazma:memory-graph-select", this._graphListener);
+
+      // Graph ops bar → list slots (skip events we emitted ourselves)
+      this._opsListener = (ev) => {
+        const d = (ev && ev.detail) || {};
+        if (d.fromList) return;
+        this._syncingSlots = true;
+        try {
+          if (d.sourceId !== undefined) this.mergeSource = d.sourceId || "";
+          if (d.targetId !== undefined) this.mergeTarget = d.targetId || "";
+          if (d.predicate) this.linkPredicate = d.predicate;
+        } finally {
+          this._syncingSlots = false;
+        }
+      };
+      window.addEventListener("kazma:memory-ops-slots", this._opsListener);
+
+      // After graph link/merge/unlink/edit — refresh list tables
+      this._opsDoneListener = async (ev) => {
+        const d = (ev && ev.detail) || {};
+        try {
+          await this.loadEntities();
+          await this.loadBeliefs();
+          await this.loadSummary();
+          if (d.op === "merge" || d.op === "delete") await this.loadHygiene();
+        } catch (_) {
+          /* ignore */
+        }
+      };
+      window.addEventListener("kazma:memory-ops-done", this._opsDoneListener);
     },
 
     destroy() {
       if (this._graphListener) {
         window.removeEventListener("kazma:memory-graph-select", this._graphListener);
         this._graphListener = null;
+      }
+      if (this._opsListener) {
+        window.removeEventListener("kazma:memory-ops-slots", this._opsListener);
+        this._opsListener = null;
+      }
+      if (this._opsDoneListener) {
+        window.removeEventListener("kazma:memory-ops-done", this._opsDoneListener);
+        this._opsDoneListener = null;
       }
     },
 
@@ -221,8 +298,14 @@ function memoryPage() {
       if (!id) return;
       this.selectedEntityId = id;
       this.selectedBeliefId = null;
-      if (opts.asSource) this.mergeSource = id;
-      if (opts.asTarget) this.mergeTarget = id;
+      if (opts.asSource) {
+        this.mergeSource = id;
+        this.pushSlotsToGraph();
+      }
+      if (opts.asTarget) {
+        this.mergeTarget = id;
+        this.pushSlotsToGraph();
+      }
       if (!opts.asSource && !opts.asTarget && !opts.skipPick) {
         // Soft-pick into merge slots without overwriting both
         this.pickEntity(id);
@@ -388,6 +471,7 @@ function memoryPage() {
       if (!this.mergeSource) this.mergeSource = id;
       else if (!this.mergeTarget) this.mergeTarget = id;
       else this.mergeSource = id;
+      this.pushSlotsToGraph();
     },
 
     async deleteEntity(e) {
@@ -465,7 +549,22 @@ function memoryPage() {
       const src = (this.mergeSource || "").trim();
       const tgt = (this.mergeTarget || "").trim();
       if (!src || !tgt) {
-        toast("Set source and target entity ids", "error");
+        toast("Set source and target entity ids (or pick on the graph)", "error");
+        scrollToConsole();
+        return;
+      }
+      // Prefer graph helper when available so canvas + list stay in sync
+      if (typeof window._v2gDoMerge === "function") {
+        const ok = await window._v2gDoMerge(src, tgt);
+        if (ok) {
+          this.mergeSource = "";
+          this.mergeTarget = tgt;
+          this.selectedEntityId = tgt;
+          this.pushSlotsToGraph();
+          await this.loadEntities();
+          await this.loadBeliefs();
+          await this.loadSummary();
+        }
         return;
       }
       const ok = await confirm({
@@ -485,7 +584,9 @@ function memoryPage() {
       if (d.ok) {
         toast("Merged " + src + " → " + tgt, "success");
         this.mergeSource = "";
+        this.mergeTarget = tgt;
         this.selectedEntityId = tgt;
+        this.pushSlotsToGraph();
         await this.loadEntities();
         await this.loadBeliefs();
         await this.loadSummary();
@@ -501,7 +602,17 @@ function memoryPage() {
       const tgt = (this.mergeTarget || "").trim();
       const pred = (this.linkPredicate || "related_to").trim() || "related_to";
       if (!src || !tgt) {
-        toast("Set source and target for link", "error");
+        toast("Set source and target for link (or pick on the graph)", "error");
+        scrollToConsole();
+        return;
+      }
+      if (typeof window._v2gDoLink === "function") {
+        const ok = await window._v2gDoLink(src, tgt, pred);
+        if (ok) {
+          await this.loadEntities();
+          await this.loadBeliefs();
+          await this.loadSummary();
+        }
         return;
       }
       const d = await api("/api/memory/v2/entities/link", {

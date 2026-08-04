@@ -214,15 +214,27 @@
             <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>entity</span>
             <span style="opacity:0.75;">edges · accent blue</span>
           </div>
+          <!-- Graph ops bar — link / merge / edit without leaving the canvas -->
+          <div id="v2g-ops-bar" style="padding:6px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:rgba(0,0,0,0.18);">
+            <span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-tertiary);margin-right:2px;">Ops</span>
+            <span id="v2g-ops-source" title="Source entity" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(34,211,238,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">src: —</span>
+            <span id="v2g-ops-target" title="Target entity" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(59,130,246,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">tgt: —</span>
+            <input id="v2g-ops-predicate" type="text" value="related_to" placeholder="predicate" title="Link predicate" style="width:100px;padding:3px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);color:var(--text-primary);font-size:0.68rem;font-family:var(--font-mono);">
+            <button type="button" id="v2g-ops-link" class="btn btn-sm btn-primary" style="font-size:0.68rem;padding:3px 10px;" title="Link source —pred→ target (or enter pick mode)">Link</button>
+            <button type="button" id="v2g-ops-merge" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 10px;" title="Merge source into target">Merge</button>
+            <button type="button" id="v2g-ops-swap" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Swap source ↔ target">⇄</button>
+            <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Clear source/target and cancel pick mode">Clear</button>
+            <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">Click node → inspect. Click edge → edit/unlink. Link: set src+tgt or use pick mode.</span>
+          </div>
           <!-- Canvas -->
           <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:440px;border-radius:0 0 10px 10px;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
-            <canvas id="v2g-canvas" width="800" height="400" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
+            <canvas id="v2g-canvas" width="800" height="400" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view. Click edges to edit or unlink beliefs." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
             <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
             <div id="v2g-empty" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
               <div>No beliefs yet — the graph populates as Kazma learns.</div>
               <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
             </div>
-            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">←↑↓→ pan · +/− zoom · Home reset · Tab to focus</div>
+            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">←↑↓→ pan · +/− zoom · edge click = edit · Esc cancel · Home reset</div>
           </div>
         </div>
       </div>
@@ -270,7 +282,7 @@
               <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
             </span>
           </div>
-          <div id="v2g-inspect" style="margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:8px;font-size:0.72rem;color:var(--text-muted);min-height:40px;">Click a node to inspect.</div>
+          <div id="v2g-inspect" style="margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:8px;font-size:0.72rem;color:var(--text-muted);min-height:80px;max-height:320px;overflow-y:auto;">Click a node or edge to inspect · Link/Merge from the Ops bar above the graph.</div>
         </div>
       </div>
     </div>

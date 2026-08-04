@@ -25,6 +25,9 @@
     delete: {{ t('memory.delete') | tojson }},
     merge: {{ t('memory.merge') | tojson }},
     link: {{ t('memory.link') | tojson }},
+    unlink: {{ t('memory.unlink') | tojson }},
+    edit: {{ t('memory.edit') | tojson }},
+    rename: {{ t('memory.rename') | tojson }},
     empty_only: {{ t('memory.empty_only') | tojson }},
     isolated_only: {{ t('memory.isolated_only') | tojson }},
     purge_empty: {{ t('memory.purge_empty') | tojson }},
@@ -250,7 +253,7 @@
                   <div class="mem-actions">
                     <button class="btn btn-sm btn-secondary" @click="focusBelief(b)" title="Focus on graph">Graph</button>
                     <button class="btn btn-sm btn-secondary" @click="editBelief(b)" x-text="S.edit || 'Edit'" title="Edit subject / predicate / object"></button>
-                    <button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" x-text="S.invalidate || 'Invalidate'"></button>
+                    <button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" :title="S.unlink || 'Unlink (invalidate edge)'" x-text="S.unlink || S.invalidate || 'Unlink'"></button>
                   </div>
                 </td>
               </tr>
@@ -276,23 +279,32 @@
       </div>
       <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 0.75rem;" x-text="S.isolated_hint || ''"></p>
       <div class="card" style="padding:0.85rem 1rem;margin-bottom:0.75rem;">
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">
+          Link / merge slots sync with the <strong>graph Ops bar</strong> above.
+          On the graph: click a node → <em>Src</em>/<em>Tgt</em>/<em>Link→</em>, or click an <em>edge</em> to edit/unlink.
+          Shift+click nodes to fill slots quickly.
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px;">
           <div>
             <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.source || 'Source'"></label>
-            <input class="form-input" x-model="mergeSource" placeholder="source entity id">
+            <input class="form-input" x-model="mergeSource" @change="pushSlotsToGraph()" @blur="pushSlotsToGraph()" placeholder="source entity id">
           </div>
           <div>
             <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.target || 'Target'"></label>
-            <input class="form-input" x-model="mergeTarget" placeholder="target entity id">
+            <input class="form-input" x-model="mergeTarget" @change="pushSlotsToGraph()" @blur="pushSlotsToGraph()" placeholder="target entity id">
           </div>
           <div>
             <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.predicate || 'Predicate'"></label>
-            <input class="form-input" x-model="linkPredicate" placeholder="related_to">
+            <input class="form-input" x-model="linkPredicate" @change="pushSlotsToGraph()" @blur="pushSlotsToGraph()" placeholder="related_to">
           </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn btn-primary btn-sm" @click="doMerge()" x-text="S.merge || 'Merge'"></button>
-          <button class="btn btn-secondary btn-sm" @click="doLink()" x-text="S.link || 'Link'"></button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-primary btn-sm" @click="doLink()" :disabled="!canLinkOrMerge" x-text="S.link || 'Link'" title="Create belief edge source —pred→ target"></button>
+          <button class="btn btn-secondary btn-sm" @click="doMerge()" :disabled="!canLinkOrMerge" x-text="S.merge || 'Merge'" title="Merge source into target (beliefs rewire)"></button>
+          <button class="btn btn-secondary btn-sm" @click="swapSlots()" title="Swap source ↔ target">⇄ Swap</button>
+          <button class="btn btn-secondary btn-sm" @click="clearSlots()" title="Clear source and target">Clear</button>
+          <a href="#console" class="btn btn-secondary btn-sm" style="text-decoration:none;" title="Jump to graph">Graph ↑</a>
+          <span x-show="canLinkOrMerge" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);" x-text="(mergeSource || '') + ' → ' + (mergeTarget || '')"></span>
         </div>
       </div>
       <div class="card mem-table-wrap" style="padding:0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
@@ -328,8 +340,8 @@
                   <div class="mem-actions">
                     <button class="btn btn-sm btn-secondary" @click="focusEntity(e.id, { skipPick: true, entity: e })" title="Focus on graph">Graph</button>
                     <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="Change display name (id stays the same)"></button>
-                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id">Src</button>
-                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id">Tgt</button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="Set as link/merge source (syncs to graph)">Src</button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="Set as link/merge target (syncs to graph)">Tgt</button>
                     <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
                   </div>
                 </td>

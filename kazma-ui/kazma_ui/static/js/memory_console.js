@@ -769,14 +769,18 @@
   document.getElementById('v2-belief-invalidate')?.addEventListener('click', async function() {
     if (!_openBeliefId) return;
     const ok = window.kazmaConfirm
-      ? await window.kazmaConfirm({ title: 'Invalidate belief?', message: 'Soft-delete this fact from active memory.' })
-      : confirm('Invalidate belief?');
+      ? await window.kazmaConfirm({ title: 'Unlink belief?', message: 'Soft-invalidate this edge from active memory.' })
+      : confirm('Unlink (invalidate) belief?');
     if (!ok) return;
     await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
     const d = document.getElementById('v2-belief-drawer');
     if (d) d.style.display = 'none';
     loadV2Beliefs();
     pollV2Health();
+    if (typeof window._v2gForceReload === 'function') window._v2gForceReload();
+    try {
+      window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'unlink', beliefId: _openBeliefId } }));
+    } catch (e) { /* ignore */ }
   });
 
   async function loadV2Queue() {
@@ -1214,6 +1218,14 @@
   var _v2gFilters = { entity: {}, predicate: {} };
   // Cache the last full dataset so client-side filters don't need a re-fetch
   var _v2gRawNodes = [], _v2gRawLinks = [];
+  // Graph-native ops: source/target slots + pick modes (link | merge)
+  // Shared with the Entities list via kazma:memory-ops-slots events.
+  var _v2gOps = {
+    sourceId: null,
+    targetId: null,
+    mode: null, // null | 'link' | 'merge'
+    selectedEdgeIdx: -1,
+  };
 
   // Palette follows site tokens (cyan accent + blue secondary).
   // The "user" node is intentionally warm amber so it stands out.
@@ -1515,9 +1527,24 @@
         var ai = _v2gIds[l.source];
         var bi = _v2gIds[l.target];
         if (ai !== undefined && bi !== undefined) {
-          _v2gEdges.push({ a: ai, b: bi, label: String(l.label || '').slice(0, 18), objectText: String(l.object_text || ''), type: l.type || 'set', confidence: l.confidence || 0.5, superseded: !!l.superseded });
+          _v2gEdges.push({
+            a: ai,
+            b: bi,
+            // Belief id (from graph API `id`) — required for edit/unlink
+            beliefId: l.id || l.belief_id || null,
+            label: String(l.label || l.predicate || '').slice(0, 18),
+            fullLabel: String(l.label || l.predicate || ''),
+            objectText: String(l.object_text || ''),
+            sourceId: l.source,
+            targetId: l.target,
+            type: l.type || 'set',
+            confidence: l.confidence || 0.5,
+            superseded: !!l.superseded,
+          });
         }
       });
+      // Drop selected edge if topology rebuilt without it
+      if (_v2gOps.selectedEdgeIdx >= _v2gEdges.length) _v2gOps.selectedEdgeIdx = -1;
       // Keep pan/zoom if we already had a layout; only reset on first paint.
       if (hadLayout) {
         _v2gView = keepView;
@@ -1571,6 +1598,7 @@
       if (!A || !B) continue;
       var ax = _v2gSX(A.x), ay = _v2gSY(A.y), bx = _v2gSX(B.x), by = _v2gSY(B.y);
       var hot = _v2gSelectedId && (A.id === _v2gSelectedId || B.id === _v2gSelectedId);
+      var edgeSelected = e === _v2gOps.selectedEdgeIdx;
       var beliefHot = _v2gHighlightSubj && _v2gHighlightObj &&
         ((A.id === _v2gHighlightSubj && B.id === _v2gHighlightObj) ||
          (A.id === _v2gHighlightObj && B.id === _v2gHighlightSubj));
@@ -1578,9 +1606,17 @@
       var touchesUser = _v2gIsUser(A) || _v2gIsUser(B);
       ctx.lineCap = 'round';
       var pathHot = !!ed.pathHot || (_v2gPathIds[A.id] && _v2gPathIds[B.id]);
-      if (beliefHot || pathHot) {
-        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = pathHot ? 3.0 : 3.4;
-        ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.55); ctx.shadowBlur = 10;
+      // Source/target slot rings on edges between ops endpoints
+      var opsEdge = (_v2gOps.sourceId && _v2gOps.targetId &&
+        ((A.id === _v2gOps.sourceId && B.id === _v2gOps.targetId) ||
+         (A.id === _v2gOps.targetId && B.id === _v2gOps.sourceId)));
+      if (edgeSelected || beliefHot || pathHot) {
+        ctx.strokeStyle = edgeSelected ? '#fbbf24' : theme.accentLight;
+        ctx.lineWidth = edgeSelected ? 3.6 : (pathHot ? 3.0 : 3.4);
+        ctx.shadowColor = _v2gHexAlpha(edgeSelected ? '#fbbf24' : theme.accent, 0.55); ctx.shadowBlur = 10;
+      } else if (opsEdge) {
+        ctx.strokeStyle = theme.user; ctx.lineWidth = 2.6;
+        ctx.shadowColor = _v2gHexAlpha(theme.user, 0.45); ctx.shadowBlur = 8;
       } else if (hot) {
         ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.3;
         ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.4); ctx.shadowBlur = 8;
@@ -1672,6 +1708,16 @@
         ctx.beginPath(); ctx.arc(x, y, r + 5, 0, 2 * Math.PI);
         ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 2.2; ctx.stroke();
       }
+      // Ops source / target rings (cyan = src, blue = tgt)
+      if (_v2gOps.sourceId && p.id === _v2gOps.sourceId) {
+        ctx.beginPath(); ctx.arc(x, y, r + 7, 0, 2 * Math.PI);
+        ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.4; ctx.stroke();
+      }
+      if (_v2gOps.targetId && p.id === _v2gOps.targetId) {
+        ctx.beginPath(); ctx.arc(x, y, r + 9, 0, 2 * Math.PI);
+        ctx.strokeStyle = theme.secondary; ctx.lineWidth = 2; ctx.setLineDash([3, 2]); ctx.stroke();
+        ctx.setLineDash([]);
+      }
       // Body — radial highlight for depth
       var body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, 0, x, y, r);
       body.addColorStop(0, _v2gHexAlpha('#ffffff', isUser ? 0.45 : 0.28));
@@ -1721,6 +1767,489 @@
     return -1;
   }
 
+  /** Distance from point to segment; used for edge pick (edit/unlink). */
+  function _v2gDistToSeg(px, py, x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1;
+    var len2 = dx * dx + dy * dy;
+    if (len2 < 1e-6) {
+      var d0x = px - x1, d0y = py - y1;
+      return Math.sqrt(d0x * d0x + d0y * d0y);
+    }
+    var t = ((px - x1) * dx + (py - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    var qx = x1 + t * dx, qy = y1 + t * dy;
+    var ex = px - qx, ey = py - qy;
+    return Math.sqrt(ex * ex + ey * ey);
+  }
+
+  function _v2gHitEdge(sx, sy) {
+    var best = -1, bestD = 8; // px threshold (screen space)
+    for (var e = 0; e < _v2gEdges.length; e++) {
+      var ed = _v2gEdges[e];
+      var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+      if (!A || !B) continue;
+      var d = _v2gDistToSeg(sx, sy, _v2gSX(A.x), _v2gSY(A.y), _v2gSX(B.x), _v2gSY(B.y));
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  // ── Graph ops helpers (link / merge / unlink / edit) ─────────────
+
+  function _v2gToast(msg, type) {
+    if (window.showToast) window.showToast(msg, type || 'info');
+  }
+
+  async function _v2gConfirm(opts) {
+    if (window.kazmaConfirm) return window.kazmaConfirm(opts);
+    return window.confirm((opts && (opts.message || opts.title)) || 'Confirm?');
+  }
+
+  async function _v2gPrompt(opts) {
+    if (window.kazmaPrompt) return window.kazmaPrompt(opts);
+    return window.prompt((opts && opts.message) || '', (opts && opts.defaultValue) || '');
+  }
+
+  function _v2gShortId(id) {
+    var s = String(id || '');
+    return s.length > 18 ? s.slice(0, 16) + '…' : s;
+  }
+
+  function _v2gSyncOpsBar() {
+    var srcEl = document.getElementById('v2g-ops-source');
+    var tgtEl = document.getElementById('v2g-ops-target');
+    var hint = document.getElementById('v2g-ops-hint');
+    var linkBtn = document.getElementById('v2g-ops-link');
+    var mergeBtn = document.getElementById('v2g-ops-merge');
+    if (srcEl) {
+      srcEl.textContent = 'src: ' + (_v2gOps.sourceId ? _v2gShortId(_v2gOps.sourceId) : '—');
+      srcEl.title = _v2gOps.sourceId || 'Source entity';
+      srcEl.style.borderColor = _v2gOps.sourceId ? 'var(--accent,#22d3ee)' : 'var(--border-subtle)';
+    }
+    if (tgtEl) {
+      tgtEl.textContent = 'tgt: ' + (_v2gOps.targetId ? _v2gShortId(_v2gOps.targetId) : '—');
+      tgtEl.title = _v2gOps.targetId || 'Target entity';
+      tgtEl.style.borderColor = _v2gOps.targetId ? 'var(--secondary,#3b82f6)' : 'var(--border-subtle)';
+    }
+    if (hint) {
+      if (_v2gOps.mode === 'link') {
+        hint.textContent = _v2gOps.sourceId
+          ? 'Link mode: click the target node…'
+          : 'Link mode: click the source node…';
+        hint.style.color = 'var(--accent,#22d3ee)';
+      } else if (_v2gOps.mode === 'merge') {
+        hint.textContent = _v2gOps.sourceId
+          ? 'Merge mode: click the target (survivor)…'
+          : 'Merge mode: click the source (will be retired)…';
+        hint.style.color = 'var(--warning,#f59e0b)';
+      } else if (_v2gOps.sourceId && _v2gOps.targetId) {
+        hint.textContent = 'Ready — press Link or Merge, or click an edge to edit/unlink.';
+        hint.style.color = 'var(--text-secondary)';
+      } else {
+        hint.textContent = 'Click node → inspect. Click edge → edit/unlink. Link: set src+tgt or use pick mode.';
+        hint.style.color = 'var(--text-muted)';
+      }
+    }
+    if (linkBtn) {
+      linkBtn.classList.toggle('btn-primary', _v2gOps.mode === 'link' || !!(!_v2gOps.mode && _v2gOps.sourceId && _v2gOps.targetId));
+      linkBtn.textContent = _v2gOps.mode === 'link' ? 'Linking…' : 'Link';
+    }
+    if (mergeBtn) {
+      mergeBtn.classList.toggle('btn-primary', _v2gOps.mode === 'merge');
+      mergeBtn.textContent = _v2gOps.mode === 'merge' ? 'Merging…' : 'Merge';
+    }
+  }
+
+  function _v2gBroadcastSlots() {
+    try {
+      window.dispatchEvent(new CustomEvent('kazma:memory-ops-slots', {
+        detail: {
+          sourceId: _v2gOps.sourceId,
+          targetId: _v2gOps.targetId,
+          predicate: (document.getElementById('v2g-ops-predicate') || {}).value || 'related_to',
+        },
+      }));
+    } catch (e) { /* ignore */ }
+    _v2gSyncOpsBar();
+    _v2gRepaint();
+  }
+
+  function _v2gSetSlot(which, id, opts) {
+    opts = opts || {};
+    if (!id) return;
+    if (which === 'source') _v2gOps.sourceId = id;
+    else if (which === 'target') _v2gOps.targetId = id;
+    if (!opts.silent) _v2gBroadcastSlots();
+  }
+
+  function _v2gClearSlots(opts) {
+    opts = opts || {};
+    _v2gOps.sourceId = null;
+    _v2gOps.targetId = null;
+    _v2gOps.mode = null;
+    if (!opts.keepEdge) _v2gOps.selectedEdgeIdx = -1;
+    _v2gBroadcastSlots();
+  }
+
+  function _v2gEnterMode(mode) {
+    _v2gOps.mode = mode;
+    // Soft-start: if no source yet, wait for first click; if source set, wait for target
+    _v2gSyncOpsBar();
+    _v2gToast(
+      mode === 'link'
+        ? 'Link mode: click source, then target'
+        : 'Merge mode: click source (retire), then target (keep)',
+      'info'
+    );
+  }
+
+  function _v2gOpsPredicate() {
+    var el = document.getElementById('v2g-ops-predicate');
+    var p = el ? String(el.value || '').trim() : '';
+    return p || 'related_to';
+  }
+
+  async function _v2gReloadGraph() {
+    _v2gStructSig = '';
+    _v2gLabelSig = '';
+    await _v2gLoad();
+  }
+
+  async function _v2gDoLink(src, tgt, pred) {
+    src = String(src || '').trim();
+    tgt = String(tgt || '').trim();
+    pred = String(pred || _v2gOpsPredicate()).trim() || 'related_to';
+    if (!src || !tgt) {
+      _v2gToast('Set source and target first', 'error');
+      return false;
+    }
+    if (src === tgt) {
+      _v2gToast('Source and target must differ', 'error');
+      return false;
+    }
+    try {
+      var resp = await fetch('/api/memory/v2/entities/link', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ subject: src, predicate: pred, object: tgt }),
+      });
+      var data = await resp.json().catch(function() { return {}; });
+      if (!resp.ok || !data.ok) {
+        _v2gToast(data.error || 'Link failed', 'error');
+        return false;
+      }
+      _v2gToast('Linked ' + _v2gShortId(src) + ' —' + pred + '→ ' + _v2gShortId(tgt), 'success');
+      _v2gOps.mode = null;
+      _v2gSyncOpsBar();
+      await _v2gReloadGraph();
+      _v2gSelectEntity(tgt, { notify: false });
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'link', source: src, target: tgt } }));
+      } catch (e) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Link failed', 'error');
+      return false;
+    }
+  }
+
+  async function _v2gDoMerge(src, tgt) {
+    src = String(src || '').trim();
+    tgt = String(tgt || '').trim();
+    if (!src || !tgt) {
+      _v2gToast('Set source and target first', 'error');
+      return false;
+    }
+    if (src === tgt) {
+      _v2gToast('Source and target must differ', 'error');
+      return false;
+    }
+    var ok = await _v2gConfirm({
+      title: 'Merge entities',
+      message: 'Merge ' + src + ' into ' + tgt + '?\nBeliefs rewire to the target; source is retired.',
+    });
+    if (!ok) return false;
+    try {
+      var resp = await fetch('/api/memory/v2/entities/merge', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ source_id: src, target_id: tgt }),
+      });
+      var data = await resp.json().catch(function() { return {}; });
+      if (!resp.ok || !data.ok) {
+        _v2gToast(data.error || 'Merge failed', 'error');
+        return false;
+      }
+      _v2gToast('Merged ' + _v2gShortId(src) + ' → ' + _v2gShortId(tgt), 'success');
+      _v2gOps.sourceId = null;
+      _v2gOps.targetId = tgt;
+      _v2gOps.mode = null;
+      _v2gBroadcastSlots();
+      await _v2gReloadGraph();
+      _v2gSelectEntity(tgt, { notify: false });
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'merge', source: src, target: tgt } }));
+      } catch (e) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Merge failed', 'error');
+      return false;
+    }
+  }
+
+  async function _v2gUnlinkBelief(beliefId) {
+    if (!beliefId) {
+      _v2gToast('No belief id on this edge', 'error');
+      return false;
+    }
+    var ok = await _v2gConfirm({
+      title: 'Unlink belief',
+      message: 'Soft-invalidate this belief edge? It leaves active memory (can archive later via Hygiene).',
+    });
+    if (!ok) return false;
+    try {
+      var resp = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId) + '/invalidate', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: '{}',
+      });
+      var data = await resp.json().catch(function() { return {}; });
+      if (!resp.ok || data.ok === false) {
+        _v2gToast(data.error || 'Unlink failed', 'error');
+        return false;
+      }
+      _v2gToast('Unlinked (invalidated)', 'success');
+      _v2gOps.selectedEdgeIdx = -1;
+      await _v2gReloadGraph();
+      try {
+        if (typeof loadV2Beliefs === 'function') loadV2Beliefs((document.getElementById('v2-belief-search') || {}).value || '');
+      } catch (e) { /* optional */ }
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'unlink', beliefId: beliefId } }));
+      } catch (e2) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Unlink failed', 'error');
+      return false;
+    }
+  }
+
+  async function _v2gEditBeliefById(beliefId, seed) {
+    seed = seed || {};
+    if (!beliefId) {
+      _v2gToast('No belief id — cannot edit', 'error');
+      return false;
+    }
+    // Prefer live detail so we edit the current triple
+    var b = {
+      id: beliefId,
+      subject: seed.subject || '',
+      predicate: seed.predicate || seed.label || '',
+      object: seed.object || seed.objectText || '',
+    };
+    try {
+      var r0 = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId), {
+        credentials: 'same-origin',
+      });
+      var d0 = await r0.json().catch(function() { return {}; });
+      if (d0.ok && d0.belief) {
+        b.subject = d0.belief.subject || b.subject;
+        b.predicate = d0.belief.predicate || b.predicate;
+        b.object = d0.belief.object || b.object;
+      }
+    } catch (e) { /* use seed */ }
+
+    var object = await _v2gPrompt({
+      title: 'Edit belief — object',
+      message: 'Fact / object text. Cancel aborts.',
+      defaultValue: b.object || '',
+      confirmText: 'Next',
+      placeholder: 'e.g. Paris',
+    });
+    if (object == null) return false;
+    var predicate = await _v2gPrompt({
+      title: 'Edit belief — predicate',
+      message: 'Relation name (snake_case ok).',
+      defaultValue: b.predicate || '',
+      confirmText: 'Next',
+      placeholder: 'lives_in',
+    });
+    if (predicate == null) return false;
+    var subject = await _v2gPrompt({
+      title: 'Edit belief — subject',
+      message: 'Subject entity id.',
+      defaultValue: b.subject || '',
+      confirmText: 'Save',
+      placeholder: 'user',
+    });
+    if (subject == null) return false;
+    subject = String(subject).trim();
+    predicate = String(predicate).trim();
+    object = String(object).trim();
+    if (!subject || !predicate || !object) {
+      _v2gToast('Subject, predicate, and object are required', 'error');
+      return false;
+    }
+    if (subject === b.subject && predicate === b.predicate && object === b.object) return false;
+    try {
+      var resp = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId), {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ subject: subject, predicate: predicate, object: object }),
+      });
+      var data = await resp.json().catch(function() { return {}; });
+      if (!resp.ok || !data.ok) {
+        _v2gToast(data.error || 'Edit failed', 'error');
+        return false;
+      }
+      _v2gToast('Belief updated', 'success');
+      _v2gOps.selectedEdgeIdx = -1;
+      await _v2gReloadGraph();
+      try {
+        if (typeof loadV2Beliefs === 'function') loadV2Beliefs((document.getElementById('v2-belief-search') || {}).value || '');
+      } catch (e2) { /* optional */ }
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
+          detail: { op: 'edit', beliefId: beliefId, subject: subject, object: object },
+        }));
+      } catch (e3) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Edit failed', 'error');
+      return false;
+    }
+  }
+
+  async function _v2gDeleteEntity(id) {
+    if (!id || id === 'user') {
+      _v2gToast('Cannot delete protected hub', 'error');
+      return false;
+    }
+    var ok = await _v2gConfirm({
+      title: 'Delete entity',
+      message: 'Delete entity shell “' + id + '”? (Protected / non-empty may fail.)',
+    });
+    if (!ok) return false;
+    try {
+      var resp = await fetch('/api/memory/v2/entities/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      });
+      var data = await resp.json().catch(function() { return {}; });
+      if (!resp.ok || !data.ok) {
+        _v2gToast(data.error || 'Delete failed', 'error');
+        return false;
+      }
+      _v2gToast('Deleted ' + _v2gShortId(id), 'success');
+      if (_v2gOps.sourceId === id) _v2gOps.sourceId = null;
+      if (_v2gOps.targetId === id) _v2gOps.targetId = null;
+      _v2gBroadcastSlots();
+      await _v2gReloadGraph();
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'delete', id: id } }));
+      } catch (e) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Delete failed', 'error');
+      return false;
+    }
+  }
+
+  function _v2gHandleNodePick(p) {
+    if (!p || p.isEpisode) return false;
+    if (!_v2gOps.mode) return false;
+    if (!_v2gOps.sourceId) {
+      _v2gSetSlot('source', p.id);
+      _v2gSyncOpsBar();
+      return true;
+    }
+    if (p.id === _v2gOps.sourceId) {
+      _v2gToast('Pick a different node as target', 'info');
+      return true;
+    }
+    _v2gSetSlot('target', p.id);
+    var mode = _v2gOps.mode;
+    _v2gOps.mode = null;
+    _v2gSyncOpsBar();
+    if (mode === 'link') {
+      _v2gDoLink(_v2gOps.sourceId, _v2gOps.targetId, _v2gOpsPredicate());
+    } else if (mode === 'merge') {
+      _v2gDoMerge(_v2gOps.sourceId, _v2gOps.targetId);
+    }
+    return true;
+  }
+
+  function _v2gInspectEdge(edgeIdx) {
+    var el = document.getElementById('v2g-inspect');
+    if (!el || edgeIdx < 0 || !_v2gEdges[edgeIdx]) return;
+    var ed = _v2gEdges[edgeIdx];
+    var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+    if (!A || !B) return;
+    _v2gOps.selectedEdgeIdx = edgeIdx;
+    _v2gSelectedId = null;
+    _v2gHighlightSubj = A.id;
+    _v2gHighlightObj = B.id;
+    var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
+    var pred = ed.fullLabel || ed.label || '';
+    var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">';
+    html += '<div style="font-weight:700;font-size:0.8rem;color:#fbbf24;word-break:break-word;flex:1;">Edge · belief</div>';
+    html += '</div>';
+    html += '<div style="font-size:0.74rem;line-height:1.45;margin-bottom:8px;color:var(--text-primary);">';
+    html += '<b>' + _v2gEsc(_v2gDisplayName(A)) + '</b> ';
+    html += '<span style="color:' + pcolor + ';">' + _v2gEsc(String(pred).replace(/_/g, ' ')) + '</span> ';
+    html += '<b>' + _v2gEsc(_v2gDisplayName(B)) + '</b>';
+    html += '</div>';
+    html += '<div style="color:var(--text-muted);font-size:0.65rem;margin-bottom:8px;font-family:var(--font-mono);">';
+    if (ed.beliefId) html += 'id: ' + _v2gEsc(String(ed.beliefId).slice(0, 20));
+    else html += 'id: (missing — unlink may fail)';
+    html += ' · ' + _v2gEsc(ed.type || '?') + ' · conf ' + Math.round((ed.confidence || 0) * 100) + '%';
+    if (ed.superseded) html += ' · superseded';
+    html += '</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="edit" style="font-size:0.65rem;padding:2px 8px;">Edit</button>';
+    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" style="font-size:0.65rem;padding:2px 8px;">Unlink</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;">Src←A</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;">Tgt→B</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;">In list</button>';
+    html += '</div>';
+    el.innerHTML = html;
+    el.querySelectorAll('.v2g-edge-act').forEach(function(btn) {
+      btn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var act = btn.getAttribute('data-act');
+        if (act === 'edit') {
+          _v2gEditBeliefById(ed.beliefId, {
+            subject: A.id,
+            predicate: pred,
+            object: ed.objectText || B.id,
+            objectText: ed.objectText,
+          });
+        } else if (act === 'unlink') {
+          _v2gUnlinkBelief(ed.beliefId);
+        } else if (act === 'src') {
+          _v2gSetSlot('source', A.id);
+        } else if (act === 'tgt') {
+          _v2gSetSlot('target', B.id);
+        } else if (act === 'list') {
+          _v2gNotifyList({
+            type: 'belief',
+            id: ed.beliefId,
+            subject: A.id,
+            object: ed.objectText || B.id,
+            scrollOps: true,
+          });
+        }
+      });
+    });
+    _v2gRepaint();
+  }
+
   function _v2gBindPointer(canvas, wrap) {
     if (canvas._v2gBound) return; canvas._v2gBound = true;
     function evToCanvas(ev) {
@@ -1731,6 +2260,27 @@
       var c = evToCanvas(ev); var idx = _v2gHit(c.sx, c.sy);
       if (idx >= 0) {
         var p = _v2gPts[idx];
+        // Link/merge pick mode: first/second node click assigns slots
+        if (_v2gOps.mode && !p.isEpisode) {
+          _v2gSelectedId = p.id;
+          _v2gOps.selectedEdgeIdx = -1;
+          _v2gHighlightSubj = null; _v2gHighlightObj = null;
+          _v2gInspect(p);
+          _v2gHandleNodePick(p);
+          canvas.setPointerCapture(ev.pointerId);
+          canvas.style.cursor = 'pointer';
+          _v2gHeated(); _v2gRepaint();
+          return;
+        }
+        // Shift+click: soft-pick into source/target without a formal mode
+        if (ev.shiftKey && !p.isEpisode) {
+          if (!_v2gOps.sourceId || (_v2gOps.sourceId && _v2gOps.targetId)) {
+            _v2gOps.targetId = null;
+            _v2gSetSlot('source', p.id);
+          } else {
+            _v2gSetSlot('target', p.id);
+          }
+        }
         _v2gDrag = {
           idx: idx,
           wx: _v2gWX(c.sx) - p.x,
@@ -1743,13 +2293,24 @@
         canvas.style.cursor = 'grabbing';
         // Clear belief-click highlight when selecting a node directly
         _v2gHighlightSubj = null; _v2gHighlightObj = null;
+        _v2gOps.selectedEdgeIdx = -1;
         // Do NOT jump the page to the entities list on single click —
         // that blocks free explore/drag. List sync is double-click only.
       } else {
+        // Prefer edge hit when not on a node (edit/unlink without leaving graph)
+        var eidx = _v2gHitEdge(c.sx, c.sy);
+        if (eidx >= 0) {
+          _v2gInspectEdge(eidx);
+          canvas.setPointerCapture(ev.pointerId);
+          canvas.style.cursor = 'pointer';
+          _v2gHeated(); _v2gRepaint();
+          return;
+        }
         _v2gDrag = { pan: true, sx: c.sx, sy: c.sy, ox: _v2gView.ox, oy: _v2gView.oy };
         canvas.style.cursor = 'grabbing';
         // Clear selection + belief highlight on empty-space click
         _v2gSelectedId = null; _v2gHighlightSubj = null; _v2gHighlightObj = null;
+        _v2gOps.selectedEdgeIdx = -1;
       }
       // Heat lightly so free nodes can settle; pinned nodes stay fixed.
       _v2gHeated(); _v2gRepaint();
@@ -1773,23 +2334,39 @@
         _v2gRepaint();
       } else {
         var idx = _v2gHit(c.sx, c.sy);
+        var eHover = idx < 0 ? _v2gHitEdge(c.sx, c.sy) : -1;
         if (idx !== _v2gHover) { _v2gHover = idx; _v2gRepaint(); }
-        canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
+        canvas.style.cursor = (idx >= 0 || eHover >= 0) ? 'pointer' : 'grab';
         var tip = document.getElementById('v2g-tooltip');
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
           var tc = _v2gNodeColor(p);
           var tLabel = _v2gTitle(_v2gDisplayName(p));
+          var modeHint = '';
+          if (_v2gOps.mode === 'link') modeHint = '<br><span style="color:var(--accent);">link pick</span>';
+          else if (_v2gOps.mode === 'merge') modeHint = '<br><span style="color:var(--warning);">merge pick</span>';
           tip.innerHTML = '<b style="color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b><br><span style="color:var(--text-muted);">' +
             (_v2gIsUser(p) ? 'you · center of memory' : ('type: ' + p.type)) +
             (p.isHighStakes ? ' · ⚠ high-stakes' : '') +
             (p.isVirtual ? ' · fact' : '') +
             (p.id && _v2gDisplayName(p) !== p.id ? ' · id: ' + _v2gEsc(String(p.id).slice(0, 24)) : '') +
-            '</span>';
+            '</span>' + modeHint;
           tip.style.display = 'block';
           tip.style.borderColor = _v2gHexAlpha(tc, 0.35);
           var rect = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect.width - 200) + 'px';
+          tip.style.top = (c.sy + 12) + 'px';
+        } else if (eHover >= 0 && tip) {
+          var edh = _v2gEdges[eHover];
+          var Ah = _v2gPts[edh.a], Bh = _v2gPts[edh.b];
+          tip.innerHTML = '<b style="color:#fbbf24;">' + _v2gEsc((edh.fullLabel || edh.label || 'edge').replace(/_/g, ' ')) + '</b><br>' +
+            '<span style="color:var(--text-muted);">' +
+            _v2gEsc(Ah ? _v2gDisplayName(Ah) : '?') + ' → ' + _v2gEsc(Bh ? _v2gDisplayName(Bh) : '?') +
+            '</span><br><span style="color:var(--text-muted);font-size:0.68rem;">click to edit / unlink</span>';
+          tip.style.display = 'block';
+          tip.style.borderColor = 'rgba(251,191,36,0.4)';
+          var rect2 = canvas.getBoundingClientRect();
+          tip.style.left = Math.min(c.sx + 12, rect2.width - 200) + 'px';
           tip.style.top = (c.sy + 12) + 'px';
         } else if (tip) { tip.style.display = 'none'; }
       }
@@ -1881,73 +2458,141 @@
     var el = document.getElementById('v2g-inspect');
     if (!el || !p) return;
     _v2gRefreshPalette();
+    _v2gOps.selectedEdgeIdx = -1;
     var color = _v2gNodeColor(p);
     var fullName = _v2gDisplayName(p);
     var title = _v2gTitle(fullName);
     var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px;">';
     html += '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;flex:1;min-width:0;">' + _v2gEsc(title) + '</div>';
-    if (!p.isEpisode) {
-      html += '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">';
-      html += '<button type="button" id="v2g-rename-btn" class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
-      html += '<button type="button" id="v2g-show-list-btn" class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:2px 8px;" title="Highlight this entity in the list below">In list</button>';
-      html += '</div>';
-    }
     html += '</div>';
-    html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:8px;">';
+    html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:6px;">';
     html += _v2gIsUser(p) ? 'you · memory hub' : ('type: ' + p.type);
     if (p.id) html += ' · id: <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
     if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
     if (p.isVirtual) html += ' · fact node';
     html += '</div>';
+    // Node ops — same capabilities as the Entities list, on the graph
+    if (!p.isEpisode) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
+      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge source">Src</button>';
+      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge target">Tgt</button>';
+      html += '<button type="button" class="btn btn-sm btn-primary v2g-node-act" data-act="link-from" style="font-size:0.65rem;padding:2px 8px;" title="Start link from this node — click target next">Link→</button>';
+      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="merge-from" style="font-size:0.65rem;padding:2px 8px;" title="Start merge from this node (will be retired)">Merge→</button>';
+      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="rename" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
+      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;" title="Highlight in entities list">In list</button>';
+      if (!_v2gIsUser(p) && !p.isVirtual) {
+        html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="delete" style="font-size:0.65rem;padding:2px 8px;" title="Delete empty entity shell">Del</button>';
+      }
+      html += '</div>';
+    }
     // Contents — the full text of this belief/entity, shown exactly once.
     if (fullName !== title) {
       html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Contents</div>';
       html += '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;max-height:200px;overflow-y:auto;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
     }
-    // List readable belief sentences touching this node
+    // Belief rows with per-edge edit/unlink (click row or buttons)
     var rels = [];
     for (var i = 0; i < _v2gEdges.length; i++) {
       var ed = _v2gEdges[i];
       var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
       if (!A || !B) continue;
+      if (A.id !== p.id && B.id !== p.id) continue;
       var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
-      var predLabel = _v2gEsc(ed.label.replace(/_/g, ' '));
-      // Neighbor labels only — never repeat THIS node's own text in the row.
+      var predLabel = _v2gEsc((ed.fullLabel || ed.label || '').replace(/_/g, ' '));
       var targetName = _v2gEsc(_v2gShortLabel(_v2gDisplayName(B) || ed.objectText));
       var sourceName = _v2gEsc(_v2gShortLabel(_v2gDisplayName(A) || ed.objectText));
+      var line;
       if (A.id === p.id) {
-        rels.push('<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + _v2gHexAlpha(pcolor, 0.15) + ';">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : ''));
-      } else if (B.id === p.id) {
-        rels.push('<span style="color:var(--text-muted);font-size:0.68rem;">←</span> ' + sourceName + ' ' + predLabel + ' <b>(this)</b>');
+        line = '<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + _v2gHexAlpha(pcolor, 0.15) + ';">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : '');
+      } else {
+        line = '<span style="color:var(--text-muted);font-size:0.68rem;">←</span> ' + sourceName + ' ' + predLabel + ' <b>(this)</b>';
       }
+      rels.push({ idx: i, line: line, beliefId: ed.beliefId || '' });
     }
     if (rels.length) {
-      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ')</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:3px;max-height:280px;overflow-y:auto;">' + rels.map(function(r) { return '<div style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:2px 0;">' + r + '</div>'; }).join('') + '</div>';
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ') · click to edit</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto;">';
+      for (var r = 0; r < rels.length; r++) {
+        var row = rels[r];
+        html += '<div class="v2g-belief-row" data-edge-idx="' + row.idx + '" style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:4px 4px;border-radius:4px;cursor:pointer;border:1px solid transparent;" onmouseover="this.style.background=\'rgba(251,191,36,0.08)\';this.style.borderColor=\'rgba(251,191,36,0.2)\'" onmouseout="this.style.background=\'transparent\';this.style.borderColor=\'transparent\'">';
+        html += '<div>' + row.line + '</div>';
+        html += '<div style="display:flex;gap:4px;margin-top:3px;">';
+        html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Edit</button>';
+        html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="unlink" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Unlink</button>';
+        html += '</div></div>';
+      }
+      html += '</div>';
     } else {
-      html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — this entity may be referenced indirectly.</div>';
+      html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — set as Src and Link→ another node to connect it.</div>';
     }
     el.innerHTML = html;
-    var renBtn = document.getElementById('v2g-rename-btn');
-    if (renBtn) {
-      renBtn.addEventListener('click', function(ev) {
+
+    el.querySelectorAll('.v2g-node-act').forEach(function(btn) {
+      btn.addEventListener('click', function(ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        _v2gRenameNode(p);
-      });
-    }
-    var listBtn = document.getElementById('v2g-show-list-btn');
-    if (listBtn) {
-      listBtn.addEventListener('click', function(ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p), scrollOps: true });
-        var ops = document.getElementById('mem-tab-entities') || document.querySelector('[id^="mem-tab-"]');
-        if (ops) {
-          try { ops.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+        var act = btn.getAttribute('data-act');
+        if (act === 'src') {
+          _v2gSetSlot('source', p.id);
+          _v2gToast('Source = ' + _v2gShortId(p.id), 'info');
+        } else if (act === 'tgt') {
+          _v2gSetSlot('target', p.id);
+          _v2gToast('Target = ' + _v2gShortId(p.id), 'info');
+        } else if (act === 'link-from') {
+          _v2gOps.sourceId = p.id;
+          _v2gOps.targetId = null;
+          _v2gOps.mode = 'link';
+          _v2gBroadcastSlots();
+          _v2gToast('Link from ' + _v2gShortId(p.id) + ' — click target on graph', 'info');
+        } else if (act === 'merge-from') {
+          _v2gOps.sourceId = p.id;
+          _v2gOps.targetId = null;
+          _v2gOps.mode = 'merge';
+          _v2gBroadcastSlots();
+          _v2gToast('Merge from ' + _v2gShortId(p.id) + ' — click survivor target', 'info');
+        } else if (act === 'rename') {
+          _v2gRenameNode(p);
+        } else if (act === 'list') {
+          _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p), scrollOps: true });
+          var ops = document.getElementById('mem-tab-entities') || document.querySelector('[id^="mem-tab-"]');
+          if (ops) {
+            try { ops.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+          }
+        } else if (act === 'delete') {
+          _v2gDeleteEntity(p.id);
         }
       });
-    }
+    });
+
+    el.querySelectorAll('.v2g-rel-act').forEach(function(btn) {
+      btn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var eidx = parseInt(btn.getAttribute('data-edge-idx'), 10);
+        var ed = _v2gEdges[eidx];
+        if (!ed) return;
+        var act = btn.getAttribute('data-act');
+        var AA = _v2gPts[ed.a], BB = _v2gPts[ed.b];
+        if (act === 'edit') {
+          _v2gEditBeliefById(ed.beliefId, {
+            subject: AA ? AA.id : '',
+            predicate: ed.fullLabel || ed.label,
+            object: ed.objectText || (BB ? BB.id : ''),
+            objectText: ed.objectText,
+          });
+        } else if (act === 'unlink') {
+          _v2gUnlinkBelief(ed.beliefId);
+        }
+      });
+    });
+
+    el.querySelectorAll('.v2g-belief-row').forEach(function(row) {
+      row.addEventListener('click', function(ev) {
+        if (ev.target && ev.target.closest && ev.target.closest('button')) return;
+        var eidx = parseInt(row.getAttribute('data-edge-idx'), 10);
+        if (!isNaN(eidx)) _v2gInspectEdge(eidx);
+      });
+    });
   }
 
   async function _v2gRenameNode(p) {
@@ -2420,6 +3065,69 @@
     document.getElementById('v2g-path-query')?.addEventListener('click', _v2gApplyPathFromQuery);
     document.getElementById('v2g-export-png')?.addEventListener('click', _v2gExportPng);
     document.getElementById('v2g-export-svg')?.addEventListener('click', _v2gExportSvg);
+
+    // Graph ops bar
+    var linkBtn = document.getElementById('v2g-ops-link');
+    if (linkBtn) {
+      linkBtn.addEventListener('click', function() {
+        if (_v2gOps.sourceId && _v2gOps.targetId) {
+          _v2gDoLink(_v2gOps.sourceId, _v2gOps.targetId, _v2gOpsPredicate());
+        } else if (_v2gOps.mode === 'link') {
+          _v2gOps.mode = null;
+          _v2gSyncOpsBar();
+          _v2gToast('Link mode cancelled', 'info');
+        } else {
+          _v2gEnterMode('link');
+        }
+      });
+    }
+    var mergeBtn = document.getElementById('v2g-ops-merge');
+    if (mergeBtn) {
+      mergeBtn.addEventListener('click', function() {
+        if (_v2gOps.sourceId && _v2gOps.targetId) {
+          _v2gDoMerge(_v2gOps.sourceId, _v2gOps.targetId);
+        } else if (_v2gOps.mode === 'merge') {
+          _v2gOps.mode = null;
+          _v2gSyncOpsBar();
+          _v2gToast('Merge mode cancelled', 'info');
+        } else {
+          _v2gEnterMode('merge');
+        }
+      });
+    }
+    var swapBtn = document.getElementById('v2g-ops-swap');
+    if (swapBtn) {
+      swapBtn.addEventListener('click', function() {
+        var s = _v2gOps.sourceId;
+        _v2gOps.sourceId = _v2gOps.targetId;
+        _v2gOps.targetId = s;
+        _v2gBroadcastSlots();
+      });
+    }
+    var clearBtn = document.getElementById('v2g-ops-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function() {
+        _v2gClearSlots();
+        _v2gToast('Slots cleared', 'info');
+      });
+    }
+    var predEl = document.getElementById('v2g-ops-predicate');
+    if (predEl) {
+      predEl.addEventListener('change', function() { _v2gBroadcastSlots(); });
+    }
+    // List → graph slot sync (Entities form Src/Tgt)
+    window.addEventListener('kazma:memory-ops-slots', function(ev) {
+      var d = (ev && ev.detail) || {};
+      // Avoid feedback loop: only apply if values differ from graph state
+      // and the event is marked from list (fromList: true)
+      if (!d.fromList) return;
+      if (d.sourceId !== undefined) _v2gOps.sourceId = d.sourceId || null;
+      if (d.targetId !== undefined) _v2gOps.targetId = d.targetId || null;
+      if (d.predicate && predEl) predEl.value = d.predicate;
+      _v2gSyncOpsBar();
+      _v2gRepaint();
+    });
+    _v2gSyncOpsBar();
     var epToggle = document.getElementById('v2g-episode-overlay');
     if (epToggle) {
       epToggle.addEventListener('change', async function() {
@@ -2447,6 +3155,9 @@
           _v2gView = { scale: 1, ox: 0, oy: 0 };
         } else if (ev.key === 'Escape') {
           _v2gSelectedId = null; _v2gPathIds = {};
+          _v2gOps.mode = null; _v2gOps.selectedEdgeIdx = -1;
+          _v2gHighlightSubj = null; _v2gHighlightObj = null;
+          _v2gSyncOpsBar();
         } else {
           handled = false;
         }
@@ -2513,11 +3224,7 @@
 
   // Expose for Memory admin list ↔ graph bridge
   window._v2gLoad = _v2gLoad;
-  window._v2gForceReload = async function() {
-    _v2gStructSig = '';
-    _v2gLabelSig = '';
-    await _v2gLoad();
-  };
+  window._v2gForceReload = _v2gReloadGraph;
   window._v2gRenameNode = _v2gRenameNode;
   window._v2gSelectEntity = _v2gSelectEntity;
   window._v2gSelectBelief = function(subj, obj, beliefId, opts) {
@@ -2533,6 +3240,26 @@
     }
     return ok;
   };
+  window._v2gSetOpsSlots = function(src, tgt, pred) {
+    if (src !== undefined) _v2gOps.sourceId = src || null;
+    if (tgt !== undefined) _v2gOps.targetId = tgt || null;
+    var predEl = document.getElementById('v2g-ops-predicate');
+    if (pred && predEl) predEl.value = pred;
+    _v2gSyncOpsBar();
+    _v2gRepaint();
+  };
+  window._v2gGetOpsSlots = function() {
+    return {
+      sourceId: _v2gOps.sourceId,
+      targetId: _v2gOps.targetId,
+      predicate: _v2gOpsPredicate(),
+      mode: _v2gOps.mode,
+    };
+  };
+  window._v2gDoLink = _v2gDoLink;
+  window._v2gDoMerge = _v2gDoMerge;
+  window._v2gUnlinkBelief = _v2gUnlinkBelief;
+  window._v2gEditBeliefById = _v2gEditBeliefById;
 
   try {
     _v2gRenderFilters();
