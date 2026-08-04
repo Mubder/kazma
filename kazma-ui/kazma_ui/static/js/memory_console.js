@@ -2051,27 +2051,78 @@
     }
   }
 
+  /** Build SPO seed from a canvas edge for unlink API. */
+  function _v2gEdgeSeed(ed) {
+    if (!ed) return {};
+    var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+    var pred = ed.fullLabel || ed.label || '';
+    return {
+      subject: (A && A.id) || ed.sourceId || '',
+      predicate: pred,
+      object: ed.objectText || (B && B.id) || ed.targetId || '',
+      objectText: ed.objectText || '',
+      sourceId: (A && A.id) || ed.sourceId || '',
+      targetId: (B && B.id) || ed.targetId || '',
+      label: pred,
+      fullLabel: pred,
+      beliefId: ed.beliefId || null,
+      edgeIdx: typeof ed._idx === 'number' ? ed._idx : -1,
+    };
+  }
+
+  /** All edges touching a node id (with neighbor + hub flags). */
+  function _v2gEdgesForNode(nodeId) {
+    var out = [];
+    if (!nodeId) return out;
+    for (var i = 0; i < _v2gEdges.length; i++) {
+      var ed = _v2gEdges[i];
+      var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+      if (!A || !B) continue;
+      if (A.id !== nodeId && B.id !== nodeId) continue;
+      var other = A.id === nodeId ? B : A;
+      var outbound = A.id === nodeId;
+      out.push({
+        idx: i,
+        ed: ed,
+        other: other,
+        outbound: outbound,
+        toHub: _v2gIsUser(other),
+        seed: _v2gEdgeSeed(ed),
+      });
+    }
+    return out;
+  }
+
   /**
    * Unlink (soft-invalidate) a belief edge.
    * @param {string|null} beliefId
    * @param {{subject?:string,predicate?:string,object?:string,objectText?:string}} [seed]
+   * @param {{skipConfirm?:boolean,skipReload?:boolean,silent?:boolean}} [opts]
    */
-  async function _v2gUnlinkBelief(beliefId, seed) {
+  async function _v2gUnlinkBelief(beliefId, seed, opts) {
     seed = seed || {};
+    opts = opts || {};
     var subject = String(seed.subject || seed.sourceId || '').trim();
     var predicate = String(seed.predicate || seed.label || seed.fullLabel || '').trim();
     var object = String(seed.object || seed.objectText || seed.targetId || '').trim();
+    if (!beliefId) beliefId = seed.beliefId || null;
     if (!beliefId && !(subject && predicate && object)) {
-      _v2gToast('Cannot unlink — missing belief id and edge triple', 'error');
+      if (!opts.silent) _v2gToast('Cannot cut — missing belief id and edge triple', 'error');
       return false;
     }
-    var ok = await _v2gConfirm({
-      title: 'Unlink belief',
-      message: 'Remove this edge from active memory? (soft-invalidate — recoverable via Hygiene archive)',
-      confirmText: 'Unlink',
-      danger: true,
-    });
-    if (!ok) return false;
+    if (!opts.skipConfirm) {
+      var ok = await _v2gConfirm({
+        title: 'Cut connection',
+        message:
+          'Remove this edge from active memory?\n' +
+          (subject && predicate
+            ? subject + ' —' + predicate + '→ ' + object
+            : 'Soft-invalidate (recoverable via Hygiene).'),
+        confirmText: 'Cut',
+        danger: true,
+      });
+      if (!ok) return false;
+    }
     try {
       // Prefer unified unlink (id + SPO fallback) so missing belief ids still work
       var data = await _v2gApiJson('/api/memory/v2/entities/unlink', {
@@ -2094,16 +2145,80 @@
         }
       }
       if (!data.ok) {
-        _v2gToast(data.error || 'Unlink failed', 'error');
-        console.warn('[v2g] unlink failed', data, { beliefId: beliefId, seed: seed });
+        if (!opts.silent) {
+          _v2gToast(data.error || 'Cut failed', 'error');
+          console.warn('[v2g] unlink failed', data, { beliefId: beliefId, seed: seed });
+        }
         return false;
       }
-      _v2gToast(data.already ? 'Already unlinked' : 'Unlinked', 'success');
-      _v2gOps.selectedEdgeIdx = -1;
-      var insp = document.getElementById('v2g-inspect');
-      if (insp) {
-        insp.innerHTML = '<span style="color:var(--text-muted);">Edge unlinked. Click a node or edge.</span>';
+      if (!opts.silent && !opts.skipReload) {
+        _v2gToast(data.already ? 'Already cut' : 'Connection cut', 'success');
       }
+      if (!opts.skipReload) {
+        _v2gOps.selectedEdgeIdx = -1;
+        var insp = document.getElementById('v2g-inspect');
+        if (insp) {
+          insp.innerHTML = '<span style="color:var(--text-muted);">Connection cut. Click a node or edge.</span>';
+        }
+        await _v2gReloadGraph();
+        try {
+          if (typeof loadV2Beliefs === 'function') {
+            loadV2Beliefs((document.getElementById('v2-belief-search') || {}).value || '');
+          }
+        } catch (e) { /* optional */ }
+        try {
+          window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
+            detail: { op: 'unlink', beliefId: data.belief_id || beliefId },
+          }));
+        } catch (e2) { /* ignore */ }
+      }
+      return true;
+    } catch (err) {
+      if (!opts.silent) {
+        _v2gToast('Cut failed: ' + (err && err.message ? err.message : err), 'error');
+        console.warn('[v2g] unlink exception', err);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Cut several edges after a single confirm (hub-shortcut cleanups).
+   * @param {Array<{beliefId?:string,seed?:object,ed?:object}>} items
+   */
+  async function _v2gCutEdges(items, opts) {
+    opts = opts || {};
+    items = (items || []).filter(Boolean);
+    if (!items.length) {
+      _v2gToast('No edges to cut', 'info');
+      return 0;
+    }
+    var msg =
+      opts.message ||
+      ('Cut ' + items.length + ' connection' + (items.length > 1 ? 's' : '') +
+        ' from active memory?');
+    var ok = await _v2gConfirm({
+      title: opts.title || 'Cut connections',
+      message: msg,
+      confirmText: opts.confirmText || ('Cut ' + items.length),
+      danger: true,
+    });
+    if (!ok) return 0;
+    var n = 0;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var seed = it.seed || (it.ed ? _v2gEdgeSeed(it.ed) : it);
+      var bid = it.beliefId || seed.beliefId || (it.ed && it.ed.beliefId) || null;
+      var done = await _v2gUnlinkBelief(bid, seed, {
+        skipConfirm: true,
+        skipReload: true,
+        silent: true,
+      });
+      if (done) n++;
+    }
+    if (n > 0) {
+      _v2gToast('Cut ' + n + ' connection' + (n > 1 ? 's' : ''), 'success');
+      _v2gOps.selectedEdgeIdx = -1;
       await _v2gReloadGraph();
       try {
         if (typeof loadV2Beliefs === 'function') {
@@ -2112,15 +2227,48 @@
       } catch (e) { /* optional */ }
       try {
         window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
-          detail: { op: 'unlink', beliefId: data.belief_id || beliefId },
+          detail: { op: 'unlink-batch', count: n },
         }));
       } catch (e2) { /* ignore */ }
-      return true;
-    } catch (err) {
-      _v2gToast('Unlink failed: ' + (err && err.message ? err.message : err), 'error');
-      console.warn('[v2g] unlink exception', err);
-      return false;
+    } else {
+      _v2gToast('No edges were cut', 'error');
     }
+    return n;
+  }
+
+  /** Cut every direct edge between this node and the memory hub (You/Mubder). */
+  async function _v2gCutHubLinks(nodeId) {
+    var edges = _v2gEdgesForNode(nodeId).filter(function(x) { return x.toHub; });
+    if (!edges.length) {
+      _v2gToast('No direct hub link on this node', 'info');
+      return 0;
+    }
+    var otherLinks = _v2gEdgesForNode(nodeId).filter(function(x) { return !x.toHub; });
+    var hint = otherLinks.length
+      ? '\n\nKeeps links to: ' +
+        otherLinks
+          .map(function(x) { return _v2gDisplayName(x.other); })
+          .slice(0, 6)
+          .join(', ') +
+        (otherLinks.length > 6 ? '…' : '') +
+        '\nUseful when the chain should be leaf → parent → hub (not leaf → hub).'
+      : '';
+    return _v2gCutEdges(
+      edges.map(function(x) {
+        return { beliefId: x.ed.beliefId, seed: x.seed, ed: x.ed };
+      }),
+      {
+        title: 'Cut hub shortcut',
+        message:
+          'Remove ' +
+          edges.length +
+          ' direct link' +
+          (edges.length > 1 ? 's' : '') +
+          ' to the hub (You/Mubder)?' +
+          hint,
+        confirmText: 'Cut hub link' + (edges.length > 1 ? 's' : ''),
+      }
+    );
   }
 
   async function _v2gEditBeliefById(beliefId, seed) {
@@ -2297,8 +2445,8 @@
     if (ed.superseded) html += ' · superseded';
     html += '</div>';
     html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">';
+    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" style="font-size:0.65rem;padding:2px 8px;" title="Cut this edge">Cut</button>';
     html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="edit" style="font-size:0.65rem;padding:2px 8px;">Edit</button>';
-    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" style="font-size:0.65rem;padding:2px 8px;">Unlink</button>';
     html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;">Src←A</button>';
     html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;">Tgt→B</button>';
     html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;">In list</button>';
@@ -2568,6 +2716,13 @@
     if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
     if (p.isVirtual) html += ' · fact node';
     html += '</div>';
+    // Collect connections once for cut-hub + list UI
+    var nodeEdges = _v2gEdgesForNode(p.id);
+    var hubEdges = nodeEdges.filter(function(x) { return x.toHub; });
+    var nonHubEdges = nodeEdges.filter(function(x) { return !x.toHub; });
+    // Hub shortcut: leaf linked to hub AND to another node (should be leaf→parent→hub)
+    var hubShortcut = !_v2gIsUser(p) && hubEdges.length > 0 && nonHubEdges.length > 0;
+
     // Node ops — same capabilities as the Entities list, on the graph
     if (!p.isEpisode) {
       html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
@@ -2575,6 +2730,12 @@
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge target">Tgt</button>';
       html += '<button type="button" class="btn btn-sm btn-primary v2g-node-act" data-act="link-from" style="font-size:0.65rem;padding:2px 8px;" title="Start link from this node — click target next">Link→</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="merge-from" style="font-size:0.65rem;padding:2px 8px;" title="Start merge from this node (will be retired)">Merge→</button>';
+      if (hubEdges.length && !_v2gIsUser(p)) {
+        html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="font-size:0.65rem;padding:2px 8px;" title="Remove direct link(s) to You/Mubder — keep parent chain">Cut hub</button>';
+      }
+      if (nodeEdges.length > 1 && !_v2gIsUser(p)) {
+        html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="cut-all" style="font-size:0.65rem;padding:2px 8px;" title="Cut every edge on this node">Cut all</button>';
+      }
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="rename" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;" title="Highlight in entities list">In list</button>';
       if (!_v2gIsUser(p) && !p.isVirtual) {
@@ -2582,41 +2743,55 @@
       }
       html += '</div>';
     }
+
+    if (hubShortcut) {
+      var parentNames = nonHubEdges
+        .map(function(x) { return _v2gDisplayName(x.other); })
+        .filter(Boolean);
+      var uniqParents = [];
+      parentNames.forEach(function(n) {
+        if (uniqParents.indexOf(n) < 0) uniqParents.push(n);
+      });
+      html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.1);font-size:0.7rem;line-height:1.4;color:#fcd34d;">';
+      html += '<strong style="color:#fbbf24;">Hub shortcut</strong> — also linked directly to the hub while linked to ';
+      html += '<b>' + _v2gEsc(uniqParents.slice(0, 4).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>.';
+      html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">Preferred chain: this → parent → hub (You/Mubder). Cut the hub edge to fix.</div>';
+      html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">Cut hub link' + (hubEdges.length > 1 ? 's' : '') + '</button>';
+      html += '</div>';
+    }
+
     // Contents — the full text of this belief/entity, shown exactly once.
     if (fullName !== title) {
       html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Contents</div>';
       html += '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;max-height:200px;overflow-y:auto;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
     }
-    // Belief rows with per-edge edit/unlink (click row or buttons)
-    var rels = [];
-    for (var i = 0; i < _v2gEdges.length; i++) {
-      var ed = _v2gEdges[i];
-      var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
-      if (!A || !B) continue;
-      if (A.id !== p.id && B.id !== p.id) continue;
-      var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
-      var predLabel = _v2gEsc((ed.fullLabel || ed.label || '').replace(/_/g, ' '));
-      var targetName = _v2gEsc(_v2gShortLabel(_v2gDisplayName(B) || ed.objectText));
-      var sourceName = _v2gEsc(_v2gShortLabel(_v2gDisplayName(A) || ed.objectText));
-      var line;
-      if (A.id === p.id) {
-        line = '<span style="color:' + pcolor + ';font-size:0.6rem;padding:1px 4px;border-radius:3px;background:' + _v2gHexAlpha(pcolor, 0.15) + ';">' + ed.type + '</span> ' + predLabel + ' <b style="word-break:break-word;">' + targetName + '</b>' + (ed.superseded ? ' <span style="color:var(--text-muted);font-size:0.58rem;">(superseded)</span>' : '');
-      } else {
-        line = '<span style="color:var(--text-muted);font-size:0.68rem;">←</span> ' + sourceName + ' ' + predLabel + ' <b>(this)</b>';
-      }
-      rels.push({ idx: i, line: line, beliefId: ed.beliefId || '' });
-    }
-    if (rels.length) {
-      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Beliefs (' + rels.length + ') · click to edit</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto;">';
-      for (var r = 0; r < rels.length; r++) {
-        var row = rels[r];
-        html += '<div class="v2g-belief-row" data-edge-idx="' + row.idx + '" style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:4px 4px;border-radius:4px;cursor:pointer;border:1px solid transparent;" onmouseover="this.style.background=\'rgba(251,191,36,0.08)\';this.style.borderColor=\'rgba(251,191,36,0.2)\'" onmouseout="this.style.background=\'transparent\';this.style.borderColor=\'transparent\'">';
-        html += '<div>' + row.line + '</div>';
-        html += '<div style="display:flex;gap:4px;margin-top:3px;">';
+    // Connections — one Cut per neighbor (easy topology cleanup)
+    if (nodeEdges.length) {
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Connections (' + nodeEdges.length + ') · Cut to detach</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:3px;max-height:260px;overflow-y:auto;">';
+      for (var r = 0; r < nodeEdges.length; r++) {
+        var row = nodeEdges[r];
+        var ed = row.ed;
+        var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
+        var predLabel = _v2gEsc((ed.fullLabel || ed.label || '').replace(/_/g, ' '));
+        var neighLabel = _v2gEsc(_v2gShortLabel(_v2gDisplayName(row.other), 48));
+        var dir = row.outbound ? '→' : '←';
+        var hubBadge = row.toHub
+          ? ' <span style="font-size:0.58rem;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.2);color:#fbbf24;">hub</span>'
+          : '';
+        var rowBg = row.toHub && hubShortcut ? 'rgba(245,158,11,0.1)' : 'transparent';
+        var rowBorder = row.toHub && hubShortcut ? 'rgba(245,158,11,0.35)' : 'transparent';
+        html += '<div class="v2g-belief-row" data-edge-idx="' + row.idx + '" style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:5px 6px;border-radius:6px;cursor:pointer;border:1px solid ' + rowBorder + ';background:' + rowBg + ';" onmouseover="this.style.background=\'rgba(251,191,36,0.1)\'" onmouseout="this.style.background=\'' + rowBg + '\'">';
+        html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">';
+        html += '<div style="min-width:0;flex:1;">';
+        html += '<span style="color:var(--text-muted);">' + dir + '</span> <b>' + neighLabel + '</b>' + hubBadge;
+        html += '<div style="font-size:0.62rem;color:var(--text-muted);margin-top:1px;"><span style="color:' + pcolor + ';">' + predLabel + '</span>' +
+          (ed.superseded ? ' · superseded' : '') + '</div>';
+        html += '</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">';
+        html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="cut" data-edge-idx="' + row.idx + '" style="font-size:0.62rem;padding:2px 8px;" title="Cut this edge only">Cut</button>';
         html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Edit</button>';
-        html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="unlink" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Unlink</button>';
-        html += '</div></div>';
+        html += '</div></div></div>';
       }
       html += '</div>';
     } else {
@@ -2647,6 +2822,32 @@
           _v2gOps.mode = 'merge';
           _v2gBroadcastSlots();
           _v2gToast('Merge from ' + _v2gShortId(p.id) + ' — click survivor target', 'info');
+        } else if (act === 'cut-hub') {
+          _v2gCutHubLinks(p.id).then(function() {
+            // Re-inspect node after graph reload if still present
+            var idx = _v2gFindNodeIndex(p.id);
+            if (idx >= 0) _v2gInspect(_v2gPts[idx]);
+          });
+        } else if (act === 'cut-all') {
+          var all = _v2gEdgesForNode(p.id);
+          _v2gCutEdges(
+            all.map(function(x) {
+              return { beliefId: x.ed.beliefId, seed: x.seed, ed: x.ed };
+            }),
+            {
+              title: 'Cut all connections',
+              message:
+                'Detach “' +
+                _v2gDisplayName(p) +
+                '” from all ' +
+                all.length +
+                ' neighbor(s)? Node shell stays.',
+              confirmText: 'Cut all',
+            }
+          ).then(function() {
+            var idx2 = _v2gFindNodeIndex(p.id);
+            if (idx2 >= 0) _v2gInspect(_v2gPts[idx2]);
+          });
         } else if (act === 'rename') {
           _v2gRenameNode(p);
         } else if (act === 'list') {
@@ -2669,20 +2870,16 @@
         var ed = _v2gEdges[eidx];
         if (!ed) return;
         var act = btn.getAttribute('data-act');
-        var AA = _v2gPts[ed.a], BB = _v2gPts[ed.b];
-        var seed = {
-          subject: AA ? AA.id : '',
-          predicate: ed.fullLabel || ed.label,
-          object: ed.objectText || (BB ? BB.id : ''),
-          objectText: ed.objectText,
-          sourceId: AA ? AA.id : '',
-          targetId: BB ? BB.id : '',
-          label: ed.fullLabel || ed.label,
-        };
+        var seed = _v2gEdgeSeed(ed);
         if (act === 'edit') {
           _v2gEditBeliefById(ed.beliefId, seed);
-        } else if (act === 'unlink') {
-          _v2gUnlinkBelief(ed.beliefId, seed);
+        } else if (act === 'cut' || act === 'unlink') {
+          _v2gUnlinkBelief(ed.beliefId, seed).then(function(ok) {
+            if (ok) {
+              var idx3 = _v2gFindNodeIndex(p.id);
+              if (idx3 >= 0) _v2gInspect(_v2gPts[idx3]);
+            }
+          });
         }
       });
     });
@@ -3375,6 +3572,8 @@
   window._v2gDoLink = _v2gDoLink;
   window._v2gDoMerge = _v2gDoMerge;
   window._v2gUnlinkBelief = _v2gUnlinkBelief;
+  window._v2gCutHubLinks = _v2gCutHubLinks;
+  window._v2gCutEdges = _v2gCutEdges;
   window._v2gEditBeliefById = _v2gEditBeliefById;
 
   try {
