@@ -29,6 +29,7 @@ __all__ = [
     "is_short_continuation",
     "is_memory_store_intent",
     "is_memory_graph_cleanup_intent",
+    "is_multi_part_memory_work",
     "is_bulk_document_message",
     "extract_store_focus_query",
     "latest_turn_priority_note",
@@ -103,30 +104,75 @@ def is_bulk_document_message(text: str, *, min_chars: int = 600) -> bool:
 
 
 # User wants graph/entity hygiene: merge, link, delete junk — NOT memory_store.
+# Keep patterns *exclusive* enough that multi-part tasks mentioning hierarchy
+# as a *storage shape* (Mubder → kazma → facts) are not forced into cleanup-only.
 _GRAPH_CLEANUP_RE = re.compile(
     r"(?is)"
     r"("
-    r"\b(?:entities?|beliefs?|graph|nodes?)\b.{0,80}\b(?:messy|missy|clutter|cleanup|clean\s*up|align|restructur|organiz|organise|hierarchy|linked|duplicate)\b"
+    r"\b(?:entities?|beliefs?|graph|nodes?)\b.{0,80}\b(?:messy|missy|clutter|cleanup|clean\s*up|align|restructur|organiz|organise|duplicate)\b"
     r"|"
-    r"\b(?:merge|link|align|restructur|cleanup|clean\s*up)\b.{0,80}\b(?:entities?|beliefs?|graph|nodes?|kazma|shipx)\b"
+    r"\b(?:merge|align|restructur|cleanup|clean\s*up)\b.{0,80}\b(?:entities?|beliefs?|graph|nodes?|kazma|shipx)\b"
     r"|"
-    r"\b(?:aligned|structure)\b.{0,40}\b(?:this way|like|as)\b"
+    r"\b(?:aligned|structure)\b.{0,40}\b(?:this way|like|as)\b.{0,40}\b(?:entities?|graph|nodes?)\b"
     r"|"
-    r"\b(?:mubder|user)\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b"
+    # Hierarchy alone is not cleanup — require hygiene verbs nearby
+    r"\b(?:mubder|user)\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b.{0,120}\b(?:merge|cleanup|clean\s*up|delete|junk|messy|duplicate)\b"
     r"|"
-    r"\bjunk\b.{0,40}\b(?:entities?|nodes?|true|false)\b"
+    r"\b(?:merge|cleanup|clean\s*up|delete|junk|messy|duplicate)\b.{0,120}\b(?:mubder|user)\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b"
+    r"|"
+    r"\bjunk\b.{0,40}\b(?:entities?|nodes?|true|false|graph)\b"
     r"|"
     r"\bdelete\b.{0,40}\b(?:entities?|entity|true|false)\b"
     r")"
 )
 
+# Multi-part research / ingest tasks that *also* mention graph shape or junk.
+# These must NOT be treated as exclusive MEMORY GRAPH CLEANUP (which disables
+# store intent and steers the model away from GitHub/read/compare work).
+_MULTI_PART_WORK_RE = re.compile(
+    r"(?is)"
+    r"("
+    r"\b(?:github|ghp_|pat\b|personal\s+access\s+token)\b"
+    r"|"
+    r"\b(?:read|fetch|clone|pull)\b.{0,40}\b(?:repo|repos|repositories|projects?)\b"
+    r"|"
+    r"\b(?:compare|analy[sz]e|analysis)\b.{0,60}\b(?:projects?|repos?|jobs?|email)\b"
+    r"|"
+    r"\b(?:job|career|resume|cv|hiring)\b"
+    r"|"
+    # Arabic cues used in multi-step PAT / read / save / compare asks
+    r"(?:تقرأ|تقرا|قارن|تقارن|تحفظ|تحفض|احفظ|جيت\s*هب|غيت\s*هب|ايميل|إيميل|توكن)"
+    r"|"
+    r"\b(?:save|store|remember)\b.{0,40}\b(?:memory|graph)\b"
+    r"|"
+    r"\b(?:read|fetch).{0,40}(?:github|repo)\b"
+    r")"
+)
 
-def is_memory_graph_cleanup_intent(text: str) -> bool:
-    """True when the user wants to restructure/clean the belief graph."""
+
+def is_multi_part_memory_work(text: str) -> bool:
+    """True for compound tasks (read GitHub + store + shape graph + analyze)."""
     t = (text or "").strip()
     if not t:
         return False
-    return bool(_GRAPH_CLEANUP_RE.search(t))
+    return bool(_MULTI_PART_WORK_RE.search(t))
+
+
+def is_memory_graph_cleanup_intent(text: str) -> bool:
+    """True when the user wants *primarily* to restructure/clean the belief graph.
+
+    Returns False for multi-part work that only *mentions* hierarchy as the
+    desired storage shape (e.g. read PAT repos then save under Mubder→kazma).
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if not _GRAPH_CLEANUP_RE.search(t):
+        return False
+    # Compound research/store tasks win — inject store + structure notes instead
+    if is_multi_part_memory_work(t):
+        return False
+    return True
 
 
 def is_memory_store_intent(text: str) -> bool:
@@ -139,10 +185,17 @@ def is_memory_store_intent(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
-    # Graph cleanup wins over store (users say "memory is messy" without meaning store)
+    # Pure graph cleanup wins over store (users say "memory is messy" without meaning store)
     if is_memory_graph_cleanup_intent(t):
         return False
     if _STORE_INTENT_RE.search(t):
+        return True
+    # Arabic / multi-part "save to memory" without English store phrasing
+    if re.search(
+        r"(?is)(?:تحفظ|تحفض|احفظ|بالذاكر|بالذاكرة|في الذاكر|في الذاكرة|save|store).{0,40}"
+        r"(?:memory|ذاكر|graph|جراف)",
+        t,
+    ):
         return True
     # Long document with an explicit project memory target in the first lines
     head = t[:400]
@@ -198,6 +251,7 @@ def latest_turn_priority_note(
     *,
     store_intent: bool = False,
     graph_cleanup: bool = False,
+    multi_part: bool = False,
     focus: str = "",
 ) -> str:
     """System note so the model does not pivot to an old recalled topic."""
@@ -208,7 +262,21 @@ def latest_turn_priority_note(
         "recalled topic (e.g. reminders, quota resets, prior tools) when the "
         "latest message is about something else."
     )
-    if graph_cleanup:
+    if multi_part and not graph_cleanup:
+        focus_bit = f" Focus: {focus}." if focus else ""
+        base += (
+            " MULTI-PART TASK — complete *every* step the user asked, in order; "
+            "do not stop after only graph cleanup or only listing entities."
+            f"{focus_bit} Typical steps may include: (1) use the stored GitHub "
+            "PAT/token to read the named repos/projects; (2) save *new* facts "
+            "into memory with clean hierarchy "
+            "Mubder(user) → has_project → {kazma|shipx|kca} → has_part → details "
+            "(no junk true/false shells); (3) compare projects and answer any "
+            "analysis/job/email question. Prefer memory_link_entities + "
+            "memory_store over endless list/merge loops. If a step fails "
+            "(e.g. missing token), report it and continue the rest."
+        )
+    elif graph_cleanup:
         base += (
             " MEMORY GRAPH CLEANUP TASK: The user wants the entity/belief graph "
             "restructured or cleaned — NOT a new free-text memory_store note. "
@@ -218,7 +286,8 @@ def latest_turn_priority_note(
             "kazma has_part …), memory_delete_entity (junk shells like true/false), "
             "memory_invalidate (bad beliefs). Target shape often: "
             "Mubder(user) → has_project → kazma → has_part → related entities. "
-            "Do NOT invent ShipX notes or re-save FILE_INDEX unless they asked."
+            "Do NOT invent ShipX notes or re-save FILE_INDEX unless they asked. "
+            "Finish in a bounded number of tool rounds — do not loop list→merge forever."
         )
         if focus:
             base += f" Focus keywords: {focus}."

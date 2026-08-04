@@ -613,13 +613,17 @@ async def supervisor_node(
             extract_store_focus_query,
             is_memory_graph_cleanup_intent,
             is_memory_store_intent,
+            is_multi_part_memory_work,
             is_short_continuation,
             latest_turn_priority_note,
         )
 
         _graph_cleanup = is_memory_graph_cleanup_intent(last_user_content)
-        _store_intent = (not _graph_cleanup) and is_memory_store_intent(
+        _multi_part = (not _graph_cleanup) and is_multi_part_memory_work(
             last_user_content
+        )
+        _store_intent = (not _graph_cleanup) and (
+            is_memory_store_intent(last_user_content) or _multi_part
         )
         if _graph_cleanup:
             # Focus list/merge tools on named projects in the message
@@ -630,15 +634,19 @@ async def supervisor_node(
                 "[Supervisor] Memory graph-cleanup intent — recall %r (no session_boost)",
                 (_recall_query or "")[:80],
             )
-        elif _store_intent:
+        elif _store_intent or _multi_part:
             _store_focus = extract_store_focus_query(last_user_content)
+            if _multi_part and not _store_focus:
+                # Prefer project names from the user line for multi-part PAT/read work
+                _store_focus = (last_user_content or "")[:200]
             if _store_focus:
                 _recall_query = _store_focus
             # Drop same-thread session boost so prior reminder turns do not
             # drown a document-store request in ZCode/Grok quota facts.
             _recall_session_id = None
             logger.info(
-                "[Supervisor] Memory-store intent — focused recall %r (no session_boost)",
+                "[Supervisor] Memory-%s intent — focused recall %r (no session_boost)",
+                "multi-part" if _multi_part else "store",
                 (_recall_query or "")[:80],
             )
         elif is_short_continuation(last_user_content):
@@ -670,7 +678,9 @@ async def supervisor_node(
                 _cont_note = (
                     "CONTINUITY: The user sent a short follow-up "
                     f"({last_user_content!r}). The open task is in the conversation "
-                    "history above (and prior user messages). Continue that work. "
+                    "history above (and prior user messages). Continue that work "
+                    "— all unfinished steps (GitHub read, memory store, analysis), "
+                    "not only graph cleanup if that was only part of the goal. "
                     "Do NOT claim you forgot the task or ask what to do unless the "
                     "history truly has no prior goal."
                 )
@@ -679,15 +689,17 @@ async def supervisor_node(
                     {"role": "system", "content": _cont_note},
                 )
 
-        # Pin latest-turn priority for store, graph cleanup, or long messages.
+        # Pin latest-turn priority for store, multi-part, graph cleanup, or long msgs.
         if last_user_content.strip() and (
             _store_intent
             or _graph_cleanup
+            or _multi_part
             or len(last_user_content.strip()) >= 80
         ):
             _prio = latest_turn_priority_note(
                 store_intent=_store_intent,
                 graph_cleanup=_graph_cleanup,
+                multi_part=_multi_part,
                 focus=_store_focus,
             )
             _ins = 1 if messages and messages[0].get("role") == "system" else 0

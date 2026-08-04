@@ -1129,14 +1129,28 @@ def create_graph_handler(
                     )
                 )
 
-            except Exception:
+            except Exception as inv_exc:
                 logger.exception("[agent-handler] Graph invocation failed for %s", sender)
                 # Use msg.context_metadata directly instead of re-accessing
                 # the store (which may be the source of the original exception)
                 ctx = msg.context_metadata
-                err_text, err_ctx = _prepare_tg_outbound(
-                    msg, "⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)", ctx
-                )
+                err_msg = "⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)"
+                # LangGraph tool-loop cap — tell the user to restate unfinished steps
+                _exc_name = type(inv_exc).__name__
+                _exc_s = str(inv_exc or "")
+                if (
+                    "GraphRecursionError" in _exc_name
+                    or "Recursion limit" in _exc_s
+                    or "recursion_limit" in _exc_s.lower()
+                ):
+                    err_msg = (
+                        "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
+                        "⚠️ Turn stopped: tool loop hit the recursion limit before finishing.\n"
+                        "Reply with the *remaining* steps only (e.g. read GitHub repos, "
+                        "compare projects, job/email advice) so we continue without "
+                        "re-doing graph cleanup."
+                    )
+                err_text, err_ctx = _prepare_tg_outbound(msg, err_msg, ctx)
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),

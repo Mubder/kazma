@@ -22,7 +22,10 @@ def test_is_short_continuation():
 
 
 def test_is_memory_store_intent_shipx_paste():
-    from kazma_core.agent.turn_input import is_memory_graph_cleanup_intent
+    from kazma_core.agent.turn_input import (
+        is_memory_graph_cleanup_intent,
+        is_multi_part_memory_work,
+    )
 
     msg = (
         "Now read this and add it to the ShipX memory:\n\n"
@@ -41,6 +44,42 @@ def test_is_memory_store_intent_shipx_paste():
     )
     assert is_memory_graph_cleanup_intent(cleanup) is True
     assert is_memory_store_intent(cleanup) is False
+
+
+def test_multi_part_pat_github_not_exclusive_graph_cleanup():
+    """Regression: PAT + read repos + store under Mubder→kazma + compare.
+
+    Must NOT classify as pure graph-cleanup (that forced 100-step merge loops
+    and GraphRecursionError on Telegram).
+    """
+    from kazma_core.agent.turn_input import (
+        is_memory_graph_cleanup_intent,
+        is_memory_store_intent,
+        is_multi_part_memory_work,
+        latest_turn_priority_note,
+    )
+
+    ar = (
+        "زين انا حافظ الـ PAT توكن للجيت هب ابيك تقرأ مشاريعي اللي هم "
+        "ShipX - KCA - Kazma وتحفظهم او تحفض الجزء الجديد بالذاكره ويكون "
+        "مرتبط Graph بهالطريقه: Mubder -> kazma -> new info. او بدال كاظمه "
+        "الـ KCA OR SHIPX بحيث الجراف ما يكون فيه Junk وبعدها تقارن المشاريع "
+        "وتقولي شنو اقدر استفيد من الايميل هذا؟"
+    )
+    assert is_multi_part_memory_work(ar) is True
+    assert is_memory_graph_cleanup_intent(ar) is False
+    assert is_memory_store_intent(ar) is True
+    note = latest_turn_priority_note(multi_part=True, store_intent=True, focus="ShipX KCA Kazma")
+    assert "MULTI-PART" in note
+    assert "CLEANUP TASK" not in note or "only graph cleanup" in note.lower()
+
+    # Pure hierarchy+messy still cleanup
+    pure = (
+        "Entities is still messy. Clean junk true/false and align "
+        "Mubder -> kazma. Delete duplicate entities."
+    )
+    assert is_memory_graph_cleanup_intent(pure) is True
+    assert is_multi_part_memory_work(pure) is False
 
 
 def test_contentful_ignores_empty_pending():
