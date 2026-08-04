@@ -115,57 +115,6 @@
         <a href="/settings?tab=memory" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
       </div>
 
-      <!-- Live recall probe + federated search (memory + KB, labeled) -->
-      <div style="margin-bottom:16px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
-          <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> {{ t('dashboard.memory_include_kb') }}
-          </label>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input id="v2-probe-input" type="text" placeholder="What color do I like? / How does the API auth work?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
-          <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">{{ t('dashboard.memory_probe_memory') }}</button>
-          <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">{{ t('dashboard.memory_probe_federated') }}</button>
-        </div>
-        <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
-        <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
-      </div>
-
-      <!-- Queue + entity merges + procedural + quality -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px;">
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Task queue</span>
-            <span style="display:inline-flex;gap:4px;">
-              <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="Delete failed dead-letter tasks">Clear failed</button>
-              <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
-            </span>
-          </div>
-          <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
-          <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">Run reconsolidation</button>
-        </div>
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Pending entity merges</span>
-            <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
-          </div>
-          <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
-        </div>
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Procedural skills</span>
-            <button id="v2-procedural-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
-          </div>
-          <div id="v2-procedural-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
-        </div>
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-          <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">Memory quality</div>
-          <div id="v2-quality-score" style="font-size:1.4rem;font-weight:700;font-family:var(--font-mono);">–</div>
-          <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
-        </div>
-      </div>
-
       <!-- ── Full-width V2 Belief Topology Graph ── -->
       <div id="v2-beliefs-graph-row" style="width:100%;margin-bottom:12px;">
         <div id="v2g-panel" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;width:100%;">
@@ -268,6 +217,61 @@
           <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">Unlink belief</button>
         </div>
       </div>
+
+      <!-- Search + ops cards — below known beliefs (graph stays primary above) -->
+      <div id="v2-search-ops" style="margin-top:12px;">
+        <!-- Live recall probe + federated search (memory + KB, labeled) -->
+        <div style="margin-bottom:12px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
+            <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+              <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> {{ t('dashboard.memory_include_kb') }}
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input id="v2-probe-input" type="text" placeholder="What color do I like? / How does the API auth work?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
+            <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">{{ t('dashboard.memory_probe_memory') }}</button>
+            <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">{{ t('dashboard.memory_probe_federated') }}</button>
+          </div>
+          <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
+          <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
+        </div>
+
+        <!-- Queue + entity merges + procedural + quality -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:8px;">
+          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
+              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Task queue</span>
+              <span style="display:inline-flex;gap:4px;">
+                <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="Delete failed dead-letter tasks">Clear failed</button>
+                <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+              </span>
+            </div>
+            <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+            <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">Run reconsolidation</button>
+          </div>
+          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Pending entity merges</span>
+              <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            </div>
+            <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+          </div>
+          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Procedural skills</span>
+              <button id="v2-procedural-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            </div>
+            <div id="v2-procedural-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+          </div>
+          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">Memory quality</div>
+            <div id="v2-quality-score" style="font-size:1.4rem;font-weight:700;font-family:var(--font-mono);">–</div>
+            <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
+          </div>
+        </div>
+      </div>
+
       <style>
         @media (max-width: 720px) {
           #v2g-canvas-wrap {
