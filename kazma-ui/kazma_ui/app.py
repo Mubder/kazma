@@ -450,6 +450,9 @@ class KazmaAppBuilder:
             _STATIC_DIR / "js" / "settings.js",
             _STATIC_DIR / "js" / "providers.js",
             _STATIC_DIR / "js" / "models.js",
+            # Memory page — graph ops / cut-hub UI lives here; omit = stale canvas JS
+            _STATIC_DIR / "js" / "memory.js",
+            _STATIC_DIR / "js" / "memory_console.js",
         )
 
         def _css_version() -> int:

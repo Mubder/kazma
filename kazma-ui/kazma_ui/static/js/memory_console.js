@@ -2,10 +2,15 @@
  * Memory console — health, V2 KPIs, belief list, topology graph, probe, maintenance.
  * Moved from dashboard.html so /memory is the single memory hub.
  * Expects window.__DASH_MEM_I18N for labels (optional).
+ *
+ * CUT_UI_BUILD: bump when shipping cut/hub-shortcut inspect changes so we can
+ * verify cache-bust (console: window.__KAZMA_MEMORY_CONSOLE_BUILD).
  */
 (function () {
   "use strict";
   var I18N = window.__DASH_MEM_I18N || window.I18N || {};
+  // Visible build stamp — if missing in browser console, JS is stale/cached
+  window.__KAZMA_MEMORY_CONSOLE_BUILD = 'cut-hub-2026-08-04b';
   // Memory & Governance Polling
   const memoryBadge = document.getElementById('memory-status-badge');
   const memoryDesc = document.getElementById('memory-status-desc');
@@ -1279,8 +1284,23 @@
   function _v2gIsUser(p) {
     if (!p) return false;
     if (p.isHub || p.isUser) return true;
-    var id = String(p.id || '').toLowerCase();
-    return id === 'user' || id === 'you';
+    var id = String(p.id || '').toLowerCase().trim();
+    if (id === 'user' || id === 'you' || id === 'me') return true;
+    // Display name can be "Mubder" while id stays user — already handled by isUser.
+    // Leak self shells: ent_* / person named You/User (not collapsed onto hub).
+    var name = String(p.name || p.fullLabel || p.label || '').toLowerCase().trim();
+    if (name === 'you' || name === 'user' || name === 'me') return true;
+    return false;
+  }
+
+  /** True if neighbor is the memory hub (You/Mubder) — used for Cut hub / shortcut banner. */
+  function _v2gIsHubNeighbor(other) {
+    if (!other) return false;
+    if (_v2gIsUser(other)) return true;
+    // Fallback: only one hub-colored center exists; match by id user even if flags missing
+    var id = String(other.id || '').toLowerCase();
+    if (id === 'user') return true;
+    return false;
   }
 
   // Display label for a node. Id stays canonical (user, shipx); name is the
@@ -1513,6 +1533,7 @@
           fullLabel: d.display,
           type: nd.type || 'entity',
           isUser: d.isUser,
+          isHub: !!nd.isHub || d.isUser,
           isHighStakes: !!nd.isHighStakes,
           r: (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
@@ -2086,7 +2107,7 @@
         ed: ed,
         other: other,
         outbound: outbound,
-        toHub: _v2gIsUser(other),
+        toHub: _v2gIsHubNeighbor(other),
         seed: _v2gEdgeSeed(ed),
       });
     }
@@ -2702,6 +2723,7 @@
   function _v2gInspect(p) {
     var el = document.getElementById('v2g-inspect');
     if (!el || !p) return;
+    try {
     _v2gRefreshPalette();
     _v2gOps.selectedEdgeIdx = -1;
     var color = _v2gNodeColor(p);
@@ -2723,18 +2745,19 @@
     // Hub shortcut: leaf linked to hub AND to another node (should be leaf→parent→hub)
     var hubShortcut = !_v2gIsUser(p) && hubEdges.length > 0 && nonHubEdges.length > 0;
 
-    // Node ops — same capabilities as the Entities list, on the graph
+    // Node ops — always show Cut when there is anything to cut
     if (!p.isEpisode) {
       html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge source">Src</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge target">Tgt</button>';
       html += '<button type="button" class="btn btn-sm btn-primary v2g-node-act" data-act="link-from" style="font-size:0.65rem;padding:2px 8px;" title="Start link from this node — click target next">Link→</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="merge-from" style="font-size:0.65rem;padding:2px 8px;" title="Start merge from this node (will be retired)">Merge→</button>';
+      // Always offer Cut hub when any hub edge exists (even without "shortcut" pattern)
       if (hubEdges.length && !_v2gIsUser(p)) {
         html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="font-size:0.65rem;padding:2px 8px;" title="Remove direct link(s) to You/Mubder — keep parent chain">Cut hub</button>';
       }
-      if (nodeEdges.length > 1 && !_v2gIsUser(p)) {
-        html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="cut-all" style="font-size:0.65rem;padding:2px 8px;" title="Cut every edge on this node">Cut all</button>';
+      if (nodeEdges.length >= 1 && !_v2gIsUser(p)) {
+        html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="cut-all" style="font-size:0.65rem;padding:2px 8px;" title="Cut every edge on this node">Cut all (' + nodeEdges.length + ')</button>';
       }
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="rename" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;" title="Highlight in entities list">In list</button>';
@@ -2744,6 +2767,7 @@
       html += '</div>';
     }
 
+    // Banner: true shortcut (hub + other), OR softer note when only hub-linked
     if (hubShortcut) {
       var parentNames = nonHubEdges
         .map(function(x) { return _v2gDisplayName(x.other); })
@@ -2752,12 +2776,14 @@
       parentNames.forEach(function(n) {
         if (uniqParents.indexOf(n) < 0) uniqParents.push(n);
       });
-      html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.1);font-size:0.7rem;line-height:1.4;color:#fcd34d;">';
-      html += '<strong style="color:#fbbf24;">Hub shortcut</strong> — also linked directly to the hub while linked to ';
+      html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.12);font-size:0.7rem;line-height:1.4;color:#fcd34d;">';
+      html += '<strong style="color:#fbbf24;">Hub shortcut</strong> — direct link to hub while also linked to ';
       html += '<b>' + _v2gEsc(uniqParents.slice(0, 4).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>.';
-      html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">Preferred chain: this → parent → hub (You/Mubder). Cut the hub edge to fix.</div>';
+      html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">Preferred: this → parent → hub (You/Mubder). Use <b>Cut hub</b> to drop the shortcut edge.</div>';
       html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">Cut hub link' + (hubEdges.length > 1 ? 's' : '') + '</button>';
       html += '</div>';
+    } else if (hubEdges.length && !_v2gIsUser(p) && nonHubEdges.length === 0) {
+      html += '<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);font-size:0.68rem;color:var(--text-muted);">Linked only to hub. Use <b style="color:#f87171;">Cut</b> on the connection row to detach.</div>';
     }
 
     // Contents — the full text of this belief/entity, shown exactly once.
@@ -2891,6 +2917,14 @@
         if (!isNaN(eidx)) _v2gInspectEdge(eidx);
       });
     });
+    } catch (inspectErr) {
+      console.error('[v2g] inspect failed', inspectErr);
+      try {
+        el.innerHTML = '<div style="color:#f87171;font-size:0.75rem;">Inspect error: ' +
+          _v2gEsc(String(inspectErr && inspectErr.message ? inspectErr.message : inspectErr)) +
+          '</div>';
+      } catch (e2) { /* ignore */ }
+    }
   }
 
   async function _v2gRenameNode(p) {
