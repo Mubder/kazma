@@ -10,7 +10,7 @@
   "use strict";
   var I18N = window.__DASH_MEM_I18N || window.I18N || {};
   // Visible build stamp — if missing in browser console, JS is stale/cached
-  window.__KAZMA_MEMORY_CONSOLE_BUILD = 'cut-hub-2026-08-04b';
+  window.__KAZMA_MEMORY_CONSOLE_BUILD = 'comp-collapse-2026-08-04';
   // Memory & Governance Polling
   const memoryBadge = document.getElementById('memory-status-badge');
   const memoryDesc = document.getElementById('memory-status-desc');
@@ -143,6 +143,140 @@
     set('graph-count-metric', (data.v2 ? entitiesTotal : 0) + ' entities');
   }
 
+  // Component-health group open state (survives poll re-renders). Default: collapsed.
+  var _memCompOpen = {};
+  var _memCompToggleAllWired = false;
+
+  function _memGroupKey(title) {
+    return String(title || 'group').toLowerCase().replace(/\s+/g, '_');
+  }
+
+  function _memGroupStatusLine(cards) {
+    var okN = 0, warnN = 0, errN = 0, offN = 0;
+    (cards || []).forEach(function(c) {
+      var st = c.status || (c.ok ? 'ok' : 'error');
+      if (st === 'ok') okN++;
+      else if (st === 'warn') warnN++;
+      else if (st === 'off') offN++;
+      else errN++;
+    });
+    var parts = [okN + '/' + cards.length + ' OK'];
+    if (warnN) parts.push(warnN + ' warn');
+    if (errN) parts.push(errN + ' err');
+    if (offN) parts.push(offN + ' off');
+    return parts.join(' · ');
+  }
+
+  function _memGroupDotColor(cards) {
+    var hasErr = false, hasWarn = false, hasOff = false;
+    (cards || []).forEach(function(c) {
+      var st = c.status || (c.ok ? 'ok' : 'error');
+      if (st === 'error') hasErr = true;
+      else if (st === 'warn') hasWarn = true;
+      else if (st === 'off') hasOff = true;
+    });
+    if (hasErr) return '#ff4757';
+    if (hasWarn) return '#f59e0b';
+    if (hasOff) return '#94a3b8';
+    return '#2ed573';
+  }
+
+  function _memCompSyncToggleAllLabel() {
+    var btn = document.getElementById('memory-components-toggle-all');
+    var grid = document.getElementById('memory-components-grid');
+    if (!btn || !grid) return;
+    var panels = grid.querySelectorAll('.mem-comp-group');
+    if (!panels.length) {
+      btn.textContent = 'Expand all';
+      return;
+    }
+    var openN = 0;
+    panels.forEach(function(p) {
+      if (p.getAttribute('data-open') === '1') openN++;
+    });
+    // If any open → offer collapse all; if all closed → expand all
+    btn.textContent = openN > 0 ? 'Collapse all' : 'Expand all';
+  }
+
+  function _memCompSetGroupOpen(groupEl, open) {
+    if (!groupEl) return;
+    var key = groupEl.getAttribute('data-group-key') || '';
+    var body = groupEl.querySelector('.mem-comp-group-body');
+    var chev = groupEl.querySelector('.mem-comp-chevron');
+    groupEl.setAttribute('data-open', open ? '1' : '0');
+    if (key) _memCompOpen[key] = !!open;
+    if (body) body.style.display = open ? 'grid' : 'none';
+    if (chev) chev.textContent = open ? '▾' : '▸';
+    groupEl.style.borderColor = open ? 'var(--border-subtle)' : 'var(--border-subtle)';
+    groupEl.style.background = open ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.02)';
+  }
+
+  function _memCompWireGroups(grid) {
+    if (!grid) return;
+    grid.querySelectorAll('.mem-comp-group-head').forEach(function(head) {
+      if (head._memWired) return;
+      head._memWired = true;
+      head.addEventListener('click', function() {
+        var group = head.closest('.mem-comp-group');
+        if (!group) return;
+        var open = group.getAttribute('data-open') === '1';
+        _memCompSetGroupOpen(group, !open);
+        _memCompSyncToggleAllLabel();
+      });
+      head.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          head.click();
+        }
+      });
+    });
+    var allBtn = document.getElementById('memory-components-toggle-all');
+    if (allBtn && !_memCompToggleAllWired) {
+      _memCompToggleAllWired = true;
+      allBtn.addEventListener('click', function() {
+        var panels = grid.querySelectorAll('.mem-comp-group');
+        if (!panels.length) return;
+        var anyOpen = false;
+        panels.forEach(function(p) {
+          if (p.getAttribute('data-open') === '1') anyOpen = true;
+        });
+        // Toggle: if any open → collapse all; else expand all
+        var next = !anyOpen;
+        panels.forEach(function(p) { _memCompSetGroupOpen(p, next); });
+        _memCompSyncToggleAllLabel();
+      });
+    }
+    _memCompSyncToggleAllLabel();
+  }
+
+  function _memGroupHtml(title, cards) {
+    if (!cards || !cards.length) return '';
+    var key = _memGroupKey(title);
+    // Default collapsed unless user previously expanded this group
+    var open = _memCompOpen[key] === true;
+    var statusLine = _memGroupStatusLine(cards);
+    var dot = _memGroupDotColor(cards);
+    return (
+      '<div class="mem-comp-group" data-group-key="' + key.replace(/"/g, '') + '" data-open="' + (open ? '1' : '0') + '" ' +
+        'style="border:1px solid var(--border-subtle);border-radius:10px;background:' + (open ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.02)') + ';overflow:hidden;">' +
+        '<button type="button" class="mem-comp-group-head" aria-expanded="' + (open ? 'true' : 'false') + '" ' +
+          'style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:none;background:transparent;cursor:pointer;text-align:left;color:inherit;font:inherit;">' +
+          '<span style="display:inline-flex;align-items:center;gap:8px;min-width:0;">' +
+            '<span class="mem-comp-chevron" style="font-size:0.75rem;color:var(--text-muted);width:0.9rem;flex-shrink:0;">' + (open ? '▾' : '▸') + '</span>' +
+            '<span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-secondary);">' + String(title).replace(/</g, '&lt;') + '</span>' +
+          '</span>' +
+          '<span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.68rem;font-family:var(--font-mono);color:var(--text-muted);">' +
+            '<span style="width:7px;height:7px;border-radius:50%;background:' + dot + ';box-shadow:0 0 6px ' + dot + ';"></span>' +
+            statusLine +
+          '</span>' +
+        '</button>' +
+        '<div class="mem-comp-group-body" style="display:' + (open ? 'grid' : 'none') + ';grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;padding:0 12px 12px;">' +
+          cards.map(_memCardHtml).join('') +
+        '</div>' +
+      '</div>'
+    );
+  }
+
   function renderMemoryComponents(data) {
     const grid = document.getElementById('memory-components-grid');
     const summaryEl = document.getElementById('memory-health-summary');
@@ -171,28 +305,14 @@
       var html = groups.map(function(g) {
         var cards = g.ids.map(function(id) { return byId[id]; }).filter(Boolean);
         cards.forEach(function(c) { used[c.id] = true; });
-        if (!cards.length) return '';
-        return (
-          '<div>' +
-            '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-bottom:6px;">' + g.title + '</div>' +
-            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">' +
-              cards.map(_memCardHtml).join('') +
-            '</div>' +
-          '</div>'
-        );
+        return _memGroupHtml(g.title, cards);
       }).join('');
       var rest = components.filter(function(c) { return !used[c.id]; });
       if (rest.length) {
-        html += (
-          '<div>' +
-            '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-bottom:6px;">Other</div>' +
-            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">' +
-              rest.map(_memCardHtml).join('') +
-            '</div>' +
-          '</div>'
-        );
+        html += _memGroupHtml('Other', rest);
       }
       grid.innerHTML = html;
+      _memCompWireGroups(grid);
     }
 
     const issues = Array.isArray(data.issues) ? data.issues : [];

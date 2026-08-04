@@ -43,13 +43,16 @@
       </div>
     </div>
 
-    <!-- Live component health board (grouped) -->
+    <!-- Live component health board (grouped, collapsed by default) -->
     <div style="margin-top:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
         <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">{{ t('dashboard.memory_components') }}</span>
-        <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
+        <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
+          <button type="button" id="memory-components-toggle-all" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="Expand or collapse all health groups">Expand all</button>
+        </span>
       </div>
-      <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:14px;">
+      <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:8px;">
         <div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">
           {{ t('dashboard.memory_probing') }}
         </div>
