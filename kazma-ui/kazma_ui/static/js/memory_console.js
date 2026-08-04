@@ -1590,6 +1590,7 @@
     ctx.fillRect(0, 0, W, H);
 
     // Edges — accent family, gradient along the link when connected to You
+    // Wider hit targets via thicker stroke when zoomed out (pick still uses _v2gHitEdge)
     ctx.font = _v2gFont(10);
     for (var e = 0; e < _v2gEdges.length; e++) {
       var ed = _v2gEdges[e]; var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
@@ -1781,7 +1782,8 @@
   }
 
   function _v2gHitEdge(sx, sy) {
-    var best = -1, bestD = 8; // px threshold (screen space)
+    // Generous hit area so edges are easy to pick for edit/unlink
+    var best = -1, bestD = 14;
     for (var e = 0; e < _v2gEdges.length; e++) {
       var ed = _v2gEdges[e];
       var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
@@ -1799,13 +1801,60 @@
   }
 
   async function _v2gConfirm(opts) {
-    if (window.kazmaConfirm) return window.kazmaConfirm(opts);
-    return window.confirm((opts && (opts.message || opts.title)) || 'Confirm?');
+    try {
+      if (typeof window.kazmaConfirm === 'function') {
+        return !!(await window.kazmaConfirm(opts || {}));
+      }
+      // window.confirm may be async (overridden by stores.js) — always await
+      var native = window._nativeConfirm || window.confirm;
+      var res = native.call(window, (opts && (opts.message || opts.title)) || 'Confirm?');
+      return !!(await Promise.resolve(res));
+    } catch (e) {
+      return false;
+    }
   }
 
   async function _v2gPrompt(opts) {
-    if (window.kazmaPrompt) return window.kazmaPrompt(opts);
-    return window.prompt((opts && opts.message) || '', (opts && opts.defaultValue) || '');
+    try {
+      if (typeof window.kazmaPrompt === 'function') {
+        return await window.kazmaPrompt(opts || {});
+      }
+      var native = window._nativePrompt || window.prompt;
+      var res = native.call(
+        window,
+        (opts && opts.message) || '',
+        (opts && opts.defaultValue) || ''
+      );
+      return await Promise.resolve(res);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function _v2gApiJson(url, opts) {
+    opts = opts || {};
+    var resp = await fetch(url, {
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        Accept: 'application/json',
+      },
+      method: opts.method || 'GET',
+      body: opts.body != null ? opts.body : undefined,
+    });
+    var data = {};
+    var text = '';
+    try {
+      text = await resp.text();
+      data = text ? JSON.parse(text) : {};
+    } catch (e) {
+      data = { ok: false, error: text ? text.slice(0, 160) : ('HTTP ' + resp.status) };
+    }
+    if (!resp.ok && data.ok == null) data.ok = false;
+    if (!resp.ok && !data.error) data.error = 'HTTP ' + resp.status;
+    data._status = resp.status;
+    return data;
   }
 
   function _v2gShortId(id) {
@@ -1926,28 +1975,33 @@
       return false;
     }
     try {
-      var resp = await fetch('/api/memory/v2/entities/link', {
+      var data = await _v2gApiJson('/api/memory/v2/entities/link', {
         method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         body: JSON.stringify({ subject: src, predicate: pred, object: tgt }),
       });
-      var data = await resp.json().catch(function() { return {}; });
-      if (!resp.ok || !data.ok) {
+      if (!data.ok) {
         _v2gToast(data.error || 'Link failed', 'error');
+        console.warn('[v2g] link failed', data);
         return false;
       }
-      _v2gToast('Linked ' + _v2gShortId(src) + ' —' + pred + '→ ' + _v2gShortId(tgt), 'success');
+      _v2gToast(
+        (data.already ? 'Already linked · ' : 'Linked ') +
+          _v2gShortId(data.subject || src) + ' —' + pred + '→ ' + _v2gShortId(data.object || tgt),
+        'success'
+      );
       _v2gOps.mode = null;
       _v2gSyncOpsBar();
       await _v2gReloadGraph();
-      _v2gSelectEntity(tgt, { notify: false });
+      _v2gSelectEntity(data.object || tgt, { notify: false });
       try {
-        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'link', source: src, target: tgt } }));
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
+          detail: { op: 'link', source: data.subject || src, target: data.object || tgt, beliefId: data.belief_id },
+        }));
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Link failed', 'error');
+      _v2gToast('Link failed: ' + (err && err.message ? err.message : err), 'error');
+      console.warn('[v2g] link exception', err);
       return false;
     }
   }
@@ -1997,40 +2051,74 @@
     }
   }
 
-  async function _v2gUnlinkBelief(beliefId) {
-    if (!beliefId) {
-      _v2gToast('No belief id on this edge', 'error');
+  /**
+   * Unlink (soft-invalidate) a belief edge.
+   * @param {string|null} beliefId
+   * @param {{subject?:string,predicate?:string,object?:string,objectText?:string}} [seed]
+   */
+  async function _v2gUnlinkBelief(beliefId, seed) {
+    seed = seed || {};
+    var subject = String(seed.subject || seed.sourceId || '').trim();
+    var predicate = String(seed.predicate || seed.label || seed.fullLabel || '').trim();
+    var object = String(seed.object || seed.objectText || seed.targetId || '').trim();
+    if (!beliefId && !(subject && predicate && object)) {
+      _v2gToast('Cannot unlink — missing belief id and edge triple', 'error');
       return false;
     }
     var ok = await _v2gConfirm({
       title: 'Unlink belief',
-      message: 'Soft-invalidate this belief edge? It leaves active memory (can archive later via Hygiene).',
+      message: 'Remove this edge from active memory? (soft-invalidate — recoverable via Hygiene archive)',
+      confirmText: 'Unlink',
+      danger: true,
     });
     if (!ok) return false;
     try {
-      var resp = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId) + '/invalidate', {
+      // Prefer unified unlink (id + SPO fallback) so missing belief ids still work
+      var data = await _v2gApiJson('/api/memory/v2/entities/unlink', {
         method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-        body: '{}',
+        body: JSON.stringify({
+          belief_id: beliefId || null,
+          subject: subject || null,
+          predicate: predicate || null,
+          object: object || null,
+          object_text: seed.objectText || object || null,
+        }),
       });
-      var data = await resp.json().catch(function() { return {}; });
-      if (!resp.ok || data.ok === false) {
+      if (!data.ok) {
+        // Legacy fallback: direct invalidate by id
+        if (beliefId) {
+          data = await _v2gApiJson(
+            '/api/memory/v2/beliefs/' + encodeURIComponent(beliefId) + '/invalidate',
+            { method: 'POST', body: '{}' }
+          );
+        }
+      }
+      if (!data.ok) {
         _v2gToast(data.error || 'Unlink failed', 'error');
+        console.warn('[v2g] unlink failed', data, { beliefId: beliefId, seed: seed });
         return false;
       }
-      _v2gToast('Unlinked (invalidated)', 'success');
+      _v2gToast(data.already ? 'Already unlinked' : 'Unlinked', 'success');
       _v2gOps.selectedEdgeIdx = -1;
+      var insp = document.getElementById('v2g-inspect');
+      if (insp) {
+        insp.innerHTML = '<span style="color:var(--text-muted);">Edge unlinked. Click a node or edge.</span>';
+      }
       await _v2gReloadGraph();
       try {
-        if (typeof loadV2Beliefs === 'function') loadV2Beliefs((document.getElementById('v2-belief-search') || {}).value || '');
+        if (typeof loadV2Beliefs === 'function') {
+          loadV2Beliefs((document.getElementById('v2-belief-search') || {}).value || '');
+        }
       } catch (e) { /* optional */ }
       try {
-        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'unlink', beliefId: beliefId } }));
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
+          detail: { op: 'unlink', beliefId: data.belief_id || beliefId },
+        }));
       } catch (e2) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Unlink failed', 'error');
+      _v2gToast('Unlink failed: ' + (err && err.message ? err.message : err), 'error');
+      console.warn('[v2g] unlink exception', err);
       return false;
     }
   }
@@ -2215,21 +2303,32 @@
     html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;">Tgt→B</button>';
     html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;">In list</button>';
     html += '</div>';
+    // Stash edge triple on the panel for delegated clicks (survives re-renders better)
+    el.setAttribute('data-edge-belief-id', ed.beliefId || '');
+    el.setAttribute('data-edge-subject', A.id || '');
+    el.setAttribute('data-edge-target', B.id || '');
+    el.setAttribute('data-edge-predicate', pred || '');
+    el.setAttribute('data-edge-object', ed.objectText || B.id || '');
     el.innerHTML = html;
     el.querySelectorAll('.v2g-edge-act').forEach(function(btn) {
       btn.addEventListener('click', function(ev) {
         ev.preventDefault();
         ev.stopPropagation();
         var act = btn.getAttribute('data-act');
+        var seed = {
+          subject: A.id,
+          predicate: pred,
+          object: ed.objectText || B.id,
+          objectText: ed.objectText,
+          sourceId: A.id,
+          targetId: B.id,
+          label: pred,
+          fullLabel: pred,
+        };
         if (act === 'edit') {
-          _v2gEditBeliefById(ed.beliefId, {
-            subject: A.id,
-            predicate: pred,
-            object: ed.objectText || B.id,
-            objectText: ed.objectText,
-          });
+          _v2gEditBeliefById(ed.beliefId, seed);
         } else if (act === 'unlink') {
-          _v2gUnlinkBelief(ed.beliefId);
+          _v2gUnlinkBelief(ed.beliefId, seed);
         } else if (act === 'src') {
           _v2gSetSlot('source', A.id);
         } else if (act === 'tgt') {
@@ -2571,15 +2670,19 @@
         if (!ed) return;
         var act = btn.getAttribute('data-act');
         var AA = _v2gPts[ed.a], BB = _v2gPts[ed.b];
+        var seed = {
+          subject: AA ? AA.id : '',
+          predicate: ed.fullLabel || ed.label,
+          object: ed.objectText || (BB ? BB.id : ''),
+          objectText: ed.objectText,
+          sourceId: AA ? AA.id : '',
+          targetId: BB ? BB.id : '',
+          label: ed.fullLabel || ed.label,
+        };
         if (act === 'edit') {
-          _v2gEditBeliefById(ed.beliefId, {
-            subject: AA ? AA.id : '',
-            predicate: ed.fullLabel || ed.label,
-            object: ed.objectText || (BB ? BB.id : ''),
-            objectText: ed.objectText,
-          });
+          _v2gEditBeliefById(ed.beliefId, seed);
         } else if (act === 'unlink') {
-          _v2gUnlinkBelief(ed.beliefId);
+          _v2gUnlinkBelief(ed.beliefId, seed);
         }
       });
     });
@@ -3064,10 +3167,23 @@
     document.getElementById('v2g-export-png')?.addEventListener('click', _v2gExportPng);
     document.getElementById('v2g-export-svg')?.addEventListener('click', _v2gExportSvg);
 
+    // Prevent canvas pointer capture from eating inspect-panel clicks
+    var inspectEl = document.getElementById('v2g-inspect');
+    if (inspectEl && !inspectEl._v2gPointerGuard) {
+      inspectEl._v2gPointerGuard = true;
+      ['pointerdown', 'mousedown', 'click', 'touchstart'].forEach(function(evName) {
+        inspectEl.addEventListener(evName, function(ev) {
+          ev.stopPropagation();
+        });
+      });
+    }
+
     // Graph ops bar
     var linkBtn = document.getElementById('v2g-ops-link');
-    if (linkBtn) {
-      linkBtn.addEventListener('click', function() {
+    if (linkBtn && !linkBtn._v2gWired) {
+      linkBtn._v2gWired = true;
+      linkBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
         if (_v2gOps.sourceId && _v2gOps.targetId) {
           _v2gDoLink(_v2gOps.sourceId, _v2gOps.targetId, _v2gOpsPredicate());
         } else if (_v2gOps.mode === 'link') {
@@ -3080,8 +3196,10 @@
       });
     }
     var mergeBtn = document.getElementById('v2g-ops-merge');
-    if (mergeBtn) {
-      mergeBtn.addEventListener('click', function() {
+    if (mergeBtn && !mergeBtn._v2gWired) {
+      mergeBtn._v2gWired = true;
+      mergeBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
         if (_v2gOps.sourceId && _v2gOps.targetId) {
           _v2gDoMerge(_v2gOps.sourceId, _v2gOps.targetId);
         } else if (_v2gOps.mode === 'merge') {

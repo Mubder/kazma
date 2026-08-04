@@ -91,6 +91,68 @@ async def test_link_entities(mem_db):
 
     out = await link_entities(Req())
     assert out["ok"] is True
+    assert out.get("belief_id") or (out.get("link") or {}).get("belief_id")
+
+
+@pytest.mark.asyncio
+async def test_unlink_by_triple(mem_db):
+    """Graph unlink must work via subject–predicate–object when id is known."""
+    from kazma_ui.memory_api import link_entities, unlink_entities
+
+    class LinkReq:
+        async def json(self):
+            return {
+                "subject": "lonely",
+                "predicate": "part_of",
+                "object": "shipx",
+            }
+
+    linked = await link_entities(LinkReq())
+    assert linked["ok"] is True
+    bid = linked.get("belief_id") or (linked.get("link") or {}).get("belief_id")
+    assert bid
+
+    class UnlinkReq:
+        async def json(self):
+            return {
+                "subject": "lonely",
+                "predicate": "part_of",
+                "object": "shipx",
+            }
+
+    out = await unlink_entities(UnlinkReq())
+    assert out["ok"] is True
+    assert out.get("belief_id") == bid
+
+    # Idempotent second unlink
+    out2 = await unlink_entities(UnlinkReq())
+    # No active match after first unlink → ok False OR already via id
+    assert out2.get("ok") is False or out2.get("already") is True
+
+
+@pytest.mark.asyncio
+async def test_unlink_by_belief_id(mem_db):
+    from kazma_ui.memory_api import link_entities, unlink_entities
+
+    class LinkReq:
+        async def json(self):
+            return {
+                "subject": "lonely",
+                "predicate": "near",
+                "object": "shipx",
+            }
+
+    linked = await link_entities(LinkReq())
+    bid = linked.get("belief_id") or (linked.get("link") or {}).get("belief_id")
+    assert bid
+
+    class UnlinkReq:
+        async def json(self):
+            return {"belief_id": bid}
+
+    out = await unlink_entities(UnlinkReq())
+    assert out["ok"] is True
+    assert out.get("via") == "id"
 
 
 @pytest.mark.asyncio

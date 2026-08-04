@@ -448,6 +448,32 @@ async def merge_entities(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+def _entity_slug(text: str) -> str:
+    """Match belief_mutation._slug so entity rows align with belief subjects."""
+    import re
+
+    raw = (text or "").strip().lower()
+    s = re.sub(r"[^a-z0-9_]+", "_", raw)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return (s[:80] or "entity")
+
+
+def _ensure_entity_row(conn: sqlite3.Connection, eid: str, *, name: str | None = None) -> None:
+    eid = (eid or "").strip()
+    if not eid or len(eid) > 200:
+        return
+    row = conn.execute("SELECT id FROM entities WHERE id=?", (eid,)).fetchone()
+    if row:
+        return
+    display = (name or eid).replace("_", " ").strip() or eid
+    conn.execute(
+        """INSERT OR IGNORE INTO entities
+           (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
+           VALUES (?, 'default', 'concept', ?, '[]', 0, '{}')""",
+        (eid, display[:120]),
+    )
+
+
 @router.post("/api/memory/v2/entities/link")
 async def link_entities(request: Request) -> dict[str, Any]:
     """Create a belief edge subject --predicate--> object (links two nodes)."""
@@ -460,6 +486,8 @@ async def link_entities(request: Request) -> dict[str, Any]:
     obj = str((body or {}).get("object") or "").strip()
     if not subject or not obj:
         return {"ok": False, "error": "subject and object required"}
+    if subject == obj:
+        return {"ok": False, "error": "source and target must differ"}
     if not predicate:
         predicate = "related_to"
     try:
@@ -467,27 +495,29 @@ async def link_entities(request: Request) -> dict[str, Any]:
         from kazma_core.memory.schema_v2 import ensure_ops_schema
         from kazma_core.paths import memory_ops_db
 
+        # mutate_belief slugs the *subject*; keep object as the graph node id
+        # (entity id or virtual fact text) so the canvas endpoints stay stable.
+        sub_id = _entity_slug(subject)
+        obj_id = obj.strip()
+
         primary = _conn()
         ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
         ensure_ops_schema(ops)
-        # Ensure both entities exist
-        for eid, etype in ((subject, "concept"), (obj, "concept")):
-            row = primary.execute(
-                "SELECT id FROM entities WHERE id=?", (eid,)
-            ).fetchone()
-            if not row:
-                primary.execute(
-                    """INSERT OR IGNORE INTO entities
-                       (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
-                       VALUES (?, 'default', ?, ?, '[]', 0, '{}')""",
-                    (eid, etype, eid.replace("_", " ")),
-                )
+        _ensure_entity_row(primary, sub_id, name=subject)
+        # Ensure target shell when it looks like an entity id (graph node).
+        # Long free-text objects still work as belief object without a row.
+        if len(obj_id) <= 120:
+            _ensure_entity_row(primary, obj_id, name=obj_id)
+            slug_obj = _entity_slug(obj_id)
+            if slug_obj != obj_id and len(slug_obj) <= 80:
+                _ensure_entity_row(primary, slug_obj, name=obj_id)
         primary.commit()
+
         result = mutate_belief(
             primary,
-            subject,
+            sub_id,
             predicate,
-            obj,
+            obj_id,
             ops_conn=ops,
             predicate_type="set",
             confidence=0.9,
@@ -497,9 +527,131 @@ async def link_entities(request: Request) -> dict[str, Any]:
         )
         ops.close()
         primary.close()
-        return {"ok": True, "link": result, "subject": subject, "predicate": predicate, "object": obj}
+
+        if not isinstance(result, dict):
+            return {"ok": False, "error": "link mutation returned nothing"}
+        if result.get("rejected"):
+            return {
+                "ok": False,
+                "error": f"link rejected: {result.get('rejected')}",
+                "link": result,
+            }
+        # noop with belief_id = already linked (treat as success so UI refreshes)
+        bid = str(result.get("belief_id") or "")
+        if result.get("action") == "noop" and not bid:
+            return {"ok": False, "error": "link was a no-op (blocked or empty)", "link": result}
+        return {
+            "ok": True,
+            "link": result,
+            "subject": sub_id,
+            "predicate": predicate,
+            "object": obj_id,
+            "belief_id": bid or None,
+            "already": result.get("action") == "noop",
+        }
     except Exception as exc:
         logger.exception("[memory_api] link failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+@router.post("/api/memory/v2/entities/unlink")
+async def unlink_entities(request: Request) -> dict[str, Any]:
+    """Invalidate a belief edge by id and/or subject–predicate–object triple.
+
+    Graph canvas edges always have endpoints; belief_id can be missing on
+    older Neo4j exports — triple match is the fallback.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON"}
+    body = body or {}
+    belief_id = str(body.get("belief_id") or body.get("id") or "").strip()
+    subject = str(body.get("subject") or "").strip()
+    predicate = str(body.get("predicate") or body.get("label") or "").strip()
+    obj = str(body.get("object") or body.get("object_text") or "").strip()
+
+    from kazma_core.memory.hygiene import invalidate_belief
+
+    id_err: str | None = None
+    # 1) Direct id path
+    if belief_id:
+        r = invalidate_belief(belief_id, remove_graph=True)
+        if r.get("ok") or r.get("already"):
+            return {
+                "ok": True,
+                "belief_id": belief_id,
+                "via": "id",
+                "updated": r.get("updated", 0),
+                "graph_removed": r.get("graph_removed"),
+                "already": bool(r.get("already")),
+            }
+        id_err = str(r.get("error") or "invalidate failed")
+        # Fall through to triple if id miss (stale canvas) and triple provided
+
+    # 2) Triple path
+    if not (subject and predicate and obj):
+        return {
+            "ok": False,
+            "error": id_err or "belief_id or subject+predicate+object required",
+            "belief_id": belief_id or None,
+        }
+
+    sub_id = _entity_slug(subject)
+    try:
+        conn = _conn()
+        row = conn.execute(
+            """
+            SELECT id FROM beliefs
+            WHERE valid_until IS NULL AND invalidated_at IS NULL
+              AND predicate = ?
+              AND object = ?
+              AND (subject = ? OR subject = ?)
+            ORDER BY valid_from DESC
+            LIMIT 1
+            """,
+            (predicate, obj, subject, sub_id),
+        ).fetchone()
+        # Also try slugified object for entity-like targets
+        if not row:
+            obj_slug = _entity_slug(obj)
+            row = conn.execute(
+                """
+                SELECT id FROM beliefs
+                WHERE valid_until IS NULL AND invalidated_at IS NULL
+                  AND predicate = ?
+                  AND (object = ? OR object = ?)
+                  AND (subject = ? OR subject = ?)
+                ORDER BY valid_from DESC
+                LIMIT 1
+                """,
+                (predicate, obj, obj_slug, subject, sub_id),
+            ).fetchone()
+        conn.close()
+        if not row:
+            return {
+                "ok": False,
+                "error": "no active belief matches this edge",
+                "subject": subject,
+                "predicate": predicate,
+                "object": obj,
+            }
+        bid = str(row["id"] if isinstance(row, sqlite3.Row) else row[0])
+        r = invalidate_belief(bid, remove_graph=True)
+        if not r.get("ok"):
+            # Idempotent: already soft-deleted counts as success
+            if r.get("error") == "not found":
+                return {"ok": True, "belief_id": bid, "via": "triple", "already": True}
+            return {"ok": False, "error": r.get("error") or "invalidate failed", "belief_id": bid}
+        return {
+            "ok": True,
+            "belief_id": bid,
+            "via": "triple",
+            "updated": r.get("updated"),
+            "graph_removed": r.get("graph_removed"),
+        }
+    except Exception as exc:
+        logger.exception("[memory_api] unlink failed")
         return {"ok": False, "error": str(exc)[:300]}
 
 

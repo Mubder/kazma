@@ -177,7 +177,7 @@ def invalidate_belief(
 
         row = conn.execute(
             """
-            SELECT id, subject, predicate, object, tenant_id
+            SELECT id, subject, predicate, object, tenant_id, valid_until, invalidated_at
             FROM beliefs WHERE id=? LIMIT 1
             """,
             (bid,),
@@ -186,6 +186,23 @@ def invalidate_belief(
             if own_conn:
                 conn.close()
             return {"ok": False, "updated": 0, "error": "not found"}
+
+        def _col(name: str, idx: int) -> Any:
+            if isinstance(row, sqlite3.Row):
+                return row[name]
+            return row[idx]
+
+        # Already soft-deleted → idempotent success (UI unlink must not fail)
+        if _col("valid_until", 5) is not None or _col("invalidated_at", 6) is not None:
+            if own_conn:
+                conn.close()
+            return {
+                "ok": True,
+                "updated": 0,
+                "already": True,
+                "graph_removed": False,
+                "belief_id": bid,
+            }
 
         cur = beliefs_write(
             conn,
@@ -203,10 +220,10 @@ def invalidate_belief(
             try:
                 from kazma_core.memory.graph_backend import delete_belief_edge
 
-                sub = row["subject"] if isinstance(row, sqlite3.Row) else row[1]
-                pred = row["predicate"] if isinstance(row, sqlite3.Row) else row[2]
-                obj = row["object"] if isinstance(row, sqlite3.Row) else row[3]
-                tid = row["tenant_id"] if isinstance(row, sqlite3.Row) else row[4]
+                sub = _col("subject", 1)
+                pred = _col("predicate", 2)
+                obj = _col("object", 3)
+                tid = _col("tenant_id", 4)
                 graph_removed = bool(
                     delete_belief_edge(
                         belief_id=bid,
