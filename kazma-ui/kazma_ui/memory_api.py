@@ -143,35 +143,38 @@ async def memory_admin_summary() -> dict[str, Any]:
 async def list_entities(
     q: str = "",
     limit: int = 100,
+    offset: int = 0,
     empty_only: bool = False,
     isolated_only: bool = False,
 ) -> dict[str, Any]:
     try:
         conn = _conn()
         lim = max(1, min(int(limit or 100), 300))
-        sql = f"""
-            SELECT e.id, e.type, e.name, e.is_high_stakes, e.aliases_json,
-                   e.metadata_json,
-                   {_belief_count_sql()} AS belief_count,
-                   {_entity_degree_sql()} AS linked_others
-            FROM entities e
-            WHERE 1=1
-        """
+        off = max(0, int(offset or 0))
+        where = " FROM entities e WHERE 1=1"
         params: list[Any] = []
         if q and q.strip():
             ql = f"%{q.strip().lower()}%"
-            sql += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
+            where += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
             params.extend([ql, ql, ql])
         if empty_only:
-            sql += f" AND {_belief_count_sql()} = 0"
+            where += f" AND {_belief_count_sql()} = 0"
         if isolated_only:
-            sql += (
+            where += (
                 f" AND {_belief_count_sql()} > 0 AND {_entity_degree_sql()} = 0"
                 " AND LOWER(e.id) NOT IN ('user','assistant')"
             )
-        sql += " ORDER BY belief_count DESC, linked_others ASC, e.name ASC LIMIT ?"
-        params.append(lim)
-        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        # Total count for the pager (same WHERE, no ORDER/LIMIT). Uses the
+        # tenant_id-leading indexes; cheap relative to the row query.
+        total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
+
+        sql = (
+            f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.aliases_json,"
+            f" e.metadata_json, {_belief_count_sql()} AS belief_count,"
+            f" {_entity_degree_sql()} AS linked_others{where}"
+            " ORDER BY belief_count DESC, linked_others ASC, e.name ASC LIMIT ? OFFSET ?"
+        )
+        rows = [dict(r) for r in conn.execute(sql, [*params, lim, off]).fetchall()]
         from kazma_core.memory.self_hub import (
             graph_focus_id,
             is_self_entity,
@@ -202,7 +205,14 @@ async def list_entities(
                 entity_type=str(r.get("type") or ""),
             )
         conn.close()
-        return {"ok": True, "count": len(rows), "entities": rows}
+        return {
+            "ok": True,
+            "count": len(rows),
+            "total": int(total),
+            "offset": off,
+            "limit": lim,
+            "entities": rows,
+        }
     except Exception as exc:
         logger.exception("[memory_api] list entities failed")
         return {"ok": False, "entities": [], "error": str(exc)[:300]}

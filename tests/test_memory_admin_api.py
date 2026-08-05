@@ -313,3 +313,82 @@ async def test_rename_person_user_shell_syncs_hub(mem_db):
     assert ent["is_self"] is True
     assert ent["graph_id"] == "user"
     assert ent["name"] == "Mubder"
+
+
+# ── Phase 1.1: pagination + total counts ─────────────────────────────────
+
+
+@pytest.fixture
+def mem_db_many(tmp_path, monkeypatch):
+    """Seed 25 entities so pagination windows are non-trivial."""
+    state = tmp_path / "memory_state.db"
+    ops = tmp_path / "memory_ops.db"
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core import paths as paths_mod
+
+    monkeypatch.setattr(paths_mod, "primary_memory_db", lambda: str(state))
+    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda: str(ops))
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+
+    c = sqlite3.connect(state)
+    ensure_primary_schema(c)
+    for i in range(25):
+        c.execute(
+            "INSERT INTO entities (id, tenant_id, type, name) VALUES (?,?,?,?)",
+            (f"ent_{i:02d}", "default", "concept", f"Entity {i}"),
+        )
+    # Give a couple of entities active beliefs so belief_count ordering varies.
+    for i, bid in enumerate(["b_a", "b_b", "b_c"]):
+        c.execute(
+            """INSERT INTO beliefs
+               (id, tenant_id, subject, predicate, predicate_type, object,
+                confidence, structural_importance, source_trust_weight,
+                extraction_method, valid_from, ingested_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (bid, "default", f"ent_{i:02d}", "related_to", "set", "ent_24",
+             1.0, 1, 1.0, "user_explicit", 1.0, 1.0),
+        )
+    c.commit()
+    c.close()
+    o = sqlite3.connect(ops)
+    ensure_ops_schema(o)
+    o.close()
+    return state
+
+
+@pytest.mark.asyncio
+async def test_list_entities_pagination_total(mem_db_many):
+    """list_entities returns total + offset + limit and respects the window."""
+    from kazma_ui.memory_api import list_entities
+
+    page1 = await list_entities(limit=10, offset=0)
+    assert page1["ok"]
+    assert page1["count"] == 10
+    assert page1["total"] >= 25, f"expected total>=25, got {page1['total']}"
+    assert page1["offset"] == 0
+    assert page1["limit"] == 10
+
+    page2 = await list_entities(limit=10, offset=10)
+    assert page2["ok"]
+    assert page2["count"] == 10
+    assert page2["offset"] == 10
+    # No overlap between windows.
+    ids1 = {e["id"] for e in page1["entities"]}
+    ids2 = {e["id"] for e in page2["entities"]}
+    assert not (ids1 & ids2), "pages overlap"
+
+    # Final partial window.
+    page3 = await list_entities(limit=10, offset=20)
+    assert page3["count"] >= 5
+    assert page3["total"] == page1["total"]  # stable across pages
+
+
+@pytest.mark.asyncio
+async def test_list_entities_offset_clamped(mem_db_many):
+    """Negative offset is clamped to 0 (doesn't error or duplicate)."""
+    from kazma_ui.memory_api import list_entities
+
+    out = await list_entities(limit=5, offset=-3)
+    assert out["ok"]
+    assert out["offset"] == 0
+    assert out["count"] == 5

@@ -80,6 +80,11 @@ function memoryPage() {
     mergeTarget: "",
     linkPredicate: "related_to",
     merges: [],
+    // Pagination state per collection. pageSize is the per-fetch window;
+    // offset/total are (re)set by each load. loadMore appends the next window.
+    entitiesPage: { offset: 0, total: 0, pageSize: 150 },
+    beliefsPage: { offset: 0, total: 0, pageSize: 100 },
+    mergesPage: { offset: 0, total: 0, pageSize: 50 },
     hygienePreview: {},
     hygiene: {
       purge_empty_entities: true,
@@ -116,6 +121,22 @@ function memoryPage() {
         { k: "Isolated", v: s.entities_isolated ?? "—" },
         { k: "Episodes", v: s.episodes ?? "—" },
       ];
+    },
+
+    /** "Showing 1–150 of 3,412" for a collection's pager. */
+    rangeText(page, len) {
+      const total = (page && page.total) || 0;
+      if (!total) return "";
+      const start = ((page && page.offset) || 0) + 1;
+      const end = Math.min(start + len - 1, total);
+      return `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}`;
+    },
+
+    /** Can we load another window? (offset + fetched < total) */
+    hasMore(page, len) {
+      if (!page) return false;
+      const fetched = (page.offset || 0) + len;
+      return fetched < (page.total || 0);
     },
 
     /** Push list source/target/predicate into the graph ops bar. */
@@ -260,28 +281,59 @@ function memoryPage() {
       if (d.ok) this.summary = d;
     },
 
-    async loadBeliefs() {
+    async loadBeliefs(append) {
       const q = encodeURIComponent(this.beliefQ || "");
-      const d = await api("/api/memory/v2/beliefs?q=" + q + "&limit=100");
-      this.beliefs = d.beliefs || [];
-      this.selectedBeliefs = [];
+      const off = append ? this.beliefsPage.offset + this.beliefsPage.pageSize : 0;
+      const d = await api(
+        "/api/memory/v2/beliefs?q=" + q + "&limit=" + this.beliefsPage.pageSize + "&offset=" + off
+      );
+      const rows = d.beliefs || [];
+      this.beliefsPage = {
+        offset: Number(d.offset || off),
+        total: Number(d.total || rows.length),
+        pageSize: Number(d.limit || this.beliefsPage.pageSize),
+      };
+      this.beliefs = append ? this.beliefs.concat(rows) : rows;
+      if (!append) this.selectedBeliefs = [];
     },
 
-    async loadEntities() {
+    async loadEntities(append) {
+      const off = append ? this.entitiesPage.offset + this.entitiesPage.pageSize : 0;
       const params = new URLSearchParams({
         q: this.entityQ || "",
-        limit: "150",
+        limit: String(this.entitiesPage.pageSize),
+        offset: String(off),
         empty_only: this.emptyOnly ? "true" : "false",
         isolated_only: this.isolatedOnly ? "true" : "false",
       });
       const d = await api("/api/memory/v2/entities?" + params.toString());
-      this.entities = d.entities || [];
+      const rows = d.entities || [];
+      this.entitiesPage = {
+        offset: Number(d.offset || off),
+        total: Number(d.total || rows.length),
+        pageSize: Number(d.limit || this.entitiesPage.pageSize),
+      };
+      this.entities = append ? this.entities.concat(rows) : rows;
     },
 
-    async loadMerges() {
-      const d = await api("/api/memory/v2/entity-merges?limit=50");
-      this.merges = d.merges || [];
+    async loadMerges(append) {
+      const off = append ? this.mergesPage.offset + this.mergesPage.pageSize : 0;
+      const d = await api(
+        "/api/memory/v2/entity-merges?limit=" + this.mergesPage.pageSize + "&offset=" + off
+      );
+      const rows = d.merges || [];
+      this.mergesPage = {
+        offset: Number(d.offset || off),
+        total: Number(d.total || rows.length),
+        pageSize: Number(d.limit || this.mergesPage.pageSize),
+      };
+      this.merges = append ? this.merges.concat(rows) : rows;
     },
+
+    // One-line load-more wrappers for the pager buttons.
+    loadMoreEntities() { return this.loadEntities(true); },
+    loadMoreBeliefs() { return this.loadBeliefs(true); },
+    loadMoreMerges() { return this.loadMerges(true); },
 
     async loadHygiene() {
       const d = await api("/api/memory/v2/hygiene/preview");

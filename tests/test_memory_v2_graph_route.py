@@ -187,3 +187,50 @@ def test_entity_object_id_collision_emits_one_node(
     # Global uniqueness of node ids (canvas map invariant)
     ids = [n["id"] for n in payload["nodes"]]
     assert len(ids) == len(set(ids)), f"duplicate node ids in payload: {ids}"
+
+
+# ── Phase 1.1: graph truncation stats + beliefs offset ───────────────────
+
+
+def test_graph_reports_truncation_when_capped(seeded_client: TestClient) -> None:
+    """When the node count exceeds `limit`, stats must flag truncation and
+    report the full pre-slice total so the UI can show "showing N of M"."""
+    # seeded_client has alice + Paris + French + git (~4 nodes). Cap at 1.
+    resp = seeded_client.get("/api/memory/v2/graph", params={"limit": 1})
+    assert resp.status_code == 200
+    payload = resp.json()
+    stats = payload["stats"]
+
+    assert stats["truncated"] is True
+    assert stats["total_nodes"] > stats["nodes"], (
+        f"total_nodes ({stats['total_nodes']}) must exceed kept nodes ({stats['nodes']})"
+    )
+    assert stats["nodes"] == len(payload["nodes"]) <= 1
+
+
+def test_graph_no_truncation_when_under_limit(seeded_client: TestClient) -> None:
+    """Under the limit, truncated=False and total_nodes equals the kept set."""
+    resp = seeded_client.get("/api/memory/v2/graph", params={"limit": 200})
+    assert resp.status_code == 200
+    stats = resp.json()["stats"]
+    assert stats["truncated"] is False
+    assert stats["total_nodes"] == stats["nodes"]
+
+
+def test_beliefs_offset_paginates(seeded_client: TestClient) -> None:
+    """beliefs endpoint returns total + offset and offset shifts the window."""
+    full = seeded_client.get("/api/memory/v2/beliefs", params={"limit": 100}).json()
+    total = full["total"]
+    assert total >= 2, f"expected >=2 seeded beliefs, got {total}"
+    assert full["offset"] == 0
+
+    first = full["beliefs"]
+    paged = seeded_client.get(
+        "/api/memory/v2/beliefs", params={"limit": 1, "offset": 1}
+    ).json()
+    assert paged["total"] == total
+    assert paged["offset"] == 1
+    assert len(paged["beliefs"]) == 1
+    # The offset=1 row must differ from the offset=0 row (ordered query).
+    if len(first) >= 2:
+        assert paged["beliefs"][0]["id"] != first[0]["id"]

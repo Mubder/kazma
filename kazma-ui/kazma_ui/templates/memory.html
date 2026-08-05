@@ -271,6 +271,12 @@
           </tbody>
         </table>
       </div>
+      <div class="mem-pager" x-show="beliefsPage.total > 0" style="display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:0.78rem;color:var(--text-muted);">
+        <span x-text="rangeText(beliefsPage, beliefs.length)"></span>
+        <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
+          x-show="hasMore(beliefsPage, beliefs.length)" @click="loadMoreBeliefs()"
+          :disabled="loading">Load more</button>
+      </div>
     </div>
 
     {# ENTITIES #}
@@ -288,34 +294,19 @@
         <button class="btn btn-secondary btn-sm" @click="loadEntities()" x-text="S.search || 'Search'"></button>
       </div>
       <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 0.75rem;" x-text="S.isolated_hint || ''"></p>
-      <div class="card" style="padding:0.85rem 1rem;margin-bottom:0.75rem;">
-        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">
-          Link / merge slots sync with the <strong>graph Ops bar</strong> above.
-          On the graph: click a node → <em>Src</em>/<em>Tgt</em>/<em>Link→</em>, or click an <em>edge</em> to edit/unlink.
-          Shift+click nodes to fill slots quickly.
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px;">
-          <div>
-            <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.source || 'Source'"></label>
-            <input class="form-input" x-model="mergeSource" @change="pushSlotsToGraph()" @blur="pushSlotsToGraph()" placeholder="source entity id">
-          </div>
-          <div>
-            <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.target || 'Target'"></label>
-            <input class="form-input" x-model="mergeTarget" @change="pushSlotsToGraph()" @blur="pushSlotsToGraph()" placeholder="target entity id">
-          </div>
-          <div>
-            <label style="font-size:0.72rem;color:var(--text-muted);" x-text="S.predicate || 'Predicate'"></label>
-            <input class="form-input" x-model="linkPredicate" @change="pushSlotsToGraph()" @blur="pushSlotsToGraph()" placeholder="related_to">
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button class="btn btn-primary btn-sm" @click="doLink()" :disabled="!canLinkOrMerge" x-text="S.link || 'Link'" title="Create belief edge source —pred→ target"></button>
-          <button class="btn btn-secondary btn-sm" @click="doMerge()" :disabled="!canLinkOrMerge" x-text="S.merge || 'Merge'" title="Merge source into target (beliefs rewire)"></button>
-          <button class="btn btn-secondary btn-sm" @click="swapSlots()" title="Swap source ↔ target">⇄ Swap</button>
-          <button class="btn btn-secondary btn-sm" @click="clearSlots()" title="Clear source and target">Clear</button>
-          <a href="#console" class="btn btn-secondary btn-sm" style="text-decoration:none;" title="Jump to graph">Graph ↑</a>
-          <span x-show="canLinkOrMerge" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);" x-text="(mergeSource || '') + ' → ' + (mergeTarget || '')"></span>
-        </div>
+      {# Single source of truth for link/merge: the graph Ops bar.
+         A row's Src/Tgt buttons (and Shift+click on the canvas) fill the
+         slots shown in the live preview below; actuate from the Ops bar. #}
+      <div class="card" style="padding:0.6rem 0.9rem;margin-bottom:0.75rem;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <span style="font-size:0.74rem;color:var(--text-muted);line-height:1.4;">
+          To link or merge: click a row's
+          <strong>Src</strong>/<strong>Tgt</strong> (or Shift-click nodes on the graph),
+          then use the <strong>graph Ops bar</strong>
+          <a href="#console" style="text-decoration:none;">↑</a>.
+          Click an <em>edge</em> to edit or unlink a belief.
+        </span>
+        <span style="flex:1;min-width:4px;"></span>
+        <span x-show="canLinkOrMerge" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);" :title="'Source → target (actuate from the graph Ops bar)'" x-text="(mergeSource || '') + ' → ' + (mergeTarget || '')"></span>
       </div>
       <div class="card mem-table-wrap" style="padding:0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
         <table class="mem-table">
@@ -360,6 +351,12 @@
           </tbody>
         </table>
       </div>
+      <div class="mem-pager" x-show="entitiesPage.total > 0" style="display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:0.78rem;color:var(--text-muted);">
+        <span x-text="rangeText(entitiesPage, entities.length)"></span>
+        <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
+          x-show="hasMore(entitiesPage, entities.length)" @click="loadMoreEntities()"
+          :disabled="loading">Load more</button>
+      </div>
     </div>
 
     {# MERGES #}
@@ -388,6 +385,12 @@
             </template>
           </tbody>
         </table>
+      </div>
+      <div class="mem-pager" x-show="mergesPage.total > 0" style="display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:0.78rem;color:var(--text-muted);">
+        <span x-text="rangeText(mergesPage, merges.length)"></span>
+        <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
+          x-show="hasMore(mergesPage, merges.length)" @click="loadMoreMerges()"
+          :disabled="loading">Load more</button>
       </div>
     </div>
 

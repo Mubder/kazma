@@ -336,8 +336,15 @@ def list_pending_merges(
     *,
     tenant_id: str | None = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List pending entity merges from the quarantine ledger."""
+    """List pending entity merges from the quarantine ledger.
+
+    ``offset`` is clamped to >= 0 for pager support (Phase 1.1). Default 0
+    preserves the pre-pagination behavior for existing callers.
+    """
+    off = max(0, int(offset or 0))
+    lim = max(1, min(limit, 200))
     try:
         if tenant_id:
             rows = conn.execute(
@@ -347,9 +354,9 @@ def list_pending_merges(
                 FROM entity_merges
                 WHERE status = 'pending' AND tenant_id = ?
                 ORDER BY requested_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (tenant_id, max(1, min(limit, 200))),
+                (tenant_id, lim, off),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -359,14 +366,36 @@ def list_pending_merges(
                 FROM entity_merges
                 WHERE status = 'pending'
                 ORDER BY requested_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (max(1, min(limit, 200)),),
+                (lim, off),
             ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
         logger.debug("[entity_resolve] list_pending failed", exc_info=True)
         return []
+
+
+def count_pending_merges(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str | None = None,
+) -> int:
+    """Total pending merge count (for the pager's 'of N')."""
+    try:
+        if tenant_id:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM entity_merges WHERE status = 'pending' AND tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM entity_merges WHERE status = 'pending'"
+            ).fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        logger.debug("[entity_resolve] count_pending failed", exc_info=True)
+        return 0
 
 
 def decide_entity_merge(

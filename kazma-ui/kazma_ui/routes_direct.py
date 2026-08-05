@@ -427,7 +427,7 @@ def register_direct_routes(self: Any) -> None:
             return {"ok": False, "error": str(exc)[:300], "beliefs": [], "episodes": []}
 
     @self.app.get("/api/memory/v2/beliefs")
-    async def _memory_v2_beliefs(q: str = "", limit: int = 50):
+    async def _memory_v2_beliefs(q: str = "", limit: int = 50, offset: int = 0):
         """Active V2 beliefs (currently valid only), optional FTS filter."""
         import sqlite3
 
@@ -438,22 +438,34 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
-            sql = (
-                "SELECT id, subject, predicate, predicate_type, object, confidence, "
-                "structural_importance, valid_from, source_trust_weight, extraction_method, "
-                "access_count, last_accessed, supersedes_id "
-                "FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            where = (
+                " FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
             )
             params: list = []
             if q and q.strip():
                 ql = f"%{q.strip().lower()}%"
-                sql += " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? OR LOWER(object) LIKE ?)"
+                where += " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? OR LOWER(object) LIKE ?)"
                 params = [ql, ql, ql]
-            sql += " ORDER BY (structural_importance * confidence * source_trust_weight) DESC LIMIT ?"
-            params.append(max(1, min(limit, 200)))
-            rows = conn.execute(sql, params).fetchall()
+            # Total count for the pager (same WHERE).
+            total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
+
+            sql = (
+                "SELECT id, subject, predicate, predicate_type, object, confidence, "
+                "structural_importance, valid_from, source_trust_weight, extraction_method, "
+                "access_count, last_accessed, supersedes_id"
+                + where
+                + " ORDER BY (structural_importance * confidence * source_trust_weight) DESC LIMIT ? OFFSET ?"
+            )
+            lim = max(1, min(limit, 200))
+            off = max(0, int(offset or 0))
+            rows = conn.execute(sql, [*params, lim, off]).fetchall()
             conn.close()
-            return {"beliefs": [dict(r) for r in rows]}
+            return {
+                "beliefs": [dict(r) for r in rows],
+                "total": int(total),
+                "offset": off,
+                "limit": lim,
+            }
         except Exception as exc:
             return {"beliefs": [], "error": str(exc)}
 
@@ -533,11 +545,14 @@ def register_direct_routes(self: Any) -> None:
         return invalidate_belief(belief_id, remove_graph=True)
 
     @self.app.get("/api/memory/v2/entity-merges")
-    async def _memory_v2_entity_merges(limit: int = 50):
+    async def _memory_v2_entity_merges(limit: int = 50, offset: int = 0):
         """Pending entity merge quarantine list."""
         import sqlite3
 
-        from kazma_core.memory.entity_resolution import list_pending_merges
+        from kazma_core.memory.entity_resolution import (
+            count_pending_merges,
+            list_pending_merges,
+        )
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
 
@@ -545,9 +560,12 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
-            merges = list_pending_merges(conn, limit=limit)
+            lim = max(1, min(limit, 200))
+            off = max(0, int(offset or 0))
+            merges = list_pending_merges(conn, limit=lim, offset=off)
+            total = count_pending_merges(conn)
             conn.close()
-            return {"merges": merges}
+            return {"merges": merges, "total": total, "offset": off, "limit": lim}
         except Exception as exc:
             return {"merges": [], "error": str(exc)[:300]}
 
@@ -578,7 +596,7 @@ def register_direct_routes(self: Any) -> None:
             return {"ok": False, "error": str(exc)[:300]}
 
     @self.app.get("/api/memory/v2/queue")
-    async def _memory_v2_queue(status: str = "", limit: int = 50):
+    async def _memory_v2_queue(status: str = "", limit: int = 50, offset: int = 0):
         """Memory task queue rows for the dashboard table."""
         import sqlite3
 
@@ -589,23 +607,32 @@ def register_direct_routes(self: Any) -> None:
             import os
 
             if not os.path.exists(memory_ops_db()):
-                return {"tasks": []}
+                return {"tasks": [], "total": 0, "offset": 0, "limit": 50}
             conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_ops_schema(conn)
-            sql = (
-                "SELECT id, task_type, status, attempts, max_attempts, "
-                "created_at, updated_at, error_log FROM memory_task_queue"
-            )
+            where = " FROM memory_task_queue"
             params: list = []
             if status and status.strip():
-                sql += " WHERE status = ?"
+                where += " WHERE status = ?"
                 params.append(status.strip())
-            sql += " ORDER BY created_at DESC LIMIT ?"
-            params.append(max(1, min(limit, 200)))
-            rows = conn.execute(sql, params).fetchall()
+            total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
+            lim = max(1, min(limit, 200))
+            off = max(0, int(offset or 0))
+            sql = (
+                "SELECT id, task_type, status, attempts, max_attempts,"
+                " created_at, updated_at, error_log"
+                + where
+                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            )
+            rows = conn.execute(sql, [*params, lim, off]).fetchall()
             conn.close()
-            return {"tasks": [dict(r) for r in rows]}
+            return {
+                "tasks": [dict(r) for r in rows],
+                "total": int(total),
+                "offset": off,
+                "limit": lim,
+            }
         except Exception as exc:
             return {"tasks": [], "error": str(exc)[:300]}
 
@@ -661,7 +688,7 @@ def register_direct_routes(self: Any) -> None:
             return {"ok": False, "error": str(exc)[:300]}
 
     @self.app.get("/api/memory/v2/episodes")
-    async def _memory_v2_episodes(limit: int = 40, tier: str = ""):
+    async def _memory_v2_episodes(limit: int = 40, tier: str = "", offset: int = 0):
         """Recent episodes for Dashboard overlay (id, tier, preview text)."""
         import sqlite3
 
@@ -672,19 +699,22 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
-            sql = (
-                "SELECT id, tier, user_text, assistant_text, created_at, session_id "
-                "FROM episodes WHERE 1=1"
-            )
+            where = " FROM episodes WHERE 1=1"
             params: list = []
             if tier and tier.strip():
-                sql += " AND tier = ?"
+                where += " AND tier = ?"
                 params.append(tier.strip())
             else:
-                sql += " AND tier IN ('working','episodic','recall')"
-            sql += " ORDER BY created_at DESC LIMIT ?"
-            params.append(max(1, min(int(limit or 40), 100)))
-            rows = conn.execute(sql, params).fetchall()
+                where += " AND tier IN ('working','episodic','recall')"
+            total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
+            lim = max(1, min(int(limit or 40), 100))
+            off = max(0, int(offset or 0))
+            sql = (
+                "SELECT id, tier, user_text, assistant_text, created_at, session_id"
+                + where
+                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            )
+            rows = conn.execute(sql, [*params, lim, off]).fetchall()
             conn.close()
             out = []
             for r in rows:
@@ -700,7 +730,13 @@ def register_direct_routes(self: Any) -> None:
                         "session_id": r["session_id"] or "",
                     }
                 )
-            return {"ok": True, "episodes": out}
+            return {
+                "ok": True,
+                "episodes": out,
+                "total": int(total),
+                "offset": off,
+                "limit": lim,
+            }
         except Exception as exc:
             return {"ok": False, "episodes": [], "error": str(exc)[:300]}
 
@@ -1406,6 +1442,11 @@ def register_direct_routes(self: Any) -> None:
 
             conn.close()
             nodes.sort(key=lambda n: n["beliefCount"], reverse=True)
+            # Pre-slice totals so the UI can show "showing 200 of N" and
+            # decide whether to warn the operator about truncation.
+            total_nodes = len(nodes)
+            total_links = len(links)
+            truncated = total_nodes > limit
             kept_ids = {n["id"] for n in nodes[:limit]}
             links = [l for l in links if l["source"] in kept_ids and l["target"] in kept_ids]
 
@@ -1423,6 +1464,10 @@ def register_direct_routes(self: Any) -> None:
             stats = {
                 "nodes": len(nodes[:limit]),
                 "links": len(links),
+                "total_nodes": total_nodes,
+                "total_links": total_links,
+                "truncated": truncated,
+                "limit": limit,
                 "superseded": sum(1 for l in links if l["superseded"]),
                 "earliest": min(valid_froms, default=0),
                 "latest": max(valid_froms, default=0),

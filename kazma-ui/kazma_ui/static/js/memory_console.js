@@ -3127,6 +3127,21 @@
 
   var _v2gLastStats = {};
 
+  function _v2gRenderTruncation(stats) {
+    var el = document.getElementById('v2g-trunc-banner');
+    if (!el) return;
+    var truncI18n = (window.__DASH_MEM_I18N && window.__DASH_MEM_I18N.graphTrunc) || 'showing first {n} of {total} nodes';
+    if (stats && stats.truncated && stats.total_nodes > (stats.nodes || 0)) {
+      var msg = String(truncI18n)
+        .replace('{n}', stats.nodes || 0)
+        .replace('{total}', stats.total_nodes);
+      el.textContent = msg + ' — filter to narrow the view.';
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
   async function _v2gLoad() {
     try {
       var resp = await fetch(_v2gBuildUrl());
@@ -3157,6 +3172,7 @@
       if (stats.earliest && stats.latest && stats.latest > stats.earliest) {
         _v2gTimeRange = { min: stats.earliest, max: Math.max(stats.latest, Date.now() / 1000) };
       }
+      _v2gRenderTruncation(stats);
       _v2gRenderFilters();
       _v2gApplyFilters();
     } catch (e) { /* silent */ }
