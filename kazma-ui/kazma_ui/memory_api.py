@@ -98,6 +98,35 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
+def _memory_tenant_id() -> str:
+    """Active tenant id for memory reads/writes.
+
+    Phase 4 tenant correctness. When ``KAZMA_MEMORY_ENFORCE_TENANT`` is unset
+    (default), returns ``"default"`` so existing single-tenant deployments
+    behave exactly as before — every memory row is in the ``default`` tenant
+    and no query is narrowed. When the flag is on (``1``/``true``), returns
+    the request-scoped tenant from ``require_tenant_id()`` (set by the auth
+    middleware from verified JWT/opaque-session claims), so tenant A's memory
+    is isolated from tenant B's.
+
+    Read paths use this in ``WHERE tenant_id = ?``; write paths use it on
+    every INSERT. The flag is read live so a Settings/env change takes effect
+    without a restart.
+    """
+    import os
+
+    if str(os.environ.get("KAZMA_MEMORY_ENFORCE_TENANT", "")).strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        try:
+            from kazma_core.tenant_isolation import require_tenant_id
+
+            return require_tenant_id()
+        except Exception:
+            return "default"
+    return "default"
+
+
 def _belief_count_sql() -> str:
     return """
         (
@@ -161,12 +190,21 @@ def register_memory_page(app: Any, templates: Any, agent: Any) -> None:
 async def memory_admin_summary() -> dict[str, Any]:
     try:
         conn = _conn()
+        # Phase 4: scope every count by the active tenant when enforcement is
+        # on; unscoped (today's behavior) otherwise. The tenant filter uses
+        # the tenant_id-leading indexes so it stays fast either way.
+        tid = _memory_tenant_id()
+        scoped = tid != "default"
+        tfilter = " AND tenant_id = ?" if scoped else ""
+        tparam: tuple = (tid,) if scoped else ()
+
         # Phase 3: prefer the materialized columns for the empty/isolated
         # counts when no entity is stale; fall back to the live correlated
         # subqueries otherwise (correctness over speed).
         try:
             stale_n = conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE belief_count = -1"
+                "SELECT COUNT(*) FROM entities WHERE belief_count = -1" + tfilter,
+                tparam,
             ).fetchone()[0]
         except Exception:
             stale_n = 1
@@ -174,25 +212,31 @@ async def memory_admin_summary() -> dict[str, Any]:
         degree_expr = "e.graph_degree" if stale_n == 0 else _entity_degree_sql()
 
         live = conn.execute(
-            "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL" + tfilter,
+            tparam,
         ).fetchone()[0]
         dead = conn.execute(
-            "SELECT COUNT(*) FROM beliefs WHERE invalidated_at IS NOT NULL OR valid_until IS NOT NULL"
+            "SELECT COUNT(*) FROM beliefs WHERE invalidated_at IS NOT NULL OR valid_until IS NOT NULL" + tfilter,
+            tparam,
         ).fetchone()[0]
-        ents = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        ents = conn.execute(
+            "SELECT COUNT(*) FROM entities WHERE 1=1" + tfilter, tparam
+        ).fetchone()[0]
         empty = conn.execute(
-            f"SELECT COUNT(*) FROM entities e WHERE {count_expr} = 0"
+            f"SELECT COUNT(*) FROM entities e WHERE {count_expr} = 0" + tfilter,
+            tparam,
         ).fetchone()[0]
         isolated = conn.execute(
-            f"""
-            SELECT COUNT(*) FROM entities e
-            WHERE {count_expr} > 0
-              AND {degree_expr} = 0
-              AND LOWER(e.id) NOT IN ('user','assistant')
-            """
+            "SELECT COUNT(*) FROM entities e "
+            "WHERE " + count_expr + " > 0 AND " + degree_expr + " = 0 "
+            "AND LOWER(e.id) NOT IN ('user','assistant')"
+            + tfilter,
+            tparam,
         ).fetchone()[0]
         try:
-            eps = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            eps = conn.execute(
+                "SELECT COUNT(*) FROM episodes WHERE 1=1" + tfilter, tparam
+            ).fetchone()[0]
         except Exception:
             eps = 0
         conn.close()
@@ -274,8 +318,14 @@ async def list_entities(
         else:
             count_expr = _belief_count_sql()
             degree_expr = _entity_degree_sql()
+        # Phase 4: scope by tenant when enforcement is on. The base WHERE
+        # carries the filter; FTS/LIKE/empty/isolated clauses append to it.
+        tid = _memory_tenant_id()
         where = " FROM entities e WHERE 1=1"
         params: list[Any] = []
+        if tid != "default":
+            where += " AND e.tenant_id = ?"
+            params.append(tid)
         matched_via: str | None = None
         query = (q or "").strip()
         if query:
@@ -426,8 +476,8 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
             conn.execute(
                 """INSERT INTO entities
                    (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
-                   VALUES (?, 'default', ?, ?, '[]', ?, '{}')""",
-                (eid, etype, new_name, 1 if etype == "person" else 0),
+                   VALUES (?, ?, ?, ?, '[]', ?, '{}')""",
+                (eid, _memory_tenant_id(), etype, new_name, 1 if etype == "person" else 0),
             )
             created = True
             old_name = eid
@@ -555,9 +605,10 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             c.execute(
                 "INSERT OR IGNORE INTO entities "
                 "(id, tenant_id, type, name, aliases_json, metadata_json, is_high_stakes) "
-                "VALUES (?, 'default', ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     snap["id"],
+                    _memory_tenant_id(),
                     snap["type"],
                     snap["name"],
                     snap["aliases_json"],
@@ -659,9 +710,10 @@ async def merge_entities(request: Request) -> dict[str, Any]:
             """INSERT OR IGNORE INTO entity_merges
                (id, tenant_id, source_entity_id, target_entity_id, status,
                 merge_tier, confidence, requested_at, resolved_at, metadata_json)
-               VALUES (?, 'default', ?, ?, 'approved', 'ui_manual', 1.0, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, 'approved', 'ui_manual', 1.0, ?, ?, ?)""",
             (
                 mid,
+                _memory_tenant_id(),
                 source_id,
                 target_id,
                 now,
@@ -718,8 +770,8 @@ def _ensure_entity_row(conn: sqlite3.Connection, eid: str, *, name: str | None =
     conn.execute(
         """INSERT OR IGNORE INTO entities
            (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
-           VALUES (?, 'default', 'concept', ?, '[]', 0, '{}')""",
-        (eid, display[:120]),
+           VALUES (?, ?, 'concept', ?, '[]', 0, '{}')""",
+        (eid, _memory_tenant_id(), display[:120]),
     )
 
 
@@ -772,7 +824,7 @@ async def link_entities(request: Request) -> dict[str, Any]:
             confidence=0.9,
             importance=3,
             extraction_method="user_explicit",
-            tenant_id="default",
+            tenant_id=_memory_tenant_id(),
         )
         ops.close()
         primary.close()
