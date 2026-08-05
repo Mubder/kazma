@@ -1606,11 +1606,36 @@ def register_direct_routes(self: Any) -> None:
                 "predicate_type_counts": pred_counts,
             }
             stats.update(meta)
-            return {"nodes": nodes[:limit], "links": links, "stats": stats}
+            # F: graph groupings — attach the view-only associations + tiers
+            # so the canvas can render per-tier colors and cluster halos.
+            # Purely advisory; recall/extraction never read this.
+            groups: list[dict] = []
+            member_tier: dict[str, int] = {}
+            try:
+                tfilter_g = "WHERE tenant_id=?" if _memory_tenant_id() != "default" else ""
+                gparams: tuple = (_memory_tenant_id(),) if _memory_tenant_id() != "default" else ()
+                grows = conn.execute(
+                    f"SELECT group_root, member, member_tier, label "
+                    f"FROM graph_associations {tfilter_g}",
+                    gparams,
+                ).fetchall()
+                groups = [dict(r) for r in grows]
+                member_tier = {r["member"]: int(r["member_tier"]) for r in grows}
+            except Exception:
+                logger.debug("[memory_v2_graph] group associations read failed", exc_info=True)
+            # Stamp each node with its tier (0=hub, -1=ungrouped).
+            emitted = nodes[:limit]
+            for n in emitted:
+                if n.get("isHub"):
+                    n["tier"] = 0
+                else:
+                    n["tier"] = member_tier.get(n.get("id"), -1)
+            return {"nodes": emitted, "links": links, "stats": stats, "groups": groups}
         except Exception as exc:
             return {
                 "nodes": [],
                 "links": [],
+                "groups": [],
                 "stats": {**_graph_backend_meta(), "source": "sqlite", "error": True},
                 "error": str(exc),
             }

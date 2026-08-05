@@ -1484,9 +1484,27 @@
     }
     return raw || String(p.id || '');
   }
+  // F: tier color palette. The operator organizes nodes into a tiered tree
+  // (0=main/hub, 1=major, 2=sub, 3=leaf). Grouped nodes take their tier
+  // color; ungrouped nodes (tier -1/undefined) fall back to the entity-type
+  // color. The hub keeps its amber user color regardless.
+  var _V2G_TIER_COLORS = {
+    0: '#f59e0b',  // main  — amber/orange (the hub; matches existing hub style)
+    1: '#22d3ee',  // major — cyan
+    2: '#3b82f6',  // sub   — blue
+    3: '#94a3b8',  // leaf  — slate
+  };
+  function _v2gTierColor(tier) {
+    return _V2G_TIER_COLORS[tier];
+  }
+
   function _v2gNodeColor(p) {
     var t = _v2gTheme();
     if (_v2gIsUser(p)) return t.user;
+    // Tier color wins for grouped nodes (tier 0-3). -1/undefined → type color.
+    if (p && p.tier !== undefined && p.tier >= 0 && _V2G_TIER_COLORS[p.tier]) {
+      return _V2G_TIER_COLORS[p.tier];
+    }
     return (t.type[p.type] || t.accent);
   }
   function _v2gHexAlpha(hex, a) {
@@ -2087,6 +2105,9 @@
       } else if (_v2gOps.mode === 'repoint') {
         hint.textContent = 'Move mode: click the new endpoint node… (Clear to cancel)';
         hint.style.color = 'var(--accent,#22d3ee)';
+      } else if (_v2gOps.mode === 'group') {
+        hint.textContent = 'Group mode: click the PARENT node… (Clear to cancel)';
+        hint.style.color = 'var(--accent,#22d3ee)';
       } else if (_v2gOps.sourceId && _v2gOps.targetId) {
         hint.textContent = 'Ready — press Link or Merge, or click an edge to edit/unlink.';
         hint.style.color = 'var(--text-secondary)';
@@ -2133,6 +2154,7 @@
     _v2gOps.targetId = null;
     _v2gOps.mode = null;
     _v2gOps.repoint = null;  // F1: cancel any pending move
+    _v2gOps.group = null;    // F: cancel any pending group-under
     if (!opts.keepEdge) _v2gOps.selectedEdgeIdx = -1;
     _v2gBroadcastSlots();
   }
@@ -2620,6 +2642,55 @@
     }
   }
 
+  // F: "Group under" — a VIEW-ONLY association (no belief change). The operator
+  // picks a member node, then clicks the parent; the canvas clusters + tiers
+  // them. Distinct from Link (which mutates memory). See MEMORY_GRAPH_GROUPING_PLAN.md.
+  function _v2gGroupUnder(memberId) {
+    memberId = String(memberId || '').trim();
+    if (!memberId) { _v2gToast('Pick a node first', 'error'); return false; }
+    if (_v2gIsUser({ id: memberId })) {
+      _v2gToast('The hub is the top-level root — not groupable', 'info');
+      return false;
+    }
+    _v2gOps.mode = 'group';
+    _v2gOps.group = { member: memberId };
+    _v2gSyncOpsBar();
+    _v2gToast('Click the PARENT node to group "' + _v2gShortId(memberId) + '" under…', 'info');
+    return true;
+  }
+
+  async function _v2gDoGroup(memberId, rootId) {
+    try {
+      var data = await _v2gApiJson('/api/memory/v2/graph/groups', {
+        method: 'POST',
+        body: JSON.stringify({ group_root: rootId, member: memberId }),
+      });
+      if (!data.ok) {
+        _v2gToast(data.error || 'Group failed', 'error');
+        return false;
+      }
+      _v2gToast(
+        'Grouped ' + _v2gShortId(memberId) + ' under ' + _v2gShortId(rootId)
+        + ' (tier ' + data.member_tier + ') · view-only, memory untouched',
+        'success'
+      );
+      _v2gOps.mode = null;
+      _v2gOps.group = null;
+      _v2gSyncOpsBar();
+      await _v2gReloadGraph();
+      _v2gSelectEntity(memberId, { notify: false });
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
+          detail: { op: 'group', member: memberId, root: rootId, tier: data.member_tier },
+        }));
+      } catch (e) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Group failed', 'error');
+      return false;
+    }
+  }
+
   async function _v2gDeleteEntity(id) {
     if (!id || id === 'user') {
       _v2gToast('Cannot delete protected hub', 'error');
@@ -2669,6 +2740,17 @@
       _v2gOps.repoint = null;
       _v2gSyncOpsBar();
       _v2gDoRepoint(beliefId, side, endpoint);
+      return true;
+    }
+    // F: group mode — single click on the parent completes the grouping.
+    if (_v2gOps.mode === 'group') {
+      var g = _v2gOps.group || {};
+      var member = g.member;
+      _v2gOps.mode = null;
+      _v2gOps.group = null;
+      _v2gSyncOpsBar();
+      if (!member || p.id === member) { _v2gToast('Pick a different parent node', 'info'); return true; }
+      _v2gDoGroup(member, p.id);
       return true;
     }
     if (!_v2gOps.sourceId) {
@@ -3005,6 +3087,11 @@
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge target">Tgt</button>';
       html += '<button type="button" class="btn btn-sm btn-primary v2g-node-act" data-act="link-from" style="font-size:0.65rem;padding:2px 8px;" title="Start link from this node — click target next">Link→</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="merge-from" style="font-size:0.65rem;padding:2px 8px;" title="Start merge from this node (will be retired)">Merge→</button>';
+      // F: "Group under" — view-only association (no memory change). The hub
+      // can't be grouped (it's the root), so hide it for the hub.
+      if (!_v2gIsUser(p)) {
+        html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="group-under" style="font-size:0.65rem;padding:2px 8px;" title="Group this node under a parent (view-only — does not change memory)">Group under→</button>';
+      }
       // Always offer Cut hub when any hub edge exists (even without "shortcut" pattern)
       if (hubEdges.length && !_v2gIsUser(p)) {
         html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="font-size:0.65rem;padding:2px 8px;" title="Remove direct link(s) to You/Mubder — keep parent chain">Cut hub</button>';
@@ -3102,6 +3189,9 @@
           _v2gOps.mode = 'merge';
           _v2gBroadcastSlots();
           _v2gToast('Merge from ' + _v2gShortId(p.id) + ' — click survivor target', 'info');
+        } else if (act === 'group-under') {
+          // F: view-only grouping — pick the parent next.
+          _v2gGroupUnder(p.id);
         } else if (act === 'cut-hub') {
           _v2gCutHubLinks(p.id).then(function() {
             // Re-inspect node after graph reload if still present
@@ -3995,6 +4085,8 @@
   window._v2gEditBeliefById = _v2gEditBeliefById;
   // F1: move (repoint) a belief endpoint to another node by clicking.
   window._v2gRepointBelief = _v2gRepointBelief;
+  // F: view-only grouping (cluster + tier without mutating memory).
+  window._v2gGroupUnder = _v2gGroupUnder;
 
   try {
     _v2gRenderFilters();
