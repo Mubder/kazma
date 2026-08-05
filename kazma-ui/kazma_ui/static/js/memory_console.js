@@ -3186,6 +3186,18 @@
     }
   }
 
+  // Refresh the canvas's screen-reader label with live node/edge counts so
+  // the graph state is announced (the canvas itself is non-text). a11y.
+  function _v2gUpdateCanvasAria(stats) {
+    var canvas = document.getElementById('v2g-canvas');
+    if (!canvas) return;
+    var nodes = (stats && stats.nodes) || 0;
+    var links = (stats && stats.links) || 0;
+    var focus = _v2gSelectedId || '';
+    var base = 'V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets. Click edges to edit or unlink beliefs.';
+    canvas.setAttribute('aria-label', base + ' Currently showing ' + nodes + ' nodes and ' + links + ' edges.' + (focus ? ' Focused on ' + focus + '.' : ''));
+  }
+
   async function _v2gLoad() {
     try {
       var resp = await fetch(_v2gBuildUrl());
@@ -3217,6 +3229,7 @@
         _v2gTimeRange = { min: stats.earliest, max: Math.max(stats.latest, Date.now() / 1000) };
       }
       _v2gRenderTruncation(stats);
+      _v2gUpdateCanvasAria(stats);
       _v2gRenderFilters();
       _v2gApplyFilters();
     } catch (e) { /* silent */ }

@@ -2238,6 +2238,21 @@ tbody tr:last-child td {
   font-weight: 500;
 }
 .badge-accent { background: var(--accent-subtle); color: var(--accent-light); }
+
+/* Screen-reader-only — visually hidden but announced by assistive tech.
+   Standard a11y utility (WebAIM pattern). Used for table captions, action
+   column headers, and any label that must be machine-readable but not seen. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .badge-success { background: var(--success-subtle); color: var(--success); }
 .badge-warning { background: var(--warning-subtle); color: var(--warning); }
 .badge-danger { background: var(--danger-subtle); color: var(--danger); }

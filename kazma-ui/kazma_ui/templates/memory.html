@@ -237,10 +237,11 @@
       </div>
       <div class="card" style="padding:0;overflow:auto;max-height:50vh;">
         <table class="table" style="width:100%;font-size:0.85rem;">
+          <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Active beliefs — select to invalidate, or use row actions to focus, edit, or unlink.</caption>
           <thead>
             <tr>
-              <th style="width:2rem;"><input type="checkbox" @change="toggleAllBeliefs($event.target.checked)"></th>
-              <th>Subject</th><th>Predicate</th><th>Object</th><th>Type</th><th></th>
+              <th scope="col" style="width:2rem;"><input type="checkbox" aria-label="Select all beliefs" @change="toggleAllBeliefs($event.target.checked)"></th>
+              <th scope="col">Subject</th><th scope="col">Predicate</th><th scope="col">Object</th><th scope="col">Type</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -310,9 +311,10 @@
       </div>
       <div class="card mem-table-wrap" style="padding:0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
         <table class="mem-table">
+          <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Entities — click a row to focus it on the graph; use Src/Tgt then the graph Ops bar to link or merge.</caption>
           <thead>
             <tr>
-              <th>ID</th><th>Type</th><th>Name</th><th>Beliefs</th><th>Links</th><th>Flags</th><th></th>
+              <th scope="col">ID</th><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Beliefs</th><th scope="col">Links</th><th scope="col">Flags</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -364,7 +366,7 @@
       <div class="card" style="padding:0;overflow:auto;max-height:50vh;">
         <table class="table" style="width:100%;font-size:0.85rem;">
           <thead>
-            <tr><th>ID</th><th>Source</th><th>Target</th><th>Tier</th><th>Conf</th><th></th></tr>
+            <tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Tier</th><th scope="col">Conf</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th></tr>
           </thead>
           <tbody>
             <template x-if="!merges.length">
@@ -431,8 +433,8 @@
       </div>
     </div>
 
-    <div x-show="loading" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">Loading…</div>
-    <div x-show="error" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
+    <div x-show="loading" role="status" aria-live="polite" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">Loading…</div>
+    <div x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
   </div>
 </div>
 {% endblock %}

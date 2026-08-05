@@ -502,46 +502,56 @@ function memoryPage() {
 
     async editBelief(b) {
       if (!b || !b.id) return;
-      let object = b.object;
-      let predicate = b.predicate;
-      let subject = b.subject;
-      if (window.kazmaPrompt) {
-        object = await window.kazmaPrompt({
-          title: S.edit_belief || "Edit belief — object",
-          message:
-            "Fact / object text (what the belief says). Cancel aborts the whole edit.",
-          defaultValue: b.object || "",
-          confirmText: "Next",
-          placeholder: "e.g. ShipX platform description…",
-        });
+      // Single modal form (replaces the old 3-prompt wizard). One overlay,
+      // three fields, one Save — the universal edit pattern. Uses the shared
+      // modal store directly so the body can carry a form (kazmaPrompt only
+      // does one input). Falls back to native prompts if Alpine isn't up.
+      const store = window.Alpine && Alpine.store('modal');
+      if (!store) {
+        // Legacy fallback (pre-Alpine) — keep the 3-step native prompt.
+        let object = window.prompt("Object (fact text)", b.object || "");
         if (object == null) return;
-        predicate = await window.kazmaPrompt({
-          title: S.edit_belief || "Edit belief — predicate",
-          message: "Relation name (snake_case ok).",
-          defaultValue: b.predicate || "",
-          confirmText: "Next",
-          placeholder: "has_project",
-        });
+        let predicate = window.prompt("Predicate", b.predicate || "");
         if (predicate == null) return;
-        subject = await window.kazmaPrompt({
-          title: S.edit_belief || "Edit belief — subject",
-          message: "Subject entity id (usually stable slug).",
-          defaultValue: b.subject || "",
-          confirmText: "Save",
-          placeholder: "user",
-        });
+        let subject = window.prompt("Subject", b.subject || "");
         if (subject == null) return;
-      } else {
-        object = window.prompt("Object (fact text)", b.object || "");
-        if (object == null) return;
-        predicate = window.prompt("Predicate", b.predicate || "");
-        if (predicate == null) return;
-        subject = window.prompt("Subject", b.subject || "");
-        if (subject == null) return;
+        return this._submitBeliefEdit(b, subject, predicate, object);
       }
-      subject = String(subject).trim();
-      predicate = String(predicate).trim();
-      object = String(object).trim();
+      const fid = "mem-edit-" + b.id;
+      const fieldStyle = "width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.85rem;box-sizing:border-box;margin-top:3px;";
+      const labelStyle = "font-size:0.72rem;color:var(--text-muted);";
+      const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      store.show({
+        title: S.edit || "Edit belief",
+        size: 'sm',
+        body:
+          '<div style="display:flex;flex-direction:column;gap:10px;">' +
+          '<div><label style="' + labelStyle + '">Subject (entity id)</label>' +
+          '<input id="' + fid + '-subject" type="text" value="' + escHtml(b.subject) + '" style="' + fieldStyle + '" placeholder="user"></div>' +
+          '<div><label style="' + labelStyle + '">Predicate</label>' +
+          '<input id="' + fid + '-predicate" type="text" value="' + escHtml(b.predicate) + '" style="' + fieldStyle + '" placeholder="has_project"></div>' +
+          '<div><label style="' + labelStyle + '">Object (fact text)</label>' +
+          '<input id="' + fid + '-object" type="text" value="' + escHtml(b.object) + '" style="' + fieldStyle + '" placeholder="e.g. ShipX platform description…"></div>' +
+          '</div>',
+        actions: [
+          { label: 'Cancel', variant: 'btn-secondary', close: true },
+          {
+            label: 'Save', variant: 'btn-primary', close: true,
+            handler: () => {
+              const subject = (document.getElementById(fid + '-subject') || {}).value;
+              const predicate = (document.getElementById(fid + '-predicate') || {}).value;
+              const object = (document.getElementById(fid + '-object') || {}).value;
+              this._submitBeliefEdit(b, subject, predicate, object);
+            },
+          },
+        ],
+      });
+    },
+
+    async _submitBeliefEdit(b, subject, predicate, object) {
+      subject = String(subject || "").trim();
+      predicate = String(predicate || "").trim();
+      object = String(object || "").trim();
       if (!subject || !predicate || !object) {
         toast("Subject, predicate, and object are required", "error");
         return;
