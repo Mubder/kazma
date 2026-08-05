@@ -269,6 +269,7 @@ def mutate_belief(
     source_session: str | None = None,
     source_turn: int | None = None,
     cfg: dict[str, Any] | None = None,
+    subject_id: str | None = None,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
@@ -299,7 +300,13 @@ def mutate_belief(
         pass
 
     ptype = _classify_predicate(predicate, predicate_type)
-    sub = _slug(subject)
+    # Operator-driven links may carry an explicit subject_id (the exact
+    # graph node id the operator clicked, e.g. a virtual-fact id like
+    # "ShipX — Deployment Modes"). Slugifying that id would mint a
+    # different entity and detach the edge from the node the operator
+    # clicked. When subject_id is provided, use it verbatim; otherwise
+    # slugify the free-text subject (the historical behavior).
+    sub = subject_id if subject_id else _slug(subject)
     pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
     # Re-check after slugify (spaces → underscores)
     try:

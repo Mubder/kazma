@@ -846,6 +846,77 @@ async def test_repoint_undo_restores(mem_db):
     assert row["subject"] == "lonely", "undo did not restore original subject"
 
 
+# ── Link from a virtual-fact node: edge attaches to the clicked node ──────
+
+
+@pytest.mark.asyncio
+async def test_link_from_virtual_fact_node_attaches_verbatim(mem_db):
+    """Linking FROM a virtual-fact node id (raw text that's a belief object,
+    not an entity slug) must attach the edge to THAT node verbatim — not mint
+    a slug-divergent entity. Reproduces the operator's "ShipX — Deployment
+    Modes" bug: the link succeeded but connected to a different (slug) entity.
+    """
+    from kazma_ui.memory_api import link_entities
+    from kazma_core.paths import primary_memory_db
+
+    # 'lonely' has belief b1 with object='orphan node' (a literal/virtual
+    # fact). 'orphan node' is therefore a virtual-fact node id on the canvas.
+    virtual_id = "orphan node"
+
+    class Req:
+        async def json(self):
+            return {"subject": virtual_id, "predicate": "related_to", "object": "shipx"}
+
+    out = await link_entities(Req())
+    assert out["ok"] is True, out
+
+    # The new belief's subject MUST be the virtual id verbatim.
+    c = sqlite3.connect(primary_memory_db())
+    c.row_factory = sqlite3.Row
+    row = c.execute(
+        "SELECT subject FROM beliefs WHERE subject=? AND object='shipx' "
+        "AND invalidated_at IS NULL AND valid_until IS NULL",
+        (virtual_id,),
+    ).fetchone()
+    c.close()
+    assert row is not None, (
+        "edge did not attach to the virtual-fact node verbatim — the bug"
+    )
+    assert row["subject"] == virtual_id
+
+
+@pytest.mark.asyncio
+async def test_link_from_new_free_text_still_slugifies(mem_db):
+    """Genuinely new free-text subjects (not an existing node) still slugify,
+    so we don't create entities with arbitrary long raw-text ids. Back-compat.
+    """
+    from kazma_ui.memory_api import link_entities
+    from kazma_core.paths import primary_memory_db
+
+    free_text = "Brand New Concept Never Seen Before"
+
+    class Req:
+        async def json(self):
+            return {"subject": free_text, "predicate": "related_to", "object": "shipx"}
+
+    out = await link_entities(Req())
+    assert out["ok"] is True
+
+    c = sqlite3.connect(primary_memory_db())
+    c.row_factory = sqlite3.Row
+    # No belief should store the raw free text as subject.
+    raw = c.execute(
+        "SELECT subject FROM beliefs WHERE subject=?", (free_text,)
+    ).fetchone()
+    # The slug form should exist.
+    slug = c.execute(
+        "SELECT subject FROM beliefs WHERE subject='brand_new_concept_never_seen_before'"
+    ).fetchone()
+    c.close()
+    assert raw is None, "raw free-text stored as subject (should have been slugified)"
+    assert slug is not None, "slug form not created"
+
+
 # ── F4: vocab route (chip source) ─────────────────────────────────────────
 
 
