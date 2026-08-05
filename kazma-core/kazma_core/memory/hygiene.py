@@ -215,6 +215,27 @@ def invalidate_belief(
         conn.commit()
         n = int(cur.rowcount or 0)
 
+        # Phase 3: invalidation removes the belief from the active set, so the
+        # subject/object entities' belief_count / graph_degree drop. Recompute
+        # them (centralized here so all invalidate paths stay consistent —
+        # single, batch, and the UI unlink all funnel through this function).
+        # Only on a real flip (n > 0); idempotent re-invalidates are no-ops.
+        if n > 0:
+            try:
+                from kazma_core.memory.entity_counts import recompute_entity_counts
+
+                sub = _col("subject", 1)
+                obj = _col("object", 3)
+                tid = _col("tenant_id", 4)
+                recompute_entity_counts(
+                    conn,
+                    [str(sub or ""), str(obj or "")],
+                    tenant_id=str(tid or "default"),
+                )
+                conn.commit()
+            except Exception:
+                logger.debug("[hygiene] entity count recompute skipped", exc_info=True)
+
         graph_removed = False
         if remove_graph and n > 0:
             try:

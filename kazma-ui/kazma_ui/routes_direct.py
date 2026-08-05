@@ -238,6 +238,14 @@ def register_direct_routes(self: Any) -> None:
                 "WHERE valid_until IS NULL AND invalidated_at IS NULL",
                 (now, now),
             )
+            # Phase 3: a clear invalidates every active belief, so every entity's
+            # belief_count/graph_degree drop to 0. Mark them all stale (-1) so
+            # the read path recomputes on next access rather than recomputing
+            # the whole table inline here.
+            try:
+                conn.execute("UPDATE entities SET belief_count=-1, graph_degree=-1")
+            except Exception:
+                pass
             conn.commit()
             after = conn.execute(
                 "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"

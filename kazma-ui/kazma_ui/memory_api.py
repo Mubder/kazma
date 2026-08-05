@@ -161,6 +161,18 @@ def register_memory_page(app: Any, templates: Any, agent: Any) -> None:
 async def memory_admin_summary() -> dict[str, Any]:
     try:
         conn = _conn()
+        # Phase 3: prefer the materialized columns for the empty/isolated
+        # counts when no entity is stale; fall back to the live correlated
+        # subqueries otherwise (correctness over speed).
+        try:
+            stale_n = conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE belief_count = -1"
+            ).fetchone()[0]
+        except Exception:
+            stale_n = 1
+        count_expr = "e.belief_count" if stale_n == 0 else _belief_count_sql()
+        degree_expr = "e.graph_degree" if stale_n == 0 else _entity_degree_sql()
+
         live = conn.execute(
             "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
         ).fetchone()[0]
@@ -169,16 +181,13 @@ async def memory_admin_summary() -> dict[str, Any]:
         ).fetchone()[0]
         ents = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
         empty = conn.execute(
-            f"""
-            SELECT COUNT(*) FROM entities e
-            WHERE {_belief_count_sql()} = 0
-            """
+            f"SELECT COUNT(*) FROM entities e WHERE {count_expr} = 0"
         ).fetchone()[0]
         isolated = conn.execute(
             f"""
             SELECT COUNT(*) FROM entities e
-            WHERE {_belief_count_sql()} > 0
-              AND {_entity_degree_sql()} = 0
+            WHERE {count_expr} > 0
+              AND {degree_expr} = 0
               AND LOWER(e.id) NOT IN ('user','assistant')
             """
         ).fetchone()[0]
@@ -248,6 +257,23 @@ async def list_entities(
         conn = _conn()
         lim = max(1, min(int(limit or 100), 300))
         off = max(0, int(offset or 0))
+        # Phase 3: use the materialized belief_count / graph_degree columns
+        # when no entity is stale (-1). If any are stale (first boot after
+        # upgrade, or after a bulk clear/delete), fall back to the live
+        # correlated subqueries for correctness. The backfill + write-path
+        # hooks keep stale rows rare in steady state.
+        try:
+            stale_n = conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE belief_count = -1"
+            ).fetchone()[0]
+        except Exception:
+            stale_n = 1  # column missing → treat as stale (use live subquery)
+        if stale_n == 0:
+            count_expr = "e.belief_count"
+            degree_expr = "e.graph_degree"
+        else:
+            count_expr = _belief_count_sql()
+            degree_expr = _entity_degree_sql()
         where = " FROM entities e WHERE 1=1"
         params: list[Any] = []
         matched_via: str | None = None
@@ -290,10 +316,10 @@ async def list_entities(
                 params.extend([ql, ql, ql])
                 matched_via = "like"
         if empty_only:
-            where += f" AND {_belief_count_sql()} = 0"
+            where += f" AND {count_expr} = 0"
         if isolated_only:
             where += (
-                f" AND {_belief_count_sql()} > 0 AND {_entity_degree_sql()} = 0"
+                f" AND {count_expr} > 0 AND {degree_expr} = 0"
                 " AND LOWER(e.id) NOT IN ('user','assistant')"
             )
         # Total count for the pager (same WHERE, no ORDER/LIMIT). Uses the
@@ -302,8 +328,8 @@ async def list_entities(
 
         sql = (
             f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.aliases_json,"
-            f" e.metadata_json, {_belief_count_sql()} AS belief_count,"
-            f" {_entity_degree_sql()} AS linked_others{where}"
+            f" e.metadata_json, {count_expr} AS belief_count,"
+            f" {degree_expr} AS linked_others{where}"
             " ORDER BY belief_count DESC, linked_others ASC, e.name ASC LIMIT ? OFFSET ?"
         )
         rows = [dict(r) for r in conn.execute(sql, [*params, lim, off]).fetchall()]
@@ -498,6 +524,28 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
             (eid, eid),
         )
+        # Phase 3: entities that co-occurred with this one lose a degree once
+        # it's gone. Mark them stale (-1) so the read path recomputes them on
+        # next access, rather than tracking the delta precisely here. (Beliefs
+        # referencing eid by subject/object are left in place — only the
+        # entity shell is removed.)
+        try:
+            ename = row["name"]
+            co = conn.execute(
+                "SELECT DISTINCT CASE WHEN subject=? THEN object ELSE subject END AS other "
+                "FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL "
+                "AND (subject=? OR object=? OR subject=? OR object=?)",
+                (eid, eid, eid, ename, ename),
+            ).fetchall()
+            other_ids = [str(r["other"]) for r in co if r["other"]]
+            if other_ids:
+                placeholders = ",".join("?" for _ in other_ids)
+                conn.execute(
+                    f"UPDATE entities SET belief_count=-1 WHERE id IN ({placeholders})",
+                    other_ids,
+                )
+        except Exception:
+            logger.debug("[memory_api] delete co-occur stale-mark failed", exc_info=True)
         conn.execute("DELETE FROM entities WHERE id=?", (eid,))
         conn.commit()
         conn.close()
@@ -621,6 +669,15 @@ async def merge_entities(request: Request) -> dict[str, Any]:
                 json.dumps({"via": "memory_ui"}),
             ),
         )
+        # Phase 3: the merge rewired beliefs (source → target), so recompute
+        # the materialized counts for BOTH entities. Source's count drops to
+        # 0 (its beliefs were reassigned); target's rises by the rewired count.
+        try:
+            from kazma_core.memory.entity_counts import recompute_entity_counts
+
+            recompute_entity_counts(conn, [source_id, target_id])
+        except Exception:
+            logger.debug("[memory_api] merge count recompute failed", exc_info=True)
         conn.commit()
         conn.close()
         return {
@@ -981,6 +1038,18 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
                     bid,
                 ),
             )
+        # Phase 3: an edit can change subject/object, so recompute counts for
+        # the union of old AND new endpoints (a flip changes two entities).
+        try:
+            from kazma_core.memory.entity_counts import recompute_entity_counts
+
+            affected = {
+                str(row["subject"]), str(row["object"]),
+                str(subject), str(obj),
+            }
+            recompute_entity_counts(conn, [a for a in affected if a])
+        except Exception:
+            logger.debug("[memory_api] edit count recompute failed", exc_info=True)
         conn.commit()
         # Snapshot the prior triple for undo (restore in-place).
         prior = {

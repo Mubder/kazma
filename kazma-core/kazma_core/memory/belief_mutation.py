@@ -377,6 +377,21 @@ def mutate_belief(
                 )
             except Exception:
                 logger.debug("[belief_mutate] dual-write backends failed", exc_info=True)
+
+        # Phase 3: keep the materialized entity belief_count / graph_degree
+        # columns in sync. Recompute the affected subject + object so the
+        # operator /memory page reads precomputed values instead of running
+        # per-row correlated subqueries. Only on a real mutation (not noop).
+        # The object is included even when it's a literal — recompute is a
+        # no-op for ids with no entity row. Caller owns the commit.
+        try:
+            from kazma_core.memory.entity_counts import recompute_entity_counts
+
+            recompute_entity_counts(primary_conn, [sub, obj], tenant_id=tenant_id)
+            primary_conn.commit()
+        except Exception:
+            logger.debug("[belief_mutate] entity count recompute failed", exc_info=True)
+
         return result
     except Exception:
         logger.debug("[belief_mutate] mutation failed", exc_info=True)

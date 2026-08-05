@@ -101,6 +101,18 @@ CREATE INDEX IF NOT EXISTS idx_beliefs_temporal
 CREATE INDEX IF NOT EXISTS idx_beliefs_tenant_predicate
   ON beliefs(tenant_id, predicate, valid_until);
 
+-- Covering indexes for entity belief_count / degree (Phase 3 perf). The
+-- operator /memory page computes these per-row via correlated subqueries;
+-- these partial indexes let the count queries scan only active rows scoped
+-- by tenant + endpoint (subject or object) instead of the full table.
+CREATE INDEX IF NOT EXISTS idx_beliefs_active_obj
+  ON beliefs(tenant_id, object)
+  WHERE valid_until IS NULL AND invalidated_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_beliefs_active_subj
+  ON beliefs(tenant_id, subject)
+  WHERE valid_until IS NULL AND invalidated_at IS NULL;
+
 -- Tiered episodic memory.
 CREATE TABLE IF NOT EXISTS episodes (
   id                      TEXT PRIMARY KEY,
@@ -141,6 +153,10 @@ CREATE TABLE IF NOT EXISTS entities (
 
 CREATE INDEX IF NOT EXISTS idx_entities_tenant_type
   ON entities(tenant_id, type);
+
+-- Name lookup for entity search (Phase 3 perf — LIKE fallback path).
+CREATE INDEX IF NOT EXISTS idx_entities_tenant_name
+  ON entities(tenant_id, name);
 
 -- Quarantine merge ledger — full audit trail of every identity decision.
 CREATE TABLE IF NOT EXISTS entity_merges (
@@ -265,6 +281,12 @@ def ensure_primary_schema(conn: Any) -> None:
         # Phase A: access accounting on beliefs (episodes already have these columns)
         "ALTER TABLE beliefs ADD COLUMN access_count INTEGER DEFAULT 0",
         "ALTER TABLE beliefs ADD COLUMN last_accessed REAL",
+        # Phase 3: materialized belief_count / graph_degree on entities so the
+        # operator /memory page avoids per-row correlated subqueries. Sentinel
+        # -1 = "not computed yet" (distinct from a genuine 0). Backfilled
+        # below; maintained on write by entity_counts.recompute_entity_counts.
+        "ALTER TABLE entities ADD COLUMN belief_count INTEGER DEFAULT -1",
+        "ALTER TABLE entities ADD COLUMN graph_degree INTEGER DEFAULT -1",
     ):
         try:
             conn.execute(col_sql)
@@ -272,10 +294,43 @@ def ensure_primary_schema(conn: Any) -> None:
             pass  # column already exists
     # Phase B: real FTS5 indexes (MATCH + bm25) with LIKE fallback in recall.
     _ensure_fts5(conn)
+    # Phase 3: one-shot backfill of stale entity counts on first boot after
+    # the columns are added (rows default to -1). Idempotent — only touches
+    # rows still at the sentinel. Safe to re-run; cheap when nothing's stale.
+    _backfill_entity_counts(conn)
     # FK enforcement must be set per-connection in SQLite.
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] primary schema ensured")
+
+
+def _backfill_entity_counts(conn: Any) -> None:
+    """Compute belief_count/graph_degree for rows still at the -1 sentinel.
+
+    Runs once per DB on first boot after the Phase 3 columns are added. The
+    per-entity subqueries are the same shape the read path falls back to when
+    a count is stale; with the Phase 3 partial indexes (idx_beliefs_active_*)
+    these are index scans over active rows only. Best-effort: never raises.
+    """
+    try:
+        stale = conn.execute(
+            "SELECT COUNT(*) FROM entities WHERE belief_count = -1"
+        ).fetchone()[0]
+        if not stale:
+            return
+        logger.info("[schema_v2] backfilling %d stale entity counts", stale)
+        from kazma_core.memory.entity_counts import recompute_entity_counts
+
+        stale_ids = [
+            str(r[0])
+            for r in conn.execute("SELECT id FROM entities WHERE belief_count = -1 LIMIT 5000").fetchall()
+        ]
+        # Recompute in batches to bound transaction size on large memories.
+        for i in range(0, len(stale_ids), 500):
+            recompute_entity_counts(conn, stale_ids[i : i + 500])
+        conn.commit()
+    except Exception:
+        logger.debug("[schema_v2] entity count backfill skipped", exc_info=True)
 
 
 def _ensure_fts5(conn: Any) -> None:
