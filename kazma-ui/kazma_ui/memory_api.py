@@ -23,6 +23,56 @@ _PROTECTED_ENTITIES = frozenset({"user", "assistant", "kazma", "mubder"})
 router = APIRouter(tags=["memory-admin"])
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Undo store — short-window reversal for reversible memory mutations
+# ══════════════════════════════════════════════════════════════════════════
+# In-process LRU mapping an opaque token → an async restore closure. Covers
+# invalidate-batch, link, unlink, edit, delete-entity. NOT durability: the
+# window is 60s, the cap is 50, and entries are lost on restart. The point is
+# the "Undo" affordance on the toast — for true safety, restore from a backup
+# (Maintenance deck). Merge is intentionally NOT undoable (an identity rewrite
+# across many beliefs is not reliably reversible); it returns a full receipt
+# instead so the operator can see exactly what moved.
+_UNDO_TTL_SECONDS = 60.0
+_UNDO_CAP = 50
+_undo_store: dict[str, dict[str, Any]] = {}
+
+
+def register_undo(restore: Any, *, label: str, kind: str) -> str:
+    """Register a restore closure and return an undo token.
+
+    Args:
+        restore: an ``async def``/coroutine factory that replays the inverse
+                 mutation. Called with no args by ``POST /undo/{token}``.
+        label:   human-readable summary for logs ("invalidated 3 beliefs").
+        kind:    op category (invalidate / link / edit / delete-entity).
+
+    Returns:
+        Opaque token string.
+    """
+    token = f"undo-{uuid.uuid4().hex[:16]}"
+    _undo_store[token] = {
+        "restore": restore,
+        "label": label,
+        "kind": kind,
+        "expires_at": time.time() + _UNDO_TTL_SECONDS,
+    }
+    # LRU evict (dict preserves insertion order in Py3.7+).
+    while len(_undo_store) > _UNDO_CAP:
+        _undo_store.pop(next(iter(_undo_store)))
+    return token
+
+
+def _consume_undo(token: str) -> dict[str, Any] | None:
+    """Pop a non-expired undo entry, or None if missing/expired."""
+    entry = _undo_store.pop(token, None)
+    if entry is None:
+        return None
+    if time.time() > float(entry.get("expires_at") or 0):
+        return None
+    return entry
+
+
 def _conn() -> sqlite3.Connection:
     from kazma_core.memory.schema_v2 import ensure_primary_schema
     from kazma_core.paths import primary_memory_db
@@ -133,6 +183,38 @@ async def memory_admin_summary() -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] summary failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+# ── Undo ─────────────────────────────────────────────────────────────────
+
+
+@router.post("/api/memory/v2/undo/{token}")
+async def undo_action(token: str) -> dict[str, Any]:
+    """Replay the inverse of a recent reversible mutation (60s window).
+
+    Tokens are single-use and expire. Returns the restore closure's result.
+    """
+    entry = _consume_undo(token.strip())
+    if entry is None:
+        return {"ok": False, "error": "undo token not found or expired"}
+    try:
+        restore = entry["restore"]
+        result = await restore() if callable(restore) else None
+        logger.info(
+            "[memory_api] undo %s (%s): %s",
+            entry.get("kind"),
+            entry.get("label"),
+            "restored",
+        )
+        return {
+            "ok": True,
+            "kind": entry.get("kind"),
+            "label": entry.get("label"),
+            "result": result,
+        }
+    except Exception as exc:
+        logger.exception("[memory_api] undo %s failed", entry.get("kind"))
         return {"ok": False, "error": str(exc)[:300]}
 
 
@@ -345,11 +427,22 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
     try:
         conn = _conn()
         row = conn.execute(
-            "SELECT id, type, name FROM entities WHERE id=?", (eid,)
+            "SELECT id, type, name, aliases_json, metadata_json, is_high_stakes "
+            "FROM entities WHERE id=?",
+            (eid,),
         ).fetchone()
         if not row:
             conn.close()
             return {"ok": False, "error": "not_found"}
+        # Snapshot for undo (restore the exact row).
+        snap = {
+            "id": row["id"],
+            "type": row["type"],
+            "name": row["name"],
+            "aliases_json": row["aliases_json"] or "[]",
+            "metadata_json": row["metadata_json"] or "{}",
+            "is_high_stakes": int(row["is_high_stakes"] or 0),
+        }
         conn.execute(
             "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
             (eid, eid),
@@ -357,11 +450,38 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
         conn.execute("DELETE FROM entities WHERE id=?", (eid,))
         conn.commit()
         conn.close()
+
+        async def _restore_entity() -> dict[str, Any]:
+            c = _conn()
+            c.execute(
+                "INSERT OR IGNORE INTO entities "
+                "(id, tenant_id, type, name, aliases_json, metadata_json, is_high_stakes) "
+                "VALUES (?, 'default', ?, ?, ?, ?, ?)",
+                (
+                    snap["id"],
+                    snap["type"],
+                    snap["name"],
+                    snap["aliases_json"],
+                    snap["metadata_json"],
+                    snap["is_high_stakes"],
+                ),
+            )
+            c.commit()
+            c.close()
+            return {"restored": snap["id"]}
+
+        undo_token = register_undo(
+            _restore_entity,
+            label=f"deleted entity {eid}",
+            kind="delete-entity",
+        )
         return {
             "ok": True,
             "deleted": eid,
             "type": row["type"],
             "name": row["name"],
+            "undo_token": undo_token,
+            "receipt": {"entities_deleted": 1},
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:300]}
@@ -409,16 +529,22 @@ async def merge_entities(request: Request) -> dict[str, Any]:
             "UPDATE entities SET aliases_json=? WHERE id=?",
             (json.dumps(tgt_aliases, ensure_ascii=False), target_id),
         )
-        # Rewire beliefs (slug + display name)
+        # Rewire beliefs (slug + display name) and count how many moved so the
+        # receipt can show "N beliefs rewired" (undo is intentionally NOT
+        # offered — an identity rewrite across many beliefs is not reliably
+        # reversible; restore from a backup if needed).
+        beliefs_rewired = 0
         for old in {source_id, src["name"]}:
             if not old:
                 continue
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE beliefs SET subject=? WHERE subject=?", (target_id, old)
             )
-            conn.execute(
+            beliefs_rewired += int(cur.rowcount or 0)
+            cur = conn.execute(
                 "UPDATE beliefs SET object=? WHERE object=?", (target_id, old)
             )
+            beliefs_rewired += int(cur.rowcount or 0)
         conn.execute(
             """UPDATE entities
                SET metadata_json = json_set(
@@ -452,6 +578,11 @@ async def merge_entities(request: Request) -> dict[str, Any]:
             "source_id": source_id,
             "target_id": target_id,
             "status": "approved",
+            # No undo_token — identity rewrite is not reliably reversible.
+            "receipt": {
+                "beliefs_rewired": beliefs_rewired,
+                "note": "merge is not reversible; restore from a backup if needed",
+            },
         }
     except Exception as exc:
         logger.exception("[memory_api] merge failed")
@@ -550,6 +681,25 @@ async def link_entities(request: Request) -> dict[str, Any]:
         bid = str(result.get("belief_id") or "")
         if result.get("action") == "noop" and not bid:
             return {"ok": False, "error": "link was a no-op (blocked or empty)", "link": result}
+
+        # Register undo only when we actually created a new edge (not when the
+        # link already existed). Undo = invalidate that belief.
+        undo_token = None
+        is_new = result.get("action") != "noop" and bool(bid)
+        if is_new:
+            captured_bid = bid
+
+            async def _restore_link() -> dict[str, Any]:
+                from kazma_core.memory.hygiene import invalidate_belief
+
+                return invalidate_belief(captured_bid, remove_graph=True)
+
+            undo_token = register_undo(
+                _restore_link,
+                label=f"linked {sub_id} —{predicate}→ {obj_id}",
+                kind="link",
+            )
+
         return {
             "ok": True,
             "link": result,
@@ -558,6 +708,8 @@ async def link_entities(request: Request) -> dict[str, Any]:
             "object": obj_id,
             "belief_id": bid or None,
             "already": result.get("action") == "noop",
+            "undo_token": undo_token,
+            "receipt": {"belief_created": 1 if is_new else 0},
         }
     except Exception as exc:
         logger.exception("[memory_api] link failed")
@@ -779,6 +931,14 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
                 ),
             )
         conn.commit()
+        # Snapshot the prior triple for undo (restore in-place).
+        prior = {
+            "subject": str(row["subject"]),
+            "predicate": str(row["predicate"]),
+            "object": str(row["object"]),
+            "predicate_type": str(row["predicate_type"] or "set"),
+            "had_embedding_null": object_changed,
+        }
         conn.close()
 
         # Best-effort Neo4j edge cleanup (stale dual-write after operator edit)
@@ -794,6 +954,28 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         except Exception:
             pass
 
+        async def _restore_edit() -> dict[str, Any]:
+            c = _conn()
+            c.execute(
+                "UPDATE beliefs SET subject=?, predicate=?, object=?, predicate_type=? "
+                "WHERE id=?",
+                (
+                    prior["subject"],
+                    prior["predicate"],
+                    prior["object"],
+                    prior["predicate_type"],
+                    bid,
+                ),
+            )
+            c.commit()
+            c.close()
+            return {"restored": bid}
+
+        undo_token = register_undo(
+            _restore_edit,
+            label=f"edited belief {bid}",
+            kind="edit",
+        )
         return {
             "ok": True,
             "id": bid,
@@ -805,6 +987,8 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
                 "predicate_type": ptype,
             },
             "object_changed": object_changed,
+            "undo_token": undo_token,
+            "receipt": {"beliefs_edited": 1},
         }
     except Exception as exc:
         logger.exception("[memory_api] edit belief failed")
@@ -823,13 +1007,48 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
     from kazma_core.memory.hygiene import invalidate_belief
 
     results = []
-    ok_n = 0
+    invalidated_ids: list[str] = []
     for bid in ids[:200]:
-        r = invalidate_belief(str(bid), remove_graph=True)
+        bid_s = str(bid)
+        r = invalidate_belief(bid_s, remove_graph=True)
         results.append(r)
-        if r.get("ok"):
-            ok_n += 1
-    return {"ok": True, "invalidated": ok_n, "results": results}
+        # Track only rows we actually flipped (not idempotent "already" ones)
+        # so the undo restores exactly what this call changed.
+        if r.get("ok") and not r.get("already"):
+            invalidated_ids.append(bid_s)
+
+    undo_token = None
+    if invalidated_ids:
+        # Undo = clear the soft-invalidate timestamps so the rows are active
+        # again. Re-adds the Neo4j edge best-effort via re-link is omitted
+        # (edge re-sync happens on the next dual-write / reconsolidation).
+        captured = list(invalidated_ids)
+
+        async def _restore() -> dict[str, Any]:
+            conn = _conn()
+            placeholders = ",".join("?" for _ in captured)
+            cur = conn.execute(
+                f"UPDATE beliefs SET valid_until=NULL, invalidated_at=NULL "
+                f"WHERE id IN ({placeholders})",
+                captured,
+            )
+            conn.commit()
+            conn.close()
+            return {"restored": int(cur.rowcount or 0)}
+
+        undo_token = register_undo(
+            _restore,
+            label=f"invalidated {len(invalidated_ids)} belief(s)",
+            kind="invalidate",
+        )
+
+    return {
+        "ok": True,
+        "invalidated": len(invalidated_ids),
+        "results": results,
+        "undo_token": undo_token,
+        "receipt": {"beliefs_invalidated": len(invalidated_ids)},
+    }
 
 
 # ── Hygiene ──────────────────────────────────────────────────────────────

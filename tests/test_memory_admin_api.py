@@ -392,3 +392,125 @@ async def test_list_entities_offset_clamped(mem_db_many):
     assert out["ok"]
     assert out["offset"] == 0
     assert out["count"] == 5
+
+
+# ── Phase 1.2: action receipts + undo ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_invalidate_batch_undo_restores(mem_db_many):
+    """Invalidating beliefs then undo re-activates them."""
+    import sqlite3
+
+    from kazma_core import paths as paths_mod
+    from kazma_ui.memory_api import invalidate_batch, undo_action
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b_a", "b_b"]}
+
+    out = await invalidate_batch(Req())
+    assert out["ok"]
+    assert out["invalidated"] == 2
+    assert out["undo_token"], "undo_token must be returned"
+
+    # Confirm they are invalidated.
+    conn = sqlite3.connect(paths_mod.primary_memory_db())
+    active = conn.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE id IN ('b_a','b_b') "
+        "AND valid_until IS NULL AND invalidated_at IS NULL"
+    ).fetchone()[0]
+    conn.close()
+    assert active == 0
+
+    # Undo.
+    restored = await undo_action(out["undo_token"])
+    assert restored["ok"], f"undo failed: {restored}"
+
+    conn = sqlite3.connect(paths_mod.primary_memory_db())
+    active = conn.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE id IN ('b_a','b_b') "
+        "AND valid_until IS NULL AND invalidated_at IS NULL"
+    ).fetchone()[0]
+    conn.close()
+    assert active == 2, f"expected 2 active after undo, got {active}"
+
+
+@pytest.mark.asyncio
+async def test_link_undo_invalidates(mem_db_many):
+    """Linking two entities then undo removes the created belief."""
+    import sqlite3
+
+    from kazma_core import paths as paths_mod
+    from kazma_ui.memory_api import link_entities, undo_action
+
+    class Req:
+        async def json(self):
+            return {"subject": "ent_05", "predicate": "related_to", "object": "ent_06"}
+
+    out = await link_entities(Req())
+    assert out["ok"]
+    bid = out.get("belief_id")
+    assert bid, "link must return a belief_id"
+    assert out["undo_token"], "link must return an undo_token"
+
+    # Belief is active.
+    conn = sqlite3.connect(paths_mod.primary_memory_db())
+    active = conn.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE id=? AND valid_until IS NULL", (bid,)
+    ).fetchone()[0]
+    conn.close()
+    assert active == 1
+
+    restored = await undo_action(out["undo_token"])
+    assert restored["ok"], f"undo failed: {restored}"
+
+    # Undo invalidated the created belief.
+    conn = sqlite3.connect(paths_mod.primary_memory_db())
+    active = conn.execute(
+        "SELECT COUNT(*) FROM beliefs WHERE id=? AND valid_until IS NULL", (bid,)
+    ).fetchone()[0]
+    conn.close()
+    assert active == 0, "belief should be invalidated after undo"
+
+
+@pytest.mark.asyncio
+async def test_undo_token_single_use_and_expiry(mem_db_many):
+    """An undo token is single-use and rejects a second redemption."""
+    from kazma_ui.memory_api import invalidate_batch, undo_action
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b_c"]}
+
+    out = await invalidate_batch(Req())
+    token = out["undo_token"]
+    assert token
+
+    first = await undo_action(token)
+    assert first["ok"]
+
+    # Second use → not found (consumed).
+    second = await undo_action(token)
+    assert not second["ok"]
+    assert "expired" in second.get("error", "").lower() or "not found" in second.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_undo_expired_token_rejected(mem_db_many):
+    """An expired token (past TTL) is rejected."""
+    import time as _time
+
+    from kazma_ui import memory_api
+    from kazma_ui.memory_api import invalidate_batch, undo_action
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b_a"]}
+
+    out = await invalidate_batch(Req())
+    token = out["undo_token"]
+    # Fast-forward the stored expiry into the past.
+    memory_api._undo_store[token]["expires_at"] = _time.time() - 1
+    res = await undo_action(token)
+    assert not res["ok"]

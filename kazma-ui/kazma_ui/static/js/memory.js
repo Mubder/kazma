@@ -11,6 +11,57 @@ function memoryPage() {
     else console.log(`[${type}] ${msg}`);
   }
 
+  /** Show a toast with an inline [Undo] button that POSTs /undo/{token}.
+   *  Falls back to a plain toast if no container is present. Single-use:
+   *  the button disables itself after the first click. */
+  function undoToast(message, undoToken, { kind, duration } = {}) {
+    const container = document.querySelector('.toast-container');
+    if (!container || !undoToken) {
+      toast(message + (undoToken ? ' (undo available)' : ''), 'success');
+      return;
+    }
+    const el = document.createElement('div');
+    el.className = 'toast toast-success';
+    el.style.cssText = 'display:flex;align-items:center;gap:10px;max-width:440px;';
+    const text = document.createElement('span');
+    text.textContent = message;
+    text.style.cssText = 'flex:1;min-width:0;';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Undo';
+    btn.className = 'btn btn-sm btn-secondary';
+    btn.style.cssText = 'flex:0 0 auto;font-size:0.74rem;padding:2px 10px;';
+    let done = false;
+    btn.addEventListener('click', async () => {
+      if (done) return;
+      done = true;
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const r = await api('/api/memory/v2/undo/' + encodeURIComponent(undoToken), {
+          method: 'POST',
+        });
+        if (r && r.ok) {
+          toast('Undone: ' + (r.label || kind || 'action'), 'success');
+          // Trigger the standard post-ops refresh so lists/graph update.
+          try { window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'undo', kind } })); } catch (_) { /* */ }
+        } else {
+          toast((r && r.error) || 'Undo failed', 'error');
+        }
+      } catch (e) {
+        toast('Undo failed: ' + e, 'error');
+      } finally {
+        el.remove();
+      }
+    });
+    el.appendChild(text);
+    el.appendChild(btn);
+    container.appendChild(el);
+    // Auto-dismiss the (still-clickable) toast after the window.
+    const ms = duration || 9000;
+    setTimeout(() => { if (el.parentNode) el.remove(); }, ms);
+  }
+
   async function confirm(opts) {
     if (window.kazmaConfirm) return window.kazmaConfirm(opts);
     return window.confirm(opts.message || opts.title || "Confirm?");
@@ -438,7 +489,11 @@ function memoryPage() {
         body: JSON.stringify({ ids: this.selectedBeliefs }),
       });
       if (d.ok) {
-        toast("Invalidated " + d.invalidated, "success");
+        undoToast(
+          "Invalidated " + d.invalidated + " belief" + (d.invalidated === 1 ? "" : "s") + ".",
+          d.undo_token,
+          { kind: "invalidate" }
+        );
         await this.loadBeliefs();
         await this.loadSummary();
         await refreshGraph();
@@ -506,7 +561,7 @@ function memoryPage() {
         }
       );
       if (d.ok) {
-        toast("Belief updated", "success");
+        undoToast("Belief updated.", d.undo_token, { kind: "edit" });
         await this.loadBeliefs();
         await this.loadEntities();
         await this.loadSummary();
@@ -537,7 +592,7 @@ function memoryPage() {
         method: "DELETE",
       });
       if (d.ok) {
-        toast("Deleted " + e.id, "success");
+        undoToast("Deleted entity " + e.id + ".", d.undo_token, { kind: "delete-entity" });
         if (this.selectedEntityId === e.id) this.selectedEntityId = null;
         await this.loadEntities();
         await this.loadSummary();
@@ -634,7 +689,13 @@ function memoryPage() {
         body: JSON.stringify({ source_id: src, target_id: tgt }),
       });
       if (d.ok) {
-        toast("Merged " + src + " → " + tgt, "success");
+        // Merge is not undoable (identity rewrite) — show a detailed receipt
+        // instead so the operator sees exactly what moved.
+        const rewired = (d.receipt && d.receipt.beliefs_rewired) || 0;
+        toast(
+          "Merged " + src + " → " + tgt + ": " + rewired + " belief" + (rewired === 1 ? "" : "s") + " rewired.",
+          "success"
+        );
         this.mergeSource = "";
         this.mergeTarget = tgt;
         this.selectedEntityId = tgt;
@@ -672,7 +733,11 @@ function memoryPage() {
         body: JSON.stringify({ subject: src, predicate: pred, object: tgt }),
       });
       if (d.ok) {
-        toast("Linked " + src + " —" + pred + "→ " + tgt, "success");
+        undoToast(
+          "Linked " + src + " —" + pred + "→ " + tgt + (d.already ? " (already linked)" : "") + ".",
+          d.undo_token,
+          { kind: "link" }
+        );
         await this.loadEntities();
         await this.loadBeliefs();
         await this.loadSummary();
