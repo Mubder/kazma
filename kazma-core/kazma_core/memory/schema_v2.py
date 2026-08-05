@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS entities (
   name            TEXT NOT NULL,                             -- display label
   aliases_json    TEXT DEFAULT '[]',
   is_high_stakes  INTEGER DEFAULT 0,                         -- 1 = quarantine before merge
+  is_protected    INTEGER DEFAULT 0,                         -- 1 = operator-marked undeletable/unmergeable (F3)
   metadata_json   TEXT DEFAULT '{}'
 );
 
@@ -287,6 +288,10 @@ def ensure_primary_schema(conn: Any) -> None:
         # below; maintained on write by entity_counts.recompute_entity_counts.
         "ALTER TABLE entities ADD COLUMN belief_count INTEGER DEFAULT -1",
         "ALTER TABLE entities ADD COLUMN graph_degree INTEGER DEFAULT -1",
+        # F3: per-entity protection flag — operator-marked undeletable and
+        # unmergeable-as-source. Extends the hardcoded _PROTECTED_ENTITIES set
+        # (user/assistant/kazma/mubder) to any entity the operator chooses.
+        "ALTER TABLE entities ADD COLUMN is_protected INTEGER DEFAULT 0",
     ):
         try:
             conn.execute(col_sql)

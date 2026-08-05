@@ -650,3 +650,109 @@ def test_belief_search_falls_back_to_like_on_fts_error(tmp_path, monkeypatch):
     payload = resp.json()
     assert payload["matched_via"] == "like"
     assert any(b["id"] == "b9" for b in payload["beliefs"])
+
+
+# ── F3: per-entity protection flag + orphan warnings ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_protect_flag_blocks_delete(mem_db):
+    """An entity marked is_protected=1 cannot be deleted."""
+    from kazma_ui.memory_api import delete_entity, protect_entity
+
+    class Req:
+        async def json(self):
+            return {"protected": True}
+
+    out = await protect_entity("shipx", Req())
+    assert out["ok"] is True
+    assert out["protected"] is True
+
+    out2 = await delete_entity("shipx")
+    assert out2["ok"] is False
+    assert "protected" in str(out2.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_protect_flag_blocks_merge_source(mem_db):
+    """A protected entity cannot be used as a merge source."""
+    from kazma_ui.memory_api import merge_entities, protect_entity
+
+    class ProtReq:
+        async def json(self):
+            return {"protected": True}
+
+    await protect_entity("shipx_old", ProtReq())
+
+    class MergeReq:
+        async def json(self):
+            return {"source_id": "shipx_old", "target_id": "shipx"}
+
+    out = await merge_entities(MergeReq())
+    assert out["ok"] is False
+    assert "protected" in str(out.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_protect_toggle_unprotects_non_core(mem_db):
+    """A non-core entity can be protected then unprotected; core entities cannot."""
+    from kazma_ui.memory_api import protect_entity
+
+    class On:
+        async def json(self):
+            return {"protected": True}
+
+    class Off:
+        async def json(self):
+            return {"protected": False}
+
+    # Non-core toggles both ways.
+    assert (await protect_entity("shipx", On()))["ok"] is True
+    assert (await protect_entity("shipx", Off()))["ok"] is True
+    # Core entity (kazma) cannot be unprotected via this route.
+    res = await protect_entity("kazma", Off())
+    assert res["ok"] is False
+    assert "core" in str(res.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_batch_warns_on_orphan(mem_db):
+    """Invalidating the only belief of an entity surfaces warn_orphaned.
+
+    The `lonely` entity has exactly one belief (b1). Invalidating b1 leaves
+    `lonely` with zero live edges → warn_orphaned must include it.
+    """
+    from kazma_ui.memory_api import invalidate_batch
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b1"]}
+
+    out = await invalidate_batch(Req())
+    assert out["ok"] is True
+    assert out["invalidated"] == 1
+    assert "warn_orphaned" in out
+    # `lonely` is the subject of b1 and has no other beliefs → orphaned.
+    assert "lonely" in out["warn_orphaned"]
+
+
+@pytest.mark.asyncio
+async def test_invalidate_batch_no_warn_when_other_edges_remain(mem_db):
+    """If an entity keeps other live edges, it is NOT in warn_orphaned."""
+    from kazma_ui.memory_api import invalidate_batch, link_entities
+
+    # Give `lonely` a second belief so invalidating b1 doesn't strand it.
+    class LinkReq:
+        async def json(self):
+            return {"subject": "lonely", "predicate": "related_to", "object": "shipx"}
+
+    await link_entities(LinkReq())
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b1"]}
+
+    out = await invalidate_batch(Req())
+    assert out["ok"] is True
+    # `lonely` still has the related_to belief → not orphaned.
+    assert "lonely" not in out.get("warn_orphaned", [])
