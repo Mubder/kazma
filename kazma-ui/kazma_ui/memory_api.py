@@ -963,15 +963,35 @@ async def link_entities(request: Request) -> dict[str, Any]:
         from kazma_core.memory.schema_v2 import ensure_ops_schema
         from kazma_core.paths import memory_ops_db
 
-        # mutate_belief slugs the *subject*; keep object as the graph node id
-        # (entity id or virtual fact text) so the canvas endpoints stay stable.
-        sub_id = _entity_slug(subject)
-        obj_id = obj.strip()
-
+        # mutate_belief slugs the *subject* by default; keep object as the
+        # graph node id (entity id or virtual fact text) so the canvas
+        # endpoints stay stable. BUT when the operator clicked an existing
+        # graph node (real entity OR virtual-fact id) as the subject, slugifying
+        # it would mint a *different* entity and detach the edge from the node
+        # they clicked (the "link looks like it failed" bug). So: if the
+        # subject is already a graph node id, use it verbatim.
         primary = _conn()
         ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
         ensure_ops_schema(ops)
-        _ensure_entity_row(primary, sub_id, name=subject)
+        subject_is_node = bool(
+            primary.execute(
+                "SELECT 1 FROM entities WHERE id=? "
+                "UNION SELECT 1 FROM beliefs WHERE subject=? AND invalidated_at IS NULL AND valid_until IS NULL "
+                "UNION SELECT 1 FROM beliefs WHERE object=? AND invalidated_at IS NULL AND valid_until IS NULL "
+                "LIMIT 1",
+                (subject, subject, subject),
+            ).fetchone()
+        )
+        if subject_is_node and len(subject) <= 200:
+            # Promote: use the exact node id verbatim, and ensure a real entity
+            # row so the canvas renders it as a connected real node (not a
+            # virtual fact). The display name is the id itself when it's text.
+            sub_id = subject
+            _ensure_entity_row(primary, sub_id, name=subject)
+        else:
+            sub_id = _entity_slug(subject)
+            _ensure_entity_row(primary, sub_id, name=subject)
+        obj_id = obj.strip()
         # Ensure target shell when it looks like an entity id (graph node).
         # Long free-text objects still work as belief object without a row.
         if len(obj_id) <= 120:
@@ -983,7 +1003,7 @@ async def link_entities(request: Request) -> dict[str, Any]:
 
         result = mutate_belief(
             primary,
-            sub_id,
+            subject,
             predicate,
             obj_id,
             ops_conn=ops,
@@ -992,6 +1012,9 @@ async def link_entities(request: Request) -> dict[str, Any]:
             importance=3,
             extraction_method="user_explicit",
             tenant_id=_memory_tenant_id(),
+            # When the operator clicked an existing node, pin the subject id
+            # verbatim so the edge attaches to that node (no slug divergence).
+            subject_id=sub_id if subject_is_node else None,
         )
         ops.close()
         primary.close()
