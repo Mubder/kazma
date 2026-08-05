@@ -151,11 +151,20 @@ class SelfImprovementSkill:
         past_context = ""
         try:
             from kazma_core.memory.recall import search
+            from kazma_core.safety.prompt_fence import format_untrusted_block
 
             results = search(f"{worker_name} pipeline {task[:100]}", limit=3)
             if results:
-                past_context = "\nPast memory:\n" + "\n".join(
+                # Recalled content is untrusted (it originates from past
+                # conversation/tool output) and this prompt drives generation
+                # of a PERSISTENT Soul delta — so it must be fenced as
+                # observation data, never interpolated bare. The output-side
+                # is_override_delta guard below stays as defense-in-depth.
+                raw = "\n".join(
                     f"  [{r['source_layer']}] {r['content'][:200]}" for r in results[:3]
+                )
+                past_context = "\n" + format_untrusted_block(
+                    f"Past memory:\n{raw}", source="memory_success_patterns"
                 )
         except Exception as exc:
             logger.debug("Memory search failed: %s", exc)
@@ -232,11 +241,17 @@ Output ONLY the delta text, no preamble."""
         past_context = ""
         try:
             from kazma_core.memory.recall import search
+            from kazma_core.safety.prompt_fence import format_untrusted_block
 
             results = search(f"{worker_name} failure {task[:100]}", limit=3)
             if results:
-                past_context = "\nPast failures:\n" + "\n".join(
+                # See _analyze_success: recalled content is untrusted and feeds
+                # a persistent-delta generator, so it must be fenced.
+                raw = "\n".join(
                     f"  [{r['source_layer']}] {r['content'][:200]}" for r in results[:3]
+                )
+                past_context = "\n" + format_untrusted_block(
+                    f"Past failures:\n{raw}", source="memory_failure_patterns"
                 )
         except Exception as exc:
             logger.debug("Memory search failed: %s", exc)
