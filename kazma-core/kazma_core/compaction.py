@@ -310,11 +310,40 @@ class CompactionEngine:
         ]
 
         if memories:
-            parts.append("")
-            parts.append("## Relevant Memories")
-            for i, memory in enumerate(memories, 1):
-                content = memory.get("content", memory.get("text", str(memory)))
-                parts.append(f"{i}. {content}")
+            # Memory content is untrusted (it originates from past conversation /
+            # tool output). It is being injected into the SYSTEM prompt — the
+            # highest-trust slot — so it must be fenced and override-laden
+            # entries dropped, mirroring graph_builder._format_retrieved_memories.
+            try:
+                from kazma_core.safety.prompt_fence import (
+                    format_untrusted_block,
+                    is_override_delta,
+                )
+            except Exception:  # safety module unavailable → degrade to no filter
+                format_untrusted_block = None  # type: ignore[assignment]
+                is_override_delta = None  # type: ignore[assignment]
+
+            lines: list[str] = []
+            for memory in memories:
+                content = str(memory.get("content", memory.get("text", ""))).strip()
+                if not content:
+                    continue
+                if is_override_delta is not None and is_override_delta(content):
+                    logger.warning(
+                        "[Compaction] dropped override-laden memory from system prompt"
+                    )
+                    continue
+                if len(content) > 300:  # compaction runs under token pressure
+                    content = content[:300] + "…"
+                lines.append(f"- {content}")
+            if lines:
+                body = "## Relevant Memories\n" + "\n".join(lines)
+                parts.append("")
+                parts.append(
+                    format_untrusted_block(body, source="memory_compaction")
+                    if format_untrusted_block
+                    else body
+                )
 
         parts.append("")
         parts.append("Continue assisting the user based on this context.")
