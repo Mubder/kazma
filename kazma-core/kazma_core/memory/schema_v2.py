@@ -178,6 +178,29 @@ CREATE TABLE IF NOT EXISTS entity_merges (
 CREATE INDEX IF NOT EXISTS idx_entity_merges_status
   ON entity_merges(tenant_id, status);
 
+-- Graph groupings — operator-defined VIEW-ONLY associations for the /memory
+-- canvas. Lets the operator cluster nodes (e.g. "kazma_app belongs under
+-- kazma") and tier them (main/major/sub/leaf) for tree layout + per-tier
+-- colors WITHOUT mutating beliefs. recall/extraction NEVER read this table;
+-- it is purely advisory for the operator graph. See
+-- docs/plans/MEMORY_GRAPH_GROUPING_PLAN.md.
+CREATE TABLE IF NOT EXISTS graph_associations (
+  id            TEXT PRIMARY KEY,                       -- assoc_<uuid>
+  tenant_id     TEXT NOT NULL DEFAULT 'default',
+  group_root    TEXT NOT NULL,                          -- parent node id (entity id or virtual-fact text)
+  member        TEXT NOT NULL,                          -- grouped node id
+  member_tier   INTEGER DEFAULT 1,                      -- 0=main(hub),1=major,2=sub,3=leaf
+  label         TEXT,                                   -- optional operator note
+  created_at    REAL NOT NULL,
+  created_by    TEXT DEFAULT 'operator',
+  metadata_json TEXT DEFAULT '{}',
+  UNIQUE(tenant_id, group_root, member)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_assoc_root
+  ON graph_associations(tenant_id, group_root);
+CREATE INDEX IF NOT EXISTS idx_graph_assoc_member
+  ON graph_associations(tenant_id, member);
+
 -- Procedural memory — parametric action DAGs learned from tool execution.
 CREATE TABLE IF NOT EXISTS procedural_dags (
   id                      TEXT PRIMARY KEY,

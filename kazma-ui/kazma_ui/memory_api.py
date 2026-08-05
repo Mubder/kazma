@@ -1489,6 +1489,271 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
     }
 
 
+# ── Graph groupings (view-only associations; never touch beliefs) ────────
+# See docs/plans/MEMORY_GRAPH_GROUPING_PLAN.md. The operator clusters nodes
+# into a tiered tree (main/major/sub/leaf) for canvas layout + per-tier
+# colors. recall/extraction never read this table; it is purely advisory.
+
+
+def _group_tier_of(conn: sqlite3.Connection, node_id: str) -> int:
+    """Return the tier of a node that is already a member somewhere, or -1."""
+    row = conn.execute(
+        "SELECT member_tier FROM graph_associations WHERE member=?", (node_id,)
+    ).fetchone()
+    return int(row["member_tier"]) if row else -1
+
+
+def _group_creates_cycle(conn: sqlite3.Connection, member: str, new_root: str) -> bool:
+    """True if making `member` a child of `new_root` would create a cycle
+    (i.e. new_root is already a descendant of member, or member == new_root).
+    Walks the ancestor chain of new_root."""
+    if member == new_root:
+        return True
+    seen: set[str] = set()
+    cur = new_root
+    while cur:
+        if cur in seen:
+            return True  # pre-existing cycle (defensive)
+        seen.add(cur)
+        row = conn.execute(
+            "SELECT group_root FROM graph_associations WHERE member=?", (cur,)
+        ).fetchone()
+        cur = row["group_root"] if row else None
+        if cur == member:
+            return True
+    return False
+
+
+def _group_descendants(conn: sqlite3.Connection, root: str) -> list[str]:
+    """All transitive member ids under `root` (for subtree re-tiering)."""
+    out: list[str] = []
+    queue = [root]
+    seen: set[str] = set()
+    while queue:
+        cur = queue.pop()
+        rows = conn.execute(
+            "SELECT member FROM graph_associations WHERE group_root=?", (cur,)
+        ).fetchall()
+        for r in rows:
+            m = r["member"]
+            if m not in seen:
+                seen.add(m)
+                out.append(m)
+                queue.append(m)
+    return out
+
+
+@router.get("/api/memory/v2/graph/groups")
+async def graph_groups_list() -> dict[str, Any]:
+    """List all graph groupings (view-only associations) for the active tenant."""
+    try:
+        conn = _conn()
+        tid = _memory_tenant_id()
+        rows = [
+            dict(r) for r in conn.execute(
+                "SELECT id, group_root, member, member_tier, label "
+                "FROM graph_associations WHERE tenant_id=? "
+                "ORDER BY group_root, member_tier, member",
+                (tid,),
+            ).fetchall()
+        ]
+        conn.close()
+        return {"ok": True, "groups": rows, "count": len(rows)}
+    except Exception as exc:
+        logger.exception("[memory_api] graph groups list failed")
+        return {"ok": False, "error": str(exc)[:300], "groups": []}
+
+
+@router.post("/api/memory/v2/graph/groups")
+async def graph_groups_create(request: Request) -> dict[str, Any]:
+    """Create a view-only grouping: member under group_root, tier defaults to
+    parent_tier + 1. Never touches beliefs. Rejects cycles.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON"}
+    body = body or {}
+    root = str(body.get("group_root") or "").strip()
+    member = str(body.get("member") or "").strip()
+    if not root or not member:
+        return {"ok": False, "error": "group_root and member required"}
+    if root == member:
+        return {"ok": False, "error": "group_root and member must differ"}
+    label = str(body.get("label") or "").strip() or None
+    try:
+        conn = _conn()
+        if _group_creates_cycle(conn, member, root):
+            conn.close()
+            return {"ok": False, "error": "cycle: member is an ancestor of group_root"}
+        # Existing membership? Update in place (move within same root / re-tier).
+        existing = conn.execute(
+            "SELECT id FROM graph_associations WHERE member=?", (member,)
+        ).fetchone()
+        # Derive tier: explicit override > parent's tier + 1 > default 1.
+        parent_tier = _group_tier_of(conn, root)
+        explicit_tier = body.get("tier")
+        if explicit_tier is not None:
+            tier = int(explicit_tier)
+        elif parent_tier >= 0:
+            tier = parent_tier + 1
+        else:
+            tier = 1
+        tier = max(0, min(tier, 4))  # soft cap
+        gid = existing["id"] if existing else f"assoc_{uuid.uuid4().hex[:16]}"
+        now = time.time()
+        conn.execute(
+            """INSERT INTO graph_associations
+               (id, tenant_id, group_root, member, member_tier, label, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'operator')
+               ON CONFLICT(tenant_id, group_root, member) DO UPDATE SET
+                 member_tier=excluded.member_tier, label=excluded.label""",
+            (gid, _memory_tenant_id(), root, member, tier, label, now),
+        )
+        conn.commit()
+        conn.close()
+        return {"ok": True, "id": gid, "group_root": root, "member": member,
+                "member_tier": tier, "memory_affected": False}
+    except Exception as exc:
+        logger.exception("[memory_api] graph group create failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+@router.delete("/api/memory/v2/graph/groups/{group_id}")
+async def graph_groups_delete(group_id: str) -> dict[str, Any]:
+    """Remove a view-only grouping. The member's children (if any) become
+    ungrouped. Never touches beliefs."""
+    gid = (group_id or "").strip()
+    if not gid:
+        return {"ok": False, "error": "group_id required"}
+    try:
+        conn = _conn()
+        row = conn.execute(
+            "SELECT member FROM graph_associations WHERE id=?", (gid,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            return {"ok": False, "error": "not_found"}
+        cur = conn.execute("DELETE FROM graph_associations WHERE id=?", (gid,))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "id": gid, "removed": int(cur.rowcount or 0),
+                "memory_affected": False}
+    except Exception as exc:
+        logger.exception("[memory_api] graph group delete failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+@router.post("/api/memory/v2/graph/groups/member/{member_id}/move")
+async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
+    """Move a member (and re-tier its subtree) to a new group root. Atomic.
+    Never touches beliefs."""
+    member = (member_id or "").strip()
+    if not member:
+        return {"ok": False, "error": "member_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    new_root = str((body or {}).get("new_root") or "").strip()
+    if not new_root:
+        return {"ok": False, "error": "new_root required"}
+    if new_root == member:
+        return {"ok": False, "error": "new_root must differ from member"}
+    try:
+        conn = _conn()
+        if _group_creates_cycle(conn, member, new_root):
+            conn.close()
+            return {"ok": False, "error": "cycle: member is an ancestor of new_root"}
+        # Capture the member's old tier + its subtree (member + descendants),
+        # so we can shift them by the delta after the move.
+        old_row = conn.execute(
+            "SELECT member_tier FROM graph_associations WHERE member=?", (member,)
+        ).fetchone()
+        old_tier = int(old_row["member_tier"]) if old_row else 1
+        subtree = [member] + _group_descendants(conn, member)
+        # New tier for the moved member.
+        parent_tier = _group_tier_of(conn, new_root)
+        explicit = body.get("tier")
+        new_tier = int(explicit) if explicit is not None else (
+            parent_tier + 1 if parent_tier >= 0 else 1
+        )
+        new_tier = max(0, min(new_tier, 4))
+        delta = new_tier - old_tier
+        tid = _memory_tenant_id()
+        now = time.time()
+        # Upsert the member's new root + tier.
+        conn.execute(
+            """INSERT INTO graph_associations
+               (id, tenant_id, group_root, member, member_tier, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, 'operator')
+               ON CONFLICT(tenant_id, group_root, member) DO UPDATE SET
+                 member_tier=excluded.member_tier""",
+            (f"assoc_{uuid.uuid4().hex[:16]}", tid, new_root, member, new_tier, now),
+        )
+        # But the member may have had a different root — delete the old edge.
+        conn.execute(
+            "DELETE FROM graph_associations WHERE member=? AND group_root!=?",
+            (member, new_root),
+        )
+        # Re-tier descendants by the same delta (keep relative depth).
+        if delta != 0:
+            for desc in subtree:
+                if desc == member:
+                    continue
+                row = conn.execute(
+                    "SELECT member_tier FROM graph_associations WHERE member=?", (desc,)
+                ).fetchone()
+                if row:
+                    conn.execute(
+                        "UPDATE graph_associations SET member_tier=? WHERE member=?",
+                        (max(0, min(int(row["member_tier"]) + delta, 4)), desc),
+                    )
+        conn.commit()
+        conn.close()
+        return {"ok": True, "member": member, "new_root": new_root,
+                "new_tier": new_tier, "subtree_retiered": len(subtree) - 1,
+                "memory_affected": False}
+    except Exception as exc:
+        logger.exception("[memory_api] graph group move failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+@router.post("/api/memory/v2/graph/groups/node/{node_id}/tier")
+async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any]:
+    """Manually override a node's tier (for when parent+1 is wrong). Never
+    touches beliefs."""
+    node = (node_id or "").strip()
+    if not node:
+        return {"ok": False, "error": "node_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    tier = body.get("tier")
+    if tier is None:
+        return {"ok": False, "error": "tier required"}
+    try:
+        tier = max(0, min(int(tier), 4))
+    except Exception:
+        return {"ok": False, "error": "tier must be an integer 0-4"}
+    try:
+        conn = _conn()
+        cur = conn.execute(
+            "UPDATE graph_associations SET member_tier=? WHERE member=?",
+            (tier, node),
+        )
+        conn.commit()
+        conn.close()
+        if cur.rowcount == 0:
+            return {"ok": False, "error": "node is not a grouped member"}
+        return {"ok": True, "member": node, "member_tier": tier,
+                "memory_affected": False}
+    except Exception as exc:
+        logger.exception("[memory_api] graph group set tier failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 # ── Hygiene ──────────────────────────────────────────────────────────────
 
 
