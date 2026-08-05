@@ -73,7 +73,12 @@ def memory_server(tmp_path_factory):
 
 
 def test_memory_page_loads_and_renders(memory_server: str) -> None:
-    """The /memory page mounts: console, graph canvas, and ops tabs are present."""
+    """The /memory page mounts: console, graph canvas, and ops tabs are present.
+
+    Also asserts the graph actually loaded the seeded belief (the empty-state
+    is hidden) — this is the parity check that catches a broken _v2gLoad /
+    module-load failure that leaves the canvas blank with data present.
+    """
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -89,6 +94,16 @@ def test_memory_page_loads_and_renders(memory_server: str) -> None:
             page.wait_for_selector("#mem-tab-beliefs", timeout=5000)
             page.wait_for_selector("#mem-tab-merges", timeout=5000)
             page.wait_for_selector("#mem-tab-hygiene", timeout=5000)
+
+            # The seeded belief must have loaded into the graph — the empty-state
+            # (#v2g-empty) is display:none when nodes are present. This is the
+            # assertion that would have caught the _v2gWireControls-undefined bug
+            # (graph code threw silently → _v2gLoad never ran → canvas stayed empty).
+            page.wait_for_function(
+                "() => { const el = document.getElementById('v2g-empty'); "
+                "return el && el.style.display === 'none'; }",
+                timeout=10000,
+            )
         finally:
             browser.close()
 
