@@ -441,7 +441,7 @@
 
 {% block scripts %}
 <script src="/static/js/memory.js?v={{ js_version() }}"></script>
-<script src="/static/js/memory_console.js?v={{ js_version() }}"></script>
+<script type="module" src="/static/js/memory/boot.js?v={{ js_version() }}"></script>
 <script>
   // Deep-link: /memory#hygiene or #console
   (function () {
