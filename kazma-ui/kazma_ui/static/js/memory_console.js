@@ -2084,6 +2084,9 @@
           ? 'Merge mode: click the target (survivor)…'
           : 'Merge mode: click the source (will be retired)…';
         hint.style.color = 'var(--warning,#f59e0b)';
+      } else if (_v2gOps.mode === 'repoint') {
+        hint.textContent = 'Move mode: click the new endpoint node… (Clear to cancel)';
+        hint.style.color = 'var(--accent,#22d3ee)';
       } else if (_v2gOps.sourceId && _v2gOps.targetId) {
         hint.textContent = 'Ready — press Link or Merge, or click an edge to edit/unlink.';
         hint.style.color = 'var(--text-secondary)';
@@ -2129,6 +2132,7 @@
     _v2gOps.sourceId = null;
     _v2gOps.targetId = null;
     _v2gOps.mode = null;
+    _v2gOps.repoint = null;  // F1: cancel any pending move
     if (!opts.keepEdge) _v2gOps.selectedEdgeIdx = -1;
     _v2gBroadcastSlots();
   }
@@ -2555,6 +2559,67 @@
     }
   }
 
+  // F1: repoint (move) a belief's subject or object to a different node.
+  // Flow: click "Move" on an edge → choose which side (subject/object) →
+  // enter pick mode → click the new endpoint node → POST /repoint. Replaces
+  // the destructive cut+relink two-step that left nodes adrift.
+  function _v2gRepointBelief(beliefId, seed) {
+    seed = seed || {};
+    if (!beliefId) { _v2gToast('No belief id — cannot move', 'error'); return false; }
+    var subj = seed.subject || '';
+    var obj = seed.object || '';
+    var fromId = _v2gSelectedId;
+    // Ask which endpoint to move. Default to the non-selected endpoint so the
+    // most common case (move the OTHER end away from the inspected node) is
+    // one click.
+    _v2gConfirm({
+      title: 'Move which end of the edge?',
+      message: 'Subject = ' + _v2gShortId(subj) + ' · Object = ' + _v2gShortId(obj)
+        + '. Pick the end to move to another node.',
+      confirmText: 'Move subject',
+      cancelText: 'Move object',
+    }).then(function (moveSubject) {
+      _v2gOps.mode = 'repoint';
+      _v2gOps.repoint = { beliefId: beliefId, side: moveSubject ? 'subject' : 'object' };
+      _v2gSyncOpsBar();
+      _v2gToast('Click the new endpoint node…', 'info');
+    });
+    return true;
+  }
+
+  async function _v2gDoRepoint(beliefId, side, newEndpoint) {
+    try {
+      var payload = {};
+      payload[side] = newEndpoint;
+      var data = await _v2gApiJson('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId) + '/repoint', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (!data.ok) {
+        _v2gToast(data.error || 'Move failed', 'error');
+        return false;
+      }
+      var warn = data.warn_orphaned && data.warn_orphaned.length
+        ? ' · stranded: ' + data.warn_orphaned.join(', ')
+        : '';
+      _v2gToast('Moved edge to ' + _v2gShortId(newEndpoint) + (data.undo_token ? ' · Undo' : '') + warn, 'success');
+      _v2gOps.mode = null;
+      _v2gOps.repoint = null;
+      _v2gSyncOpsBar();
+      await _v2gReloadGraph();
+      _v2gSelectEntity(newEndpoint, { notify: false });
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
+          detail: { op: 'repoint', beliefId: beliefId, side: side, endpoint: newEndpoint },
+        }));
+      } catch (e) { /* ignore */ }
+      return true;
+    } catch (err) {
+      _v2gToast('Move failed', 'error');
+      return false;
+    }
+  }
+
   async function _v2gDeleteEntity(id) {
     if (!id || id === 'user') {
       _v2gToast('Cannot delete protected hub', 'error');
@@ -2594,6 +2659,18 @@
   function _v2gHandleNodePick(p) {
     if (!p || p.isEpisode) return false;
     if (!_v2gOps.mode) return false;
+    // F1: repoint mode consumes a single node click as the new endpoint.
+    if (_v2gOps.mode === 'repoint') {
+      var rp = _v2gOps.repoint || {};
+      if (!rp.beliefId || !rp.side) { _v2gOps.mode = null; _v2gSyncOpsBar(); return true; }
+      if (p.id === _v2gSelectedId) { _v2gToast('Pick a different node', 'info'); return true; }
+      var beliefId = rp.beliefId, side = rp.side, endpoint = p.id;
+      _v2gOps.mode = null;
+      _v2gOps.repoint = null;
+      _v2gSyncOpsBar();
+      _v2gDoRepoint(beliefId, side, endpoint);
+      return true;
+    }
     if (!_v2gOps.sourceId) {
       _v2gSetSlot('source', p.id);
       _v2gSyncOpsBar();
@@ -2993,6 +3070,7 @@
         html += '<div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">';
         html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="cut" data-edge-idx="' + row.idx + '" style="font-size:0.62rem;padding:2px 8px;" title="Cut this edge only">Cut</button>';
         html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Edit</button>';
+        html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="move" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;" title="Move this edge to another node (repoint)">Move</button>';
         html += '</div></div></div>';
       }
       html += '</div>';
@@ -3075,6 +3153,8 @@
         var seed = _v2gEdgeSeed(ed);
         if (act === 'edit') {
           _v2gEditBeliefById(ed.beliefId, seed);
+        } else if (act === 'move') {
+          _v2gRepointBelief(ed.beliefId, seed);
         } else if (act === 'cut' || act === 'unlink') {
           _v2gUnlinkBelief(ed.beliefId, seed).then(function(ok) {
             if (ok) {
@@ -3913,6 +3993,8 @@
   window._v2gCutHubLinks = _v2gCutHubLinks;
   window._v2gCutEdges = _v2gCutEdges;
   window._v2gEditBeliefById = _v2gEditBeliefById;
+  // F1: move (repoint) a belief endpoint to another node by clicking.
+  window._v2gRepointBelief = _v2gRepointBelief;
 
   try {
     _v2gRenderFilters();

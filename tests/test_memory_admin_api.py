@@ -758,6 +758,94 @@ async def test_invalidate_batch_no_warn_when_other_edges_remain(mem_db):
     assert "lonely" not in out.get("warn_orphaned", [])
 
 
+# ── F1: repoint (move) a belief endpoint ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_repoint_moves_subject_in_place(mem_db):
+    """POST /beliefs/{id}/repoint moves the subject to a new entity, keeps
+    the predicate, recomputes counts, and is undoable.
+    """
+    from kazma_ui.memory_api import repoint_belief
+
+    # The fixture's belief b1 is: lonely --description--> 'orphan node'.
+    # Move its subject to shipx_old.
+    class Req:
+        async def json(self):
+            return {"subject": "shipx_old"}
+
+    out = await repoint_belief("b1", Req())
+    assert out["ok"] is True
+    assert out.get("op") == "repoint"
+    # An undo token should be present (delegated from edit_belief).
+    assert out.get("undo_token"), "repoint should be undoable"
+
+    # Verify the belief row actually moved in the DB.
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    c.row_factory = sqlite3.Row
+    row = c.execute(
+        "SELECT subject, predicate, object FROM beliefs WHERE id='b1'"
+    ).fetchone()
+    c.close()
+    assert row["subject"] == "shipx_old", f"subject not moved: {row['subject']}"
+    assert row["predicate"] == "description", "predicate must be preserved"
+    assert row["object"] == "orphan node", "object must be unchanged"
+
+
+@pytest.mark.asyncio
+async def test_repoint_rejects_predicate_change(mem_db):
+    """repoint is endpoint-only; passing predicate is rejected."""
+    from kazma_ui.memory_api import repoint_belief
+
+    class Req:
+        async def json(self):
+            return {"subject": "shipx_old", "predicate": "renamed"}
+
+    out = await repoint_belief("b1", Req())
+    assert out["ok"] is False
+    assert "endpoint-only" in str(out.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_repoint_requires_an_endpoint(mem_db):
+    """repoint with neither subject nor object is rejected."""
+    from kazma_ui.memory_api import repoint_belief
+
+    class Req:
+        async def json(self):
+            return {}
+
+    out = await repoint_belief("b1", Req())
+    assert out["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_repoint_undo_restores(mem_db):
+    """Undoing a repoint restores the original subject."""
+    from kazma_ui.memory_api import repoint_belief, undo_action
+
+    class Req:
+        async def json(self):
+            return {"subject": "shipx_old"}
+
+    out = await repoint_belief("b1", Req())
+    token = out.get("undo_token")
+    assert token
+
+    restored = await undo_action(token)
+    assert restored.get("ok") is True
+
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    c.row_factory = sqlite3.Row
+    row = c.execute("SELECT subject FROM beliefs WHERE id='b1'").fetchone()
+    c.close()
+    assert row["subject"] == "lonely", "undo did not restore original subject"
+
+
 # ── F4: vocab route (chip source) ─────────────────────────────────────────
 
 

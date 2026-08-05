@@ -1334,6 +1334,69 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+@router.post("/api/memory/v2/beliefs/{belief_id}/repoint")
+async def repoint_belief(belief_id: str, request: Request) -> dict[str, Any]:
+    """F1: move a single belief's subject and/or object endpoint in place.
+
+    This is the "move one connection" action the graph was missing — the
+    alternative was destructive cut+relink (two calls, node adrift between
+    them). Repoint delegates to edit_belief with only subject/object, so it
+    inherits the in-place UPDATE, count recompute for old+new endpoints,
+    Neo4j cleanup, the active-only guard, and the 60s undo token. The
+    predicate is preserved (repoint is an endpoint move, not a relation
+    change — use PATCH for predicate/type edits).
+    """
+    bid = (belief_id or "").strip()
+    if not bid:
+        return {"ok": False, "error": "belief_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON"}
+    body = body or {}
+    new_subject = str(body.get("subject") or "").strip() or None
+    new_object = str(body.get("object") or "").strip() or None
+    if not new_subject and not new_object:
+        return {"ok": False, "error": "provide subject and/or object to repoint"}
+    # Reject predicate/type here — repoint is endpoint-only. If the operator
+    # wants to change the relation, PATCH /beliefs/{id} is the right surface.
+    if body.get("predicate") is not None or body.get("predicate_type") is not None:
+        return {"ok": False, "error": "repoint is endpoint-only; use PATCH for predicate/type"}
+
+    # Build the edit_belief body (subject/object only; predicate/type absent
+    # so edit_belief keeps the existing values) and delegate. The request body
+    # is re-serialized so edit_belief's `await request.json()` sees our shape.
+
+    class _Req:
+        def __init__(self, payload):
+            self._payload = payload
+
+        async def json(self):
+            return self._payload
+
+    payload: dict[str, Any] = {}
+    if new_subject:
+        payload["subject"] = new_subject
+    if new_object:
+        payload["object"] = new_object
+    result = await edit_belief(bid, _Req(payload))
+    # Tag the result so the UI can distinguish a repoint from a generic edit
+    # (e.g. for the toast wording). edit_belief returns its own shape; we only
+    # add the op label if the call succeeded.
+    if isinstance(result, dict) and result.get("ok"):
+        result["op"] = "repoint"
+        # F3: surface orphan warning for the OLD subject if it lost its last edge.
+        try:
+            conn = _conn()
+            warn = _would_orphan(conn, [bid])
+            conn.close()
+            if warn:
+                result["warn_orphaned"] = warn
+        except Exception:
+            logger.debug("[memory_api] repoint orphan warning failed", exc_info=True)
+    return result
+
+
 @router.post("/api/memory/v2/beliefs/invalidate-batch")
 async def invalidate_batch(request: Request) -> dict[str, Any]:
     try:
