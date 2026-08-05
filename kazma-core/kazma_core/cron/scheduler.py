@@ -61,6 +61,12 @@ class ScheduledJob:
     next_run: str | None = None
     last_result: str | None = None
     tenant_id: str = "default"
+    # Platform-prefixed delivery target (e.g. "telegram:<chat_id>") captured at
+    # schedule time so `_deliver` can route the result back to the originating
+    # chat long after the SessionStore row has been TTL-evicted (5-min default).
+    # Empty for legacy rows scheduled before this field existed; `_deliver`
+    # falls back to the thread_id in that case.
+    delivery_target: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +80,7 @@ class ScheduledJob:
             "next_run": self.next_run,
             "last_result": self.last_result[:200] if self.last_result else None,
             "tenant_id": self.tenant_id,
+            "delivery_target": self.delivery_target,
         }
 
 
@@ -183,6 +190,15 @@ class SQLiteCronStore:
             await self._db.commit()
         except Exception:
             pass  # column already exists
+        # Idempotent delivery_target column for direct result routing
+        # (the chat a reminder was scheduled from). Empty for legacy rows.
+        try:
+            await self._db.execute(
+                "ALTER TABLE cron_jobs ADD COLUMN delivery_target TEXT NOT NULL DEFAULT ''"
+            )
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
         await self._db.commit()
         logger.info("[CronStore] Initialized at %s", self._db_path)
 
@@ -192,10 +208,11 @@ class SQLiteCronStore:
             raise RuntimeError("CronDB not initialized")
         await self._db.execute(
             "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, "
-            "status, created_at, next_run, tenant_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, created_at, next_run, tenant_id, delivery_target) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job.job_id, job.timing, job.prompt, job.platform, job.thread_id,
-             job.status.value, job.created_at, job.next_run, job.tenant_id),
+             job.status.value, job.created_at, job.next_run, job.tenant_id,
+             job.delivery_target),
         )
         await self._db.commit()
 
@@ -203,6 +220,9 @@ class SQLiteCronStore:
         tenant = "default"
         if len(row) > 9 and row[9] is not None:
             tenant = str(row[9])
+        delivery_target = ""
+        if len(row) > 10 and row[10] is not None:
+            delivery_target = str(row[10])
         return ScheduledJob(
             job_id=row[0],
             timing=row[1],
@@ -214,6 +234,7 @@ class SQLiteCronStore:
             next_run=row[7],
             last_result=row[8],
             tenant_id=tenant,
+            delivery_target=delivery_target,
         )
 
     async def list_active(self) -> list[ScheduledJob]:
@@ -222,7 +243,7 @@ class SQLiteCronStore:
             raise RuntimeError("CronDB not initialized")
         async with self._db.execute(
             "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-            "next_run, last_result, tenant_id "
+            "next_run, last_result, tenant_id, delivery_target "
             "FROM cron_jobs WHERE status IN ('pending', 'running')"
         ) as cursor:
             jobs = []
@@ -237,14 +258,14 @@ class SQLiteCronStore:
         if tenant_id:
             sql = (
                 "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-                "next_run, last_result, tenant_id "
+                "next_run, last_result, tenant_id, delivery_target "
                 "FROM cron_jobs WHERE tenant_id = ? ORDER BY created_at DESC"
             )
             args: tuple[Any, ...] = (tenant_id,)
         else:
             sql = (
                 "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-                "next_run, last_result, tenant_id "
+                "next_run, last_result, tenant_id, delivery_target "
                 "FROM cron_jobs ORDER BY created_at DESC"
             )
             args = ()
@@ -392,6 +413,7 @@ class CronScheduler:
         prompt: str,
         platform: str = "telegram",
         thread_id: str = "",
+        delivery_target: str = "",
     ) -> dict[str, Any]:
         """Schedule a new task.
 
@@ -400,6 +422,11 @@ class CronScheduler:
             prompt:   Self-contained task description.
             platform: Delivery platform (default "telegram").
             thread_id: Parent thread for context.
+            delivery_target: Platform-prefixed target (e.g. "telegram:12345")
+                captured at schedule time so the result reaches the chat that
+                asked for the reminder. Survives the long gap between schedule
+                and fire, which the SessionStore row does not (5-min TTL).
+                Empty → ``_deliver`` falls back to ``thread_id``.
 
         Returns:
             Dict with job_id, timing, next_run.
@@ -419,13 +446,15 @@ class CronScheduler:
             thread_id=thread_id,
             next_run=next_run.isoformat(),
             tenant_id=tid,
+            delivery_target=delivery_target,
         )
         await self._store.insert(job)
         logger.info(
-            "[CronScheduler] Scheduled %s for %s tenant=%s",
+            "[CronScheduler] Scheduled %s for %s tenant=%s target=%s",
             job.job_id,
             job.next_run,
             tid,
+            delivery_target or "(none)",
         )
         return {
             "job_id": job.job_id,
@@ -433,6 +462,7 @@ class CronScheduler:
             "next_run": job.next_run,
             "status": "scheduled",
             "tenant_id": tid,
+            "delivery_target": delivery_target,
         }
 
     async def list_jobs(self) -> list[dict[str, Any]]:
@@ -570,11 +600,19 @@ class CronScheduler:
             self._in_flight.discard(job.job_id)
 
     async def _deliver(self, job: ScheduledJob, text: str) -> None:
-        """Send result to the user via the original platform."""
+        """Send result to the user via the original platform.
+
+        Preference order for the delivery target:
+            1. ``job.delivery_target`` — the platform-prefixed chat id captured
+               at schedule time (robust against SessionStore TTL eviction).
+            2. ``job.thread_id`` — legacy fallback for rows scheduled before
+               the ``delivery_target`` column existed.
+            3. ``"{platform}:unknown"`` — last resort.
+        """
         try:
             from kazma_core.tools.send_message import send_message
 
-            target_id = job.thread_id or f"{job.platform}:unknown"
+            target_id = job.delivery_target or job.thread_id or f"{job.platform}:unknown"
             await send_message(target_id, text, backend=job.platform)
         except Exception as exc:
             logger.warning("[CronScheduler] Failed to deliver result for %s: %s", job.job_id, exc)

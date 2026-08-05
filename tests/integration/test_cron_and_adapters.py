@@ -97,6 +97,152 @@ class TestCronFires:
         await store.close()
 
 
+# ── #4: delivery_target is captured, persisted, and used by _deliver ────
+
+
+class _StubGraph2:
+    """Compiled-graph stand-in whose reply echoes the prompt."""
+
+    async def ainvoke(self, state, config=None):
+        msgs = list(state.get("messages", []))
+        user = ""
+        for m in reversed(msgs):
+            if isinstance(m, dict) and m.get("role") == "user":
+                user = str(m.get("content", ""))
+                break
+        msgs.append({"role": "assistant", "content": f"done: {user}"})
+        return {"messages": msgs}
+
+
+class TestCronDeliveryTarget:
+    """delivery_target routes results back to the originating chat."""
+
+    async def test_delivery_target_persisted_and_used(self, tmp_path, monkeypatch) -> None:
+        """A job scheduled with delivery_target delivers to that target."""
+        store = SQLiteCronStore(db_path=str(tmp_path / "cron.db"))
+        await store.init()
+
+        delivered: list[tuple[str, str]] = []
+        # NOTE: `kazma_core.tools.__init__` re-exports `send_message`, so the
+        # name `kazma_core.tools.send_message` can resolve to the *function*
+        # rather than the module. Reach the real module via sys.modules so the
+        # patch is visible to _deliver's lazy `from ... import send_message`.
+        import sys
+        import kazma_core.tools.send_message  # noqa: F401 — ensure module loaded
+
+        sm_mod = sys.modules["kazma_core.tools.send_message"]
+
+        async def stub_send(target_id, text, *, backend="telegram"):
+            delivered.append((target_id, text))
+            return f"sent:{target_id}"
+
+        monkeypatch.setattr(sm_mod, "send_message", stub_send, raising=False)
+
+        scheduler = CronScheduler(
+            store=store,
+            graph_builder=lambda: _StubGraph2(),
+            poll_interval=0.05,
+        )
+
+        info = await scheduler.schedule(
+            timing="0m",
+            prompt="ping",
+            platform="telegram",
+            delivery_target="telegram:12345",
+        )
+        job_id = info["job_id"]
+        assert info["delivery_target"] == "telegram:12345"
+
+        # delivery_target persisted on the job row.
+        jobs = {j.job_id: j for j in await store.list_all()}
+        assert jobs[job_id].delivery_target == "telegram:12345"
+
+        await scheduler.start()
+        try:
+            # _deliver runs AFTER update_status(DONE), so poll for delivery
+            # (not just DONE) to avoid a race that exits before _deliver fires.
+            for _ in range(100):
+                if delivered:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            await scheduler.stop()
+
+        assert delivered, "no delivery was made"
+        assert delivered[0][0] == "telegram:12345", f"wrong target: {delivered[0][0]}"
+        await store.close()
+
+    async def test_empty_delivery_target_falls_back(self, tmp_path, monkeypatch) -> None:
+        """Legacy jobs with empty delivery_target fall back to thread_id."""
+        store = SQLiteCronStore(db_path=str(tmp_path / "cron.db"))
+        await store.init()
+
+        delivered: list[str] = []
+        import sys
+        import kazma_core.tools.send_message  # noqa: F401 — ensure module loaded
+
+        sm_mod = sys.modules["kazma_core.tools.send_message"]
+
+        async def stub_send(target_id, text, *, backend="telegram"):
+            delivered.append(target_id)
+            return f"sent:{target_id}"
+
+        monkeypatch.setattr(sm_mod, "send_message", stub_send, raising=False)
+
+        scheduler = CronScheduler(
+            store=store,
+            graph_builder=lambda: _StubGraph2(),
+            poll_interval=0.05,
+        )
+        # No delivery_target → legacy behavior.
+        info = await scheduler.schedule(
+            timing="0m", prompt="ping", platform="telegram", thread_id="gw-telegram-1",
+        )
+        job_id = info["job_id"]
+
+        await scheduler.start()
+        try:
+            # _deliver runs AFTER update_status(DONE); poll for delivery.
+            for _ in range(100):
+                if delivered:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            await scheduler.stop()
+
+        # Empty delivery_target → _deliver uses thread_id as the target.
+        assert delivered and delivered[0] == "gw-telegram-1"
+        await store.close()
+
+    async def test_delivery_target_column_migration(self, tmp_path) -> None:
+        """An existing cron.db without delivery_target gets the column added."""
+        import aiosqlite
+
+        db_path = str(tmp_path / "legacy.db")
+        # Build a legacy schema WITHOUT the delivery_target column.
+        async with aiosqlite.connect(db_path) as conn:
+            await conn.execute(
+                "CREATE TABLE cron_jobs (job_id TEXT PRIMARY KEY, timing TEXT, "
+                "prompt TEXT, platform TEXT, thread_id TEXT, status TEXT, "
+                "created_at TEXT, next_run TEXT, last_result TEXT, tenant_id TEXT)"
+            )
+            await conn.execute(
+                "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, "
+                "status) VALUES ('legacy-1', '5m', 'x', 'telegram', 't', 'pending')"
+            )
+            await conn.commit()
+
+        # init() runs the idempotent ALTER — must not raise.
+        store = SQLiteCronStore(db_path=db_path)
+        await store.init()
+        jobs = await store.list_all()
+        assert len(jobs) == 1
+        # Legacy row defaults to empty delivery_target, not an error.
+        assert jobs[0].delivery_target == ""
+        assert jobs[0].job_id == "legacy-1"
+        await store.close()
+
+
 # ── #2: adapter receive loops start with websockets present ──────────────
 
 

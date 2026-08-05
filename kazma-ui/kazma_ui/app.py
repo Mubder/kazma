@@ -886,13 +886,25 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.cron.scheduler import CronScheduler, SQLiteCronStore, set_cron_scheduler
 
+                # Graph builder for scheduled-job execution. Uses the agent's
+                # one-shot child graph (checkpointer=None) — correct for a
+                # fire-and-deliver cron job. Mirrors the _sub_graph_builder
+                # closure above. Without this, _execute() raises
+                # "No graph builder configured" the moment a job fires.
+                def _cron_graph_builder(**_kwargs: Any) -> Any:
+                    agent = self.agent
+                    if agent is not None and hasattr(agent, "build_child_graph"):
+                        return agent.build_child_graph()
+                    return agent.get_streaming_graph()
+
                 self.cron_store = SQLiteCronStore("kazma-data/cron.db")
                 self.cron_scheduler = CronScheduler(
                     store=self.cron_store,
+                    graph_builder=_cron_graph_builder,
                     poll_interval=30.0,
                 )
                 set_cron_scheduler(self.cron_scheduler)
-                logger.info("[Cron] Scheduler initialized")
+                logger.info("[Cron] Scheduler initialized (graph_builder wired)")
             except Exception as e:
                 logger.warning("[Cron] Scheduler not available: %s", e)
                 self.cron_store = None

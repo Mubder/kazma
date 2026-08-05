@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## Unreleased — Cron/reminder fix: graph builder + delivery target (2026-08-05)
+
+- **Root cause (crash):** `KazmaAppBuilder` constructed `CronScheduler(store=…,
+  poll_interval=…)` with **no `graph_builder=`**, so the moment a scheduled job
+  fired, `_execute()` raised `RuntimeError("No graph builder configured")` and
+  the job went `failed`. Every reminder silently crashed on fire (verified on
+  the WSL production instance: jobs `cron-1e2c764d`, `cron-778e592e`).
+- **Root cause (silent delivery):** the `schedule_task` skill called
+  `scheduler.schedule(timing, prompt)` with no delivery target, so `_deliver()`
+  resolved `target_id = "telegram:unknown"` and nothing reached the chat. The
+  obvious fire-time SessionStore lookup is unreliable: sessions are TTL-evicted
+  after 5 min of inactivity (`agent_handler/graph.py:_session_ttl_seconds=300`,
+  evicted on every inbound message), so any reminder >5 min out would miss.
+- **Fix (crash):** wire a `graph_builder=` closure at the `CronScheduler`
+  construction site (`app.py`) that returns the agent's one-shot
+  `build_child_graph()` (checkpointer=None) — semantically correct for a
+  fire-and-deliver job. Mirrors the existing sub-agent graph-builder closure.
+- **Fix (delivery):** capture the platform-prefixed delivery target
+  (`telegram:<chat_id>`) **at schedule time** onto the job, so it survives the
+  schedule→fire gap independently of the SessionStore.
+  - New ContextVar `_current_delivery_target` (`tools/send_message.py`), bound
+    at two layers like `_current_thread_id`: best-effort at the gateway handler
+    entry, authoritatively in the tool-worker node from the `_gateway` routing
+    block (transport-layer ContextVars do not reliably cross into node exec).
+  - `_gateway` block gains `delivery_target` (`agent_handler/store.py`); the
+    platform-isolation invariant (AGENTS.md §2) is preserved — `chat_id` still
+    never enters graph state as a top-level key.
+  - `schedule_task` reads the target, infers `platform` from its prefix, and
+    passes both to `scheduler.schedule()`.
+  - `ScheduledJob.delivery_target` + idempotent `ALTER TABLE` migration;
+    `_deliver` preference order: `delivery_target` → `thread_id` →
+    `"{platform}:unknown"`. Legacy rows with empty target degrade gracefully.
+- **Tests:** `tests/integration/test_cron_and_adapters.py` —
+  `TestCronDeliveryTarget` covers (a) target persisted + used by `_deliver`,
+  (b) empty target falls back to `thread_id`, (c) schema migration on a legacy
+  DB. All 24 cron tests pass; existing no-graph-builder failure-path test stays
+  green.
+
 ## Unreleased — Turn priority: stop memory/session hijack on store pastes (2026-08-04)
 
 - **Root cause:** After a long reminder thread, a Telegram bulk paste

@@ -390,6 +390,21 @@ def create_graph_handler(
         except Exception:
             logger.debug("[agent-handler] typing keepalive start skipped", exc_info=True)
 
+        # ── Bind delivery target for this turn ──────────────────────
+        # Best-effort transport-layer bind so tools (schedule_task) can capture
+        # the chat the reminder should return to. The authoritative bind lives
+        # in the tool-worker node (graph_builder.py), which re-sets this from
+        # the state's `_gateway` block — transport-layer ContextVars do not
+        # reliably cross into LangGraph node execution (same caveat as the
+        # thread_id bind above). Reuses the already-computed typing_target.
+        _delivery_token = None
+        try:
+            from kazma_core.tools.send_message import set_current_delivery_target
+
+            _delivery_token = set_current_delivery_target(typing_target)
+        except Exception:
+            logger.debug("[agent-handler] delivery-target bind skipped", exc_info=True)
+
         try:
             await _handler_body(msg, thread_id)
         finally:
@@ -399,6 +414,15 @@ def create_graph_handler(
                 await get_typing_keepalive().stop(typing_target)
             except Exception:
                 pass
+            # Restore the delivery-target ContextVar (best-effort transport
+            # bind; the authoritative bind lives in the tool-worker node).
+            if _delivery_token is not None:
+                try:
+                    from kazma_core.tools.send_message import reset_current_delivery_target
+
+                    reset_current_delivery_target(_delivery_token)
+                except Exception:
+                    pass
 
     async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
         """Inner handler body (typing keepalive wraps this)."""

@@ -181,6 +181,11 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
         "thread_id": thread_id,
         "display_name": ctx.get("username") or "unknown",
         "platform": msg.platform,
+        # Platform-prefixed delivery target (e.g. "telegram:<chat_id>"), carried
+        # in the internal routing block so tools can capture it for later async
+        # delivery (cron reminders) without putting the raw chat_id into graph
+        # state as a top-level key (platform-isolation invariant, AGENTS.md §2).
+        "delivery_target": _build_target_id(msg.platform, msg.context_metadata),
     }
 
     # Attach the user message — multimodal when media is present.

@@ -1345,6 +1345,24 @@ async def tool_worker_node(
     # (memory_search / memory_store) can read it without a state handle.
     _state_tenant_token = set_current_tenant_id(str(state.get("tenant_id", "default")))
 
+    # ── Bind delivery target from the _gateway routing block ───────
+    # Authoritative node-level bind (the reliable layer — see the note above
+    # about transport-layer ContextVars not crossing into node execution).
+    # `schedule_task` reads this so a reminder can route back to the chat it
+    # was booked from, even after the SessionStore row is TTL-evicted.
+    from kazma_core.tools.send_message import (
+        get_current_delivery_target,
+        reset_current_delivery_target,
+        set_current_delivery_target,
+    )
+
+    _delivery_token = None
+    if not get_current_delivery_target():
+        _gw = state.get("_gateway") or {}
+        _delivery = _gw.get("delivery_target") if isinstance(_gw, dict) else None
+        if _delivery:
+            _delivery_token = set_current_delivery_target(str(_delivery))
+
     try:
         # ── HITL: separate safe and danger tools ──────────────────────
         safe_tools: list[PendingToolCall] = []
@@ -1587,6 +1605,8 @@ async def tool_worker_node(
         if _state_tid_token is not None:
             reset_current_thread_id(_state_tid_token)
         reset_current_tenant_id(_state_tenant_token)
+        if _delivery_token is not None:
+            reset_current_delivery_target(_delivery_token)
 
 
 async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:

@@ -16,11 +16,67 @@ Usage:
 
 from __future__ import annotations
 
+import contextvars
 from collections.abc import Callable
 
-__all__ = ["register_message_backend", "send_message"]
+__all__ = [
+    "register_message_backend",
+    "send_message",
+    "get_current_delivery_target",
+    "set_current_delivery_target",
+    "reset_current_delivery_target",
+]
 
 _message_backends: dict[str, Callable] = {}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Current delivery target ContextVar
+# ══════════════════════════════════════════════════════════════════════════
+# Mirrors safety/hitl.py::_current_thread_id. Holds the platform-prefixed
+# delivery target (e.g. "telegram:<chat_id>") of the conversation that is
+# *currently* executing, so tools (notably schedule_task) can capture it for
+# later async delivery (cron reminders) without leaking the raw chat_id into
+# graph state — preserving the platform-isolation invariant (AGENTS.md §2).
+#
+# Like _current_thread_id, this is bound at two layers:
+#   1. Transport layer (gateway handler entry) — best-effort.
+#   2. Tool-worker node (graph_builder.py) — authoritative, re-set from the
+#      state's `_gateway` routing block on every iteration, because ContextVars
+#      set at the transport layer do not reliably cross into LangGraph node
+#      execution (see the existing note + _current_thread_id fallback).
+_current_delivery_target: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_delivery_target", default=None
+)
+
+
+def set_current_delivery_target(
+    target: str | None,
+) -> contextvars.Token[str | None]:
+    """Bind the current delivery target for this async context.
+
+    Args:
+        target: Platform-prefixed target (e.g. "telegram:12345"), or None.
+
+    Returns:
+        Token to pass to :func:`reset_current_delivery_target`.
+    """
+    return _current_delivery_target.set(target)
+
+
+def reset_current_delivery_target(
+    token: contextvars.Token[str | None],
+) -> None:
+    """Restore the prior delivery-target ContextVar value."""
+    _current_delivery_target.reset(token)
+
+
+def get_current_delivery_target() -> str | None:
+    """Return the platform-prefixed delivery target of the running turn, if any.
+
+    Returns None when no conversation is active (e.g. headless cron execution).
+    """
+    return _current_delivery_target.get()
 
 
 def register_message_backend(name: str, handler: Callable) -> None:

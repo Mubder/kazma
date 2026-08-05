@@ -19,13 +19,27 @@ async def schedule_task(timing: str, prompt: str) -> str:
         JSON response with the scheduled job info.
     """
     from kazma_core.cron.scheduler import get_cron_scheduler
+    from kazma_core.tools.send_message import get_current_delivery_target
 
     scheduler = get_cron_scheduler()
     if scheduler is None:
         return "Error: Cron scheduler not initialized."
 
+    # Capture the chat this reminder was booked from so the result routes back
+    # to the right conversation at fire time. The delivery_target is a
+    # platform-prefixed id like "telegram:<chat_id>"; infer the platform from
+    # its prefix so _deliver uses the matching backend. Empty when invoked
+    # headlessly (no active conversation) — _deliver then falls back gracefully.
+    delivery_target = get_current_delivery_target() or ""
+    platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
+
     try:
-        result = await scheduler.schedule(timing=timing, prompt=prompt)
+        result = await scheduler.schedule(
+            timing=timing,
+            prompt=prompt,
+            platform=platform,
+            delivery_target=delivery_target,
+        )
         return _json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("Error scheduling task: %s", e)
