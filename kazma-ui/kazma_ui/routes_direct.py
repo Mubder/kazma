@@ -1612,17 +1612,19 @@ def register_direct_routes(self: Any) -> None:
             groups: list[dict] = []
             member_tier: dict[str, int] = {}
             try:
-                tfilter_g = "WHERE tenant_id=?" if _memory_tenant_id() != "default" else ""
-                gparams: tuple = (_memory_tenant_id(),) if _memory_tenant_id() != "default" else ()
+                # NOTE: /graph does not tenant-scope beliefs today (the admin
+                # overview is operator-wide), so read groupings unscoped too
+                # for consistency. (Tenant enforcement for /graph is tracked
+                # separately — audit C2.) Avoids a cross-module import of
+                # _memory_tenant_id which caused a swallowed NameError here.
                 grows = conn.execute(
-                    f"SELECT group_root, member, member_tier, label "
-                    f"FROM graph_associations {tfilter_g}",
-                    gparams,
+                    "SELECT group_root, member, member_tier, label "
+                    "FROM graph_associations"
                 ).fetchall()
                 groups = [dict(r) for r in grows]
                 member_tier = {r["member"]: int(r["member_tier"]) for r in grows}
             except Exception:
-                logger.debug("[memory_v2_graph] group associations read failed", exc_info=True)
+                logger.warning("[memory_v2_graph] group associations read failed", exc_info=True)
             # Stamp each node with its tier (0=hub, -1=ungrouped).
             emitted = nodes[:limit]
             for n in emitted:
