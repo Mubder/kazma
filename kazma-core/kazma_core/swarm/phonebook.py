@@ -73,9 +73,13 @@ class WorkerPhonebook:
 
         # Inject episodic memory + evolution learnings before dispatch.
         # V2-native recall for past strategies + evolution learnings.
+        # The recalled content is untrusted (it originates from past
+        # conversation/tool output), so it is fenced via format_untrusted_block
+        # before interpolation — the same defense the supervisor chat path uses.
         enriched = task
         try:
             from kazma_core.memory.recall import search
+            from kazma_core.safety.prompt_fence import format_untrusted_block
 
             # recall.search is sync; call both directly (fast local SQLite).
             strategies_hits = search(task, limit=3)
@@ -88,14 +92,22 @@ class WorkerPhonebook:
                 ]
                 episodic = " | ".join(s for s in strategies if s)
                 if episodic:
-                    enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
+                    fenced = format_untrusted_block(
+                        f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}",
+                        source="episodic_memory",
+                    )
+                    enriched = f"{fenced}\n\n{task}"
 
             # Process past evolution learnings
             if isinstance(evo_hits, list) and evo_hits:
                 learnings = [h["content"] for h in evo_hits if h["content"]]
                 if learnings:
                     learning_ctx = "\n".join(f"- {l[:300]}" for l in learnings)
-                    enriched = f"PAST_LEARNINGS_FOR_THIS_WORKER:\n{learning_ctx}\n\n{enriched}"
+                    fenced = format_untrusted_block(
+                        f"PAST_LEARNINGS_FOR_THIS_WORKER:\n{learning_ctx}",
+                        source="soul_evolution",
+                    )
+                    enriched = f"{fenced}\n\n{enriched}"
         except Exception as exc:
             logger.debug("Episodic memory lookup failed: %s", exc)
 
