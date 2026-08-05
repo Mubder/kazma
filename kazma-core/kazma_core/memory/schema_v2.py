@@ -279,11 +279,14 @@ def ensure_primary_schema(conn: Any) -> None:
 
 
 def _ensure_fts5(conn: Any) -> None:
-    """Create episodes_fts + beliefs_fts and keep them in sync via triggers.
+    """Create episodes_fts + beliefs_fts + entities_fts and keep them in sync.
 
-    External-content FTS5 over ``episodes`` / ``beliefs`` so lexical search
-    uses ``MATCH`` + ``bm25()`` instead of multi-term ``LIKE``. Idempotent.
-    On first create (or empty index with existing rows) runs a rebuild.
+    External-content FTS5 over ``episodes`` / ``beliefs`` / ``entities`` so
+    lexical search uses ``MATCH`` + ``bm25()`` instead of multi-term ``LIKE``.
+    Idempotent. On first create (or empty index with existing rows) runs a
+    rebuild. ``entities_fts`` indexes name + type + aliases_json so the
+    operator entity search matches display names AND aliases (the JSON array
+    string tokenizes to its members under unicode61).
     """
     try:
         conn.execute(
@@ -305,6 +308,18 @@ def _ensure_fts5(conn: Any) -> None:
                 predicate,
                 object,
                 content='beliefs',
+                content_rowid='rowid',
+                tokenize='unicode61 remove_diacritics 2'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(
+                name,
+                type,
+                aliases_json,
+                content='entities',
                 content_rowid='rowid',
                 tokenize='unicode61 remove_diacritics 2'
             )
@@ -356,6 +371,28 @@ def _ensure_fts5(conn: Any) -> None:
           VALUES (new.rowid, new.subject, new.predicate, new.object);
         END
         """,
+        # entities: aliases_json is indexed as an FTS column so the JSON array
+        # string tokenizes to its members (e.g. ["Mubder","You"] → mubder, you).
+        """
+        CREATE TRIGGER IF NOT EXISTS entities_fts_ai AFTER INSERT ON entities BEGIN
+          INSERT INTO entities_fts(rowid, name, type, aliases_json)
+          VALUES (new.rowid, new.name, new.type, new.aliases_json);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS entities_fts_ad AFTER DELETE ON entities BEGIN
+          INSERT INTO entities_fts(entities_fts, rowid, name, type, aliases_json)
+          VALUES ('delete', old.rowid, old.name, old.type, old.aliases_json);
+        END
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS entities_fts_au AFTER UPDATE ON entities BEGIN
+          INSERT INTO entities_fts(entities_fts, rowid, name, type, aliases_json)
+          VALUES ('delete', old.rowid, old.name, old.type, old.aliases_json);
+          INSERT INTO entities_fts(rowid, name, type, aliases_json)
+          VALUES (new.rowid, new.name, new.type, new.aliases_json);
+        END
+        """,
     ):
         try:
             conn.execute(sql)
@@ -379,6 +416,14 @@ def _ensure_fts5(conn: Any) -> None:
             logger.info("[schema_v2] rebuilt beliefs_fts (%d rows)", bel_n)
     except Exception:
         logger.debug("[schema_v2] beliefs_fts rebuild skipped", exc_info=True)
+    try:
+        ent_n = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        fts_n = conn.execute("SELECT COUNT(*) FROM entities_fts").fetchone()[0]
+        if ent_n and not fts_n:
+            conn.execute("INSERT INTO entities_fts(entities_fts) VALUES('rebuild')")
+            logger.info("[schema_v2] rebuilt entities_fts (%d rows)", ent_n)
+    except Exception:
+        logger.debug("[schema_v2] entities_fts rebuild skipped", exc_info=True)
 
 
 def ensure_ops_schema(conn: Any) -> None:

@@ -73,6 +73,21 @@ def _consume_undo(token: str) -> dict[str, Any] | None:
     return entry
 
 
+def _fts_match_expr(text: str) -> str:
+    """Build a safe FTS5 MATCH expression (alnum tokens OR-joined).
+
+    Mirrors ``kazma_core.memory.recall._fts_match_query`` but kept local to
+    the UI layer so it doesn't couple to recall's private helpers. Returns
+    "" when no usable tokens remain (caller then falls back to LIKE).
+    """
+    toks: list[str] = []
+    for part in (text or "").lower().replace("-", " ").split():
+        cleaned = "".join(c for c in part if c.isalnum())
+        if len(cleaned) >= 2 and cleaned not in toks:
+            toks.append(cleaned)
+    return " OR ".join(toks)
+
+
 def _conn() -> sqlite3.Connection:
     from kazma_core.memory.schema_v2 import ensure_primary_schema
     from kazma_core.paths import primary_memory_db
@@ -235,10 +250,45 @@ async def list_entities(
         off = max(0, int(offset or 0))
         where = " FROM entities e WHERE 1=1"
         params: list[Any] = []
-        if q and q.strip():
-            ql = f"%{q.strip().lower()}%"
-            where += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
-            params.extend([ql, ql, ql])
+        matched_via: str | None = None
+        query = (q or "").strip()
+        if query:
+            # Prefer entities_fts (name + type + aliases_json) for diacritic-
+            # insensitive, alias-aware search; fall back to LIKE if FTS is
+            # unavailable or the query has no usable tokens.
+            match_q = _fts_match_expr(query)
+            fts_rowids: list[int] | None = None
+            if match_q:
+                try:
+                    fts_rows = conn.execute(
+                        "SELECT e.rowid FROM entities_fts "
+                        "JOIN entities e ON e.rowid = entities_fts.rowid "
+                        "WHERE entities_fts MATCH ? LIMIT 2000",
+                        (match_q,),
+                    ).fetchall()
+                    fts_rowids = [int(r["rowid"]) for r in fts_rows]
+                except Exception:
+                    fts_rowids = None  # FTS unavailable → LIKE fallback
+            if fts_rowids is not None:
+                matched_via = "fts"
+                if not fts_rowids:
+                    # FTS matched nothing — return empty.
+                    conn.close()
+                    return {
+                        "ok": True, "count": 0, "total": 0, "offset": off,
+                        "limit": lim, "entities": [], "matched_via": "fts",
+                    }
+                ph = ",".join("?" for _ in fts_rowids)
+                # Also allow an exact id match alongside FTS (ids aren't in FTS).
+                where += f" AND (e.rowid IN ({ph}) OR LOWER(e.id) LIKE ?)"
+                params.extend(fts_rowids)
+                params.append(f"%{query.lower()}%")
+            else:
+                # FTS unavailable or no usable tokens → LIKE on id/name/type.
+                ql = f"%{query.lower()}%"
+                where += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
+                params.extend([ql, ql, ql])
+                matched_via = "like"
         if empty_only:
             where += f" AND {_belief_count_sql()} = 0"
         if isolated_only:
@@ -294,6 +344,7 @@ async def list_entities(
             "offset": off,
             "limit": lim,
             "entities": rows,
+            "matched_via": matched_via,
         }
     except Exception as exc:
         logger.exception("[memory_api] list entities failed")

@@ -234,3 +234,78 @@ def test_beliefs_offset_paginates(seeded_client: TestClient) -> None:
     # The offset=1 row must differ from the offset=0 row (ordered query).
     if len(first) >= 2:
         assert paged["beliefs"][0]["id"] != first[0]["id"]
+
+
+# ── Phase 2.2: recall-trail endpoint ─────────────────────────────────────
+
+
+def test_recall_trail_returns_access_stats_and_origin(tmp_path, monkeypatch) -> None:
+    """recall-trail surfaces access_count/last_accessed + the origin episode."""
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    primary = sqlite3.connect(primary_memory_db())
+    primary.row_factory = sqlite3.Row
+    ensure_primary_schema(primary)
+    ops = sqlite3.connect(memory_ops_db())
+    ensure_ops_schema(ops)
+    now = time.time()
+    # A belief with a known origin session/turn and a bumped access count.
+    primary.execute(
+        "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, "
+        "confidence, structural_importance, valid_from, ingested_at, source_session, "
+        "source_turn, access_count, last_accessed, extraction_method) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("btrail", "default", "user", "lives_in", "functional", "Paris",
+         0.9, 4, now, now, "sess-abc", 3, 5, now, "llm_inferred"),
+    )
+    # The originating episode in the same session/turn.
+    primary.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, tier, user_text, "
+        "created_at) VALUES (?,?,?,?,?,?,?)",
+        ("ep1", "default", "sess-abc", 3, "episodic", "Where does the user live?", now),
+    )
+    primary.commit()
+    primary.close()
+    ops.close()
+
+    from fastapi.testclient import TestClient
+    from kazma_ui.app import create_app
+
+    client = TestClient(create_app())
+    resp = client.get("/api/memory/v2/beliefs/btrail/recall-trail")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"]
+    assert payload["belief_id"] == "btrail"
+    assert payload["access_count"] == 5
+    assert payload["last_accessed"] is not None
+    # Origin episode resolved from source_session + source_turn.
+    origin = payload["origin"]
+    assert origin["session"] == "sess-abc"
+    assert origin["turn"] == 3
+    assert origin["episode"] is not None
+    assert "live" in origin["episode"]["preview"].lower()
+
+
+def test_recall_trail_not_found(tmp_path, monkeypatch) -> None:
+    """A missing belief_id returns a structured not_found error."""
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    primary = sqlite3.connect(primary_memory_db())
+    ensure_primary_schema(primary)
+    ops = sqlite3.connect(memory_ops_db())
+    ensure_ops_schema(ops)
+    primary.close()
+    ops.close()
+
+    from fastapi.testclient import TestClient
+    from kazma_ui.app import create_app
+
+    client = TestClient(create_app())
+    resp = client.get("/api/memory/v2/beliefs/does-not-exist/recall-trail")
+    assert resp.status_code == 200
+    assert resp.json()["error"] == "not_found"

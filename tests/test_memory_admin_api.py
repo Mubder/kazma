@@ -514,3 +514,139 @@ async def test_undo_expired_token_rejected(mem_db_many):
     memory_api._undo_store[token]["expires_at"] = _time.time() - 1
     res = await undo_action(token)
     assert not res["ok"]
+
+
+# ── Phase 2.1: FTS5 search in the operator UI ────────────────────────────
+
+
+@pytest.fixture
+def mem_db_fts(tmp_path, monkeypatch):
+    """Seed entities + beliefs with aliases and diacritic-laden text."""
+    state = tmp_path / "memory_state.db"
+    ops = tmp_path / "memory_ops.db"
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core import paths as paths_mod
+
+    monkeypatch.setattr(paths_mod, "primary_memory_db", lambda: str(state))
+    monkeypatch.setattr(paths_mod, "memory_ops_db", lambda: str(ops))
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+
+    c = sqlite3.connect(state)
+    ensure_primary_schema(c)
+    # Entity with an alias; diacritic-rich name.
+    c.execute(
+        "INSERT INTO entities (id, tenant_id, type, name, aliases_json) "
+        "VALUES ('mubder','default','person','Mubder','[\"Mubdir, Mupder\"]')"
+    )
+    c.execute(
+        "INSERT INTO entities (id, tenant_id, type, name, aliases_json) "
+        "VALUES ('shipx','default','project','ShipX','[]')"
+    )
+    # A belief with a diacritic in the object text.
+    c.execute(
+        """INSERT INTO beliefs
+           (id, tenant_id, subject, predicate, predicate_type, object,
+            confidence, structural_importance, source_trust_weight, extraction_method,
+            valid_from, ingested_at)
+           VALUES ('bf1','default','mubder','speaks','set','Arabic Français',
+                   1.0, 2, 1.0, 'user_explicit', 1.0, 1.0)"""
+    )
+    c.commit()
+    c.close()
+    o = sqlite3.connect(ops)
+    ensure_ops_schema(o)
+    o.close()
+    return state
+
+
+@pytest.mark.asyncio
+async def test_entity_search_matches_alias(mem_db_fts):
+    """Entity search via FTS matches a name stored only in aliases_json."""
+    from kazma_ui.memory_api import list_entities
+
+    # "mubdir" is in aliases_json, not the name. FTS unicode61 tokenizes the
+    # JSON array string so the alias is searchable.
+    out = await list_entities(q="mubdir", limit=20)
+    assert out["ok"]
+    ids = {e["id"] for e in out["entities"]}
+    assert "mubder" in ids, f"alias search missed mubder; got {ids}"
+
+
+@pytest.mark.asyncio
+async def test_entity_search_no_match_returns_empty(mem_db_fts):
+    """A query that matches nothing returns total=0 (not a LIKE false-positive)."""
+    from kazma_ui.memory_api import list_entities
+
+    out = await list_entities(q="zzzznomatch", limit=20)
+    assert out["ok"]
+    assert out["total"] == 0
+    assert out["entities"] == []
+
+
+def test_belief_search_fts_diacritic_insensitive(tmp_path, monkeypatch):
+    """Belief search finds diacritic-laden object text via beliefs_fts.
+
+    Uses the TestClient route so the FTS path in routes_direct is exercised.
+    """
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    primary = sqlite3.connect(primary_memory_db())
+    primary.row_factory = sqlite3.Row
+    ensure_primary_schema(primary)
+    ops = sqlite3.connect(memory_ops_db())
+    ensure_ops_schema(ops)
+    primary.execute(
+        "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, "
+        "confidence, structural_importance, valid_from, ingested_at) "
+        "VALUES ('b1','default','user','speaks','set','Français',1.0,2,1.0,1.0)"
+    )
+    primary.commit()
+    primary.close()
+    ops.close()
+
+    from fastapi.testclient import TestClient
+    from kazma_ui.app import create_app
+
+    client = TestClient(create_app())
+    # 'francais' (no cedilla) should match 'Français' under unicode61
+    # remove_diacritics.
+    resp = client.get("/api/memory/v2/beliefs", params={"q": "francais"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["matched_via"] == "fts"
+    ids = [b["id"] for b in payload["beliefs"]]
+    assert "b1" in ids, f"diacritic-insensitive FTS missed b1; got {ids}"
+
+
+def test_belief_search_falls_back_to_like_on_fts_error(tmp_path, monkeypatch):
+    """If FTS raises, the beliefs endpoint falls back to LIKE and still returns."""
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    primary = sqlite3.connect(primary_memory_db())
+    primary.row_factory = sqlite3.Row
+    ensure_primary_schema(primary)
+    ops = sqlite3.connect(memory_ops_db())
+    ensure_ops_schema(ops)
+    primary.execute(
+        "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, "
+        "confidence, structural_importance, valid_from, ingested_at) "
+        "VALUES ('b9','default','shipx','has','set','phase1',1.0,2,1.0,1.0)"
+    )
+    primary.commit()
+    primary.close()
+    ops.close()
+
+    from fastapi.testclient import TestClient
+    from kazma_ui.app import create_app
+
+    client = TestClient(create_app())
+    # A single-char token ('p') has no usable FTS token (len<2) → LIKE path.
+    resp = client.get("/api/memory/v2/beliefs", params={"q": "p"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["matched_via"] == "like"
+    assert any(b["id"] == "b9" for b in payload["beliefs"])

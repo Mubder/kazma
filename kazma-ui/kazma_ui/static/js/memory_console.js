@@ -873,6 +873,33 @@
       const chain = (data.chain || []).slice(1).map(function(c) {
         return _esc(c.subject) + ' ' + _esc(c.predicate) + ' ' + _esc(c.object);
       }).join(' ← ');
+
+      // Recall history — fetch in parallel, render best-effort. Answers the
+      // operator's "when/where was this used?" without a separate panel.
+      let trailHtml = '';
+      try {
+        const tr = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId) + '/recall-trail');
+        const td = await tr.json();
+        if (td && td.ok) {
+          const last = td.last_accessed ? new Date((td.last_accessed||0) * 1000).toLocaleString() : 'never';
+          const ep = td.origin && td.origin.episode;
+          const originTxt = ep
+            ? ' · from <span style="color:var(--text-secondary);">' + _esc(ep.preview) + '</span>'
+            : (td.origin && td.origin.session ? ' · session ' + _esc(td.origin.session) : '');
+          trailHtml =
+            '<div style="margin-top:6px;color:var(--text-muted);">' +
+              'recalled <b style="color:var(--text-secondary);">' + (td.access_count||0) + '×</b>' +
+              ' · last ' + _esc(last) +
+              ' · via ' + _esc(td.extraction_method || '?') +
+              originTxt +
+            '</div>';
+        }
+      } catch (_) { /* trail is optional */ }
+
+      // "Probe from this belief" — seeds the probe box with the object text so
+      // the operator can see what else this belief recalls alongside.
+      const probeBtn = '<button type="button" id="v2-belief-probe" style="margin-top:6px;font-size:0.7rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);cursor:pointer;">Probe from this belief →</button>';
+
       body.innerHTML =
         '<div><b>' + _esc(b.subject) + '</b> ' + _esc((b.predicate||'').replace(/_/g,' ')) +
         ' <b>' + _esc(b.object) + '</b></div>' +
@@ -880,7 +907,24 @@
         ' · conf ' + Math.round((b.confidence||0)*100) + '%' +
         ' · imp ' + (b.structural_importance||'?') +
         ' · access ' + (b.access_count||0) + '</div>' +
-        (chain ? '<div style="margin-top:6px;color:var(--text-muted);">supersedes chain: ' + chain + '</div>' : '');
+        trailHtml +
+        (chain ? '<div style="margin-top:6px;color:var(--text-muted);">supersedes chain: ' + chain + '</div>' : '') +
+        probeBtn;
+
+      // Wire the probe button.
+      const pb = document.getElementById('v2-belief-probe');
+      if (pb) {
+        pb.addEventListener('click', function() {
+          const probeInput = document.getElementById('v2g-probe-input') || document.getElementById('v2-probe-input');
+          if (probeInput) {
+            probeInput.value = b.object || b.subject || '';
+            probeInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          const probeBtn2 = document.getElementById('v2-probe-btn') || document.getElementById('v2g-probe-btn');
+          if (probeBtn2) probeBtn2.click();
+          document.getElementById('v2g-canvas-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      }
     } catch (e) {
       body.textContent = 'Load failed';
     }

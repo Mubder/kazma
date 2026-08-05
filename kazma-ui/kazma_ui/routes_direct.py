@@ -428,24 +428,73 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.get("/api/memory/v2/beliefs")
     async def _memory_v2_beliefs(q: str = "", limit: int = 50, offset: int = 0):
-        """Active V2 beliefs (currently valid only), optional FTS filter."""
+        """Active V2 beliefs (currently valid only), optional FTS filter.
+
+        Search prefers the ``beliefs_fts`` FTS5 index (diacritic-insensitive,
+        tokenized) and falls back to ``LIKE`` if FTS is unavailable or the
+        query has no usable tokens — matching the recall engine's own pattern.
+        """
+        import re
         import sqlite3
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
 
+        def _match_expr(text: str) -> str:
+            """Safe FTS5 MATCH expression (alphanumeric tokens OR-joined)."""
+            toks = []
+            for part in text.lower().replace("-", " ").split():
+                cleaned = "".join(c for c in part if c.isalnum())
+                if len(cleaned) >= 2 and cleaned not in toks:
+                    toks.append(cleaned)
+            return " OR ".join(toks)
+
         try:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
-            where = (
+            base_where = (
                 " FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
             )
+
+            query = (q or "").strip()
+            fts_ids: list[str] | None = None  # None = unfiltered / LIKE fallback
+            if query:
+                match_q = _match_expr(query)
+                if match_q:
+                    # FTS5 MATCH — collect matching active belief ids.
+                    try:
+                        fts_rows = conn.execute(
+                            "SELECT b.id FROM beliefs_fts "
+                            "JOIN beliefs b ON b.rowid = beliefs_fts.rowid "
+                            "WHERE beliefs_fts MATCH ? "
+                            "AND b.valid_until IS NULL AND b.invalidated_at IS NULL "
+                            "LIMIT 1000",
+                            (match_q,),
+                        ).fetchall()
+                        fts_ids = [str(r["id"]) for r in fts_rows]
+                    except Exception:
+                        # FTS unavailable/corrupt → fall back to LIKE.
+                        fts_ids = None
+                # else: no usable tokens → LIKE fallback below.
+
+            where = base_where
             params: list = []
-            if q and q.strip():
-                ql = f"%{q.strip().lower()}%"
+            if fts_ids is not None:
+                if not fts_ids:
+                    # FTS matched nothing — short-circuit to empty.
+                    conn.close()
+                    lim = max(1, min(limit, 200))
+                    return {"beliefs": [], "total": 0, "offset": max(0, int(offset or 0)), "limit": lim, "matched_via": "fts"}
+                ph = ",".join("?" for _ in fts_ids)
+                where += f" AND id IN ({ph})"
+                params = list(fts_ids)
+            elif query:
+                # LIKE fallback (FTS unavailable or no usable tokens).
+                ql = f"%{query.lower()}%"
                 where += " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? OR LOWER(object) LIKE ?)"
                 params = [ql, ql, ql]
+
             # Total count for the pager (same WHERE).
             total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
 
@@ -460,11 +509,13 @@ def register_direct_routes(self: Any) -> None:
             off = max(0, int(offset or 0))
             rows = conn.execute(sql, [*params, lim, off]).fetchall()
             conn.close()
+            matched_via = "fts" if (fts_ids is not None) else ("like" if query else None)
             return {
                 "beliefs": [dict(r) for r in rows],
                 "total": int(total),
                 "offset": off,
                 "limit": lim,
+                "matched_via": matched_via,
             }
         except Exception as exc:
             return {"beliefs": [], "error": str(exc)}
@@ -533,6 +584,77 @@ def register_direct_routes(self: Any) -> None:
                 "belief": _belief_json_safe(row),
                 "chain": chain,
                 "superseded_by": [dict(k) for k in kids],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    @self.app.get("/api/memory/v2/beliefs/{belief_id}/recall-trail")
+    async def _memory_v2_belief_recall_trail(belief_id: str):
+        """Recall history for a belief — answers "why/how-often was this used?"
+
+        Surfaces the access stats the engine already stamps (``access_count``,
+        ``last_accessed``) plus the belief's origin (``source_session`` /
+        ``source_turn`` and the originating episode preview when available).
+        There is no dedicated recall-audit table today, so the trail is
+        aggregate (count + last time) rather than per-recall-event; the origin
+        episode gives the operator the concrete "where it came from" link.
+        """
+        import sqlite3
+
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        bid = (belief_id or "").strip()
+        if not bid:
+            return {"ok": False, "error": "belief_id required"}
+        try:
+            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            ensure_primary_schema(conn)
+            row = conn.execute(
+                "SELECT id, subject, predicate, object, source_session, source_turn, "
+                "extraction_method, access_count, last_accessed, valid_from "
+                "FROM beliefs WHERE id=?",
+                (bid,),
+            ).fetchone()
+            if not row:
+                conn.close()
+                return {"ok": False, "error": "not_found"}
+
+            origin_episode = None
+            src_session = row["source_session"]
+            src_turn = row["source_turn"]
+            if src_session:
+                # Find the originating episode (same session; prefer the turn).
+                ep_row = conn.execute(
+                    "SELECT id, tier, user_text, assistant_text, created_at "
+                    "FROM episodes WHERE session_id=? "
+                    + ("AND turn_number=?" if src_turn is not None else "")
+                    + " ORDER BY created_at DESC LIMIT 1",
+                    (src_session, src_turn) if src_turn is not None else (src_session,),
+                ).fetchone()
+                if ep_row:
+                    ut = (ep_row["user_text"] or "")[:160]
+                    at = (ep_row["assistant_text"] or "")[:120]
+                    origin_episode = {
+                        "id": ep_row["id"],
+                        "tier": ep_row["tier"],
+                        "preview": ut or at or ep_row["id"],
+                        "created_at": ep_row["created_at"],
+                        "turn": src_turn,
+                    }
+            conn.close()
+            return {
+                "ok": True,
+                "belief_id": bid,
+                "access_count": int(row["access_count"] or 0),
+                "last_accessed": row["last_accessed"],
+                "extraction_method": row["extraction_method"],
+                "origin": {
+                    "session": src_session,
+                    "turn": src_turn,
+                    "episode": origin_episode,
+                },
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:300]}
