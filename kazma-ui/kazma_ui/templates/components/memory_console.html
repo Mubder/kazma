@@ -152,6 +152,16 @@
             <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Clear source/target and cancel pick mode">Clear</button>
             <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">Click node → inspect. Click edge → edit/unlink.</span>
           </div>
+          <!-- F4: predicate chips — sourced from /vocab so the operator reuses
+               existing predicate names instead of inventing near-duplicates
+               (the root cause of the reset-explosion mess). Populated on load
+               and refreshed after each link op. Clicking a chip sets the
+               predicate input value; the input stays free-text for genuinely
+               new predicates. -->
+          <div id="v2g-pred-chips" style="padding:5px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:rgba(0,0,0,0.12);max-height:64px;overflow-y:auto;">
+            <span style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-right:2px;">pred</span>
+            <span id="v2g-pred-chips-list" style="display:flex;flex-wrap:wrap;gap:4px;"></span>
+          </div>
           <!-- Canvas + floating inspect -->
           <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:min(68vh,720px);height:min(68vh,720px);width:100%;border-radius:0;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
             <canvas id="v2g-canvas" width="1200" height="700" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view. Click edges to edit or unlink beliefs." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>

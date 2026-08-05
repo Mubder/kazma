@@ -23,6 +23,66 @@ _PROTECTED_ENTITIES = frozenset({"user", "assistant", "kazma", "mubder"})
 router = APIRouter(tags=["memory-admin"])
 
 
+def _is_protected(conn: sqlite3.Connection, eid: str) -> bool:
+    """True if `eid` is protected from deletion / merge-as-source.
+
+    The hardcoded floor (_PROTECTED_ENTITIES: user/assistant/kazma/mubder) is
+    always protected. F3 adds a per-row `is_protected` flag so an operator can
+    extend protection to any entity (e.g. mark `shipx` protected).
+    """
+    if str(eid or "").lower() in _PROTECTED_ENTITIES:
+        return True
+    try:
+        row = conn.execute(
+            "SELECT is_protected FROM entities WHERE id=?", (eid,)
+        ).fetchone()
+        return bool(row and int(row["is_protected"] or 0) == 1)
+    except Exception:
+        return False
+
+
+def _would_orphan(conn: sqlite3.Connection, belief_ids: list[str]) -> list[str]:
+    """F3: return entity ids that would have ZERO live edges if the given
+    beliefs were invalidated. Used to warn the operator before an
+    unlink/invalidate/repoint strands a node. A node is "orphaned" only if it
+    currently has live edges AND all of them are in `belief_ids`.
+    """
+    if not belief_ids:
+        return []
+    try:
+        placeholders = ",".join("?" * len(belief_ids))
+        # Active beliefs NOT in the to-remove set — endpoints here stay anchored.
+        surviving = conn.execute(
+            f"""SELECT DISTINCT subject AS eid FROM beliefs
+                WHERE invalidated_at IS NULL AND valid_until IS NULL
+                  AND id NOT IN ({placeholders})
+                UNION
+                SELECT DISTINCT object AS eid FROM beliefs
+                WHERE invalidated_at IS NULL AND valid_until IS NULL
+                  AND id NOT IN ({placeholders})""",
+            tuple(belief_ids) * 2,
+        ).fetchall()
+        surviving_ids = {r["eid"] for r in surviving if r["eid"]}
+        # Endpoints touched by the to-remove beliefs — candidates for orphaning.
+        touched = conn.execute(
+            f"""SELECT DISTINCT subject AS eid FROM beliefs
+                WHERE invalidated_at IS NULL AND valid_until IS NULL
+                  AND id IN ({placeholders})
+                UNION
+                SELECT DISTINCT object AS eid FROM beliefs
+                WHERE invalidated_at IS NULL AND valid_until IS NULL
+                  AND id IN ({placeholders})""",
+            tuple(belief_ids) * 2,
+        ).fetchall()
+        return sorted(
+            r["eid"] for r in touched
+            if r["eid"] and r["eid"] not in surviving_ids
+        )
+    except Exception:
+        logger.debug("[memory_api] _would_orphan failed", exc_info=True)
+        return []
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Undo store — short-window reversal for reversible memory mutations
 # ══════════════════════════════════════════════════════════════════════════
@@ -184,6 +244,62 @@ def register_memory_page(app: Any, templates: Any, agent: Any) -> None:
 
 
 # ── Health snapshot (compact for page header) ────────────────────────────
+
+
+@router.get("/api/memory/v2/vocab")
+async def memory_vocab() -> dict[str, Any]:
+    """F4: existing vocabulary for the chip-based link dialog.
+
+    Returns the predicates and entities already in the store so the Link UI
+    can offer them as clickable chips instead of forcing free-text (the root
+    cause of the reset-explosion mess: each new link invented a new predicate
+    name). Predicates are ordered by frequency so the common ones surface
+    first; entities by belief_count. Tenant-scoped like every other route.
+    """
+    try:
+        conn = _conn()
+        tid = _memory_tenant_id()
+        tfilter = " AND tenant_id = ?" if tid != "default" else ""
+        tparam: tuple = (tid,) if tid != "default" else ()
+        # Predicates: DISTINCT name + type + count, frequency-sorted. Only
+        # counts active beliefs so stale predicates don't dominate the chips.
+        preds = [
+            dict(r)
+            for r in conn.execute(
+                f"""SELECT predicate AS name, predicate_type AS type,
+                           COUNT(*) AS cnt
+                    FROM beliefs
+                    WHERE invalidated_at IS NULL AND valid_until IS NULL
+                    {tfilter}
+                    GROUP BY predicate, predicate_type
+                    ORDER BY cnt DESC, predicate ASC
+                    LIMIT 200""",
+                tparam,
+            ).fetchall()
+        ]
+        # Entities: id + name + type + belief_count, count-sorted. The hub
+        # (user) is pinned at the top by its high belief_count naturally.
+        ents = [
+            dict(r)
+            for r in conn.execute(
+                f"""SELECT e.id, e.name, e.type,
+                           COALESCE(e.belief_count,
+                             (SELECT COUNT(*) FROM beliefs b
+                              WHERE b.invalidated_at IS NULL AND b.valid_until IS NULL
+                                AND (b.subject=e.id OR b.object=e.id))
+                           ) AS belief_count
+                    FROM entities e
+                    WHERE 1=1 {('AND e.tenant_id = ?' if tid != 'default' else '')}
+                    ORDER BY belief_count DESC, e.name ASC
+                    LIMIT 200""",
+                tparam,
+            ).fetchall()
+        ]
+        conn.close()
+        return {"ok": True, "predicates": preds, "entities": ents}
+    except Exception as exc:
+        logger.exception("[memory_api] vocab failed")
+        return {"ok": False, "error": str(exc)[:300], "predicates": [], "entities": []}
 
 
 @router.get("/api/memory/v2/admin/summary")
@@ -377,8 +493,8 @@ async def list_entities(
         total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
 
         sql = (
-            f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.aliases_json,"
-            f" e.metadata_json, {count_expr} AS belief_count,"
+            f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.is_protected,"
+            f" e.aliases_json, e.metadata_json, {count_expr} AS belief_count,"
             f" {degree_expr} AS linked_others{where}"
             " ORDER BY belief_count DESC, linked_others ASC, e.name ASC LIMIT ? OFFSET ?"
         )
@@ -396,7 +512,10 @@ async def list_entities(
                 and int(r.get("linked_others") or 0) == 0
                 and str(r.get("id") or "").lower() not in ("user", "assistant")
             )
-            r["protected"] = str(r.get("id") or "").lower() in _PROTECTED_ENTITIES
+            r["protected"] = (
+                str(r.get("id") or "").lower() in _PROTECTED_ENTITIES
+                or int(r.get("is_protected") or 0) == 1
+            )
             aliases = parse_aliases(r.get("aliases_json"))
             r["aliases"] = aliases
             r["is_self"] = is_self_entity(
@@ -544,17 +663,61 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+@router.post("/api/memory/v2/entities/{entity_id}/protect")
+async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
+    """F3: toggle the per-entity `is_protected` flag.
+
+    A protected entity cannot be deleted or used as a merge source. The
+    hardcoded floor (user/assistant/kazma/mubder) is always protected and
+    cannot be unprotected here. Body: ``{"protected": true|false}``.
+    """
+    eid = (entity_id or "").strip()
+    if not eid:
+        return {"ok": False, "error": "entity_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    want = bool(body.get("protected"))
+    # The hardcoded floor is always protected — reject attempts to clear it
+    # via this route so the operator can't accidentally unprotect the hub.
+    # Checked before the row lookup so it holds even if the core entity has no
+    # row yet (the core set is policy, not data-dependent).
+    if not want and str(eid).lower() in _PROTECTED_ENTITIES:
+        return {"ok": False, "error": f"cannot unprotect core entity: {eid}"}
+    try:
+        conn = _conn()
+        row = conn.execute(
+            "SELECT id, is_protected FROM entities WHERE id=?", (eid,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            return {"ok": False, "error": "not_found"}
+        conn.execute(
+            "UPDATE entities SET is_protected=? WHERE id=?", (1 if want else 0, eid)
+        )
+        conn.commit()
+        conn.close()
+        return {"ok": True, "id": eid, "protected": want}
+    except Exception as exc:
+        logger.exception("[memory_api] protect entity failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 @router.delete("/api/memory/v2/entities/{entity_id}")
 async def delete_entity(entity_id: str) -> dict[str, Any]:
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
-    if eid.lower() in _PROTECTED_ENTITIES:
+    conn = _conn()
+    # F3: protection covers the hardcoded floor AND the per-row is_protected
+    # flag. Resolved against a connection so the per-row flag is read.
+    if _is_protected(conn, eid):
+        conn.close()
         return {"ok": False, "error": f"protected entity: {eid}"}
     try:
-        conn = _conn()
         row = conn.execute(
-            "SELECT id, type, name, aliases_json, metadata_json, is_high_stakes "
+            "SELECT id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected "
             "FROM entities WHERE id=?",
             (eid,),
         ).fetchone()
@@ -569,6 +732,7 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             "aliases_json": row["aliases_json"] or "[]",
             "metadata_json": row["metadata_json"] or "{}",
             "is_high_stakes": int(row["is_high_stakes"] or 0),
+            "is_protected": int(row["is_protected"] or 0),
         }
         conn.execute(
             "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
@@ -604,8 +768,8 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             c = _conn()
             c.execute(
                 "INSERT OR IGNORE INTO entities "
-                "(id, tenant_id, type, name, aliases_json, metadata_json, is_high_stakes) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(id, tenant_id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     snap["id"],
                     _memory_tenant_id(),
@@ -614,6 +778,7 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
                     snap["aliases_json"],
                     snap["metadata_json"],
                     snap["is_high_stakes"],
+                    snap["is_protected"],
                 ),
             )
             c.commit()
@@ -650,10 +815,12 @@ async def merge_entities(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "source_id and target_id required"}
     if source_id == target_id:
         return {"ok": False, "error": "source and target must differ"}
-    if source_id.lower() in _PROTECTED_ENTITIES:
+    conn = _conn()
+    # F3: protection covers the hardcoded floor AND the per-row is_protected flag.
+    if _is_protected(conn, source_id):
+        conn.close()
         return {"ok": False, "error": f"cannot merge protected source {source_id}"}
     try:
-        conn = _conn()
         src = conn.execute(
             "SELECT id, name, aliases_json FROM entities WHERE id=?", (source_id,)
         ).fetchone()
@@ -1167,6 +1334,69 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+@router.post("/api/memory/v2/beliefs/{belief_id}/repoint")
+async def repoint_belief(belief_id: str, request: Request) -> dict[str, Any]:
+    """F1: move a single belief's subject and/or object endpoint in place.
+
+    This is the "move one connection" action the graph was missing — the
+    alternative was destructive cut+relink (two calls, node adrift between
+    them). Repoint delegates to edit_belief with only subject/object, so it
+    inherits the in-place UPDATE, count recompute for old+new endpoints,
+    Neo4j cleanup, the active-only guard, and the 60s undo token. The
+    predicate is preserved (repoint is an endpoint move, not a relation
+    change — use PATCH for predicate/type edits).
+    """
+    bid = (belief_id or "").strip()
+    if not bid:
+        return {"ok": False, "error": "belief_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON"}
+    body = body or {}
+    new_subject = str(body.get("subject") or "").strip() or None
+    new_object = str(body.get("object") or "").strip() or None
+    if not new_subject and not new_object:
+        return {"ok": False, "error": "provide subject and/or object to repoint"}
+    # Reject predicate/type here — repoint is endpoint-only. If the operator
+    # wants to change the relation, PATCH /beliefs/{id} is the right surface.
+    if body.get("predicate") is not None or body.get("predicate_type") is not None:
+        return {"ok": False, "error": "repoint is endpoint-only; use PATCH for predicate/type"}
+
+    # Build the edit_belief body (subject/object only; predicate/type absent
+    # so edit_belief keeps the existing values) and delegate. The request body
+    # is re-serialized so edit_belief's `await request.json()` sees our shape.
+
+    class _Req:
+        def __init__(self, payload):
+            self._payload = payload
+
+        async def json(self):
+            return self._payload
+
+    payload: dict[str, Any] = {}
+    if new_subject:
+        payload["subject"] = new_subject
+    if new_object:
+        payload["object"] = new_object
+    result = await edit_belief(bid, _Req(payload))
+    # Tag the result so the UI can distinguish a repoint from a generic edit
+    # (e.g. for the toast wording). edit_belief returns its own shape; we only
+    # add the op label if the call succeeded.
+    if isinstance(result, dict) and result.get("ok"):
+        result["op"] = "repoint"
+        # F3: surface orphan warning for the OLD subject if it lost its last edge.
+        try:
+            conn = _conn()
+            warn = _would_orphan(conn, [bid])
+            conn.close()
+            if warn:
+                result["warn_orphaned"] = warn
+        except Exception:
+            logger.debug("[memory_api] repoint orphan warning failed", exc_info=True)
+    return result
+
+
 @router.post("/api/memory/v2/beliefs/invalidate-batch")
 async def invalidate_batch(request: Request) -> dict[str, Any]:
     try:
@@ -1177,6 +1407,17 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
     if not isinstance(ids, list) or not ids:
         return {"ok": False, "error": "ids[] required"}
     from kazma_core.memory.hygiene import invalidate_belief
+
+    # F3: compute the orphan warning BEFORE the invalidations — once the rows
+    # are soft-deleted the "which endpoints would be stranded" query can no
+    # longer see them as active. The beliefs are still live here.
+    warn_orphaned: list[str] = []
+    try:
+        conn = _conn()
+        warn_orphaned = _would_orphan(conn, [str(b) for b in ids[:200]])
+        conn.close()
+    except Exception:
+        logger.debug("[memory_api] orphan warning failed", exc_info=True)
 
     results = []
     invalidated_ids: list[str] = []
@@ -1214,12 +1455,14 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
             kind="invalidate",
         )
 
+    # F3: warn_orphaned is computed above (before the invalidations).
     return {
         "ok": True,
         "invalidated": len(invalidated_ids),
         "results": results,
         "undo_token": undo_token,
         "receipt": {"beliefs_invalidated": len(invalidated_ids)},
+        "warn_orphaned": warn_orphaned,
     }
 
 

@@ -650,3 +650,259 @@ def test_belief_search_falls_back_to_like_on_fts_error(tmp_path, monkeypatch):
     payload = resp.json()
     assert payload["matched_via"] == "like"
     assert any(b["id"] == "b9" for b in payload["beliefs"])
+
+
+# ── F3: per-entity protection flag + orphan warnings ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_protect_flag_blocks_delete(mem_db):
+    """An entity marked is_protected=1 cannot be deleted."""
+    from kazma_ui.memory_api import delete_entity, protect_entity
+
+    class Req:
+        async def json(self):
+            return {"protected": True}
+
+    out = await protect_entity("shipx", Req())
+    assert out["ok"] is True
+    assert out["protected"] is True
+
+    out2 = await delete_entity("shipx")
+    assert out2["ok"] is False
+    assert "protected" in str(out2.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_protect_flag_blocks_merge_source(mem_db):
+    """A protected entity cannot be used as a merge source."""
+    from kazma_ui.memory_api import merge_entities, protect_entity
+
+    class ProtReq:
+        async def json(self):
+            return {"protected": True}
+
+    await protect_entity("shipx_old", ProtReq())
+
+    class MergeReq:
+        async def json(self):
+            return {"source_id": "shipx_old", "target_id": "shipx"}
+
+    out = await merge_entities(MergeReq())
+    assert out["ok"] is False
+    assert "protected" in str(out.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_protect_toggle_unprotects_non_core(mem_db):
+    """A non-core entity can be protected then unprotected; core entities cannot."""
+    from kazma_ui.memory_api import protect_entity
+
+    class On:
+        async def json(self):
+            return {"protected": True}
+
+    class Off:
+        async def json(self):
+            return {"protected": False}
+
+    # Non-core toggles both ways.
+    assert (await protect_entity("shipx", On()))["ok"] is True
+    assert (await protect_entity("shipx", Off()))["ok"] is True
+    # Core entity (kazma) cannot be unprotected via this route.
+    res = await protect_entity("kazma", Off())
+    assert res["ok"] is False
+    assert "core" in str(res.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_batch_warns_on_orphan(mem_db):
+    """Invalidating the only belief of an entity surfaces warn_orphaned.
+
+    The `lonely` entity has exactly one belief (b1). Invalidating b1 leaves
+    `lonely` with zero live edges → warn_orphaned must include it.
+    """
+    from kazma_ui.memory_api import invalidate_batch
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b1"]}
+
+    out = await invalidate_batch(Req())
+    assert out["ok"] is True
+    assert out["invalidated"] == 1
+    assert "warn_orphaned" in out
+    # `lonely` is the subject of b1 and has no other beliefs → orphaned.
+    assert "lonely" in out["warn_orphaned"]
+
+
+@pytest.mark.asyncio
+async def test_invalidate_batch_no_warn_when_other_edges_remain(mem_db):
+    """If an entity keeps other live edges, it is NOT in warn_orphaned."""
+    from kazma_ui.memory_api import invalidate_batch, link_entities
+
+    # Give `lonely` a second belief so invalidating b1 doesn't strand it.
+    class LinkReq:
+        async def json(self):
+            return {"subject": "lonely", "predicate": "related_to", "object": "shipx"}
+
+    await link_entities(LinkReq())
+
+    class Req:
+        async def json(self):
+            return {"ids": ["b1"]}
+
+    out = await invalidate_batch(Req())
+    assert out["ok"] is True
+    # `lonely` still has the related_to belief → not orphaned.
+    assert "lonely" not in out.get("warn_orphaned", [])
+
+
+# ── F1: repoint (move) a belief endpoint ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_repoint_moves_subject_in_place(mem_db):
+    """POST /beliefs/{id}/repoint moves the subject to a new entity, keeps
+    the predicate, recomputes counts, and is undoable.
+    """
+    from kazma_ui.memory_api import repoint_belief
+
+    # The fixture's belief b1 is: lonely --description--> 'orphan node'.
+    # Move its subject to shipx_old.
+    class Req:
+        async def json(self):
+            return {"subject": "shipx_old"}
+
+    out = await repoint_belief("b1", Req())
+    assert out["ok"] is True
+    assert out.get("op") == "repoint"
+    # An undo token should be present (delegated from edit_belief).
+    assert out.get("undo_token"), "repoint should be undoable"
+
+    # Verify the belief row actually moved in the DB.
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    c.row_factory = sqlite3.Row
+    row = c.execute(
+        "SELECT subject, predicate, object FROM beliefs WHERE id='b1'"
+    ).fetchone()
+    c.close()
+    assert row["subject"] == "shipx_old", f"subject not moved: {row['subject']}"
+    assert row["predicate"] == "description", "predicate must be preserved"
+    assert row["object"] == "orphan node", "object must be unchanged"
+
+
+@pytest.mark.asyncio
+async def test_repoint_rejects_predicate_change(mem_db):
+    """repoint is endpoint-only; passing predicate is rejected."""
+    from kazma_ui.memory_api import repoint_belief
+
+    class Req:
+        async def json(self):
+            return {"subject": "shipx_old", "predicate": "renamed"}
+
+    out = await repoint_belief("b1", Req())
+    assert out["ok"] is False
+    assert "endpoint-only" in str(out.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_repoint_requires_an_endpoint(mem_db):
+    """repoint with neither subject nor object is rejected."""
+    from kazma_ui.memory_api import repoint_belief
+
+    class Req:
+        async def json(self):
+            return {}
+
+    out = await repoint_belief("b1", Req())
+    assert out["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_repoint_undo_restores(mem_db):
+    """Undoing a repoint restores the original subject."""
+    from kazma_ui.memory_api import repoint_belief, undo_action
+
+    class Req:
+        async def json(self):
+            return {"subject": "shipx_old"}
+
+    out = await repoint_belief("b1", Req())
+    token = out.get("undo_token")
+    assert token
+
+    restored = await undo_action(token)
+    assert restored.get("ok") is True
+
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    c.row_factory = sqlite3.Row
+    row = c.execute("SELECT subject FROM beliefs WHERE id='b1'").fetchone()
+    c.close()
+    assert row["subject"] == "lonely", "undo did not restore original subject"
+
+
+# ── F4: vocab route (chip source) ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_vocab_returns_predicates_by_frequency(mem_db):
+    """/vocab returns predicates frequency-sorted + entities count-sorted.
+
+    The mem_db fixture seeds belief b1 (lonely → description). After creating
+    two more beliefs with a repeated predicate, that predicate must rank first.
+    """
+    from kazma_ui.memory_api import link_entities, memory_vocab
+
+    # Create two `related_to` links so `related_to` (count 2) outranks
+    # `description` (count 1) in the frequency-sorted predicate list.
+    for obj in ("shipx", "kazma"):
+        class Req:
+            async def json(self):
+                return {"subject": "lonely", "predicate": "related_to", "object": obj}
+
+        await link_entities(Req())
+
+    out = await memory_vocab()
+    assert out["ok"] is True
+    preds = out["predicates"]
+    assert isinstance(preds, list) and preds
+    # Frequency-sorted: related_to (2) before description (1).
+    names = [p["name"] for p in preds]
+    assert "related_to" in names and "description" in names
+    assert names.index("related_to") < names.index("description")
+    # Each predicate carries its type + count.
+    rt = next(p for p in preds if p["name"] == "related_to")
+    assert rt["cnt"] >= 2 and rt["type"] in ("set", "state", "functional")
+    # Entities are count-sorted and include the seeded ones.
+    ents = out["entities"]
+    ent_ids = [e["id"] for e in ents]
+    assert "shipx" in ent_ids and "lonely" in ent_ids
+
+
+@pytest.mark.asyncio
+async def test_vocab_excludes_invalidated_beliefs(mem_db):
+    """Soft-deleted beliefs must not count toward predicate frequency."""
+    from kazma_ui.memory_api import invalidate_batch, link_entities, memory_vocab
+
+    class LinkReq:
+        async def json(self):
+            return {"subject": "lonely", "predicate": "stale_pred", "object": "shipx"}
+
+    await link_entities(LinkReq())
+    # Invalidate it — the predicate should NOT appear in vocab.
+    class InvReq:
+        async def json(self):
+            return {"ids": ["b1"]}  # b1 is `description`, not stale_pred
+
+    # Create a stale_pred belief then invalidate it via its own id would need
+    # a lookup; simpler: invalidate b1 (description) and confirm `description`
+    # disappears from vocab while `related_to`/`stale_pred` remain.
+    await invalidate_batch(InvReq())
+    out = await memory_vocab()
+    names = [p["name"] for p in out["predicates"]]
+    assert "description" not in names, "invalidated belief's predicate leaked into vocab"
