@@ -246,6 +246,62 @@ def register_memory_page(app: Any, templates: Any, agent: Any) -> None:
 # ── Health snapshot (compact for page header) ────────────────────────────
 
 
+@router.get("/api/memory/v2/vocab")
+async def memory_vocab() -> dict[str, Any]:
+    """F4: existing vocabulary for the chip-based link dialog.
+
+    Returns the predicates and entities already in the store so the Link UI
+    can offer them as clickable chips instead of forcing free-text (the root
+    cause of the reset-explosion mess: each new link invented a new predicate
+    name). Predicates are ordered by frequency so the common ones surface
+    first; entities by belief_count. Tenant-scoped like every other route.
+    """
+    try:
+        conn = _conn()
+        tid = _memory_tenant_id()
+        tfilter = " AND tenant_id = ?" if tid != "default" else ""
+        tparam: tuple = (tid,) if tid != "default" else ()
+        # Predicates: DISTINCT name + type + count, frequency-sorted. Only
+        # counts active beliefs so stale predicates don't dominate the chips.
+        preds = [
+            dict(r)
+            for r in conn.execute(
+                f"""SELECT predicate AS name, predicate_type AS type,
+                           COUNT(*) AS cnt
+                    FROM beliefs
+                    WHERE invalidated_at IS NULL AND valid_until IS NULL
+                    {tfilter}
+                    GROUP BY predicate, predicate_type
+                    ORDER BY cnt DESC, predicate ASC
+                    LIMIT 200""",
+                tparam,
+            ).fetchall()
+        ]
+        # Entities: id + name + type + belief_count, count-sorted. The hub
+        # (user) is pinned at the top by its high belief_count naturally.
+        ents = [
+            dict(r)
+            for r in conn.execute(
+                f"""SELECT e.id, e.name, e.type,
+                           COALESCE(e.belief_count,
+                             (SELECT COUNT(*) FROM beliefs b
+                              WHERE b.invalidated_at IS NULL AND b.valid_until IS NULL
+                                AND (b.subject=e.id OR b.object=e.id))
+                           ) AS belief_count
+                    FROM entities e
+                    WHERE 1=1 {('AND e.tenant_id = ?' if tid != 'default' else '')}
+                    ORDER BY belief_count DESC, e.name ASC
+                    LIMIT 200""",
+                tparam,
+            ).fetchall()
+        ]
+        conn.close()
+        return {"ok": True, "predicates": preds, "entities": ents}
+    except Exception as exc:
+        logger.exception("[memory_api] vocab failed")
+        return {"ok": False, "error": str(exc)[:300], "predicates": [], "entities": []}
+
+
 @router.get("/api/memory/v2/admin/summary")
 async def memory_admin_summary() -> dict[str, Any]:
     try:

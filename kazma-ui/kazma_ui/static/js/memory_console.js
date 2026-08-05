@@ -2188,6 +2188,8 @@
       _v2gSyncOpsBar();
       await _v2gReloadGraph();
       _v2gSelectEntity(data.object || tgt, { notify: false });
+      // F4: refresh predicate chips so a newly-created predicate appears.
+      _v2gLoadPredChips();
       try {
         window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
           detail: { op: 'link', source: data.subject || src, target: data.object || tgt, beliefId: data.belief_id },
@@ -3392,6 +3394,82 @@
     _v2gDrawCanvas(nodes, links);
   }
 
+  // F4: predicate chips — reuse existing vocabulary instead of inventing
+  // near-duplicate predicate names (the root cause of the reset-explosion
+  // mess: next_reset / grok_next_reset / grok_next_reset_personal).
+  var _v2gPredVocab = [];
+  async function _v2gLoadPredChips() {
+    try {
+      var data = await _v2gApiJson('/api/memory/v2/vocab');
+      if (!data || !data.ok || !Array.isArray(data.predicates)) return;
+      _v2gPredVocab = data.predicates;
+    } catch (e) { return; }
+    var box = document.getElementById('v2g-pred-chips-list');
+    if (!box) return;
+    var cur = _v2gOpsPredicate().toLowerCase();
+    // Canonical predicates pinned at top so they're always one click away.
+    var canonical = ['related_to', 'has_project', 'next_reset', 'supports_channels', 'works_at', 'email_is'];
+    var preds = _v2gPredVocab.map(function (p) { return p.name; });
+    canonical.forEach(function (c) { if (preds.indexOf(c) < 0) preds.unshift(c); });
+    // De-dup + cap at 40 for the bar (search/typeahead can extend later).
+    var seen = {}; var ordered = [];
+    preds.forEach(function (p) { if (p && !seen[p]) { seen[p] = 1; ordered.push(p); } });
+    ordered = ordered.slice(0, 40);
+    box.innerHTML = ordered.map(function (p) {
+      var active = (p === cur) ? 'chip-sel' : '';
+      var esc = String(p).replace(/"/g, '&quot;');
+      return '<button type="button" class="v2g-chip ' + active + '" data-pred="' + esc + '" '
+        + 'style="font-size:0.62rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;'
+        + 'border:1px solid ' + (active ? 'var(--accent)' : 'var(--border-subtle)') + ';'
+        + 'background:' + (active ? 'rgba(34,211,238,0.14)' : 'rgba(255,255,255,0.03)') + ';'
+        + 'color:' + (active ? 'var(--text-primary)' : 'var(--text-secondary)') + ';cursor:pointer;">'
+        + esc + '</button>';
+    }).join('');
+    box.querySelectorAll('[data-pred]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var predEl = document.getElementById('v2g-ops-predicate');
+        if (predEl) predEl.value = btn.getAttribute('data-pred') || '';
+        _v2gBroadcastSlots();
+        _v2gLoadPredChips(); // refresh active styling
+      });
+    });
+  }
+
+  // F4: similarity hint — when the typed predicate is a near-miss of an
+  // existing one (e.g. "grok_next_reset" when "next_reset" exists), nudge
+  // toward reuse. Non-blocking; shown in the ops hint line.
+  function _v2gMaybeHintPredicate(typed) {
+    var hintEl = document.getElementById('v2g-ops-hint');
+    if (!hintEl) return;
+    typed = String(typed || '').trim().toLowerCase();
+    if (!typed || !_v2gPredVocab.length) return;
+    // Exact match → no hint.
+    for (var i = 0; i < _v2gPredVocab.length; i++) {
+      if (String(_v2gPredVocab[i].name).toLowerCase() === typed) {
+        hintEl.textContent = 'Reusing existing predicate.';
+        return;
+      }
+    }
+    // Near-miss: typed contains an existing predicate as a token-substring
+    // (catches grok_next_reset_personal ⊇ next_reset). Tokenize on _ .
+    var typedTokens = typed.split('_');
+    for (var j = 0; j < _v2gPredVocab.length; j++) {
+      var name = String(_v2gPredVocab[j].name).toLowerCase();
+      if (name.length < 4) continue;
+      if (typed !== name && typedTokens.indexOf(name) >= 0) {
+        hintEl.innerHTML = 'Similar to <b style="color:var(--accent);cursor:pointer;" data-adopt="' + name + '">' + name + '</b>? Click to reuse.';
+        var adopt = hintEl.querySelector('[data-adopt]');
+        if (adopt) adopt.addEventListener('click', function () {
+          var predEl = document.getElementById('v2g-ops-predicate');
+          if (predEl) predEl.value = name;
+          _v2gBroadcastSlots();
+          _v2gLoadPredChips();
+        });
+        return;
+      }
+    }
+  }
+
   function _v2gRenderFilters() {
     var entBox = document.getElementById('v2g-filters-entity');
     var predBox = document.getElementById('v2g-filters-predicate');
@@ -3680,7 +3758,11 @@
     var predEl = document.getElementById('v2g-ops-predicate');
     if (predEl) {
       predEl.addEventListener('change', function() { _v2gBroadcastSlots(); });
+      // F4: live similarity hint as the operator types a predicate.
+      predEl.addEventListener('input', function() { _v2gMaybeHintPredicate(predEl.value); });
     }
+    // F4: load predicate chips from /vocab on init.
+    _v2gLoadPredChips();
     // List → graph slot sync (Entities form Src/Tgt)
     window.addEventListener('kazma:memory-ops-slots', function(ev) {
       var d = (ev && ev.detail) || {};

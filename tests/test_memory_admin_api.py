@@ -756,3 +756,65 @@ async def test_invalidate_batch_no_warn_when_other_edges_remain(mem_db):
     assert out["ok"] is True
     # `lonely` still has the related_to belief → not orphaned.
     assert "lonely" not in out.get("warn_orphaned", [])
+
+
+# ── F4: vocab route (chip source) ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_vocab_returns_predicates_by_frequency(mem_db):
+    """/vocab returns predicates frequency-sorted + entities count-sorted.
+
+    The mem_db fixture seeds belief b1 (lonely → description). After creating
+    two more beliefs with a repeated predicate, that predicate must rank first.
+    """
+    from kazma_ui.memory_api import link_entities, memory_vocab
+
+    # Create two `related_to` links so `related_to` (count 2) outranks
+    # `description` (count 1) in the frequency-sorted predicate list.
+    for obj in ("shipx", "kazma"):
+        class Req:
+            async def json(self):
+                return {"subject": "lonely", "predicate": "related_to", "object": obj}
+
+        await link_entities(Req())
+
+    out = await memory_vocab()
+    assert out["ok"] is True
+    preds = out["predicates"]
+    assert isinstance(preds, list) and preds
+    # Frequency-sorted: related_to (2) before description (1).
+    names = [p["name"] for p in preds]
+    assert "related_to" in names and "description" in names
+    assert names.index("related_to") < names.index("description")
+    # Each predicate carries its type + count.
+    rt = next(p for p in preds if p["name"] == "related_to")
+    assert rt["cnt"] >= 2 and rt["type"] in ("set", "state", "functional")
+    # Entities are count-sorted and include the seeded ones.
+    ents = out["entities"]
+    ent_ids = [e["id"] for e in ents]
+    assert "shipx" in ent_ids and "lonely" in ent_ids
+
+
+@pytest.mark.asyncio
+async def test_vocab_excludes_invalidated_beliefs(mem_db):
+    """Soft-deleted beliefs must not count toward predicate frequency."""
+    from kazma_ui.memory_api import invalidate_batch, link_entities, memory_vocab
+
+    class LinkReq:
+        async def json(self):
+            return {"subject": "lonely", "predicate": "stale_pred", "object": "shipx"}
+
+    await link_entities(LinkReq())
+    # Invalidate it — the predicate should NOT appear in vocab.
+    class InvReq:
+        async def json(self):
+            return {"ids": ["b1"]}  # b1 is `description`, not stale_pred
+
+    # Create a stale_pred belief then invalidate it via its own id would need
+    # a lookup; simpler: invalidate b1 (description) and confirm `description`
+    # disappears from vocab while `related_to`/`stale_pred` remain.
+    await invalidate_batch(InvReq())
+    out = await memory_vocab()
+    names = [p["name"] for p in out["predicates"]]
+    assert "description" not in names, "invalidated belief's predicate leaked into vocab"
