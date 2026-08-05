@@ -126,3 +126,76 @@ def test_memory_beliefs_tab_renders(memory_server: str) -> None:
             page.wait_for_selector("text=Predicate", timeout=10000)
         finally:
             browser.close()
+
+
+def test_memory_graph_isolation_safe_under_filter(memory_server: str) -> None:
+    """F2: a node whose only edge is filtered out by a PREDICATE-type filter
+    must stay visible (dimmed/badged), not vanish from the canvas. Pre-fix,
+    `_v2gApplyFilters` dropped any node not in a surviving link whenever any
+    predicate filter was active — so isolating a node's only edge made it
+    disappear even though it still existed in the DB. Post-fix such nodes are
+    marked `isolated` and counted via `_v2gGetIsolatedCount()`.
+
+    The predicate filter is by predicate_type (functional/set/state). We seed
+    a second belief with a DIFFERENT type so toggling the `set` chip isolates
+    the `state`-only node. SEARCH intentionally hides non-matching nodes
+    (that's its job); isolation-safe behavior is about the predicate case.
+    """
+    import sqlite3
+    import time
+    from playwright.sync_api import sync_playwright
+
+    # Seed a second belief with predicate_type='state' on a distinct node so
+    # toggling the 'set' predicate-type filter isolates it. NOTE: the module
+    # `memory_server` fixture sets KAZMA_DATA_DIR, but an autouse conftest
+    # fixture redirects KAZMA_MEMORY_STATE_DB to a per-test tmp path — so
+    # `primary_memory_db()` would resolve to the WRONG (empty) DB. Read the
+    # server's actual DB path from KAZMA_DATA_DIR instead.
+    server_state_db = os.path.join(os.environ["KAZMA_DATA_DIR"], "memory_state.db")
+    now = time.time()
+    c = sqlite3.connect(server_state_db)
+    c.execute(
+        "INSERT OR IGNORE INTO entities (id, tenant_id, type, name) "
+        "VALUES ('orphan_node','default','concept','Orphan Node')"
+    )
+    c.execute(
+        "INSERT INTO beliefs (id,tenant_id,subject,predicate,predicate_type,object,confidence,"
+        "structural_importance,valid_from,ingested_at) "
+        "VALUES ('be_iso1','default','orphan_node','has_status','state','active',0.9,1,?,?)",
+        (now, now),
+    )
+    c.commit()
+    c.close()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_context().new_page()
+            page.goto(memory_server + "/memory", timeout=15000)
+            page.wait_for_selector("#v2g-canvas", timeout=8000)
+            page.wait_for_function(
+                "() => typeof window._v2gGetIsolatedCount === 'function'",
+                timeout=10000,
+            )
+            # Reload so the just-seeded belief is in the payload.
+            page.evaluate("() => { if (typeof window._v2gLoad === 'function') window._v2gLoad(); }")
+            # With no filter active, nothing is isolated.
+            page.wait_for_function("() => window._v2gGetIsolatedCount() === 0", timeout=10000)
+            # Toggle the 'set' predicate-type chip ON. The seeded has_phase
+            # belief is type 'set' (survives); the has_status belief is 'state'
+            # (filtered out) → orphan_node loses its only edge → isolated.
+            page.evaluate(
+                """() => {
+                    var cb = document.getElementById('v2g-ft-predicate-set');
+                    if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+                }"""
+            )
+            page.wait_for_function(
+                "() => window._v2gGetIsolatedCount() >= 1", timeout=10000,
+            )
+            isolated = page.evaluate("() => window._v2gGetIsolatedCount()")
+            assert isolated >= 1, (
+                f"expected >=1 isolated node under 'set' predicate filter, got {isolated}"
+            )
+        finally:
+            browser.close()

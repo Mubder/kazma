@@ -1385,6 +1385,9 @@
   var _v2gFilters = { entity: {}, predicate: {} };
   // Cache the last full dataset so client-side filters don't need a re-fetch
   var _v2gRawNodes = [], _v2gRawLinks = [];
+  // F2: count of nodes that survived the entity-type filter but lost all their
+  // links (dimmed, badged, not dropped). Exposed for the ops-bar indicator.
+  var _v2gIsolatedCount = 0;
   // Graph-native ops: source/target slots + pick modes (link | merge)
   // Shared with the Entities list via kazma:memory-ops-slots events.
   var _v2gOps = {
@@ -1909,12 +1912,19 @@
       body.addColorStop(1, _v2gHexAlpha(color, 0.85));
       ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
       ctx.fillStyle = body;
-      ctx.globalAlpha = p.isVirtual && !isSel && !isHover ? 0.72 : 1;
+      // F2: isolated (link-less under filter) + virtual nodes render faded.
+      ctx.globalAlpha = (p.isVirtual && !isSel && !isHover) ? 0.72
+                      : (p.isolated && !isSel && !isHover) ? 0.4 : 1;
       ctx.fill();
       ctx.globalAlpha = 1;
       if (p.isVirtual) {
         ctx.setLineDash([3, 2]);
         ctx.strokeStyle = _v2gHexAlpha(theme.accentLight, 0.55);
+      } else if (p.isolated) {
+        // Isolation badge: amber dashed ring so a stranded node is visible,
+        // not mistaken for a healthy connected node.
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = 'rgba(245,158,11,0.7)';
       } else {
         ctx.setLineDash([]);
         ctx.strokeStyle = isUser ? _v2gHexAlpha('#fff7ed', 0.55) : 'rgba(255,255,255,0.28)';
@@ -3322,7 +3332,12 @@
         return true;
       });
     }
-    // Keep only nodes referenced by surviving links (+ search match on node names)
+    // Keep only nodes referenced by surviving links (+ search match on node names).
+    // Isolation-safe rendering (F2): a node that matches the entity-type filter
+    // but lost its links (e.g. right after a Cut) is kept and marked `isolated`
+    // so the paint loop can dim it + badge it — instead of silently dropping it.
+    // Without this, cutting the only edge to a node while a filter is active made
+    // the node vanish from the canvas even though it still exists in the DB.
     var nodeIds = new Set();
     links.forEach(function(l) { nodeIds.add(l.source); nodeIds.add(l.target); });
     if (search) {
@@ -3331,11 +3346,19 @@
         if (nm.indexOf(search) >= 0) nodeIds.add(n.id);
       });
     }
-    // Filter nodes by entity type + membership
+    var linkFilterActive = !!(activePred.length || search);
+    var isolatedCount = 0;
     nodes = nodes.filter(function(n) {
+      // Always start from a clean per-pass flag.
+      n.isolated = false;
       if (activeEnt.length && activeEnt.indexOf(n.type) < 0) return false;
-      // Keep nodes that are in a surviving link, OR all nodes if no link filter
-      if (activePred.length || search) return nodeIds.has(n.id);
+      if (linkFilterActive) {
+        if (nodeIds.has(n.id)) return true;
+        // Entity-type matched but no surviving link → keep, but dim.
+        // (Search still drops non-matching nodes — those are intentional hides.)
+        if (!search) { n.isolated = true; isolatedCount++; return true; }
+        return false;
+      }
       return true;
     });
     // If entity-type filter is on, re-filter links to only those between surviving nodes
@@ -3345,11 +3368,14 @@
     }
 
     var sl = document.getElementById('v2g-stats-line');
+    // Expose the isolated count for the ops-bar indicator + tests.
+    _v2gIsolatedCount = isolatedCount;
     if (sl) {
       var st = _v2gLastStats || {};
       var paint = st.paint_source || st.source || 'sqlite';
       var gprov = st.graph_provider || paint;
       var parts = [nodes.length + ' nodes · ' + links.length + ' beliefs'];
+      if (isolatedCount > 0) parts.push(isolatedCount + ' isolated');
       parts.push('paint ' + paint);
       if (gprov === 'neo4j') {
         parts.push(st.graph_online ? 'neo4j dual-write online' : 'neo4j offline');
@@ -3766,6 +3792,9 @@
   window._v2gLoad = _v2gLoad;
   window._v2gForceReload = _v2gReloadGraph;
   window._v2gRenameNode = _v2gRenameNode;
+  // F2: live isolated-node count (for the ops-bar indicator + tests). Getter
+  // because the value is recomputed each filter pass.
+  window._v2gGetIsolatedCount = function() { return _v2gIsolatedCount; };
   window._v2gSelectEntity = _v2gSelectEntity;
   window._v2gSelectBelief = function(subj, obj, beliefId, opts) {
     opts = opts || {};
