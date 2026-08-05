@@ -1570,7 +1570,31 @@ def register_direct_routes(self: Any) -> None:
                     "valid_until": b["valid_until"],
                 })
 
+            # F: graph groupings — read BEFORE conn.close() (the block below
+            # operates on a closed connection otherwise → ProgrammingError).
+            # Purely advisory; recall/extraction never read this. /graph does
+            # not tenant-scope beliefs today (admin overview is operator-wide),
+            # so read groupings unscoped for consistency (audit C2 tracks the
+            # tenant scope separately).
+            groups: list[dict] = []
+            member_tier: dict[str, int] = {}
+            try:
+                grows = conn.execute(
+                    "SELECT group_root, member, member_tier, label "
+                    "FROM graph_associations"
+                ).fetchall()
+                groups = [dict(r) for r in grows]
+                member_tier = {r["member"]: int(r["member_tier"]) for r in grows}
+            except Exception:
+                logger.warning("[memory_v2_graph] group associations read failed", exc_info=True)
+
             conn.close()
+            # Stamp each node with its tier (0=hub, 1-3=grouped, -1=ungrouped).
+            for n in nodes:
+                if n.get("isHub"):
+                    n["tier"] = 0
+                else:
+                    n["tier"] = member_tier.get(n.get("id"), -1)
             nodes.sort(key=lambda n: n["beliefCount"], reverse=True)
             # Pre-slice totals so the UI can show "showing 200 of N" and
             # decide whether to warn the operator about truncation.
@@ -1606,33 +1630,8 @@ def register_direct_routes(self: Any) -> None:
                 "predicate_type_counts": pred_counts,
             }
             stats.update(meta)
-            # F: graph groupings — attach the view-only associations + tiers
-            # so the canvas can render per-tier colors and cluster halos.
-            # Purely advisory; recall/extraction never read this.
-            groups: list[dict] = []
-            member_tier: dict[str, int] = {}
-            try:
-                # NOTE: /graph does not tenant-scope beliefs today (the admin
-                # overview is operator-wide), so read groupings unscoped too
-                # for consistency. (Tenant enforcement for /graph is tracked
-                # separately — audit C2.) Avoids a cross-module import of
-                # _memory_tenant_id which caused a swallowed NameError here.
-                grows = conn.execute(
-                    "SELECT group_root, member, member_tier, label "
-                    "FROM graph_associations"
-                ).fetchall()
-                groups = [dict(r) for r in grows]
-                member_tier = {r["member"]: int(r["member_tier"]) for r in grows}
-            except Exception:
-                logger.warning("[memory_v2_graph] group associations read failed", exc_info=True)
-            # Stamp each node with its tier (0=hub, -1=ungrouped).
-            emitted = nodes[:limit]
-            for n in emitted:
-                if n.get("isHub"):
-                    n["tier"] = 0
-                else:
-                    n["tier"] = member_tier.get(n.get("id"), -1)
-            return {"nodes": emitted, "links": links, "stats": stats, "groups": groups}
+            # `groups` was read above (before conn.close); tiers stamped on nodes.
+            return {"nodes": nodes[:limit], "links": links, "stats": stats, "groups": groups}
         except Exception as exc:
             return {
                 "nodes": [],
