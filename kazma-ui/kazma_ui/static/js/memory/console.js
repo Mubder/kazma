@@ -1,9 +1,9 @@
 // Memory console — health polling, KPIs, component board, V2 panel (queue/
 // merges/procedural/quality/beliefs/drawer), probe/federated/golden search,
-// maintenance deck. Shared helpers (formatBytes, fmtNum, _chipStyle) live here.
-// Split from memory_console.js (2026-08). State lives in state.js.
+// maintenance deck. Shared helpers live here. Split from memory_console.js.
 import { state, I18N, dispatchOpsDone } from './state.js';
 
+  var I18N = window.__DASH_MEM_I18N || window.I18N || {};
   // Visible build stamp — if missing in browser console, JS is stale/cached
   window.__KAZMA_MEMORY_CONSOLE_BUILD = 'comp-collapse-2026-08-04';
   // Memory & Governance Polling
