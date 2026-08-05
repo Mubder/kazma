@@ -977,3 +977,190 @@ async def test_vocab_excludes_invalidated_beliefs(mem_db):
     out = await memory_vocab()
     names = [p["name"] for p in out["predicates"]]
     assert "description" not in names, "invalidated belief's predicate leaked into vocab"
+
+
+# ── Graph groupings (view-only associations; never touch beliefs) ────────
+
+
+def _group_belief_count(mem_db):
+    """Count live belief rows — the invariant that must NOT change across
+    any grouping op."""
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    n = c.execute(
+        "SELECT count(*) FROM beliefs WHERE invalidated_at IS NULL AND valid_until IS NULL"
+    ).fetchone()[0]
+    c.close()
+    return n
+
+
+@pytest.mark.asyncio
+async def test_group_create_and_list(mem_db):
+    from kazma_ui.memory_api import graph_groups_create, graph_groups_list
+
+    before = _group_belief_count(mem_db)
+
+    class Req:
+        async def json(self):
+            return {"group_root": "shipx", "member": "kazma_app"}
+
+    out = await graph_groups_create(Req())
+    assert out["ok"] is True
+    assert out["member_tier"] == 1  # default (no parent tier known)
+    assert out["memory_affected"] is False
+
+    listed = await graph_groups_list()
+    assert listed["ok"] is True
+    assert any(g["member"] == "kazma_app" and g["group_root"] == "shipx"
+               for g in listed["groups"])
+    # CRITICAL INVARIANT: beliefs unchanged.
+    assert _group_belief_count(mem_db) == before
+
+
+@pytest.mark.asyncio
+async def test_group_tier_derives_from_parent(mem_db):
+    """Grouping a member under a tiered root assigns parent_tier + 1."""
+    from kazma_ui.memory_api import graph_groups_create, graph_groups_list
+
+    # shipx is a major (tier 1) under the hub. First make shipx tier 1.
+    class ReqShipx:
+        async def json(self):
+            return {"group_root": "user", "member": "shipx", "tier": 1}
+
+    await graph_groups_create(ReqShipx())
+    # Now group kazma_app under shipx — should auto-derive tier 2.
+    class ReqApp:
+        async def json(self):
+            return {"group_root": "shipx", "member": "kazma_app"}
+
+    out = await graph_groups_create(ReqApp())
+    assert out["ok"] is True
+    assert out["member_tier"] == 2, f"expected derived tier 2, got {out['member_tier']}"
+
+
+@pytest.mark.asyncio
+async def test_group_rejects_cycle(mem_db):
+    """Grouping that would create a cycle (A under B when B is under A) is rejected."""
+    from kazma_ui.memory_api import graph_groups_create
+
+    class AunderB:
+        async def json(self):
+            return {"group_root": "shipx", "member": "kazma"}
+
+    class BunderA:
+        async def json(self):
+            return {"group_root": "kazma", "member": "shipx"}
+
+    assert (await graph_groups_create(AunderB()))["ok"] is True
+    cycle = await graph_groups_create(BunderA())
+    assert cycle["ok"] is False
+    assert "cycle" in str(cycle.get("error", "")).lower()
+
+
+@pytest.mark.asyncio
+async def test_group_delete(mem_db):
+    from kazma_ui.memory_api import graph_groups_create, graph_groups_delete, graph_groups_list
+
+    class Req:
+        async def json(self):
+            return {"group_root": "shipx", "member": "kazma_app"}
+
+    created = await graph_groups_create(Req())
+    gid = created["id"]
+
+    before = _group_belief_count(mem_db)
+    out = await graph_groups_delete(gid)
+    assert out["ok"] is True
+    assert out["memory_affected"] is False
+
+    listed = await graph_groups_list()
+    assert not any(g["id"] == gid for g in listed["groups"])
+    assert _group_belief_count(mem_db) == before
+
+
+@pytest.mark.asyncio
+async def test_group_move_and_retier_subtree(mem_db):
+    """Moving a member to a new root re-tiers the member + its subtree,
+    keeping relative depth. Never touches beliefs."""
+    from kazma_ui.memory_api import (
+        graph_groups_create, graph_groups_move, graph_groups_list,
+    )
+
+    # Build a small tree: user(0) > shipx(1) > kazma_app(2) > callback(3)
+    class R:
+        def __init__(self, body):
+            self._b = body
+
+        async def json(self):
+            return self._b
+
+    await graph_groups_create(R({"group_root": "user", "member": "shipx", "tier": 1}))
+    await graph_groups_create(R({"group_root": "shipx", "member": "kazma_app"}))  # tier 2
+    await graph_groups_create(R({"group_root": "kazma_app", "member": "callback"}))  # tier 3
+
+    before = _group_belief_count(mem_db)
+
+    # Move kazma_app (and its child callback) under user directly.
+    # user is tier 0, so kazma_app becomes tier 1, callback becomes tier 2.
+    out = await graph_groups_move("kazma_app", R({"new_root": "user"}))
+    assert out["ok"] is True
+    assert out["new_tier"] == 1
+    assert out["subtree_retiered"] == 1  # callback
+
+    listed = await graph_groups_list()
+    tiers = {g["member"]: g["member_tier"] for g in listed["groups"]}
+    assert tiers["kazma_app"] == 1
+    assert tiers["callback"] == 2  # shifted by delta -1
+    # Beliefs untouched.
+    assert _group_belief_count(mem_db) == before
+
+
+@pytest.mark.asyncio
+async def test_group_set_tier_override(mem_db):
+    from kazma_ui.memory_api import graph_groups_create, graph_groups_set_tier, graph_groups_list
+
+    class Req:
+        async def json(self):
+            return {"group_root": "shipx", "member": "kazma_app"}
+
+    await graph_groups_create(Req())  # tier 1
+
+    class TierReq:
+        async def json(self):
+            return {"tier": 3}
+
+    out = await graph_groups_set_tier("kazma_app", TierReq())
+    assert out["ok"] is True
+    assert out["member_tier"] == 3
+    listed = await graph_groups_list()
+    assert next(g for g in listed["groups"] if g["member"] == "kazma_app")["member_tier"] == 3
+
+
+@pytest.mark.asyncio
+async def test_group_ops_never_touch_beliefs(mem_db):
+    """End-to-end: a full cycle of create/move/retier/delete must leave the
+    belief row count identical. This is the core promise of the grouping layer.
+    """
+    from kazma_ui.memory_api import (
+        graph_groups_create, graph_groups_move, graph_groups_set_tier,
+        graph_groups_delete, graph_groups_list,
+    )
+
+    class R:
+        def __init__(self, body):
+            self._b = body
+
+        async def json(self):
+            return self._b
+
+    before = _group_belief_count(mem_db)
+    await graph_groups_create(R({"group_root": "user", "member": "shipx", "tier": 1}))
+    await graph_groups_create(R({"group_root": "shipx", "member": "kazma_app"}))
+    await graph_groups_move("kazma_app", R({"new_root": "user"}))
+    await graph_groups_set_tier("kazma_app", R({"tier": 2}))
+    # delete all groups
+    for g in (await graph_groups_list())["groups"]:
+        await graph_groups_delete(g["id"])
+    after = _group_belief_count(mem_db)
+    assert before == after, f"beliefs changed across group ops: {before} -> {after}"
