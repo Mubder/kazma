@@ -33,8 +33,10 @@
             {# Header #}
             {% include "components/header.html" %}
 
-            {# Global System Alerts Banner #}
-            <div x-data="systemAlertsBanner()" x-show="activeAlert" class="system-alerts-banner" style="display: none; background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); padding: 12px 24px; margin: 16px 24px 0 24px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.3s ease;">
+            {# Global System Alerts Banner — x-cloak + x-show gate it; the
+               flex layout lives in the .system-alerts-banner class so the
+               inline style never forces display (which caused the flash). #}
+            <div x-data="systemAlertsBanner()" x-cloak x-show="activeAlert" class="system-alerts-banner" style="background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); padding: 12px 24px; margin: 16px 24px 0 24px; border-radius: 6px; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.3s ease;">
                 <div style="display: flex; align-items: center; gap: 12px; color: var(--text-primary);">
                     <!-- Warning SVG Icon -->
                     <svg style="color: var(--warning); flex-shrink: 0;" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

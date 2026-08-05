@@ -235,8 +235,8 @@
         <button class="btn btn-secondary btn-sm" @click="loadBeliefs()" x-text="S.search || 'Search'"></button>
         <button class="btn btn-danger btn-sm" @click="invalidateSelected()" :disabled="!selectedBeliefs.length" x-text="(S.invalidate || 'Invalidate') + ' (' + selectedBeliefs.length + ')'"></button>
       </div>
-      <div class="card" style="padding:0;overflow:auto;max-height:50vh;">
-        <table class="table" style="width:100%;font-size:0.85rem;">
+      <div class="card" style="padding:0;overflow:auto;max-height:50vh;-webkit-overflow-scrolling:touch;">
+        <table class="table" style="width:100%;font-size:0.85rem;min-width:560px;">
           <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Active beliefs — select to invalidate, or use row actions to focus, edit, or unlink.</caption>
           <thead>
             <tr>
@@ -363,8 +363,8 @@
 
     {# MERGES #}
     <div x-show="tab === 'merges'" x-cloak>
-      <div class="card" style="padding:0;overflow:auto;max-height:50vh;">
-        <table class="table" style="width:100%;font-size:0.85rem;">
+      <div class="card" style="padding:0;overflow:auto;max-height:50vh;-webkit-overflow-scrolling:touch;">
+        <table class="table" style="width:100%;font-size:0.85rem;min-width:560px;">
           <thead>
             <tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Tier</th><th scope="col">Conf</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th></tr>
           </thead>

@@ -2253,6 +2253,25 @@ tbody tr:last-child td {
   white-space: nowrap;
   border: 0;
 }
+
+/* Alpine x-cloak — GLOBAL rule. Hides any element carrying x-cloak until
+   Alpine initializes and removes the attribute. Without this, x-show-gated
+   panels (memory tabs, settings banners, the HITL approval card, the system
+   alerts banner) flash visible at first paint before Alpine evaluates their
+   x-show expression — the "blink of a different section / permissions card
+   then nothing" symptom. Alpine's docs make the CSS rule the developer's
+   responsibility; it was previously only defined in 3 page-local <style>
+   blocks (ide/settings/workspace), so every other page blinked. */
+[x-cloak] { display: none !important; }
+
+/* System alerts banner layout (base.html). Flex lives here — NOT inline —
+   so an inline `display:flex` can't force the banner visible before Alpine
+   evaluates its x-show (the alerts-flash-on-refresh bug). */
+.system-alerts-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .badge-success { background: var(--success-subtle); color: var(--success); }
 .badge-warning { background: var(--warning-subtle); color: var(--warning); }
 .badge-danger { background: var(--danger-subtle); color: var(--danger); }

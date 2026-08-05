@@ -203,6 +203,36 @@ Operator page **`/memory`**: graph on top, entities/beliefs/merge/hygiene below.
 
 ---
 
+## 4c. Memory page overhaul + cron reminders (2026-08)
+
+A full pass on the operator `/memory` page — usefulness, performance,
+correctness, accessibility — plus a long-standing cron-reminder crash fix.
+
+**Memory page (`/memory`):**
+
+| Capability | What changed |
+|------------|--------------|
+| **Pagination + counts** | Lists show "Showing 1–150 of 3,412" + **Load more**; graph shows a truncation banner. No more silent cap masquerading as empty. |
+| **Real search** | Diacritic-insensitive (`francais`→`Français`), alias-aware FTS5 search across beliefs + entities. |
+| **"Why recalled"** | Click a belief → recall history (count, last time, origin episode) + **Probe from this belief**. |
+| **Undo** | Invalidate / link / edit / delete show an **[Undo]** toast for 60s. Merge shows a rewired-count receipt. |
+| **~10× faster page-open** | Materialized entity counts replace per-row correlated subqueries; self-heals if a write site is missed. |
+| **Multi-tenant** | `KAZMA_MEMORY_ENFORCE_TENANT=1` isolates memory per tenant (off by default). |
+| **Accessibility** | `aria-live` status, table captions, dynamic canvas descriptions, single belief-edit modal. |
+
+**Cron reminders now actually deliver:**
+
+- The scheduler was constructed without a `graph_builder=`, so every scheduled
+  reminder crashed with "No graph builder configured" on fire. Now wired.
+- Reminders also never reached Telegram because the delivery target wasn't
+  captured; now `delivery_target` (the originating `telegram:<chat_id>`) is
+  captured at schedule time and used at fire time. (SessionStore lookup is
+  not a viable fallback — sessions TTL-evict after 5 min.)
+
+**Deep dive:** [Memory & RAG — operator capabilities](./memory-and-rag.md#operator-capabilities-2026-08-overhaul) · [env vars](../reference/environment-variables.md).
+
+---
+
 ## 5. Quick operator recipes
 
 ### A. First deep research paper

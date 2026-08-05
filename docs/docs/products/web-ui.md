@@ -58,12 +58,14 @@ Dedicated ops page (not the chat sidebar):
 
 | Area | What you can do |
 |------|-----------------|
-| Graph & health (top) | Belief canvas, KPIs, probe, refresh/export |
-| Entities | Rename display labels, merge/link shells, delete empty, **click row → focus graph** |
-| Beliefs | Search, **Edit** triple, invalidate batch; click row → focus edge endpoints |
+| Graph & health (top) | Belief canvas, KPIs, probe, refresh/export; truncation banner when capped |
+| Entities | Rename display labels, merge/link shells, delete empty, **click row → focus graph**. Pagination + diacritic-insensitive/alias-aware search |
+| Beliefs | Search (FTS5), **Edit** triple (single modal), invalidate batch with **[Undo]**; click row → focus edge endpoints + see "recalled N×" history |
+| Pending merges | Approve/reject quarantine; merge shows a rewired-belief-count receipt |
+| Hygiene | Purge empty, dedupe noted, archive dead (preview counts before run) |
 | Hub identity | Person **User** / `ent_…` rename to **Mubder** updates canvas hub (not a second “You” node) |
 
-APIs under `/api/memory/v2/*` (rename, PATCH belief, entities, hygiene). Full guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
+Multi-tenant isolation: set `KAZMA_MEMORY_ENFORCE_TENANT=1` to scope memory by the request tenant (off by default). APIs under `/api/memory/v2/*`. Full guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)). Tour of the latest stack: [Recent features](../guide/recent-features).
 

@@ -151,6 +151,23 @@ Single operator surface for **topology + entities + beliefs + hygiene**
 1. **Graph & health** (top) — V2 belief canvas, KPIs, probe, backups.  
 2. **Ops tabs** — Entities, Beliefs, Pending merges, Hygiene.
 
+### Operator capabilities (2026-08 overhaul)
+
+| Capability | Where | Notes |
+|------------|-------|-------|
+| **Pagination + real counts** | every list tab | "Showing 1–150 of 3,412" + **Load more**. The graph reports `total_nodes`/`truncated` and shows an amber banner when capped. No more silent 200-row cap. |
+| **Diacritic-insensitive search** | Entities, Beliefs search boxes | Routes through `beliefs_fts` / `entities_fts` (FTS5) — `francais` matches `Français`, aliases are searchable. Falls back to `LIKE` if FTS is unavailable. |
+| **"Why recalled"** | belief drawer | Click a belief → see `recalled N× · last <date> · via <method> · from <episode>`, plus a **Probe from this belief →** button. Endpoint: `GET /beliefs/{id}/recall-trail`. |
+| **Undo** | action toast | Invalidate-batch, link, edit, delete-entity return a receipt + a 60s single-use undo token; the toast has an **[Undo]** button. Merge shows a "N beliefs rewired" receipt (not undoable — restore from backup). |
+| **Single belief edit** | belief row **Edit** | One modal form (subject/predicate/object), not a multi-step prompt. |
+| **Single ops bar** | graph Ops bar | The duplicate Link/merge slots card was removed — graph Ops bar is the one source of truth; row **Src**/**Tgt** buttons + Shift-click sync to it. |
+| **Multi-tenant** | env flag | `KAZMA_MEMORY_ENFORCE_TENANT=1` scopes reads/writes by the request-scoped tenant. Off by default (single-tenant `default`). Note: `entities.id` is a global PK, not per-tenant. |
+
+**Performance:** entity `belief_count` / `graph_degree` are materialized columns
+(maintained on every write, self-healing from the `-1` sentinel), so the page
+reads precomputed counts instead of running O(entities×beliefs) correlated
+subqueries on every load — a ~10× page-open speedup at scale.
+
 ### Graph invariants (canvas SoT)
 
 | Rule | Why |

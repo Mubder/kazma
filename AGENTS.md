@@ -406,6 +406,37 @@ beliefs, episodes, entities, procedural DAGs) is isolated from
 consolidation/backup writes don't WAL-contend with chat recall reads. Do
 not merge them or route queue writes at the primary DB.
 
+### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
+
+The user-facing reminder cron (`schedule_task` native skill → `CronScheduler`
+→ `kazma-data/cron.db`). Two invariants must hold:
+
+**A. The scheduler MUST be constructed with a `graph_builder=`.**
+`app.py` builds `CronScheduler(store=…, graph_builder=_cron_graph_builder,
+poll_interval=…)`. Without `graph_builder=`, a job fires and `_execute()`
+raises `RuntimeError("No graph builder configured")` — every reminder
+silently crashes on fire. The closure returns the agent's one-shot
+`build_child_graph()` (checkpointer=None), mirroring the sub-agent
+graph-builder closure defined just above it.
+
+**B. `delivery_target` is captured at schedule time, not resolved at fire time.**
+`schedule_task` reads `get_current_delivery_target()` (the
+`_current_delivery_target` ContextVar, bound at the gateway handler entry
+AND re-set in the tool-worker node from the `_gateway` routing block —
+same two-layer pattern as `_current_thread_id`) and stores it on the job.
+At fire time `_deliver()` uses `job.delivery_target` as the `target_id`.
+The fire-time SessionStore lookup is NOT a viable fallback — sessions
+TTL-evict after 5 min (`_session_ttl_seconds=300`), so any reminder >5 min
+out would miss. Legacy rows with empty `delivery_target` fall back to
+`thread_id`, then `"{platform}:unknown"`. The platform-isolation invariant
+(§2) is preserved — `chat_id` never enters graph state; `delivery_target`
+joins `thread_id`/`platform` in the internal `_gateway` routing sub-dict.
+
+**Multi-tenant memory flag:** `KAZMA_MEMORY_ENFORCE_TENANT=1` (off by default)
+scopes `/memory` operator reads/writes by the request-scoped tenant. See
+§8 ConfigStore + the env-var reference. Note: `entities.id` is a global PK,
+not per-tenant.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -417,6 +448,17 @@ not merge them or route queue writes at the primary DB.
 - **Toasts:** use `window.showToast(msg, type, duration)` or
   `Alpine.store('toast').add(...)`. `streaming.js`'s `KazmaStream.toast`
   delegates to `$store.toast` — there is one toast system.
+- **`x-cloak` is GLOBAL — do not re-introduce the blink.** The rule
+  `[x-cloak] { display: none !important; }` lives once in `kazma.css`. Any
+  `x-show`-gated panel MUST also carry `x-cloak`, or it flashes visible at
+  first paint before Alpine evaluates its `x-show` (the "different section /
+  permissions card blinks then disappears" symptom). Never put `display:flex`
+  (or any `display`) in an inline `style` on an `x-show` element — the inline
+  declaration wins over Alpine's `display:none` toggle; put flex layout in a
+  CSS class instead (see `.system-alerts-banner`).
+- **Responsive grids:** use `class="two-col-grid"` (collapses to one column
+  ≤768px via `kazma.css`) on any inline `grid-template-columns:1fr 1fr;` —
+  bare inline 2-col grids don't collapse and crush on mobile.
 
 ## Server Management
 

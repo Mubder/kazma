@@ -87,6 +87,7 @@ Generic `ConfigStore.get()` does **not** automatically overlay every env var —
 | `KAZMA_EMBED_BASE_URL` | unset | Remote only | `/embeddings` endpoint base URL for `openai-compatible`. |
 | `KAZMA_EMBED_API_KEY` | unset | Remote only | API key for the remote `/embeddings` endpoint. |
 | `KAZMA_DEMO_MODE` | unset | **No** | Demo fixtures — never enable in real prod. |
+| `KAZMA_MEMORY_ENFORCE_TENANT` | unset | Multi-tenant only | When `1`/`true`, the `/memory` operator endpoints scope reads/writes by the request-scoped tenant (set by the auth middleware from verified JWT/opaque-session claims). Unset = single-tenant `default` (identical to pre-Phase-4 behavior). Flip on only when you add a second tenant. |
 
 ---
 

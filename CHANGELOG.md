@@ -38,6 +38,47 @@
   DB. All 24 cron tests pass; existing no-graph-builder failure-path test stays
   green.
 
+## Unreleased — Memory page overhaul (5 phases) + UI fixes (2026-08-05)
+
+Operator `/memory` page, audited and upgraded across usefulness, performance,
+correctness, and professionalism. 26 new tests, 0 regressions.
+
+- **Phase 1 — pagination + receipts/undo + single ops bar.** List endpoints
+  (`entities`, `beliefs`, `episodes`, `queue`, `entity-merges`) return `total`
+  + `offset` + `limit`; the graph reports `total_nodes`/`truncated`. UI shows
+  "Showing 1–150 of 3,412" + Load more. Every reversible mutation
+  (invalidate-batch, link, edit, delete-entity) returns a receipt + a 60s
+  single-use undo token; the toast has an `[Undo]` button. Duplicate
+  Link/merge slots card removed — graph Ops bar is the single source of truth.
+- **Phase 2 — FTS5 search + "why recalled".** Belief/entity search routes
+  through `beliefs_fts`/new `entities_fts` (diacritic-insensitive, alias-aware),
+  LIKE fallback on FTS error. New `GET /beliefs/{id}/recall-trail` surfaces
+  access_count/last_accessed + origin episode; belief drawer shows "recalled
+  N× · last …" + a "Probe from this belief" button.
+- **Phase 3 — materialized entity counts (perf).** `entities.belief_count`/
+  `graph_degree` columns + covering partial indexes replace per-row correlated
+  subqueries (O(entities×beliefs) on every page load). Maintained at all
+  identity-affecting write sites; read path self-heals from the `-1` sentinel.
+  ~10× page-open speedup at scale. Connection pooling deferred (measured
+  `ensure_primary_schema` at 0.16ms/call — negligible).
+- **Phase 4 — multi-tenant correctness.** `KAZMA_MEMORY_ENFORCE_TENANT=1`
+  (off by default = identical to prior behavior) scopes memory reads/writes by
+  the request-scoped tenant. Tests prove tenant A can't see/mutate tenant B.
+  Note surfaced: `entities.id` is a global PK (not per-tenant).
+- **Phase 5 — a11y + edit modal + E2E.** Single belief-edit modal (replaces
+  3-prompt wizard); `aria-live`, table `<caption>`/`scope`, dynamic canvas
+  aria-label, `.sr-only` utility; Playwright E2E smoke. JS-module split +
+  design-token CSS extraction deferred (large mechanical refactors, no
+  behavioral change).
+- **UI blink fixes.** Added the global `[x-cloak] { display:none!important }`
+  CSS rule (was only in 3 page-local blocks → every other page's `x-show`
+  panels flashed pre-Alpine). Fixed the base.html system-alerts banner's
+  conflicting inline `display:none;…;display:flex` (forced it visible until
+  Alpine ran — the "permissions card flashes then disappears" symptom).
+- **Mobile fixes.** Added `two-col-grid` to 6 bare inline 2-column grids
+  (swarm/workspace/settings) so they collapse to one column ≤768px. Beliefs/
+  merges tables get `min-width` + momentum scroll so columns don't crush.
+
 ## Unreleased — Turn priority: stop memory/session hijack on store pastes (2026-08-04)
 
 - **Root cause:** After a long reminder thread, a Telegram bulk paste

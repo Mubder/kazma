@@ -47,13 +47,16 @@ Use this page to clean topology without raw SQL.
 | Goal | How |
 |------|-----|
 | See the belief graph | Top **Graph & health** canvas; Refresh if labels look stale |
+| Find an entity beyond the top 150 | Entities search box → type the name/alias (FTS5, diacritic-insensitive); use **Load more** if "Showing X of Y" shows more |
 | Rename hub “You” → brand name | Entities: find person **User** / `ent_…` or hub → **Rename** → e.g. `Mubder`. Canvas hub should show that name. |
 | Rename a project node | Click node or entity row → **Rename** (id stays `shipx`; label becomes `ShipX`) |
 | Focus list ↔ graph | Click a row to zoom the canvas; click a node to highlight the list |
-| Fix a wrong belief | Beliefs tab → **Edit** (object / predicate / subject) |
-| Merge duplicate shells | Set Src + Tgt → **Merge** (beliefs rewired to target) |
+| Fix a wrong belief | Beliefs tab → **Edit** (single modal: object / predicate / subject) |
+| Undo a mistaken edit/invalidate | Click **[Undo]** on the action toast (60s window) — or restore from Maintenance → backups for older mistakes |
+| Merge duplicate shells | Set Src + Tgt → **Merge** (beliefs rewired to target; receipt shows the count) |
 | Link two entities | Src + Tgt + predicate → **Link** |
 | Drop junk beliefs | Select → **Invalidate** |
+| Why was a belief used? | Click a belief → drawer shows "recalled N× · last … · from <episode>"; **Probe from this belief** to see neighbors |
 
 ### Hub identity note
 

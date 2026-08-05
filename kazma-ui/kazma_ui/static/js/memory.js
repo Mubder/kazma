@@ -8,7 +8,7 @@ function memoryPage() {
 
   function toast(msg, type) {
     if (window.showToast) window.showToast(msg, type || "info");
-    else console.log(`[${type}] ${msg}`);
+    else console.warn(`[memory ${type || "info"}] ${msg}`);  // fallback only (toast system not loaded)
   }
 
   /** Show a toast with an inline [Undo] button that POSTs /undo/{token}.
