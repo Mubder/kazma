@@ -1677,12 +1677,22 @@
       var rawName = String(nd.name || nd.id || '').trim();
       var isUser = !!nd.isHub || String(nd.id || '').toLowerCase() === 'user';
       var display = rawName;
+      // Blob compaction: a node whose id/text is >80 chars is a prose note
+      // (e.g. a `noted` essay), not a real entity. Compact its display to the
+      // first meaningful line + "…" so it renders as a readable chip, not a
+      // giant unreadable node. The full text is available via fullLabel on
+      // inspect.
+      var isBlob = String(nd.id || '').length > 80 || rawName.length > 80;
+      if (isBlob && !isUser) {
+        var firstLine = rawName.split(/[\n\r]/)[0];
+        display = firstLine.length > 40 ? firstLine.slice(0, 40) + '…' : (firstLine + '…');
+      }
       if (isUser) {
         var low = rawName.toLowerCase();
         if (!rawName || low === 'user' || low === 'you' || low === 'me') display = 'You';
         // else keep branded name (Mubder, Kazma, …)
       }
-      return { rawName: rawName, display: display, isUser: isUser };
+      return { rawName: rawName, display: display, isUser: isUser, isBlob: isBlob };
     }
     var idKey = ns.map(function(nd) { return String(nd.id); }).join('\0');
     var labelKey = ns.map(function(nd) {
@@ -1750,7 +1760,11 @@
           isUser: d.isUser,
           isHub: !!nd.isHub || d.isUser,
           isHighStakes: !!nd.isHighStakes,
-          r: (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
+          isBlob: !!d.isBlob,
+          // Blob chips are compact: small radius so they don't dominate the
+          // canvas and the group-spring can move them against other forces.
+          r: d.isBlob ? _v2gNodeBaseR - 3
+            : (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
           isEpisode: !!nd.isEpisode,
           tier: (typeof nd.tier === 'number' ? nd.tier : -1),
@@ -1991,6 +2005,39 @@
         ctx.beginPath(); ctx.arc(x, y, r + 9, 0, 2 * Math.PI);
         ctx.strokeStyle = theme.secondary; ctx.lineWidth = 2; ctx.setLineDash([3, 2]); ctx.stroke();
         ctx.setLineDash([]);
+      }
+      // Blob compaction: prose-note nodes (>80 chars) render as compact
+      // rounded-rect chips, not circles — smaller, distinct shape, so they
+      // don't dominate the canvas and the group-spring can reposition them.
+      if (p.isBlob && !isUser) {
+        var chipW = r * 2.4, chipH = r * 1.4;
+        var chipAlpha = (p.isolated && !isSel && !isHover) ? 0.4
+                      : (p.isVirtual && !isSel && !isHover) ? 0.72 : 1;
+        ctx.globalAlpha = chipAlpha;
+        // chip body
+        ctx.fillStyle = _v2gHexAlpha(color, 0.55);
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(x - chipW / 2, y - chipH / 2, chipW, chipH, 3);
+        } else {
+          ctx.rect(x - chipW / 2, y - chipH / 2, chipW, chipH);
+        }
+        ctx.fill();
+        // chip border (dashed = note, not entity)
+        ctx.setLineDash([2, 2]);
+        ctx.strokeStyle = _v2gHexAlpha(color, 0.8);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        // label inside the chip (truncated display name + …)
+        if (showLabels) {
+          ctx.font = _v2gFont(9);
+          ctx.fillStyle = '#e6edf3';
+          ctx.textAlign = 'center';
+          ctx.fillText(p.label, x, y + 3);
+        }
+        continue;  // skip the normal circle body below
       }
       // Body — radial highlight for depth
       var body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, 0, x, y, r);
