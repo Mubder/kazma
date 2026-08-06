@@ -920,8 +920,20 @@ class KazmaAppBuilder:
                 self.cron_store = None
 
         except Exception as e:
-            logger.warning("Gateway failed to initialize: %s", e)
-            self._init_errors.append({"subsystem": "gateway", "error": str(e)})
+            # Log the full type + repr + traceback. A bare Exception with an
+            # empty message (e.g. a swallowed cryptography InvalidTag raised
+            # deep in vault.retrieve during connector token decryption) used
+            # to log "Gateway failed to initialize: " with NO clue what went
+            # wrong — making diagnosis impossible. Include the exception type
+            # so the real cause is always visible.
+            logger.warning(
+                "Gateway failed to initialize: %s: %s", type(e).__name__, e,
+                exc_info=True,
+            )
+            self._init_errors.append({
+                "subsystem": "gateway",
+                "error": f"{type(e).__name__}: {e}",
+            })
 
     def _setup_routers(self) -> None:
         """Create and mount FastAPI routers."""
@@ -1583,6 +1595,15 @@ def main() -> None:
     """
     import argparse
     import os as _os3
+
+    # Windows: SelectorEventLoop for psycopg async compat (see
+    # kazma_core.eventloop). Must run before uvicorn.run below.
+    try:
+        from kazma_core.eventloop import set_windows_selector_policy
+
+        set_windows_selector_policy()
+    except Exception:
+        pass
 
     import uvicorn
 

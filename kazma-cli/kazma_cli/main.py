@@ -107,6 +107,18 @@ def main() -> None:
 
 def _run_serve(port: int) -> None:
     """Start the Kazma WebUI server."""
+    # Windows: switch to WindowsSelectorEventLoopPolicy BEFORE uvicorn creates
+    # its loop. ProactorEventLoop (the Windows default) is incompatible with
+    # psycopg's async connections (used by AsyncPostgresSaver checkpointer) —
+    # every connection logged "Psycopg cannot use the 'ProactorEventLoop'" and
+    # Postgres-backed checkpoints never persisted. No-op on macOS/Linux.
+    try:
+        from kazma_core.eventloop import set_windows_selector_policy
+
+        set_windows_selector_policy()
+    except Exception:
+        pass
+
     # Load the CWD's .env with override=True BEFORE anything else.
     # IMPORTANT: do NOT rely on load_dotenv()'s default search — it walks up
     # from the kazma package location (which may be an editable install in a

@@ -435,14 +435,25 @@ def _apply_path_rewrite(
 
 
 def _find_env_file(data_dir: Path) -> Path | None:
-    """Locate the project ``.env`` (sibling of ``kazma-data/`` or CWD)."""
+    """Locate the target project's ``.env`` for vault-key sync.
+
+    Prefers the CWD's ``.env`` because the import is always run from the
+    target install's directory — that's the authoritative .env the operator
+    expects the key to land in. Falls back to ``kazma-data/``'s sibling only
+    if CWD has no .env. The previous order (data_dir first) was wrong when
+    Kazma was editable-installed from a DIFFERENT repo than the one being
+    migrated into: ``data_dir`` resolved via the package's project root and
+    pointed at the *package's* repo .env, so the synced key landed in the
+    wrong file and the target's vault.db stayed undecryptable.
+    """
     candidates = [
-        data_dir.parent / ".env",
         Path.cwd() / ".env",
+        data_dir.parent / ".env",
     ]
     for c in candidates:
         if c.exists():
             return c
+    # Last resort: create one in the CWD so the key isn't lost.
     return None
 
 
