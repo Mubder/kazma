@@ -1678,6 +1678,8 @@
         p.isVirtual = !!nd.isVirtual;
         p.isHighStakes = !!nd.isHighStakes;
         p.type = nd.type || p.type;
+        // Keep tier in sync if the payload updated it (e.g. after a group op).
+        if (typeof nd.tier === 'number') p.tier = nd.tier;
       });
       _v2gLabelSig = labelSig;
       if (_v2gSelectedId) {
@@ -1723,6 +1725,7 @@
           r: (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
           isEpisode: !!nd.isEpisode,
+          tier: (typeof nd.tier === 'number' ? nd.tier : -1),
           pinned: pinned,
         };
       });
