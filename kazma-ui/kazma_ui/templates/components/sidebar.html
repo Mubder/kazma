@@ -32,8 +32,18 @@
 
     {# Navigation #}
     <nav class="nav-links">
-        {# Primary Section #}
+        {# ── Main — land here, then work ── #}
         <span class="nav-section-title">{{ t('nav.primary') }}</span>
+
+        <a href="/dashboard" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.dashboard') }}</span>
+            <span class="nav-kbd">⌘1</span>
+        </a>
 
         <a href="/workspace" class="nav-link {{ 'active' if active_page == 'workspace' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
@@ -43,7 +53,7 @@
                 </svg>
             </span>
             <span class="nav-label">{{ t('nav.workspace') }}</span>
-            <span class="nav-kbd">⌘1</span>
+            <span class="nav-kbd">⌘2</span>
         </a>
 
         <a href="/ide" class="nav-link {{ 'active' if active_page == 'ide' else '' }}" @click="closeMobileNav()">
@@ -62,102 +72,11 @@
                 </svg>
             </span>
             <span class="nav-label">{{ t('nav.chat') }}</span>
-            <span class="nav-kbd">⌘2</span>
-        </a>
-
-        <a href="/dashboard" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.dashboard') }}</span>
             <span class="nav-kbd">⌘3</span>
         </a>
 
-        {# Tools Section #}
+        {# ── Tools — active things you use ── #}
         <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.tools') }}</span>
-
-        <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.skills') }}</span>
-            <span class="nav-kbd">⌘4</span>
-        </a>
-
-        <a href="/mcp" class="nav-link {{ 'active' if active_page == 'mcp' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/>
-                    <line x1="6" y1="6" x2="6.01" y2="6" stroke-width="2" stroke-linecap="round"/>
-                    <line x1="6" y1="18" x2="6.01" y2="18" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.mcp') }}</span>
-            <span class="nav-kbd">⌘5</span>
-        </a>
-
-        {# System Section #}
-        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.system') }}</span>
-
-        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
-                    <circle cx="12" cy="18" r="2"/>
-                    <line x1="6" y1="8" x2="12" y2="16"/>
-                    <line x1="18" y1="8" x2="12" y2="16"/>
-                    <line x1="8" y1="6" x2="16" y2="6"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.swarm') }}</span>
-            <span class="nav-kbd">⌘6</span>
-        </a>
-
-        <a href="/replay" class="nav-link {{ 'active' if active_page == 'replay' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="9"/>
-                    <polyline points="12,7 12,12 15,14"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.replay') }}</span>
-            <span class="nav-kbd">⌘7</span>
-        </a>
-
-        <a href="/research" class="nav-link {{ 'active' if active_page == 'research' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <circle cx="11" cy="11" r="8"/>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.research') }}</span>
-            <span class="nav-kbd">⌘8</span>
-        </a>
-
-        <a href="/knowledge" class="nav-link {{ 'active' if active_page == 'knowledge' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.knowledge') }}</span>
-        </a>
-
-        <a href="/memory" class="nav-link {{ 'active' if active_page == 'memory' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path d="M12 2a7 7 0 0 0-7 7c0 4 7 13 7 13s7-9 7-13a7 7 0 0 0-7-7z"/>
-                    <circle cx="12" cy="9" r="2.5"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.memory') }}</span>
-        </a>
 
         <a href="/agents" class="nav-link {{ 'active' if active_page == 'agents' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
@@ -170,6 +89,65 @@
             <span class="nav-label">{{ t('nav.agents') }}</span>
         </a>
 
+        <a href="/memory" class="nav-link {{ 'active' if active_page == 'memory' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M12 2a7 7 0 0 0-7 7c0 4 7 13 7 13s7-9 7-13a7 7 0 0 0-7-7z"/>
+                    <circle cx="12" cy="9" r="2.5"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.memory') }}</span>
+        </a>
+
+        {# ── Capabilities — what the agent can do ── #}
+        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.capabilities') }}</span>
+
+        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
+                    <circle cx="12" cy="18" r="2"/>
+                    <line x1="6" y1="8" x2="12" y2="16"/>
+                    <line x1="18" y1="8" x2="12" y2="16"/>
+                    <line x1="8" y1="6" x2="16" y2="6"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.swarm') }}</span>
+        </a>
+
+        <a href="/research" class="nav-link {{ 'active' if active_page == 'research' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.research') }}</span>
+        </a>
+
+        <a href="/knowledge" class="nav-link {{ 'active' if active_page == 'knowledge' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.knowledge') }}</span>
+        </a>
+
+        <a href="/replay" class="nav-link {{ 'active' if active_page == 'replay' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="9"/>
+                    <polyline points="12,7 12,12 15,14"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.replay') }}</span>
+        </a>
+
+        {# ── Configuration — setup + extensions ── #}
+        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.configuration') }}</span>
+
         <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -179,6 +157,26 @@
             </span>
             <span class="nav-label">{{ t('nav.settings') }}</span>
             <span class="nav-kbd">⌘,</span>
+        </a>
+
+        <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.skills') }}</span>
+        </a>
+
+        <a href="/mcp" class="nav-link {{ 'active' if active_page == 'mcp' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/>
+                    <line x1="6" y1="6" x2="6.01" y2="6" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="6" y1="18" x2="6.01" y2="18" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.mcp') }}</span>
         </a>
     </nav>
 

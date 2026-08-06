@@ -34,9 +34,10 @@ __all__ = ["TRANSLATIONS"]
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     # ── Navigation / Sidebar ──────────────────────────────────────────
-    "nav.primary": {"en": "Primary", "ar": "الرئيسية"},
+    "nav.primary": {"en": "Main", "ar": "الرئيسية"},
     "nav.tools": {"en": "Tools", "ar": "الأدوات"},
-    "nav.system": {"en": "System", "ar": "النظام"},
+    "nav.capabilities": {"en": "Capabilities", "ar": "القدرات"},
+    "nav.configuration": {"en": "Configuration", "ar": "الإعدادات"},
     "nav.workspace": {"en": "Workspace", "ar": "مساحة العمل"},
     "nav.ide": {"en": "IDE", "ar": "بيئة التطوير المتكاملة"},
     "nav.chat": {"en": "Chat", "ar": "المحادثة"},
