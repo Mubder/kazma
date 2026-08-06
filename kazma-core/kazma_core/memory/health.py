@@ -9,11 +9,43 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
-__all__ = ["build_memory_health"]
+__all__ = ["build_memory_health", "mark_recall_degraded", "recall_degraded"]
 
 logger = logging.getLogger(__name__)
+
+# ── Recall degradation tracking ──────────────────────────────────────────
+# recall() fails soft (returns []) on DB/embedder failure. Without a signal,
+# a broken embedder feels like amnesia — the operator sees no error unless
+# they're watching the Dashboard. This lightweight counter lets the health
+# check surface "recall failures detected" as a DEGRADED status.
+_recall_fail_count: int = 0
+_recall_last_failure: float = 0.0
+_recall_last_reason: str = ""
+
+
+def mark_recall_degraded(reason: str = "") -> None:
+    """Record a recall failure so build_memory_health() can surface it.
+
+    Called by recall() on its outer except path. Increment-only;
+    build_memory_health() reads the count and timestamp to decide
+    whether to flag DEGRADED.
+    """
+    global _recall_fail_count, _recall_last_failure, _recall_last_reason
+    _recall_fail_count += 1
+    _recall_last_failure = time.time()
+    _recall_last_reason = reason or "unknown"
+
+
+def recall_degraded() -> dict[str, Any]:
+    """Return the recall-failure state for the health dashboard."""
+    return {
+        "fail_count": _recall_fail_count,
+        "last_failure_epoch": _recall_last_failure,
+        "last_reason": _recall_last_reason,
+    }
 
 
 def _read_memory_cfg() -> dict[str, Any]:

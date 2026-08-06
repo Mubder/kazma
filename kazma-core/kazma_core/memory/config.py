@@ -484,13 +484,13 @@ def memory_retrieval_top_k(cfg: dict[str, Any] | None = None) -> int:
 
 
 def memory_v2_enabled(cfg: dict[str, Any] | None = None) -> bool:
-    """True when the V2 cognitive memory stack is the active read path.
+    """True when the V2 cognitive memory stack is active.
 
     Requires both ``memory.enabled`` (master switch) AND
-    ``memory.v2.use_new_stack`` (the dual-write → V2 recall cutover flag).
-    During the transition ``use_new_stack`` stays False so the legacy
-    4-layer RRF adapter serves reads; the V2 schema still receives
-    dual-writes so no data is lost.
+    ``memory.v2.use_new_stack``. The legacy 4-layer RRF stack has been
+    removed — V2 (``recall()``) is now the sole read path. Setting
+    ``use_new_stack=False`` disables V2 injection + post-turn
+    consolidation only; there is no legacy fallback.
     """
     c = cfg if cfg is not None else read_memory_cfg()
     if not memory_enabled(c):

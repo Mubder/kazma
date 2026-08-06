@@ -68,7 +68,7 @@ async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
         finally:
             conn.close()
     except Exception:
-        logger.debug("[memory_worker] macro_sleep handler failed", exc_info=True)
+        logger.warning("[memory_worker] macro_sleep handler failed", exc_info=True)
         return False
 
 
@@ -113,7 +113,7 @@ async def _handle_entity_merge(payload: dict[str, Any]) -> bool:
         finally:
             conn.close()
     except Exception:
-        logger.debug("[memory_worker] entity_merge handler failed", exc_info=True)
+        logger.warning("[memory_worker] entity_merge handler failed", exc_info=True)
         return False
 
 
@@ -176,7 +176,7 @@ async def _handle_global_reconsolidation(payload: dict[str, Any]) -> bool:
         finally:
             conn.close()
     except Exception:
-        logger.debug("[memory_worker] global_reconsolidation failed", exc_info=True)
+        logger.warning("[memory_worker] global_reconsolidation failed", exc_info=True)
         return False
 
 
@@ -293,7 +293,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
             primary.close()
             ops.close()
     except Exception:
-        logger.debug("[memory_worker] micro_consolidation handler failed", exc_info=True)
+        logger.warning("[memory_worker] micro_consolidation handler failed", exc_info=True)
         return False
 
 
@@ -318,7 +318,7 @@ def start_memory_worker() -> None:
         _start_backup_export_scheduler()
         _start_reconsolidation_scheduler()
     except Exception:
-        logger.debug("[memory_worker] could not start worker", exc_info=True)
+        logger.warning("[memory_worker] could not start worker", exc_info=True)
 
 
 _MACRO_SLEEP_INTERVAL_HOURS = 6
@@ -329,6 +329,39 @@ _BACKUP_EXPORT_INTERVAL_HOURS = 24
 # Global reconsolidation: once per day, offset from backup so they don't
 # contend for the same disk I/O window.
 _RECONSOLIDATION_INTERVAL_HOURS = 24
+
+
+def _distinct_tenants() -> list[str]:
+    """Return all tenant IDs that have episodes in memory_state.db.
+
+    Used by the schedulers to fan maintenance tasks over every active
+    tenant instead of only ``"default"``. In the common single-user case
+    (``tenant_mode="shared"``) this returns ``["default"]`` and behavior
+    is unchanged from the old hardcoded-default path.
+
+    Best-effort: on any error returns ``["default"]`` so maintenance
+    continues even if the query fails.
+    """
+    try:
+        import sqlite3
+
+        from kazma_core.paths import primary_memory_db
+
+        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT tenant_id FROM episodes"
+            ).fetchall()
+            tenants = [r[0] for r in rows if r[0]]
+            # Always include "default" even if it has no episodes yet (fresh install).
+            if "default" not in tenants:
+                tenants.insert(0, "default")
+            return tenants
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("[memory_worker] _distinct_tenants failed — using ['default']", exc_info=True)
+        return ["default"]
 
 
 def _start_macro_sleep_scheduler() -> None:
@@ -350,7 +383,12 @@ def _start_macro_sleep_scheduler() -> None:
             try:
                 from kazma_core.memory.task_queue import enqueue_task
 
-                enqueue_task("macro_sleep", {"tenant_id": "default", "live_config": True})
+                # Fan out over all active tenants so decay/promotion/archival
+                # runs for every tenant, not just "default". In single-user
+                # (shared) mode _distinct_tenants() returns ["default"] —
+                # unchanged from the old hardcoded behavior.
+                for tenant in _distinct_tenants():
+                    enqueue_task("macro_sleep", {"tenant_id": tenant, "live_config": True})
                 logger.debug("[memory_worker] enqueued periodic macro_sleep")
             except Exception:
                 logger.debug("[memory_worker] macro_sleep enqueue failed", exc_info=True)
@@ -396,7 +434,10 @@ def _start_backup_export_scheduler() -> None:
                 from kazma_core.memory.task_queue import enqueue_task
 
                 enqueue_task("native_backup", {"retention": 10})
-                enqueue_task("nightly_export", {"tenant_id": "default"})
+                # Export per-tenant so each tenant's beliefs/graph land in
+                # their own file (not overwritten by "default").
+                for tenant in _distinct_tenants():
+                    enqueue_task("nightly_export", {"tenant_id": tenant})
                 logger.debug("[memory_worker] enqueued nightly backup + export")
             except Exception:
                 logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
@@ -429,10 +470,12 @@ def _start_reconsolidation_scheduler() -> None:
             try:
                 from kazma_core.memory.task_queue import enqueue_task
 
-                enqueue_task(
-                    "global_reconsolidation",
-                    {"tenant_id": "default", "max_merges": 50, "reembed_limit": 100},
-                )
+                # Fan dedup/re-embed over all active tenants.
+                for tenant in _distinct_tenants():
+                    enqueue_task(
+                        "global_reconsolidation",
+                        {"tenant_id": tenant, "max_merges": 50, "reembed_limit": 100},
+                    )
                 logger.debug("[memory_worker] enqueued global_reconsolidation")
             except Exception:
                 logger.debug(
@@ -481,7 +524,7 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
         logger.info("[memory_worker] native_backup done: %d file(s)", len(written))
         return True
     except Exception:
-        logger.debug("[memory_worker] native_backup handler failed", exc_info=True)
+        logger.warning("[memory_worker] native_backup handler failed", exc_info=True)
         return False
 
 
@@ -495,5 +538,5 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
         logger.info("[memory_worker] nightly_export done: %d file(s)", len(written))
         return True
     except Exception:
-        logger.debug("[memory_worker] nightly_export handler failed", exc_info=True)
+        logger.warning("[memory_worker] nightly_export handler failed", exc_info=True)
         return False

@@ -151,9 +151,11 @@ class SelfImprovementSkill:
         past_context = ""
         try:
             from kazma_core.memory.recall import search
+            from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            results = search(f"{worker_name} pipeline {task[:100]}", limit=3)
+            _tenant = resolve_tenant_id(prefer_context=True)
+            results = search(f"{worker_name} pipeline {task[:100]}", limit=3, tenant_id=_tenant)
             if results:
                 # Recalled content is untrusted (it originates from past
                 # conversation/tool output) and this prompt drives generation
@@ -241,9 +243,11 @@ Output ONLY the delta text, no preamble."""
         past_context = ""
         try:
             from kazma_core.memory.recall import search
+            from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            results = search(f"{worker_name} failure {task[:100]}", limit=3)
+            _tenant = resolve_tenant_id(prefer_context=True)
+            results = search(f"{worker_name} failure {task[:100]}", limit=3, tenant_id=_tenant)
             if results:
                 # See _analyze_success: recalled content is untrusted and feeds
                 # a persistent-delta generator, so it must be fenced.

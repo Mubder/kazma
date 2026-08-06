@@ -283,8 +283,10 @@ class CompactionEngine:
         """
         try:
             from kazma_core.memory.recall import search as v2_search
+            from kazma_core.memory.config import resolve_tenant_id
 
-            hits = v2_search(query, limit=limit)
+            _tenant = resolve_tenant_id(prefer_context=True)
+            hits = v2_search(query, limit=limit, tenant_id=_tenant)
             logger.info("Retrieved %d V2 memories for compaction", len(hits))
             return hits
         except Exception:

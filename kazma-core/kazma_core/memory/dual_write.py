@@ -1,16 +1,15 @@
-"""Dual-write bridge: mirror legacy memory writes into the V2 schema.
+"""V2 memory write mirror — best-effort mirroring of writes into the cognitive schema.
 
-During the transition from the 4-layer RRF stack to the V2 cognitive
-engine, every legacy write is **also** mirrored into the new
-``memory_state.db`` so no data is lost and the V2 schema stays warm.
-The mirror is **best-effort and non-blocking**: a V2 write failure is
-logged but never propagates to the caller, so the legacy path is
-unaffected.
+The legacy 4-layer RRF stack has been **removed** (V1→V2 cutover is
+complete). V2 (``memory_state.db``) is now the sole read/write path.
+This module mirrors writes from compatibility call sites (compaction,
+swarm, self-improvement) into the V2 schema, best-effort and
+non-blocking: a write failure is logged but never propagates.
 
-Read-path control is separate: :func:`kazma_core.memory.config.memory_v2_enabled`
-(the ``memory.v2.use_new_stack`` flag) decides whether ``recall()`` or
-the legacy adapter serves reads. Dual-write runs regardless, so flipping
-the flag later is instant.
+The ``memory.v2.use_new_stack`` flag (now ``True`` by default) formerly
+controlled the V1→V2 read cutover; with V1 removed, setting it to
+``False`` only disables V2 injection/post-turn consolidation — there
+is no legacy fallback to serve reads.
 
 Three legacy write paths are mirrored:
 

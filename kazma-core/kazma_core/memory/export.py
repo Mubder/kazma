@@ -39,7 +39,11 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
                    WHERE tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL""",
                 (tenant_id,),
             ).fetchall()
-            jsonl_path = out_dir / "kazma_beliefs_latest.jsonl"
+            # Include tenant_id in the filename so per-tenant exports don't
+            # overwrite each other (the "default" tenant keeps the legacy
+            # name for backward compat with existing tooling).
+            jsonl_name = "kazma_beliefs_latest.jsonl" if tenant_id == "default" else f"kazma_beliefs_{tenant_id}.jsonl"
+            jsonl_path = out_dir / jsonl_name
             with open(jsonl_path, "w", encoding="utf-8") as f:
                 for b in beliefs:
                     f.write(json.dumps(dict(b), ensure_ascii=False, default=str) + "\n")
@@ -62,7 +66,8 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
                 ).fetchall()
                 for edge in edges:
                     g.add_edge(edge["subject"], edge["object"], predicate=edge["predicate"])
-                graphml_path = out_dir / "kazma_graph_latest.graphml"
+                graphml_name = "kazma_graph_latest.graphml" if tenant_id == "default" else f"kazma_graph_{tenant_id}.graphml"
+                graphml_path = out_dir / graphml_name
                 nx.write_graphml(g, graphml_path)
                 result["graphml"] = graphml_path
             except Exception:

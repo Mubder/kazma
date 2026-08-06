@@ -153,8 +153,16 @@ def recall(
         if not result.empty:
             _bump_access(conn, beliefs, episodes)
         return result
-    except Exception:
+    except Exception as exc:
         logger.warning("[recall] failed — returning empty", exc_info=True)
+        # Surface the failure to the health system so the Dashboard can
+        # flag "DEGRADED — recall failures detected" instead of the
+        # operator inferring amnesia from empty results.
+        try:
+            from kazma_core.memory.health import mark_recall_degraded
+            mark_recall_degraded(str(exc)[:200])
+        except Exception:
+            pass
         return RecallResult([], [])
     finally:
         if own_conn and conn is not None:
@@ -273,6 +281,7 @@ def search(
     *,
     session_id: str | None = None,
     kind: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, Any]]:
     """V2-native search returning ``list[dict]`` — the shape callers of the
     legacy ``adapter.search()`` consume.
@@ -295,7 +304,7 @@ def search(
     Best-effort: never raises; returns ``[]`` on any failure.
     """
     try:
-        result = recall(query, limit=limit, session_id=session_id)
+        result = recall(query, limit=limit, session_id=session_id, tenant_id=tenant_id)
         out: list[dict[str, Any]] = []
         hits = list(result.beliefs) + list(result.episodes)
         if kind:
@@ -1105,7 +1114,7 @@ def _episode_ppr(
             f"""
             SELECT id, session_id FROM episodes
             WHERE tenant_id = ?
-              AND tier IN ('recall','episodic')
+              AND tier IN ('working','recall','episodic')
               AND session_id IN ({sph})
             LIMIT ?
             """,

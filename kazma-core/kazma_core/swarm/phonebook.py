@@ -79,11 +79,13 @@ class WorkerPhonebook:
         enriched = task
         try:
             from kazma_core.memory.recall import search
+            from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
             # recall.search is sync; call both directly (fast local SQLite).
-            strategies_hits = search(task, limit=3)
-            evo_hits = search(f"{worker_name} evolution learning", limit=2)
+            _tenant = resolve_tenant_id(prefer_context=True)
+            strategies_hits = search(task, limit=3, tenant_id=_tenant)
+            evo_hits = search(f"{worker_name} evolution learning", limit=2, tenant_id=_tenant)
 
             # Process past strategies
             if isinstance(strategies_hits, list) and strategies_hits:
