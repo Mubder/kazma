@@ -1007,7 +1007,9 @@ async def test_group_create_and_list(mem_db):
 
     out = await graph_groups_create(Req())
     assert out["ok"] is True
-    assert out["member_tier"] == 1  # default (no parent tier known)
+    # shipx is an ungrouped non-hub root → implicit tier-1 major, so the
+    # member (kazma_app) derives to tier 2 (the A/B/C/D model).
+    assert out["member_tier"] == 2
     assert out["memory_affected"] is False
 
     listed = await graph_groups_list()
@@ -1037,6 +1039,35 @@ async def test_group_tier_derives_from_parent(mem_db):
     out = await graph_groups_create(ReqApp())
     assert out["ok"] is True
     assert out["member_tier"] == 2, f"expected derived tier 2, got {out['member_tier']}"
+
+
+@pytest.mark.asyncio
+async def test_group_tier_under_hub_is_major(mem_db):
+    """Grouping a node directly under the hub ('user') derives tier 1 (major).
+    And grouping under an ungrouped non-hub root derives tier 2 (sub) — the
+    middle-out build case (operator groups kazma_app under kazma before kazma
+    is itself grouped).
+    """
+    from kazma_ui.memory_api import graph_groups_create
+
+    # Under the hub → tier 1 (major).
+    class UnderHub:
+        async def json(self):
+            return {"group_root": "user", "member": "shipx"}
+
+    out = await graph_groups_create(UnderHub())
+    assert out["ok"] is True
+    assert out["member_tier"] == 1, f"under-hub should be tier 1, got {out['member_tier']}"
+
+    # Under an ungrouped non-hub root (kazma) → tier 2 (sub), because kazma
+    # is treated as an implicit tier-1 major.
+    class UnderUngroupedRoot:
+        async def json(self):
+            return {"group_root": "kazma", "member": "kazma_app"}
+
+    out2 = await graph_groups_create(UnderUngroupedRoot())
+    assert out2["ok"] is True
+    assert out2["member_tier"] == 2, f"under ungrouped root should be tier 2, got {out2['member_tier']}"
 
 
 @pytest.mark.asyncio

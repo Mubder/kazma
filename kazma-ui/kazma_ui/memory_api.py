@@ -1590,15 +1590,19 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
         existing = conn.execute(
             "SELECT id FROM graph_associations WHERE member=?", (member,)
         ).fetchone()
-        # Derive tier: explicit override > parent's tier + 1 > default 1.
-        parent_tier = _group_tier_of(conn, root)
+        # Derive tier: explicit override > parent's tier + 1 > implicit.
+        # The hub ('user') is always tier 0. An ungrouped root that is NOT the
+        # hub is treated as an implicit tier-1 major (so grouping kazma_app
+        # under kazma — where kazma isn't yet grouped — yields tier 2, matching
+        # the A/B/C/D model). This lets operators build the tree middle-out.
+        parent_tier = 0 if str(root).lower() in ("user", "you", "me") else _group_tier_of(conn, root)
+        if parent_tier < 0:
+            parent_tier = 1  # ungrouped non-hub root → implicit major
         explicit_tier = body.get("tier")
         if explicit_tier is not None:
             tier = int(explicit_tier)
-        elif parent_tier >= 0:
-            tier = parent_tier + 1
         else:
-            tier = 1
+            tier = parent_tier + 1
         tier = max(0, min(tier, 4))  # soft cap
         gid = existing["id"] if existing else f"assoc_{uuid.uuid4().hex[:16]}"
         now = time.time()
@@ -1672,12 +1676,12 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
         ).fetchone()
         old_tier = int(old_row["member_tier"]) if old_row else 1
         subtree = [member] + _group_descendants(conn, member)
-        # New tier for the moved member.
-        parent_tier = _group_tier_of(conn, new_root)
+        # New tier for the moved member (same implicit-tier rule as create).
+        parent_tier = 0 if str(new_root).lower() in ("user", "you", "me") else _group_tier_of(conn, new_root)
+        if parent_tier < 0:
+            parent_tier = 1  # ungrouped non-hub root → implicit major
         explicit = body.get("tier")
-        new_tier = int(explicit) if explicit is not None else (
-            parent_tier + 1 if parent_tier >= 0 else 1
-        )
+        new_tier = int(explicit) if explicit is not None else parent_tier + 1
         new_tier = max(0, min(new_tier, 4))
         delta = new_tier - old_tier
         tid = _memory_tenant_id()
