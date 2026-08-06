@@ -52,11 +52,11 @@ __all__ = ["notify_lifecycle", "get_lifecycle_config"]
 # caller) — ``notify_lifecycle("started")`` upgrades itself to ``restarted``
 # when a recent graceful-shutdown marker is present.
 _EVENTS: dict[str, dict[str, str]] = {
-    "starting": {"icon": "🔵", "level": "info", "label": "Kazma server starting up…"},
-    "started": {"icon": "🟢", "level": "success", "label": "Kazma server started"},
-    "restarted": {"icon": "🔄", "level": "info", "label": "Kazma server restarted"},
-    "shutting_down": {"icon": "🟡", "level": "warn", "label": "Kazma server shutting down gracefully…"},
-    "startup_failed": {"icon": "🔴", "level": "error", "label": "Kazma startup FAILED"},
+    "starting": {"icon": "🔵", "level": "info", "label": "Kazma server starting up", "level_label": "Info"},
+    "started": {"icon": "🟢", "level": "success", "label": "Kazma server started", "level_label": "Success"},
+    "restarted": {"icon": "🔄", "level": "info", "label": "Kazma server restarted", "level_label": "Info"},
+    "shutting_down": {"icon": "🟡", "level": "warn", "label": "Kazma server shutting down gracefully", "level_label": "Warning"},
+    "startup_failed": {"icon": "🔴", "level": "error", "label": "Kazma startup FAILED", "level_label": "Error"},
 }
 
 # Events a caller may pass in. ``restarted`` is synthesized internally.
@@ -197,9 +197,14 @@ async def notify_lifecycle(event: str, detail: str = "") -> None:
                 detail = f"was down ~{down_for:.1f}s"
 
     spec = _EVENTS[event]
-    text = f"{spec['icon']} {spec['label']}"
+    # Elegant format with bold key words:
+    # Line 1: 🔵 Kazma — "Info"      (icon + name + level label in quotes)
+    # Line 2: Kazma server starting up   (the label)
+    # Line 3: Role: "System"             (role in quotes)
+    text = f"{spec['icon']} Kazma — \"{spec['level_label']}\"\n{spec['label']}"
     if detail:
         text += f"\n{detail}"
+    text += f"\nRole: \"System\""
 
     try:
         from kazma_core.swarm.bus import BusMessage, NullBusAdapter, get_message_bus

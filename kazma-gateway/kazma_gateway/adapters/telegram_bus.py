@@ -153,10 +153,30 @@ class TelegramBusAdapter(BusAdapter):
             message.level, "📍"
         )
         safe_name = _escape_md(message.worker_name)
-        safe_content = _escape_md(message.content[:300])
-        text = f"{icon} *{safe_name}* \\[{message.level}\\]\n{safe_content}"
+        # Render content with bold for quoted words ("like this" → *like this*).
+        # This gives lifecycle + alert messages an elegant, readable format
+        # on Telegram: key labels are bold without the user needing to know
+        # MarkdownV2 syntax.
+        raw_content = message.content[:300]
+        # Convert "quoted" segments to bold for Telegram MarkdownV2.
+        import re as _re
+
+        def _bold_quotes(text: str) -> str:
+            """Replace "word" with *word* (Markdown bold), then escape for MD2."""
+            # First, protect quoted segments by replacing with bold markers
+            parts = _re.split(r'"([^"]*)"', text)
+            result = ""
+            for i, part in enumerate(parts):
+                if i % 2 == 1:  # odd index = inside quotes
+                    result += "*" + _escape_md(part) + "*"
+                else:
+                    result += _escape_md(part)
+            return result
+
+        safe_content = _bold_quotes(raw_content)
+        text = f"{icon} *{safe_name}*\n{safe_content}"
         if message.worker_role:
-            text += f"\n\\_Role: {_escape_md(message.worker_role)}\\_"
+            text += f"\n*{_escape_md(message.worker_role.title())}*"
         await self._post({
             "chat_id": self._chat_id,
             "text": text[:4096],
