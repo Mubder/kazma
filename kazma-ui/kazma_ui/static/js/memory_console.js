@@ -3282,7 +3282,7 @@
       });
       html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.12);font-size:0.7rem;line-height:1.4;color:#fcd34d;">';
       html += '<strong style="color:#fbbf24;">Hub shortcut</strong> — direct link to hub while also linked to ';
-      html += '<b>' + _v2gEsc(uniqParents.slice(0, 4).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>.';
+      html += '<b>' + _v2gEsc(uniqParents.slice(0, 4).map(function(n) { return _v2gShortLabel(n, 30); }).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>.';
       html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">Preferred: this → parent → hub (You/Mubder). Use <b>Cut hub</b> to drop the shortcut edge.</div>';
       html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">Cut hub link' + (hubEdges.length > 1 ? 's' : '') + '</button>';
       html += '</div>';
@@ -3304,7 +3304,7 @@
         var ed = row.ed;
         var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
         var predLabel = _v2gEsc((ed.fullLabel || ed.label || '').replace(/_/g, ' '));
-        var neighLabel = _v2gEsc(_v2gShortLabel(_v2gDisplayName(row.other), 48));
+        var neighLabel = _v2gEsc(_v2gShortLabel(_v2gDisplayName(row.other), 30));
         var dir = row.outbound ? '→' : '←';
         var hubBadge = row.toHub
           ? ' <span style="font-size:0.58rem;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.2);color:#fbbf24;">hub</span>'
