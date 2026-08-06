@@ -1,8 +1,12 @@
-"""Document Processor Native Skill — read, merge, split, and inspect documents.
+"""Document Processor Native Skill — read, merge, split, inspect, convert, OCR, and manipulate documents.
 
 Each tool lazily imports its heavy dependency and returns a friendly
 install-hint string when the library is missing, so the skill always loads.
 Output is written to ``kazma-data/documents/`` for generated/manipulated files.
+
+Optional extras:
+- ``pip install 'kazma[ocr]'`` for OCR (scanned PDFs, images).
+- ``pip install 'kazma[convert]'`` for format conversion (HTML→PDF, MD→PDF).
 """
 
 from __future__ import annotations
@@ -434,3 +438,398 @@ async def pdf_info(file_path: str) -> str:
         lines.append("  ⚠ No extractable text. Install OCR: pip install 'kazma[ocr]'")
 
     return "\n".join(lines)
+
+
+# ── ocr_document (optional: pip install 'kazma[ocr]') ───────────────────
+
+
+async def ocr_document(path: str, lang: str = "eng") -> str:
+    """OCR a scanned PDF or image to extract text.
+
+    Requires the ``[ocr]`` extra: ``pip install 'kazma[ocr]'`` plus a
+    system install of Tesseract OCR (``apt install tesseract-ocr`` on
+    Linux, ``brew install tesseract`` on macOS, or the Windows installer
+    from https://github.com/UB-Mannheim/tesseract/wiki).
+
+    Args:
+        path: Path to a PDF or image file (PNG/JPEG/TIFF).
+        lang: Tesseract language code (e.g. ``"eng"``, ``"ara"``, ``"eng+ara"``).
+
+    Returns:
+        Extracted text, or an install-hint error if OCR deps are missing.
+    """
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return f"Error: File not found: {path}"
+
+    suffix = p.suffix.lower()
+    try:
+        import pytesseract
+    except ImportError:
+        return (
+            "Error: OCR libraries not installed. Run: pip install 'kazma[ocr]' "
+            "and install Tesseract OCR (apt install tesseract-ocr / brew install tesseract "
+            "/ Windows installer from UB-Mannheim/tesseract wiki)."
+        )
+
+    try:
+        if suffix == ".pdf":
+            # Convert PDF pages to images, then OCR each
+            try:
+                from pdf2image import convert_from_path
+            except ImportError:
+                return "Error: pdf2image not installed. Run: pip install 'kazma[ocr]'"
+
+            try:
+                from pypdf import PdfReader
+
+                total_pages = len(PdfReader(str(p)).pages)
+            except Exception:
+                total_pages = 10  # fallback
+
+            images = convert_from_path(str(p), dpi=200)
+            lines: list[str] = []
+            for i, img in enumerate(images):
+                text = pytesseract.image_to_string(img, lang=lang)
+                if text.strip():
+                    lines.append(f"--- Page {i + 1} ---")
+                    lines.append(text.strip())
+                    lines.append("")
+            return _truncate("\n".join(lines)) if lines else "No text detected via OCR."
+
+        else:
+            # Image file (PNG/JPEG/TIFF)
+            from PIL import Image
+
+            img = Image.open(str(p))
+            text = pytesseract.image_to_string(img, lang=lang)
+            return _truncate(text) if text.strip() else "No text detected in image."
+
+    except Exception as exc:
+        return f"Error during OCR: {exc}"
+
+
+# ── convert_document (optional: pip install 'kazma[convert]') ───────────
+
+
+async def convert_document(
+    file_path: str,
+    target_format: str,
+    output_name: str = "",
+) -> str:
+    """Convert a document between formats.
+
+    Supported conversions (requires optional libs):
+    - HTML → PDF (``weasyprint``)
+    - Markdown → PDF (``markdown`` + ``weasyprint``)
+    - Markdown → HTML (``markdown`` — built-in)
+    - Markdown → DOCX (``python-docx`` + ``markdown``)
+
+    Args:
+        file_path: Source file path.
+        target_format: Target format (``pdf``, ``html``, ``docx``).
+        output_name: Output filename (without extension).
+
+    Returns:
+        Success message with output path, or error.
+    """
+    p = Path(file_path).expanduser().resolve()
+    if not p.exists():
+        return f"Error: File not found: {file_path}"
+
+    src_suffix = p.suffix.lower()
+    target = target_format.lower().lstrip(".")
+    name = output_name or p.stem
+    src_text = p.read_text(encoding="utf-8", errors="replace")
+
+    try:
+        # ── Markdown → HTML ──
+        if src_suffix in (".md", ".markdown") and target == "html":
+            import markdown as md
+
+            html = md.markdown(src_text, extensions=["tables", "fenced_code"])
+            dest = _filename(name, "html")
+            dest.write_text(f"<html><body>{html}</body></html>", encoding="utf-8")
+            return f"Converted successfully.\n  {src_suffix} → .html\n  Saved to: {dest}"
+
+        # ── Markdown/HTML → PDF ──
+        if src_suffix in (".md", ".markdown", ".html", ".htm") and target == "pdf":
+            try:
+                from weasyprint import HTML
+            except ImportError:
+                return "Error: weasyprint not installed. Run: pip install 'kazma[convert]'"
+
+            if src_suffix in (".md", ".markdown"):
+                import markdown as md
+
+                html_content = md.markdown(src_text, extensions=["tables", "fenced_code"])
+                full_html = f"<html><body style='font-family: sans-serif; font-size: 12pt;'>{html_content}</body></html>"
+            else:
+                full_html = src_text
+
+            dest = _filename(name, "pdf")
+            HTML(string=full_html).write_pdf(str(dest))
+            return f"Converted successfully.\n  {src_suffix} → .pdf\n  Saved to: {dest}"
+
+        # ── Markdown → DOCX ──
+        if src_suffix in (".md", ".markdown") and target == "docx":
+            from docx import Document as DocxDoc
+
+            doc = DocxDoc()
+            for line in src_text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    level = min(stripped.count("#"), 3)
+                    text = stripped.lstrip("#").strip()
+                    doc.add_heading(text, level=level)
+                elif stripped:
+                    doc.add_paragraph(stripped)
+            dest = _filename(name, "docx")
+            doc.save(str(dest))
+            return f"Converted successfully.\n  .md → .docx\n  Saved to: {dest}"
+
+        return f"Error: Unsupported conversion {src_suffix} → .{target}"
+
+    except ImportError as exc:
+        return f"Error: Missing library for this conversion: {exc}. Run: pip install 'kazma[convert]'"
+    except Exception as exc:
+        return f"Error during conversion: {exc}"
+
+
+# ── pdf_fill_form ───────────────────────────────────────────────────────
+
+
+async def pdf_fill_form(
+    file_path: str,
+    fields: dict[str, str],
+    output_name: str = "",
+) -> str:
+    """Fill AcroForm fields in a PDF.
+
+    Args:
+        file_path: Path to the source PDF with form fields.
+        fields: Dict mapping field names to values.
+        output_name: Output filename (without extension).
+
+    Returns:
+        Success message with output path, or error.
+    """
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        return "Error: pypdf not installed. Run: pip install pypdf"
+
+    p = Path(file_path).expanduser().resolve()
+    if not p.exists():
+        return f"Error: File not found: {file_path}"
+
+    reader = PdfReader(str(p))
+    writer = PdfWriter()
+    writer.append(reader)
+
+    filled = 0
+    for page in writer.pages:
+        writer.update_page_form_field_values(page, fields)
+        filled += 1
+
+    # Check if form fields exist
+    field_count = 0
+    for page in writer.pages:
+        if "/Annots" in page:
+            for annot_ref in page["/Annots"]:
+                annot = annot_ref.get_object()
+                if annot.get("/Subtype") == "/Widget":
+                    field_count += 1
+
+    if field_count == 0:
+        return f"Warning: No AcroForm fields detected in this PDF. It may use XFA forms (not supported) or have no form fields."
+
+    name = output_name or f"{p.stem}_filled"
+    dest = _filename(name, "pdf")
+    with open(dest, "wb") as f:
+        writer.write(f)
+    writer.close()
+
+    return f"PDF form filled.\n  Fields provided: {len(fields)}\n  Pages: {filled}\n  Saved to: {dest}"
+
+
+# ── pdf_redact ──────────────────────────────────────────────────────────
+
+
+async def pdf_redact(
+    file_path: str,
+    terms: list[str],
+    output_name: str = "",
+) -> str:
+    """Redact text from a PDF by covering matched terms with black rectangles.
+
+    Args:
+        file_path: Path to the source PDF.
+        terms: List of text strings to redact (case-insensitive).
+        output_name: Output filename (without extension).
+
+    Returns:
+        Success message with output path + redaction count.
+    """
+    try:
+        import pdfplumber
+        from pypdf import PdfReader, PdfWriter
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.colors import black
+    except ImportError as exc:
+        return f"Error: Missing library: {exc}. Run: pip install pdfplumber pypdf reportlab"
+
+    p = Path(file_path).expanduser().resolve()
+    if not p.exists():
+        return f"Error: File not found: {file_path}"
+
+    terms_lower = [t.lower() for t in terms]
+    total_redacted = 0
+
+    reader = PdfReader(str(p))
+    writer = PdfWriter()
+
+    for page_idx, page in enumerate(reader.pages):
+        # Find text positions to redact using pdfplumber
+        import io
+
+        from reportlab.lib.pagesizes import letter as _letter
+
+        page_w = float(page.mediabox.width)
+        page_h = float(page.mediabox.height)
+
+        # Create overlay with black rectangles
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+        try:
+            with pdfplumber.open(p) as pdf:
+                pg = pdf.pages[page_idx]
+                for word in pg.extract_words():
+                    word_text = word["text"].lower()
+                    for term in terms_lower:
+                        if term in word_text:
+                            # Draw black rectangle over the word
+                            c.setFillColor(black)
+                            c.rect(
+                                word["x0"],
+                                page_h - word["bottom"],
+                                word["x1"] - word["x0"],
+                                word["bottom"] - word["top"],
+                                fill=1,
+                                stroke=0,
+                            )
+                            total_redacted += 1
+                            break
+        except Exception:
+            pass  # best-effort — if extraction fails, skip redaction on this page
+
+        c.save()
+        buf.seek(0)
+
+        # Merge overlay onto page
+        from pypdf import PdfReader as _PR
+
+        overlay_reader = _PR(buf)
+        page.merge_page(overlay_reader.pages[0])
+        writer.add_page(page)
+
+    name = output_name or f"{p.stem}_redacted"
+    dest = _filename(name, "pdf")
+    with open(dest, "wb") as f:
+        writer.write(f)
+    writer.close()
+
+    return (
+        f"PDF redacted successfully.\n"
+        f"  Terms: {', '.join(terms)}\n"
+        f"  Instances redacted: {total_redacted}\n"
+        f"  Saved to: {dest}"
+    )
+
+
+# ── generate_pptx ───────────────────────────────────────────────────────
+
+
+async def generate_pptx(
+    title: str,
+    slides: list[dict[str, Any]],
+) -> str:
+    """Generate a PowerPoint presentation from a title and slide data.
+
+    Requires ``python-pptx`` (included in the ``[document]`` extra).
+
+    Args:
+        title: Presentation title (used for the title slide).
+        slides: List of slide dicts. Each slide supports:
+            - ``heading`` (str): Slide title.
+            - ``body`` (str): Bullet text (newline-separated for multiple bullets).
+            - ``bullets`` (list[str]): Explicit bullet list (alternative to body).
+            - ``layout`` (str): "title" | "content" (default "content").
+
+    Returns:
+        Success message with the saved file path.
+    """
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+    except ImportError:
+        return "Error: python-pptx not installed. Run: pip install python-pptx"
+
+    prs = Presentation()
+
+    # Title slide
+    title_slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(title_slide_layout)
+    slide.shapes.title.text = title
+    if len(slide.placeholders) > 1:
+        slide.placeholders[1].text = ""
+
+    # Content slides
+    content_layout = prs.slide_layouts[1]  # Title + Content
+    for s in slides:
+        heading = s.get("heading", "")
+        body = s.get("body", "")
+        bullets = s.get("bullets")
+        layout_name = s.get("layout", "content")
+
+        if layout_name == "title":
+            slide_layout = prs.slide_layouts[0]
+        else:
+            slide_layout = content_layout
+
+        slide = prs.slides.add_slide(slide_layout)
+        if slide.shapes.title:
+            slide.shapes.title.text = heading
+
+        # Add body text as bullets
+        if bullets:
+            text_frame = slide.placeholders[1].text_frame if len(slide.placeholders) > 1 else None
+            if text_frame:
+                for i, bullet in enumerate(bullets):
+                    if i == 0:
+                        text_frame.text = str(bullet)
+                    else:
+                        p = text_frame.add_paragraph()
+                        p.text = str(bullet)
+                        p.level = 0
+        elif body:
+            text_frame = slide.placeholders[1].text_frame if len(slide.placeholders) > 1 else None
+            if text_frame:
+                lines = body.split("\n")
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if i == 0 and not text_frame.text:
+                        text_frame.text = line
+                    else:
+                        p = text_frame.add_paragraph()
+                        p.text = line
+                        # Support indentation via leading spaces
+                        p.level = 1 if line.startswith("  ") else 0
+
+    dest = _filename(title, "pptx")
+    prs.save(str(dest))
+
+    return f"PowerPoint generated successfully.\n  Title: {title}\n  Slides: {len(slides) + 1}\n  Saved to: {dest}"

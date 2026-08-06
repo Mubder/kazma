@@ -46,11 +46,20 @@ def _normalize_sections(sections: list[Any]) -> list[dict[str, str]]:
 
 async def generate_pdf(
     title: str,
-    sections: list[dict[str, str]],
+    sections: list[dict[str, str]] | None = None,
+    tables: list[dict[str, Any]] | None = None,
+    images: list[dict[str, str]] | None = None,
 ) -> str:
-    """Generate a PDF from a title and sections (each {heading, body}).
+    """Generate a PDF from a title, sections, tables, and/or images.
 
     Requires the ``reportlab`` package (``pip install reportlab``).
+
+    Args:
+        title: Document title.
+        sections: List of {heading, body} dicts (optional if tables/images provided).
+        tables: List of {heading, headers: list[str], rows: list[list[str]]} dicts.
+        images: List of {path, caption?, width?} dicts. Path is a file path
+            to an image (PNG/JPEG). Width in points (default: 400).
     """
     try:
         from reportlab.lib.pagesizes import LETTER
@@ -59,7 +68,11 @@ async def generate_pdf(
             Paragraph,
             SimpleDocTemplate,
             Spacer,
+            Table,
+            TableStyle,
+            Image as RLImage,
         )
+        from reportlab.lib import colors
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT
@@ -201,10 +214,65 @@ async def generate_pdf(
                 text = _shape(s["body"]).replace("\n", "<br/>") if is_ar else s["body"].replace("\n", "<br/>")
                 flow.append(Paragraph(text, b_style))
             flow.append(Spacer(1, 8))
+
+        # ── Tables ──────────────────────────────────────────────
+        if tables:
+            for tbl in tables:
+                heading = tbl.get("heading", "")
+                headers = tbl.get("headers") or []
+                rows = tbl.get("rows") or []
+                if heading:
+                    flow.append(Paragraph(_shape(heading) if _is_arabic_text(heading) else heading, head_style))
+                if headers and rows:
+                    table_data = [headers] + [list(r) for r in rows]
+                    col_widths = None
+                    page_width = LETTER[0] - 72 * 2  # LETTER width minus 1-inch margins
+                    if headers:
+                        col_widths = [page_width / len(headers)] * len(headers)
+                    pdf_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+                    pdf_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4472C4")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#B4C6E7")),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#D9E2F3")]),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ]))
+                    flow.append(pdf_table)
+                    flow.append(Spacer(1, 10))
+
+        # ── Images ──────────────────────────────────────────────
+        if images:
+            for img in images:
+                img_path = img.get("path", "")
+                caption = img.get("caption", "")
+                width = float(img.get("width", 400))
+                if img_path:
+                    from pathlib import Path as _P
+
+                    ip = _P(img_path).expanduser().resolve()
+                    if ip.exists():
+                        try:
+                            rl_img = RLImage(str(ip), width=width, height=width * 0.75)
+                            flow.append(rl_img)
+                            if caption:
+                                cap_style = ParagraphStyle("Caption", fontName=_latin_font, fontSize=9, alignment=1, textColor=colors.grey, spaceAfter=10)
+                                flow.append(Paragraph(caption, cap_style))
+                            flow.append(Spacer(1, 6))
+                        except Exception as exc:
+                            flow.append(Paragraph(f"[Image load failed: {exc}]", body_style))
+                    else:
+                        flow.append(Paragraph(f"[Image not found: {img_path}]", body_style))
+
         doc.build(flow)
     except Exception as exc:  # noqa: BLE001
         return f"Error: PDF generation failed — {exc}"
-    return f"PDF generated successfully.\n  Title: {title}\n  Sections: {len(secs)}\n  Saved to: {dest}"
+
+    parts_count = len(secs) + len(tables or []) + len(images or [])
+    return f"PDF generated successfully.\n  Title: {title}\n  Sections: {len(secs)}\n  Tables: {len(tables or [])}\n  Images: {len(images or [])}\n  Saved to: {dest}"
 
 
 async def generate_docx(

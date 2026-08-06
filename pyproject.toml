@@ -90,6 +90,18 @@ document = [
     "pdfplumber>=0.11.0",
     "python-pptx>=0.6.23",
 ]
+# OCR for scanned documents (requires system Tesseract install)
+# apt install tesseract-ocr (Linux) | brew install tesseract (macOS)
+# Windows: https://github.com/UB-Mannheim/tesseract/wiki
+ocr = [
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.17.0",
+    "pillow>=10.0.0",
+]
+# Document format conversion (HTML→PDF, Markdown→PDF)
+convert = [
+    "weasyprint>=60.0",
+]
 # Database drivers beyond SQLite (database_client skill)
 database = [
     "psycopg[binary]>=3.1.0",
@@ -99,7 +111,7 @@ database = [
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
 all = [
-    "kazma[rag,dev,tui,observability,web,postgres,document,database]",
+    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert]",
 ]
 
 [project.scripts]

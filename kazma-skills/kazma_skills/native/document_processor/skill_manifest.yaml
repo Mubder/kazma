@@ -1,6 +1,6 @@
 name: document-processor
-version: 0.1.0
-description: Read, merge, split, and inspect documents (PDF, DOCX, XLSX, PPTX, CSV, JSON). Extract text, tables, and metadata.
+version: 0.2.0
+description: Read, merge, split, inspect, convert, OCR, and redact documents. Generate PowerPoint presentations.
 author: Kazma Team
 license: MIT
 
@@ -9,12 +9,10 @@ tools:
     arabic_name: "قراءة مستند"
     description: >
       Read and extract text from a document file (PDF, DOCX, XLSX, PPTX, CSV, JSON, TXT).
-      Returns the full text content with page/sheet markers. Use this to read any
-      document the user uploads or asks about. Handles tables in PDFs and spreadsheets.
+      Returns the full text content with page/sheet markers. Handles tables in PDFs and spreadsheets.
     category: document
     prompt_chain:
       - "اقرأ المستند المحدد واستخرج النص الكامل"
-      - "أعد النص مع علامات الصفحات أو الأوراق"
   pdf_merge:
     arabic_name: "دمج PDF"
     description: >
@@ -39,3 +37,45 @@ tools:
     category: document
     prompt_chain:
       - "استخرج البيانات الوصفية لملف PDF"
+  ocr_document:
+    arabic_name: "التعرف الضوئي على الحروف"
+    description: >
+      OCR a scanned PDF or image to extract text. Requires the [ocr] extra:
+      pip install 'kazma[ocr]'. Also requires system Tesseract OCR install.
+      Use when read_document returns "no text layer" for a scanned PDF.
+    category: document
+    prompt_chain:
+      - "استخرج النص من المستند الممسوح ضوئياً باستخدام OCR"
+  convert_document:
+    arabic_name: "تحويل المستندات"
+    description: >
+      Convert documents between formats: HTML→PDF, Markdown→PDF, Markdown→HTML,
+      Markdown→DOCX. Requires the [convert] extra: pip install 'kazma[convert]'.
+    category: document
+    prompt_chain:
+      - "حول المستند إلى الصيغة المطلوبة"
+  pdf_fill_form:
+    arabic_name: "تعبئة نموذج PDF"
+    description: >
+      Fill AcroForm fields in a PDF. Pass a dict of field names to values.
+      Returns the path of the filled PDF.
+    category: document
+    prompt_chain:
+      - "املأ حقول النموذج في ملف PDF"
+  pdf_redact:
+    arabic_name: "تنقيح PDF"
+    description: >
+      Redact text from a PDF by covering matched terms with black rectangles.
+      Pass a list of text strings to redact (case-insensitive). Use for PII removal.
+    category: document
+    prompt_chain:
+      - "تنقيح النصوص الحساسة من ملف PDF"
+  generate_pptx:
+    arabic_name: "إنشاء PowerPoint"
+    description: >
+      Generate a PowerPoint (.pptx) presentation from a title and slide data.
+      Each slide supports heading, body text (as bullets), and layout type.
+      Returns the saved file path.
+    category: document
+    prompt_chain:
+      - "أنشئ عرضاً تقديمياً من العنوان والشرائح المحددة"
