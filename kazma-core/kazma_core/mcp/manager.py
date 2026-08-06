@@ -40,6 +40,7 @@ import itertools
 import json
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -574,6 +575,18 @@ class AsyncMCPManager:
         stdio_limit = max(256 * 1024, min(stdio_limit, 64 * 1024 * 1024))  # 256 KiB–64 MiB
 
         try:
+            # Windows fix: asyncio.create_subprocess_exec does NOT resolve
+            # .cmd/.bat shim extensions (e.g. npx → npx.cmd), raising a bare
+            # FileNotFoundError. Resolve via shutil.which first so the full
+            # path (including the .cmd extension) is passed. On Linux/macOS
+            # this is a no-op (which returns the path as-is for executables).
+            if sys.platform == "win32":
+                import shutil as _shutil
+
+                resolved = _shutil.which(command[0])
+                if resolved:
+                    command = [resolved] + list(command[1:])
+
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdin=asyncio.subprocess.PIPE,
