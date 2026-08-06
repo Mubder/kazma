@@ -2037,12 +2037,16 @@
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
-        // label inside the chip (truncated display name + …)
+        // label inside the chip (truncated display name + …), clamped to chip width
         if (showLabels) {
           ctx.font = _v2gFont(9);
+          var chipLab = p.label;
+          while (ctx.measureText(chipLab).width > chipW - 6 && chipLab.length > 3) {
+            chipLab = chipLab.slice(0, -2) + '…';
+          }
           ctx.fillStyle = '#e6edf3';
           ctx.textAlign = 'center';
-          ctx.fillText(p.label, x, y + 3);
+          ctx.fillText(chipLab, x, y + 3);
         }
         continue;  // skip the normal circle body below
       }
@@ -2080,7 +2084,15 @@
       }
       if (showLabels) {
         var lab = p.label;
-        // Canvas font: weight + size/family
+        // Clamp the label to fit within a plate proportional to the node
+        // radius (so long names don't overflow the card/box). Truncate with
+        // … if the measured text exceeds the max width.
+        ctx.font = (isUser ? '600 ' : '') + _v2gFont(isUser ? 12 : 11);
+        var maxLabelW = Math.max(60, r * 3.2);
+        while (ctx.measureText(lab).width > maxLabelW && lab.length > 4) {
+          lab = lab.slice(0, -2) + '…';
+        }
+        // Canvas font: weight + size/family (re-set after measure loop)
         ctx.font = (isUser ? '600 ' : '') + _v2gFont(isUser ? 12 : 11);
         // subtle label plate for readability
         var lw = ctx.measureText(lab).width;
