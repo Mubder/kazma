@@ -578,7 +578,22 @@ async def supervisor_node(
     if compacted_state is not state_for_check:
         logger.info("[Supervisor] Context compacted — continuing turn with compacted context")
         messages = list(compacted_state.get("messages", []))
-        breaker_reset = {**breaker_reset, "needs_compaction": False}
+        # Reset the tool circuit breaker on compaction. The breaker may have
+        # tripped from tool failures in the pre-compaction context (e.g. a
+        # 212-second file_search, or consecutive errors). After compaction
+        # the context is fresh — stale breaker state would bypass ALL tool
+        # execution for the rest of the turn, making the agent unable to
+        # use tools even though the context that caused the failures is gone.
+        # This is the root cause of the "Circuit breaker is active! Bypassing
+        # all execution" after /compact — the breaker persisted across the
+        # compaction boundary.
+        breaker_reset = {
+            **breaker_reset,
+            "needs_compaction": False,
+            "circuit_breaker_tripped": False,
+            "consecutive_tool_failures": 0,
+        }
+        logger.info("[Supervisor] Tool circuit breaker reset after compaction")
 
     # ── Ensure system prompt and personality are present ───────────
     # The personality prompt is injected at position 0, replacing any
