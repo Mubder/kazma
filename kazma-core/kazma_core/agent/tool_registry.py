@@ -710,11 +710,39 @@ class LocalToolRegistry:
             if scope_err:
                 return scope_err
 
+            # Skip directories that would make the search catastrophically slow
+            # (e.g. 1.6 GB .venv, .git internals, node_modules, build artifacts,
+            # data dirs). Without this, rglob walks the entire venv reading
+            # every .py — a 212-second operation on a standard install.
+            _SKIP_DIRS = frozenset({
+                ".venv", "venv", ".git", "node_modules", "__pycache__",
+                ".kazma", "kazma-data", ".pytest_cache", ".mypy_cache",
+                ".ruff_cache", "build", "dist", ".tox", ".eggs",
+                "vector_memory", "site-packages",
+            })
+
+            def _should_skip(p: Path) -> bool:
+                """True if any path component is in the skip set."""
+                return any(part in _SKIP_DIRS for part in p.parts)
+
             regex = re.compile(pattern)
             results: list[str] = []
+            files_scanned = 0
+            _MAX_FILES = 5000  # hard cap so a huge tree can't run for minutes
 
             for file_path in root.rglob(glob):
-                if file_path.is_file() and file_path.stat().st_size < 500_000:
+                if _should_skip(file_path):
+                    continue
+                if not file_path.is_file():
+                    continue
+                if files_scanned >= _MAX_FILES:
+                    results.append(
+                        f"... (search stopped after scanning {_MAX_FILES} files; "
+                        f"narrow the path or glob to find more matches)"
+                    )
+                    break
+                files_scanned += 1
+                if file_path.stat().st_size < 500_000:
                     try:
                         for i, line in enumerate(file_path.read_text(errors="replace").splitlines(), 1):
                             if regex.search(line):
@@ -727,6 +755,54 @@ class LocalToolRegistry:
 
             return "\n".join(results) if results else f"No matches for '{pattern}' in {path}/{glob}"
 
+
+        @self.register(
+            description=(
+                "Send a file from the workspace to the user's chat (Telegram/Discord/Slack). "
+                "Use this when the user asks for a file, document, PDF, or download. "
+                "The file is delivered as an attachment alongside the text caption."
+            ),
+            category="filesystem",
+        )
+        async def send_file(
+            file_path: str,
+            caption: str = "",
+        ) -> str:
+            from pathlib import Path
+
+            p = Path(file_path).expanduser().resolve()
+            if not p.exists():
+                return f"Error: file not found: {file_path}"
+            # Workspace scoping — block sends outside workspace (fail-closed)
+            scope_err = _workspace_scope_error(p, file_path, "file sends")
+            if scope_err:
+                return scope_err
+            if not p.is_file():
+                return f"Error: not a file: {file_path}"
+            if p.stat().st_size > 50 * 1024 * 1024:
+                return f"Error: file too large ({p.stat().st_size // 1024 // 1024} MB; max 50 MB)"
+
+            # Resolve the target chat from the gateway ContextVar (set by the
+            # agent handler on every turn from the inbound message's sender).
+            try:
+                from kazma_core.tools.send_message import send_file_message, get_current_delivery_target
+            except ImportError:
+                return "Error: send_file requires the chat-platform dispatcher (not available in CLI mode)"
+
+            target_id = get_current_delivery_target()
+            if not target_id:
+                return "Error: no chat target — send_file only works from a platform chat (Telegram/Discord/Slack)"
+
+            try:
+                result = await send_file_message(
+                    target_id=target_id,
+                    text=caption or f"📎 {p.name}",
+                    file_path=str(p),
+                )
+                return f"File sent: {p.name} ({p.stat().st_size // 1024} KB) → {result}"
+            except Exception as exc:
+                logger.warning("[ToolRegistry] send_file failed: %s", exc)
+                return f"Error sending file: {exc}"
 
 
         @self.register(

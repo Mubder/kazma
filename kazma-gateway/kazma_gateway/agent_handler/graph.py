@@ -9,7 +9,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
+from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
 from .store import (
     _InMemoryStore,
@@ -1436,7 +1436,7 @@ def create_graph_handler(
     try:
         from kazma_core.tools.send_message import register_message_backend
 
-        async def _telegram_backend_handler(target_id: str, text: str) -> str:
+        async def _telegram_backend_handler(target_id: str, text: str, **kwargs: Any) -> str:
             ctx = await _store.get(target_id)
             if not ctx:
                 ctx = {"thread_id": target_id}
@@ -1448,8 +1448,21 @@ def create_graph_handler(
                 out_text: str = md_to_tg_html(text)
             else:
                 out_ctx, out_text = ctx, text
+            # Build attachments from kwargs (file delivery via send_file_message).
+            raw_attachments = kwargs.get("attachments")
+            outbound_attachments: list[Attachment] = []
+            if raw_attachments and isinstance(raw_attachments, list):
+                for att in raw_attachments:
+                    if isinstance(att, dict) and att.get("data"):
+                        outbound_attachments.append(Attachment(
+                            kind=att.get("kind", "file"),
+                            filename=att.get("filename", "file"),
+                            mime=att.get("mime", "application/octet-stream"),
+                            data=att["data"],
+                        ))
             outbound = OutboundMessage(
-                target_id=target_id, text=out_text, context_metadata=out_ctx
+                target_id=target_id, text=out_text, context_metadata=out_ctx,
+                attachments=outbound_attachments,
             )
             await manager.send(outbound)
             return f"sent:{target_id}"
