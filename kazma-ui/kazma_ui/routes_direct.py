@@ -1467,7 +1467,7 @@ def register_direct_routes(self: Any) -> None:
             if lookup_ids:
                 placeholders = ",".join("?" * len(lookup_ids))
                 erows = conn.execute(
-                    f"SELECT id, name, type, is_high_stakes FROM entities WHERE id IN ({placeholders})",
+                    f"SELECT id, name, type, is_high_stakes, is_major FROM entities WHERE id IN ({placeholders})",
                     tuple(lookup_ids),
                 ).fetchall()
                 ent_lookup = {r["id"]: dict(r) for r in erows}
@@ -1517,6 +1517,7 @@ def register_direct_routes(self: Any) -> None:
                     "name": ename,
                     "type": etype,
                     "isHighStakes": stakes,
+                    "isMajor": bool(e and int(e.get("is_major") or 0) == 1) if eid != HUB_ID else True,
                     "beliefCount": bc,
                     "isHub": eid == HUB_ID,
                 })

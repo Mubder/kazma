@@ -1504,6 +1504,9 @@
   function _v2gNodeColor(p) {
     var t = _v2gTheme();
     if (_v2gIsUser(p)) return t.user;
+    // Major nodes get a distinct violet color — stands out from tier palette
+    // and hub amber, so the operator's marked projects/hubs are instantly visible.
+    if (p && p.isMajor) return '#a855f7';
     // Tier color wins for grouped nodes (tier 0-3). -1/undefined → type color.
     if (p && p.tier !== undefined && p.tier >= 0 && _V2G_TIER_COLORS[p.tier]) {
       return _V2G_TIER_COLORS[p.tier];
@@ -1760,11 +1763,15 @@
           isUser: d.isUser,
           isHub: !!nd.isHub || d.isUser,
           isHighStakes: !!nd.isHighStakes,
+          isMajor: !!nd.isMajor || !!nd.isHub,
           isBlob: !!d.isBlob,
           // Blob chips are compact: small radius so they don't dominate the
           // canvas and the group-spring can move them against other forces.
           r: d.isBlob ? _v2gNodeBaseR - 3
-            : (d.isUser ? _v2gNodeBaseR + 4 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)) + Math.min(8, Math.sqrt(bc) * 1.5),
+            : (d.isUser ? _v2gNodeBaseR + 4
+              : (nd.isMajor ? _v2gNodeBaseR + 2
+                : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)))
+              + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
           isEpisode: !!nd.isEpisode,
           tier: (typeof nd.tier === 'number' ? nd.tier : -1),
@@ -2761,6 +2768,28 @@
   // F: "Group under" — a VIEW-ONLY association (no belief change). The operator
   // picks a member node, then clicks the parent; the canvas clusters + tiers
   // them. Distinct from Link (which mutates memory). See MEMORY_GRAPH_GROUPING_PLAN.md.
+
+  // Toggle the is_major flag on an entity — makes it render bigger + violet.
+  async function _v2gToggleMajor(p) {
+    if (!p || !p.id || _v2gIsUser(p)) return;
+    var newMajor = !p.isMajor;
+    try {
+      var data = await _v2gApiJson('/api/memory/v2/entities/' + encodeURIComponent(p.id) + '/major', {
+        method: 'POST',
+        body: JSON.stringify({ major: newMajor }),
+      });
+      if (!data.ok) { _v2gToast(data.error || 'Toggle failed', 'error'); return; }
+      p.isMajor = newMajor;
+      _v2gToast((newMajor ? 'Marked ' : 'Unmarked ') + _v2gShortId(p.id) + (newMajor ? ' as major ★' : ''), 'success');
+      _v2gRepaint();
+      try {
+        window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'major', id: p.id, major: newMajor } }));
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      _v2gToast('Toggle failed', 'error');
+    }
+  }
+
   function _v2gGroupUnder(memberId) {
     memberId = String(memberId || '').trim();
     if (!memberId) { _v2gToast('Pick a node first', 'error'); return false; }
@@ -3216,6 +3245,12 @@
       if (nodeEdges.length >= 1 && !_v2gIsUser(p)) {
         html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="cut-all" style="font-size:0.65rem;padding:2px 8px;" title="Cut every edge on this node">Cut all (' + nodeEdges.length + ')</button>';
       }
+      // Major toggle — mark important nodes (projects, hubs) so they render
+      // bigger + violet. Hidden for the hub (always major) and virtual facts.
+      if (!_v2gIsUser(p) && !p.isVirtual) {
+        var isMaj = !!p.isMajor;
+        html += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' + (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') + '" title="Mark as major (bigger + violet)">' + (isMaj ? 'Major ★' : 'Major') + '</button>';
+      }
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="rename" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;" title="Highlight in entities list">In list</button>';
       if (!_v2gIsUser(p) && !p.isVirtual) {
@@ -3337,6 +3372,8 @@
           });
         } else if (act === 'rename') {
           _v2gRenameNode(p);
+        } else if (act === 'major') {
+          _v2gToggleMajor(p);
         } else if (act === 'list') {
           _v2gNotifyList({ type: 'entity', id: p.id, name: _v2gDisplayName(p), scrollOps: true });
           var ops = document.getElementById('mem-tab-entities') || document.querySelector('[id^="mem-tab-"]');
@@ -4221,6 +4258,7 @@
   window._v2gRepointBelief = _v2gRepointBelief;
   // F: view-only grouping (cluster + tier without mutating memory).
   window._v2gGroupUnder = _v2gGroupUnder;
+  window._v2gToggleMajor = _v2gToggleMajor;
 
   try {
     _v2gRenderFilters();
