@@ -1150,6 +1150,18 @@ class KazmaAppBuilder:
 
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
+        # ── Lifecycle status notification: "starting" ────────────────
+        # Emitted before any subsystem comes up. Pairs with the "started"
+        # message at the end of this method — if you see "starting" but no
+        # "started" in chat, the boot hung or crashed mid-way. Best-effort:
+        # a failure here (or no platform bus configured) never blocks boot.
+        try:
+            from kazma_core.lifecycle_notifier import notify_lifecycle
+
+            await notify_lifecycle("starting")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[App] lifecycle 'starting' notification failed: %s", e)
+
         try:
             # ── Connect MCP servers ────────────────────────────────────
             # The CLI path (agent_runner.run_once/main) calls
@@ -1276,6 +1288,14 @@ class KazmaAppBuilder:
                 )
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
+                # Surface the most common boot failure (bad token, network)
+                # to chat — this is the highest-signal startup_failed event.
+                try:
+                    from kazma_core.lifecycle_notifier import notify_lifecycle
+
+                    await notify_lifecycle("startup_failed", detail=f"Gateway: {e}")
+                except Exception as ne:  # noqa: BLE001
+                    logger.debug("[App] lifecycle 'startup_failed' notification failed: %s", ne)
 
         # ── V2 memory worker (durable task queue) ────────────────────
         # Registers the macro_sleep / entity_merge / micro_consolidation
@@ -1314,10 +1334,46 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Cron] Failed to start: %s", e)
 
+        # ── Lifecycle status notification: "started" (or "restarted") ─
+        # Emitted once all subsystems are up. The notifier upgrades this to
+        # "🔄 Restarted" when a recent graceful-shutdown marker exists, so
+        # an operator can tell an intentional restart from crash-recovery.
+        # Best-effort: never blocks boot. NullBusAdapter (no platform
+        # configured / pytest) drops it silently.
+        try:
+            from kazma_core.lifecycle_notifier import notify_lifecycle
+
+            _adapter_names = (
+                ", ".join(a.name for a in self.gateway.adapters)
+                if self.gateway is not None
+                else "none"
+            )
+            _model = self.config_store.get("registry.active_model") or "unknown"
+            await notify_lifecycle(
+                "started",
+                detail=f"Adapters: {_adapter_names}\nModel: {_model}",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[App] lifecycle 'started' notification failed: %s", e)
+
         # (VectorMemory degradation-alert flush removed with the V1 stack.)
 
     async def _on_shutdown(self) -> None:
         """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
+        # ── Lifecycle status notification: "shutting down" ───────────
+        # Emitted FIRST, before any teardown, while subsystems are still up
+        # and the bus adapter is still reachable (the inbound gateway
+        # adapters are torn down LAST at the bottom of this method). Its
+        # absence in chat means a crash / kill -9 rather than graceful stop.
+        # Also stamps the restart-detection marker consumed on next startup.
+        # Best-effort: never blocks teardown.
+        try:
+            from kazma_core.lifecycle_notifier import notify_lifecycle
+
+            await notify_lifecycle("shutting_down")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[App] lifecycle 'shutting_down' notification failed: %s", e)
+
         # Global drain flag so long-lived SSE / telemetry loops exit cleanly
         try:
             from kazma_core.shutdown import signal_shutdown

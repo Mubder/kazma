@@ -139,6 +139,23 @@ safety:
     - browser_eval_js
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
+# Server lifecycle status notifications. Pushes a status update to every
+# configured platform (Telegram/Discord/Slack) when the server starts,
+# restarts, shuts down, or fails to boot — so you can tell from chat when
+# something went wrong (hung boot, crash with no shutdown message, bad token).
+# Routed via the SwarmMessageBus, so it lands wherever your swarm bus is
+# configured (connectors.<platform>.swarm_chat_id / swarm_channel_id).
+# Silently dropped if no platform bus is configured. Toggle live via
+# PUT /api/settings/single — no restart needed for the next boot/shutdown.
+notifications:
+  lifecycle:
+    enabled: true
+    events:
+    - starting
+    - started
+    - shutting_down
+    - startup_failed
+    restart_window_seconds: 60
 ui:
   host: 127.0.0.1
   port: 9090

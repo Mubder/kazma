@@ -1,5 +1,85 @@
 # CHANGELOG
 
+## Unreleased — Cross-machine migration system (`kazma migrate`) (2026-08-06)
+
+- **Feature:** a portable-bundle migration system so any user can move a full
+  Kazma installation across machines/OSes (WSL→Windows, Linux→Mac) without
+  the silent breakage of a naive copy-paste.
+- **CLI:** `kazma migrate export | verify | import`. `export` produces a
+  versioned `.zip` bundle (config + secrets + memory + chat history +
+  snapshots + cron jobs + assets); `verify` checks integrity (structure,
+  sha256 hashes, manifest compat) without importing; `import` restores into
+  the current installation atomically with `--dry-run` to preview.
+- **Three load-bearing invariants enforced** (the whole point of the tool —
+  see AGENTS.md §18):
+  - **A. Vault pairing:** `vault.db` and `KAZMA_VAULT_KEY` travel as an atomic
+    pair (the PBKDF2 salt lives inside vault.db). On import, a key MISMATCH
+    aborts with a clear error unless `--reset-vault-key` is passed (backs up
+    the target's vault.db, then overwrites the key). The #1 silent-breakage
+    mode of copy-paste.
+  - **B. Automatic path translation:** embedded absolute paths
+    (`/home/user/kazma`) in workspaces.root_path, snapshots.state_json,
+    chat messages, memory episodes, and cron prompts are rewritten to the
+    target path across OS separator conventions. Longest-source-first
+    ordering prevents prefix overlaps (`/kazma` vs `/kazma-repos/ShipX`);
+    byte-level substring (not JSON parse) handles the 304 MB snapshots.db.
+  - **C. Atomic import:** stages to a temp dir, verifies, backs up live DBs,
+    then swaps — a failure leaves live data untouched; the staging dir is
+    preserved for inspection.
+- **v1 scope — SQLite-portable:** the bundle is always SQLite regardless of
+  source backend (exporter reads via the backend-agnostic data-access layer).
+  Source can be SQLite OR Postgres; target must be SQLite. Postgres→Postgres
+  targets are v2; `verify` warns when the source was Postgres-backed.
+- **Engine reuse:** builds on existing infrastructure — `ConfigStore.export_yaml`
+  / `import_yaml` (config), `memory/backup.py:_backup_one` → promoted to public
+  `backup_one()` (WAL-safe SQLite copier for the export + pre-swap backup),
+  `WorkspaceStore` (workspaces table), `notify_root_changed` (MCP rebind bus).
+- **New package** `kazma_core/migration/` (`bundle.py`, `path_rewrite.py`,
+  `vault_pairing.py`, `exporter.py`, `importer.py`) — engine kept out of the
+  CLI so REST/UI can wrap it later. New CLI module `kazma_cli/migrate.py`.
+- **Docs:** AGENTS.md §18 documents the format, three invariants, and v1 scope.
+- **Verified:** path-rewriter unit-tested (prefix ordering, both separators,
+  no false positives, end-to-end SQLite rewrite); full export→verify→dry-run
+  →real-import cycle run against an isolated `KAZMA_DATA_DIR` (paths
+  rewritten, workspaces table merged into settings.db, 221 config keys
+  imported, live install untouched); negative test confirms vault-key
+  mismatch aborts cleanly with exit 1.
+
+## Unreleased — Lifecycle status notifications (start/restart/shutdown) (2026-08-06)
+
+- **Feature:** the server now pushes a status update to every configured
+  platform (Telegram/Discord/Slack) on lifecycle events, so an operator can
+  tell from chat when something went wrong — a hung boot (you see "starting"
+  with no "started"), a crash that emits no shutdown message, or a bad bot
+  token (surfaced as `startup_failed`).
+- **Design — reuse the SwarmMessageBus, no parallel path:** `notify_lifecycle()`
+  (`kazma_core/lifecycle_notifier.py`) calls `get_message_bus().adapter.send(...)`.
+  The bus is wired during `KazmaAppBuilder.build()` (before the lifespan), and
+  `FanOutBusAdapter` already fans out to every configured platform — each
+  `*BusAdapter` carries its own destination `chat_id`/`channel_id` from the
+  existing `connectors.<platform>.swarm_chat_id` keys, so no new recipient
+  config is required. `NullBusAdapter` (no platform configured, or under
+  pytest) silently drops the message; the feature self-disables. The bus
+  adapters are standalone `httpx` clients independent of `gateway.start()/stop()`,
+  so notifications work during early startup and late shutdown.
+- **Events:** `starting` (🔵 top of `_on_startup`), `started` (🟢 end of
+  `_on_startup`, with `Adapters:`/`Model:` detail), `shutting_down` (🟡 top of
+  `_on_shutdown`, before any teardown), `startup_failed` (🔴 in the gateway-start
+  failure guard, with the error). Each call site is try/except-guarded so a
+  notification failure never breaks boot/shutdown.
+- **Restart detection:** on `shutting_down` the notifier stamps the internal
+  ConfigStore key `system.lifecycle.last_shutdown_epoch`; on `started`, if that
+  epoch is within `restart_window_seconds` (default 60; 0 disables), it upgrades
+  to "🔄 Restarted (was down ~Ns)". A hard crash leaves no marker, so the next
+  boot shows a plain "Started" — distinguishing intentional restart from
+  crash-recovery.
+- **Config:** new `notifications.lifecycle.{enabled,events,restart_window_seconds}`
+  section in `kazma.yaml`; live-re-read on every call (mirrors `get_hitl_config`/
+  `get_proxy_provider`), so toggling via `PUT /api/settings/single` takes effect
+  on the next boot/shutdown without a restart.
+- **Docs:** AGENTS.md §17 documents the invariant (bus routing, 4 call sites,
+  live config + restart marker).
+
 ## Unreleased — Cron/reminder fix: graph builder + delivery target (2026-08-05)
 
 - **Root cause (crash):** `KazmaAppBuilder` constructed `CronScheduler(store=…,

@@ -75,6 +75,8 @@ def main() -> None:
 
     elif cmd == "update":
         _run_update(sys.argv[2:])
+    elif cmd == "migrate":
+        _run_migrate(sys.argv[2:])
 
     elif cmd in ("--help", "-h", "help"):
         from kazma_cli.banner import _get_version
@@ -92,6 +94,7 @@ def main() -> None:
         print("  gateway    Gateway control (status, start, stop, restart, refresh)")
         print("  swarm      Swarm orchestration (workers, dispatch, metrics, ...)")
         print("  update     Check for and install Kazma CLI updates")
+        print("  migrate    Export/import a Kazma installation (cross-machine migration)")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: 9090)")
@@ -519,6 +522,13 @@ def _run_swarm(args: list[str]) -> None:
     from kazma_cli.swarm import run as swarm_run
 
     swarm_run(args)
+
+
+def _run_migrate(args: list[str]) -> None:
+    """Handle 'kazma migrate' subcommands (delegates to kazma_cli.migrate)."""
+    from kazma_cli.migrate import run as migrate_run
+
+    migrate_run(args)
 
 
 def _run_update(args: list[str]) -> None:

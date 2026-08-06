@@ -437,6 +437,120 @@ scopes `/memory` operator reads/writes by the request-scoped tenant. See
 §8 ConfigStore + the env-var reference. Note: `entities.id` is a global PK,
 not per-tenant.
 
+### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
+
+Server lifecycle status notifications — pushes a status update to every
+configured platform (Telegram/Discord/Slack) when the server starts,
+restarts, shuts down, or fails to boot, so an operator can tell from chat
+when something went wrong (hung boot, a crash emitting no shutdown message,
+a bad bot token, etc.). Three invariants must hold:
+
+**A. Notifications route through the SwarmMessageBus — no parallel path.**
+`notify_lifecycle(event)` calls `get_message_bus().adapter.send(BusMessage(...))`.
+The bus is wired during `KazmaAppBuilder.build()` (before the lifespan runs),
+and `FanOutBusAdapter` already fans a single send out to every configured
+platform concurrently, with each `*BusAdapter` holding its own destination
+`chat_id`/`channel_id` (from `connectors.<platform>.swarm_chat_id`). Do NOT
+construct new adapters or introduce new recipient config for this feature —
+reuse the bus. `NullBusAdapter` (no platform configured, or under pytest via
+`_skip_real_adapters`) silently drops the message; the feature self-disables.
+The bus adapters are standalone `httpx` clients independent of
+`gateway.start()`/`stop()`, so notifications work during early startup
+(before the inbound poller is up) and late shutdown (after `gateway.stop()`,
+which tears down inbound adapters, not the bus).
+
+**B. `notify_lifecycle()` is the single entry point — called from 4 sites in `app.py`.**
+- `_on_startup()` top (before MCP connect) → `starting`
+- `_on_startup()` end (after the cron block) → `started`, with a `detail`
+  of `Adapters: …` + `Model: <registry.active_model>`
+- the gateway-start failure `except` (`[Gateway] Failed to start`) →
+  `startup_failed`, with the gateway error as `detail` (highest-signal boot
+  failure — bad token, network)
+- `_on_shutdown()` top (before `signal_shutdown()`, before any teardown) →
+  `shutting_down`
+Each call site is wrapped in its own try/except (debug-level on failure) —
+a notification must NEVER break boot or shutdown.
+
+**C. Config is live-re-read; restart detection uses a ConfigStore marker.**
+`get_lifecycle_config()` mirrors `get_hitl_config`/`get_proxy_provider`:
+imports `get_config_store` locally inside a try, reads flat dotted keys
+(`notifications.lifecycle.enabled` / `.events` /
+`.restart_window_seconds`), falls back to YAML/env on any error, never
+raises. Toggling via `PUT /api/settings/single` takes effect on the next
+boot/shutdown. On `shutting_down`, the notifier stamps the internal key
+`system.lifecycle.last_shutdown_epoch`; on `started`, if that epoch is
+within `restart_window_seconds` (default 60; `0` disables detection) it
+upgrades to "🔄 Restarted" instead of "🟢 Started". A hard crash leaves no
+marker, so the next boot shows a plain "Started" — distinguishing
+intentional restart from crash-recovery.
+
+### 18. Migration System (`kazma-core/kazma_core/migration/`)
+
+A portable-bundle system for moving a full Kazma installation across
+machines/OSes (WSL→Windows, Linux→Mac, server→laptop) without the silent
+breakage of a naive copy-paste. User surface is the `kazma migrate` CLI
+(`export` / `verify` / `import`); the engine lives in
+`kazma_core/migration/` so REST/UI can wrap it later.
+
+**Three load-bearing invariants (the whole point of the tool):**
+
+**A. `vault.db` + `KAZMA_VAULT_KEY` travel as an atomic pair.** The vault's
+per-installation PBKDF2 salt lives *inside* `vault.db`, so the DB is
+undecryptable without its matching key. The bundle carries both: the key in
+`meta.env`, a non-reversible fingerprint in `manifest.json`. On import,
+`check_vault_key()` (`migration/vault_pairing.py`) compares them: MATCH
+proceeds, EMPTY writes the bundle's key, MISMATCH **aborts** unless
+`--reset-vault-key` is passed (which backs up the target's existing vault.db
+first, then overwrites the key). This is the #1 silent-breakage mode of a
+copy-paste migration.
+
+**B. Embedded absolute paths are rewritten to the target root.** A Linux
+source (`/home/user/kazma`) has its workspace root baked into
+`workspaces.root_path`, `snapshots.state_json` (full SupervisorState blobs),
+`chat_sessions.messages`, memory entities/episodes, cron prompts. The
+importer rewrites them all to the target path across OS separator
+conventions (`migration/path_rewrite.py`). Two correctness properties: (1)
+`PathMap` is ordered **longest-source-first** so `/home/u/kazma` doesn't
+partially rewrite `/home/u/kazma-repos/ShipX`; (2) substitution is
+byte-level substring on the column text (NOT a JSON parse — the state_json
+blob is huge and paths appear anywhere), with both forward-slash and
+backslash variants handled. No false positives (e.g. `barcode` ≠ `code`).
+Workspace root rewrite also fires `notify_root_changed()` so MCP rebinds.
+
+**C. Import is atomic — never corrupt the target mid-flight.** The importer
+(`migration/importer.py:import_bundle`) stages to `kazma-data/.migrate-staging-<ts>/`,
+verifies, path-rewrites the *staged* copies, backs up the live DBs to
+`.migrate-backup-<ts>/`, then swaps staging → live one file at a time via
+`rename`. Any exception before the swap leaves live data untouched; the
+staging dir is preserved on failure. `verify` runs as a dry-run inside every
+import and is available standalone.
+
+**v1 scope — SQLite-portable.** The bundle is always SQLite, regardless of
+source backend. The exporter reads via the backend-agnostic data-access
+layer (ConfigStore.export_yaml, WorkspaceStore, the SQLite file resolvers in
+`paths.py`) so it works for SQLite OR Postgres sources. The target must be
+SQLite (`KAZMA_DB_BACKEND=sqlite`). Postgres→Postgres and *→Postgres targets
+are v2; `verify` warns when the source was Postgres-backed. This covers the
+common case (WSL/Linux→Windows) without the full SQLite↔Postgres
+cross-product.
+
+**Bundle layout:** `manifest.json` (version, source OS/host, per-file sha256,
+vault-key fingerprint, table counts, source workspace root), `meta.env`
+(vault key + public url), `config.yaml` (ConfigStore.export_yaml — secrets
+are `vault://` refs, not plaintext), `vault.db` (encrypted, under `data/`),
+the 13 data SQLite files under `data/`, `pathmap.json`, and verbatim
+`assets/` (attachments/documents/exports/images/fonts — no embedded paths).
+
+**Key files:**
+- `migration/bundle.py` — `Manifest`, `KazmaBundle`, `verify()`, `sha256_file`
+- `migration/path_rewrite.py` — `PathMap`, `build_path_map`, `rewrite_paths_in_sqlite`
+- `migration/vault_pairing.py` — `check_vault_key`, `sync_vault_key`
+- `migration/exporter.py` — `export_bundle()`
+- `migration/importer.py` — `import_bundle()`, `ImportReport`
+- `kazma-cli/kazma_cli/migrate.py` — CLI dispatch (`kazma migrate export|verify|import`)
+- `memory/backup.py:backup_one()` — the WAL-safe SQLite copier reused by the
+  importer's pre-swap safety backup (promoted from `_backup_one`).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

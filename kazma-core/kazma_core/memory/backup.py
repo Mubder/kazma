@@ -21,18 +21,29 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["perform_native_backups", "prune_old_backups"]
+__all__ = ["perform_native_backups", "prune_old_backups", "backup_one"]
 
 # Default retention: keep the most recent N backups per database.
 _DEFAULT_RETENTION = 10
 
 
-def _backup_one(src_path: Path, dest_path: Path) -> bool:
+def backup_one(src_path: Path, dest_path: Path) -> bool:
     """Stream-copy one database via the Online Backup API.
 
     Returns True on success.  ``pages=100`` batches the copy to avoid
     holding a long lock; ``sleep`` yields between batches so concurrent
-    writers are not starved.
+    writers are not starved. Reusable by callers outside the memory
+    subsystem (e.g. the migration importer's pre-swap safety backup).
+    """
+    return _backup_one(src_path, dest_path)
+
+
+def _backup_one(src_path: Path, dest_path: Path) -> bool:
+    """Stream-copy one database via the Online Backup API (internal impl).
+
+    Kept as a private alias so existing call sites (and the migration
+    engine) keep working; new external callers should prefer
+    :func:`backup_one`.
     """
     try:
         with sqlite3.connect(str(src_path)) as src, sqlite3.connect(str(dest_path)) as dst:
