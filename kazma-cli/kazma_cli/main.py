@@ -214,8 +214,16 @@ def _run_serve(port: int) -> None:
 
     import uvicorn
 
+    # Windows: pass a SelectorEventLoop loop_factory so psycopg async
+    # connections work (uvicorn 0.36+ hardcodes ProactorEventLoop on
+    # Windows, bypassing the event-loop policy, which makes psycopg raise
+    # "cannot use the ProactorEventLoop" on every async connection). On
+    # non-Windows, uvicorn_loop_factory() returns None (uvicorn default).
+    from kazma_core.eventloop import uvicorn_loop_factory
+
     try:
-        uvicorn.run(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=15)
+        uvicorn.run(app, host=host, port=port, log_level="info",
+                    timeout_graceful_shutdown=15, loop=uvicorn_loop_factory())
     except OSError as exc:
         # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.
         err = str(exc).lower()

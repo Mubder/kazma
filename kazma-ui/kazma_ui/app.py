@@ -1627,7 +1627,9 @@ def main() -> None:
         )
 
     app = create_app()
-    uvicorn.run(app, host=host, port=args.port, log_level="info")
+    from kazma_core.eventloop import uvicorn_loop_factory
+    uvicorn.run(app, host=host, port=args.port, log_level="info",
+                loop=uvicorn_loop_factory())
 
 
 if __name__ == "__main__":

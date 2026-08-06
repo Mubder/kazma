@@ -1,8 +1,10 @@
-"""Windows asyncio event-loop policy helper.
+"""Windows asyncio event-loop helpers for psycopg async compatibility.
 
-On Windows, Python 3.8+ defaults to ``ProactorEventLoop`` (better for
-subprocesses and pipes). However, several async drivers Kazma depends on
-are **incompatible** with the Proactor loop and require the older
+On Windows, Python 3.8+ defaults to ``ProactorEventLoop``. Uvicorn 0.36+
+**also** hardcodes ``ProactorEventLoop`` on Windows in its
+``asyncio_loop_factory`` (``uvicorn/loops/asyncio.py``), bypassing the
+event-loop policy entirely. However, several async drivers Kazma depends
+on are **incompatible** with the Proactor loop and require the older
 ``SelectorEventLoop``:
 
   - **psycopg** (async connections, used by LangGraph's
@@ -10,44 +12,75 @@ are **incompatible** with the Proactor loop and require the older
     ``Psycopg cannot use the 'ProactorEventLoop' to run in async mode``
     on every connection attempt, so Postgres-backed checkpoints never
     persist on Windows.
-  - Some older ``aio*`` libraries have the same limitation.
 
-``set_windows_selector_policy()`` switches to ``WindowsSelectorEventLoopPolicy``
-on Windows. It MUST be called before uvicorn creates its event loop (i.e. at
-the very top of ``_run_serve``, before any async work). It is a no-op on
-non-Windows platforms, so calling it unconditionally is safe.
+This module provides two helpers:
 
-Trade-off: the SelectorEventLoop does not support subprocesses from within
-async code. Kazma's subprocess-spawning paths (code_exec, MCP stdio) use
-``asyncio.create_subprocess_exec`` which IS supported on the Selector loop
-on Python 3.8+; the only thing lost is ``asyncio.subprocess`` on the
-Proactor's overlapped IO, which Kazma does not use.
+  - :func:`set_windows_selector_policy` — sets the asyncio event-loop
+    policy to ``WindowsSelectorEventLoopPolicy``. This alone is NOT
+    sufficient under uvicorn 0.36+ (which bypasses the policy), but it
+    helps non-uvicorn callers (tests, scripts, the migration importer).
+
+  - :func:`uvicorn_loop_factory` — returns a ``loop_factory`` callable that
+    creates a ``SelectorEventLoop``. Pass it to ``uvicorn.run(...,
+    loop=uvicorn_loop_factory())`` to override uvicorn's hardcoded
+    ProactorEventLoop. This is the fix that actually works under uvicorn
+    0.36+.
+
+Both are no-ops on non-Windows platforms.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["set_windows_selector_policy"]
+__all__ = ["set_windows_selector_policy", "uvicorn_loop_factory"]
 
 
 def set_windows_selector_policy() -> None:
     """On Windows, switch asyncio to ``WindowsSelectorEventLoopPolicy``.
 
-    No-op on macOS/Linux. Safe to call multiple times. Call this as early as
-    possible in the boot path — before uvicorn.run and before any async
-    driver imports its loop.
+    No-op on macOS/Linux. Safe to call multiple times. Call this early in
+    the boot path for non-uvicorn callers (tests, scripts). Under uvicorn
+    0.36+ you ALSO need ``uvicorn_loop_factory`` (see below) because
+    uvicorn bypasses the policy.
     """
     if sys.platform != "win32":
         return
     try:
         import asyncio
 
-        # Idempotent: setting the same policy twice is fine.
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore[attr-defined]
         logger.debug("[eventloop] Windows: set WindowsSelectorEventLoopPolicy (psycopg/async compat)")
     except Exception as exc:  # noqa: BLE001 — never block boot over the loop policy
         logger.warning("[eventloop] could not set WindowsSelectorEventLoopPolicy: %s", exc)
+
+
+def uvicorn_loop_factory() -> Callable[..., Any] | None:
+    """Return a uvicorn ``loop_factory`` that creates a SelectorEventLoop on Windows.
+
+    Usage::
+
+        from kazma_core.eventloop import uvicorn_loop_factory
+        uvicorn.run(app, ..., loop=uvicorn_loop_factory())
+
+    On non-Windows, returns ``None`` (uvicorn keeps its default behavior).
+    On Windows, returns a callable that creates a ``SelectorEventLoop``
+    instead of the default ``ProactorEventLoop`` — which psycopg's async
+    connections require. This bypasses uvicorn 0.36+'s hardcoded
+    ``asyncio.ProactorEventLoop`` in its ``asyncio_loop_factory``.
+    """
+    if sys.platform != "win32":
+        return None
+
+    import asyncio
+
+    def _factory(**_kwargs: Any) -> asyncio.AbstractEventLoop:
+        return asyncio.SelectorEventLoop()
+
+    logger.debug("[eventloop] Windows: uvicorn loop_factory → SelectorEventLoop")
+    return _factory
+
