@@ -25,7 +25,7 @@ __all__ = [
 
 
 def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
-    """HITL Approve / Deny buttons for Discord."""
+    """HITL Approve / Deny / Approve-for-task buttons for Discord."""
     return [
         {
             "type": 1,
@@ -43,7 +43,18 @@ def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
                     "custom_id": f"hitl:deny:{request_id}",
                 },
             ],
-        }
+        },
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Approve for task",
+                    "custom_id": f"hitl:approve_task:{request_id}",
+                },
+            ],
+        },
     ]
 
 
@@ -137,6 +148,12 @@ def slack_approval_blocks(request_id: str, text: str = "Approval required") -> l
                     "style": "danger",
                     "value": f"hitl:deny:{request_id}",
                     "action_id": f"hitl_deny_{request_id}",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve for task"},
+                    "value": f"hitl:approve_task:{request_id}",
+                    "action_id": f"hitl_approve_task_{request_id}",
                 },
             ],
         },

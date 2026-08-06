@@ -13,7 +13,16 @@ __all__ = [
 
 
 def build_approval_keyboard(request_id: str) -> dict[str, Any]:
-    """Build an inline keyboard for HITL approval prompts."""
+    """Build an inline keyboard for HITL approval prompts.
+
+    Three actions:
+    - ✅ Approve: approve once (re-prompt next turn if the agent calls
+      another danger tool).
+    - ❌ Deny: deny the tool (agent must synthesize without it).
+    - 🔓 Approve for task: auto-approve ALL danger tools for this thread
+      until the user sends a new message (or the 10-minute TTL expires).
+      Eliminates approval spam for multi-step tasks.
+    """
     return {
         "inline_keyboard": [
             [
@@ -25,7 +34,13 @@ def build_approval_keyboard(request_id: str) -> dict[str, Any]:
                     "text": "❌ Deny",
                     "callback_data": f"hitl:deny:{request_id}",
                 },
-            ]
+            ],
+            [
+                {
+                    "text": "🔓 Approve for task",
+                    "callback_data": f"hitl:approve_task:{request_id}",
+                },
+            ],
         ]
     }
 

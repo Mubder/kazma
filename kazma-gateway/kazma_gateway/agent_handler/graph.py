@@ -476,6 +476,18 @@ def create_graph_handler(
                 if hitl_handled:
                     return
 
+        # ── Clear task grant on new user message ──────────────────
+        # The user sent a real message (not an HITL approval callback,
+        # which returned above). This is the natural task boundary —
+        # the previous task is done, safety re-engages.
+        try:
+            from kazma_core.safety.task_grants import clear_task_grant
+
+            if clear_task_grant(thread_id):
+                logger.info("[agent-handler] Task grant cleared (new user message) thread=%s", thread_id)
+        except Exception:
+            pass
+
         # ── /new: Create a brand new session/season ───────────────
         if msg.text and msg.text.strip().lower() == "/new":
             import uuid

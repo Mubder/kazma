@@ -138,7 +138,8 @@ async def _handle_hitl_resume(
         return False
 
     action = parts[1].lower()
-    approved = action in ("approve", "yes", "y", "allow")
+    approved = action in ("approve", "yes", "y", "allow", "approve_task")
+    is_task_grant = action == "approve_task"
     # The target thread_id defaults to the current sender's thread but can
     # be overridden by the third argument (for cross-thread approvals).
     target_thread = parts[2] if len(parts) >= 3 else thread_id
@@ -225,8 +226,27 @@ async def _handle_hitl_resume(
                 "[HITL] Resume: thread=%s approved=%s action=%s",
                 target_thread, approved, action,
             )
+
+            # ── Task grant: auto-approve all danger tools until next message ──
+            # When the user clicks "Approve for task", grant ALL danger tools
+            # for this thread so subsequent turns skip the approval card
+            # entirely. The grant auto-clears on the next user message (not
+            # a callback) or after the TTL (default 10 min).
+            if is_task_grant and approved:
+                try:
+                    from kazma_core.safety.task_grants import grant_task
+
+                    actor = (msg.sender_id or msg.user_id or "unknown")
+                    grant_task(target_thread, actor=actor)
+                    logger.info(
+                        "[HITL] Task grant activated for thread=%s actor=%s",
+                        target_thread, actor,
+                    )
+                except Exception as exc:
+                    logger.warning("[HITL] Task grant failed: %s — continuing with single approve", exc)
+
             result_state = await graph.ainvoke(
-                Command(resume={"approved": approved, "reason": action}),
+                Command(resume={"approved": approved, "reason": action, "scope": "task" if is_task_grant else "once"}),
                 resume_config,
             )
 

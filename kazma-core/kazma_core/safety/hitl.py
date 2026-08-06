@@ -249,6 +249,13 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
         except Exception as exc:
             logger.warning("YOLO check failed in requires_approval: %s", exc)
         try:
+            from kazma_core.safety.task_grants import has_task_grant
+
+            if has_task_grant(tid):
+                return False
+        except Exception as exc:
+            logger.debug("Task grant check failed in requires_approval: %s", exc)
+        try:
             from kazma_core.safety.hitl_grants import has_tool_grant
 
             if has_tool_grant(tid, tool_name):
