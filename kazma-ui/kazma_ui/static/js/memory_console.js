@@ -3578,6 +3578,11 @@
       _v2gUpdateCanvasAria(stats);
       _v2gRenderFilters();
       _v2gApplyFilters();
+      // If there are groupings AND the sim is cold (alpha=0), reheat once so
+      // the group-spring can pull children into orbit. Without this, the sim
+      // is settled on page load and groupings have no visible effect.
+      // Only fires when alpha is already 0 (avoids reheating every 30s poll).
+      if (_v2gGroups && _v2gGroups.length && _v2gAlpha < 0.01) _v2gHeated();
     } catch (e) { /* silent */ }
   }
 
