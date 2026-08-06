@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS entities (
   aliases_json    TEXT DEFAULT '[]',
   is_high_stakes  INTEGER DEFAULT 0,                         -- 1 = quarantine before merge
   is_protected    INTEGER DEFAULT 0,                         -- 1 = operator-marked undeletable/unmergeable (F3)
+  is_major        INTEGER DEFAULT 0,                         -- 1 = operator-marked major node (bigger + distinct color)
   metadata_json   TEXT DEFAULT '{}'
 );
 
@@ -315,6 +316,9 @@ def ensure_primary_schema(conn: Any) -> None:
         # unmergeable-as-source. Extends the hardcoded _PROTECTED_ENTITIES set
         # (user/assistant/kazma/mubder) to any entity the operator chooses.
         "ALTER TABLE entities ADD COLUMN is_protected INTEGER DEFAULT 0",
+        # Major node flag: operator-marked important nodes (projects, hubs)
+        # that render bigger + distinct color on the canvas.
+        "ALTER TABLE entities ADD COLUMN is_major INTEGER DEFAULT 0",
     ):
         try:
             conn.execute(col_sql)

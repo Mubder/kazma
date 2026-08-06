@@ -704,6 +704,38 @@ async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+@router.post("/api/memory/v2/entities/{entity_id}/major")
+async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
+    """Mark/unmark an entity as a MAJOR node (bigger + distinct color on canvas).
+
+    The operator's mental model: Mubder is the master node; big projects
+    (kazma, shipx, kca) are MAJOR. This flag makes them render bigger and
+    with a distinct color, and grouped sub-nodes attach to them visually.
+    Body: ``{"major": true|false}``.
+    """
+    eid = (entity_id or "").strip()
+    if not eid:
+        return {"ok": False, "error": "entity_id required"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    want = bool(body.get("major"))
+    try:
+        conn = _conn()
+        row = conn.execute("SELECT id FROM entities WHERE id=?", (eid,)).fetchone()
+        if not row:
+            conn.close()
+            return {"ok": False, "error": "not_found"}
+        conn.execute("UPDATE entities SET is_major=? WHERE id=?", (1 if want else 0, eid))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "id": eid, "major": want}
+    except Exception as exc:
+        logger.exception("[memory_api] set major failed")
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 @router.delete("/api/memory/v2/entities/{entity_id}")
 async def delete_entity(entity_id: str) -> dict[str, Any]:
     eid = (entity_id or "").strip()
