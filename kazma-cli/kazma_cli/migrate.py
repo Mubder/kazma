@@ -284,8 +284,13 @@ def print_help() -> None:
         Restore a bundle into THIS installation. Use --dry-run first to
         preview the path-translation plan and vault-key check.
 
-  Scope (v1): bundles are SQLite-portable. Source can be SQLite OR Postgres;
-  target must be SQLite (set KAZMA_DB_BACKEND=sqlite on the target). The
-  verify command warns if the source was Postgres-backed.
+  Scope: bundles carry BOTH the SQLite files (vault/memory/snapshots —
+  always SQLite even under a Postgres backend) AND, when the source is
+  Postgres, a pg_dump of the shared-state tables (settings/chat/checkpoints).
+  Import restores whichever the target backend expects: a Postgres target
+  pg_restores the dump; a SQLite target uses the SQLite files. A Postgres
+  bundle into a SQLite target aborts with a clear error (rather than
+  silently losing the Postgres data). pg_dump/pg_restore are found on PATH,
+  then via `docker exec ${KAZMA_DB_CONTAINER:-kazma-db}`.
 """
     )

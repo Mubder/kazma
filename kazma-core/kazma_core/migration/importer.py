@@ -263,6 +263,61 @@ def import_bundle(
     report.files_restored = swapped
     _log(f"  restored {len(swapped)} data files")
 
+    # 6b. Postgres dump restore (v2). If the bundle contains a postgres.dump,
+    # the source was Postgres-backed and the shared-state tables (settings,
+    # chat sessions, checkpoints) live in that dump, NOT in the SQLite files.
+    # - Target Postgres: pg_restore the dump into KAZMA_DATABASE_URL. Schema
+    #   self-recreates (--clean --if-exists), so the target DB can be empty.
+    # - Target SQLite: the dump is unusable (different backend) — abort with
+    #   a clear error rather than silently importing partial data.
+    staged_pg_dump = staged_data / "postgres.dump"
+    if staged_pg_dump.exists():
+        from kazma_core.db.backend import is_postgres, get_database_url
+
+        if is_postgres():
+            target_dsn = get_database_url()
+            if not target_dsn:
+                report.error(
+                    "bundle has a Postgres dump and target is Postgres, but "
+                    "KAZMA_DATABASE_URL is not set. Set it and re-run."
+                )
+                return report
+            _log("Restoring Postgres dump into target DB…")
+            try:
+                from kazma_core.migration.pg_bridge import (
+                    PgToolNotFound,
+                    restore_database,
+                )
+                warnings = restore_database(
+                    staged_pg_dump, target_dsn,
+                    progress=lambda p: _log(f"    {p}"),
+                )
+                if warnings:
+                    report.warnings.append(
+                        f"pg_restore emitted {warnings} non-fatal warning line(s) "
+                        "(typical for --clean on a fresh DB; safe to ignore)."
+                    )
+                _log("  Postgres dump restored.")
+            except PgToolNotFound as exc:
+                report.error(f"pg_restore not available: {exc}")
+                return report
+            except Exception as exc:
+                report.error(f"pg_restore failed: {exc}")
+                return report
+        else:
+            # Bundle is Postgres-backed but target is SQLite — the dump is
+            # unusable. Don't silently produce a half-migrated install.
+            report.error(
+                "bundle contains a Postgres dump but the target backend is SQLite. "
+                "The Postgres tables (settings, chat sessions, checkpoints) cannot "
+                "be restored into SQLite. To use the migrated Postgres data, set "
+                "KAZMA_DB_BACKEND=postgres + KAZMA_DATABASE_URL on the target (and "
+                "run a Postgres instance), then re-import. The SQLite files "
+                "(vault/memory/snapshots) were restored, but without the Postgres "
+                "data the install is incomplete."
+            )
+            return report
+
     # 7. Restore config (config.yaml → ConfigStore.import_yaml).
     config_path = staging / "config.yaml"
     if config_path.exists():

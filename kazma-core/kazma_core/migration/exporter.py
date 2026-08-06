@@ -313,27 +313,41 @@ def _dump_postgres_shared_state(
     manifest: Manifest,
     _log: Callable[[str], None],
 ) -> None:
-    """Dump Postgres shared-state tables to SQLite files in the bundle.
+    """Dump the Postgres DB into the bundle as a custom-format dump file.
 
-    v1 covers the tables that hold operator-relevant state: settings (already
-    covered by config.yaml + ConfigStore), chat_sessions, checkpoints. These
-    are read via the live Postgres pool (not raw pg_dump) so the bundle stays
-    portable-SQLite. Best-effort: a failure here logs + continues (the SQLite
-    file copies in steps 3-4 already captured what was on disk).
+    v2: replaces the v1 no-op stub. When the source backend is Postgres, the
+    shared-state tables (kazma_settings, kazma_chat_sessions, checkpoints,
+    checkpoint_blobs, checkpoint_writes, kazma_swarm_tasks, etc.) live in
+    Postgres, NOT in the on-disk SQLite files. This runs ``pg_dump -Fc`` and
+    writes ``data/postgres.dump`` into the bundle so the importer can
+    ``pg_restore`` it into a target Postgres.
+
+    Best-effort at the bundle level: a failure here logs + continues, because
+    the SQLite files (vault, memory, snapshots) are still valuable on their
+    own. The importer will warn that the Postgres dump is missing.
     """
     try:
         from kazma_core.db.backend import get_database_url
+        from kazma_core.migration.pg_bridge import PgToolNotFound, dump_database
 
-        url = get_database_url() or ""
-        if not url:
-            _log("  (no DATABASE_URL — skipping Postgres dump)")
+        dsn = get_database_url() or ""
+        if not dsn:
+            _log("  (no KAZMA_DATABASE_URL — skipping Postgres dump)")
             return
-        _log("  Postgres dump is best-effort in v1; SQLite files copied above take precedence.")
-        # The chat-sessions + checkpoints Postgres content is captured on disk
-        # in SQLite form by the live SessionManager + checkpointer when they
-        # also keep SQLite mirrors; if not, this is where a future v2 would
-        # pg_dump → sqlite-restore. For v1 we log the gap rather than risk a
-        # half-translated copy.
-        manifest.table_counts.setdefault("_postgres_source", {"note": "postgres-backed; v1 copies SQLite mirrors"})
+        dest = staging / "data" / "postgres.dump"
+        _log(f"  pg_dump → data/postgres.dump (this may take a minute for large DBs)…")
+        written = dump_database(dsn, dest, progress=lambda p: _log(f"    {p}"))
+        manifest.table_counts["_postgres_dump"] = {
+            "bytes": written.stat().st_size,
+            "mb": round(written.stat().st_size / (1024 * 1024), 1),
+        }
+        _log(f"  Postgres dump: {written.stat().st_size // (1024*1024)} MB")
+    except PgToolNotFound as exc:
+        # Tool not available — degrade gracefully, the SQLite files still ship.
+        _log(f"  ⚠ pg_dump unavailable: {exc}")
+        _log("    Postgres tables will NOT be in the bundle (SQLite files still included).")
+        manifest.table_counts["_postgres_dump"] = {"skipped": "pg_dump not found"}
     except Exception as exc:
-        logger.warning("[migrate:export] Postgres shared-state dump failed: %s", exc)
+        logger.warning("[migrate:export] Postgres dump failed: %s", exc)
+        _log(f"  ⚠ Postgres dump failed: {exc}")
+        manifest.table_counts["_postgres_dump"] = {"error": str(exc)[:100]}

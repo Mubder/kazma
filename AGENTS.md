@@ -525,21 +525,39 @@ verifies, path-rewrites the *staged* copies, backs up the live DBs to
 staging dir is preserved on failure. `verify` runs as a dry-run inside every
 import and is available standalone.
 
-**v1 scope — SQLite-portable.** The bundle is always SQLite, regardless of
-source backend. The exporter reads via the backend-agnostic data-access
-layer (ConfigStore.export_yaml, WorkspaceStore, the SQLite file resolvers in
-`paths.py`) so it works for SQLite OR Postgres sources. The target must be
-SQLite (`KAZMA_DB_BACKEND=sqlite`). Postgres→Postgres and *→Postgres targets
-are v2; `verify` warns when the source was Postgres-backed. This covers the
-common case (WSL/Linux→Windows) without the full SQLite↔Postgres
-cross-product.
+**Scope — SQLite + Postgres (v2).** The bundle always carries the SQLite
+files (vault, memory, snapshots, cron — these are SQLite even under a
+Postgres backend). When the source is Postgres, it ALSO carries a
+``data/postgres.dump`` produced by ``pg_dump -Fc`` containing the
+shared-state tables (settings, chat sessions, checkpoints, swarm tasks).
+The exporter reads via the backend-agnostic data-access layer for the
+SQLite portion and shells out to ``pg_dump`` for the Postgres portion.
+
+**Postgres dump/restore discovery — ``pg_bridge.py``.**
+``resolve_pg_dump()`` / ``resolve_pg_restore()`` try, in order: (1) the
+binary on PATH, (2) ``docker exec ${KAZMA_DB_CONTAINER:-kazma-db} <bin>``
+(the common Docker-deployment default — the DB container has the client
+tools even when the host doesn't), (3) raise ``PgToolNotFound`` with a
+clear install hint. Override the container name with ``KAZMA_DB_CONTAINER``.
+
+**Target-backend matching on import.** The importer checks the target
+backend: if Postgres, it ``pg_restore`` the dump (``--clean --if-exists``
+idempotent; schema self-recreates, target DB can be empty) into
+``KAZMA_DATABASE_URL``, then proceeds with the SQLite-file restore +
+path-rewrite for vault/memory/snapshots. If the target is SQLite but the
+bundle has a Postgres dump, it **aborts with a clear error** rather than
+silently importing partial data (the SQLite files alone lack chat history,
+settings, checkpoints that live in Postgres). No SQLite↔Postgres content
+translation is attempted — the bundle is source-backend-shaped.
 
 **Bundle layout:** `manifest.json` (version, source OS/host, per-file sha256,
 vault-key fingerprint, table counts, source workspace root), `meta.env`
 (vault key + public url), `config.yaml` (ConfigStore.export_yaml — secrets
 are `vault://` refs, not plaintext), `vault.db` (encrypted, under `data/`),
-the 13 data SQLite files under `data/`, `pathmap.json`, and verbatim
-`assets/` (attachments/documents/exports/images/fonts — no embedded paths).
+the 13 data SQLite files under `data/`, `data/postgres.dump` (only when the
+source was Postgres — custom format, restored via pg_restore), `pathmap.json`,
+and verbatim `assets/` (attachments/documents/exports/images/fonts — no
+embedded paths).
 
 **Key files:**
 - `migration/bundle.py` — `Manifest`, `KazmaBundle`, `verify()`, `sha256_file`

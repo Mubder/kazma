@@ -42,3 +42,8 @@ __all__ = [
     "import_bundle",
     "ImportReport",
 ]
+
+# v2: Postgres dump/restore bridge. Imported lazily by exporter/importer so
+# the migration package still imports cleanly when psycopg/docker aren't
+# installed (the SQLite-only path stays usable).
+# See kazma_core.migration.pg_bridge for the public dump_database / restore_database.
