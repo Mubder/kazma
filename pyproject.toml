@@ -36,6 +36,9 @@ dependencies = [
     "reportlab>=4.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
+    "pypdf>=4.0.0",
+    "pdfplumber>=0.11.0",
+    "python-pptx>=0.6.23",
 ]
 
 [project.optional-dependencies]
@@ -83,6 +86,9 @@ document = [
     "openpyxl>=3.1.0",
     "arabic-reshaper>=3.0.0",
     "python-bidi>=0.4.2",
+    "pypdf>=4.0.0",
+    "pdfplumber>=0.11.0",
+    "python-pptx>=0.6.23",
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [

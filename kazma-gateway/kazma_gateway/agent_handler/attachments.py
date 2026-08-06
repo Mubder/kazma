@@ -59,6 +59,100 @@ def _persist_attachment(attachment: "Attachment") -> str:
     return str(dest.resolve())
 
 
+def _try_parse_attachment(path: str, *, max_chars: int = 2000) -> str:
+    """Best-effort synchronous parse of a document attachment for prompt injection.
+
+    Called by build_user_content when a document (PDF/DOCX/XLSX/PPTX/CSV) is
+    uploaded — extracts the first ``max_chars`` of text so the agent sees the
+    content immediately in the prompt. Returns an error string on failure.
+
+    This is synchronous (not async) because build_user_content is sync and
+    runs in the graph-builder thread before the LLM call.
+    """
+    try:
+        p = Path(path)
+        suffix = p.suffix.lower()
+
+        if suffix == ".pdf":
+            try:
+                import pdfplumber
+
+                with pdfplumber.open(p) as pdf:
+                    lines = []
+                    for i, page in enumerate(pdf.pages[:5]):
+                        text = page.extract_text() or ""
+                        if text.strip():
+                            lines.append(text.strip())
+                        if sum(len(l) for l in lines) > max_chars:
+                            break
+                    result = "\n".join(lines)[:max_chars]
+                    return result if result.strip() else "Error: no text layer (scanned PDF)"
+            except ImportError:
+                return "Error: pdfplumber not installed"
+
+        elif suffix == ".docx":
+            try:
+                from docx import Document
+
+                doc = Document(str(p))
+                lines = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
+                return "\n".join(lines)[:max_chars]
+            except ImportError:
+                return "Error: python-docx not installed"
+
+        elif suffix in (".xlsx", ".xls"):
+            try:
+                from openpyxl import load_workbook
+
+                wb = load_workbook(p, read_only=True, data_only=True)
+                lines = []
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    lines.append(f"--- {sheet_name} ---")
+                    for i, row in enumerate(ws.iter_rows(values_only=True)):
+                        if i >= 20:
+                            break
+                        cells = [str(c) if c else "" for c in row]
+                        if any(c.strip() for c in cells):
+                            lines.append(" | ".join(cells))
+                wb.close()
+                return "\n".join(lines)[:max_chars]
+            except ImportError:
+                return "Error: openpyxl not installed"
+
+        elif suffix == ".csv":
+            import csv as _csv
+
+            with open(p, "r", encoding="utf-8", errors="replace", newline="") as f:
+                reader = _csv.reader(f)
+                lines = [", ".join(row) for _, row in zip(range(20), reader)]
+            return "\n".join(lines)[:max_chars]
+
+        elif suffix == ".pptx":
+            try:
+                from pptx import Presentation
+
+                prs = Presentation(str(p))
+                lines = []
+                for i, slide in enumerate(prs.slides[:10]):
+                    lines.append(f"--- Slide {i+1} ---")
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            for para in shape.text_frame.paragraphs:
+                                if para.text.strip():
+                                    lines.append(para.text.strip())
+                return "\n".join(lines)[:max_chars]
+            except ImportError:
+                return "Error: python-pptx not installed"
+
+        else:
+            return f"Error: unsupported format {suffix}"
+
+    except Exception as exc:
+        logger.debug("[attachments] document parse failed: %s", exc)
+        return f"Error: {exc}"
+
+
 def _resolve_active_model_vision_capable() -> bool:
     """Best-effort: is the active model vision-capable?
 
@@ -163,11 +257,39 @@ def build_user_content(
             if data is not None:
                 try:
                     path = _persist_attachment(att)
-                    kind_note = att.kind
-                    text_parts.append(
-                        f"[Attached: {att.filename or path} ({att.mime}) "
-                        f"— use file_read to open: {path}]"
-                    )
+                    # ── Auto-parse document attachments ──────────────
+                    # For document types (PDF, DOCX, XLSX, PPTX, CSV), extract
+                    # text immediately so the agent sees the content in the
+                    # prompt — not just a "use file_read" stub that would
+                    # fail on binary formats. The file is also persisted so
+                    # the agent can use read_document for the full content.
+                    from pathlib import Path as _Path
+
+                    _suffix = _Path(path).suffix.lower()
+                    _DOC_SUFFIXES = frozenset({
+                        ".pdf", ".docx", ".doc", ".xlsx", ".xls",
+                        ".pptx", ".ppt", ".csv", ".json", ".rtf",
+                    })
+                    if _suffix in _DOC_SUFFIXES:
+                        excerpt = _try_parse_attachment(path, max_chars=2000)
+                        if excerpt and not excerpt.startswith("Error"):
+                            text_parts.append(
+                                f"[Attached: {att.filename or path} ({att.mime}) "
+                                f"— parsed contents:\n{excerpt}]"
+                            )
+                            text_parts.append(
+                                f"[Full document at: {path} — use read_document for complete content]"
+                            )
+                        else:
+                            text_parts.append(
+                                f"[Attached: {att.filename or path} ({att.mime}) "
+                                f"— use read_document to open: {path}]"
+                            )
+                    else:
+                        text_parts.append(
+                            f"[Attached: {att.filename or path} ({att.mime}) "
+                            f"— use file_read to open: {path}]"
+                        )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[attachments] persist failed: %s", exc)
                     text_parts.append(

@@ -62,7 +62,7 @@ async def generate_pdf(
         )
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.lib.enums import TA_RIGHT
+        from reportlab.lib.enums import TA_LEFT, TA_RIGHT
     except ImportError:
         return "Error: reportlab not installed. Run: pip install reportlab"
 
@@ -150,32 +150,56 @@ async def generate_pdf(
         except Exception as exc:
             logger.warning("[PDF] Could not register Calibri: %s", exc)
 
+    def _is_arabic_text(text: str) -> bool:
+        """True if the text contains Arabic script characters (\u0600-\u06FF)."""
+        return any("\u0600" <= ch <= "\u06FF" for ch in text)
+
     secs = _normalize_sections(sections)
     dest = _filename(title, "pdf")
     try:
         doc = SimpleDocTemplate(str(dest), pagesize=LETTER)
 
-        if _arabic_font_name:
-            _base_font = _calibri_name or _arabic_font_name
-            title_style = ParagraphStyle("Title", fontName=_arabic_font_name, fontSize=18, alignment=TA_RIGHT, spaceAfter=12)
-            head_style = ParagraphStyle("SectionHead", fontName=_arabic_font_name, fontSize=14, alignment=TA_RIGHT, spaceBefore=14, spaceAfter=6)
-            body_style = ParagraphStyle("BodyText", fontName=_arabic_font_name, fontSize=10, alignment=TA_RIGHT, leading=16)
-        elif _calibri_name:
-            title_style = ParagraphStyle("Title", fontName="Calibri", fontSize=18, spaceAfter=12)
-            head_style = ParagraphStyle("SectionHead", fontName="Calibri-Bold", fontSize=14, spaceBefore=14, spaceAfter=6)
-            body_style = ParagraphStyle("BodyText", fontName="Calibri", fontSize=10, leading=16)
-        else:
-            styles = getSampleStyleSheet()
-            title_style = styles["Title"]
-            head_style = ParagraphStyle("SectionHead", parent=styles["Heading2"], spaceBefore=14, spaceAfter=6)
-            body_style = styles["BodyText"]
+        # Build base styles (font choices depend on what's registered).
+        # Per-paragraph direction is applied dynamically below — NOT forced
+        # globally. The old code forced TA_RIGHT on ALL text when an Arabic
+        # font was available, which made English-only documents render RTL.
+        _latin_font = _calibri_name or "Helvetica"
+        _latin_bold = "Calibri-Bold" if _calibri_name else "Helvetica-Bold"
 
-        flow: list[Any] = [Paragraph(_shape(title), title_style), Spacer(1, 12)]
+        title_style = ParagraphStyle("Title", fontName=_latin_font, fontSize=18, spaceAfter=12)
+        head_style = ParagraphStyle("SectionHead", fontName=_latin_bold, fontSize=14, spaceBefore=14, spaceAfter=6)
+        body_style = ParagraphStyle("BodyText", fontName=_latin_font, fontSize=10, leading=16)
+
+        # Arabic variants (only if Arabic font + reshaping are available)
+        if _arabic_font_name and _has_arabic:
+            title_style_ar = ParagraphStyle("TitleAr", fontName=_arabic_font_name, fontSize=18, alignment=TA_RIGHT, spaceAfter=12)
+            head_style_ar = ParagraphStyle("SectionHeadAr", fontName=_arabic_font_name, fontSize=14, alignment=TA_RIGHT, spaceBefore=14, spaceAfter=6)
+            body_style_ar = ParagraphStyle("BodyTextAr", fontName=_arabic_font_name, fontSize=10, alignment=TA_RIGHT, leading=16)
+        else:
+            title_style_ar = title_style
+            head_style_ar = head_style
+            body_style_ar = body_style
+
+        flow: list[Any] = []
+
+        # Title — detect direction per-content
+        is_ar_title = _is_arabic_text(title)
+        t_style = title_style_ar if is_ar_title else title_style
+        flow.append(Paragraph(_shape(title) if is_ar_title else title, t_style))
+        flow.append(Spacer(1, 12))
+
         for s in secs:
+            # Per-section direction detection
+            is_ar = _is_arabic_text(s["heading"]) or _is_arabic_text(s["body"])
+            h_style = head_style_ar if is_ar else head_style
+            b_style = body_style_ar if is_ar else body_style
+
             if s["heading"]:
-                flow.append(Paragraph(_shape(s["heading"]), head_style))
+                text = _shape(s["heading"]) if is_ar else s["heading"]
+                flow.append(Paragraph(text, h_style))
             if s["body"]:
-                flow.append(Paragraph(_shape(s["body"]).replace("\n", "<br/>"), body_style))
+                text = _shape(s["body"]).replace("\n", "<br/>") if is_ar else s["body"].replace("\n", "<br/>")
+                flow.append(Paragraph(text, b_style))
             flow.append(Spacer(1, 8))
         doc.build(flow)
     except Exception as exc:  # noqa: BLE001

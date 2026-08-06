@@ -1,0 +1,41 @@
+name: document-processor
+version: 0.1.0
+description: Read, merge, split, and inspect documents (PDF, DOCX, XLSX, PPTX, CSV, JSON). Extract text, tables, and metadata.
+author: Kazma Team
+license: MIT
+
+tools:
+  read_document:
+    arabic_name: "قراءة مستند"
+    description: >
+      Read and extract text from a document file (PDF, DOCX, XLSX, PPTX, CSV, JSON, TXT).
+      Returns the full text content with page/sheet markers. Use this to read any
+      document the user uploads or asks about. Handles tables in PDFs and spreadsheets.
+    category: document
+    prompt_chain:
+      - "اقرأ المستند المحدد واستخرج النص الكامل"
+      - "أعد النص مع علامات الصفحات أو الأوراق"
+  pdf_merge:
+    arabic_name: "دمج PDF"
+    description: >
+      Merge multiple PDF files into a single PDF. Pass a list of file paths.
+      Returns the path of the merged output file.
+    category: document
+    prompt_chain:
+      - "ادمج ملفات PDF المتعددة في ملف واحد"
+  pdf_split:
+    arabic_name: "تقسيم PDF"
+    description: >
+      Extract specific pages from a PDF into a new file. Pass start_page and end_page
+      (1-indexed). Returns the path of the extracted output.
+    category: document
+    prompt_chain:
+      - "استخرج الصفحات المحددة من ملف PDF"
+  pdf_info:
+    arabic_name: "معلومات PDF"
+    description: >
+      Extract metadata from a PDF: page count, title, author, creation date,
+      page size, and whether it has a text layer (vs scanned/image-only).
+    category: document
+    prompt_chain:
+      - "استخرج البيانات الوصفية لملف PDF"
