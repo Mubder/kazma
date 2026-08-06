@@ -1976,7 +1976,19 @@ def create_sse_chat_router(
                 return []
 
         messages = list(session.messages or [])
-        if not messages:
+        # Hydrate from checkpointer when:
+        # 1. messages is completely empty (original behavior), OR
+        # 2. there are messages but NO assistant replies (partial sync from
+        #    gateway — the end-of-turn sync didn't reach this process's
+        #    in-memory cache). The checkpointer is the source of truth for
+        #    gw-* platform sessions.
+        has_assistant = any(
+            (m.get("role") or "").lower() == "assistant"
+            and str(m.get("content") or "").strip()
+            for m in messages
+            if isinstance(m, dict)
+        )
+        if not messages or (not has_assistant and session_id.startswith("gw-")):
             # Hydrate from checkpointer (source of truth for agent seasons)
             try:
                 live = _get_graph()
@@ -2012,11 +2024,27 @@ def create_sse_chat_router(
                         if _ui_ok(m)
                     ]
                     if ui:
-                        session.messages = ui
+                        # The checkpointer is the source of truth for gw-*
+                        # sessions. Replace if the checkpoint has more content
+                        # (e.g. it has assistant replies the cached row lacks),
+                        # or if the cache was empty.
+                        if len(ui) >= len(messages):
+                            session.messages = ui
+                        else:
+                            # Merge: add any checkpoint messages missing from cache
+                            existing_keys = {
+                                (m.get("role"), str(m.get("content") or "")[:80])
+                                for m in messages if isinstance(m, dict)
+                            }
+                            for m in ui:
+                                key = (m.get("role"), str(m.get("content") or "")[:80])
+                                if key not in existing_keys:
+                                    messages.append(m)
+                            session.messages = messages
                         if session_id.startswith("gw-"):
                             session.thread_id = session_id
                         _get_store().put(session)
-                        messages = ui
+                        messages = session.messages
             except Exception:
                 logger.debug(
                     "[SSE] checkpointer hydrate failed for %s",
