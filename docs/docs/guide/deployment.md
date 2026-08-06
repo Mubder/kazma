@@ -254,7 +254,55 @@ The repo's notes mention "resource constraints on 24 GB VRAM setups." Practical 
 
 ---
 
-## Documentation Audit Notes
+## 10. Lifecycle status notifications
+
+Kazma pushes a status update to every configured platform (Telegram/Discord/Slack) when the server starts, restarts, shuts down, or fails to boot — so you can tell from chat when something went wrong (a hung boot, a crash that emits no shutdown message, a bad bot token).
+
+### Events
+
+| Event | Icon | When | What it tells you |
+|-------|------|------|-------------------|
+| `starting` | 🔵 | Top of startup (before MCP) | Boot began. If you see this with no `started`, the boot hung or crashed. |
+| `started` | 🟢 | End of startup (all subsystems up) | Server is healthy. Includes `Adapters:` + `Model:` detail. |
+| `restarted` | 🔄 | Auto-upgraded from `started` | Shutdown→start within the restart window — intentional restart, not crash-recovery. |
+| `shutting_down` | 🟡 | Top of graceful shutdown | Clean stop. Its **absence** means a crash / `kill -9`. |
+| `startup_failed` | 🔴 | Gateway-start failure guard | Boot error (bad token, network) — the error is in the message body. |
+
+### How it works
+
+Notifications route through the **SwarmMessageBus** — the same bus that delivers swarm worker output. No separate notification path is constructed. The bus is wired during `KazmaAppBuilder.build()` (before the lifespan), and `FanOutBusAdapter` fans out to every configured platform. When no platform bus is configured (`NullBusAdapter`), the feature self-disables silently.
+
+### Configuration
+
+```yaml
+notifications:
+  lifecycle:
+    enabled: true
+    events: [starting, started, shutting_down, startup_failed]
+    restart_window_seconds: 60  # 0 disables restart detection
+```
+
+Config is **live-re-read** on every boot/shutdown — toggle it via the Settings API or `kazma.yaml` without a restart for the *next* boot.
+
+### Enabling notifications
+
+The messages need a destination. Set `connectors.<platform>.swarm_chat_id` to the chat ID where you want them delivered (typically your DM with the bot):
+
+```bash
+# Telegram example — set to your user ID (same as allowed_users)
+# Via the Settings API:
+curl -X PUT http://127.0.0.1:9090/api/settings/single \
+  -H "Content-Type: application/json" \
+  -H "X-Kazma-Secret: $KAZMA_SECRET" \
+  -d '{"key":"connectors.telegram.swarm_chat_id","value":"<your-chat-id>"}'
+```
+
+Without `swarm_chat_id`, the bus stays `NullBusAdapter` and notifications are dropped silently.
+
+See: [Configuration → `notifications`](configuration#notifications) for the full key reference.
+
+---
+
 
 - **`kubernetes/` deploys a Hub API, not the main agent**, and references PostgreSQL + Redis, which the main codebase does not use. Flagged prominently to prevent misdeployment.
 - **Volume path mismatch** (`/root/.kazma/...` vs the `kazma` user's home) in `docker-compose.yml` — set `KAZMA_VECTOR_PATH` explicitly to be safe.

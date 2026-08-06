@@ -52,6 +52,12 @@ Generic `ConfigStore.get()` does **not** automatically overlay every env var —
 | `KAZMA_DATABASE_URL` | unset (SQLite) | Multi-replica **Yes** | Postgres DSN → dual-backend stores + LangGraph checkpointer. |
 | `DATABASE_URL` | unset | Alt | Accepted by migrate script as alias. |
 | `KAZMA_DB_BACKEND` | auto | Optional | Force `postgres` / `sqlite`. |
+| `KAZMA_DB_CONTAINER` | `kazma-db` | Migration | Docker container name for `pg_dump` / `pg_restore` discovery during `kazma migrate`. See [Migration](../ops/migration). |
+| `KAZMA_DB_INTERNAL_PORT` | `5432` | Migration | Container-internal Postgres port when `pg_dump` / `pg_restore` run via `docker exec` (the host's forwarded port is unreachable from inside the container). |
+| `KAZMA_PG_POOL_RETRIES` | `5` | Optional | Connection-pool creation retry count. Handles transient failures (Windows Docker-bridge, container mid-startup). |
+| `KAZMA_PG_POOL_RETRY_DELAY` | `1.0` | Optional | Seconds between pool-creation retries. |
+| `KAZMA_PG_POOL_MIN` | `1` | Optional | Minimum connections in the psycopg pool. |
+| `KAZMA_PG_POOL_MAX` | `10` | Optional | Maximum connections in the psycopg pool. |
 
 ---
 

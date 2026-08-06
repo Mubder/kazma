@@ -203,7 +203,29 @@ kazma update --yes       # apply without prompting
 
 ---
 
-## 8. `kazma hub` — skill hub (Click group)
+## 8. `kazma migrate` — cross-machine migration
+
+Move a full Kazma installation (config, secrets, memory, chat history, snapshots, assets) across machines/OSes without silent breakage. See [Migration](../ops/migration) for the full guide and the three load-bearing invariants (vault pairing, path translation, atomic import).
+
+```bash
+kazma migrate export [--out PATH] [--no-assets]   # create a portable bundle
+kazma migrate verify BUNDLE [--no-hash]           # check integrity without importing
+kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run]
+```
+
+| Subcommand | Purpose |
+|------------|---------|
+| `export` | Bundle the current install into a `.zip` (SQLite files + Postgres dump + vault + assets) |
+| `verify` | Validate bundle structure, sha256 hashes, manifest, vault-key fingerprint |
+| `import` | Restore into this machine: staging → path-rewrite → backup → atomic swap |
+
+**Postgres sources**: set `KAZMA_DB_CONTAINER` so `pg_dump` is discovered via `docker exec`. See [Migration → Postgres](../ops/migration#postgres-migration).
+
+**Vault-key mismatch**: if the bundle's vault key differs from the target's, import aborts. Pass `--reset-vault-key` to overwrite (the existing target `vault.db` is backed up first).
+
+---
+
+## 9. `kazma hub` — skill hub (Click group)
 
 The only Click-based subtree (`kazma_core/hub/cli.py:104`). Group options: `--registry-path` (env `KAZMA_HUB_DB`, default `~/.kazma/hub/registry.db`), `--hub-url` (env `KAZMA_HUB_URL`, default `https://hub.kazma.ai`).
 
@@ -235,7 +257,7 @@ kazma hub install oil-pricing-pro@1.2.0
 
 ---
 
-## 9. `kazma-tui`
+## 10. `kazma-tui`
 
 Launches the Textual TUI (`kazma_tui.app:main` → `KazmaTUI().run()`). Tabs: Dashboard, Chat, Files, Traces, Swarm, Settings. Initializes `ModelRegistry`/`SwarmEngine` singletons if launched standalone. Includes a HITL approval modal (`widgets/hitl_modal.py`).
 
@@ -246,7 +268,7 @@ kazma-tui
 
 ---
 
-## 10. `kazma-web`
+## 11. `kazma-web`
 
 Alias for launching the FastAPI Web UI server directly (`kazma_ui.app:main`). Defaults `127.0.0.1:8000`; warns if binding `0.0.0.0` without `KAZMA_SECRET` (`app.py:900-906`).
 
@@ -256,7 +278,7 @@ kazma-web
 
 ---
 
-## 11. Slash commands (in-chat)
+## 12. Slash commands (in-chat)
 
 These are typed inside a connected chat (Telegram/Discord/Slack/Web). Defined in `kazma-gateway/.../slash_commands.py`.
 
@@ -282,7 +304,7 @@ These are typed inside a connected chat (Telegram/Discord/Slack/Web). Defined in
 
 ---
 
-## 12. Exit codes {#exit-codes}
+## 13. Exit codes {#exit-codes}
 
 | Code | Meaning |
 |---|---|

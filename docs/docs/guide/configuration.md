@@ -200,6 +200,32 @@ safety:
 
 > The **swarm bus** uses a separate, broader list (`_EXTENDED_DANGER` adds `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests`). The **MCP** path classifies dynamically by name pattern. See [Security & Safety → danger-tool lists](security-and-safety#danger-tool-lists-three-of-them).
 
+### `notifications.lifecycle` (lines 143-157)
+
+Server lifecycle status notifications — pushes a status update to every configured platform when the server starts, restarts, shuts down, or fails to boot. See [Deployment → Lifecycle notifications](deployment#10-lifecycle-status-notifications).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `notifications.lifecycle.enabled` | bool | `true` | Master switch. |
+| `notifications.lifecycle.events` | list | `[starting, started, shutting_down, startup_failed]` | Which events trigger a notification. Remove entries to silence specific events. |
+| `notifications.lifecycle.restart_window_seconds` | int | `60` | If a shutdown→start happens within this window, reports "🔄 Restarted" instead of "🟢 Started". `0` disables restart detection. |
+
+Default:
+
+```yaml
+notifications:
+  lifecycle:
+    enabled: true
+    events:
+      - starting
+      - started
+      - shutting_down
+      - startup_failed
+    restart_window_seconds: 60
+```
+
+Notifications route through the SwarmMessageBus (no parallel path). Set `connectors.<platform>.swarm_chat_id` to the chat ID where messages should land. Without it, the bus is `NullBusAdapter` and messages are dropped silently.
+
 ### `ui` (lines 98-102)
 
 | Key | Type | Default | Description |

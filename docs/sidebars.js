@@ -71,6 +71,7 @@ const sidebars = {
         'ops/oidc-setup',
         'ops/wsl-fixed-access',
         'ops/portability',
+        'ops/migration',
       ],
     },
   ],
