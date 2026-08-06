@@ -78,13 +78,30 @@ class PostgresPool:
 
 
 def get_postgres_pool() -> PostgresPool | None:
-    """Return shared pool when Postgres is configured; else None."""
+    """Return shared pool when Postgres is configured; else None.
+
+    Retries pool creation on transient connection failures — psycopg's
+    ``ConnectionPool(open=True)`` can fail its first ``check()`` on a brief
+    network blip (common on Windows against a Docker-bridge, or when the DB
+    container just started). A transient failure here previously surfaced as
+    ``RuntimeError("Postgres pool unavailable")`` in ``reconcile_from_yaml``
+    and crashed boot. We now retry a few times with a short backoff so a
+    momentary unreachable DB doesn't kill startup.
+
+    Note: we check the DSN directly rather than ``is_postgres()`` so that a
+    caller that already determined Postgres is active (``_use_postgres()``)
+    isn't tripped up by an env-var resolution race between that check and
+    this call (the .env load can settle at slightly different moments during
+    early boot). If a DSN is present, we honor it.
+    """
     global _pool
-    if not is_postgres():
+    dsn = get_database_url()
+    if not dsn and not is_postgres():
         return None
     with _lock:
         if _pool is None:
-            dsn = get_database_url()
+            if not dsn:
+                dsn = get_database_url()
             if not dsn:
                 return None
             # Normalize postgres:// → postgresql:// for psycopg
@@ -92,8 +109,36 @@ def get_postgres_pool() -> PostgresPool | None:
                 dsn = "postgresql://" + dsn[len("postgres://") :]
             min_size = int(os_env("KAZMA_PG_POOL_MIN", "1"))
             max_size = int(os_env("KAZMA_PG_POOL_MAX", "10"))
-            _pool = PostgresPool(dsn, min_size=min_size, max_size=max_size)
-            _ensure_core_schema(_pool)
+
+            import time
+
+            attempts = int(os_env("KAZMA_PG_POOL_RETRIES", "5"))
+            delay = float(os_env("KAZMA_PG_POOL_RETRY_DELAY", "1.0"))
+            last_exc: Exception | None = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    _pool = PostgresPool(dsn, min_size=min_size, max_size=max_size)
+                    _ensure_core_schema(_pool)
+                    break
+                except Exception as exc:
+                    # Pool construction/health-check failed. Reset any
+                    # half-built pool and retry — the DB may be mid-startup.
+                    last_exc = exc
+                    logger.warning(
+                        "[PostgresPool] attempt %d/%d failed: %s",
+                        attempt,
+                        attempts,
+                        exc,
+                    )
+                    _pool = None
+                    if attempt < attempts:
+                        time.sleep(delay)
+            if _pool is None:
+                # All retries exhausted — surface the underlying cause so
+                # callers see WHY (not just "pool unavailable").
+                raise RuntimeError(
+                    f"Postgres pool unreachable after {attempts} attempts: {last_exc}"
+                ) from last_exc
         return _pool
 
 

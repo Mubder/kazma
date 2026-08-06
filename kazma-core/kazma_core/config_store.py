@@ -533,10 +533,19 @@ class ConfigStore:
             return False
 
     def _pg_pool(self) -> Any:
+        # Re-resolve each call until we have a live pool — a transient
+        # connection failure on the first attempt must not permanently cache
+        # None (which would make every subsequent call raise "pool
+        # unavailable" and crash boot). Once get_postgres_pool() returns a
+        # pool it's cached at the module level; we just stop shadowing it
+        # with a stale None.
         if self._pg is None:
             from kazma_core.db.postgres_pool import get_postgres_pool
 
-            self._pg = get_postgres_pool()
+            pool = get_postgres_pool()
+            # Only cache non-None so a later retry can still succeed.
+            if pool is not None:
+                self._pg = pool
         return self._pg
 
     def _get_conn(self) -> sqlite3.Connection:

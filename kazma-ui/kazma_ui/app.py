@@ -71,7 +71,25 @@ class KazmaAppBuilder:
 
     def _bootstrap_environment(self) -> None:
         """Initialize configurations, core agent, and model registry."""
-        # Setup structured JSON logging if requested
+        # Ensure .env is loaded FIRST, before any subsystem that may need
+        # env-derived config (notably KAZMA_DB_BACKEND / KAZMA_DATABASE_URL,
+        # which the Postgres pool resolver reads). Load the CWD's .env
+        # explicitly with override=True — load_dotenv()'s default search
+        # walks up from the kazma package location (possibly a different
+        # editable-install repo) and would load the WRONG .env; and override
+        # is required so stale empty shell values don't shadow real ones.
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+
+            cwd_env = Path.cwd() / ".env"
+            if cwd_env.exists():
+                load_dotenv(dotenv_path=cwd_env, override=True)
+            logger.info("[Auth] Loaded environment variables from .env")
+        except Exception as e:
+            logger.debug("[Auth] Failed to load .env: %s", e)
+
+        # Setup structured JSON logging if requested (now env-aware).
         try:
             from kazma_core.logging_config import setup_logging
             setup_logging()
@@ -82,14 +100,6 @@ class KazmaAppBuilder:
         from kazma_core.config_store import ConfigStore, set_config_store
         from kazma_core.model_registry import initialize_model_registry, ModelRegistry
         from kazma_core.service_container import get_container
-
-        # Ensure .env is loaded on startup if present
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()
-            logger.info("[Auth] Loaded environment variables from .env")
-        except Exception as e:
-            logger.debug("[Auth] Failed to load .env: %s", e)
 
         # Ensure KAZMA_SECRET is configured
         import sys

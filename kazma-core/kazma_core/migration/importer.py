@@ -232,18 +232,33 @@ def import_bundle(
         else:
             dest = data_dir / arc_name
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # Back up the existing live file (if any) before swapping.
+        # Back up the existing live file (if any) before swapping. Use the
+        # WAL-safe online-backup primitive so the backup is a consistent
+        # single file (no -wal/-shm dependency).
         if dest.exists():
             _backup_one(dest, backup_dir / arc_name)
-        # Move staging → live (atomic rename; fall back to copy+unlink on
-        # cross-device or Windows locks).
-        try:
-            if dest.exists():
-                dest.unlink()
-            src_staged.rename(dest)
-        except OSError:
-            shutil.copy2(src_staged, dest)
-            src_staged.unlink(missing_ok=True)
+        # CRITICAL: remove any stale -wal / -shm sidecars at the destination
+        # before writing the new main file. A leftover -wal from the previous
+        # DB would be inconsistent with the new main file and SQLite would
+        # either replay stale transactions (corruption) or report "database
+        # disk image is malformed" — this was the root cause of the vault.db
+        # corruption bug on the first migration import.
+        for suffix in ("-wal", "-shm", "-journal"):
+            stale = dest.with_name(dest.name + suffix)
+            stale.unlink(missing_ok=True)
+        # Install the staged file → live via the WAL-safe online backup,
+        # which checkpoints any WAL state into a single consistent file.
+        # (Equivalent to: copy main + drop sidecars, but robust to the
+        # staged file itself being a WAL-mode DB.)
+        if not _backup_one(src_staged, dest):
+            report.warn(f"failed to install {arc_name} (online backup failed)")
+            continue
+        # NOTE: do NOT unlink src_staged here — _backup_one's sqlite3
+        # connection has just released the Windows file handle and the OS
+        # may still hold a lingering lock (WinError 32 on the 304MB
+        # snapshots.db). The whole staging dir is removed by shutil.rmtree
+        # at the end of a successful import, which is the right cleanup
+        # point (after all _backup_one calls are long done).
         swapped.append(arc_name)
     report.files_restored = swapped
     _log(f"  restored {len(swapped)} data files")

@@ -107,6 +107,24 @@ def main() -> None:
 
 def _run_serve(port: int) -> None:
     """Start the Kazma WebUI server."""
+    # Load the CWD's .env with override=True BEFORE anything else.
+    # IMPORTANT: do NOT rely on load_dotenv()'s default search — it walks up
+    # from the kazma package location (which may be an editable install in a
+    # DIFFERENT repo than the one being served), loading the WRONG .env. We
+    # load the .env in the current working directory explicitly. override=True
+    # is required so stale empty values in the shell env (e.g. an exported
+    # ``KAZMA_DATABASE_URL=''``) don't shadow the real value from .env — that
+    # shadow was the root cause of the "Postgres pool unavailable" boot crash.
+    try:
+        from dotenv import load_dotenv
+        from pathlib import Path
+
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            load_dotenv(dotenv_path=cwd_env, override=True)
+    except Exception:
+        pass
+
     # Initialise logging as the FIRST thing so every subsequent import
     # (app factory, agent, MCP manager, KB subsystem) records to
     # <repo>/.kazma/kazma.log. ``--debug`` is detected via KAZMA_LOG_LEVEL.
