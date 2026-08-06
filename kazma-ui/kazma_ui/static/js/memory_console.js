@@ -1388,6 +1388,9 @@
   // F2: count of nodes that survived the entity-type filter but lost all their
   // links (dimmed, badged, not dropped). Exposed for the ops-bar indicator.
   var _v2gIsolatedCount = 0;
+  // P2: view-only groupings (member → parent + tier) fetched at render so the
+  // tree layout's group-spring has data. Populated by _v2gLoad.
+  var _v2gGroups = [];
   // Graph-native ops: source/target slots + pick modes (link | merge)
   // Shared with the Entities list via kazma:memory-ops-slots events.
   var _v2gOps = {
@@ -1585,6 +1588,31 @@
       if (!(_v2gDrag && _v2gDrag.idx === ed.a) && !_v2gIsPinned(A)) { A.vx += fx; A.vy += fy; }
       if (!(_v2gDrag && _v2gDrag.idx === ed.b) && !_v2gIsPinned(B)) { B.vx -= fx; B.vy -= fy; }
     }
+    // P2d: group-spring — holds grouped children in a tier-relative orbit
+    // around their parent. Stiffer than belief-edges (k=0.06 vs 0.04) so a
+    // cross-cluster belief edge doesn't pull a child out of its cluster.
+    // Mutates vx/vy only (matches the existing force contract); reuses the
+    // same pinned/dragged guards. Ungrouped nodes (groupParent === -1) skip.
+    for (var gi = 0; gi < n; gi++) {
+      var gp = _v2gPts[gi];
+      if (!gp || gp.groupParent === undefined || gp.groupParent < 0) continue;
+      var par = _v2gPts[gp.groupParent];
+      if (!par) continue;
+      var gdx = par.x - gp.x, gdy = par.y - gp.y;
+      var gd = Math.sqrt(gdx * gdx + gdy * gdy + 0.01);
+      var gTarget = 50 + (gp.tier >= 0 ? gp.tier : 1) * 30;
+      var gk = 0.06 * _v2gAlpha;
+      var gf = (gd - gTarget) * gk;
+      var gfx = (gdx / gd) * gf, gfy = (gdy / gd) * gf;
+      // Pull the child toward the orbit distance; the parent stays anchored
+      // when pinned (the guard skips it), so dragged parents don't jump.
+      if (!(_v2gDrag && _v2gDrag.idx === gi) && !_v2gIsPinned(gp)) {
+        gp.vx += gfx; gp.vy += gfy;
+      }
+      if (!(_v2gDrag && _v2gDrag.idx === gp.groupParent) && !_v2gIsPinned(par)) {
+        par.vx -= gfx; par.vy -= gfy;
+      }
+    }
     // Gravity + collision-aware integration
     var margin = 30;
     for (var p = 0; p < n; p++) {
@@ -1729,6 +1757,44 @@
           pinned: pinned,
         };
       });
+      // P2b: stamp groupParent (parent point index) + tier onto each point
+      // from the view-only groupings. _v2gIds (id→index) is live here. The
+      // group-spring in _v2gStep reads pt.groupParent; -1 = ungrouped.
+      if (_v2gGroups && _v2gGroups.length) {
+        var memberTier = {};
+        var memberParent = {};
+        _v2gGroups.forEach(function(g) {
+          if (g.member) {
+            memberTier[g.member] = g.member_tier;
+            if (g.group_root) memberParent[g.member] = g.group_root;
+          }
+        });
+        _v2gPts.forEach(function(p) {
+          p.groupParent = -1;
+          if (memberParent[p.id] !== undefined) {
+            var pidx = _v2gIds[memberParent[p.id]];
+            if (pidx !== undefined) p.groupParent = pidx;
+          }
+          if (p.tier === undefined || p.tier < 0) {
+            var t = memberTier[p.id];
+            if (t !== undefined) p.tier = t;
+          }
+        });
+        // P2c: seed grouped (non-pinned) nodes in a ring around their parent,
+        // ignoring the stale pre-grouping cached position. Pinned nodes (user
+        // drag) keep their cache. The group-spring will hold this distance.
+        _v2gPts.forEach(function(p, i) {
+          if (p.groupParent >= 0 && !_v2gIsPinned(p)) {
+            var parent_1 = _v2gPts[p.groupParent];
+            if (parent_1) {
+              var tlen = 50 + (p.tier >= 0 ? p.tier : 1) * 30;
+              var seedAng = i * 2.39996;
+              p.x = parent_1.x + Math.cos(seedAng) * tlen;
+              p.y = parent_1.y + Math.sin(seedAng) * tlen;
+            }
+          }
+        });
+      }
       _v2gEdges = [];
       (links || []).forEach(function(l) {
         var ai = _v2gIds[l.source];
@@ -2681,6 +2747,7 @@
       _v2gOps.group = null;
       _v2gSyncOpsBar();
       await _v2gReloadGraph();
+      _v2gHeated();  // P2d: reheat so the new group-spring snaps the member into orbit
       _v2gSelectEntity(memberId, { notify: false });
       try {
         window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
@@ -3385,12 +3452,22 @@
 
   async function _v2gLoad() {
     try {
+      // P2: fetch view-only groupings in parallel (non-blocking — if it fails,
+      // the tree layout's group-spring just has no data, no harm).
+      try {
+        var gresp = await fetch('/api/memory/v2/graph/groups', { credentials: 'same-origin' });
+        var gdata = await gresp.json();
+        _v2gGroups = (gdata && gdata.ok && Array.isArray(gdata.groups)) ? gdata.groups : [];
+      } catch (ge) { _v2gGroups = []; }
       var resp = await fetch(_v2gBuildUrl());
       var data = await resp.json();
       var stats = data.stats || {};
       _v2gLastStats = stats;
       _v2gRawNodes = data.nodes || [];
       _v2gRawLinks = data.links || [];
+      // The payload may also carry groups inline (faster, one fetch); prefer
+      // the dedicated endpoint's result when both exist.
+      if (!_v2gGroups.length && Array.isArray(data.groups)) _v2gGroups = data.groups;
       // Normalize link fields (neo4j probe may use predicate instead of label)
       _v2gRawLinks.forEach(function(l) {
         if (!l.label && l.predicate) l.label = l.predicate;
@@ -4050,6 +4127,13 @@
   // F2: live isolated-node count (for the ops-bar indicator + tests). Getter
   // because the value is recomputed each filter pass.
   window._v2gGetIsolatedCount = function() { return _v2gIsolatedCount; };
+  // P2: positions by id (for tests + operator inspection of the tree layout).
+  window._v2gGetNodePos = function(id) {
+    for (var i = 0; i < _v2gPts.length; i++) {
+      if (_v2gPts[i].id === id) return { x: _v2gPts[i].x, y: _v2gPts[i].y, tier: _v2gPts[i].tier, groupParent: _v2gPts[i].groupParent };
+    }
+    return null;
+  };
   window._v2gSelectEntity = _v2gSelectEntity;
   window._v2gSelectBelief = function(subj, obj, beliefId, opts) {
     opts = opts || {};
