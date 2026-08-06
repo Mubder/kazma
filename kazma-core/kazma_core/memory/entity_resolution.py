@@ -46,6 +46,46 @@ def slug(text: str) -> str:
     return s[:80] or "entity"
 
 
+def canonical_entity_id(conn, eid: str, *, _max_chain: int = 8) -> str:
+    """Follow ``metadata_json.merged_into`` to the terminal canonical id.
+
+    Merges soft-retire the source entity by writing ``merged_into`` into its
+    metadata. Nothing used to READ this, so extraction kept minting beliefs
+    under the retired id (the root cause of the mubder→user re-orphaning).
+    This helper resolves any id to its canonical target — chain-following so
+    a→b→c collapses to c — and is the single chokepoint for the redirect.
+
+    Returns the id unchanged if it has no ``merged_into`` (the common case),
+    if the row is missing, or if the chain is longer than _max_chain (cycle
+    guard). Best-effort: never raises.
+    """
+    if not eid:
+        return eid
+    cur = eid
+    seen: set[str] = set()
+    for _ in range(_max_chain):
+        if cur in seen:
+            break  # defensive — cycle in the merge graph
+        seen.add(cur)
+        try:
+            row = conn.execute(
+                "SELECT metadata_json FROM entities WHERE id=?", (cur,)
+            ).fetchone()
+        except Exception:
+            break
+        if not row:
+            break
+        try:
+            meta = json.loads(row["metadata_json"] or "{}")
+        except Exception:
+            break
+        nxt = (meta or {}).get("merged_into")
+        if not nxt or nxt == cur:
+            break
+        cur = nxt
+    return cur
+
+
 def alias_hash(text: str) -> str:
     """Stable hash of a normalized alias for exact-match tier 1."""
     norm = " ".join((text or "").strip().lower().split())

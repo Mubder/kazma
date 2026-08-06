@@ -307,6 +307,24 @@ def mutate_belief(
     # clicked. When subject_id is provided, use it verbatim; otherwise
     # slugify the free-text subject (the historical behavior).
     sub = subject_id if subject_id else _slug(subject)
+    # Follow merged_into so beliefs land on the canonical entity, not a
+    # retired id. This is the write-side fix for the mubder→user re-orphan
+    # bug: extraction kept minting under 'mubder' after the merge because
+    # nothing read merged_into. Also applied to obj below (objects can be
+    # entity ids). Best-effort; on any failure the id is unchanged.
+    try:
+        from kazma_core.memory.entity_resolution import canonical_entity_id
+        sub = canonical_entity_id(primary_conn, sub)
+    except Exception:
+        pass
+    # Also follow merged_into for the object when it's an entity id. Objects
+    # can be entity ids (e.g. operator links), and a retired object id would
+    # otherwise leave a dangling edge to a merged-away node.
+    try:
+        from kazma_core.memory.entity_resolution import canonical_entity_id
+        obj = canonical_entity_id(primary_conn, obj)
+    except Exception:
+        pass
     pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
     # Re-check after slugify (spaces → underscores)
     try:

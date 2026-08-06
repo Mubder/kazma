@@ -453,3 +453,69 @@ def test_episode_fts_binding_correct(isolated_data):
     hits2 = _episode_fts(p, "ZCode", "default", 10)
     assert len(hits2) > 0, "Episode FTS returned empty for ZCode query"
     p.close()
+
+
+# ── merged_into redirect: beliefs minted under a retired id land on canonical ─
+
+
+def test_mutate_belief_follows_merged_into(dbs):
+    """A belief written under a retired (merged-away) entity id must land on
+    the canonical target. Reproduces the mubder→user re-orphaning bug:
+    extraction kept minting `mubder has_project X` 17h after the merge
+    because nothing read merged_into. The write-side redirect in
+    mutate_belief (canonical_entity_id) is the fix.
+    """
+    import json
+    from kazma_core.memory.belief_mutation import mutate_belief
+    p, o = dbs
+
+    # Set up: two entities, 'oldself' merged into 'user' (merged_into set).
+    p.execute("INSERT OR IGNORE INTO entities (id, tenant_id, type, name) "
+              "VALUES ('oldself','default','person','Old Self')")
+    p.execute("UPDATE entities SET metadata_json=? WHERE id='oldself'",
+              (json.dumps({"merged_into": "user"}),))
+    p.commit()
+
+    # Now write a belief with subject='oldself' (the retired id) — exactly
+    # what extraction does when it encounters the old name post-merge.
+    r = mutate_belief(p, "oldself", "has_project", "probe_canon", ops_conn=o,
+                      predicate_type="set", tenant_id="default")
+    assert r.get("belief_id"), f"no belief created: {r}"
+
+    # The belief's subject MUST be 'user' (the canonical target), NOT 'oldself'.
+    row = p.execute("SELECT subject FROM beliefs WHERE id=?", (r["belief_id"],)).fetchone()
+    assert row["subject"] == "user", (
+        f"belief minted under retired id {row['subject']!r}, expected 'user'"
+    )
+
+    # Cleanup the probe belief so other tests in this module are unaffected.
+    p.execute("DELETE FROM beliefs WHERE id=?", (r["belief_id"],))
+    p.execute("DELETE FROM entities WHERE id='oldself'")
+    p.commit()
+
+
+def test_canonical_entity_id_follows_chain(dbs):
+    """canonical_entity_id follows a→b→c to the terminal id, and is a no-op
+    for an id with no merge."""
+    import json
+    from kazma_core.memory.entity_resolution import canonical_entity_id
+    p, _ = dbs
+
+    # a → b → c chain
+    for eid in ("chain_a", "chain_b", "chain_c"):
+        p.execute("INSERT OR IGNORE INTO entities (id, tenant_id, type, name) "
+                  f"VALUES ('{eid}','default','concept','{eid}')")
+    p.execute("UPDATE entities SET metadata_json=? WHERE id='chain_a'",
+              (json.dumps({"merged_into": "chain_b"}),))
+    p.execute("UPDATE entities SET metadata_json=? WHERE id='chain_b'",
+              (json.dumps({"merged_into": "chain_c"}),))
+    p.commit()
+
+    assert canonical_entity_id(p, "chain_a") == "chain_c", "chain not followed"
+    assert canonical_entity_id(p, "chain_b") == "chain_c"
+    assert canonical_entity_id(p, "chain_c") == "chain_c"  # terminal
+    # No merge → unchanged.
+    assert canonical_entity_id(p, "user") == "user"
+    # Cleanup
+    p.execute("DELETE FROM entities WHERE id IN ('chain_a','chain_b','chain_c')")
+    p.commit()
