@@ -792,6 +792,12 @@ class SlackAdapter(BaseAdapter):
         if not self._bot_token:
             logger.error("[Slack] Cannot start — no bot token")
             return
+        if not self._allowed_users:
+            logger.warning(
+                "[Slack] No allowed_users configured — accepting messages "
+                "from ALL users. Set connectors.slack.allowed_users in "
+                "Settings to restrict access."
+            )
         self._queue = queue
         self._shutdown = shutdown_event
         await super().start(queue, shutdown_event)

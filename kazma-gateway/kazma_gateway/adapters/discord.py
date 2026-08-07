@@ -115,6 +115,12 @@ class DiscordAdapter(BaseAdapter):
             queue:          The unified message bus.
             shutdown_event: Signals when to stop.
         """
+        if not self._allowed_users:
+            logger.warning(
+                "[discord] No allowed_users configured — accepting messages "
+                "from ALL users. Set connectors.discord.allowed_users in "
+                "Settings to restrict access."
+            )
         self._queue = queue  # for interaction → synthetic slash enqueue
         self._http = httpx.AsyncClient(
             base_url=_DISCORD_API,
@@ -282,7 +288,7 @@ class DiscordAdapter(BaseAdapter):
         """Route Discord component interactions via shared callback schemes.
 
         Handles swarm HITL, dependency install, and graph-HITL button IDs
-        (``hitl:approve:…``) using :mod:`discord_callbacks`.
+        (``hitl:approve:{id}``) using :mod:`discord_callbacks`.
         """
         from kazma_gateway.adapters.discord_callbacks import (
             is_install_action,

@@ -159,6 +159,12 @@ class TelegramAdapter(BaseAdapter):
     ) -> None:
         """Start the adapter and store queue reference for webhook ingress."""
         self._queue = queue
+        if not self._allowed_users:
+            logger.warning(
+                "[telegram] No allowed_users configured — accepting messages "
+                "from ALL users. Set connectors.telegram.allowed_users in "
+                "Settings to restrict access."
+            )
         await super().start(queue, shutdown_event)
 
     async def listen(

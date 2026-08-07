@@ -44,66 +44,19 @@ class Token:
 # ── Kuwaiti dialect markers ───────────────────────────────────────────
 # Maps Kuwaiti word → MSA meaning (for metadata, NOT for replacement)
 
-DIALECT_MARKERS: dict[str, str] = {
-    # Core conversational
-    "شلونك": "كيف حالك",
-    "شلون": "كيف",
-    "وين": "أين",
-    "ليش": "لماذا",
-    "هلا": "الآن",
-    "تمام": "جيد",
-    "شنو": "ماذا",
-    "اخوي": "أخي",
-    "ياخوي": "يا أخي",
-    "هجم": "تعال",
-    "يالله": "هيا",
-    # Informal address
-    "اخو": "أخ",
-    "اخوات": "إخوة",
-    "اخوكم": "أخوك",
-    "اخويا": "أخي",
-    "اختك": "أختك",
-    # Descriptions / adjectives
-    "خوش": "جيد",
-    "زينة": "جميلة",
-    "حلو": "جميل",
-    "حلوه": "جميلة",
-    "كبير": "كبير",
-    "صغير": "صغير",
-    "قديم": "قديم",
-    "جديد": "جديد",
-    # Verbs / actions
-    " gal ": "قال",
-    " agool ": "أقول",
-    " aruh ": "أذهب",
-    " areed ": "أريد",
-    " arid ": "أريد",
-    " yishtgil ": "يشتغل",
-    " ayesh ": "عايش",
-    # Prepositions / particles
-    " مكو ": "ليس هناك",
-    " اكو ": "يوجد",
-    " ماف ": "لا يوجد",
-    " وايد ": "كثير",
-    " واجد ": "كثير",
-    " بس ": "فقط",
-    " عسب ": "حتى",
-    " عشان ": "من أجل",
-    " زاي ": "مثل",
-    " هيج ": "هكذا",
-    # Common Gulf expressions
-    " بالعافية ": "بالصحة",
-    " يعطيك العافية ": "الله يعطيك العافية",
-    " تسلم ": "الله يسلمك",
-    " الله يسلمك ": "وأنت بخير",
-    " ما شاء الله ": "ما شاء الله",
-    " ان شاء الله ": "إن شاء الله",
-    " الحمد لله ": "الحمد لله",
-    " سبحان الله ": "سبحان الله",
-    # Numbers / time
-    " buckra ": "غداً",
-    " ibaarak ": "مبروك",
-}
+DIALECT_MARKERS: dict[str, str] = {}
+# Import from canonical Kuwaiti lexicon (single source of truth).
+# Arabic-script keys are used as-is; Latin-script keys get space-padded
+# for str.find() substring matching (the tokenizer's matching strategy).
+from kazma_core.arabic.kuwaiti_lexicon import CANONICAL_KUWAITI_MARKERS as _CANON
+
+for _k, _v in _CANON.items():
+    if _k.isascii() and " " not in _k.strip():
+        # Latin-script single word: pad with spaces for substring matching
+        DIALECT_MARKERS[f" {_k} "] = _v
+    else:
+        # Arabic-script or multi-word: use as-is
+        DIALECT_MARKERS[_k] = _v
 
 
 # Emoji pattern

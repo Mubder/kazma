@@ -14,9 +14,10 @@ Kazma is the reliable multi-agent framework built for real deployment. Cryptogra
 
 ## ⚡ At a Glance
 
+<!-- Update from METRICS.md via: python scripts/generate_metrics.py --write -->
 | Lines of code | Tests | Commits | Contributors |
 |---|---:|---:|---:|
-| ~159K | 4,360 | 1,200+ | Solo |
+| ~241K | 4,243 | 1,668+ | 7 |
 
 ![Kazma Dashboard](https://kazma.ai/screenshots/Hero-en.png)
 

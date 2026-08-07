@@ -361,6 +361,54 @@ def verify_api_token(provided: str) -> bool:
         return False
 
 
+# ── Per-session WebSocket tokens ─────────────────────────────────────────
+# The browser can't set custom headers on a WebSocket handshake, so the
+# WS auth path uses ?token=... query parameter. Previously this exposed
+# the raw KAZMA_SECRET (which gates ALL HTTP APIs) in browser history,
+# proxy logs, and view-source via a <meta> tag. These functions generate
+# short-lived, per-process WS tokens that grant ONLY WebSocket access and
+# expire after 1 hour — never the raw secret.
+
+_ws_session_tokens: dict[str, float] = {}  # token → expiry epoch
+_WS_TOKEN_TTL_SECONDS = 3600  # 1 hour
+
+
+def generate_ws_session_token() -> str:
+    """Generate a short-lived per-session WS token (NOT the raw KAZMA_SECRET).
+
+    The token grants ONLY WebSocket access and expires after 1 hour.
+    Call this once per page render and inject into the meta tag so the
+    browser JS can use it for WS ?token=... without exposing the secret.
+    """
+    import secrets
+    import time
+
+    # Prune expired tokens (keep dict small).
+    now = time.time()
+    expired = [k for k, exp in _ws_session_tokens.items() if exp < now]
+    for k in expired:
+        del _ws_session_tokens[k]
+
+    token = secrets.token_urlsafe(32)
+    _ws_session_tokens[token] = now + _WS_TOKEN_TTL_SECONDS
+    return token
+
+
+def verify_ws_session_token(token: str) -> bool:
+    """Verify a per-session WS token. Returns False if expired or unknown."""
+    import time
+
+    if not token:
+        return False
+    expiry = _ws_session_tokens.get(token)
+    if expiry is None:
+        return False
+    if time.time() > expiry:
+        _ws_session_tokens.pop(token, None)
+        return False
+    return True
+
+
 def extract_provided_credential(request: Request) -> str:
     """Pull auth material from headers/cookie (secret, session, or API token).
 
@@ -416,17 +464,24 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     Accepts the same credentials as HTTP, plus query parameter token:
       1. ``X-Kazma-Secret`` header
       2. ``Authorization: Bearer …``
-      3. ``?token=…`` query parameter (for browser WS connections that can't set headers)
+      3. ``?token=…`` query parameter — accepts a **per-session WS token**
+         (NOT the raw KAZMA_SECRET). See ``generate_ws_session_token()``.
       4. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
       5. ``kazma-secret`` legacy cookie
       6. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
-      7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only)
+      7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only — blocked in production)
     """
     expected = expected_secret or get_kazma_secret()
 
     # Dev bypass for local testing — never enable in production
     if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
+        if os.environ.get("KAZMA_PRODUCTION", "").strip().lower() in ("1", "true", "yes"):
+            logger.error(
+                "[SECURITY] KAZMA_DEV_WS_BYPASS is set but KAZMA_PRODUCTION=1 "
+                "— refusing to bypass WebSocket auth"
+            )
+        else:
+            return True
 
     if not expected:
         return True
@@ -439,7 +494,11 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     if _is_private_lan_client(websocket) and _trust_lan_enabled():
         return True
 
-    # Query parameter token (browser WebSocket can't set headers)
+    # Query parameter token (browser WebSocket can't set headers).
+    # Accepts BOTH the per-session WS token (from generate_ws_session_token,
+    # NOT the raw KAZMA_SECRET) AND the raw secret for backward compat with
+    # API clients. The browser JS uses the session token; the raw secret
+    # path is for programmatic WS clients.
     provided = ""
     try:
         query_params = websocket.query_params
@@ -447,6 +506,10 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
             provided = (query_params.get("token") or "").strip()
     except Exception:
         pass
+
+    # Check per-session WS token first (security: don't leak raw secret via query param)
+    if provided and verify_ws_session_token(provided):
+        return True
 
     if not provided:
         provided = (websocket.headers.get(SECRET_HEADER) or "").strip()

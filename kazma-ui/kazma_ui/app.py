@@ -483,15 +483,25 @@ class KazmaAppBuilder:
         self.templates.env.globals["css_version"] = _css_version
         self.templates.env.globals["js_version"] = _js_version
 
-        # WebSocket token for browser WS connections (query param fallback)
+        # WebSocket token for browser WS connections (query param fallback).
         # Browsers can't send custom headers on WebSocket handshake, so we inject
-        # the KAZMA_SECRET as a meta tag for the agentStore to pick up.
-        from kazma_ui.auth import get_kazma_secret as _get_kazma_secret
+        # a per-session WS token (NOT the raw KAZMA_SECRET) as a meta tag.
+        # The token grants ONLY WebSocket access and expires in 1 hour —
+        # much safer than exposing the master secret in view-source/proxy logs.
+        from kazma_ui.auth import generate_ws_session_token as _gen_ws_token
 
         def _ws_token() -> str:
-            return _get_kazma_secret()
+            return _gen_ws_token()
 
         self.templates.env.globals["ws_token"] = _ws_token
+
+        # Startup warning: DEV_WS_BYPASS is a security backdoor
+        if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
+            logger.warning(
+                "[SECURITY] KAZMA_DEV_WS_BYPASS is set — all WebSocket auth is "
+                "DISABLED. This is a security risk. Remove it from .env for "
+                "production deployments."
+            )
 
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):

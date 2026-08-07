@@ -4,9 +4,24 @@ The Majlis (مجلس) is the traditional Gulf gathering space where conversation
 follows specific cultural rhythms: greetings first, then social talk, then
 business. This protocol enforces that pattern for AI conversations.
 
-**Status: UNWIRED orchestrator.** Building blocks (pacing, tone, cultural
-context) are live in the gateway graph; this composite is library-only until
-wired. See ``docs/audits/UNWIRED_INVENTORY.md``.
+**Status: PARTIALLY WIRED.** The building blocks are LIVE in the gateway:
+
+- ✅ **Greeting/farewell fast-path** — ``graph.py:805-838``: detects pure
+  greetings/farewells and responds instantly (zero LLM token cost) with
+  culturally-aware Arabic responses. Uses ``kazma_core.pacing`` +
+  ``kazma_core.cultural_context``.
+- ✅ **Tone adaptation** — ``graph.py:1087-1106``: wraps every LLM response
+  with cultural tone (Ramadan warm, Eid celebratory, formal business,
+  general polite) via ``kazma_core.tone_adapter``.
+- ✅ **Cultural context detection** — Ramadan/Eid/National Day flags flow
+  through the system prompt enrichment (``cultural_context_enrichment.py``).
+
+**Library-only (this composite class):** The ``MajlisProtocol`` orchestrator
+below is NOT imported by the gateway. It adds a conversation-phase state
+machine (GREETING → SOCIAL → TRANSACTION → FAREWELL), pacing-aware reply
+throttling, and formality-aware farewell generation. These features are
+designed and tested but not yet wired into the runtime — the gateway uses
+the building blocks directly instead. See ``docs/audits/UNWIRED_INVENTORY.md``.
 
 Orchestrates:
 - Dialect detection → cultural context
