@@ -1866,28 +1866,21 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             }
         )
 
-    # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
-    # in one task so consolidator can dedup against auto_store texts.
-    # Provenance (session_id/turn) flows through to the V2 dual-write mirror
-    # so beliefs/episodes carry source traces (resolution #3).
-    try:
-        from kazma_core.memory.consolidator import schedule_post_turn_memory
-
-        schedule_post_turn_memory(
-            messages,
-            session_id=state.get("thread_id"),
-            turn=iteration,
-            tenant_id=state.get("tenant_id", "default"),
-        )
-    except Exception:
-        logger.debug("[Respond] post_turn memory schedule failed", exc_info=True)
-
+    # Post-turn memory: signal that memory work is pending so the gateway
+    # handler can fire it AFTER the graph reaches terminal state (preventing
+    # the CoT "active again" flicker — the memory thread's SQLite writes
+    # would otherwise re-trigger the CoT panel while it's showing "Done").
     return {
         "messages": messages,
         "iteration": iteration,
         "tool_calls_pending": [],
         "tool_calls_done": [],
         "next_node": "end",
+        "_post_turn_memory": {
+            "session_id": state.get("thread_id"),
+            "turn": iteration,
+            "tenant_id": state.get("tenant_id", "default"),
+        },
     }
 
 

@@ -1140,6 +1140,26 @@ def create_graph_handler(
                     result_state.get("messages", []),
                 )
 
+                # ── Post-turn memory: fire AFTER graph is terminal ──
+                # The memory consolidator (episode mirror, heuristic beliefs,
+                # micro_consolidation enqueue) runs in a daemon thread. Moving
+                # it here (from inside respond_node) prevents the CoT panel
+                # from flickering back to "active" when the thread's SQLite
+                # writes complete 5-10s after the graph signals "Done".
+                _post_turn = result_state.get("_post_turn_memory")
+                if _post_turn and isinstance(_post_turn, dict):
+                    try:
+                        from kazma_core.memory.consolidator import schedule_post_turn_memory
+
+                        schedule_post_turn_memory(
+                            result_state.get("messages", []),
+                            session_id=_post_turn.get("session_id") or thread_id,
+                            turn=_post_turn.get("turn", 0),
+                            tenant_id=_post_turn.get("tenant_id", "default"),
+                        )
+                    except Exception:
+                        logger.debug("[agent-handler] post-turn memory schedule failed", exc_info=True)
+
                 # ── Restore platform IDs from SessionStore ─────────
                 # The entry is intentionally NOT deleted here. It must persist
                 # so crash-recovery routing can rehydrate the platform context
