@@ -1167,7 +1167,7 @@ def create_graph_handler(
                 # entries are evicted lazily by TTL below.
                 ctx = dict(await _store.get(thread_id) or {})
                 # Turn-scoped voice flag: only this inbound may request TTS.
-                # Prefer live msg metadata over a sticky store value.
+                # Prefer live msg.metadata over a sticky store value.
                 if msg.context_metadata.get("voice_transcribed"):
                     ctx["voice_transcribed"] = True
                 else:
@@ -1184,6 +1184,39 @@ def create_graph_handler(
                         context_metadata=tg_ctx,
                     )
                 )
+
+                # ── Re-sync with the FINAL assistant response ──────
+                # The first sync (above, line 1136) captures the graph state
+                # BEFORE tone adaptation. The assistant_text that was actually
+                # sent to Telegram may differ (cultural tone wrapping). Append
+                # it to the messages and re-sync so the Web UI sees the exact
+                # same response the user received on Telegram.
+                try:
+                    _final_messages = list(result_state.get("messages", []))
+                    # If the last message isn't the assistant_text we sent,
+                    # append it so the Web UI shows the real response.
+                    _last_is_assistant = (
+                        _final_messages
+                        and isinstance(_final_messages[-1], dict)
+                        and _final_messages[-1].get("role") == "assistant"
+                    )
+                    if not _last_is_assistant or (
+                        isinstance(_final_messages[-1], dict)
+                        and assistant_text
+                        and assistant_text not in str(_final_messages[-1].get("content", ""))
+                    ):
+                        _final_messages.append({
+                            "role": "assistant",
+                            "content": assistant_text,
+                        })
+                    _sync_platform_session_to_web(
+                        thread_id,
+                        msg.platform,
+                        msg.context_metadata,
+                        _final_messages,
+                    )
+                except Exception:
+                    logger.debug("[agent-handler] post-send re-sync failed", exc_info=True)
 
             except Exception as inv_exc:
                 logger.exception("[agent-handler] Graph invocation failed for %s", sender)
