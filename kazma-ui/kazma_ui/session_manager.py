@@ -564,6 +564,27 @@ class SessionManager:
             self._upsert_db(session)
             self._evict_if_needed(tenant_id)
 
+    def _refresh_from_db(self, session_id: str) -> None:
+        """Force-reload a session from the database, bypassing the in-memory cache.
+
+        For gw-* platform sessions (Telegram/Discord/Slack), the gateway
+        writes directly to Postgres (bypassing this process's in-memory
+        cache). The cache can be stale — missing the latest assistant
+        response. This method reloads from DB and replaces the cached entry
+        so the Web UI always shows current data.
+
+        Safe to call even if the session doesn't exist in the DB yet.
+        """
+        with self._lock:
+            tenant_id = get_current_tenant_id() or "default"
+            loaded = self._load_one_from_db(tenant_id, session_id)
+            if loaded is None and tenant_id != "default":
+                loaded = self._load_one_from_db("default", session_id)
+            if loaded is not None:
+                key = f"{loaded.tenant_id}:{loaded.session_id}"
+                self._sessions[key] = loaded
+                self._sessions.move_to_end(key)
+
     @contextlib.contextmanager
     def transact(self, session_id: str) -> Iterator[ChatSession]:
         """Serialize read-modify-write on *session_id* (T4).

@@ -1965,7 +1965,17 @@ def create_sse_chat_router(
         LangGraph checkpointer has history for this thread (e.g. Telegram
         session opened in Web), hydrate from the checkpointer and persist
         back to SessionManager so takeover is seamless.
+
+        For gw-* platform sessions (Telegram/Discord/Slack), the
+        SessionManager in-memory cache can be stale because the gateway
+        writes to Postgres directly (bypassing the cache). We force-refresh
+        from Postgres on every request for these sessions.
         """
+        # For gw-* sessions, force-refresh from Postgres (the in-memory cache
+        # may be stale — the gateway writes directly to Postgres).
+        if session_id.startswith("gw-"):
+            _get_store()._refresh_from_db(session_id)
+
         session = _get_store().get(session_id)
         if not session:
             # Platform seasons may not be in store yet — create shell
