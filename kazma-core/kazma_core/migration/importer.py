@@ -348,6 +348,28 @@ def import_bundle(
         except Exception as exc:
             report.warn(f"workspaces merge failed: {exc}")
 
+    # 7c. Merge Knowledge Library tables from the bundle's settings.db into
+    # the live settings.db. The KB (knowledge_libraries + knowledge_chunks +
+    # FTS5 shadow tables) lives in SQLite settings.db REGARDLESS of the
+    # backend — it is NOT in Postgres, even on Postgres-backed installs.
+    # Without this step, a Postgres→Postgres migration restores all config
+    # from pg_restore but the KB is empty (0 libraries, 0 chunks) because
+    # the target's settings.db was fresh/empty. The bundle's settings.db
+    # (staged as data/settings.db before the swap) has the KB data — but
+    # after the swap, the LIVE settings.db may be a restored copy that
+    # either lacks the KB tables entirely or has them empty. We ATTACH the
+    # staged settings.db copy and copy KB rows into the live one.
+    staged_settings_db = staged_data / "settings.db"
+    if staged_settings_db.exists():
+        _log("Merging Knowledge Library tables into settings.db…")
+        try:
+            from kazma_core import paths as _paths
+
+            live_settings = _paths.settings_db()
+            _merge_kb_into_settings(live_settings, str(staged_settings_db))
+        except Exception as exc:
+            report.warn(f"Knowledge Library merge failed: {exc}")
+
     # 8. Restore assets (verbatim).
     staged_assets = staging / "assets"
     if staged_assets.exists():
@@ -499,5 +521,113 @@ def _merge_workspaces_into_settings(settings_db: str, workspaces_db: str) -> int
             return cur.rowcount
         finally:
             conn.execute("DETACH DATABASE src")
+    finally:
+        conn.close()
+
+
+def _merge_kb_into_settings(settings_db: str, source_settings_db: str) -> int:
+    """Copy Knowledge Library tables from the bundle's settings.db into live settings.db.
+
+    The KB (knowledge_libraries + knowledge_chunks) lives in SQLite settings.db
+    REGARDLESS of the backend — it is NOT in Postgres. On a Postgres→Postgres
+    migration, pg_restore restores Postgres tables but the KB tables in the
+    target's settings.db are empty (or the settings.db was freshly created).
+    This ATTACHs the bundle's staged settings.db copy and copies KB rows.
+
+    Handles FTS5 shadow tables by rebuilding them after the insert (FTS5
+    content is external-table-backed, so the shadow tables auto-populate on
+    insert if configured correctly; we also run a no-op REBUILD as a safety
+    net).
+
+    Returns the number of knowledge_chunks rows merged.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(settings_db)
+    try:
+        # Ensure KB tables exist in the target (they should, but a fresh
+        # settings.db may lack them).
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS knowledge_libraries (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                source TEXT,
+                source_url TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                chunk_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'ready',
+                metadata TEXT
+            );
+            CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                id TEXT PRIMARY KEY,
+                library_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                chunk_index INTEGER,
+                embedding BLOB,
+                metadata TEXT,
+                created_at TEXT
+            );
+            """
+        )
+
+        # Check if the source has KB data
+        conn.execute("ATTACH DATABASE ? AS src", (source_settings_db,))
+        try:
+            # Check source KB tables exist and have data
+            try:
+                src_libs = conn.execute("SELECT COUNT(*) FROM src.knowledge_libraries").fetchone()[0]
+            except Exception:
+                src_libs = 0
+            try:
+                src_chunks = conn.execute("SELECT COUNT(*) FROM src.knowledge_chunks").fetchone()[0]
+            except Exception:
+                src_chunks = 0
+
+            if src_libs == 0 and src_chunks == 0:
+                logger.debug("[migrate:import] source settings.db has no KB data — skipping KB merge")
+                return 0
+
+            # Copy knowledge_libraries (delete-then-insert for idempotency)
+            conn.execute("DELETE FROM knowledge_libraries")
+            conn.execute(
+                "INSERT INTO knowledge_libraries "
+                "(id, name, source, source_url, created_at, updated_at, chunk_count, status, metadata) "
+                "SELECT id, name, source, source_url, created_at, updated_at, chunk_count, status, metadata "
+                "FROM src.knowledge_libraries"
+            )
+
+            # Copy knowledge_chunks
+            conn.execute("DELETE FROM knowledge_chunks")
+            conn.execute(
+                "INSERT INTO knowledge_chunks "
+                "(id, library_id, content, chunk_index, embedding, metadata, created_at) "
+                "SELECT id, library_id, content, chunk_index, embedding, metadata, created_at "
+                "FROM src.knowledge_chunks"
+            )
+            conn.commit()
+
+            # Rebuild FTS5 index if the knowledge_chunks_fts table exists
+            # (FTS5 external-content tables need to be rebuilt after bulk insert)
+            try:
+                fts_exists = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_chunks_fts'"
+                ).fetchone()
+                if fts_exists:
+                    conn.execute("INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts) VALUES('rebuild')")
+                    conn.commit()
+                    logger.debug("[migrate:import] rebuilt knowledge_chunks_fts index")
+            except Exception:
+                pass  # FTS rebuild is best-effort
+
+            merged_libs = conn.execute("SELECT COUNT(*) FROM knowledge_libraries").fetchone()[0]
+            logger.info("[migrate:import] KB merge: %d libraries, %d chunks", merged_libs, src_chunks)
+            return src_chunks
+        finally:
+            conn.execute("DETACH DATABASE src")
+    except Exception as exc:
+        logger.warning("[migrate:import] KB merge failed: %s", exc)
+        raise
     finally:
         conn.close()
