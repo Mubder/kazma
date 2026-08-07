@@ -543,6 +543,30 @@ def _recall_beliefs(
         # PPR multi-hop boost (additive on structural score)
         if r["id"] in ppr_scores:
             score = score + float(ppr_scores[r["id"]]) * 2.0
+
+        # ── Recency diversification ──────────────────────────────
+        # Penalize beliefs that have been surfaced frequently (high access_count)
+        # so the same 5 beliefs don't dominate every turn. The penalty is gentle
+        # (logarithmic) — it reduces the score of frequently-accessed hub beliefs
+        # by a small factor, giving less-accessed beliefs a chance to appear.
+        # Without this, hub beliefs (Kazma, ShipX, KCA) with high PPR scores
+        # and max importance show up in EVERY turn's recall, wasting context
+        # slots on memories that are rarely relevant to the current question.
+        import math
+
+        access_count = 0
+        try:
+            access_count = int(r["access_count"]) if "access_count" in r.keys() else 0
+        except Exception:
+            access_count = 0
+        if access_count > 5:
+            # Gentle log decay: 6 accesses → ~0.9×, 10 → ~0.8×, 20 → ~0.7×, 50 → ~0.6×
+            # This preserves relevance (high-scoring beliefs still win) but
+            # creates rotation so the agent doesn't see the same context every turn.
+            # Without this, hub beliefs (Kazma, ShipX, KCA) with high PPR scores
+            # and max importance show up in EVERY turn's recall, wasting context
+            # slots on memories that are rarely relevant to the current question.
+            score = score * (1.0 + 2.0 / math.log2(access_count)) / 2.0
         srcs = source_by_id.get(r["id"]) or ["belief_match"]
         meta: dict[str, Any] = {
             "subject": r["subject"],
