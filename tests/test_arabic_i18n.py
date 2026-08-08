@@ -117,3 +117,33 @@ def test_arabic_tokenizer_normalization():
     assert "احمد" in normalized
     assert "ابراهيم" in normalized
     assert "المكتبه" in normalized
+
+
+# ── 5. PDF Exporter Two-Stage Pipeline Tests ─────────────────────────
+
+
+def test_exporter_pdf_compilation():
+    from kazma_core.skills.exporter import generate_pdf_html_document, prepare_markdown_for_pdf
+
+    raw_markdown = """# تقرير تقني
+التكلفة: \\$0.0035 لملف 15 MB.
+المعيار: ISO/IEC 27001-2026 والسرعة https://kazma.ai.
+المعادلة: $$R = P \\cdot I$$ والمعادلة الضمنية $P = 0.95$.
+    """
+
+    compiled_html = generate_pdf_html_document(
+        raw_markdown,
+        title="تقرير اختبار",
+        model="deepseek-v4-flash",
+        session_id="sec-1234",
+        timestamp="2026-08-08 17:00",
+    )
+
+    assert "<html lang=\"ar\" dir=\"rtl\">" in compiled_html
+    assert "$0.0035" in compiled_html
+    assert "\\$0.0035" not in compiled_html
+    assert '<bdi dir="ltr">https://kazma.ai</bdi>' in compiled_html
+    assert '<bdi dir="ltr">ISO/IEC 27001-2026</bdi>' in compiled_html
+    assert '<div class="math-block" dir="ltr">' in compiled_html
+    assert '<span class="math-inline" dir="ltr">' in compiled_html
+
