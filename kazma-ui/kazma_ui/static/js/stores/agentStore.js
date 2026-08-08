@@ -78,6 +78,12 @@ document.addEventListener('alpine:init', () => {
         s: still[1],
       });
     }
+    const stillWork = msg.match(/still working\s*…?\s*\((\d+)\s*s\)/i);
+    if (stillWork) {
+      return _tiFmt('still_working_sec', 'Still working… ({s}s)', {
+        s: stillWork[1],
+      });
+    }
     const runTool = msg.match(/^running\s+(.+?)\s*[.…]*$/i);
     if (runTool && !/after/i.test(msg)) {
       return _tiFmt('running_tool', 'Running {tool}…', { tool: runTool[1] });

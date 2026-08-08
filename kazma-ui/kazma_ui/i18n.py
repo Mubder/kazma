@@ -313,7 +313,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "chat.still_working_approval": {
         "en": "Still working after approval ({s}s)…",
-        "ar": "ما زال يعمل بعد الموافقة ({s} ث)…",
+        "ar": "ما زال يعمل بعد الموافقة ({s}ث)…",
+    },
+    "chat.still_working_sec": {
+        "en": "Still working… ({s}s)",
+        "ar": "ما زال يعمل… ({s}ث)",
+    },
+    "chat.memory_context": {
+        "en": "Memory context",
+        "ar": "سياق الذاكرة",
+    },
+    "chat.beliefs": {
+        "en": "beliefs",
+        "ar": "معتقدات",
+    },
+    "chat.episodes": {
+        "en": "episodes",
+        "ar": "حلقات",
     },
     "chat.approval_complete": {
         "en": "Approval completed successfully!",

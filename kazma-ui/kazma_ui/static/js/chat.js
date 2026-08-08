@@ -1250,9 +1250,13 @@
     body.innerHTML = hintHtml + (lines.join('') ||
       '<div class="agent-memory-explain-empty">' + escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) + '</div>');
     wrap.hidden = false;
+    var isArMem = (document.documentElement.getAttribute('dir') || '') === 'rtl' || (window.KAZMA_LANG === 'ar');
+    var memUnits = isArMem
+      ? (nB + ' ' + ti('beliefs', 'معتقدات') + ' / ' + nE + ' ' + ti('episodes', 'حلقات') + ' / ' + nK + ' KB')
+      : (nB + 'B / ' + nE + 'E / ' + nK + 'KB');
     logProgress({
       kind: 'status',
-      title: ti('memory_context', 'Memory context') + ' · ' + nB + 'B / ' + nE + 'E / ' + nK + 'KB',
+      title: ti('memory_context', 'Memory context') + ' · ' + memUnits,
       state: 'info',
     });
   }
