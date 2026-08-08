@@ -75,7 +75,7 @@ async def generate_pdf(
         from reportlab.lib import colors
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+        from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_RIGHT
     except ImportError:
         return "Error: reportlab not installed. Run: pip install reportlab"
 
@@ -181,13 +181,13 @@ async def generate_pdf(
 
         title_style = ParagraphStyle("Title", fontName=_latin_font, fontSize=18, spaceAfter=12)
         head_style = ParagraphStyle("SectionHead", fontName=_latin_bold, fontSize=14, spaceBefore=14, spaceAfter=6)
-        body_style = ParagraphStyle("BodyText", fontName=_latin_font, fontSize=10, leading=16)
+        body_style = ParagraphStyle("BodyText", fontName=_latin_font, fontSize=10, alignment=TA_JUSTIFY, leading=16)
 
         # Arabic variants (only if Arabic font + reshaping are available)
         if _arabic_font_name and _has_arabic:
             title_style_ar = ParagraphStyle("TitleAr", fontName=_arabic_font_name, fontSize=18, alignment=TA_RIGHT, spaceAfter=12)
             head_style_ar = ParagraphStyle("SectionHeadAr", fontName=_arabic_font_name, fontSize=14, alignment=TA_RIGHT, spaceBefore=14, spaceAfter=6)
-            body_style_ar = ParagraphStyle("BodyTextAr", fontName=_arabic_font_name, fontSize=10, alignment=TA_RIGHT, leading=16)
+            body_style_ar = ParagraphStyle("BodyTextAr", fontName=_arabic_font_name, fontSize=10, alignment=TA_JUSTIFY, leading=16)
         else:
             title_style_ar = title_style
             head_style_ar = head_style
