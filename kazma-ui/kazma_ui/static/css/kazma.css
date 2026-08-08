@@ -1478,8 +1478,8 @@ tbody tr:last-child td {
   border-radius: var(--radius);
   line-height: 1.7;
   word-wrap: break-word;
-  /* Mixed AR/EN: each paragraph follows its first strong character
-     (works in both LTR English UI and RTL Arabic UI). */
+  text-align: justify;
+  text-align-last: start;
   unicode-bidi: plaintext;
 }
 
@@ -1570,6 +1570,7 @@ tbody tr:last-child td {
 .message-text pre {
   margin: var(--sp-3) 0; padding: 14px 16px; background: rgba(0,0,0,0.3);
   border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; line-height: 1.5;
+  text-align: left !important; text-align-last: left !important; direction: ltr !important; unicode-bidi: isolate !important;
 }
 .message-text pre code { background: none; border: none; padding: 0; font-size: 0.85rem; }
 

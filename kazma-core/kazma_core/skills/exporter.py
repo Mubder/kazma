@@ -60,7 +60,8 @@ PDF_HTML_TEMPLATE = """<!DOCTYPE html>
     body {{
       font-family: var(--font-arabic);
       direction: rtl;
-      text-align: right;
+      text-align: justify;
+      text-align-last: right;
       line-height: 1.65;
       color: #1e293b;
       font-size: 10pt;
@@ -114,6 +115,7 @@ PDF_HTML_TEMPLATE = """<!DOCTYPE html>
       font-family: var(--font-mono) !important;
       direction: ltr !important;
       text-align: left !important;
+      text-align-last: left !important;
       unicode-bidi: isolate !important;
     }}
 
