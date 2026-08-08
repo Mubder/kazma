@@ -1229,7 +1229,10 @@
     }
     var lines = [];
     function row(kind, h) {
-      var label = kind === 'belief' ? 'BELIEF' : (kind === 'episode' ? 'EPISODE' : 'KB');
+      var isAr = (document.documentElement.getAttribute('dir') || '') === 'rtl' || (window.KAZMA_LANG === 'ar');
+      var label = kind === 'belief'
+        ? (isAr ? 'معتقد' : 'BELIEF')
+        : (kind === 'episode' ? (isAr ? 'حلقة' : 'EPISODE') : (isAr ? 'معرفة' : 'KB'));
       var cls = kind === 'belief' ? 'is-belief' : (kind === 'episode' ? 'is-episode' : 'is-kb');
       var score = (h.score != null && h.score !== '') ? Number(h.score).toFixed(3) : '';
       lines.push(
@@ -1541,6 +1544,8 @@
     if (m) return tiFmt('running_after_approval', s, { scope: m[1] });
     m = s.match(/^still working after approval\s*\((\d+)\s*s\)/i);
     if (m) return tiFmt('still_working_approval', s, { s: m[1] });
+    m = s.match(/^still working\s*…?\s*\((\d+)\s*s\)/i);
+    if (m) return tiFmt('still_working_sec', s, { s: m[1] });
     m = s.match(/^running\s+(.+?)\s*[.…]*$/i);
     if (m && !/after/i.test(s)) return tiFmt('running_tool', s, { tool: m[1] });
     return s;
