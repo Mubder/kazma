@@ -96,7 +96,14 @@ def get_cultural_prompt_suffix() -> str:
             "'عسب' for 'because', 'زين' for 'good/nice'. Keep tone warm, "
             "informal, and culturally natural — like speaking with a friend "
             "at a diwaniya. Mix in English loanwords naturally (هوى, نت, كول) "
-            "as Kuwaitis do in daily speech."
+            "as Kuwaitis do in daily speech. "
+            "DIALECT BACKOFF: If a specific Kuwaiti word doesn't come to mind, "
+            "it is acceptable to use the closest Saudi/Najdi or general Gulf "
+            "(Khaleeji) equivalent instead — the goal is natural Gulf speech, "
+            "not strict dictionary Kuwaiti. For example: 'زي' instead of 'مثل', "
+            "'كذا' instead of 'هكذا', 'وش' instead of 'شنو/ويش'. The priority "
+            "order is: Kuwaiti → Saudi/Gulf → MSA. Never use Egyptian, Levantine, "
+            "or Iraqi forms."
         )
 
         # Never force Arabic output — language is chosen per user turn.
