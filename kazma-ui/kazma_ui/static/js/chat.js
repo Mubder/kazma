@@ -1509,6 +1509,8 @@
     var n = _normalizeStatusTitle(s);
     // EN + AR thinking heartbeats (and localized CHAT_I18N.thinking)
     if (n.indexOf('thinking') >= 0) return true;
+    if (n.indexOf('still working') >= 0) return true;
+    if (n.indexOf('ما زال يعمل') >= 0) return true;
     if (n.indexOf('kazma is') === 0 && n.indexOf('think') >= 0) return true;
     if (n.indexOf('\u062a\u0641\u0643\u0631') >= 0) return true; // تفكر
     if (n.indexOf('\u0643\u0627\u0638\u0645\u0647') >= 0 && n.indexOf('\u062a\u0641\u0643') >= 0) return true;
@@ -1558,6 +1560,19 @@
 
     var kind = step.kind || 'status';
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
+
+    // Reactivate panel if a new active step arrives (prevents premature "Done" title during background execution)
+    if (panel.classList.contains('is-done') && (state === 'running' || kind === 'status' || kind === 'tool')) {
+      panel.classList.remove('is-done');
+      panel.classList.add('is-active');
+      var headerTitle = panel.querySelector('.agent-progress-title');
+      if (headerTitle) {
+        headerTitle.textContent = ti('thinking', 'Kazma is thinking\u2026');
+      }
+      var pulse = panel.querySelector('.agent-progress-pulse');
+      if (pulse) pulse.classList.remove('is-off');
+      _startProgressTimer();
+    }
     var rawTitle = String(step.title || '').trim() || '\u2026';
     var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
     // Canonical display for thinking heartbeats (localized)
