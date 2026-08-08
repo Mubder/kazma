@@ -7,6 +7,7 @@ queues (live only while this process runs).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import sqlite3
@@ -26,6 +27,7 @@ __all__ = [
     "cancel_session",
     "subscribe_progress",
     "unsubscribe_progress",
+    "record_chat_research",
 ]
 
 logger = logging.getLogger(__name__)
@@ -540,3 +542,85 @@ async def start_deep_research(
     task = asyncio.create_task(_run())
     _RUNNING[sess.id] = task
     return sess
+
+
+def record_chat_research(
+    topic: str,
+    *,
+    tool_name: str = "web_search",
+    result_text: str = "",
+    session_id: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> ResearchSession:
+    """Record a research activity from chat tools into research_sessions.db.
+
+    Ensures all chat research queries populate dynamically in the Research Tab list.
+    """
+    now = time.time()
+    sid = session_id or f"rs_chat_{hashlib.md5((topic or '').encode()).hexdigest()[:12]}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}"
+    c = _conn()
+    try:
+        cur = c.execute("SELECT * FROM research_sessions WHERE id = ?", (sid,))
+        row = cur.fetchone()
+        if row:
+            sess = _row_to_session(row)
+            sess.updated_at = now
+            sess.status = "done"
+            sess.stage = "complete"
+            sess.message = f"Research via {tool_name}"
+            sess.sources = max(sess.sources, 1)
+            entry = f"Tool {tool_name} executed for '{topic[:60]}'"
+            if entry not in sess.log:
+                sess.log.append(entry)
+            if result_text and not sess.summary:
+                sess.summary = result_text[:500]
+            update_session(sess.id, status=sess.status, stage=sess.stage, message=sess.message, sources=sess.sources, summary=sess.summary)
+            return sess
+        else:
+            sess = ResearchSession(
+                id=sid,
+                topic=topic[:120] if topic else f"Chat research ({tool_name})",
+                depth="chat",
+                status="done",
+                stage="complete",
+                message=f"Executed in chat ({tool_name})",
+                log=[f"Tool {tool_name} executed for '{topic[:60]}'"],
+                summary=result_text[:500] if result_text else "",
+                sources=1,
+                created_at=now,
+                updated_at=now,
+                meta=meta or {"source": "chat", "tool": tool_name},
+            )
+            c.execute(
+                """
+                INSERT INTO research_sessions
+                (id, topic, depth, status, stage, message, log_json, report_path,
+                 summary, error, sources, max_sources, rubric_score, rubric_ok,
+                 created_at, updated_at, meta_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    sess.id,
+                    sess.topic,
+                    sess.depth,
+                    sess.status,
+                    sess.stage,
+                    sess.message,
+                    json.dumps(sess.log),
+                    sess.report_path,
+                    sess.summary,
+                    sess.error,
+                    sess.sources,
+                    sess.max_sources,
+                    sess.rubric_score,
+                    1 if sess.rubric_ok else (0 if sess.rubric_ok is False else None),
+                    sess.created_at,
+                    sess.updated_at,
+                    json.dumps(sess.meta),
+                ),
+            )
+            c.commit()
+            return sess
+    finally:
+        c.close()
+

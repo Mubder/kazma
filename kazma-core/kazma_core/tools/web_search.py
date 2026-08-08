@@ -497,6 +497,12 @@ async def web_search(query: str, max_results: int = 8) -> str:
         logger.warning(
             "[web_search] All backends empty for %r attempts=%s", q, attempts
         )
-        return _format_empty(q, attempts)
+    res_text = _format_results(q, results, backend=backend, attempts=attempts)
+    try:
+        from kazma_core.tools.research_session import record_chat_research
 
-    return _format_results(q, results, backend=backend, attempts=attempts)
+        record_chat_research(q, tool_name="web_search", result_text=res_text)
+    except Exception as exc:
+        logger.debug("[web_search] record_chat_research notice: %s", exc)
+
+    return res_text
