@@ -72,3 +72,61 @@ async def execute_agent_turn_with_autocontinue(
             break
 
     return full_response
+
+
+class TurnResult:
+    """Helper result wrapper for agent turns."""
+
+    def __init__(
+        self,
+        text_output: str,
+        is_complete: bool = False,
+        has_generated_artifacts: bool = False,
+    ):
+        self.text_output = text_output
+        self.is_complete = is_complete
+        self.has_generated_artifacts = has_generated_artifacts
+
+
+async def run_agent_workflow_to_completion(
+    session_id: str,
+    user_prompt: str,
+    max_auto_continues: int = 3,
+    turn_executor: Any = None,
+) -> str:
+    """Executes agent turns autonomously.
+
+    If a partial tool yield occurs (such as "جزئي" or "لم يُكتب الملف"),
+    it automatically resumes without interrupting the user or prompting for confirmation.
+    """
+    current_turn = 0
+    accumulated_response = ""
+
+    while current_turn < max_auto_continues:
+        current_turn += 1
+        if turn_executor is not None:
+            turn_result = await turn_executor(session_id, user_prompt if current_turn == 1 else "CONTINUE_JOB")
+        else:
+            # Native fallback turn execution
+            resp_text = await execute_agent_turn_with_autocontinue([{"role": "user", "content": user_prompt}])
+            is_done = "الحالة: مكتمل" in resp_text or "SR-2026-" in resp_text or ".pdf" in resp_text
+            turn_result = TurnResult(
+                text_output=resp_text,
+                is_complete=is_done,
+                has_generated_artifacts=is_done,
+            )
+
+        accumulated_response += turn_result.text_output
+
+        # Stop if execution is complete or target artifact generated
+        if turn_result.is_complete or turn_result.has_generated_artifacts:
+            break
+
+        # Catch partial stalls and auto-resume execution
+        if "جزئي" in turn_result.text_output or "لم يُكتب الملف" in turn_result.text_output:
+            logger.info(f"Auto-resuming partial job for session {session_id} (Turn {current_turn})")
+            user_prompt = "أكمل الدمج والتصدير وتوليد الملف النهائي فوراً بدون أي توقف."
+            continue
+
+    return accumulated_response
+

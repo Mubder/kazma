@@ -203,4 +203,64 @@ async def test_agent_loop_autocontinue():
     assert "والجزء الثاني المكتمل." in result
 
 
+# ── 8. Directive Task Tests: Merger, Loop & Tool Runner ─────────────────
+
+
+def test_file_merger_atomic_execution(tmp_path):
+    from kazma_core.skills.file_merger import merge_html_parts_and_export_pdf
+
+    template_file = tmp_path / "template.html"
+    template_file.write_text("<html><body>{{BODY_PLACEHOLDER}}</body></html>", encoding="utf-8")
+
+    part1 = tmp_path / "part1.html"
+    part1.write_text("<h2>الجزء الأول</h2>", encoding="utf-8")
+    part2 = tmp_path / "part2.html"
+    part2.write_text("<p>محتوى الجزء الثاني</p>", encoding="utf-8")
+
+    result = merge_html_parts_and_export_pdf(
+        workspace_dir=str(tmp_path),
+        template_relative_path="template.html",
+        part_relative_paths=["part1.html", "part2.html"],
+        output_html_name="merged_test.html",
+        output_pdf_name="merged_test.pdf",
+    )
+
+    assert result["status"] == "completed"
+    out_html = tmp_path / "merged_test.html"
+    assert out_html.exists()
+    content = out_html.read_text(encoding="utf-8")
+    assert "الجزء الأول" in content
+    assert "محتوى الجزء الثاني" in content
+
+
+@pytest.mark.asyncio
+async def test_run_agent_workflow_to_completion():
+    from kazma_core.agent_loop import TurnResult, run_agent_workflow_to_completion
+
+    turns = 0
+
+    async def mock_executor(session_id, prompt):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            return TurnResult("الحالة: جزئي — جاري تحضير الملف...", is_complete=False)
+        return TurnResult("الحالة: مكتمل — تم توليد الملف بنجاح SR-2026-00002.pdf", is_complete=True)
+
+    res = await run_agent_workflow_to_completion("s123", "دمج الملفات", turn_executor=mock_executor)
+    assert turns == 2
+    assert "SR-2026-00002.pdf" in res
+
+
+@pytest.mark.asyncio
+async def test_execute_workspace_tool_safe():
+    from kazma_core.tools.runner import execute_workspace_tool_safe
+
+    def sync_tool(x, y):
+        return x + y
+
+    res = await execute_workspace_tool_safe(sync_tool, 10, 20)
+    assert res == 30
+
+
+
 
