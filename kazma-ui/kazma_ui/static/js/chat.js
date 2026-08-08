@@ -2393,12 +2393,13 @@
 
   function sessionRowHtml(s, q) {
     var isActive = s.session_id === chatSessionId;
+    var isMenuOpen = _openMenuId === s.session_id;
     var title = s.title || (s.session_id || '').slice(0, 8);
     var plat = s.platform || 'web';
     var absTime = '';
     try { absTime = new Date(s.updated_at || s.created_at).toLocaleString(); } catch (e) {}
     var meta = s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
-    var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
+    var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
       '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(plat) + '"></span>' +
       '<div class="session-info">' +
         '<span class="session-title" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
@@ -2410,7 +2411,6 @@
         '<button class="session-act-btn session-del" data-delete="' + escapeHtml(s.session_id) + '" title="' + escapeHtml(ti('delete', 'Delete')) + '">\u2715</button>' +
       '</div>';
     } else {
-      var isMenuOpen = _openMenuId === s.session_id;
       html += '<div class="session-actions">' +
         '<button class="session-more' + (isMenuOpen ? ' active' : '') + '" data-more="' + escapeHtml(s.session_id) + '" title="' + escapeHtml(ti('actions', 'Actions')) + '">\u22EF</button>' +
         '<div class="session-menu' + (isMenuOpen ? ' open' : '') + '" data-menu="' + escapeHtml(s.session_id) + '">' +

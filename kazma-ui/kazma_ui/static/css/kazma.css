@@ -1400,6 +1400,8 @@ tbody tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  position: relative;
+  z-index: 35; /* Elevate above chat-main frame */
 }
 .session-list {
   flex: 1;
@@ -1407,6 +1409,7 @@ tbody tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  padding-bottom: 80px; /* Guarantees bottom dropdown menus are never clipped by scroll box */
 }
 .session-item {
   padding: var(--sp-2) var(--sp-3);
@@ -3534,6 +3537,11 @@ canvas { display: block; border-radius: 4px; }
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
+  z-index: 2;
+}
+.session-item:hover,
+.session-item.menu-open {
+  z-index: 100; /* Elevate open/hovered item so dropdown renders on top of adjacent items */
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active {
@@ -3591,6 +3599,7 @@ canvas { display: block; border-radius: 4px; }
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  z-index: 101;
 }
 .session-act-btn, .session-more {
   background: none;
@@ -3615,16 +3624,32 @@ canvas { display: block; border-radius: 4px; }
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 50;
-  min-width: 130px;
+  left: auto;
+  margin-top: 4px;
+  z-index: 9999;
+  min-width: 135px;
   padding: 4px;
   background: var(--bg-elevated, var(--bg-card, #1b1e2e));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.15));
   border-radius: var(--radius-sm);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   display: none;
 }
 .session-menu.open { display: block; }
+[dir="rtl"] .session-menu {
+  right: auto;
+  left: 0;
+  text-align: right;
+}
+[dir="rtl"] .session-menu-item {
+  text-align: right;
+}
+.session-menu.drop-up {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 4px;
+}
 .session-menu-item {
   display: block;
   width: 100%;
