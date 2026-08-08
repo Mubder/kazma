@@ -538,7 +538,12 @@ var KazmaStream = (function() {
 
       function renderTable(block) {
         var cols = block.header.length;
-        var html = '<div class="md-table-wrap" dir="auto"><table class="md-table">';
+        // Detect if table content is Arabic-dominant → render RTL
+        var allText = (block.header || []).join(' ') + ' ' +
+          (block.rows || []).map(function(r) { return r.join(' '); }).join(' ');
+        var isAr = !!(window.KazmaBidi && KazmaBidi.isArabicDominant(allText));
+        var tableDir = isAr ? 'rtl' : 'ltr';
+        var html = '<div class="md-table-wrap" dir="' + tableDir + '"><table class="md-table" dir="' + tableDir + '">';
         html += '<thead><tr>';
         for (var c = 0; c < cols; c++) {
           var al = (block.aligns && block.aligns[c]) ? ' style="text-align:' + block.aligns[c] + '"' : '';
