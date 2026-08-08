@@ -328,6 +328,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.send": {"en": "Send", "ar": "إرسال"},
     "chat.attach_file": {"en": "Attach file", "ar": "إرفاق ملف"},
     "chat.tokens": {"en": "tokens", "ar": "رمز"},
+    "ws.tools_completed": {"en": "Completed: {tools}", "ar": "تم التنفيذ: {tools}"},
+    "ws.task_processing": {"en": "Task processing completed.", "ar": "اكتملت معالجة المهمة."},
+    "ws.task_completed": {"en": "Task completed.", "ar": "اكتملت المهمة."},
     "chat.send_shortcut": {"en": "send", "ar": "إرسال"},
     "chat.newline_shortcut": {"en": "newline", "ar": "سطر جديد"},
 

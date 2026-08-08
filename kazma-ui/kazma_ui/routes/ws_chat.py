@@ -32,6 +32,24 @@ from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
 
+
+def ti_(key: str, fallback: str, **kwargs) -> str:
+    """Translate a WS chat status string. Falls back to English if no translation."""
+    try:
+        from kazma_ui.i18n import TRANSLATIONS
+        lang = "ar"  # WS chat is always Arabic UI (Kazma default)
+        entry = TRANSLATIONS.get(key, {})
+        text = entry.get(lang) or entry.get("en") or fallback
+    except Exception:
+        text = fallback
+    if kwargs:
+        try:
+            text = text.format(**kwargs)
+        except Exception:
+            pass
+    return text
+
+
 ws_chat_router = APIRouter(tags=["ws-chat"])
 
 # Match sse_chat / agent_runner / gateway — LangGraph default (25) is too low.
@@ -420,12 +438,13 @@ def create_ws_chat_router(
                                 or (getattr(m, "type", None) in ("tool", "function"))
                             ]
                             if tools_run:
-                                text = f"Completed execution of tools: {', '.join(set(tools_run))}."
+                                _tools = ', '.join(set(tools_run))
+                                text = ti_("ws.tools_completed", f"Completed: {_tools}", tools=_tools)
                             elif activity:
-                                text = "Task processing completed."
+                                text = ti_("ws.task_processing", "Task processing completed.")
 
             if not text:
-                text = "Task completed."
+                text = ti_("ws.task_completed", "Task completed.")
 
             # T4: mutate + persist under the per-session mutation lock so this
             # never interleaves with the SSE live/detached persist paths on the
