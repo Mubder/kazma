@@ -1387,7 +1387,7 @@
       var active = (!item.done && (idx === 0 || _planItems[idx - 1].done)) ? ' is-active' : '';
       return '<li class="agent-plan-item' + done + active + '" data-idx="' + idx + '">' +
         '<span class="plan-check" aria-hidden="true">' + (item.done ? '\u2713' : (idx + 1)) + '</span>' +
-        '<span class="plan-text">' + escapeHtml(item.text) + '</span></li>';
+        '<span class="plan-text" dir="auto">' + escapeHtml(item.text) + '</span></li>';
     }).join('');
     // Arabic UI / Arabic plan text: force RTL layout (not only after bidi late-pass)
     var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
