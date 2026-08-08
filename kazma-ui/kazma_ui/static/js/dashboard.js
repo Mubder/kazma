@@ -57,24 +57,35 @@
     var isAr = (document.documentElement.getAttribute('dir') || '') === 'rtl' ||
                (window.KAZMA_LANG === 'ar');
 
+    var svgIcons = {
+      doc: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+      web: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+      brain: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>',
+      swarm: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>',
+      shield: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      time: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/><path d="M12 2a10 10 0 1 0 10 10"/></svg>',
+      email: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+      culture: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6M4 14l6-6 2 2M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6"/></svg>'
+    };
+
     var features = isAr ? [
-      { icon: '📄', name: 'معالج المستندات', desc: 'قراءة ودمج وتقسيم وتعرف ضوئي وتحويل وتنقيح PDF و DOCX و XLSX', color: '#6366f1' },
-      { icon: '🌐', name: 'زاحف الويب', desc: 'كشط متقدم مع Jina و Firecrawl + دوران البروكسي', color: '#0ea5e9' },
-      { icon: '🧠', name: 'الذاكرة المعرفية', desc: 'معتقدات ثنائية الزمن، استرجاع الحلقات، رسم بياني PPR', color: '#8b5cf6' },
-      { icon: '🐝', name: 'محرك السرب', desc: 'توسيع تلقائي للعمال + قواطع دوائر الموثوقية', color: '#f59e0b' },
-      { icon: '🛡️', name: 'أمان HITL', desc: 'بوابات موافقة ثلاثية + منح على مستوى المهمة', color: '#ef4444' },
-      { icon: '⏪', name: 'السفر عبر الزمن', desc: 'إعادة تشغيل اللقطات وتفريع سجل المحادثة', color: '#10b981' },
-      { icon: '📧', name: 'مدير البريد', desc: 'مصادقة Gmail و Microsoft + وضع الحماية', color: '#6366f1' },
-      { icon: '🎨', name: 'العربية والثقافة', desc: 'لهجة خليجية، واجهة RTL، بروتوكول المجلس، ترجمة', color: '#ec4899' },
+      { icon: svgIcons.doc, name: 'معالج المستندات', desc: 'قراءة ودمج وتقسيم وتعرف ضوئي وتحويل وتنقيح PDF و DOCX و XLSX', color: '#6366f1' },
+      { icon: svgIcons.web, name: 'زاحف الويب', desc: 'كشط متقدم مع Jina و Firecrawl + دوران البروكسي', color: '#0ea5e9' },
+      { icon: svgIcons.brain, name: 'الذاكرة المعرفية', desc: 'معتقدات ثنائية الزمن، استرجاع الحلقات، رسم بياني PPR', color: '#8b5cf6' },
+      { icon: svgIcons.swarm, name: 'محرك السرب', desc: 'توسيع تلقائي للعمال + قواطع دوائر الموثوقية', color: '#f59e0b' },
+      { icon: svgIcons.shield, name: 'أمان HITL', desc: 'بوابات موافقة ثلاثية + منح على مستوى المهمة', color: '#ef4444' },
+      { icon: svgIcons.time, name: 'السفر عبر الزمن', desc: 'إعادة تشغيل اللقطات وتفريع سجل المحادثة', color: '#10b981' },
+      { icon: svgIcons.email, name: 'مدير البريد', desc: 'مصادقة Gmail و Microsoft + وضع الحماية', color: '#6366f1' },
+      { icon: svgIcons.culture, name: 'العربية والثقافة', desc: 'لهجة خليجية، واجهة RTL، بروتوكول المجلس، ترجمة', color: '#ec4899' },
     ] : [
-      { icon: '📄', name: 'Document Processor', desc: 'Read, merge, split, OCR, convert & redact PDFs/DOCX/XLSX', color: '#6366f1' },
-      { icon: '🌐', name: 'Web Crawler', desc: 'Advanced scraping with Jina/Firecrawl + proxy rotation', color: '#0ea5e9' },
-      { icon: '🧠', name: 'Cognitive Memory', desc: 'Bi-temporal beliefs, episode recall, V2 PPR graph', color: '#8b5cf6' },
-      { icon: '🐝', name: 'Swarm Engine', desc: 'Dynamic worker autoscaling + reliability circuit breakers', color: '#f59e0b' },
-      { icon: '🛡️', name: 'HITL Safety', desc: 'Triple-wired approval gates + task-scoped grants', color: '#ef4444' },
-      { icon: '⏪', name: 'Time Travel', desc: 'Snapshot replay & fork for conversation history', color: '#10b981' },
-      { icon: '📧', name: 'Email Manager', desc: 'Gmail/Microsoft OAuth + sandbox mode', color: '#6366f1' },
-      { icon: '🎨', name: 'Arabic & Cultural', desc: 'Khaleeji dialect, RTL UI, Majlis protocol, i18n', color: '#ec4899' },
+      { icon: svgIcons.doc, name: 'Document Processor', desc: 'Read, merge, split, OCR, convert & redact PDFs/DOCX/XLSX', color: '#6366f1' },
+      { icon: svgIcons.web, name: 'Web Crawler', desc: 'Advanced scraping with Jina/Firecrawl + proxy rotation', color: '#0ea5e9' },
+      { icon: svgIcons.brain, name: 'Cognitive Memory', desc: 'Bi-temporal beliefs, episode recall, V2 PPR graph', color: '#8b5cf6' },
+      { icon: svgIcons.swarm, name: 'Swarm Engine', desc: 'Dynamic worker autoscaling + reliability circuit breakers', color: '#f59e0b' },
+      { icon: svgIcons.shield, name: 'HITL Safety', desc: 'Triple-wired approval gates + task-scoped grants', color: '#ef4444' },
+      { icon: svgIcons.time, name: 'Time Travel', desc: 'Snapshot replay & fork for conversation history', color: '#10b981' },
+      { icon: svgIcons.email, name: 'Email Manager', desc: 'Gmail/Microsoft OAuth + sandbox mode', color: '#6366f1' },
+      { icon: svgIcons.culture, name: 'Arabic & Cultural', desc: 'Khaleeji dialect, RTL UI, Majlis protocol, i18n', color: '#ec4899' },
     ];
 
     var dirAttr = isAr ? ' dir="rtl"' : '';
@@ -82,7 +93,7 @@
 
     var html = features.map(function(f) {
       return '<div' + dirAttr + ' style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;padding:14px;transition:border-color 0.2s;cursor:default;' + textAlign + '" onmouseover="this.style.borderColor=\'' + f.color + '\'"; onmouseout="this.style.borderColor=\'var(--border-color)\'">' +
-        '<div style="font-size:1.3rem;margin-bottom:6px;">' + f.icon + '</div>' +
+        '<div style="color:' + f.color + ';margin-bottom:8px;display:flex;align-items:center;">' + f.icon + '</div>' +
         '<div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">' + f.name + '</div>' +
         '<div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;">' + f.desc + '</div>' +
         '</div>';
