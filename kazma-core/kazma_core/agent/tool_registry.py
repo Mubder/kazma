@@ -760,7 +760,9 @@ class LocalToolRegistry:
             description=(
                 "Send a file from the workspace to the user's chat (Telegram/Discord/Slack). "
                 "Use this when the user asks for a file, document, PDF, or download. "
-                "The file is delivered as an attachment alongside the text caption."
+                "The file is delivered as an attachment alongside the text caption. "
+                "After calling send_file, ALWAYS output a clear confirmation message "
+                "in your final text response in the active chat session."
             ),
             category="filesystem",
         )
