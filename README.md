@@ -292,7 +292,7 @@ These projects grew up next to Kazma — each one taught us something about agen
 
 ## 🧪 Development
 
-**4,300+ tests passing** across 5 suites.
+**4,243+ tests passing** across 5 suites.
 
 ```bash
 uv sync --all-extras
@@ -312,7 +312,7 @@ See: [Development](docs/docs/guide/development.md) · [CONTRIBUTING.md](CONTRIBU
 - **Startups & enterprises** evaluating production-grade multi-agent orchestration
 - **Contributors** looking for a well-tested, well-documented AI framework to build on
 
-MIT-licensed, production-tested, 1,200+ commits. Built solo in Kuwait with full-stack execution.
+MIT-licensed, production-tested, 1,668+ commits. Built in Kuwait 🇰🇼 with full-stack execution.
 
 [🌐 kazma.ai](https://kazma.ai) · [🐙 GitHub](https://github.com/Mubder/kazma) · [💬 Try the live demo](https://kazma-demo.fly.dev/) · [📧 Pilots & partnerships](mailto:admin@kazma.ai)
 

@@ -96,21 +96,19 @@ kazma/
 │   └── kazma_core/
 │       ├── agent/         ReAct loop via LangGraph (KazmaAgent, graph builder)
 │       ├── ide/           Transport-agnostic coding backend (env_context, service, workspace_scope)
-│       ├── delegation/    Multi-agent orchestration
+│       ├── swarm/         Swarm engine, reliability, autoscaler
 │       ├── hub/           Skill manifest, registry, validator
 │       ├── security/      Linter, certification, audit trail
 │       └── ...
-├── kazma-memory/          sqlite-vec schemas, retrieval
 ├── kazma-skills/          YAML manifests wrapping MCP tools
-├── kazma-connectors/      Telegram, Discord, Slack adapters
-├── kazma-providers/       LiteLLM router, model switching
+├── kazma-gateway/         Telegram, Discord, Slack adapters + agent handler
 ├── kazma-ui/              FastAPI + HTMX dashboard (Arabic RTL)
 ├── kazma-cli/             CLI entry points
-├── examples/              Example custom skills (ALMuhalab)
+├── kazma-tui/             Textual TUI dashboard
+├── examples/              Example custom skills (ALMuhalAB)
 ├── tests/                 pytest + integration tests
 ├── docs/                  Documentation
 ├── kazma.yaml             Main configuration
-├── kazma-permissions.yaml Division permission boundaries
 └── pyproject.toml         Project metadata and tool config
 ```
 
@@ -350,7 +348,7 @@ config_schema:
       type: string
       description: "API key for external service"
 
-min_core_version: "0.5.0"
+min_core_version: "0.6.1"
 tags:
   - data
   - example
