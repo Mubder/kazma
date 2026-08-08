@@ -618,35 +618,70 @@ async def supervisor_node(
     # the prior task — expand recall query + pin a continuity system note.
     # Opposite case: bulk "add this to ShipX memory" after a reminder thread
     # must NOT inherit ZCode/session topics via recall session_boost.
+    # Topic shifts drop session boost and supersede the open task focus.
     _recall_query = last_user_content
     _store_intent = False
     _graph_cleanup = False
+    _multi_part = False
     _store_focus = ""
     _recall_session_id = state.get("thread_id")
+    _intent_mode = "normal"
+    # Merged into every supervisor return after classification (focus lifecycle).
+    intent_patch: dict[str, Any] = {}
     try:
+        from kazma_core.agent.state import TaskStatus
         from kazma_core.agent.turn_input import (
+            classify_turn_intent,
             extract_store_focus_query,
-            is_memory_graph_cleanup_intent,
-            is_memory_store_intent,
-            is_multi_part_memory_work,
-            is_short_continuation,
             latest_turn_priority_note,
+            prior_substantive_user_texts,
         )
 
-        _graph_cleanup = is_memory_graph_cleanup_intent(last_user_content)
-        _multi_part = (not _graph_cleanup) and is_multi_part_memory_work(
-            last_user_content
+        _prev_status = str(state.get("task_status") or TaskStatus.IDLE)
+        _prev_goal = str(state.get("task_goal_summary") or "")
+        _intent_mode = classify_turn_intent(
+            last_user_content,
+            messages=messages,
+            task_status=_prev_status,
+            task_goal_summary=_prev_goal,
+            use_embedding_drift=(iteration == 0),
         )
-        _store_intent = (not _graph_cleanup) and (
-            is_memory_store_intent(last_user_content) or _multi_part
-        )
+        _graph_cleanup = _intent_mode == "cleanup"
+        _multi_part = _intent_mode == "multi_part"
+        _store_intent = _intent_mode in ("store", "multi_part")
+        _is_continue = _intent_mode == "continue"
+        _is_shift = _intent_mode == "shift"
+
+        intent_patch["intent_mode"] = _intent_mode
+
+        # Collapse prior multi-step tool payloads when focus is done/shifted
+        # so attention is not dominated by stale tool chains (PR5).
+        if iteration == 0:
+            try:
+                from kazma_core.agent.topic_drift import (
+                    should_stub_prior_tools,
+                    stub_prior_tool_chains,
+                )
+
+                if should_stub_prior_tools(
+                    intent_mode=_intent_mode,
+                    prev_task_status=_prev_status,
+                ):
+                    messages = stub_prior_tool_chains(
+                        messages, keep_last_n_user_turns=1
+                    )
+            except Exception:
+                logger.debug("[Supervisor] tool stub skipped", exc_info=True)
+
         if _graph_cleanup:
             # Focus list/merge tools on named projects in the message
             _store_focus = extract_store_focus_query(last_user_content) or "kazma entities graph"
             _recall_query = _store_focus
             _recall_session_id = None
+            intent_patch["task_status"] = TaskStatus.IN_PROGRESS
+            intent_patch["task_goal_summary"] = (_store_focus or last_user_content)[:240]
             logger.info(
-                "[Supervisor] Memory graph-cleanup intent — recall %r (no session_boost)",
+                "[Supervisor] intent_mode=cleanup recall=%r (no session_boost)",
                 (_recall_query or "")[:80],
             )
         elif _store_intent or _multi_part:
@@ -659,27 +694,33 @@ async def supervisor_node(
             # Drop same-thread session boost so prior reminder turns do not
             # drown a document-store request in ZCode/Grok quota facts.
             _recall_session_id = None
+            intent_patch["task_status"] = TaskStatus.IN_PROGRESS
+            intent_patch["task_goal_summary"] = (
+                _store_focus or last_user_content
+            )[:240]
             logger.info(
-                "[Supervisor] Memory-%s intent — focused recall %r (no session_boost)",
-                "multi-part" if _multi_part else "store",
+                "[Supervisor] intent_mode=%s recall=%r (no session_boost)",
+                "multi_part" if _multi_part else "store",
                 (_recall_query or "")[:80],
             )
-        elif is_short_continuation(last_user_content):
-            prev_users: list[str] = []
-            for m in messages:
-                if not isinstance(m, dict) or m.get("role") != "user":
-                    continue
-                c = m.get("content")
-                if isinstance(c, str) and c.strip() and c.strip() != last_user_content.strip():
-                    prev_users.append(c.strip())
+        elif _is_continue:
+            prev_users = prior_substantive_user_texts(
+                messages, exclude=last_user_content, min_chars=8, limit=3
+            )
             if prev_users:
                 # Prefer last 3 substantive user turns as the real goal.
                 _recall_query = " | ".join(prev_users[-3:])
+                intent_patch["task_goal_summary"] = _recall_query[:240]
                 logger.info(
-                    "[Supervisor] Continuation phrase %r — expanded recall from %d prior user turns",
+                    "[Supervisor] intent_mode=continue phrase=%r expanded_recall from %d prior user turns",
                     last_user_content[:40],
                     len(prev_users[-3:]),
                 )
+            # Keep open focus; only re-open if we were idle/completed.
+            if _prev_status in ("", TaskStatus.IDLE, TaskStatus.COMPLETED, TaskStatus.SUPERSEDED):
+                intent_patch["task_status"] = TaskStatus.IN_PROGRESS
+            else:
+                intent_patch["task_status"] = _prev_status or TaskStatus.IN_PROGRESS
             # Always inject continuity instruction when history has more than
             # this one short line (industry: do not re-ask "what should I do?").
             _user_turns = sum(
@@ -689,7 +730,7 @@ async def supervisor_node(
                 and m.get("role") == "user"
                 and str(m.get("content") or "").strip()
             )
-            if _user_turns >= 2:
+            if iteration == 0 and _user_turns >= 2:
                 _cont_note = (
                     "CONTINUITY: The user sent a short follow-up "
                     f"({last_user_content!r}). The open task is in the conversation "
@@ -703,24 +744,70 @@ async def supervisor_node(
                     1 if messages and messages[0].get("role") == "system" else 0,
                     {"role": "system", "content": _cont_note},
                 )
+        elif _is_shift:
+            # Soft-reset focus: do not session-boost old-thread episodes and
+            # never expand recall to prior goals on a pivot.
+            _recall_session_id = None
+            _recall_query = last_user_content
+            intent_patch["task_status"] = TaskStatus.SUPERSEDED
+            intent_patch["auto_continue"] = False
+            intent_patch["task_goal_summary"] = (last_user_content or "")[:240]
+            logger.info(
+                "[Supervisor] intent_mode=shift — session_boost off, auto_continue cleared, "
+                "prior task superseded",
+            )
+        else:
+            # normal chat — keep session boost; do not expand query
+            if last_user_content.strip() and len(last_user_content.strip()) >= 40:
+                intent_patch["task_status"] = TaskStatus.IN_PROGRESS
+                intent_patch["task_goal_summary"] = last_user_content.strip()[:240]
+            logger.info(
+                "[Supervisor] intent_mode=normal session_boost=%s",
+                bool(_recall_session_id),
+            )
 
-        # Pin latest-turn priority for store, multi-part, graph cleanup, or long msgs.
-        if last_user_content.strip() and (
-            _store_intent
-            or _graph_cleanup
-            or _multi_part
-            or len(last_user_content.strip()) >= 80
-        ):
+        # Priority pin: every non-continuation turn (drop the old len>=80 gate).
+        # Continuations get CONTINUITY above instead of fighting priority text.
+        # Only on iteration 0 so ReAct tool rounds do not re-stack system notes.
+        if iteration == 0 and last_user_content.strip() and not _is_continue:
             _prio = latest_turn_priority_note(
                 store_intent=_store_intent,
                 graph_cleanup=_graph_cleanup,
                 multi_part=_multi_part,
+                topic_shift=_is_shift,
                 focus=_store_focus,
             )
             _ins = 1 if messages and messages[0].get("role") == "system" else 0
             messages.insert(_ins, {"role": "system", "content": _prio})
+
+        if iteration == 0:
+            logger.info(
+                "[Supervisor] intent_mode=%s task_status=%s session_boost=%s recall_q=%r",
+                _intent_mode,
+                intent_patch.get("task_status", _prev_status),
+                _recall_session_id is not None,
+                (_recall_query or "")[:80],
+            )
+        # Mid-turn ReAct: keep prior focus fields; do not re-supersede from the
+        # same user message re-read as "latest" after tool messages.
+        if iteration > 0:
+            intent_patch = {
+                "intent_mode": state.get("intent_mode") or _intent_mode,
+                "task_status": state.get("task_status")
+                or intent_patch.get("task_status")
+                or _prev_status,
+                "task_goal_summary": state.get("task_goal_summary")
+                or intent_patch.get("task_goal_summary")
+                or "",
+            }
+            if state.get("auto_continue") is False or _is_shift:
+                # Preserve soft-reset once shift cleared auto_continue
+                if state.get("task_status") == "superseded" or _is_shift:
+                    intent_patch["auto_continue"] = False
+                    intent_patch["task_status"] = "superseded"
     except Exception:
         logger.debug("[Supervisor] continuation/store intent expand skipped", exc_info=True)
+        intent_patch = {}
 
     # Classify and route to optimal model if router is available
     routed_model = None
@@ -1084,6 +1171,7 @@ async def supervisor_node(
         # thinking" symptom's real cause).
         return {
             **breaker_reset,
+            **intent_patch,
             "next_node": NodeName.RESPOND,
             "turn_failed": True,
             "error_message": error_content,
@@ -1137,12 +1225,20 @@ async def supervisor_node(
                 "(iteration=%d) — retrying with pruned context nudge", iteration,
             )
             # Prune context specifically for nudge call to prevent sending bloated prompt
+            _nudge_tail = (
+                "Answer only the latest user request; do not resume a superseded prior task."
+                if intent_patch.get("intent_mode") == "shift"
+                or intent_patch.get("task_status") == "superseded"
+                else (
+                    "Based on the conversation and tool results above, tell the "
+                    "user what you found and what remains unfinished."
+                )
+            )
             pruned_nudge_msgs = prune_tool_outputs(messages, max_tokens=14000, keep_recent_tool_outputs=2) + [
                 {"role": "system", "content": (
                     "Your previous response was empty. Provide a clear, helpful "
                     "TEXT answer only (no tools, no XML, no DSML, no tool_calls). "
-                    "Based on the conversation and tool results above, tell the "
-                    "user what you found and what remains unfinished."
+                    + _nudge_tail
                 )},
             ]
             try:
@@ -1170,12 +1266,19 @@ async def supervisor_node(
             )
             content = ""
 
-        # Auto-continuation guard for multi-step goals/tasks
-        is_auto = state.get("auto_continue", False)
+        # Auto-continuation guard for multi-step goals/tasks.
+        # Topic shifts / superseded focus never auto-continue the old goal.
+        is_auto = bool(state.get("auto_continue", False))
+        if "auto_continue" in intent_patch:
+            is_auto = bool(intent_patch["auto_continue"])
+        if intent_patch.get("task_status") == "superseded" or intent_patch.get("intent_mode") == "shift":
+            is_auto = False
         if not is_auto and content:
             _content_lower = content.lower()
             if any(marker in _content_lower for marker in ["now section", "proceeding to section", "next section", "proceeding with section"]):
-                is_auto = True
+                # Only section-auto when not on a soft-reset pivot
+                if intent_patch.get("intent_mode") != "shift":
+                    is_auto = True
 
         if is_auto and iteration + 1 < max_iter and content:
             logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
@@ -1183,6 +1286,7 @@ async def supervisor_node(
             continuation_msg = {"role": "user", "content": "Please proceed automatically with the remaining steps and complete the task."}
             return {
                 **breaker_reset,
+                **intent_patch,
                 "messages": messages + [assistant_msg, continuation_msg],
                 "next_node": NodeName.SUPERVISOR,
                 "iteration": iteration + 1,
@@ -1200,6 +1304,7 @@ async def supervisor_node(
             )
             return {
                 **breaker_reset,
+                **intent_patch,
                 "messages": messages,
                 "next_node": NodeName.RESPOND,
                 "force_synthesis": True,
@@ -1208,10 +1313,22 @@ async def supervisor_node(
                 "last_cost_usd": response.cost_usd,
             }
 
-        # Pure text response → RESPOND
+        # Pure text response → RESPOND. Mark completed when focus was open
+        # and this turn is not mid multi-step tool work.
+        _done_patch = dict(intent_patch)
+        if _done_patch.get("intent_mode") in ("normal", "shift") and _done_patch.get(
+            "task_status"
+        ) not in ("superseded",):
+            # Final answer with no tools — focus can rest as completed for
+            # short Q&A; multi-part/store stay in_progress until tools finish.
+            if _done_patch.get("intent_mode") == "normal" and len(
+                (last_user_content or "").strip()
+            ) < 120:
+                _done_patch.setdefault("task_status", "completed")
         assistant_msg = {"role": "assistant", "content": content}
         return {
             **breaker_reset,
+            **_done_patch,
             "messages": messages + [assistant_msg],
             "next_node": NodeName.RESPOND,
             "last_model": response.model,
@@ -1243,8 +1360,14 @@ async def supervisor_node(
 
     pending = [PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments) for tc in response.tool_calls]
 
+    # Tools imply an open multi-step focus (unless user already superseded).
+    _tool_patch = dict(intent_patch)
+    if _tool_patch.get("task_status") != "superseded":
+        _tool_patch["task_status"] = "in_progress"
+
     return {
         **breaker_reset,
+        **_tool_patch,
         "messages": messages + [assistant_msg],
         "tool_calls_pending": pending,
         "tool_calls_done": [],  # reset for this iteration

@@ -25,7 +25,11 @@ logger = logging.getLogger(__name__)
 _SUMMARY_SYSTEM = """You are a conversation summarizer for an AI agent. Summarize the following conversation history into a concise summary under 2000 tokens.
 
 Your summary MUST preserve:
-1. **Task Goal**: What the user is trying to accomplish
+1. **Task Goal**: What the user is trying to accomplish *on the active subject*.
+   - If the latest user message continues that work, keep the goal as ACTIVE.
+   - If the latest user message indicates a subject change / topic shift, mark the
+     preceding Task Goal as **SUPERSEDED** and state the new subject (if any).
+     Do NOT instruct the agent to complete superseded steps.
 2. **Key Decisions**: Important choices made during the conversation
 3. **Tool Results**: Critical output from tool calls that may be referenced later
 4. **User Constraints**: Any limitations, preferences, or requirements the user specified

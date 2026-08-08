@@ -27,12 +27,18 @@ __all__ = [
     "contentful_turn_count",
     "normalize_history_messages",
     "is_short_continuation",
+    "is_explicit_topic_shift",
     "is_memory_store_intent",
     "is_memory_graph_cleanup_intent",
     "is_multi_part_memory_work",
     "is_bulk_document_message",
     "extract_store_focus_query",
     "latest_turn_priority_note",
+    "classify_turn_intent",
+    "prior_substantive_user_texts",
+    "stub_prior_tool_chains",
+    "should_stub_prior_tools",
+    "semantic_topic_drift",
 ]
 
 logger = logging.getLogger(__name__)
@@ -96,6 +102,232 @@ def is_short_continuation(text: str) -> bool:
     # "proceed with cleanup", "continue please"
     head = s.split()[0] if s.split() else ""
     return head in ("proceed", "continue", "resume", "retry") and len(s) < 40
+
+
+# Explicit topic pivots — user is abandoning / suspending the open task.
+# Keep patterns exclusive enough that "continue with the other step" still
+# routes through is_short_continuation, not shift.
+_TOPIC_SHIFT_RE = re.compile(
+    r"(?is)"
+    r"("
+    r"\b(?:new\s+topic|different\s+(?:topic|question|subject)|change\s+(?:of\s+)?subject)\b"
+    r"|"
+    r"\b(?:forget\s+(?:that|this|it)|never\s*mind|nvm|unrelated|anyway)\b"
+    r"|"
+    r"\b(?:switch(?:ing)?\s+(?:to|topics?)|moving\s+on|side\s+question)\b"
+    r"|"
+    r"\b(?:by\s+the\s+way|btw)\b.{0,20}\b(?:unrelated|different|new)\b"
+    r"|"
+    # Arabic pivots (common Gulf/Levantine chat)
+    r"(?:موضوع\s*ثاني|موضوع\s*جديد|غير\s*موضوع|خلنا\s*نغير|نغير\s*الموضوع|"
+    r"اسأل\s*سؤال\s*ثاني|سؤال\s*ثاني|مو\s*مهم|خلاص\s*غير\s*هالموضوع)"
+    r")"
+)
+
+# Casual off-task asks that should not inherit multi-step tool goals when
+# there is a substantive prior user goal in history (heuristic shift).
+_CASUAL_PIVOT_RE = re.compile(
+    r"(?is)^(?:"
+    r"(?:what(?:'s|\s+is)\s+the\s+weather|how(?:'s|\s+is)\s+the\s+weather)"
+    r"|(?:what\s+time\s+is\s+it|what(?:'s|\s+is)\s+today(?:'s)?\s+date)"
+    r"|(?:tell\s+me\s+a\s+joke|good\s+morning|good\s+night|hello|hi\s+there)"
+    r"|(?:check\s+my\s+email|any\s+new\s+email|read\s+my\s+inbox)"
+    r"|(?:who\s+are\s+you|what\s+model\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)"
+    r"|(?:الطقس|الجو\s*شلون|كم\s*الساعه|كم\s*الساعة|وش\s*الوقت|مرحبا|السلام\s*عليكم)"
+    r")\b"
+)
+
+
+def is_explicit_topic_shift(text: str) -> bool:
+    """True when the user explicitly abandons or suspends the current subject."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    # Continuations win — "continue anyway" is not a pivot.
+    if is_short_continuation(t):
+        return False
+    return bool(_TOPIC_SHIFT_RE.search(t))
+
+
+def prior_substantive_user_texts(
+    messages: list[dict[str, Any]] | None,
+    *,
+    exclude: str = "",
+    min_chars: int = 24,
+    limit: int = 3,
+) -> list[str]:
+    """Last N non-continuation user texts (oldest→newest among the window)."""
+    if not messages:
+        return []
+    excl = (exclude or "").strip()
+    found: list[str] = []
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if not isinstance(c, str):
+            continue
+        s = c.strip()
+        if not s or s == excl:
+            continue
+        if is_short_continuation(s):
+            continue
+        if len(s) < min_chars and not is_memory_store_intent(s):
+            # Keep short-but-tasky lines only if they look like real asks
+            if len(s) < 8:
+                continue
+        found.append(s)
+    if limit > 0:
+        return found[-limit:]
+    return found
+
+
+def classify_turn_intent(
+    text: str,
+    *,
+    messages: list[dict[str, Any]] | None = None,
+    task_status: str = "",
+    task_goal_summary: str = "",
+    use_embedding_drift: bool = True,
+) -> str:
+    """Classify this user turn for focus / recall policy.
+
+    Returns one of:
+      ``continue`` | ``store`` | ``cleanup`` | ``multi_part`` | ``shift`` | ``normal``
+
+    Priority (first match wins after mutual exclusions in helpers):
+      cleanup > multi_part/store > continue > explicit/heuristic shift
+      > embedding drift (optional) > normal
+    """
+    t = (text or "").strip()
+    if not t:
+        return "normal"
+
+    # Specialized memory work — already has focused recall paths.
+    if is_memory_graph_cleanup_intent(t):
+        return "cleanup"
+    if is_multi_part_memory_work(t):
+        return "multi_part"
+    if is_memory_store_intent(t):
+        return "store"
+
+    # True same-session continuations only when an open task is plausible.
+    if is_short_continuation(t):
+        status = (task_status or "").strip().lower()
+        # If the prior task was already completed/superseded, treat bare
+        # "ok"/"yes" as normal chat unless history still has an open ask —
+        # still allow "proceed"/"continue"/"retry" heads as continue.
+        s = " ".join(t.lower().split())
+        hard_continue = s in {
+            "proceed",
+            "continue",
+            "try now",
+            "try again",
+            "retry",
+            "keep going",
+            "finish",
+            "finish it",
+            "resume",
+            "go ahead",
+            "do it",
+            "pick up",
+        } or s.split()[0] in ("proceed", "continue", "resume", "retry")
+        if hard_continue or status in ("", "idle", "in_progress"):
+            return "continue"
+        if status in ("completed", "superseded") and not hard_continue:
+            return "normal"
+        return "continue"
+
+    if is_explicit_topic_shift(t):
+        return "shift"
+
+    # Heuristic: casual pivot after a substantive multi-step prior goal.
+    priors = prior_substantive_user_texts(messages, exclude=t, min_chars=40, limit=2)
+    if priors and _CASUAL_PIVOT_RE.search(t):
+        # Only when the prior goal looks like multi-step work (not prior small talk).
+        prior_blob = " ".join(priors).lower()
+        multi_markers = (
+            "memory",
+            "github",
+            "graph",
+            "entity",
+            "entities",
+            "shipx",
+            "kazma",
+            "repo",
+            "pipeline",
+            "pat",
+            "token",
+            "ذاكر",
+            "جراف",
+            "مشروع",
+        )
+        if any(m in prior_blob for m in multi_markers) or any(
+            len(p) >= 120 for p in priors
+        ):
+            return "shift"
+
+    # Semantic embedding drift vs open goal / last substantive user ask.
+    # Fail-open inside semantic_topic_drift — never forces shift on errors.
+    if use_embedding_drift:
+        ref = (task_goal_summary or "").strip()
+        if not ref and priors:
+            ref = priors[-1]
+        if not ref:
+            # Fall back to any recent substantive line (including shorter)
+            short_priors = prior_substantive_user_texts(
+                messages, exclude=t, min_chars=16, limit=1
+            )
+            ref = short_priors[-1] if short_priors else ""
+        status = (task_status or "").strip().lower()
+        # Only run embed when focus is open (or just completed with a real goal).
+        # Skip when already superseded — soft-reset already applied.
+        _run_embed = bool(ref) and status in ("", "idle", "in_progress", "completed")
+        if _run_embed:
+            try:
+                from kazma_core.agent.topic_drift import semantic_topic_drift
+
+                if semantic_topic_drift(t, ref):
+                    return "shift"
+            except Exception:
+                logger.debug("[turn_input] embedding drift skipped", exc_info=True)
+
+    return "normal"
+
+
+def stub_prior_tool_chains(
+    messages: list[dict[str, Any]] | None,
+    *,
+    keep_last_n_user_turns: int = 1,
+) -> list[dict[str, Any]]:
+    """Re-export — collapse prior-turn tool chains into short stubs."""
+    from kazma_core.agent.topic_drift import stub_prior_tool_chains as _stub
+
+    return _stub(messages, keep_last_n_user_turns=keep_last_n_user_turns)
+
+
+def should_stub_prior_tools(
+    *,
+    intent_mode: str = "",
+    prev_task_status: str = "",
+) -> bool:
+    """Re-export — whether this turn should stub prior tool history."""
+    from kazma_core.agent.topic_drift import should_stub_prior_tools as _should
+
+    return _should(intent_mode=intent_mode, prev_task_status=prev_task_status)
+
+
+def semantic_topic_drift(
+    current: str,
+    reference: str,
+    *,
+    threshold: float | None = None,
+    enabled: bool | None = None,
+) -> bool:
+    """Re-export — embedding cosine-distance topic drift (fail-open)."""
+    from kazma_core.agent.topic_drift import semantic_topic_drift as _drift
+
+    return _drift(current, reference, threshold=threshold, enabled=enabled)
 
 
 def is_bulk_document_message(text: str, *, min_chars: int = 600) -> bool:
@@ -252,6 +484,7 @@ def latest_turn_priority_note(
     store_intent: bool = False,
     graph_cleanup: bool = False,
     multi_part: bool = False,
+    topic_shift: bool = False,
     focus: str = "",
 ) -> str:
     """System note so the model does not pivot to an old recalled topic."""
@@ -262,6 +495,15 @@ def latest_turn_priority_note(
         "recalled topic (e.g. reminders, quota resets, prior tools) when the "
         "latest message is about something else."
     )
+    if topic_shift:
+        base += (
+            " TOPIC SHIFT: The user changed subject or suspended the prior "
+            "open task. Treat any previous multi-step goal as SUPERSEDED for "
+            "this turn — do NOT resume unfinished tool steps, GitHub/memory "
+            "cleanup, or auto-continue the old task unless they explicitly "
+            "ask to resume. Answer only the latest message."
+        )
+        return base
     if multi_part and not graph_cleanup:
         focus_bit = f" Focus: {focus}." if focus else ""
         base += (

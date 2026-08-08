@@ -19,7 +19,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, TypedDict
 
-__all__ = ["NodeName", "PendingToolCall", "SupervisorState", "ToolResult", "initial_supervisor_state"]
+__all__ = [
+    "NodeName",
+    "PendingToolCall",
+    "SupervisorState",
+    "TaskStatus",
+    "ToolResult",
+    "initial_supervisor_state",
+]
 
 # ── Node names (used in conditional routing) ────────────────────────────
 
@@ -32,6 +39,19 @@ class NodeName(StrEnum):
     RESPOND = "respond"
     CHECK_SATURATION = "check_saturation"
     SUMMARIZE = "summarize"
+
+
+class TaskStatus(StrEnum):
+    """Lifecycle of the open dialog focus / multi-step goal.
+
+    Used to soft-reset continuity (auto_continue, session_boost RAG) when the
+    user pivots subjects without requiring a full ``/reset``.
+    """
+
+    IDLE = "idle"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    SUPERSEDED = "superseded"
 
 
 # ── Pending tool call (fan-out item) ───────────────────────────────────
@@ -141,6 +161,15 @@ class SupervisorState(TypedDict, total=False):
     auto_continue: bool
     """Flag indicating whether the supervisor should auto-continue turns for multi-step goals."""
 
+    task_status: str
+    """Dialog focus lifecycle — see :class:`TaskStatus` (idle/in_progress/completed/superseded)."""
+
+    task_goal_summary: str
+    """Short summary of the open multi-step goal (for drift checks / logging)."""
+
+    intent_mode: str
+    """Last classified turn intent: continue|store|cleanup|multi_part|shift|normal."""
+
     # ── Turn failure ────────────────────────────────────────────────
     turn_failed: bool
     """Set when the supervisor's LLM call failed (after retries) and could not produce a real answer.
@@ -215,6 +244,9 @@ def initial_supervisor_state(
         consecutive_tool_failures=0,
         circuit_breaker_tripped=False,
         auto_continue=False,
+        task_status=TaskStatus.IDLE,
+        task_goal_summary="",
+        intent_mode="normal",
         force_synthesis=False,
         turn_failed=False,
         error_message="",
