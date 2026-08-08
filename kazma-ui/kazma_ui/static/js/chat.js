@@ -1128,10 +1128,14 @@
     }
     var now = new Date();
     var sameDay = d.toDateString() === now.toDateString();
-    var time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    if (sameDay) return time;
-    var day = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    return day + ', ' + time;
+    var time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+    var fullStr = time;
+    if (!sameDay) {
+      var day = d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+      fullStr = day + ' ' + time;
+    }
+    // Wrap in <bdi> with LRI/PDI directional isolators to isolate LTR timestamp in Arabic text
+    return '<bdi class="bidi-time" style="unicode-bidi: isolate; direction: ltr;">\u2066' + fullStr + '\u2069</bdi>';
   }
 
   // ── Turn workbench (one solid progress surface) ───────

@@ -199,7 +199,7 @@ class ArabicTokenizer:
         Returns:
             Text with normalized Alef.
         """
-        alef_variants = ["أ", "إ", "آ"]
+        alef_variants = ["أ", "إ", "آ", "ٱ"]
         for variant in alef_variants:
             text = text.replace(variant, "ا")
         return text

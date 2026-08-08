@@ -145,6 +145,20 @@
     }
   }
 
+  function isolateMathSpans(root) {
+    root = root || document;
+    try {
+      var mathNodes = root.querySelectorAll ? root.querySelectorAll('.katex, .math, .math-inline, .math-block, [data-math]') : [];
+      for (var i = 0; i < mathNodes.length; i++) {
+        var m = mathNodes[i];
+        m.setAttribute('dir', 'ltr');
+        m.style.unicodeBidi = 'isolate';
+        m.style.direction = 'ltr';
+        m.classList.add('math-bidi-isolate');
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function applyAll(root, selector) {
     root = root || document;
     selector = selector || [
@@ -163,6 +177,7 @@
       if (root.nodeType === 1 && root.matches && root.matches(selector)) {
         apply(root);
       }
+      isolateMathSpans(root);
     } catch (e) { /* ignore */ }
   }
 

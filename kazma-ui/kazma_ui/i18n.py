@@ -20,7 +20,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TRANSLATIONS"]
+__all__ = ["TRANSLATIONS", "get_arabic_plural_form", "t_plural", "t", "make_translator"]
 
 # ---------------------------------------------------------------------------
 # Translation dictionaries
@@ -44,8 +44,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.dashboard": {"en": "Dashboard", "ar": "لوحة التحكم"},
     "nav.skills": {"en": "Skills", "ar": "المهارات"},
     "nav.mcp": {"en": "MCP Servers", "ar": "خوادم MCP"},
-    "nav.swarm": {"en": "Swarm", "ar": "السرب"},
-    "nav.replay": {"en": "Time Travel", "ar": "السفر عبر الزمن"},
+    "nav.swarm": {"en": "Swarm", "ar": "منظومة الوكلاء المنسقة"},
+    "nav.replay": {"en": "Time Travel", "ar": "سجل التفرعات واللقطات"},
     "nav.research": {"en": "Research", "ar": "الأبحاث"},
     "nav.knowledge": {"en": "Knowledge", "ar": "المكتبة المعرفية"},
     "nav.memory": {"en": "Memory", "ar": "الذاكرة"},
@@ -2411,7 +2411,43 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.mermaid_not_loaded": {"en": "Mermaid library not loaded.", "ar": "مكتبة Mermaid غير محمّلة."},
     "swarm.mermaid_render_error": {"en": "⚠️ Mermaid Render Error:", "ar": "⚠️ خطأ في عرض Mermaid:"},
     "swarm.diagram_cleared": {"en": "Diagram cleared. Populate steps...", "ar": "تم مسح المخطط. أضف مراحل..."},
+
+    # ── Chunks & Count Plurals (6-Form CLDR Arabic) ───────────────────
+    "knowledge.chunks_count.zero": {"en": "no chunks", "ar": "لا توجد مقاطع"},
+    "knowledge.chunks_count.one": {"en": "1 chunk", "ar": "مقطع واحد"},
+    "knowledge.chunks_count.two": {"en": "2 chunks", "ar": "مقطعان"},
+    "knowledge.chunks_count.few": {"en": "{n} chunks", "ar": "{n} مقاطع"},
+    "knowledge.chunks_count.many": {"en": "{n} chunks", "ar": "{n} مقطعاً"},
+    "knowledge.chunks_count.other": {"en": "{n} chunks", "ar": "{n} مقطع"},
+
+    "chat.messages_count.zero": {"en": "no messages", "ar": "لا توجد رسائل"},
+    "chat.messages_count.one": {"en": "1 message", "ar": "رسالة واحدة"},
+    "chat.messages_count.two": {"en": "2 messages", "ar": "رسالتان"},
+    "chat.messages_count.few": {"en": "{n} messages", "ar": "{n} رسائل"},
+    "chat.messages_count.many": {"en": "{n} messages", "ar": "{n} رسالةً"},
+    "chat.messages_count.other": {"en": "{n} messages", "ar": "{n} رسالة"},
 }
+
+
+def get_arabic_plural_form(count: int | float) -> str:
+    """Return the CLDR plural category for Arabic based on count.
+
+    Categories: 'zero', 'one', 'two', 'few', 'many', 'other'
+    """
+    n = abs(float(count))
+    if n == 0:
+        return "zero"
+    if n == 1:
+        return "one"
+    if n == 2:
+        return "two"
+
+    mod100 = int(n) % 100
+    if 3 <= mod100 <= 10:
+        return "few"
+    if 11 <= mod100 <= 99:
+        return "many"
+    return "other"
 
 
 def t(key: str, lang: str = "en", **kwargs: Any) -> str:
@@ -2436,8 +2472,29 @@ def t(key: str, lang: str = "en", **kwargs: Any) -> str:
     return text
 
 
+def t_plural(key: str, count: int | float, lang: str = "en", **kwargs: Any) -> str:
+    """Plural-aware translation lookup supporting 6-form Arabic CLDR rules."""
+    if lang == "ar":
+        category = get_arabic_plural_form(count)
+        plural_key = f"{key}.{category}"
+        entry = TRANSLATIONS.get(plural_key)
+        if entry:
+            text = entry.get("ar") or entry.get("en")
+            if text:
+                return text.format(n=count, **kwargs)
+
+    # Fallback to standard 2-form or single key
+    form = "one" if count == 1 else "other"
+    fallback_key = f"{key}.{form}"
+    entry = TRANSLATIONS.get(fallback_key) or TRANSLATIONS.get(key)
+    if entry:
+        text = entry.get(lang) or entry.get("en") or key
+        return text.format(n=count, **kwargs)
+    return key
+
+
 def make_translator(lang: str = "en"):
-    """Return a closure bound to *lang* for use as a Jinja2 global."""
+    """Return closures bound to *lang* for use as Jinja2 globals."""
 
     def _t(key: str, **kwargs: Any) -> str:
         return t(key, lang=lang, **kwargs)
@@ -2448,21 +2505,6 @@ def make_translator(lang: str = "en"):
 # Supported language codes (for validation / UI toggles)
 SUPPORTED_LANGUAGES = sorted({lang for entry in TRANSLATIONS.values() for lang in entry})
 
-
-# ---------------------------------------------------------------------------
-# Jinja2Templates — always-available i18n globals
-# ---------------------------------------------------------------------------
-#
-# ``create_app()`` (production) sets the language-specific translator on the
-# Jinja2 env.  However, tests and lightweight code paths sometimes construct
-# ``Jinja2Templates`` directly without going through ``create_app()``, which
-# previously caused ``UndefinedError: 't' is undefined`` whenever a template
-# used ``{{ t('...') }}``.
-#
-# To guarantee the ``t`` global is *always* present (defaulting to English),
-# we wrap ``Jinja2Templates.__init__`` so every instance starts with sensible
-# defaults.  Production code can still override these globals afterwards.
-# ---------------------------------------------------------------------------
 
 def _patch_jinja2_templates() -> None:
     """Patch ``Jinja2Templates.__init__`` to inject default i18n globals."""
@@ -2480,20 +2522,18 @@ def _patch_jinja2_templates() -> None:
 
     def _patched_init(self: Any, *args: Any, **kwargs: Any) -> Any:
         result = _original_init(self, *args, **kwargs)
-        # Inject default i18n globals (English fallback).
-        # ``create_app()`` may override these with the configured language.
-        # Templates call ``lang()`` / ``dir()`` (see base.html) — same callable
-        # shape as production in app.py, not plain strings.
         try:
             env = self.env
             env.globals.setdefault("t", make_translator("en"))
+            env.globals.setdefault("t_plural", lambda key, count, **kw: t_plural(key, count, lang="en", **kw))
             env.globals.setdefault("lang", lambda: "en")
             env.globals.setdefault("dir", lambda: "ltr")
         except Exception as exc:
             logger.debug("i18n Jinja2 patch failed: %s", exc)
-        return result  # type: ignore[attr-defined]
-    _patched_init._kazma_i18n_patched = True  # type: ignore[attr-defined]
-    _Templates.__init__ = _patched_init  # type: ignore[method-assign]
+        return result
+    _patched_init._kazma_i18n_patched = True
+    _Templates.__init__ = _patched_init
 
 
 _patch_jinja2_templates()
+

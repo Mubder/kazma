@@ -4,7 +4,7 @@
    Font: Inter, system-ui, sans-serif | Grid texture background
    ═══════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap');
 
 /* ── 1. CSS Variables — kazma.ai palette ─────────────────────────── */
 :root {
@@ -104,8 +104,8 @@
      Arabic text uses NORMAL feature shaping — Inter's OpenType features
      (cv01/ss03) break Arabic ligature shaping, so they are scoped to LTR
      only via [dir="ltr"] below, NOT applied globally on body. */
-  --font-sans: 'Inter', 'Rubik', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-arabic: 'Rubik', 'Calibri', 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter', 'IBM Plex Sans Arabic', 'Rubik', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-arabic: 'IBM Plex Sans Arabic', 'Tajawal', 'Cairo', 'Rubik', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   /* Inter-only OpenType features.  Applied to LTR text ONLY (see body
      override below) — forcing these on Arabic breaks ligature shaping. */
@@ -209,13 +209,43 @@ button { cursor: pointer; font-family: inherit; }
   font-family: var(--font-arabic);
 }
 
-/* English/code/numbers inside Arabic pages render in Inter (smooth, with
-   tabular numerals) — prevents the "out of sync, looks bigger" mismatch
-   when Arabic font metrics clash with Latin glyphs in code blocks and
-   metrics like "discovered=42 · fetched=38". The bdi tag handles inline
-   bidirectional runs (e.g. an English product name in an Arabic sentence). */
-[dir="rtl"] code,
-[dir="rtl"] pre,
+[dir="rtl"], :lang(ar) {
+  line-height: 1.6 !important;
+  letter-spacing: normal !important;
+}
+
+[dir="rtl"] h1, [dir="rtl"] h2, [dir="rtl"] h3,
+[dir="rtl"] h4, [dir="rtl"] h5, [dir="rtl"] h6,
+[dir="rtl"] .heading-title, [dir="rtl"] .badge {
+  letter-spacing: 0 !important;
+  line-height: 1.5 !important;
+}
+
+/* Code blocks ALWAYS remain strict LTR regardless of parent document direction */
+[dir="rtl"] pre, [dir="rtl"] code, [dir="rtl"] .code-block, [dir="rtl"] .highlight {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate !important;
+  font-family: var(--font-mono) !important;
+}
+
+/* Hard-lock base direction on active SSE streaming messages to prevent token alignment flicker */
+.chat-message.streaming[data-lang="ar"] .message-text,
+.message-text.streaming-lock-ar,
+.streaming-lock-rtl {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: isolate !important;
+}
+
+/* Force LTR directional isolation on inline/block math & LaTeX equations */
+.katex, .math-inline, .math-block, .math-bidi-isolate, span[data-math="true"] {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate !important;
+  display: inline-block;
+}
+
 [dir="rtl"] kbd,
 [dir="rtl"] samp,
 [dir="rtl"] .metric-value,
@@ -250,11 +280,11 @@ button { cursor: pointer; font-family: inherit; }
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  margin-left: var(--sidebar-width);
-  transition: margin-left var(--transition);
+  margin-inline-start: var(--sidebar-width);
+  transition: margin-inline-start var(--transition);
 }
 .main-content.sidebar-collapsed {
-  margin-left: var(--sidebar-collapsed);
+  margin-inline-start: var(--sidebar-collapsed);
 }
 .page-body {
   flex: 1;
@@ -2398,9 +2428,9 @@ tbody tr:last-child td {
 .mb-3 { margin-bottom: var(--sp-3); }
 .mb-4 { margin-bottom: var(--sp-4); }
 .mb-6 { margin-bottom: var(--sp-6); }
-.ml-auto { margin-left: auto; }
-.mr-auto { margin-right: auto; }
-.mx-auto { margin-left: auto; margin-right: auto; }
+.ml-auto { margin-inline-start: auto; }
+.mr-auto { margin-inline-end: auto; }
+.mx-auto { margin-inline-start: auto; margin-inline-end: auto; }
 .p-2 { padding: var(--sp-2); }
 .p-3 { padding: var(--sp-3); }
 .p-4 { padding: var(--sp-4); }
