@@ -82,12 +82,20 @@ class KazmaAppBuilder:
             from dotenv import load_dotenv
             from pathlib import Path
 
+            # Priority ladder: KAZMA_WORKSPACE / default user workspace .env -> CWD .env
+            user_env = Path(os.environ.get("KAZMA_WORKSPACE", "C:/Users/balfa/kazma")) / ".env"
             cwd_env = Path.cwd() / ".env"
+
+            # Load CWD env first, then override with user workspace env if present
             if cwd_env.exists():
                 load_dotenv(dotenv_path=cwd_env, override=True)
+            if user_env.exists() and user_env.resolve() != cwd_env.resolve():
+                load_dotenv(dotenv_path=user_env, override=True)
+
             logger.info("[Auth] Loaded environment variables from .env")
         except Exception as e:
             logger.debug("[Auth] Failed to load .env: %s", e)
+
 
         # Setup structured JSON logging if requested (now env-aware).
         try:
