@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.bidi_utils import isolate_ltr
+
 logger = logging.getLogger(__name__)
 
 DOC_DIR = Path("kazma-data/documents")
@@ -112,7 +114,8 @@ def _read_pdf(p: Path) -> str:
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text() or ""
                 if text.strip():
-                    lines.append(f"--- Page {i + 1} ---")
+                    p_num = isolate_ltr(str(i + 1))
+                    lines.append(f"--- Page {p_num} ---")
                     lines.append(text.strip())
                     lines.append("")
 
@@ -121,12 +124,15 @@ def _read_pdf(p: Path) -> str:
                     tables = page.extract_tables()
                     for j, table in enumerate(tables):
                         if table and len(table) > 1:
-                            lines.append(f"  [Table {j + 1} on page {i + 1}]")
+                            t_num = isolate_ltr(str(j + 1))
+                            p_num = isolate_ltr(str(i + 1))
+                            lines.append(f"  [Table {t_num} on page {p_num}]")
                             for row in table[:20]:  # cap at 20 rows per table
                                 cells = [str(c) if c else "" for c in row]
                                 lines.append("  | " + " | ".join(cells) + " |")
                             if len(table) > 20:
-                                lines.append(f"  [... {len(table) - 20} more rows ...]")
+                                rem_rows = isolate_ltr(str(len(table) - 20))
+                                lines.append(f"  [... {rem_rows} more rows ...]")
                             lines.append("")
                 except Exception:
                     pass  # table extraction is best-effort
