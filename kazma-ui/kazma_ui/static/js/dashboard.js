@@ -54,7 +54,19 @@
     var grid = $('feature-cards-grid');
     if (!grid) return;
 
-    var features = [
+    var isAr = (document.documentElement.getAttribute('dir') || '') === 'rtl' ||
+               (window.KAZMA_LANG === 'ar');
+
+    var features = isAr ? [
+      { icon: '📄', name: 'معالج المستندات', desc: 'قراءة ودمج وتقسيم وتعرف ضوئي وتحويل وتنقيح PDF و DOCX و XLSX', color: '#6366f1' },
+      { icon: '🌐', name: 'زاحف الويب', desc: 'كشط متقدم مع Jina و Firecrawl + دوران البروكسي', color: '#0ea5e9' },
+      { icon: '🧠', name: 'الذاكرة المعرفية', desc: 'معتقدات ثنائية الزمن، استرجاع الحلقات، رسم بياني PPR', color: '#8b5cf6' },
+      { icon: '🐝', name: 'محرك السرب', desc: 'توسيع تلقائي للعمال + قواطع دوائر الموثوقية', color: '#f59e0b' },
+      { icon: '🛡️', name: 'أمان HITL', desc: 'بوابات موافقة ثلاثية + منح على مستوى المهمة', color: '#ef4444' },
+      { icon: '⏪', name: 'السفر عبر الزمن', desc: 'إعادة تشغيل اللقطات وتفريع سجل المحادثة', color: '#10b981' },
+      { icon: '📧', name: 'مدير البريد', desc: 'مصادقة Gmail و Microsoft + وضع الحماية', color: '#6366f1' },
+      { icon: '🎨', name: 'العربية والثقافة', desc: 'لهجة خليجية، واجهة RTL، بروتوكول المجلس، ترجمة', color: '#ec4899' },
+    ] : [
       { icon: '📄', name: 'Document Processor', desc: 'Read, merge, split, OCR, convert & redact PDFs/DOCX/XLSX', color: '#6366f1' },
       { icon: '🌐', name: 'Web Crawler', desc: 'Advanced scraping with Jina/Firecrawl + proxy rotation', color: '#0ea5e9' },
       { icon: '🧠', name: 'Cognitive Memory', desc: 'Bi-temporal beliefs, episode recall, V2 PPR graph', color: '#8b5cf6' },
@@ -65,8 +77,11 @@
       { icon: '🎨', name: 'Arabic & Cultural', desc: 'Khaleeji dialect, RTL UI, Majlis protocol, i18n', color: '#ec4899' },
     ];
 
+    var dirAttr = isAr ? ' dir="rtl"' : '';
+    var textAlign = isAr ? 'text-align:right;' : '';
+
     var html = features.map(function(f) {
-      return '<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;padding:14px;transition:border-color 0.2s;cursor:default;" onmouseover="this.style.borderColor=\'' + f.color + '\'"; onmouseout="this.style.borderColor=\'var(--border-color)\'">' +
+      return '<div' + dirAttr + ' style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;padding:14px;transition:border-color 0.2s;cursor:default;' + textAlign + '" onmouseover="this.style.borderColor=\'' + f.color + '\'"; onmouseout="this.style.borderColor=\'var(--border-color)\'">' +
         '<div style="font-size:1.3rem;margin-bottom:6px;">' + f.icon + '</div>' +
         '<div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">' + f.name + '</div>' +
         '<div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;">' + f.desc + '</div>' +

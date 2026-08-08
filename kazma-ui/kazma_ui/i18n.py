@@ -345,6 +345,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.no_pending_approvals_hint": {"en": "Tools requiring human approval will appear here", "ar": "الأدوات التي تتطلب موافقة بشرية ستظهر هنا"},
     "dashboard.clear_all_confirm": {"en": "Clear all pending approvals?", "ar": "مسح كل الموافقات المعلقة؟"},
     "dashboard.hitl_once": {"en": "Once", "ar": "مرة واحدة"},
+    "dashboard.active_capabilities": {"en": "Active Capabilities", "ar": "القدرات النشطة"},
     "dashboard.hitl_allow_tool": {"en": "Allow tool", "ar": "السماح بالأداة"},
     "dashboard.hitl_yolo": {"en": "YOLO", "ar": "YOLO"},
     "dashboard.hitl_deny": {"en": "Deny", "ar": "رفض"},
