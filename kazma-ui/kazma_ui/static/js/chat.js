@@ -1134,8 +1134,10 @@
       var day = d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
       fullStr = day + ' ' + time;
     }
-    // Wrap in <bdi> with LRI/PDI directional isolators to isolate LTR timestamp in Arabic text
-    return '<bdi class="bidi-time" style="unicode-bidi: isolate; direction: ltr;">\u2066' + fullStr + '\u2069</bdi>';
+    // Return pure isolated text string using Unicode LRI (\u2066) and PDI (\u2069).
+    // Plain-text Unicode isolators work in textContent, innerHTML, escapeHtml(),
+    // and DOM nodes without rendering raw HTML tags as text.
+    return '\u2066' + fullStr + '\u2069';
   }
 
   // ── Turn workbench (one solid progress surface) ───────

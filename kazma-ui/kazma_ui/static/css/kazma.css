@@ -2154,6 +2154,8 @@ tbody tr:last-child td {
   font-size: 0.68rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+  direction: ltr;
 }
 .agent-progress-step .step-detail {
   margin-top: 4px;
