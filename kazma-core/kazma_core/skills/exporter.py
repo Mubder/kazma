@@ -49,6 +49,10 @@ PDF_HTML_TEMPLATE = """<!DOCTYPE html>
       }}
     }}
 
+    *, *::before, *::after {{
+      box-sizing: border-box;
+    }}
+
     :root {{
       --font-arabic: 'IBM Plex Sans Arabic', -apple-system, sans-serif;
       --font-mono: 'IBM Plex Mono', monospace;
@@ -112,7 +116,7 @@ PDF_HTML_TEMPLATE = """<!DOCTYPE html>
     }}
 
     pre, code {{
-      font-family: var(--font-mono) !important;
+      font-family: var(--font-mono), Consolas, "Courier New", monospace !important;
       direction: ltr !important;
       text-align: left !important;
       text-align-last: left !important;
@@ -122,14 +126,16 @@ PDF_HTML_TEMPLATE = """<!DOCTYPE html>
     pre {{
       background-color: #0f172a;
       color: #f8fafc;
-      padding: 12px;
-      border-radius: 6px;
-      overflow-x: auto;
-      font-size: 8.5pt;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-all;
-      margin: 14px 0;
+      padding: 1rem 1.2rem;
+      border-radius: 8px;
+      box-sizing: border-box !important;
+      max-width: 100% !important;
+      font-size: 0.78rem !important;
+      line-height: 1.55;
+      white-space: pre-wrap !important;
+      overflow-wrap: anywhere !important;
+      word-break: break-word !important;
+      page-break-inside: avoid;
     }}
 
     p code, td code {{

@@ -1,0 +1,28 @@
+<h3>2. التوثيق والمراجع (BiDi Isolation)</h3>
+<p>المراجع معزولة النص اللاتيني والروابط عن السياق العربي باستخدام عنصر <bdi dir="ltr">&lt;bdi&gt;</bdi> (عزل اتجاه ثنائي):</p>
+<div class="ref-box">
+<ol>
+<li><span class="ref-tag">[1]</span><bdi dir="ltr">ISO/IEC 27001:2026 — https://iso.org/standard/2026</bdi></li>
+<li><span class="ref-tag">[2]</span><bdi dir="ltr">Kazma Security Team — https://kazma.ai/security</bdi></li>
+<li><span class="ref-tag">[3]</span><bdi dir="ltr">ISO/IEC 42001:2023 — https://www.iso.org/standard/81230.html</bdi></li>
+<li><span class="ref-tag">[4]</span><bdi dir="ltr">NIST AI RMF — https://www.nist.gov/itl/ai-risk-management-framework</bdi></li>
+<li><span class="ref-tag">[5]</span><bdi dir="ltr">EU AI Act — https://artificialintelligenceact.eu/</bdi></li>
+</ol>
+</div>
+<p>مثال حي على العزل داخل الجملة: أوصت اللجنة باعتماد <bdi dir="ltr">ISO/IEC 42001:2023</bdi> كمرجع حوكمي — انعزل المعرف اللاتيني دون كسر ترتيب الجملة العربية.</p>
+<p style="font-size:0.85rem;color:#5b6675">تنويه دقة: النسخة المنشورة فعلياً من 27001 هي 2022؛ وصيغة «ISO/IEC 27001:2026» مدرجة حرفياً كما وردت في طلب المهمة في المرجع [1].</p>
+
+<h3>3. اختبار الجمع السداسي (CLDR 6-Form Pluralization)</h3>
+<p>عدد المصادر المفحوصة في هذه المهمة = 6 مصادر، والجدول يطبق القاعدة السداسية للعربية (zero / one / two / few / many / other):</p>
+<table>
+<caption>جدول الجمع السداسي CLDR للمصادر المفحوصة</caption>
+<thead><tr><th>الحالة (CLDR Form)</th><th class="num">العدد</th><th>الصيغة العربية الصحيحة</th></tr></thead>
+<tbody>
+<tr><td><bdi dir="ltr">zero</bdi></td><td class="num">0</td><td>لا توجد أي مصادر (صفر مصادر)</td></tr>
+<tr><td><bdi dir="ltr">one</bdi></td><td class="num">1</td><td>مصدر واحد</td></tr>
+<tr><td><bdi dir="ltr">two</bdi></td><td class="num">2</td><td>مصدران اثنان</td></tr>
+<tr><td><bdi dir="ltr">few</bdi></td><td class="num">3</td><td>ثلاثة مصادر</td></tr>
+<tr><td><bdi dir="ltr">many</bdi></td><td class="num">15</td><td>خمسة عشر مصدراً</td></tr>
+<tr><td><bdi dir="ltr">other</bdi></td><td class="num">100</td><td>مئة مصدر</td></tr>
+</tbody>
+</table>

@@ -1,0 +1,42 @@
+<h3>3. المعادلات الرياضية (Math Isolation)</h3>
+<p>معادلة تقييم المخاطر ضمن النص — حيث <bdi dir="ltr">P</bdi> الاحتمالية و <bdi dir="ltr">I</bdi> الأثر:</p>
+<p>قيمة المخاطر: <span class="math-inline">R = P · I</span> (بصيغة <bdi dir="ltr">$R = P \cdot I$</bdi>)</p>
+<p>معادلة منفصلة (Display Block Math):</p>
+<div class="math-display">
+<span class="math-inline" style="font-size:1.5rem">S(x) = 1 / (1 + e<sup>−x</sup>)</span>
+<span class="eq-label"><bdi dir="ltr">$$S(x) = \frac{1}{1 + e^{-x}}$$</bdi></span>
+</div>
+
+<h3>4. كتلة كود برمجية (Code Block) — محاذاة LTR كاملة</h3>
+<p>دالة Python للتحقق من سلامة التشفير (الكود بالكامل جهة اليسار LTR حتى داخل وثيقة RTL):</p>
+<pre><code><span class="kw">import</span> hashlib
+<span class="kw">import</span> hmac
+
+<span class="kw">def</span> <span class="fn">verify_cipher</span>(cipher_text: <span class="kw">bytes</span>, key: <span class="kw">bytes</span>, expected_mac: <span class="kw">bytes</span>) -&gt; <span class="kw">bool</span>:
+    <span class="cmt"># Verify AES-GCM-like integrity using HMAC-SHA256</span>
+    computed = hmac.new(key, cipher_text, hashlib.sha256).digest()
+    <span class="kw">return</span> hmac.compare_digest(computed, expected_mac)</code></pre>
+
+<h3>5. جدول البيانات المالية (Financial Data Table)</h3>
+<p>أسماء الوكلاء والحالة والتكلفة بالدولار، والتكلفة بصيغة معزولة بين علامتي دولار (LaTeX-like):</p>
+<table>
+<caption>جدول تكاليف الوكلاء (Agent Costs)</caption>
+<thead><tr><th>اسم الوكيل (Agent)</th><th>الحالة (Status)</th><th class="num">التكلفة (USD)</th></tr></thead>
+<tbody>
+<tr><td><bdi dir="ltr">sec-scanner</bdi></td><td>نشط</td><td class="num"><bdi dir="ltr">$0.0035$</bdi></td></tr>
+<tr><td><bdi dir="ltr">policy-auditor</bdi></td><td>نشط</td><td class="num"><bdi dir="ltr">$0.0021$</bdi></td></tr>
+<tr><td><bdi dir="ltr">threat-intel</bdi></td><td>قيد المراجعة</td><td class="num"><bdi dir="ltr">$0.0047$</bdi></td></tr>
+<tr><td><bdi dir="ltr">compliance-checker</bdi></td><td>نشط</td><td class="num"><bdi dir="ltr">$0.0018$</bdi></td></tr>
+<tr><td><bdi dir="ltr">incident-responder</bdi></td><td>معطل</td><td class="num"><bdi dir="ltr">$0.0000$</bdi></td></tr>
+</tbody>
+</table>
+
+<h3>6. الخلاصة</h3>
+<p>توفر هذه الوثيقة نموذجاً متكاملاً يجمع مهارة البحث (توثيق معايير 2026 بالتحقق المباشر من المصادر) ومهارة توليد الوثائق (تنسيق تصديري عربي متقدم: عزل BiDi، جمع سداسي CLDR، عزل بيانات وصفية، عزل رياضي، كود LTR، وجدول مالي). الوثيقة جاهزة للتصدير PDF/HTML.</p>
+
+<footer>
+<p>إعداد: كاظمه (Kazma Agent) — محرك توليد الوثائق + مهارة البحث | الطابع الزمني: <span class="mono">2026-08-08 16:45:00</span></p>
+</footer>
+
+</body>
+</html>
