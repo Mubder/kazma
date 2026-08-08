@@ -170,3 +170,37 @@ def test_record_chat_research():
     assert found[0].topic == sess.topic
 
 
+# ── 7. Agent Loop Auto-Continuation Tests ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_autocontinue():
+    from kazma_core.agent_loop import execute_agent_turn_with_autocontinue
+
+    class MockResponse:
+        def __init__(self, content, finish_reason):
+            self.content = content
+            self.finish_reason = finish_reason
+
+    class MockLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return MockResponse("الجزء الأول من التقرير...", "length")
+            return MockResponse("والجزء الثاني المكتمل.", "stop")
+
+    mock_llm = MockLLM()
+    result = await execute_agent_turn_with_autocontinue(
+        [{"role": "user", "content": "اكتب تقريراً مفصلاً"}],
+        llm_client=mock_llm,
+    )
+
+    assert mock_llm.calls == 2
+    assert "الجزء الأول من التقرير..." in result
+    assert "والجزء الثاني المكتمل." in result
+
+
+
