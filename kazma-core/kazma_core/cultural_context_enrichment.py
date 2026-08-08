@@ -82,11 +82,28 @@ def get_cultural_prompt_suffix() -> str:
         if not parts:
             return ""
 
+        # Kuwaiti dialect directive — tells the LLM to use Gulf/Kuwaiti Arabic
+        # (not MSA or Iraqi) when responding in Arabic. This is what makes
+        # "هسه" (Iraqi) become "الحين" (Kuwaiti), "شلونك" instead of "كيف حالك",
+        # etc. Without this, most LLMs default to MSA or Egyptian.
+        parts.append(
+            "\n\nDIALECT: When responding in Arabic, use KUWAITI/GULF (Khaleeji) "
+            "dialect — NOT Modern Standard Arabic (MSA), Egyptian, or Iraqi. "
+            "Key Kuwaiti forms: use 'الحين' not 'الآن/هسه' (now), 'شلونك' not "
+            "'كيف حالك' (how are you), 'وايد/واجد' not 'كثيراً' (a lot), "
+            "'مافي/ماكو' not 'لا يوجد' (there isn't), 'بكره' not 'غداً' "
+            "(tomorrow), 'خوش' not 'جيد جداً' (great), 'يالله' for 'let's go', "
+            "'عسب' for 'because', 'زين' for 'good/nice'. Keep tone warm, "
+            "informal, and culturally natural — like speaking with a friend "
+            "at a diwaniya. Mix in English loanwords naturally (هوى, نت, كول) "
+            "as Kuwaitis do in daily speech."
+        )
+
         # Never force Arabic output — language is chosen per user turn.
         parts.append(
-            "\nLANGUAGE: Use cultural greetings only when the user writes in "
-            "Arabic (or explicitly invites them). If the user writes in English, "
-            "reply in English and do not switch to Arabic."
+            "\nLANGUAGE: Use cultural greetings and Kuwaiti dialect only when "
+            "the user writes in Arabic (or explicitly invites them). If the "
+            "user writes in English, reply in English and do not switch to Arabic."
         )
         suffix = "".join(parts)
         if suffix:

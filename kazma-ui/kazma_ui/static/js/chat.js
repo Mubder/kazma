@@ -939,6 +939,9 @@
         tryIngestPlanFromText(tokenAccum);
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = KS.markdown(tokenAccum);
+        // Re-apply dir="auto" after innerHTML (the attribute survives but
+        // the bidi direction may need recalculating for the new content).
+        textEl.setAttribute('dir', 'auto');
         if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
         scrollToBottom();
       },
@@ -2004,6 +2007,7 @@
       textEl.innerHTML = existing
         ? existing + '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:10px 0;">' + rendered
         : rendered;
+      textEl.setAttribute('dir', 'auto');
       if (window.KazmaBidi) KazmaBidi.apply(textEl, text);
       scrollToBottom();
     }
