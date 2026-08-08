@@ -42,7 +42,7 @@
         <!-- ═══════════════════════════════════════════════════════════
              SUB-SECTION: LLM Providers & Models
              ═══════════════════════════════════════════════════════════ -->
-        <div :class="{ hidden: hubSubtab !== 'providers' }">
+        <div :class="{ hidden: hubSubtab !== 'providers' }" x-cloak>
             <div class="settings-group">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                     <h3>{{ t('settings.llm_providers') }}</h3>

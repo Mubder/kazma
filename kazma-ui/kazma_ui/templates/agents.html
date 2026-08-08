@@ -46,6 +46,24 @@
     </div>
   </div>
 
+  <!-- ── Personality Templates ── -->
+  <div style="margin-bottom:1.5rem;" x-cloak>
+    <h3 style="margin:0 0 10px 0;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">{{ t('settings.personality_templates') if t('settings.personality_templates') else 'Personality Templates' }}</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
+      <template x-for="p in personalities" :key="p.name">
+        <div @click="switchPersonality(p.name)" class="personality-card"
+             style="background:var(--card-bg);border:2px solid var(--border-color);border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;"
+             :style="agent.personality === p.name ? 'border-color:var(--brand,#6366f1);background:color-mix(in srgb, var(--brand,#6366f1) 8%, var(--card-bg));' : ''"
+             onmouseover="this.style.transform='translateY(-2px)'"
+             onmouseout="this.style.transform=''">
+          <div style="font-size:1.4rem;margin-bottom:6px;" x-html="(window.KazmaIcons && KazmaIcons.fromEmoji(p.emoji)) || p.emoji || '🤖'"></div>
+          <div style="font-weight:600;font-size:0.85rem;margin-bottom:3px;" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
+          <div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
+        </div>
+      </template>
+    </div>
+  </div>
+
   <!-- ── Metrics Grid ── -->
   <div class="metrics-grid" style="margin-bottom:1.5rem;">
     <div class="metric-card">

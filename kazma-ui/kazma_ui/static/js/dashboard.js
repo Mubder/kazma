@@ -44,6 +44,35 @@
     // Refresh button
     var refreshBtn = $('dash-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', fetchInitialData);
+
+    // Render feature cards (static — native skills don't change at runtime)
+    initFeatureCards();
+  }
+
+  // ── Feature Cards ────────────────────────────────────
+  function initFeatureCards() {
+    var grid = $('feature-cards-grid');
+    if (!grid) return;
+
+    var features = [
+      { icon: '📄', name: 'Document Processor', desc: 'Read, merge, split, OCR, convert & redact PDFs/DOCX/XLSX', color: '#6366f1' },
+      { icon: '🌐', name: 'Web Crawler', desc: 'Advanced scraping with Jina/Firecrawl + proxy rotation', color: '#0ea5e9' },
+      { icon: '🧠', name: 'Cognitive Memory', desc: 'Bi-temporal beliefs, episode recall, V2 PPR graph', color: '#8b5cf6' },
+      { icon: '🐝', name: 'Swarm Engine', desc: 'Dynamic worker autoscaling + reliability circuit breakers', color: '#f59e0b' },
+      { icon: '🛡️', name: 'HITL Safety', desc: 'Triple-wired approval gates + task-scoped grants', color: '#ef4444' },
+      { icon: '⏪', name: 'Time Travel', desc: 'Snapshot replay & fork for conversation history', color: '#10b981' },
+      { icon: '📧', name: 'Email Manager', desc: 'Gmail/Microsoft OAuth + sandbox mode', color: '#6366f1' },
+      { icon: '🎨', name: 'Arabic & Cultural', desc: 'Khaleeji dialect, RTL UI, Majlis protocol, i18n', color: '#ec4899' },
+    ];
+
+    var html = features.map(function(f) {
+      return '<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;padding:14px;transition:border-color 0.2s;cursor:default;" onmouseover="this.style.borderColor=\'' + f.color + '\'"; onmouseout="this.style.borderColor=\'var(--border-color)\'">' +
+        '<div style="font-size:1.3rem;margin-bottom:6px;">' + f.icon + '</div>' +
+        '<div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">' + f.name + '</div>' +
+        '<div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;">' + f.desc + '</div>' +
+        '</div>';
+    }).join('');
+    grid.innerHTML = html;
   }
 
   function updateConnectionStatus(status) {

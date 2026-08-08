@@ -107,6 +107,14 @@
     </div>
   </div>
 
+  <!-- ── Feature Cards: Active Skills ── -->
+  <div id="feature-cards-section" style="margin-bottom:1.25rem;">
+    <h3 class="chart-title" style="margin:0 0 10px 0;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">{{ t('dashboard.active_capabilities') if t('dashboard.active_capabilities') else 'Active Capabilities' }}</h3>
+    <div id="feature-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">
+      <!-- Populated by dashboard.js initFeatureCards() -->
+    </div>
+  </div>
+
   <!-- ── Two-column: Memory hub + System resources ── -->
   <div class="dash-pro-split" style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:16px;margin-bottom:1.25rem;">
     <div id="memory-hub-card" class="chart-card dash-pro-card" style="margin:0;padding:18px 20px;">
