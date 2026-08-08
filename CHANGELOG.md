@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Unreleased — Enterprise Arabic i18n Architecture, Two-Stage PDF Exporter & Rich UI Refactor (2026-08-08)
+
+- **Enterprise Arabic Language Architecture:**
+  - `kazma_core/bidi_utils.py`: Added `isolate_ltr()`, `format_bidi_timestamp()`, and `wrap_mixed_arabic_tokens()` using LRI (`\u2066`) and PDI (`\u2069`) isolators for URLs, model identifiers, ISO standards (`ISO/IEC 27001`), and timestamps.
+  - `kazma_core/safety/markup_guard.py`: Added `protect_markup_tokens()` and `restore_markup_tokens()` for protecting Markdown, code fences, and placeholders (`{user_name}`) during l10n passes.
+  - `kazma_memory/arabic_tokenizer.py`: Enforced Unicode NFKC normalization, Tashkeel/Tatweel stripping, and Alef Wasla (`ٱ`) harmonization (`أ`/`إ`/`آ`/`ٱ` → `ا`).
+  - `kazma_ui/i18n.py`: Implemented CLDR 6-form Arabic plural engine (`get_arabic_plural_form()`, `t_plural()`).
+
+- **Industry-Grade Two-Stage PDF Export Engine (`kazma_core/skills/exporter.py`):**
+  - **Stage 1 (`prepare_markdown_for_pdf`):** Un-escapes currency backslashes (`\$0.0035` → `$0.0035`), wraps LTR tokens (URLs, ISO standards) in `<bdi dir="ltr">`, converts display math (`$$...$$`) to `<div class="math-block" dir="ltr">` and inline math (`$...$`) to `<span class="math-inline" dir="ltr">`, and compiles Markdown to semantic HTML5.
+  - **Stage 2 (`generate_pdf_html_document`):** Embeds content in `PDF_HTML_TEMPLATE` with IBM Plex Sans Arabic font `@import`, high-DPI A4 `@page` margins (`20mm 15mm`), running page footers (`صفحة X من Y`), dark code blocks, metadata card (`model`, `session_id`, `timestamp`), and `text-align: justify; text-align-last: right;` paragraph justification.
+
+- **Chat Input, User Bubble Renderer & Multi-Line Text Justification:**
+  - Auto-resizing `#chat-input` textarea in `kazma.css` (`white-space: pre-wrap !important`, `min-height: 48px`, `max-height: 200px`).
+  - Enabled `KS.markdown()` rendering on user message bubbles in `chat.js` so user messages parse bold headers, bullet lists, code fences, and math equations inside "You" bubbles.
+  - Applied `text-align: justify;` and `text-align-last: start;` / `text-align-last: right;` to `.message-text`, `.markdown-body`, and `body` with `text-align-last: left !important;` code block guards for clean multi-line paragraph justification.
+
+- **UI Session Kebab Menu Overflow & Z-Index Elevation:**
+  - Fixed clipping bug where `.session-menu` in sidebar was hidden behind `.chat-main` or clipped by `.session-list`'s scroll container. Elevated `.chat-sidebar` to `z-index: 35`, `.session-item.menu-open` to `z-index: 100`, `.session-menu` to `z-index: 9999`, and added `padding-bottom: 80px` to `.session-list`.
+  - RTL positioning: `left: 0; right: auto;` in `[dir="rtl"]` mode.
+
+- **Research Tab Persistence Bridge & Event Sync:**
+  - Implemented `record_chat_research()` in `kazma_core/tools/research_session.py` hooked into `web_search()` so chat research queries write persistent entries into `kazma-data/research_sessions.db` and display dynamically in the Research Tab list.
+  - Updated Dashboard **Active Capabilities** cards to replace emojis with clean, color-themed inline vector SVGs in both English and Arabic versions.
+
+- **Agent Loop Truncation Catch & Auto-Continuation Loop (`kazma_core/agent_loop.py`):**
+  - Implemented `execute_agent_turn_with_autocontinue()` in `kazma_core/agent_loop.py` to catch `finish_reason == "length"` when output token limits are reached, automatically appending continuation prompts and stitching response streams without repeating text.
+
+- **Automated Unit Testing:**
+  - Extended `tests/test_arabic_i18n.py` to 22 comprehensive unit tests covering BiDi isolators, 6-form plurals, markup guard, NLP normalization, PDF export compilation, research session recording, and agent loop auto-continuation.
+
 ## Unreleased — Cross-machine migration system (`kazma migrate`) (2026-08-06)
 
 - **Feature:** a portable-bundle migration system so any user can move a full
