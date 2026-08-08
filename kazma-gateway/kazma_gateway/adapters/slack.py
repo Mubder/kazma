@@ -79,6 +79,7 @@ class SlackAdapter(BaseAdapter):
         allowed_teams: list[str] | None = None,
         allowed_channels: list[str] | None = None,
         allowed_users: list[str] | None = None,
+        allow_all: bool = False,
     ) -> None:
         import os
 
@@ -92,6 +93,7 @@ class SlackAdapter(BaseAdapter):
         # Audit G2c: per-user allowlist (parity with Telegram/Discord). Empty
         # = allow all members of allowed channels; populated = drop non-listed.
         self._allowed_users: set[str] = set(allowed_users or [])
+        self._allow_all: bool = allow_all
 
         if not self._bot_token:
             logger.warning("[Slack] No bot token — adapter will stay STOPPED")

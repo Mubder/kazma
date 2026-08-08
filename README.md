@@ -8,7 +8,7 @@ Kazma is the reliable multi-agent framework built for real deployment. Cryptogra
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests: 4,300+ passing](https://img.shields.io/badge/tests-4%2C300%2B%20passing-brightgreen.svg)](#-development)
+[![Tests: 4,243](https://img.shields.io/badge/tests-4%2C243-brightgreen.svg)](#-development)
 
 ---
 

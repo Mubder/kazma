@@ -486,9 +486,14 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     if not expected:
         return True
 
-    # Loopback peers (always allowed for single-operator local use)
-    if _is_loopback_client(websocket):
-        return True
+    # Loopback peers: still require a credential (session token or secret).
+    # The old code returned True for ANY loopback connection without checking
+    # credentials — meaning malware on the same machine could connect to the
+    # WS and approve HITL requests. The browser gets the session token via
+    # the <meta> tag automatically, so legitimate browser connections pass.
+    # Raw WS connections without credentials are now rejected.
+    # Exception: if no secret is configured at all (fresh dev install),
+    # loopback is still trusted (can't require what doesn't exist).
 
     # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
     if _is_private_lan_client(websocket) and _trust_lan_enabled():

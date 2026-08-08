@@ -121,11 +121,13 @@ class TelegramAdapter(BaseAdapter):
         tts_output_format: str = "mp3",
         stt_language: str = "auto",
         webhook_secret: str | None = None,
+        allow_all: bool = False,
     ) -> None:
         super().__init__()
         self._token = token
         self._api_base = _TELEGRAM_API.format(token=token)
         self._allowed_users = set(allowed_users or [])
+        self._allow_all = allow_all
         self._parse_mode = parse_mode or ""
         self._poll_timeout = poll_timeout
         self._offset: int = 0
@@ -159,11 +161,15 @@ class TelegramAdapter(BaseAdapter):
     ) -> None:
         """Start the adapter and store queue reference for webhook ingress."""
         self._queue = queue
-        if not self._allowed_users:
+        if not self._allowed_users and not self._allow_all:
+            logger.error(
+                "[telegram] No allowed_users configured and allow_all is false. "
+                "The bot will REJECT ALL messages. Set connectors.telegram.allowed_users "
+                "in Settings, or set allow_all=true to accept from everyone."
+            )
+        elif not self._allowed_users and self._allow_all:
             logger.warning(
-                "[telegram] No allowed_users configured — accepting messages "
-                "from ALL users. Set connectors.telegram.allowed_users in "
-                "Settings to restrict access."
+                "[telegram] allow_all is true — accepting messages from ALL users."
             )
         await super().start(queue, shutdown_event)
 
@@ -360,7 +366,10 @@ class TelegramAdapter(BaseAdapter):
                             else:
                                 continue
 
-                        # User whitelist
+                        # User whitelist (fail-closed: empty list + allow_all=false = reject all)
+                        if not self._allowed_users and not self._allow_all:
+                            logger.warning("[telegram] Rejecting message — no allowed_users and allow_all is false")
+                            continue
                         if self._allowed_users:
                             user_id = msg.context_metadata.get("user_id", 0)
                             if user_id not in self._allowed_users:

@@ -81,11 +81,13 @@ class DiscordAdapter(BaseAdapter):
         token: str,
         allowed_guilds: list[str] | None = None,
         allowed_users: list[str] | None = None,
+        allow_all: bool = False,
     ) -> None:
         super().__init__()
         self._token = token
         self._allowed_guilds = set(allowed_guilds or [])
         self._allowed_users = set(allowed_users or [])
+        self._allow_all = allow_all
         self._http: httpx.AsyncClient | None = None
         self._rate_limiter = RateLimiter(max_per_second=5)
         self._ws = None
@@ -115,12 +117,14 @@ class DiscordAdapter(BaseAdapter):
             queue:          The unified message bus.
             shutdown_event: Signals when to stop.
         """
-        if not self._allowed_users:
-            logger.warning(
-                "[discord] No allowed_users configured — accepting messages "
-                "from ALL users. Set connectors.discord.allowed_users in "
-                "Settings to restrict access."
+        if not self._allowed_users and not self._allow_all:
+            logger.error(
+                "[discord] No allowed_users configured and allow_all is false. "
+                "Bot will REJECT ALL messages. Set connectors.discord.allowed_users "
+                "or allow_all=true."
             )
+        elif not self._allowed_users and self._allow_all:
+            logger.warning("[discord] allow_all is true — accepting messages from ALL users.")
         self._queue = queue  # for interaction → synthetic slash enqueue
         self._http = httpx.AsyncClient(
             base_url=_DISCORD_API,
@@ -220,8 +224,10 @@ class DiscordAdapter(BaseAdapter):
                                 if gid and gid not in self._allowed_guilds:
                                     continue
 
-                            # User-level allowlist (mirrors Telegram). Empty
-                            # list = allow all; populated = drop non-listed.
+                            # User-level allowlist (fail-closed when empty + !allow_all)
+                            if not self._allowed_users and not self._allow_all:
+                                logger.warning("[discord] Rejecting message — no allowed_users and allow_all is false")
+                                continue
                             if self._allowed_users:
                                 uid = parsed.context_metadata.get("user_id")
                                 if not uid or uid not in self._allowed_users:

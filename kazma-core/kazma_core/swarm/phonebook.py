@@ -111,7 +111,7 @@ class WorkerPhonebook:
                     )
                     enriched = f"{fenced}\n\n{enriched}"
         except Exception as exc:
-            logger.debug("Episodic memory lookup failed: %s", exc)
+            logger.warning("[phonebook] Memory enrichment failed — dispatching without context: %s", exc)
 
         result = await worker.dispatch(enriched)
         return {"synthesis": result.get("output", ""), "opinions": [result]}
