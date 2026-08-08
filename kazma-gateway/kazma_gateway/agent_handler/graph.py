@@ -1518,13 +1518,43 @@ def create_graph_handler(
             outbound_attachments: list[Attachment] = []
             if raw_attachments and isinstance(raw_attachments, list):
                 for att in raw_attachments:
-                    if isinstance(att, dict) and att.get("data"):
-                        outbound_attachments.append(Attachment(
-                            kind=att.get("kind", "file"),
-                            filename=att.get("filename", "file"),
-                            mime=att.get("mime", "application/octet-stream"),
-                            data=att["data"],
-                        ))
+                    if isinstance(att, dict):
+                        if att.get("data"):
+                            outbound_attachments.append(Attachment(
+                                kind=att.get("kind", "file"),
+                                filename=att.get("filename", "file"),
+                                mime=att.get("mime", "application/octet-stream"),
+                                data=att["data"],
+                            ))
+                        elif att.get("path"):
+                            from pathlib import Path
+                            fpath = Path(att["path"]).expanduser().resolve()
+                            if fpath.exists() and fpath.is_file():
+                                outbound_attachments.append(Attachment(
+                                    kind=att.get("kind", "document"),
+                                    filename=fpath.name,
+                                    mime=att.get("mime", "application/octet-stream"),
+                                    data=fpath.read_bytes(),
+                                ))
+
+            # Auto-extract generated document file paths mentioned in response text
+            import re
+            from pathlib import Path
+            file_matches = re.findall(r"(?:kazma-data/documents/|reports/|data/)[^\s\"'\(\)\[\]`]+\.(?:pdf|docx|html)", text)
+            for file_path_str in file_matches:
+                fpath = Path(file_path_str).expanduser().resolve()
+                if fpath.exists() and fpath.is_file():
+                    if not any(a.filename == fpath.name for a in outbound_attachments):
+                        try:
+                            outbound_attachments.append(Attachment(
+                                kind="document",
+                                filename=fpath.name,
+                                mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
+                                data=fpath.read_bytes(),
+                            ))
+                        except Exception as exc:
+                            logger.warning("[telegram] auto-attach file failed: %s", exc)
+
             outbound = OutboundMessage(
                 target_id=target_id, text=out_text, context_metadata=out_ctx,
                 attachments=outbound_attachments,

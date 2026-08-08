@@ -790,8 +790,23 @@ class LocalToolRegistry:
                 return "Error: send_file requires the chat-platform dispatcher (not available in CLI mode)"
 
             target_id = get_current_delivery_target()
+            if not target_id or not str(target_id).startswith("telegram:"):
+                try:
+                    from kazma_core.config_store import get_config_store
+
+                    store = get_config_store()
+                    tg_id = store.get("connectors.telegram.swarm_chat_id")
+                    if not tg_id:
+                        allowed = store.get("connectors.telegram.allowed_users") or []
+                        if allowed:
+                            tg_id = allowed[0]
+                    if tg_id:
+                        target_id = f"telegram:{tg_id}"
+                except Exception as exc:
+                    logger.debug("[ToolRegistry] Telegram chat target fallback failed: %s", exc)
+
             if not target_id:
-                return "Error: no chat target — send_file only works from a platform chat (Telegram/Discord/Slack)"
+                return f"File saved in workspace at {p}. (No active Telegram/chat channel configured)"
 
             try:
                 result = await send_file_message(
