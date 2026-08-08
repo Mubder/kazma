@@ -49,7 +49,7 @@
   <!-- ── Personality Templates ── -->
   <div class="chart-card" style="margin-bottom:1.5rem;padding:18px 20px;border-radius:12px;" x-cloak>
     <h3 style="margin:0 0 14px 0;font-size:0.95rem;display:flex;align-items:center;gap:8px;">
-      <span style="font-size:1.1rem;">🎭</span>
+      <span x-html="KazmaIcons.sparkles({width:18,height:18})" style="color:var(--brand,#6366f1);"></span>
       {{ t('settings.personality_templates') if t('settings.personality_templates') else 'Personality Templates' }}
     </h3>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;">
