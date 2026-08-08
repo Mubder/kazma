@@ -1051,9 +1051,10 @@
             var meta = currentMsgEl.querySelector('.message-meta');
             if (meta) {
               var modelBit = data.model ? (' \u00B7 ' + data.model) : '';
-              meta.textContent = KS.formatTokens(data.tokens) + ' tokens \u00B7 ' +
+              meta.textContent = KS.formatTokens(data.tokens) + ' ' + ti('tokens', 'tokens') + ' \u00B7 ' +
                 KS.formatCost(data.cost) + ' \u00B7 ' +
                 KS.formatDuration(data.duration_ms) + modelBit;
+              meta.setAttribute('dir', 'auto');
             }
           }
         }
@@ -2145,7 +2146,8 @@
             if (currentMsgEl) {
               var meta = currentMsgEl.querySelector('.message-meta');
               if (meta) {
-                meta.innerHTML = '<span>' + (doneData.tokens ? doneData.tokens.toLocaleString() + ' tokens' : '') +
+                var _toksLabel = ti('tokens', 'tokens');
+                meta.innerHTML = '<span dir="auto">' + (doneData.tokens ? doneData.tokens.toLocaleString() + ' ' + _toksLabel : '') +
                   (doneData.cost ? ' \u2022 $' + doneData.cost.toFixed(4) : '') +
                   (doneData.duration_ms ? ' \u2022 ' + (doneData.duration_ms / 1000).toFixed(1) + 's' : '') +
                   '</span>';

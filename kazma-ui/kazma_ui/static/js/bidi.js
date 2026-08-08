@@ -45,7 +45,11 @@
       // Skip script/style/code (code already LTR)
       var tag = (parent.tagName || '').toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'code' || tag === 'pre') continue;
+      // Skip elements that already have explicit dir set (li, ul, ol with dir="auto")
       if (parent.getAttribute && parent.getAttribute('dir') === 'ltr' && parent.classList && parent.classList.contains('bidi-isolate')) continue;
+      // Don't re-process text inside list items that already have dir="auto"
+      // — the browser handles their directionality natively
+      if ((tag === 'li' || tag === 'ul' || tag === 'ol') && parent.getAttribute && parent.getAttribute('dir') === 'auto') continue;
 
       var text = node.nodeValue;
       if (baseDir === 'rtl') {
