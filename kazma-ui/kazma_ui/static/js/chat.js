@@ -1128,7 +1128,7 @@
     }
     var now = new Date();
     var sameDay = d.toDateString() === now.toDateString();
-    var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    var time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     if (sameDay) return time;
     var day = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     return day + ', ' + time;
