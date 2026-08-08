@@ -27,6 +27,7 @@ the deep docs when you need detail.
 | Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand | `/memory` |
 | Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |
+| Topic-shift focus | Agent soft-resets focus when user changes subject; tunable drift threshold | Settings → `agent.topic_drift.*` |
 
 ---
 

@@ -57,6 +57,8 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Stale KB hits after docs shrink | Smart re-index: page hash skip vs purge-on-change; gone-URL prune | `KnowledgeIndex.index` / `purge_source` / site prune | §10 Knowledge |
 | KB inject empty / wrong tenant | `list_auto_inject_libraries` + `kb_mode=inject` federated RRF | `KAZMA_KB_AUTO_INJECT`, smart search, archive flag | §10 Knowledge |
 | Swarm task stuck “paused” | HITL C checkpoint manager | Not A or B | §4 C |
+| Agent **resumes old task** after subject change | intent classifier `shift` vs `continue`; `task_status` superseded? | `agent.topic_drift.threshold` too **high** (missed shift) | §9 turn focus |
+| Agent **abandons** legit multi-step task mid-flow | `shift` fired on a real continuation | `agent.topic_drift.threshold` too **low** (false shift) | §9 turn focus |
 | `/replay` empty on one channel | `snapshot_recorder` at **all** graph build sites | Capture in supervisor node | §3 Time travel |
 | Session in sidebar only after F5 | WS must refresh/upsert sessions like SSE | SessionManager shared? | §2 Sessions |
 

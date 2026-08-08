@@ -53,6 +53,23 @@ The full default file (`kazma.yaml`) with every key, type, and default. Line num
 | `agent.language` | string | `ar` | UI/agent language. `ar` → RTL + Arabic; `en` → English. |
 | `agent.rtl` | bool | `true` | Master RTL switch. |
 
+#### `agent.topic_drift` — embedding topic-shift detection
+
+Read live on every turn check (no restart needed to tune). **Fail-open**: if the
+embedder is unavailable or `encode` errors, embedding drift never forces a shift —
+regex/explicit and heuristic classifiers still apply.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `agent.topic_drift.enabled` | bool | `true` | Embedding topic-drift detection on/off. Does not affect regex/heuristic shift classifiers. |
+| `agent.topic_drift.threshold` | float | `0.55` | Cosine **distance** (1 − similarity) at which a turn is flagged as a topic shift. Clamped `[0.05, 0.95]`. Higher = only more dissimilar turns count as a shift. |
+
+**Tuning direction:**
+- **False shift** (agent abandons a legit multi-step task mid-flow) → **raise** the threshold.
+- **Missed shift** (agent resumes the old task after a real pivot) → **lower** the threshold.
+
+Both keys are read via `topic_drift_config()` from ConfigStore and overlay `kazma.yaml`.
+
 ### `models` (lines 6-9)
 
 | Key | Type | Default | Description |

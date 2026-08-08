@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — Topic-shift focus soft-reset (turn intent + TaskStatus + embedding drift) (2026-08-08)
+
+- **Feature:** per-turn intent classification so the supervisor soft-resets focus when the user changes subject, instead of forcing a `/reset`.
+  - `agent/turn_input.py`: `classify_turn_intent()` returns `continue | store | cleanup | multi_part | shift | normal` (priority: cleanup > multi_part/store > continue > explicit/heuristic shift > embedding drift > normal). `is_explicit_topic_shift()` covers EN/AR pivot phrases; `prior_substantive_user_texts()` feeds the reference for drift.
+  - `agent/state.py`: new `TaskStatus` enum (`idle | in_progress | completed | superseded`) plus `task_status` / `task_goal_summary` / `intent_mode` fields on `SupervisorState`, seeded in `initial_supervisor_state()`.
+  - `agent/topic_drift.py`: embedding cosine-distance drift (θ via ConfigStore, fail-open) + `stub_prior_tool_chains()` / `should_stub_prior_tools()`.
+  - `agent/graph_builder.py`: `supervisor_node` applies the intent patch at iteration 0 (system notes only on turn entry; ReAct rounds preserve prior focus), drops session-boost and clears `auto_continue` on shift, stubs prior tool chains on shift/completed/superseded, and marks short final answers `completed`.
+  - `compaction.py`: summarizer prompt marks a prior Task Goal as **SUPERSEDED** on a subject change instead of instructing the agent to finish old steps.
+- **Config:** new `agent.topic_drift.{enabled,threshold}` ConfigStore keys (default `true` / `0.55`, clamped `[0.05, 0.95]`, live-re-read on every check, **fail-open** — embedder unavailable or encode error never forces a shift; regex/heuristic classifiers still apply).
+- **Root cause:** subject stickiness — an old multi-step task's focus bled into a new subject via session-boost and `auto_continue`, so the agent resumed finished steps until the user ran `/reset`.
+- **Tests:** `tests/test_topic_drift_embed_and_stub.py`, `tests/test_topic_shift_focus.py` (17 passing). Smoke: `scripts/smoke_topic_shift_p0.py`.
+- **Docs:** new §1 diagnosis-map rows (false shift vs missed shift → tune θ), `agent.topic_drift.*` rows in `configuration.md`, recent-features at-a-glance entry. See `docs/docs/ops/diagnosis-map.md` §1.
+
 ## Unreleased — Enterprise Arabic i18n Architecture, Two-Stage PDF Exporter & Rich UI Refactor (2026-08-08)
 
 - **Enterprise Arabic Language Architecture:**
