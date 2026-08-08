@@ -630,8 +630,9 @@ class KazmaAppBuilder:
                     stt_language=voice_cfg.get("stt_language", "auto"),
                     webhook_secret=webhook_secret or None,
                 )
-                # Set allowed users
+                # Set allowed users (backward compat: empty = allow_all for existing installs)
                 allowed = self.config_store.get("connectors.telegram.allowed_users", "")
+                tg_adapter._allow_all = True  # backward compat: existing single-operator installs
                 if allowed:
                     try:
                         allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
@@ -655,6 +656,7 @@ class KazmaAppBuilder:
                 from kazma_gateway.adapters.discord import DiscordAdapter
 
                 discord_adapter = DiscordAdapter(token=discord_token)
+                discord_adapter._allow_all = True  # backward compat
                 # User-level allowlist (mirrors Telegram). Stored in ConfigStore
                 # as a comma-separated string of Discord user IDs.
                 discord_allowed = self.config_store.get("connectors.discord.allowed_users", "")
@@ -692,6 +694,7 @@ class KazmaAppBuilder:
                     app_token=slack_app_token or None,
                     allowed_teams=slack_teams or None,
                     allowed_channels=slack_channels or None,
+                    allow_all=True,  # backward compat: existing installs
                 )
                 self.gateway.add_adapter(slack_adapter)
                 if slack_app_token:
