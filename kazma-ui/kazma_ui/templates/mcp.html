@@ -33,15 +33,12 @@
             <div class="mcp-card-actions">
                 {% if server.status == 'stopped' %}
                 <button class="btn btn-sm btn-primary"
-                        :disabled="actionPending"
                         @click="startServer({{ server.name|tojson }})">{{ t('mcp.start') }}</button>
                 {% else %}
                 <button class="btn btn-sm btn-secondary"
-                        :disabled="actionPending"
                         @click="stopServer({{ server.name|tojson }})">{{ t('mcp.stop') }}</button>
                 {% endif %}
                 <button class="btn btn-sm btn-secondary"
-                        :disabled="actionPending"
                         @click="testServer({{ server.name|tojson }})">{{ t('mcp.test') }}</button>
                 <button class="btn btn-sm btn-secondary" @click="expanded = !expanded">
                     <span x-text="expanded ? t('mcp.hide_tools') : t('mcp.show_tools')"></span>
