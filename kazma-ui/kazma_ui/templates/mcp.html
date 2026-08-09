@@ -33,13 +33,13 @@
             <div class="mcp-card-actions">
                 {% if server.status == 'stopped' %}
                 <button class="btn btn-sm btn-primary"
-                        @click="startServer({{ server.name|tojson }})">{{ t('mcp.start') }}</button>
+                        @click="$parent.startServer({{ server.name|tojson }})">{{ t('mcp.start') }}</button>
                 {% else %}
                 <button class="btn btn-sm btn-secondary"
-                        @click="stopServer({{ server.name|tojson }})">{{ t('mcp.stop') }}</button>
+                        @click="$parent.stopServer({{ server.name|tojson }})">{{ t('mcp.stop') }}</button>
                 {% endif %}
                 <button class="btn btn-sm btn-secondary"
-                        @click="testServer({{ server.name|tojson }})">{{ t('mcp.test') }}</button>
+                        @click="$parent.testServer({{ server.name|tojson }})">{{ t('mcp.test') }}</button>
                 <button class="btn btn-sm btn-secondary" @click="expanded = !expanded">
                     <span x-text="expanded ? t('mcp.hide_tools') : t('mcp.show_tools')"></span>
                 </button>
@@ -97,6 +97,7 @@
                 <select x-model="newServer.transport" class="form-select">
                     <option value="stdio">{{ t('mcp.transport_stdio') }}</option>
                     <option value="sse">{{ t('mcp.transport_sse') }}</option>
+                    <option value="streamable_http">{{ t('mcp.transport_streamable_http', 'Streamable HTTP') }}</option>
                 </select>
             </div>
             <template x-if="newServer.transport === 'stdio'">
@@ -123,6 +124,18 @@
                     <div class="form-group">
                         <label>{{ t('mcp.field_sse_url') }}</label>
                         <input type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t('mcp.field_auth_token') }}</label>
+                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="optional bearer token">
+                    </div>
+                </div>
+            </template>
+            <template x-if="newServer.transport === 'streamable_http'">
+                <div>
+                    <div class="form-group">
+                        <label>{{ t('mcp.field_url') }}</label>
+                        <input type="text" x-model="newServer.url" class="form-input" placeholder="https://mcp.example.com/devtools">
                     </div>
                     <div class="form-group">
                         <label>{{ t('mcp.field_auth_token') }}</label>

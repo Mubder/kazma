@@ -307,12 +307,12 @@ function mcpApp() {
                     name: (this.newServer.name || '').trim(),
                     transport: this.newServer.transport,
                     command: this.newServer.transport === 'stdio' ? rewrite.command : [],
-                    url: this.newServer.transport === 'sse' ? this.newServer.url : '',
+                    url: (this.newServer.transport === 'sse' || this.newServer.transport === 'streamable_http') ? this.newServer.url : '',
                     working_dir: this.newServer.working_dir || null,
                     env: this._collectEnv(),
                     trust: this.newServer.trust || 'approval_required'
                 };
-                if (this.newServer.transport === 'sse' && this.newServer.authToken) {
+                if ((this.newServer.transport === 'sse' || this.newServer.transport === 'streamable_http') && this.newServer.authToken) {
                     server.auth = { type: 'bearer', token: this.newServer.authToken };
                 }
 
@@ -325,8 +325,8 @@ function mcpApp() {
                     this.addError = 'Command is required for stdio transport.';
                     return;
                 }
-                if (server.transport === 'sse' && !server.url) {
-                    this.addError = 'URL is required for SSE transport.';
+                if ((server.transport === 'sse' || server.transport === 'streamable_http') && !server.url) {
+                    this.addError = 'URL is required for HTTP-based transport.';
                     return;
                 }
 

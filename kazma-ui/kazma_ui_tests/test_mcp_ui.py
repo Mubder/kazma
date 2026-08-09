@@ -91,6 +91,43 @@ async def test_test_config_uses_sse_bearer_auth_and_trust(mcp_router) -> None:
 
 
 @pytest.mark.asyncio
+async def test_test_config_uses_streamable_http_manager(mcp_router) -> None:
+    """streamable_http must be tested via AsyncMCPManager, not MCPClient."""
+    captured = []
+
+    class FakeManager:
+        async def connect_from_config(self, configs, *, raise_on_error=False):
+            captured.extend(configs)
+            return 3
+
+        def get_all_tool_schemas(self):
+            return [{"name": "tool1"}, {"name": "tool2"}, {"name": "tool3"}]
+
+        async def shutdown(self):
+            pass
+
+    endpoint = _router_endpoint(mcp_router, "/api/mcp/test-config", "POST")
+    with patch("kazma_core.mcp_client.MCPClient") as mock_client:
+        with patch(
+            "kazma_core.mcp.manager.AsyncMCPManager", return_value=FakeManager()
+        ) as mock_mgr:
+            result = await endpoint(
+                {
+                    "name": "remote",
+                    "transport": "streamable_http",
+                    "url": "https://mcp.example.test/devtools",
+                    "auth": {"type": "bearer", "token": "test-token"},
+                    "trust": "trusted",
+                }
+            )
+
+    mock_client.assert_not_called()
+    assert result["success"] is True
+    assert result["tool_count"] == 3
+    assert captured[0]["auth"] == {"type": "bearer", "token": "test-token"}
+
+
+@pytest.mark.asyncio
 async def test_remove_server_returns_persistence_error_without_disconnect(
     mcp_agent: MagicMock, mcp_router
 ) -> None:
