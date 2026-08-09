@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from kazma_core.memory.health import build_memory_health
+from kazma_core.memory.health import (
+    build_memory_health,
+    mark_recall_degraded,
+    recall_degraded,
+)
 
 
 def test_build_memory_health_shape():
@@ -32,3 +36,17 @@ def test_build_memory_health_shape():
     for c in data["components"]:
         assert "name" in c and "status" in c and "detail" in c
         assert c["status"] in ("ok", "warn", "error", "off")
+
+
+def test_build_memory_health_surfaces_recall_failures(monkeypatch):
+    monkeypatch.setattr("kazma_core.memory.health._recall_fail_count", 0)
+    monkeypatch.setattr("kazma_core.memory.health._recall_last_failure", 0.0)
+    monkeypatch.setattr("kazma_core.memory.health._recall_last_reason", "")
+
+    assert int((recall_degraded().get("fail_count") or 0)) == 0
+    mark_recall_degraded("unit-test")
+    data = build_memory_health()
+    by_id = {c["id"]: c for c in data["components"]}
+    assert "recall_failures" in by_id
+    assert by_id["recall_failures"]["status"] == "warn"
+    assert int((by_id["recall_failures"].get("meta") or {}).get("fail_count") or 0) >= 1

@@ -192,3 +192,42 @@ def test_dense_belief_cap_respected(mem_db, monkeypatch):
     )
     rows = recall_mod._belief_dense(mem_db, "anything", None, "default", 5)
     assert rows == []
+
+
+def test_episode_ppr_traverses_from_later_seed(mem_db):
+    from kazma_core.memory.ppr import ppr_available
+    from kazma_core.memory.recall import _episode_ppr
+
+    _insert_episode(
+        mem_db,
+        eid="ep-a",
+        session_id="sess-ppr",
+        user_text="session alpha",
+        tier="episodic",
+    )
+    _insert_episode(
+        mem_db,
+        eid="ep-b",
+        session_id="sess-ppr",
+        user_text="session beta",
+        tier="episodic",
+    )
+    scores = _episode_ppr(mem_db, ["ep-b"], "default")
+    if ppr_available():
+        assert "ep-a" in scores
+    else:
+        assert "ep-b" in scores
+
+
+def test_read_memory_cfg_store_overlay_includes_ppr_hop_radius(monkeypatch):
+    from kazma_core.memory.config import read_memory_cfg
+
+    class _DummyStore:
+        def get(self, key: str, default=None):
+            if key == "memory.v2.ppr_hop_radius":
+                return 5
+            return default
+
+    monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: _DummyStore())
+    cfg = read_memory_cfg()
+    assert int(((cfg.get("v2") or {}).get("ppr_hop_radius") or 0)) == 5
