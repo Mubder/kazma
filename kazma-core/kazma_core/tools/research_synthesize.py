@@ -150,11 +150,17 @@ async def synthesize_from_digests(
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        result = await client.chat(
+        # Resilient path (audit): transient retries + failover + ledger.
+        from kazma_core.agent.resilient_chat import resilient_chat
+
+        result = await resilient_chat(
+            client,
             messages=messages,
             tools=None,
             model=model,
+            max_attempts=3,
             max_tokens=min(8000, max(1024, cap_out // 3)),
+            label="research-synthesize",
         )
         text = ""
         if hasattr(result, "content"):

@@ -124,11 +124,18 @@ async def _llm_json(system: str, user: str, *, max_tokens: int = 1200) -> str:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    result = await client.chat(
+    # Resilient path (audit): transient retries + failover chain + ledger —
+    # previously a bare client.chat with no resilience.
+    from kazma_core.agent.resilient_chat import resilient_chat
+
+    result = await resilient_chat(
+        client,
         messages=messages,
         tools=None,
         model=model,
+        max_attempts=2,
         max_tokens=max_tokens,
+        label="research-planner",
     )
     if hasattr(result, "content"):
         return str(result.content or "")

@@ -1,6 +1,13 @@
 # CHANGELOG
 
-## Unreleased — Settings UI: Non-Stop & Self-Healing section (2026-08-09)
+## Unreleased — Self-healing rollout: swarm workers, research pipeline, KB (2026-08-09)
+
+- **Shared resilient-chat helper:** new `kazma_core/agent/resilient_chat.py` — `resilient_chat()` gives non-graph LLM paths the same guarantees as the supervisor: transient-only retries with exponential backoff (permanent 4xx fail fast), opt-in model failover via `agent.nonstop.failover.chain` (one-off registry clients, per-model cooldowns, active profile untouched), and a per-call ledger record for every success/terminal failure.
+- **Swarm workers** (`swarm/worker.py`): the ReAct loop's fixed 2s/4s inline retry replaced with `resilient_chat` (adds failover + ledger; worker LLM 180s timeout preserved). Tool executions now bounded by `asyncio.wait_for` with the shared `agent.tool_timeout_seconds` — a hung tool returns a HARD error (feeds the breaker) instead of stalling the task until the engine reaper. Smoke-verified: hung tool → timeout → worker still completes with final answer.
+- **Research pipeline** (`research_planner._llm_json`, `research_synthesize`): bare `client.chat()` calls replaced with `resilient_chat` (2–3 attempts), so planning/synthesis survive provider blips and fail over when configured.
+- **Knowledge base:** verified already covered — `kb_jobs.mark_stale_jobs_interrupted()` runs at KB API boot, marking in-flight crawl jobs interrupted on restart (test_kb_jobs green).
+
+
 
 - **New settings card** on the Agent tab (`settings.html` + `settings.js`): enable toggle, stall threshold, per-tool timeout, max recovery attempts, backoff base/max, model failover toggle + chain (comma-separated) + cooldown, and the per-call ledger toggle. Sub-sections collapse with `x-cloak` (no first-paint blink); failover fields only show when failover is on.
 - **Backend:** `SettingsManager.get/save_nonstop_settings()` (validated, whitelisted `agent.nonstop.*` ConfigStore keys; chain accepts list or comma string) + `GET/PUT /api/settings/agent/nonstop` (`settings.py`). Live-re-read by `get_nonstop_config()` — saving applies without restart.

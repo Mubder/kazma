@@ -362,30 +362,22 @@ class InProcessWorker(SwarmWorker):
             _consecutive_tool_failures = 0
 
             for iteration in range(1, MAX_ITERATIONS + 1):
-                # Retry the LLM call on transient network errors (timeouts,
-                # connection resets) — common with long research outputs.
-                response = None
-                for _attempt in range(3):
-                    try:
-                        response = await provider.chat(
-                            messages,
-                            tools=tool_defs if tool_defs else None,
-                            model=self.model or None,
-                        )
-                        break
-                    except Exception as _llm_exc:
-                        if _attempt < 2:
-                            logger.warning(
-                                "[InProcessWorker:%s] LLM call failed (attempt %d/3): %s — retrying",
-                                self.name, _attempt + 1, type(_llm_exc).__name__,
-                            )
-                            import asyncio as _aio
-                            await _aio.sleep(2 * (_attempt + 1))  # 2s, 4s backoff
-                        else:
-                            raise  # exhausted retries
+                # Resilient LLM call: transient retries + model failover chain
+                # + per-call ledger (audit: swarm workers previously had only
+                # a fixed 2s/4s retry and no failover).
+                from kazma_core.agent.resilient_chat import resilient_chat
 
-                if response is None:
-                    raise RuntimeError("LLM returned no response after retries")
+                response = await resilient_chat(
+                    provider,
+                    messages=messages,
+                    tools=tool_defs if tool_defs else None,
+                    model=self.model or None,
+                    max_attempts=3,
+                    backoff_base=2.0,
+                    thread_id=task_id,
+                    iteration=iteration,
+                    label=f"InProcessWorker:{self.name}",
+                )
 
                 # Accumulate token/cost across all iterations.
                 # Sum ONLY prompt_tokens + completion_tokens — NOT
@@ -479,8 +471,36 @@ class InProcessWorker(SwarmWorker):
                                 }
                             else:
                                 try:
-                                    result = await tool_registry.execute(tc.name, tc.arguments)
+                                    # Per-tool wall-clock timeout (audit:
+                                    # workers previously awaited tools with
+                                    # no bound — a hung tool stalled the whole
+                                    # swarm task until the engine reaper).
+                                    from kazma_core.agent.graph_builder import _resolve_tool_timeout
+
+                                    import asyncio as _aio
+
+                                    _t = _resolve_tool_timeout()
+                                    if _t and _t > 0:
+                                        result = await _aio.wait_for(
+                                            tool_registry.execute(tc.name, tc.arguments),
+                                            timeout=_t,
+                                        )
+                                    else:
+                                        result = await tool_registry.execute(tc.name, tc.arguments)
                                     executed_tools[tc_key] = result.get("content", "")
+                                except _aio.TimeoutError:
+                                    logger.error(
+                                        "[InProcessWorker:%s] tool %s timed out",
+                                        self.name, tc.name,
+                                    )
+                                    result = {
+                                        "content": (
+                                            f"Error: Tool '{tc.name}' timed out and was aborted. "
+                                            "Do NOT retry the identical call — narrow the scope or "
+                                            "choose a different tool."
+                                        ),
+                                        "is_error": True,
+                                    }
                                 except Exception:
                                     logger.exception(
                                         "[InProcessWorker:%s] tool %s execution failed",
