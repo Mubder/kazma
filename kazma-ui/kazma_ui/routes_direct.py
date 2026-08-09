@@ -295,10 +295,11 @@ def register_direct_routes(self: Any) -> None:
             }
         try:
             from kazma_core.memory.federated_search import federated_search
+            from kazma_core.tenant_isolation import require_tenant_id
 
             return federated_search(
                 query,
-                tenant_id=str((body or {}).get("tenant_id") or "default"),
+                tenant_id=require_tenant_id(),
                 session_id=(body or {}).get("session_id") or None,
                 limit_memory=int((body or {}).get("limit_memory") or 5),
                 limit_kb=int((body or {}).get("limit_kb") or 5),
@@ -350,12 +351,13 @@ def register_direct_routes(self: Any) -> None:
         query = str((body or {}).get("query") or "").strip()
         limit = int((body or {}).get("limit") or 5)
         session_id = (body or {}).get("session_id") or None
-        tenant_id = str((body or {}).get("tenant_id") or "default")
         if not query:
             return {"ok": False, "error": "query required", "beliefs": [], "episodes": []}
         try:
             from kazma_core.memory.recall import recall
+            from kazma_core.tenant_isolation import require_tenant_id
 
+            tenant_id = require_tenant_id()
             result = recall(
                 query,
                 limit=max(1, min(limit, 20)),
@@ -2895,11 +2897,22 @@ def register_direct_routes(self: Any) -> None:
         if graph_ref is None:
             return _JSONResponse({"error": "Graph not available"}, status_code=503)
 
-        # H-2 / S0-3: ownership for *gateway* threads only. Web chat sessions
-        # live in SessionManager (not gateway session_store) and already pass
-        # session_id from the browser — never 403 web users who legitimately
-        # clicked Approve on their own card just because gateway has no row.
+        # A checkpoint has no authenticated caller identity of its own. Bind
+        # every browser approval to a session belonging to this request's tenant
+        # before inspecting or resuming the graph state.
         try:
+            from kazma_ui.session_manager import get_session_manager
+
+            if get_session_manager().get_by_thread_id(thread_id) is None:
+                logger.warning(
+                    "[HITL] Approval denied for thread not owned by current tenant: %s",
+                    thread_id,
+                )
+                return _JSONResponse(
+                    {"error": "Approval request not found"},
+                    status_code=404,
+                )
+
             if self.session_store is not None:
                 ctx = None
                 try:
@@ -2926,35 +2939,14 @@ def register_direct_routes(self: Any) -> None:
                         )
                     )
                     if is_gateway_owner:
-                        # Fail-closed: require session_id for gateway-owned threads
-                        # (audit H3 — omit used to skip ownership check entirely)
-                        caller_session = body.get("session_id")
-                        if not caller_session:
-                            logger.warning(
-                                "[HITL] Web approve missing session_id for gateway thread %s owner=%s",
-                                thread_id,
-                                owner,
-                            )
-                            return _JSONResponse(
-                                {
-                                    "error": (
-                                        "session_id required to approve gateway-owned "
-                                        "HITL requests"
-                                    )
-                                },
-                                status_code=403,
-                            )
-                        if str(owner) != str(caller_session):
-                            logger.warning(
-                                "[HITL] Web approve ownership mismatch for thread %s: owner=%s caller=%s",
-                                thread_id,
-                                owner,
-                                caller_session,
-                            )
-                            return _JSONResponse(
-                                {"error": "Ownership mismatch: you cannot approve another user's request"},
-                                status_code=403,
-                            )
+                        # Gateway sessions are not implicitly transferable to a
+                        # browser caller. A matching tenant-owned UI session is
+                        # required above; platform approval remains on the
+                        # platform's native command/callback path.
+                        return _JSONResponse(
+                            {"error": "Gateway-owned approvals must be completed on their platform"},
+                            status_code=403,
+                        )
         except Exception as _e:
             # Fail-closed (audit M7): never skip ownership on store errors
             logger.warning("[HITL] Ownership check failed — denying: %s", _e)
@@ -3162,6 +3154,7 @@ def register_direct_routes(self: Any) -> None:
     @self.app.get("/api/pending-approvals")
     async def list_pending_approvals() -> _JSONResponse:
         from kazma_ui.hitl_approval import _get_pending_approvals
+        from kazma_ui.session_manager import get_session_manager
 
         graph = _resolve_hitl_graph()
         checkpointer = _resolve_hitl_checkpointer()
@@ -3171,7 +3164,12 @@ def register_direct_routes(self: Any) -> None:
                 status_code=503,
             )
         try:
-            pending = await _get_pending_approvals(graph, checkpointer)
+            pending = [
+                item
+                for item in await _get_pending_approvals(graph, checkpointer)
+                if get_session_manager().get_by_thread_id(str(item["thread_id"]))
+                is not None
+            ]
             return _JSONResponse({"pending": pending, "count": len(pending)})
         except Exception:
             logger.exception("[HITL] Failed to list pending approvals")
@@ -3180,14 +3178,29 @@ def register_direct_routes(self: Any) -> None:
     @self.app.post("/api/pending-approvals/clear")
     @self.app.delete("/api/pending-approvals")
     async def clear_pending_approvals_route() -> _JSONResponse:
-        from kazma_ui.hitl_approval import clear_pending_approvals
+        from kazma_ui.hitl_approval import _get_pending_approvals
+        from kazma_ui.session_manager import get_session_manager
 
         graph = _resolve_hitl_graph()
         checkpointer = _resolve_hitl_checkpointer()
         if checkpointer is None:
             return _JSONResponse({"error": "Checkpointer not available"}, status_code=503)
         try:
-            cleared = await clear_pending_approvals(graph, checkpointer)
+            pending = await _get_pending_approvals(graph, checkpointer)
+            cleared = 0
+            for item in pending:
+                thread_id = str(item["thread_id"])
+                if get_session_manager().get_by_thread_id(thread_id) is None:
+                    continue
+                if hasattr(checkpointer, "adelete_thread"):
+                    await checkpointer.adelete_thread(thread_id)
+                elif hasattr(checkpointer, "_saver") and hasattr(
+                    checkpointer._saver, "adelete_thread"
+                ):
+                    await checkpointer._saver.adelete_thread(thread_id)
+                else:
+                    continue
+                cleared += 1
             return _JSONResponse({"status": "ok", "cleared": cleared})
         except Exception:
             logger.exception("[HITL] Failed to clear pending approvals")

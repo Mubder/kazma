@@ -589,7 +589,7 @@
   // to /api/chat/upload and referenced by the returned descriptor.
   var pendingText = '';
   var pendingTextName = '';
-  var pendingUploads = []; // [{id, kind, mime, filename, path}]
+  var pendingUploads = []; // [{id, kind, mime, filename}]
 
   function _isTextFile(file) {
     var allowedTypes = ['text/plain', 'text/markdown', 'text/html', 'application/json', 'text/csv', 'text/x-python', 'text/javascript'];
@@ -871,7 +871,7 @@
     }
     // Build the attachments payload for the server (binary uploads only).
     var attachmentsPayload = pendingUploads.map(function(u) {
-      return { id: u.id, kind: u.kind, mime: u.mime, filename: u.filename, path: u.path };
+      return { id: u.id, kind: u.kind, mime: u.mime, filename: u.filename };
     });
 
     // Show user message

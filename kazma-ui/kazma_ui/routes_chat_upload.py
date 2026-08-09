@@ -12,20 +12,15 @@ shape so the SSE handler and the gateway path both consume the same fields.
 from __future__ import annotations
 
 import logging
-import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from kazma_ui.chat_attachments import MAX_UPLOAD_BYTES, store_uploaded_attachment
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-
-ATTACHMENT_DIR = Path("kazma-data/attachments")
-
-# 20 MB cap to match the vision tool / Telegram ceiling.
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 # Coarse classification by MIME prefix.
 def _classify(mime: str) -> str:
@@ -42,10 +37,12 @@ def _classify(mime: str) -> str:
 async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
     """Persist an uploaded file and return an attachment descriptor.
 
-    Returns ``{id, kind, mime, filename, path}``. The client sends the
-    descriptor (minus ``path``) as part of the next chat-stream request.
+    Returns ``{id, kind, mime, filename}``. The opaque ``id`` is the only
+    server-side file reference the client may send with a chat turn.
     """
-    data = await file.read()
+    # Bound the read itself so a missing or dishonest Content-Length cannot
+    # make an upload consume arbitrary process memory before rejection.
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
     if len(data) > MAX_UPLOAD_BYTES:
@@ -56,23 +53,15 @@ async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
 
     mime = (file.content_type or "application/octet-stream").lower()
     kind = _classify(mime)
-    original = file.filename or f"upload_{uuid.uuid4().hex[:8]}"
-    ext = Path(original).suffix or ""
-    stored_name = f"{Path(original).stem}_{uuid.uuid4().hex[:6]}{ext}"
-
-    ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = ATTACHMENT_DIR / stored_name
-    dest.write_bytes(data)
-
-    attach_id = f"att_{uuid.uuid4().hex[:12]}"
+    original = file.filename or "upload"
+    attach_id = store_uploaded_attachment(data, original)
     logger.info(
         "[chat-upload] stored %s (%s, %d bytes) as %s",
-        original, mime, len(data), dest,
+        original, mime, len(data), attach_id,
     )
     return {
         "id": attach_id,
         "kind": kind,
         "mime": mime,
         "filename": original,
-        "path": str(dest.resolve()),
     }

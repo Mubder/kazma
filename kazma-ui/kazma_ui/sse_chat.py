@@ -921,8 +921,8 @@ def create_sse_chat_router(
             )
 
         user_message = (body.get("message") or "").strip()
-        # Optional attachments uploaded via /api/chat/upload. Each entry is an
-        # Attachment-shaped dict {id, kind, mime, filename, path}.
+        # Optional attachments uploaded via /api/chat/upload. The upload ID,
+        # not a client filesystem path, is the server-side byte reference.
         raw_attachments = body.get("attachments") or []
         if not user_message and not raw_attachments:
             return StreamingResponse(
@@ -1525,30 +1525,10 @@ def create_sse_chat_router(
         # transports produce identical OpenAI-compatible content.
         if raw_attachments and messages:
             try:
-                from kazma_gateway.gateway import Attachment
                 from kazma_gateway.agent_handler.attachments import build_user_content
-                from pathlib import Path as _Path
+                from kazma_ui.chat_attachments import attachments_from_client_payload
 
-                atts: list[Attachment] = []
-                for a in raw_attachments:
-                    kind = a.get("kind", "file")
-                    mime = a.get("mime", "application/octet-stream")
-                    data = None
-                    p = a.get("path")
-                    if p:
-                        try:
-                            data = _Path(p).read_bytes()
-                        except Exception:  # noqa: BLE001
-                            data = None
-                    atts.append(
-                        Attachment(
-                            kind=kind,
-                            mime=mime,
-                            filename=a.get("filename", ""),
-                            data=data,
-                            url=a.get("url"),
-                        )
-                    )
+                atts = attachments_from_client_payload(raw_attachments)
                 multimodal_content = build_user_content(user_message or "", atts)
                 # Replace the trailing user message content.
                 for i in range(len(messages) - 1, -1, -1):
@@ -1959,31 +1939,13 @@ def create_sse_chat_router(
 
     @r.get("/api/chat/sessions/{session_id}/messages")
     async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
-        """Return the message history for a chat session (shared store).
-
-        Cross-platform seasons: if the UI projection is empty but a
-        LangGraph checkpointer has history for this thread (e.g. Telegram
-        session opened in Web), hydrate from the checkpointer and persist
-        back to SessionManager so takeover is seamless.
-
-        For gw-* platform sessions (Telegram/Discord/Slack), the
-        SessionManager in-memory cache can be stale because the gateway
-        writes to Postgres directly (bypassing the cache). We force-refresh
-        from Postgres on every request for these sessions.
-        """
-        # For gw-* sessions, force-refresh from Postgres (the in-memory cache
-        # may be stale — the gateway writes directly to Postgres).
+        """Return the current tenant's message history for a chat session."""
         if session_id.startswith("gw-"):
             _get_store()._refresh_from_db(session_id)
 
         session = _get_store().get(session_id)
         if not session:
-            # Platform seasons may not be in store yet — create shell
-            if session_id.startswith("gw-"):
-                session = _get_store().get_or_create(session_id)
-                session.thread_id = session_id
-            else:
-                return []
+            return []
 
         messages = list(session.messages or [])
         # Hydrate from checkpointer when:

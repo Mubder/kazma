@@ -249,6 +249,20 @@ def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
         """
         try:
             pending = await _get_pending_approvals(graph, checkpointer)
+            # A standalone router without tenant middleware is single-tenant.
+            # When middleware establishes a tenant, never expose a checkpoint
+            # unless that tenant owns its session projection.
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            if get_current_tenant_id() is not None:
+                from kazma_ui.session_manager import get_session_manager
+
+                store = get_session_manager()
+                pending = [
+                    item
+                    for item in pending
+                    if store.get_by_thread_id(str(item["thread_id"])) is not None
+                ]
             return JSONResponse({"pending": pending, "count": len(pending)})
         except Exception as exc:
             logger.exception("[HITL] Failed to list pending approvals")

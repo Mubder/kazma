@@ -23,6 +23,7 @@ import logging
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urljoin
 
 if TYPE_CHECKING:
     from kazma_gateway.gateway import Attachment
@@ -43,6 +44,33 @@ _INLINE_IMAGE_MIMES = frozenset(
 # Where over-cap / non-image attachments are persisted so the agent can
 # open them with file_read. Relative to CWD, matching tools/image_gen.py.
 ATTACHMENT_DIR = Path("kazma-data/attachments")
+_MAX_ATTACHMENT_REDIRECTS = 3
+
+
+def _fetch_attachment_url(url: str) -> bytes:
+    """Fetch a remote attachment after SSRF-validating every redirect target."""
+    import httpx
+
+    from kazma_core.security.ssrf import validate_url
+
+    current_url = url
+    for _ in range(_MAX_ATTACHMENT_REDIRECTS + 1):
+        validate_url(current_url, block_unresolved=True)
+        response = httpx.get(
+            current_url,
+            timeout=30.0,
+            follow_redirects=False,
+        )
+        if response.status_code not in (301, 302, 303, 307, 308):
+            response.raise_for_status()
+            return response.content
+
+        location = response.headers.get("location")
+        if not location:
+            raise ValueError("attachment redirect has no location")
+        current_url = urljoin(current_url, location)
+
+    raise ValueError("attachment URL exceeded redirect limit")
 
 
 def _persist_attachment(attachment: "Attachment") -> str:
@@ -212,11 +240,7 @@ def build_user_content(
         # Fetch on demand if only a URL was provided.
         if data is None and att.url:
             try:
-                import httpx
-
-                resp = httpx.get(att.url, timeout=30.0, follow_redirects=True)
-                resp.raise_for_status()
-                data = resp.content
+                data = _fetch_attachment_url(att.url)
             except Exception as exc:  # noqa: BLE001 — network is best-effort
                 logger.warning(
                     "[attachments] failed to fetch %s: %s", att.url, exc

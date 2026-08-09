@@ -25,6 +25,7 @@ from kazma_ui.session_manager import (
     get_session_manager,
     reset_session_manager,
 )
+from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
 
 # ═══════════════════════════════════════════════════════════════════
 # Fixtures
@@ -294,6 +295,49 @@ class TestSessionManagerUnit:
         mgr.get_or_create("b")
         mgr.get_or_create("c")
         assert len(mgr.list_all()) == 3
+
+    def test_get_and_list_do_not_cross_tenant_boundaries(self):
+        mgr = SessionManager()
+        first_token = set_current_tenant_id("tenant-a")
+        try:
+            first = mgr.get_or_create("shared-id")
+            first.messages.append({"role": "user", "content": "tenant-a secret"})
+            mgr.put(first)
+        finally:
+            reset_current_tenant_id(first_token)
+
+        second_token = set_current_tenant_id("tenant-b")
+        try:
+            assert mgr.get("shared-id") is None
+            assert mgr.list_all() == []
+            mgr.delete("shared-id")
+        finally:
+            reset_current_tenant_id(second_token)
+
+        first_token = set_current_tenant_id("tenant-a")
+        try:
+            restored = mgr.get("shared-id")
+            assert restored is not None
+            assert restored.messages[0]["content"] == "tenant-a secret"
+        finally:
+            reset_current_tenant_id(first_token)
+
+    def test_thread_lookup_is_tenant_scoped(self):
+        mgr = SessionManager()
+        first_token = set_current_tenant_id("tenant-a")
+        try:
+            session = mgr.get_or_create("tenant-a-session")
+            session.thread_id = "shared-thread"
+            mgr.put(session)
+            assert mgr.get_by_thread_id("shared-thread") is not None
+        finally:
+            reset_current_tenant_id(first_token)
+
+        second_token = set_current_tenant_id("tenant-b")
+        try:
+            assert mgr.get_by_thread_id("shared-thread") is None
+        finally:
+            reset_current_tenant_id(second_token)
 
     def test_update_from_dict_upserts(self):
         mgr = SessionManager()

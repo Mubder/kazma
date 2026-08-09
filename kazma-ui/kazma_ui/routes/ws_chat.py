@@ -959,33 +959,14 @@ def create_ws_chat_router(
                     raw_attachments = payload.get("attachments") or []
                     if raw_attachments and full_messages:
                         try:
-                            from pathlib import Path as _Path
-
                             from kazma_gateway.agent_handler.attachments import (
                                 build_user_content,
                             )
-                            from kazma_gateway.gateway import Attachment
+                            from kazma_ui.chat_attachments import (
+                                attachments_from_client_payload,
+                            )
 
-                            atts: list[Attachment] = []
-                            for a in raw_attachments:
-                                kind = a.get("kind", "file")
-                                mime = a.get("mime", "application/octet-stream")
-                                data = None
-                                p = a.get("path")
-                                if p:
-                                    try:
-                                        data = _Path(p).read_bytes()
-                                    except Exception:  # noqa: BLE001
-                                        data = None
-                                atts.append(
-                                    Attachment(
-                                        kind=kind,
-                                        mime=mime,
-                                        filename=a.get("filename", ""),
-                                        data=data,
-                                        url=a.get("url"),
-                                    )
-                                )
+                            atts = attachments_from_client_payload(raw_attachments)
                             multimodal_content = build_user_content(text or "", atts)
                             for i in range(len(full_messages) - 1, -1, -1):
                                 if (
@@ -1360,8 +1341,20 @@ def create_ws_chat_router(
                     elif requested_tid and requested_tid == session_id:
                         target_thread_id = thread_id
                     elif requested_tid:
-                        # Explicit non-session thread (e.g. gateway takeover)
-                        target_thread_id = requested_tid
+                        logger.warning(
+                            "[WS-Chat] Rejecting approval for non-session thread=%s session=%s",
+                            requested_tid,
+                            session_id,
+                        )
+                        await websocket.send_json(
+                            ApprovalEventBridge.create_approval_error_event(
+                                thread_id,
+                                error="Approval request does not belong to this session",
+                                code="THREAD_OWNERSHIP_MISMATCH",
+                                scope=scope,
+                            )
+                        )
+                        continue
 
                     actor = f"ws:{(session_id or '')[:12] or 'anon'}"
                     approve_config: dict[str, Any] = {
