@@ -482,6 +482,27 @@ function mcpApp() {
             }
         },
 
+        async oauthLogin(name) {
+            if (this.actionPending) return;
+            this.actionPending = 'oauth:' + name;
+            notify('Starting OAuth login — complete the sign-in in your browser…', 'info');
+            try {
+                var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/oauth/start', {
+                    method: 'POST'
+                });
+                var result = await resp.json();
+                if (result.status === 'ok') {
+                    notify('Browser login opened. Return here after signing in, then press Start.', 'success');
+                } else {
+                    notify('OAuth login failed: ' + (result.error || 'unknown error'), 'error');
+                }
+            } catch (e) {
+                notify('OAuth login failed: ' + e.message, 'error');
+            } finally {
+                this.actionPending = '';
+            }
+        },
+
         resetNewServer() {
             this.newServer = {
                 name: '',

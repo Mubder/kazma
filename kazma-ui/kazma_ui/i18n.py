@@ -1653,6 +1653,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mcp.transport_stdio": {"en": "stdio (local process)", "ar": "stdio (عملية محلية)"},
     "mcp.transport_sse": {"en": "SSE (HTTP)", "ar": "SSE (HTTP)"},
     "mcp.transport_streamable_http": {"en": "Streamable HTTP", "ar": "HTTP قابل للتدفق"},
+    "mcp.oauth_login": {"en": "Login", "ar": "تسجيل الدخول"},
     "mcp.field_command": {"en": "Command (space-separated)", "ar": "الأمر (مفصول بمسافات)"},
     "mcp.field_working_dir": {"en": "Working Directory (optional)", "ar": "مجلد العمل (اختياري)"},
     "mcp.field_sse_url": {"en": "SSE URL", "ar": "عنوان SSE"},

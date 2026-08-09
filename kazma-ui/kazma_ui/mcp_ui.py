@@ -94,8 +94,60 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
 
     @router.get("/api/mcp/servers")
     async def api_list_servers() -> list[dict[str, Any]]:
-        """List configured MCP servers."""
-        return _get_configured_servers()
+        """List configured MCP servers, annotated with OAuth status."""
+        servers = _get_configured_servers()
+        try:
+            from kazma_core.mcp.oauth import oauth_status
+
+            manager = getattr(agent.tools, "_mcp", None)
+            for s in servers:
+                name = s.get("name", "")
+                s["oauth_status"] = oauth_status(name)
+                if manager is not None and manager.oauth_challenge(name):
+                    s["oauth_required"] = True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[mcp_api] oauth status annotation skipped: %s", exc)
+        return servers
+
+    @router.post("/api/mcp/servers/{name}/oauth/start")
+    async def api_oauth_start(name: str) -> dict[str, Any]:
+        """Begin an OAuth 2.1 + DCR login for an MCP server.
+
+        Runs dynamic client registration + PKCE, starts a loopback callback
+        listener, opens the user's browser at the authorization URL, and
+        stores the resulting token (auto-refreshed on later connects).
+        """
+        from kazma_core.mcp.oauth import MCPOAuthError, start_oauth_flow
+
+        servers = agent.get_mcp_servers_config()
+        server_cfg = next((s for s in servers if s.get("name") == name), None)
+        if not server_cfg:
+            return {"status": "error", "error": f"Server '{name}' not found"}
+        if server_cfg.get("transport") not in ("streamable_http", "sse", "http"):
+            return {"status": "error", "error": "OAuth login only applies to HTTP transports"}
+
+        manager = getattr(agent.tools, "_mcp", None)
+        challenge = manager.oauth_challenge(name) if manager is not None else None
+
+        try:
+            result = await start_oauth_flow(
+                name,
+                server_cfg.get("url", ""),
+                www_authenticate=challenge or "",
+            )
+            return result
+        except MCPOAuthError as exc:
+            return {"status": "error", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[mcp_api] OAuth start failed for %s", name)
+            return {"status": "error", "error": f"OAuth login failed: {exc}"}
+
+    @router.post("/api/mcp/servers/{name}/oauth/clear")
+    async def api_oauth_clear(name: str) -> dict[str, Any]:
+        """Forget the stored OAuth token for a server (logout)."""
+        from kazma_core.mcp.oauth import clear_oauth
+
+        return {"status": "ok" if clear_oauth(name) else "error"}
 
     @router.get("/api/mcp/presets")
     async def api_list_presets() -> dict[str, Any]:

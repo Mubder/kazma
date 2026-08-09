@@ -40,6 +40,10 @@
                 {% endif %}
                 <button class="btn btn-sm btn-secondary"
                         @click="$parent.testServer({{ server.name|tojson }})">{{ t('mcp.test') }}</button>
+                {% if server.transport != 'stdio' %}
+                <button class="btn btn-sm btn-primary"
+                        @click="$parent.oauthLogin({{ server.name|tojson }})">{{ t('mcp.oauth_login') }}</button>
+                {% endif %}
                 <button class="btn btn-sm btn-secondary" @click="expanded = !expanded">
                     <span x-text="expanded ? t('mcp.hide_tools') : t('mcp.show_tools')"></span>
                 </button>

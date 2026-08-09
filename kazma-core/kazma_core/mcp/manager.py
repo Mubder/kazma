@@ -288,6 +288,14 @@ class AsyncMCPManager:
         # startup.  Retain failures so strict callers (for example, a
         # connection test) can report the actual reason instead of "0 tools".
         self._connection_errors: dict[str, str] = {}
+        # MCP OAuth: WWW-Authenticate Bearer challenges captured from 401
+        # handshake failures, keyed by server name. The UI reads these to
+        # offer an OAuth login button.
+        self._oauth_challenges: dict[str, str] = {}
+
+    def oauth_challenge(self, name: str) -> str | None:
+        """Return the captured OAuth challenge header for *name*, if any."""
+        return self._oauth_challenges.get(name)
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -1148,6 +1156,19 @@ class AsyncMCPManager:
         elif auth.get("type") == "header" and auth.get("name") and auth.get("value"):
             headers[auth["name"]] = auth["value"]
 
+        # OAuth 2.1 (MCP authorization spec): when no static token is set,
+        # reuse a stored OAuth token (auto-refreshed when expired). A static
+        # token always wins so operators can pin a PAT when preferred.
+        if "Authorization" not in headers:
+            try:
+                from kazma_core.mcp.oauth import get_valid_token
+
+                oauth_token = await get_valid_token(name)
+                if oauth_token:
+                    headers["Authorization"] = f"Bearer {oauth_token}"
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MCP] OAuth token lookup skipped for '%s': %s", name, exc)
+
         http = httpx.AsyncClient(
             base_url=url,
             headers=headers,
@@ -1174,6 +1195,14 @@ class AsyncMCPManager:
             )
             await self._notify(handle, "notifications/initialized", {})
         except Exception as exc:
+            # MCP OAuth discovery: when the server answers 401 with a Bearer
+            # resource_metadata challenge, remember it so the UI can offer an
+            # OAuth login instead of a dead "401" message.
+            resp = getattr(exc, "response", None)
+            if resp is not None and getattr(resp, "status_code", None) == 401:
+                www_auth = resp.headers.get("www-authenticate", "")
+                if "bearer" in www_auth.lower():
+                    self._oauth_challenges[name] = www_auth
             await http.aclose()
             raise MCPBridgeError(f"Handshake failed for '{name}': {exc}") from exc
 
