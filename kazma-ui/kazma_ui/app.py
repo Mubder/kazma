@@ -468,6 +468,9 @@ class KazmaAppBuilder:
             _STATIC_DIR / "js" / "settings.js",
             _STATIC_DIR / "js" / "providers.js",
             _STATIC_DIR / "js" / "models.js",
+            # MCP lifecycle controls run in a standalone page script; include
+            # it so a pulled UI never keeps a stale Start/Test handler cached.
+            _STATIC_DIR / "js" / "mcp.js",
             # Memory page — graph ops / cut-hub UI lives here; omit = stale canvas JS
             _STATIC_DIR / "js" / "memory.js",
             _STATIC_DIR / "js" / "memory_console.js",
