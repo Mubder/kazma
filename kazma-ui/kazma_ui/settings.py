@@ -1042,7 +1042,14 @@ class SettingsRouterBuilder:
         @router.delete("/api/settings/mcp/{name}")
         async def api_delete_mcp(name: str) -> dict[str, str]:
             """Delete an MCP server."""
-            _get_sm().delete_mcp_server(name)
+            from fastapi.responses import JSONResponse
+
+            result = _get_sm().delete_mcp_server(name)
+            if isinstance(result, dict) and result.get("status") == "error":
+                return JSONResponse(
+                    {"status": "error", "message": result.get("error", "delete failed")},
+                    status_code=500,
+                )
             return {"status": "ok"}
 
         @router.put("/api/settings/mcp/{name}/toggle")

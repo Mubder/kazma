@@ -1887,9 +1887,18 @@ function settingsApp() {
                 confirmText: 'Remove',
                 danger: true,
             }))) return;
-            await fetch(`/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
-            await this.loadMcpServers();
-            showToast('Server removed', 'success');
+            try {
+                const resp = await fetch(`/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                const body = await resp.json().catch(function() { return {}; });
+                if (!resp.ok || body.status === 'error') {
+                    showToast(body.message || ('Delete failed (HTTP ' + resp.status + ')'), 'error');
+                    return;
+                }
+                await this.loadMcpServers();
+                showToast('Server removed', 'success');
+            } catch (e) {
+                showToast('Delete failed: ' + e.message, 'error');
+            }
         },
 
         async toggleMcpServer(name, enabled) {

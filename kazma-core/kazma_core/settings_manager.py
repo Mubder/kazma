@@ -810,9 +810,9 @@ class SettingsManager:
         """Add a new MCP server."""
         return self.mcp_service.add_mcp_server(data)
 
-    def delete_mcp_server(self, name: str) -> None:
-        """Remove an MCP server."""
-        self.mcp_service.delete_mcp_server(name)
+    def delete_mcp_server(self, name: str) -> dict[str, Any]:
+        """Remove an MCP server. Returns the service result dict ({"status": ...})."""
+        return self.mcp_service.delete_mcp_server(name)
 
     def toggle_mcp_server(self, name: str, enabled: bool) -> None:
         """Enable/disable an MCP server."""

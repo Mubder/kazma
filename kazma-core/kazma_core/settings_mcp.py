@@ -17,26 +17,52 @@ __all__ = ["MCPSettingsService"]
 logger = logging.getLogger(__name__)
 
 
-def _agent_config_raw() -> dict[str, Any] | None:
-    """Best-effort resolve of the live agent's config.raw for dual-write sync."""
+def _resolve_live_agent() -> Any:
+    """Resolve the running KazmaAgent from the service container.
+
+    The container registers the agent under the CLASS key
+    (``container.register(KazmaAgent, agent)`` in app.py). The previous
+    implementation called ``get_container().resolve("KazmaAgent")`` — a
+    method that does not exist (the API is ``.get``), so it always raised
+    AttributeError, got swallowed, and every caller silently fell back to
+    CWD-relative ``kazma.yaml`` — writing the WRONG file for servers whose
+    config lives elsewhere (audit: Settings delete "succeeds" but the
+    server resurrects from the untouched real yaml).
+    """
     try:
         from kazma_core.service_container import get_container
 
-        agent = get_container().resolve("KazmaAgent")
-        cfg = getattr(agent, "config", None)
-        raw = getattr(cfg, "raw", None)
-        if isinstance(raw, dict):
-            return raw
+        container = get_container()
+        try:
+            from kazma_core.agent_runner import KazmaAgent
+
+            return container.get(KazmaAgent)
+        except Exception:
+            pass
+        try:
+            return container.get("KazmaAgent")
+        except Exception:
+            pass
     except Exception:
         pass
     return None
 
 
-def _agent_yaml_path() -> str | None:
-    try:
-        from kazma_core.service_container import get_container
+def _agent_config_raw() -> dict[str, Any] | None:
+    """Best-effort resolve of the live agent's config.raw for dual-write sync."""
+    agent = _resolve_live_agent()
+    cfg = getattr(agent, "config", None)
+    raw = getattr(cfg, "raw", None)
+    if isinstance(raw, dict):
+        return raw
+    return None
 
-        agent = get_container().resolve("KazmaAgent")
+
+def _agent_yaml_path() -> str | None:
+    agent = _resolve_live_agent()
+    if agent is None:
+        return None
+    try:
         if hasattr(agent, "_mcp_yaml_path"):
             return agent._mcp_yaml_path()
         cfg = getattr(agent, "config", None)
@@ -89,15 +115,48 @@ class MCPSettingsService:
             logger.warning("[MCPSettings] add failed: %s", exc)
             return {"error": str(exc)}
 
-    def delete_mcp_server(self, name: str) -> None:
-        """Remove an MCP server from both stores."""
+    def delete_mcp_server(self, name: str) -> dict[str, Any]:
+        """Remove an MCP server from both stores.
+
+        Returns ``{"status": "ok"}`` or ``{"status": "error", "error": ...}``.
+        After writing, re-reads the merged store and verifies the server is
+        actually gone — a failed/misdirected yaml write otherwise lets the
+        disk copy resurrect the server on the next read (no tombstones in
+        the merge), while the API still reported success.
+        """
         from kazma_core.mcp_servers_store import delete_mcp_server
 
-        delete_mcp_server(
-            name,
-            config_raw=_agent_config_raw(),
-            yaml_path=_agent_yaml_path(),
-        )
+        yaml_path = _agent_yaml_path()
+        if yaml_path is None:
+            return {
+                "status": "error",
+                "error": "Cannot resolve the live agent's config path — deletion aborted "
+                "rather than writing the wrong kazma.yaml",
+            }
+        try:
+            delete_mcp_server(
+                name,
+                config_raw=_agent_config_raw(),
+                yaml_path=yaml_path,
+            )
+        except Exception as exc:
+            logger.warning("[MCPSettings] delete failed: %s", exc)
+            return {"status": "error", "error": str(exc)}
+
+        # Verify: the merged view must no longer contain the server.
+        try:
+            remaining = [s.get("name") for s in self.get_mcp_servers()]
+            if name in remaining:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"Server '{name}' reappeared after delete — the on-disk "
+                        "kazma.yaml was not updated (check write permissions/lock)."
+                    ),
+                }
+        except Exception:
+            pass  # verification is best-effort; the write itself succeeded
+        return {"status": "ok"}
 
     def toggle_mcp_server(self, name: str, enabled: bool) -> None:
         """Enable/disable an MCP server (dual-write)."""
