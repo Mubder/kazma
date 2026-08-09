@@ -1,6 +1,16 @@
 # CHANGELOG
 
-## Unreleased — Self-healing rollout: swarm workers, research pipeline, KB (2026-08-09)
+## Unreleased — Scraper industry hardening: size caps, 5xx retry, robots.txt option (2026-08-09)
+
+Audit verdict: the stack was already strong (tiered Firecrawl→httpx+trafilatura→Jina→Playwright-stealth ladder, full-record SSRF DNS pinning, bot-wall heuristics, proxy rotation, UA pool, polite crawl delays). Three industry-grade gaps closed:
+
+- **Response size cap:** `read_url` now streams bodies via `client.stream` and stops at `KAZMA_FETCH_MAX_BYTES` (default 5 MB) — previously `response.text` fully decoded unbounded bodies into memory (gzip-bomb / multi-GB binary risk). Graceful fallback to plain `client.get` for limited clients. Truncation logged.
+- **Content-type gate:** non-textual payloads (PDF/images/archives) fail fast with an actionable pointer instead of feeding binary into the extractor.
+- **5xx resilience:** the httpx-path retry now covers 500/502/503/504 (not just 429/403) with backoff + jitter, 3 attempts.
+- **robots.txt compliance (opt-in):** `crawl_site(respect_robots=True)` or `KAZMA_CRAWL_RESPECT_ROBOTS=1` — fetches and parses the seed's robots.txt once per crawl (stdlib robotparser, fail-open when absent), skipping disallowed URLs as `blocked_robots` in the crawl index. Default stays off (user-directed research agent, backward compatible).
+- **Verified:** scraper suites re-run — only the 4 pre-existing clean-HEAD failures remain; smoke-tested size cap, content-type gate, robots allow/deny.
+
+
 
 - **Shared resilient-chat helper:** new `kazma_core/agent/resilient_chat.py` — `resilient_chat()` gives non-graph LLM paths the same guarantees as the supervisor: transient-only retries with exponential backoff (permanent 4xx fail fast), opt-in model failover via `agent.nonstop.failover.chain` (one-off registry clients, per-model cooldowns, active profile untouched), and a per-call ledger record for every success/terminal failure.
 - **Swarm workers** (`swarm/worker.py`): the ReAct loop's fixed 2s/4s inline retry replaced with `resilient_chat` (adds failover + ledger; worker LLM 180s timeout preserved). Tool executions now bounded by `asyncio.wait_for` with the shared `agent.tool_timeout_seconds` — a hung tool returns a HARD error (feeds the breaker) instead of stalling the task until the engine reaper. Smoke-verified: hung tool → timeout → worker still completes with final answer.

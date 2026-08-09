@@ -101,6 +101,92 @@ def _random_ua() -> str:
     except Exception:  # noqa: BLE001 — UA rotation is best-effort
         return _BROWSER_UA
 
+
+def _fetch_max_bytes() -> int:
+    """Hard cap on a single response body (env KAZMA_FETCH_MAX_BYTES, default 5MB).
+
+    Industry-grade crawlers never read unbounded bodies — a multi-GB binary or
+    a gzip bomb would otherwise be fully decoded into memory by ``response.text``.
+    """
+    try:
+        return max(65_536, int(os.environ.get("KAZMA_FETCH_MAX_BYTES", "5000000") or "5000000"))
+    except ValueError:
+        return 5_000_000
+
+
+_TEXTUAL_CONTENT_TYPES = (
+    "text/",
+    "application/xhtml",
+    "application/xml",
+    "application/json",
+    "application/rss",
+    "application/atom",
+)
+
+
+def _is_textual_content_type(content_type: str) -> bool:
+    """True when a Content-Type is worth extracting text from."""
+    ct = (content_type or "").lower()
+    if not ct:
+        return True  # missing header — try anyway
+    return any(tok in ct for tok in _TEXTUAL_CONTENT_TYPES)
+
+
+async def _get_capped(client: Any, url: str, max_bytes: int) -> tuple[Any, str, bool]:
+    """GET *url* with a streamed, byte-capped body read.
+
+    Returns ``(response, text, truncated)``. Checks the Content-Length header
+    first (fast reject of huge bodies), then streams at most *max_bytes* of
+    decoded content. The response is fully closed before returning.
+    """
+    import httpx as _httpx
+
+    truncated = False
+    try:
+        stream_cm = client.stream("GET", url)
+    except Exception:
+        stream_cm = None
+    if stream_cm is None or not hasattr(stream_cm, "__aenter__"):
+        # Fallback for clients/mocks without a true async stream context
+        # manager: plain GET, cap applied after decode.
+        response = await client.get(url)
+        full = response.text or ""
+        truncated = len(full.encode("utf-8", "replace")) > max_bytes
+        return response, full[:max_bytes], truncated
+    async with stream_cm as response:
+        # Fast reject: declared length over the cap → truncate at cap rather
+        # than reading the whole body.
+        try:
+            declared = int(response.headers.get("content-length") or 0)
+        except ValueError:
+            declared = 0
+        if declared > max_bytes:
+            truncated = True
+        chunks: list[bytes] = []
+        read = 0
+        async for chunk in response.aiter_bytes(65_536):
+            chunks.append(chunk)
+            read += len(chunk)
+            if read >= max_bytes:
+                truncated = True
+                break
+        raw = b"".join(chunks)[:max_bytes]
+        # Decode respecting the response charset where possible.
+        encoding = response.charset_encoding or "utf-8"
+        try:
+            text = raw.decode(encoding, errors="replace")
+        except (LookupError, UnicodeDecodeError):
+            text = raw.decode("utf-8", errors="replace")
+        # Build a lightweight stand-in response for downstream logic that
+        # reads .status_code / .headers / .text / .raise_for_status().
+        out = _httpx.Response(
+            status_code=response.status_code,
+            headers=response.headers,
+            request=response.request,
+        )
+        out._content = raw  # httpx reads .text from _content
+        return out, text, truncated
+
 _BOT_DETECTION_MARKERS = (
     "cloudflare",
     "checking your browser",
@@ -664,29 +750,30 @@ async def _fetch_full_text(url: str) -> str:
             headers=dict(_HTTP_HEADERS),
             rotate_ua=True,
         ) as client:
-            response = await client.get(final_url)
-            # 429/403 retry with backoff — the bulletproof core. A blocked IP
-            # retries from a different residential IP (the provider rotates the
-            # exit IP per request via a fresh session id). Only retries the raw
-            # httpx path; the existing Playwright/Firecrawl recovery cascade
-            # handles true bot-walls separately below.
+            _max_bytes = _fetch_max_bytes()
+            response, html_raw, _trunc = await _get_capped(client, final_url, _max_bytes)
+            # Retry with backoff on 429/403 (bot wall) AND 5xx (transient
+            # origin errors) — industry-standard: a 502/503 deserves one or
+            # two retries with jitter before the recovery cascade fires.
             import asyncio as _asyncio
-            for _retry in range(2):
-                if response.status_code not in (429, 403):
+            import random as _random
+
+            for _retry in range(3):
+                if response.status_code not in (429, 403, 500, 502, 503, 504):
                     break
-                delay = 1.5 * (_retry + 1)  # 1.5s, then 3s
+                delay = 1.5 * (_retry + 1) + _random.uniform(0, 0.75)
                 logger.info(
-                    "[read_url] HTTP %d on %s — retry %d/2 via proxy in %.1fs",
+                    "[read_url] HTTP %d on %s — retry %d/3 in %.1fs",
                     response.status_code, final_url, _retry + 1, delay,
                 )
                 await _asyncio.sleep(delay)
-                # Rebuild headers so the proxy rotates UA + exit IP for the retry.
+                # Rotate UA (+ proxy exit IP when configured) for the retry.
                 try:
                     if getattr(client, "headers", None) is not None:
                         client.headers["user-agent"] = _random_ua()
                 except Exception:
                     pass
-                response = await client.get(final_url)
+                response, html_raw, _trunc = await _get_capped(client, final_url, _max_bytes)
             for _ in range(3):
                 if response.status_code not in (301, 302, 303, 307, 308):
                     break
@@ -703,12 +790,30 @@ async def _fetch_full_text(url: str) -> str:
                     return f"Error: Redirect blocked (SSRF): {exc}"
                 except ValueError as exc:
                     return f"Error: Redirect target invalid — {exc}"
-                response = await client.get(redirect_url)
+                response, html_raw, _trunc = await _get_capped(client, redirect_url, _max_bytes)
                 final_url = redirect_url
 
+            # Content-type gate: binary payloads (PDF, images, archives) are
+            # not text-extractable — fail fast with a clear pointer instead of
+            # feeding megabytes of binary into the extractor.
             raw_status = getattr(response, "status_code", 200)
             status_code = raw_status if isinstance(raw_status, int) else 200
-            html = response.text or ""
+            if status_code < 400:
+                _ct = response.headers.get("content-type", "")
+                if not isinstance(_ct, str):
+                    _ct = ""
+                if not _is_textual_content_type(_ct):
+                    return (
+                        f"Error: URL returned non-text content ({_ct or 'unknown'}) — "
+                        "not extractable as a page. If this is a document you need, "
+                        "save it with read_url_to_file or add a document-ingest path."
+                    )
+
+            html = html_raw
+            if _trunc:
+                logger.info(
+                    "[read_url] body capped at %d bytes for %s", _max_bytes, final_url
+                )
 
             if _looks_like_bot_block(html, status_code):
                 logger.info(

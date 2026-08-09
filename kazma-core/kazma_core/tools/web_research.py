@@ -90,6 +90,39 @@ def _same_domain(a: str, b: str) -> bool:
     return bool(ha) and ha == hb
 
 
+async def _load_robots_checker(seed_url: str) -> Any:
+    """Fetch + parse the seed's robots.txt; return a ``can_fetch(url)`` callable.
+
+    Returns ``None`` when robots.txt is missing/unreachable (fail-open:
+    no rules to honor). Compliance is opt-in via ``respect_robots=True``
+    or ``KAZMA_CRAWL_RESPECT_ROBOTS=1`` — the default stays off so existing
+    research behavior is unchanged (Kazma is a user-directed research agent,
+    not a bulk crawler).
+    """
+    try:
+        from urllib.robotparser import RobotFileParser
+
+        parsed = urlparse(seed_url)
+        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        from kazma_core.security.ssrf import validate_url
+
+        validate_url(robots_url)
+        if _central_fetch is not None:
+            fr = await _central_fetch(robots_url, purpose="crawl")
+            body = fr.text if fr.ok else ""
+        else:
+            body = await _fetch_full_text(robots_url)
+        if not body or body.startswith("Error:"):
+            return None
+        rp = RobotFileParser()
+        rp.parse(body.splitlines())
+        agent_ua = "KazmaBot"
+        return lambda u: rp.can_fetch(agent_ua, u)
+    except Exception:
+        logger.debug("[crawl_site] robots.txt unavailable for %s", seed_url, exc_info=True)
+        return None
+
+
 def _extract_links(html: str, base_url: str) -> list[str]:
     # Lightweight href scrape (no BS4 dependency)
     hrefs = re.findall(r'''href\s*=\s*["']([^"']+)["']''', html, flags=re.I)
@@ -147,6 +180,7 @@ async def crawl_site(
     delay_ms: int = 300,
     save: bool = True,
     path_prefix: str | None = None,
+    respect_robots: bool | None = None,
 ) -> str:
     """Bounded multi-page crawl starting from *start_url*.
 
@@ -159,6 +193,9 @@ async def crawl_site(
         delay_ms: Pause between fetches (politeness).
         save: Save each page under workspace research dir.
         path_prefix: Optional workspace-relative folder for saves.
+        respect_robots: Honor the site's robots.txt. Default ``None`` → env
+            ``KAZMA_CRAWL_RESPECT_ROBOTS`` (default off, for backward
+            compatibility). Skipped pages are reported as ``blocked_robots``.
 
     Returns:
         Markdown index of crawled pages + paths + char counts.
@@ -190,6 +227,11 @@ async def crawl_site(
     if ".." in prefix.split("/"):
         return "Error: invalid path_prefix."
 
+    # robots.txt compliance (opt-in): load once per crawl.
+    if respect_robots is None:
+        respect_robots = (os.environ.get("KAZMA_CRAWL_RESPECT_ROBOTS", "0") or "0").strip() == "1"
+    robots_ok = await _load_robots_checker(start) if respect_robots else None
+
     queue: deque[tuple[str, int]] = deque([(start, 0)])
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
@@ -201,6 +243,10 @@ async def crawl_site(
         seen.add(url)
 
         if same_domain_only and not _same_domain(start, url):
+            continue
+
+        if robots_ok is not None and not robots_ok(url):
+            results.append({"url": url, "status": "blocked_robots", "chars": 0, "path": ""})
             continue
 
         try:

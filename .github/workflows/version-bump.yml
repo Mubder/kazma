@@ -1,0 +1,29 @@
+name: Auto Bump Version
+
+on:
+  push:
+    branches:
+      - main  # Runs every time code is merged into main
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed so GitHub can push the tag/version back to repo
+    steps:
+      - name: Check out repo code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Downloads full history so Commitizen can read past tags
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Commitizen Bump
+        uses: commitizen-tools/commitizen-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          git_redirect_to_github: true
