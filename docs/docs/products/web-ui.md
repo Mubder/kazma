@@ -103,6 +103,20 @@ SERP). Local SearXNG, Jina/Firecrawl APIs, and LLM traffic stay direct.
 API: `GET/PUT /api/settings/proxy`, `POST /api/settings/proxy/test`.  
 Coverage matrix: [Recent features → Proxy](../guide/recent-features#2-shared-web-acquisition--proxy-provider) · [Web research](../guide/web-research#bulletproof-scraping-proxy-provider-addon-ipua-rotation).
 
+## Non-Stop Execution & Self-Healing (Settings → Agent)
+
+Configurable self-healing supervisor watchdog and model failover controls for long-running autonomous workflows:
+
+- **Master Toggle:** Enable/disable supervisor stall watchdog and automated checkpoint recovery.
+- **Stall & Timeout Controls:** Configure stall threshold (default 60s) and per-tool execution timeout (`agent.tool_timeout_seconds`, default 120s).
+- **Recovery Budget:** Set maximum recovery attempts (default 3) and exponential backoff parameters (`backoff_base_seconds`, `backoff_max_seconds`).
+- **Model Failover Chain:** Toggle failover and specify an ordered list of fallback models with per-model cooldown periods (default 300s).
+- **Call Ledger:** Toggle durable SQLite logging (`kazma-data/llm_calls.db`) for all LLM calls.
+- Full EN/AR i18n support and live re-read (`get_nonstop_config()`) — settings apply immediately without server restart.
+
+API: `GET/PUT /api/settings/agent/nonstop`.
+Coverage matrix: [Recent features → Non-Stop Execution](../guide/recent-features#4d-non-stop-execution--self-healing-engine-2026-08).
+
 ## Auth
 
 - Single-operator: `KAZMA_SECRET` (opaque sessions preferred over legacy raw cookie).  

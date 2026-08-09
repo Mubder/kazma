@@ -22,6 +22,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 |------|----------|------------------|-------------|
 | `file_read` | filesystem | safe/read | Read a file from the local filesystem. Returns the file contents as text. |
 | `file_write` | filesystem | **danger** | Write content to a local file. Creates parent directories if needed. Overwrites existing content. |
+| `file_append` | filesystem | safe/write | Append content to a local file in chunks. Creates file and parent directories if needed. |
 | `file_delete` | filesystem | **danger** |  |
 | `file_list` | filesystem | safe/read | List files and directories at a path. Returns names sorted alphabetically. |
 | `file_search` | filesystem | safe/read |  |

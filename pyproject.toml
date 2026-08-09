@@ -207,3 +207,17 @@ major_tags = []
 [tool.semantic_release.remote]
 type = "github"
 token = { env = "GH_TOKEN" }
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver"
+version_provider = "pep621"
+version_files = [
+    "pyproject.toml:version",
+    "kazma.yaml:agent.version"
+]
+update_changelog_on_bump = true
+major_version_zero = true
+bump_message = "chore(release): version $current_version → $new_version [skip ci]"
+

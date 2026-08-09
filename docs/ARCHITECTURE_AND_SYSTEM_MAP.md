@@ -182,10 +182,13 @@ kazma/
 | **agent/** | |
 | `agent/graph_builder.py` | LangGraph supervisor + tool_worker + interrupt HITL |
 | `agent/hitl_supersede.py` | Cancel pending HITL on new turn |
+| `agent/nonstop.py` | NonStopConfig schema & settings layer |
 | `agent/pipeline_schema.py` | Pipeline-related schemas |
+| `agent/resilient_chat.py` | Resilient chat wrapper with retries, failover & ledger |
 | `agent/state.py` | Supervisor state / NodeName |
 | `agent/sub_agent.py` | SubAgentManager spawn + auto_deny HITL |
-| `agent/tool_registry.py` | LocalToolRegistry SoT + built-in tools |
+| `agent/supervisor_watchdog.py` | Supervised execution envelope & stall watchdog |
+| `agent/tool_registry.py` | LocalToolRegistry SoT + built-in tools (`file_append`) |
 | `agent/turn_input.py` | Build messages from checkpointer + user turn |
 | **agent_skills/** | Agent Skills install/discover/parse |
 | **cron/** | `scheduler.py` SQLite cron + concurrency + shutdown |

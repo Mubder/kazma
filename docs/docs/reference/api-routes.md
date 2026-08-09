@@ -100,6 +100,7 @@ Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag)
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | * | `/api/settings*`, config export | Admin/operator | ConfigStore-backed settings UI |
+| GET/PUT | `/api/settings/agent/nonstop` | Session / Admin | Non-Stop & Self-Healing watchdog/failover/ledger settings |
 | * | Workspace routes `/api/workspaces*` | Session | WorkspaceStore CRUD |
 
 ## Email (`email_api.py`)

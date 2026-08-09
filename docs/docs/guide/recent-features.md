@@ -28,6 +28,9 @@ the deep docs when you need detail.
 | Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |
 | Topic-shift focus | Agent soft-resets focus when user changes subject; tunable drift threshold | Settings → `agent.topic_drift.*` |
+| Non-Stop & Self-Healing | Supervisor watchdog, model failover chain, call ledger, orphan recovery, HITL timeout | Settings → Agent → Non-Stop Execution |
+| Scraper Hardening | Size caps (5MB default), 5xx retry backoff, robots.txt compliance | `read_url`, `crawl_site`, `KAZMA_FETCH_MAX_BYTES` |
+| Truncation Auto-Retry | Double max_tokens on length truncation + `file_append` chunk tool | `llm_provider`, `LocalToolRegistry` |
 
 ---
 
@@ -234,6 +237,37 @@ correctness, accessibility — plus a long-standing cron-reminder crash fix.
 
 ---
 
+## 4d. Non-Stop Execution & Self-Healing Engine (2026-08)
+
+An enterprise-grade self-healing execution layer designed for long-horizon autonomous tasks.
+
+| Capability | Behavior |
+|------------|----------|
+| **Supervisor Watchdog** | `supervised_invoke()` wraps graph execution with node heartbeats, stall detection (default 60s), and incident classification (`stalled`, `transient_llm`, `context_overflow`, `panic`). Auto-rolls back to last durable checkpoint, injects reflection, and resumes up to N attempts. |
+| **Model Failover Chain** | Exhausted primary models fail over down `agent.nonstop.failover.chain` with per-model cooldowns (default 300s) without mutating active settings profiles. |
+| **LLM Execution Ledger** | Durable SQLite WAL (`kazma-data/llm_calls.db`) recording thread, iteration, model, token usage, cost, latency, status, and failover origin for every LLM call. |
+| **Startup Orphan Recovery** | Swarm tasks stranded in `status='running'` by process crashes or restarts are requeued to `pending` on startup up to 3 attempts. |
+| **HITL Approval Timeout** | Background watchdog scans pending HITL approval interrupts every 15s and auto-denies stale turns after `safety.hitl.approval_timeout_seconds` (default 60s). |
+| **Resilient Chat** | Non-graph LLM calls (swarm workers, research planner, research synthesizer) use `resilient_chat` with transient retries, failover chain, and tool-execution timeouts (`agent.tool_timeout_seconds`, 120s). |
+| **Settings UI Card** | Agent Settings tab includes a Non-Stop & Self-Healing section with live-re-read toggles, thresholds, and failover chain controls (EN/AR i18n supported). |
+
+---
+
+## 4e. Scraper Hardening & Truncation Recovery (2026-08)
+
+Industry-grade web scraping resilience and model output truncation recovery.
+
+| Feature | Details |
+|---------|---------|
+| **Response Size Caps** | `read_url` streams body reads and enforces `KAZMA_FETCH_MAX_BYTES` (default 5 MB) to prevent memory exhaustion and gzip-bomb exploits. |
+| **Content-Type Gate** | Non-textual binary payloads (PDFs, images, archives) fail fast with actionable guidance instead of polluting the text extractor. |
+| **5xx Retry Loop** | HTTP scraper retry loop covers 500, 502, 503, and 504 status codes with backoff and jitter (3 attempts). |
+| **robots.txt Compliance** | Opt-in `crawl_site(respect_robots=True)` or `KAZMA_CRAWL_RESPECT_ROBOTS=1` parses host `robots.txt` and flags disallowed URLs as `blocked_robots`. |
+| **Auto-Retry Truncation** | When LLM completion stops with `finish_reason='length'`, `llm_provider.chat` transparently retries ONCE with doubled `max_tokens` (capped at 4x configured / 32k) instead of returning broken tool JSON. |
+| **`file_append` Tool** | Built-in tool in `LocalToolRegistry` allowing agents to write large files in chunks (`file_write` to initialize, `file_append` for subsequent sections). |
+
+---
+
 ## 5. Quick operator recipes
 
 ### A. First deep research paper
@@ -294,6 +328,7 @@ correctness, accessibility — plus a long-standing cron-reminder crash fix.
 | GET | `/api/research/eval` | Rubric score |
 | GET/PUT | `/api/settings/memory/merge-kb` | Inject, promote, smart search, explain |
 | GET/PUT | `/api/settings/proxy` | Proxy provider |
+| GET/PUT | `/api/settings/agent/nonstop` | Non-Stop & Self-Healing settings |
 | POST | `/api/memory/v2/probe` | Recall dry-run (explain on) |
 | POST | `/api/memory/v2/federated-search` | Memory + KB labeled |
 | POST | `/api/memory/v2/eval/golden` | Golden recall suite |

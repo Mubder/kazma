@@ -56,7 +56,7 @@ Use this page to clean topology without raw SQL.
 | Merge duplicate shells | Set Src + Tgt → **Merge** (beliefs rewired to target; receipt shows the count) |
 | Link two entities | Src + Tgt + predicate → **Link** |
 | Drop junk beliefs | Select → **Invalidate** |
-| Why was a belief used? | Click a belief → drawer shows "recalled N× · last … · from <episode>"; **Probe from this belief** to see neighbors |
+| Why was a belief used? | Click a belief → drawer shows "recalled N× · last … · from `episode`"; **Probe from this belief** to see neighbors |
 
 ### Hub identity note
 

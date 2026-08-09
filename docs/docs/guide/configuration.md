@@ -70,6 +70,23 @@ regex/explicit and heuristic classifiers still apply.
 
 Both keys are read via `topic_drift_config()` from ConfigStore and overlay `kazma.yaml`.
 
+#### `agent.nonstop` — Non-Stop & Self-Healing Execution Engine
+
+Configurable via Settings UI (**Settings → Agent → Non-Stop & Self-Healing**), ConfigStore (`agent.nonstop.*`), or `kazma.yaml`. Read live on every turn execution (`get_nonstop_config()`).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `agent.nonstop.enabled` | bool | `false` | Master switch for non-stop execution & watchdog. |
+| `agent.nonstop.watchdog.stall_threshold_seconds` | int | `60` | Watchdog stall detection threshold in seconds. |
+| `agent.nonstop.tool_timeout_seconds` | int | `120` | Per-tool execution timeout (`asyncio.wait_for`). |
+| `agent.nonstop.healing.max_recovery_attempts` | int | `3` | Max recovery & resume attempts before escalating. |
+| `agent.nonstop.healing.backoff_base_seconds` | float | `2.0` | Exponential backoff base for watchdog recovery. |
+| `agent.nonstop.healing.backoff_max_seconds` | float | `30.0` | Max backoff wait between recovery attempts. |
+| `agent.nonstop.failover.enabled` | bool | `false` | Enable model failover chain on primary LLM failure. |
+| `agent.nonstop.failover.chain` | list/str | `[]` | Ordered list or comma-separated string of failover model IDs. |
+| `agent.nonstop.failover.cooldown_seconds` | int | `300` | Cooldown period in seconds before retrying a failed model in chain. |
+| `agent.nonstop.ledger.enabled` | bool | `true` | Enable durable per-call LLM execution logging (`kazma-data/llm_calls.db`). |
+
 ### `models` (lines 6-9)
 
 | Key | Type | Default | Description |
@@ -325,8 +342,13 @@ Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `sy
 | `KAZMA_DISCLOSURE_KEY` | Disclosure HMAC key; auto-generated if unset. | `config_store.py:95` |
 | `KAZMA_API_KEY` | LLM key fallback #3. | `llm_provider.py:142` |
 | `KAZMA_MAX_COST` | Cost breaker ceiling (default `$0.50`). | `cost_breaker.py:42` |
+| `KAZMA_HARD_MAX_COST` | Hard max cost ceiling for immediate trip (default 3x soft max, `$15.0`). | `cost_breaker.py:46` |
 | `KAZMA_SILENCE_WINDOW` | Cost breaker silence window (default `300`s). | `cost_breaker.py:44` |
 | `KAZMA_SEMANTIC_CACHE` | Enable response cache (`"true"`, default off). | `llm_provider.py:212` |
+| `KAZMA_FETCH_MAX_BYTES` | Streamed response byte limit for `read_url` (default `5242880` / 5 MB). | `tools/read_url.py` |
+| `KAZMA_CRAWL_RESPECT_ROBOTS` | Opt-in `robots.txt` compliance switch for `crawl_site` (`1` or `true`). | `tools/web_research.py` |
+| `KAZMA_OTLP_ENDPOINT` | OTLP HTTP JSON trace collector endpoint. | `swarm/tracing.py` |
+| `KAZMA_TOOL_TIMEOUT_SECONDS` | Per-tool execution timeout in seconds (default `120`). | `agent/graph_builder.py` |
 | `KAZMA_HUB_DB` | Hub SQLite registry path. | `hub/cli.py:109` |
 | `KAZMA_HUB_URL` | Hub API base (default `https://hub.kazma.ai`). | `hub/cli.py:115` |
 | `KAZMA_PORT` | Server port override (default `8000`). | `gateway.py:36` |
