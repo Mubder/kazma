@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -183,6 +184,82 @@ class MCPServerHandle:
     timeout: float = 60.0
     # trust level: "trusted" (no HITL), "approval_required" (HITL for danger tools)
     trust: str = "approval_required"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Windows selector-loop stdio adapter
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class _SyncWriterAdapter:
+    """Expose the ``write``/``drain`` pair the bridge uses on a blocking pipe."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    def write(self, data: bytes) -> None:
+        self._stream.write(data)
+
+    async def drain(self) -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._stream.flush)
+
+
+class _SyncReaderAdapter:
+    """Async ``readline``/``read`` over a blocking pipe via executor threads."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    # _drain_stderr probes for read1 (BufferedReader) — delegate synchronously.
+    def read1(self, n: int) -> bytes:
+        if hasattr(self._stream, "read1"):
+            return self._stream.read1(n)
+        return self._stream.read(n)
+
+    async def readline(self) -> bytes:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._stream.readline)
+
+    async def read(self, n: int = -1) -> bytes:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._stream.read, n)
+
+
+class _SyncProcessAdapter:
+    """Adapt a blocking ``subprocess.Popen`` to the async stdio interface.
+
+    Kazma forces ``WindowsSelectorEventLoopPolicy`` (psycopg compat), and a
+    SelectorEventLoop cannot host asyncio subprocesses on Windows —
+    ``asyncio.create_subprocess_exec`` raises ``NotImplementedError``. This
+    adapter runs the same JSON-RPC-over-pipes protocol on blocking pipes via
+    executor threads, the transport shape ``MCPClient`` already uses, so the
+    stdio path works on every event-loop policy.
+    """
+
+    def __init__(self, proc: subprocess.Popen[bytes]) -> None:
+        self._proc = proc
+        self.stdin = _SyncWriterAdapter(proc.stdin)
+        self.stdout = _SyncReaderAdapter(proc.stdout)
+        self.stderr = _SyncReaderAdapter(proc.stderr)
+
+    @property
+    def pid(self) -> int:
+        return self._proc.pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._proc.poll()
+
+    def terminate(self) -> None:
+        self._proc.terminate()
+
+    def kill(self) -> None:
+        self._proc.kill()
+
+    async def wait(self) -> int:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._proc.wait)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -675,15 +752,34 @@ class AsyncMCPManager:
                 if resolved:
                     command = [resolved] + list(command[1:])
 
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                cwd=working_dir,
-                limit=stdio_limit,
-            )
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    cwd=working_dir,
+                    limit=stdio_limit,
+                )
+            except NotImplementedError:
+                # Windows SelectorEventLoop (forced for psycopg compat) cannot
+                # host asyncio subprocesses. Fall back to blocking Popen +
+                # executor-thread adapter — same JSON-RPC protocol, works on
+                # every event-loop policy.
+                loop = asyncio.get_running_loop()
+                popen: subprocess.Popen[bytes] = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.Popen(
+                        command,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=env,
+                        cwd=working_dir,
+                    ),
+                )
+                process = _SyncProcessAdapter(popen)  # type: ignore[assignment]
         except FileNotFoundError as exc:
             raise MCPBridgeError(f"Command not found: {command[0]}") from exc
         except OSError as exc:

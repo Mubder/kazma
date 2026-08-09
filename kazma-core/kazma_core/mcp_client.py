@@ -11,7 +11,9 @@ import itertools
 import json
 import logging
 import os
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -249,9 +251,20 @@ class MCPClient:
 
         env = {**os.environ, **cfg.env}
 
+        command = list(cfg.command)
+        # Windows fix: subprocess.Popen does NOT resolve .cmd/.bat shim
+        # extensions (e.g. npx → npx.cmd), raising FileNotFoundError even
+        # though the tool is on PATH. Resolve via shutil.which first so the
+        # full path (including the extension) is passed. Mirrors the fix in
+        # mcp/manager.py; no-op on Linux/macOS.
+        if sys.platform == "win32":
+            resolved = shutil.which(command[0], path=env.get("PATH"))
+            if resolved:
+                command[0] = resolved
+
         try:
             self._process = subprocess.Popen(
-                cfg.command,
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -263,7 +276,7 @@ class MCPClient:
         except OSError as exc:
             raise MCPConnectionError(f"Failed to start process: {exc}") from exc
 
-        logger.debug("Spawned stdio process: pid=%s cmd=%s", self._process.pid, cfg.command)
+        logger.debug("Spawned stdio process: pid=%s cmd=%s", self._process.pid, command)
 
     async def _connect_sse(self, cfg: MCPServerConfig) -> None:
         if not cfg.url:
@@ -359,7 +372,18 @@ class MCPClient:
                 ) from exc
 
         if not line:
-            raise MCPConnectionError("Server closed stdout (EOF)")
+            # The subprocess exited before answering. Read whatever it wrote
+            # to stderr so operators get the *real* cause (bad arg, missing
+            # dir, npm error) instead of an opaque EOF.
+            stderr_hint = ""
+            proc = self._process
+            if proc is not None and proc.stderr is not None:
+                try:
+                    stderr_hint = proc.stderr.read(4096).decode(errors="replace").strip()
+                except Exception:
+                    stderr_hint = ""
+            detail = f": {stderr_hint}" if stderr_hint else " (no stderr output)"
+            raise MCPConnectionError(f"Server closed stdout (EOF){detail}")
 
         return _jsonrpc_response(line.decode().strip())
 

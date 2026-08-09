@@ -159,10 +159,26 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
 
         try:
             count = await agent.tools.connect_server(server_cfg)
-            return {"status": "ok", "tool_count": count}
         except Exception as exc:
             logger.exception("[mcp_api] Failed to start MCP server %s", name)
             return {"status": "error", "error": f"Failed to start server: {exc}"}
+
+        # connect_server → connect_from_config(raise_on_error=False) swallows
+        # spawn/handshake failures into _connection_errors and returns 0 —
+        # reporting "ok" here is what made Start look dead. Surface the real
+        # recorded error instead.
+        if not agent.tools.is_server_connected(name):
+            detail = ""
+            try:
+                errors = getattr(agent.tools._mcp, "connection_errors", None) or {}
+                detail = errors.get(name, "")
+            except Exception:
+                detail = ""
+            return {
+                "status": "error",
+                "error": f"Failed to start server: {detail or 'connection failed (0 tools, not connected)'}",
+            }
+        return {"status": "ok", "tool_count": count}
 
     @router.post("/api/mcp/servers/{name}/stop")
     async def api_stop_server(name: str) -> dict[str, str]:
@@ -195,6 +211,16 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
 
         if not server_cfg:
             return {"success": False, "error": f"Server '{name}' not found"}
+
+        # Expand ${KAZMA_ACTIVE_WORKSPACE} exactly like the Start path
+        # (UnifiedToolExecutor.connect_server → apply_workspace_to_server_config)
+        # so Test exercises the same command the server would actually run.
+        try:
+            from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
+
+            server_cfg = apply_workspace_to_server_config(server_cfg)
+        except Exception as exc:
+            logger.debug("[mcp_api] workspace interpolation skipped for %s: %s", name, exc)
 
         client = MCPClient()
         try:
@@ -247,6 +273,13 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             server_cfg = MCPServerTestRequest.model_validate(server_cfg).model_dump()
         except Exception:
             return {"success": False, "error": "Invalid server config"}
+
+        try:
+            from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
+
+            server_cfg = apply_workspace_to_server_config(server_cfg)
+        except Exception as exc:
+            logger.debug("[mcp_api] workspace interpolation skipped for test-config: %s", exc)
 
         client = MCPClient()
         try:
