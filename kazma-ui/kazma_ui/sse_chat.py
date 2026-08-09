@@ -220,6 +220,16 @@ async def _stream_langgraph_events(
         SSE-formatted strings.
     """
     from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
+    from kazma_core.observability.correlation import (
+        bind_turn_id,
+        current_turn_id,
+        new_turn_id,
+        reset_turn_id,
+    )
+
+    # Turn correlation id — binds once per streamed turn so every log line
+    # and the terminal done payload carry the same identifier.
+    _turn_token = bind_turn_id(current_turn_id() or new_turn_id())
 
     tid = config.get("configurable", {}).get("thread_id") if config else None
     token = set_current_thread_id(tid) if tid else None
@@ -709,6 +719,7 @@ async def _stream_langgraph_events(
                 "empty": (not content_acc and not interrupted),
                 "content": content_acc or "",
                 "model": _done_model,
+                "turn_id": current_turn_id(),
             }
             yield _sse_frame("done", _done_payload)
             yield _sse_frame("turn_complete", _done_payload)
@@ -754,6 +765,7 @@ async def _stream_langgraph_events(
     finally:
         if token is not None:
             reset_current_thread_id(token)
+        reset_turn_id(_turn_token)
 
 
 # ══════════════════════════════════════════════════════════════════════════

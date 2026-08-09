@@ -18,13 +18,34 @@ try:
 except Exception:
     pass
 
-__all__ = ["CostCircuitBreaker", "DEFAULT_MAX_COST", "DEFAULT_SILENCE_WINDOW_SECONDS", "create_cost_breaker"]
+__all__ = ["CostCircuitBreaker", "DEFAULT_HARD_MAX_COST", "DEFAULT_MAX_COST", "DEFAULT_SILENCE_WINDOW_SECONDS", "create_cost_breaker"]
 
 logger = logging.getLogger(__name__)
 
 # Default: $5.00 max cost, 15 minute user silence window
 DEFAULT_MAX_COST = 5.00
 DEFAULT_SILENCE_WINDOW_SECONDS = 900  # 15 minutes
+# Hard ceiling (default 3x the soft max): trips IMMEDIATELY regardless of the
+# silence window. Closes the audit gap where an autonomous loop could burn the
+# entire soft budget within the 15-minute silence grace period.
+DEFAULT_HARD_MAX_COST = 15.00
+
+
+def _get_default_hard_max_cost() -> float:
+    env_val = os.getenv("KAZMA_HARD_MAX_COST")
+    if env_val:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    try:
+        from kazma_core.config_store import get_config_store
+        val = get_config_store().get("safety.hard_max_cost")
+        if val is not None:
+            return float(val)
+    except Exception:
+        pass
+    return DEFAULT_HARD_MAX_COST
 
 
 def _get_default_max_cost() -> float:
@@ -83,6 +104,7 @@ class CostCircuitBreaker:
 
     max_cost: float = field(default_factory=_get_default_max_cost)
     silence_window_seconds: float = field(default_factory=_get_default_silence_window)
+    hard_max_cost: float = field(default_factory=_get_default_hard_max_cost)
     current_cost: float = 0.0
     last_user_interaction: float = field(default_factory=time.time)
     _halted: bool = field(default=False, init=False, repr=False)
@@ -136,6 +158,18 @@ class CostCircuitBreaker:
             return False
 
         if self._halted:
+            return True
+
+        # Hard ceiling: absolute runaway protection — trips immediately,
+        # regardless of how recent the last user interaction was. This bounds
+        # unattended burn (the soft path waits out the silence window first).
+        if 0 < self.hard_max_cost <= self.current_cost:
+            self._halted = True
+            logger.warning(
+                "Circuit breaker HARD-TRIPPED: $%.4f >= hard ceiling $%.2f",
+                self.current_cost,
+                self.hard_max_cost,
+            )
             return True
 
         if self.current_cost < self.max_cost:
@@ -195,6 +229,7 @@ class CostCircuitBreaker:
         return {
             "current_cost": self.current_cost,
             "max_cost": self.max_cost,
+            "hard_max_cost": self.hard_max_cost,
             "cost_headroom": self.cost_headroom,
             "is_halted": self._halted,
             "seconds_since_user": time.time() - self.last_user_interaction,

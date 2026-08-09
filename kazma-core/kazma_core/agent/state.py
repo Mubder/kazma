@@ -164,6 +164,12 @@ class SupervisorState(TypedDict, total=False):
     circuit_breaker_tripped: bool
     """Flag indicating whether the tool execution circuit breaker has tripped."""
 
+    tool_signatures: list[str]
+    """Recent (tool_name, canonical-args) signatures for semantic-loop
+    detection (see ``tool_loop_breaker.detect_stagnation``). Capped window;
+    used to catch repeated identical calls that never produce hard errors
+    (no-op edits, policy-denied retries)."""
+
     auto_continue: bool
     """Flag indicating whether the supervisor should auto-continue turns for multi-step goals."""
 
@@ -249,6 +255,7 @@ def initial_supervisor_state(
         created_at=now,
         consecutive_tool_failures=0,
         circuit_breaker_tripped=False,
+        tool_signatures=[],
         auto_continue=False,
         task_status=TaskStatus.IDLE,
         task_goal_summary="",

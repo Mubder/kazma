@@ -148,18 +148,62 @@ class CompactionEngine:
         # Preserve the in-flight user question. Compaction fires mid-turn
         # (80% threshold or /compact), so dropping the latest user message
         # would leave the agent with nothing to answer and lose the request.
+        # Tiered preservation (audit §2.2): also fold the last few prior user
+        # turns into the system block so task context survives repeated
+        # compactions — previously ONLY the latest user message survived,
+        # progressively amputating the task over a long-horizon run.
+        _MAX_PRESERVED_USER_TURNS = 3
+        prior_user_turns: list[str] = []
+        latest_user: dict[str, Any] | None = None
         for msg in reversed(messages):
-            if isinstance(msg, dict) and msg.get("role") == "user":
-                compacted_messages.append({"role": "user", "content": msg.get("content", "")})
+            if not (isinstance(msg, dict) and msg.get("role") == "user"):
+                continue
+            if latest_user is None:
+                latest_user = msg
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    str(p.get("text", "")) for p in content if isinstance(p, dict)
+                )
+            content = str(content).strip()
+            if content:
+                prior_user_turns.append(content[:500])
+            if len(prior_user_turns) >= _MAX_PRESERVED_USER_TURNS - 1:
                 break
+        if prior_user_turns and latest_user is not None:
+            prior_block = "\n".join(
+                f"- {text}" for text in reversed(prior_user_turns)
+            )
+            compacted_messages[0] = {
+                "role": "system",
+                "content": (
+                    system_content
+                    + "\n\n## Recent Prior User Requests (oldest first)\n"
+                    + prior_block
+                ),
+            }
+        if latest_user is not None:
+            compacted_messages.append(
+                {"role": "user", "content": latest_user.get("content", "")}
+            )
 
         # Step 5: Build and return new state.
         # Audit AC4: preserve the most recent tool_results instead of wiping to
         # {}. Dropping them mid-ReAct caused the agent to lose tool context,
         # re-issue the same calls, climb tokens, and re-compact in a loop. We
         # keep the last _MAX_PRESERVED_TOOL_RESULTS entries (bounded so the
-        # fresh context stays small).
-        _MAX_PRESERVED_TOOL_RESULTS = 8
+        # fresh context stays small). Raised 8 → 12 (env-tunable via
+        # KAZMA_COMPACT_PRESERVE_TOOL_RESULTS) per audit §2.2 — 8 dropped
+        # too much mid-ReAct state on tool-heavy turns.
+        import os as _os
+
+        try:
+            _MAX_PRESERVED_TOOL_RESULTS = max(
+                1, int(_os.environ.get("KAZMA_COMPACT_PRESERVE_TOOL_RESULTS", "12") or "12")
+            )
+        except ValueError:
+            _MAX_PRESERVED_TOOL_RESULTS = 12
         prev_tool_results = state.get("tool_results", {}) or {}
         if isinstance(prev_tool_results, dict) and len(prev_tool_results) > _MAX_PRESERVED_TOOL_RESULTS:
             # dict is insertion-ordered; keep the most recent entries.

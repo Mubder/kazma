@@ -68,6 +68,7 @@ async def stream_chat(
     # If a custom base_url is specified (e.g. Ollama / LM Studio),
     # create a dedicated client for this call
     stream_client = client
+    _owns_client = False
     if base_url is not None:
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -85,6 +86,7 @@ async def stream_chat(
             headers=headers,
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
+        _owns_client = True
 
     start = time.monotonic()
 
@@ -185,3 +187,12 @@ async def stream_chat(
     except Exception as e:
         logger.error("Stream LLM failed: %s", e)
         yield StreamEvent(type="error", content=str(e))
+    finally:
+        # Close the dedicated per-call client (created when base_url was
+        # given) even if the generator was abandoned mid-stream or errored —
+        # previously it leaked (audit B.1).
+        if _owns_client:
+            try:
+                await stream_client.aclose()
+            except Exception as _e:
+                logger.debug("stream_chat: error closing dedicated client: %s", _e)

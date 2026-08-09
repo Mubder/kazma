@@ -116,6 +116,11 @@ class StructuredJSONFormatter(logging.Formatter):
             "lineno": record.lineno,
             "funcName": record.funcName,
         }
+        # Turn correlation id (empty string outside a turn — set by
+        # TurnIdFilter or present directly on the record).
+        turn_id = getattr(record, "turn_id", "")
+        if turn_id:
+            log_data["turn_id"] = turn_id
         if exc_str:
             log_data["exception"] = exc_str
         return json.dumps(log_data, default=str)
@@ -323,6 +328,17 @@ def setup_logging(level: str | None = None) -> str:
 
     try:
         logging.config.dictConfig(config)
+        # Turn correlation: tag every record with the ContextVar turn id
+        # ("" outside a turn). Attached post-dictConfig so it applies to the
+        # file and console handlers regardless of formatter choice.
+        try:
+            from kazma_core.observability.correlation import TurnIdFilter
+
+            _turn_filter = TurnIdFilter()
+            for handler in logging.getLogger().handlers:
+                handler.addFilter(_turn_filter)
+        except Exception:
+            pass
     except Exception:
         # Last-resort fallback: basic config so we at least get stderr.
         logging.basicConfig(level=effective)

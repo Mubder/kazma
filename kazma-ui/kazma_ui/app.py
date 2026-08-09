@@ -594,6 +594,23 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Swarm] Failed to restore paused tasks: %s", e)
 
+            # Orphan recovery: tasks left in 'running' state by a crashed/
+            # killed process would otherwise be stranded forever (audit §2.1).
+            # Requeue them (bounded by metadata.recovery_count) so long-
+            # horizon swarm work survives restarts.
+            try:
+                store = self.swarm_manager.engine.task_store
+                if store is not None:
+                    recovery = store.requeue_orphaned_running()
+                    if recovery["requeued"] or recovery["failed"]:
+                        logger.info(
+                            "[Swarm] Orphan recovery: %d requeued, %d terminally failed",
+                            len(recovery["requeued"]),
+                            len(recovery["failed"]),
+                        )
+            except Exception as e:
+                logger.warning("[Swarm] Orphan task recovery failed: %s", e)
+
         except Exception as e:
             logger.warning("[Swarm] SwarmManager not available: %s", e)
             self.swarm_manager = None
@@ -1282,6 +1299,23 @@ class KazmaAppBuilder:
             logger.info("[Checkpoint] Graph recompiled with checkpointer")
             logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
 
+            # ── HITL approval-timeout watchdog ─────────────────────
+            # The graph interrupt() gate has no intrinsic timeout — without
+            # this, a missed approval deadlocks the turn forever (audit
+            # §2.3). The watchdog auto-denies expired approvals per
+            # safety.hitl.approval_timeout_seconds / auto_deny_on_timeout.
+            try:
+                from kazma_ui.hitl_timeout import start_hitl_timeout_watchdog
+
+                start_hitl_timeout_watchdog(
+                    graph_getter=lambda: self._hitl_state.get("graph")
+                    or self._graph_holder.get("graph"),
+                    checkpointer_getter=lambda: self._hitl_state.get("checkpointer"),
+                )
+                logger.info("[HITL] Approval-timeout watchdog started")
+            except Exception as exc:
+                logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
+
             # ── Time Travel: mount replay API + page route ──────────
             if self._snapshot_recorder is not None:
                 try:
@@ -1429,6 +1463,14 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] signal_shutdown failed: %s", e)
 
+        # Stop the HITL approval-timeout watchdog
+        try:
+            from kazma_ui.hitl_timeout import stop_hitl_timeout_watchdog
+
+            await stop_hitl_timeout_watchdog()
+        except Exception as e:
+            logger.debug("[app] HITL watchdog stop: %s", e)
+
         # 1) Stop cron first so no new jobs fire (audit C3)
         try:
             from kazma_core.cron.scheduler import get_cron_scheduler
@@ -1510,6 +1552,51 @@ class KazmaAppBuilder:
             await close_http_client()
         except Exception as e:
             logger.warning("[app] Error closing http client during shutdown: %s", e)
+
+        # 5b) Close auxiliary SQLite stores that previously lived for the
+        # whole process with no close path (audit B.10): swarm task store,
+        # LLM semantic cache, pipeline logger. Best-effort each so one bad
+        # handle cannot block the rest of teardown.
+        try:
+            engine = getattr(self, "swarm_engine", None) or getattr(self, "_swarm_engine", None)
+            if engine is None:
+                try:
+                    from kazma_core.swarm.engine import get_swarm_engine
+
+                    engine = get_swarm_engine()
+                except Exception:
+                    engine = None
+            store = getattr(engine, "task_store", None) if engine is not None else None
+            if store is not None and hasattr(store, "close"):
+                store.close()
+                logger.info("[app] Swarm TaskStore closed")
+        except Exception as e:
+            logger.debug("[app] TaskStore close: %s", e)
+
+        try:
+            from kazma_core import llm_provider as _llm_mod
+
+            cache = getattr(_llm_mod, "_semantic_cache_singleton", None)
+            if cache is not None and hasattr(cache, "close"):
+                cache.close()
+                _llm_mod._semantic_cache_singleton = None
+                logger.info("[app] Semantic cache closed")
+        except Exception as e:
+            logger.debug("[app] Semantic cache close: %s", e)
+
+        try:
+            from kazma_core.swarm.memory.pipeline_logger import close_pipeline_logger
+
+            close_pipeline_logger()
+        except Exception as e:
+            logger.debug("[app] Pipeline logger close: %s", e)
+
+        try:
+            from kazma_core.observability.llm_ledger import close_llm_ledger
+
+            close_llm_ledger()
+        except Exception as e:
+            logger.debug("[app] LLM ledger close: %s", e)
 
         # 6) Best-effort vector memory close & SessionManager close
         try:

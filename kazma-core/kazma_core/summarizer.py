@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 __all__ = ["SUMMARIZATION_SYSTEM_PROMPT", "SUMMARY_TEMPLATE", "TOKEN_THRESHOLD", "clear_summary", "estimate_tokens", "format_summary", "get_summary", "prune_tool_outputs", "store_summary", "summarize"]
@@ -22,8 +23,14 @@ logger = logging.getLogger(__name__)
 
 TOKEN_THRESHOLD = 4000
 
-# In-memory summary store keyed by thread_id
-_summaries: dict[str, str] = {}
+# In-memory summary store keyed by thread_id.
+# Bounded LRU (audit: unbounded module-global dict grew forever across
+# long-horizon sessions). OrderedDict + move_to_end on access; oldest
+# entries evicted past _SUMMARIES_MAX_ENTRIES.
+from collections import OrderedDict
+
+_SUMMARIES_MAX_ENTRIES = int(os.environ.get("KAZMA_SUMMARIES_MAX_ENTRIES", "500") or "500")
+_summaries: OrderedDict[str, str] = OrderedDict()
 
 SUMMARIZATION_SYSTEM_PROMPT = """\
 You are a conversation summarizer. Below is a conversation between a user and an AI agent.
@@ -172,13 +179,20 @@ def prune_tool_outputs(
 
 
 def get_summary(thread_id: str) -> str | None:
-    """Retrieve a stored summary for a thread."""
-    return _summaries.get(thread_id)
+    """Retrieve a stored summary for a thread (marks it most-recently-used)."""
+    summary = _summaries.get(thread_id)
+    if summary is not None:
+        _summaries.move_to_end(thread_id)
+    return summary
 
 
 def store_summary(thread_id: str, summary: str) -> None:
-    """Store a summary for a thread (persists in memory for the session)."""
+    """Store a summary for a thread (bounded LRU — oldest evicted past cap)."""
     _summaries[thread_id] = summary
+    _summaries.move_to_end(thread_id)
+    while len(_summaries) > _SUMMARIES_MAX_ENTRIES:
+        evicted_tid, _ = _summaries.popitem(last=False)
+        logger.debug("[Summarizer] Evicted summary for thread %s (LRU cap)", evicted_tid)
     logger.info("[Summarizer] Stored summary for thread %s (%d chars)", thread_id, len(summary))
 
 

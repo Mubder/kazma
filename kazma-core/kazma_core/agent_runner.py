@@ -385,32 +385,30 @@ class KazmaAgent:
         return self._memory_backend
 
     def _resolve_context_window(self) -> int:
-        """Resolve the context window from Settings (ConfigStore) → yaml → default.
+        """Resolve the context window from Settings (ConfigStore) → yaml → model table → default.
 
         The Settings UI writes to ``context.max_context_tokens`` in ConfigStore;
         the yaml has ``memory.max_context_tokens``. Check both so the Settings
         UI value actually takes effect (previously only the yaml was read).
-        """
-        # 1. Settings UI value (context.max_context_tokens in ConfigStore)
-        try:
-            from kazma_core.config_store import get_config_store
 
-            cs_val = get_config_store().get("context.max_context_tokens")
-            if cs_val is not None:
-                try:
-                    return max(1024, int(cs_val))
-                except (TypeError, ValueError):
-                    pass
+        Model-aware layer (audit §2.6): when no *explicit* non-default value
+        is configured (the shipped default is 128000), the known context
+        window of the active model wins (e.g. Claude → 200k, GPT-4 → 8k),
+        so compaction fires at the model's real 80% instead of a global
+        constant. Per-model override: ConfigStore ``models.context_window.<model>``.
+        """
+        try:
+            from kazma_core.token_counter import resolve_context_window
+
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                active_model = get_model_registry().active_model or self.config.default_model
+            except Exception:
+                active_model = self.config.default_model
+            return resolve_context_window(self.config.raw, active_model)
         except Exception:
             pass
-        # 2. YAML value (memory.max_context_tokens)
-        yaml_val = self.config.raw.get("memory", {}).get("max_context_tokens")
-        if yaml_val is not None:
-            try:
-                return max(1024, int(yaml_val))
-            except (TypeError, ValueError):
-                pass
-        # 3. Default
         return 128_000
 
     def _make_compaction_client(self) -> Any:
@@ -903,9 +901,20 @@ class KazmaAgent:
         logger.info("Received input: %s", user_input[:100])
         self.cost_breaker.record_user_interaction()
 
+        # Turn correlation id — tags every log record emitted during this
+        # turn (and surfaces in the SSE done payload on streaming paths).
+        from kazma_core.observability.correlation import (
+            bind_turn_id,
+            new_turn_id,
+            reset_turn_id,
+        )
+
+        _turn_token = bind_turn_id(new_turn_id())
+
         # Cost breaker gate (kept here so a halted session short-circuits before
         # building/invoking the graph).
         if self.cost_breaker.should_halt():
+            reset_turn_id(_turn_token)
             return "⚠️ ميزانية الجلسة انتهت. أعد التشغيل أو اتصل بالمسؤول. (Budget exceeded)"
 
         graph = await self._ensure_graph()
@@ -943,7 +952,34 @@ class KazmaAgent:
                 turn_timeout = float(raw_to)
             except ValueError:
                 turn_timeout = 600.0
-            if turn_timeout <= 0:
+
+            # Non-stop self-healing envelope (opt-in): heartbeat stall
+            # detection + checkpoint rollback + reflection + bounded resume.
+            # With the master toggle off, the path below is unchanged.
+            try:
+                from kazma_core.agent.nonstop import get_nonstop_config
+
+                _ns_cfg = get_nonstop_config(self.config.raw)
+            except Exception:
+                _ns_cfg = None
+
+            if _ns_cfg is not None and _ns_cfg.enabled:
+                from kazma_core.agent.supervisor_watchdog import (
+                    reset_heartbeat,
+                    supervised_invoke,
+                )
+
+                try:
+                    result = await supervised_invoke(
+                        graph,
+                        graph_state,
+                        config,
+                        nonstop_config=_ns_cfg,
+                        turn_timeout=turn_timeout,
+                    )
+                finally:
+                    reset_heartbeat(self._thread_id)
+            elif turn_timeout <= 0:
                 result = await graph.ainvoke(graph_state, config)
             else:
                 import asyncio as _asyncio
@@ -968,6 +1004,7 @@ class KazmaAgent:
             return "عذراً، حدث خطأ تقني. يرجى المحاولة مرة أخرى."
         finally:
             reset_current_thread_id(token)
+            reset_turn_id(_turn_token)
 
         # Extract the final assistant message text.
         final_messages = result.get("messages", [])

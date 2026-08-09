@@ -99,6 +99,13 @@ _PERSONALITY_MARKER = "[KAZMA_PERSONALITY]"
 TOOL_RESULT_MAX_CHARS = int(
     os.environ.get("KAZMA_TOOL_RESULT_MAX_CHARS", "100000") or "100000"
 )
+
+# ── Failover state (module-level, process-wide) ──────────────────────
+# One-off failover clients cached by model id (created only on primary
+# failure; never mutate the active profile). Cooldowns give a failing
+# provider time to recover before it is tried again.
+_failover_clients: dict[str, Any] = {}
+_failover_cooldowns: dict[str, float] = {}
 # Higher cap for research, file-read, and MCP tools so long files reach the model.
 TOOL_RESULT_RESEARCH_MAX_CHARS = int(
     os.environ.get("KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS", "200000") or "200000"
@@ -133,6 +140,29 @@ _RESEARCH_TOOL_NAMES = frozenset(
         "mcp__filesystem__list_directory",
     }
 )
+
+
+def _resolve_tool_timeout() -> float:
+    """Per-tool wall-clock timeout in seconds (default 120, <=0 disables).
+
+    Resolution order: ConfigStore ``agent.tool_timeout_seconds`` →
+    ``KAZMA_TOOL_TIMEOUT_SECONDS`` env → 120.0. Never raises.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        val = get_config_store().get("agent.tool_timeout_seconds")
+        if val is not None:
+            return float(val)
+    except Exception:
+        pass
+    raw = (os.environ.get("KAZMA_TOOL_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return 120.0
 
 
 def truncate_tool_result(
@@ -1091,6 +1121,9 @@ async def supervisor_node(
         from kazma_core.llm_provider import LLMError
 
         cfg = load_retry_config()
+        # Guard: max_attempts <= 0 would make range(1, 1) empty and raise
+        # last_exc=None — the LLM would never be called. Clamp to >= 1.
+        cfg["max_attempts"] = max(1, int(cfg.get("max_attempts", 1) or 1))
         retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)
         try:
             import httpx
@@ -1105,6 +1138,7 @@ async def supervisor_node(
             pass
 
         _llm_attempts = 0
+        _served_by: list[str] = []  # failover bookkeeping: [model] when a chain model answered
 
         async def _call_llm_with_retry() -> Any:
             nonlocal _llm_attempts
@@ -1158,10 +1192,109 @@ async def supervisor_node(
                         raise
             raise last_exc  # type: ignore[misc]
 
-        response = await _call_llm_with_retry()
+        # ── Model failover chain (agent.nonstop.failover) ───────────
+        # After the primary model exhausts its retries on a TRANSIENT
+        # failure (network/429/outage), try each model in the configured
+        # chain via a one-off registry client — the active profile is NOT
+        # mutated. Permanent 4xx errors never trigger failover (they would
+        # fail identically on every model). Per-model cooldown prevents
+        # hammering a provider that just failed.
+        async def _try_failover_models(last_exc: Exception) -> Any:
+            is_transient = isinstance(last_exc, retryable_exc) or bool(
+                getattr(last_exc, "transient", False)
+            )
+            if not is_transient:
+                return None
+            try:
+                from kazma_core.agent.nonstop import get_nonstop_config
+
+                ns = get_nonstop_config()
+            except Exception:
+                return None
+            if not ns.failover.enabled or not ns.failover.chain:
+                return None
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                registry = get_model_registry()
+            except Exception:
+                return None
+            now = time.monotonic()
+            for fb_model in ns.failover.chain:
+                if not fb_model or fb_model == routed_model:
+                    continue
+                cooled_until = _failover_cooldowns.get(fb_model, 0.0)
+                if now < cooled_until:
+                    logger.info(
+                        "[Failover] %s in cooldown (%.0fs left) — skipping",
+                        fb_model,
+                        cooled_until - now,
+                    )
+                    continue
+                try:
+                    client = _failover_clients.get(fb_model)
+                    if client is None:
+                        client = registry.get_client(fb_model)
+                        _failover_clients[fb_model] = client
+                    logger.warning(
+                        "[Failover] Primary model '%s' failed transiently — "
+                        "trying failover model '%s'",
+                        routed_model,
+                        fb_model,
+                    )
+                    response = await client.chat(
+                        messages=messages,
+                        tools=tool_definitions if tool_definitions else None,
+                        model=fb_model,
+                    )
+                    logger.warning(
+                        "[Failover] model '%s' answered after primary failure",
+                        fb_model,
+                    )
+                    _served_by.append(fb_model)
+                    return response
+                except Exception as fb_exc:
+                    _failover_cooldowns[fb_model] = now + ns.failover.cooldown_seconds
+                    logger.warning(
+                        "[Failover] model '%s' also failed: %s (cooldown %.0fs)",
+                        fb_model,
+                        fb_exc,
+                        ns.failover.cooldown_seconds,
+                    )
+            return None
+
+        async def _call_llm_resilient() -> Any:
+            try:
+                return await _call_llm_with_retry()
+            except Exception as primary_exc:
+                fb = await _try_failover_models(primary_exc)
+                if fb is not None:
+                    return fb
+                raise
+
+        response = await _call_llm_resilient()
     except Exception as exc:
         logger.error("[Supervisor] LLM call failed after retries: %s", exc)
         from kazma_core.retry import friendly_llm_error
+
+        # Per-call ledger (observability §A): durable record of the failure.
+        try:
+            from kazma_core.agent.nonstop import get_nonstop_config
+
+            if get_nonstop_config().ledger_enabled:
+                from kazma_core.observability.llm_ledger import record_llm_call
+
+                record_llm_call(
+                    thread_id=str(state.get("thread_id", "")),
+                    iteration=int(state.get("iteration", 0) or 0),
+                    provider=type(llm).__name__,
+                    model=str(routed_model or ""),
+                    duration_ms=(time.monotonic() - start) * 1000,
+                    status="error",
+                    error_kind=str(getattr(exc, "kind", "") or type(exc).__name__),
+                )
+        except Exception:
+            pass
 
         error_content = friendly_llm_error(exc)
         # Surface an HONEST failure rather than disguising it as a normal
@@ -1186,6 +1319,30 @@ async def supervisor_node(
 
     duration_ms = (time.monotonic() - start) * 1000
     cost_breaker.record_cost(response.cost_usd)
+
+    # Per-call ledger (observability §A): durable record of the success,
+    # including failover attribution (failover_from = primary model).
+    try:
+        from kazma_core.agent.nonstop import get_nonstop_config
+
+        if get_nonstop_config().ledger_enabled:
+            from kazma_core.observability.llm_ledger import record_llm_call
+
+            _served_model = _served_by[-1] if _served_by else ""
+            record_llm_call(
+                thread_id=str(state.get("thread_id", "")),
+                iteration=int(state.get("iteration", 0) or 0),
+                provider=type(llm).__name__,
+                model=str(response.model or _served_model or routed_model or ""),
+                prompt_tokens=int(response.usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(response.usage.get("completion_tokens", 0) or 0),
+                cost_usd=float(response.cost_usd or 0.0),
+                duration_ms=duration_ms,
+                status="ok",
+                failover_from=str(routed_model or "") if _served_model else "",
+            )
+    except Exception:
+        pass
 
     # Trace
     tracer.trace_llm_call(
@@ -1579,7 +1736,48 @@ async def tool_worker_node(
                     is_error=True,
                     duration_ms=duration_ms,
                 )
-            result = await tool_executor.execute(tc["name"], _args)
+            # Per-tool wall-clock timeout (audit B: fault isolation). A hung
+            # tool (deadlocked MCP server, wedged subprocess) previously
+            # blocked the whole turn until the outer KAZMA_TURN_TIMEOUT
+            # fired. Bound each call individually; a timeout is returned as
+            # a HARD tool error so the loop breaker can trip after repeated
+            # hangs. Config: ConfigStore agent.tool_timeout_seconds or
+            # KAZMA_TOOL_TIMEOUT_SECONDS (default 120s; <=0 disables).
+            _tool_timeout = _resolve_tool_timeout()
+            try:
+                if _tool_timeout and _tool_timeout > 0:
+                    result = await asyncio.wait_for(
+                        tool_executor.execute(tc["name"], _args),
+                        timeout=_tool_timeout,
+                    )
+                else:
+                    result = await tool_executor.execute(tc["name"], _args)
+            except asyncio.TimeoutError:
+                duration_ms = (time.monotonic() - start) * 1000
+                logger.error(
+                    "[ToolWorker] %s timed out after %.0fs — returning tool error",
+                    tc["name"],
+                    _tool_timeout,
+                )
+                tracer.trace_tool_execution(
+                    tool_name=tc["name"],
+                    input_data=tc["arguments"],
+                    output_data={"error": "timeout"},
+                    duration_ms=duration_ms,
+                    success=False,
+                )
+                return ToolResult(
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                    content=(
+                        f"Error: Tool '{tc['name']}' timed out after "
+                        f"{_tool_timeout:.0f}s and was aborted. Do NOT retry the "
+                        "same call unchanged — narrow the request (smaller scope, "
+                        "fewer results) or pick a different tool."
+                    ),
+                    is_error=True,
+                    duration_ms=duration_ms,
+                )
             duration_ms = (time.monotonic() - start) * 1000
 
             tracer.trace_tool_execution(
@@ -1723,6 +1921,55 @@ async def tool_worker_node(
                 consecutive_failures,
             )
 
+        # ── Semantic stagnation detection ───────────────────────────
+        # The hard-failure breaker misses loops of *successful-but-useless*
+        # calls (same no-op edit, same denied path, same empty search). Track
+        # (tool, canonical-args) signatures over a sliding window; a signature
+        # repeated >= threshold times trips the same "stop and synthesize"
+        # path with a strategy-change hint for the model.
+        from kazma_core.agent.tool_loop_breaker import detect_stagnation, tool_signature
+
+        # Only outcomes that represent real model behaviour feed the window:
+        # policy denials / user denies / empties are control-plane signals and
+        # must NOT count as stagnation (mirrors the hard-breaker credit rules —
+        # repeating a denied call is the model being correctly blocked).
+        _id_to_outcome = {str(tr.get("tool_call_id")): str(tr.get("outcome", "")) for tr in results}
+        sigs = list(state.get("tool_signatures") or [])
+        for tc in safe_tools + danger_tools:
+            outcome = _id_to_outcome.get(str(tc.get("id")), "")
+            if outcome in ("policy", "user_deny", "empty"):
+                continue
+            sigs.append(tool_signature(tc["name"], tc.get("arguments") or {}))
+        sigs = sigs[-24:]  # bounded window
+        stagnant_sig = detect_stagnation(sigs)
+        if stagnant_sig and not breaker_tripped_now:
+            stagnant_names = [
+                tc["name"]
+                for tc in (safe_tools + danger_tools)
+                if tool_signature(tc["name"], tc.get("arguments") or {}) == stagnant_sig
+            ]
+            logger.warning(
+                "[ToolWorker] Semantic stagnation detected (repeated identical "
+                "calls: %s) — forcing synthesis with strategy-change hint",
+                sorted(set(stagnant_names)),
+            )
+            breaker_tripped_now = True
+            # Stamp this round's results with the strategy-change message.
+            stamped_results: list[ToolResult] = []
+            for tr in results:
+                tr2 = dict(tr)
+                tr2["content"] = (
+                    "SYSTEM OVERRIDE: You have repeated the same tool call(s) "
+                    f"({', '.join(sorted(set(stagnant_names))) or 'identical calls'}) "
+                    "multiple times without progress. STOP retrying the identical "
+                    "call — change strategy (different tool, different arguments, "
+                    "or narrower scope) or synthesize your final answer now."
+                )
+                tr2["is_error"] = True
+                tr2["outcome"] = "hard"
+                stamped_results.append(tr2)
+            results = stamped_results
+
         # Build tool-role messages for the conversation
         messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages: list[dict[str, Any]] = []
@@ -1774,6 +2021,7 @@ async def tool_worker_node(
             "tool_results": cumulative,
             "consecutive_tool_failures": consecutive_failures,
             "circuit_breaker_tripped": breaker_tripped_now,
+            "tool_signatures": sigs,
             # If the breaker just tripped or max consecutive failures hit, force RESPOND
             "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3) else NodeName.SUPERVISOR,
         }
@@ -2186,6 +2434,14 @@ def build_supervisor_graph(
         return None
 
     async def _supervisor(state: SupervisorState) -> dict[str, Any]:
+        # Watchdog heartbeat — lets the supervised envelope distinguish
+        # "working" from "wedged" (no-op cost, never raises).
+        try:
+            from kazma_core.agent.supervisor_watchdog import record_heartbeat
+
+            record_heartbeat(str(state.get("thread_id", "")))
+        except Exception:
+            pass
         # Clear prior turn's explain so we don't leak across concurrent tasks
         try:
             _memory_explain_cv.set(None)
@@ -2222,6 +2478,12 @@ def build_supervisor_graph(
         return result
 
     async def _tool_worker(state: SupervisorState) -> dict[str, Any]:
+        try:
+            from kazma_core.agent.supervisor_watchdog import record_heartbeat
+
+            record_heartbeat(str(state.get("thread_id", "")))
+        except Exception:
+            pass
         return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer, hitl_config=hitl_config)
 
     async def _respond(state: SupervisorState) -> dict[str, Any]:
@@ -2269,7 +2531,19 @@ def build_supervisor_graph(
             return NodeName.RESPOND
         from kazma_core.summarizer import estimate_tokens
         msgs = state.get("messages", [])
-        _MID_TURN_SATURATION_THRESHOLD = 24000
+        # Model-aware mid-turn saturation (audit: unification) — the 24000
+        # constant could never fire for small-window models (e.g. GPT-4 8k).
+        # Threshold = min(24000, 60% of the resolved window), so 128k+ models
+        # keep the historical behavior while small windows compact in time.
+        _threshold = 24000
+        try:
+            from kazma_core.token_counter import resolve_context_window
+
+            _window = resolve_context_window(None, state.get("last_model") or None)
+            _threshold = max(4000, min(24000, int(_window * 0.6)))
+        except Exception:
+            pass
+        _MID_TURN_SATURATION_THRESHOLD = _threshold
         if estimate_tokens(msgs) > _MID_TURN_SATURATION_THRESHOLD:
             logger.info("[Router] Context tokens (%d) > mid-turn threshold (%d) — routing to check_saturation", estimate_tokens(msgs), _MID_TURN_SATURATION_THRESHOLD)
             return NodeName.CHECK_SATURATION

@@ -457,6 +457,73 @@ class TaskStore:
             ).fetchall()
         return [self._row_to_task(row) for row in rows]
 
+    def requeue_orphaned_running(self, max_recovery: int = 3) -> dict[str, list[str]]:
+        """Recover tasks orphaned in 'running' state by a process crash.
+
+        A task left with ``status='running'`` at startup belongs to a dead
+        process — no worker will ever finish it. Each orphan is either:
+
+        * requeued (``status='pending'``, ``started_at`` cleared) when its
+          ``metadata.recovery_count`` is below *max_recovery*, or
+        * terminally failed (``status='failed'``) once the cap is hit, so a
+          task that keeps crashing its worker cannot loop forever.
+
+        Idempotent and crash-safe: each row is updated individually via
+        :meth:`persist_task`; if the process dies mid-recovery the remaining
+        orphans are still 'running' and will be picked up on the next boot.
+
+        Returns:
+            ``{"requeued": [...ids], "failed": [...ids]}``.
+        """
+        requeued: list[str] = []
+        failed: list[str] = []
+        with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                rows = get_pool().execute(
+                    "SELECT * FROM kazma_swarm_tasks WHERE status = %s",
+                    ("running",),
+                )
+                orphans = [self._dict_to_task(r) for r in rows]
+            else:
+                conn = self._get_conn()
+                orphans = [
+                    self._row_to_task(row)
+                    for row in conn.execute(
+                        "SELECT * FROM swarm_tasks WHERE status = ?", ("running",)
+                    ).fetchall()
+                ]
+        for task in orphans:
+            metadata = dict(task.metadata or {})
+            count = int(metadata.get("recovery_count", 0) or 0) + 1
+            metadata["recovery_count"] = count
+            task.metadata = metadata
+            if count <= max_recovery:
+                task.status = TaskStatus.PENDING
+                task.started_at = None
+                requeued.append(task.id)
+            else:
+                task.status = TaskStatus.FAILED
+                metadata["recovery_error"] = (
+                    f"Exceeded max recovery attempts ({max_recovery}); "
+                    "task kept crashing its worker."
+                )
+                failed.append(task.id)
+            try:
+                self.persist_task(task)
+            except Exception as exc:  # noqa: BLE001 — recovery must not abort boot
+                logger.warning(
+                    "[TaskStore] Failed to requeue orphaned task %s: %s", task.id, exc
+                )
+        if requeued or failed:
+            logger.info(
+                "[TaskStore] Orphan recovery: %d requeued, %d terminally failed",
+                len(requeued),
+                len(failed),
+            )
+        return {"requeued": requeued, "failed": failed}
+
     # ------------------------------------------------------------------
     # Worker metrics
     # ------------------------------------------------------------------

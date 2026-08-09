@@ -173,9 +173,161 @@ class InMemorySpanExporter:
             return len(self._spans)
 
 
+class CompositeExporter:
+    """Fan-out exporter: every span goes to each child exporter.
+
+    A failing child never blocks the others (per-exporter try/except).
+    """
+
+    def __init__(self, *exporters: Any) -> None:
+        self._exporters = list(exporters)
+
+    def export(self, span: Span) -> None:
+        for exp in self._exporters:
+            try:
+                exp.export(span)
+            except Exception:  # noqa: BLE001 — exporters are best-effort
+                pass
+
+    # Pass-through conveniences used by tests/dashboards on the in-memory child
+    def get_finished_spans(self) -> list[Span]:
+        for exp in self._exporters:
+            if isinstance(exp, InMemorySpanExporter):
+                return exp.get_finished_spans()
+        return []
+
+
+class OtlpHttpExporter:
+    """Minimal OTLP/HTTP (JSON) span exporter — zero new dependencies.
+
+    Enabled by setting ``KAZMA_OTLP_ENDPOINT`` (e.g.
+    ``http://localhost:4318``); spans are POSTed to
+    ``<endpoint>/v1/traces`` via the shared ``http_pool`` client. Export is
+    fire-and-forget from the synchronous ``export()`` call: when no event
+    loop is running the span is queued and flushed on the next call that has
+    one. Buffer is bounded; overflow drops oldest (never block a turn on
+    telemetry).
+    """
+
+    _MAX_BUFFER = 200
+
+    def __init__(self, endpoint: str | None = None, *, service_name: str = "kazma") -> None:
+        import os as _os
+
+        self._endpoint = (endpoint or _os.environ.get("KAZMA_OTLP_ENDPOINT") or "").rstrip("/")
+        self._service = service_name
+        self._lock = threading.Lock()
+        self._buffer: list[Span] = []
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._endpoint)
+
+    def export(self, span: Span) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            self._buffer.append(span)
+            if len(self._buffer) > self._MAX_BUFFER:
+                del self._buffer[: len(self._buffer) - self._MAX_BUFFER]
+            batch = list(self._buffer)
+        try:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no loop — keep buffered for a later call
+        loop.create_task(self._flush(batch))
+
+    async def _flush(self, batch: list[Span]) -> None:
+        try:
+            from kazma_core.http_pool import get_http_client
+
+            client = get_http_client()
+            resp = await client.post(
+                f"{self._endpoint}/v1/traces",
+                json=self._to_otlp(batch),
+                headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code < 300:
+                with self._lock:
+                    sent = {id(s) for s in batch}
+                    self._buffer = [s for s in self._buffer if id(s) not in sent]
+            else:
+                logger.debug("[OTLP] export rejected: HTTP %s", resp.status_code)
+        except Exception as exc:  # noqa: BLE001 — telemetry must never break work
+            logger.debug("[OTLP] export failed: %s", exc)
+
+    def _to_otlp(self, spans: list[Span]) -> dict[str, Any]:
+        def _ns(ts: str | None) -> int:
+            if not ts:
+                return 0
+            try:
+                return int(datetime.fromisoformat(ts).timestamp() * 1e9)
+            except (ValueError, TypeError):
+                return 0
+
+        def _attrs(attrs: dict[str, Any]) -> list[dict[str, Any]]:
+            out = []
+            for k, v in attrs.items():
+                if isinstance(v, bool):
+                    out.append({"key": k, "value": {"boolValue": v}})
+                elif isinstance(v, int):
+                    out.append({"key": k, "value": {"intValue": v}})
+                elif isinstance(v, float):
+                    out.append({"key": k, "value": {"doubleValue": v}})
+                else:
+                    out.append({"key": k, "value": {"stringValue": str(v)}})
+            return out
+
+        return {
+            "resourceSpans": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "service.name", "value": {"stringValue": self._service}}
+                        ]
+                    },
+                    "scopeSpans": [
+                        {
+                            "scope": {"name": "kazma.swarm"},
+                            "spans": [
+                                {
+                                    "traceId": s.trace_id,
+                                    "spanId": s.span_id,
+                                    "parentSpanId": s.parent_id or "",
+                                    "name": s.name,
+                                    "startTimeUnixNano": _ns(s.start_time),
+                                    "endTimeUnixNano": _ns(s.end_time),
+                                    "attributes": _attrs(s.attributes),
+                                    "status": (
+                                        {"code": 2, "message": s.status_msg}
+                                        if s.status == "error"
+                                        else {"code": 1}
+                                    ),
+                                }
+                                for s in spans
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+
 # ---------------------------------------------------------------------------
 # TracingEmitter
 # ---------------------------------------------------------------------------
+
+
+def _default_exporter() -> Any:
+    """Default exporter: in-memory, plus OTLP fan-out when KAZMA_OTLP_ENDPOINT is set."""
+    mem = InMemorySpanExporter()
+    otlp = OtlpHttpExporter()
+    if otlp.enabled:
+        return CompositeExporter(mem, otlp)
+    return mem
+
 
 class TracingEmitter:
     """Emits OpenTelemetry-compatible spans for swarm operations.
@@ -206,7 +358,9 @@ class TracingEmitter:
     """
 
     def __init__(self, exporter: InMemorySpanExporter | None = None) -> None:
-        self._exporter = exporter if exporter is not None else InMemorySpanExporter()
+        if exporter is None:
+            exporter = _default_exporter()
+        self._exporter = exporter
         self._lock = threading.Lock()
         # Active spans keyed by trace_id, maintained as a stack. Emptied
         # trace entries are removed in end_span() so this dict only ever

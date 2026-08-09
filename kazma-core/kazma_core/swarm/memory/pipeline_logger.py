@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["PipelineLogger", "get_pipeline_logger"]
+__all__ = ["PipelineLogger", "close_pipeline_logger", "get_pipeline_logger"]
 
 logger = logging.getLogger(__name__)
 
@@ -189,3 +189,25 @@ def get_pipeline_logger() -> PipelineLogger:
     if _pipeline_logger is None:
         _pipeline_logger = PipelineLogger()
     return _pipeline_logger
+
+
+def close_pipeline_logger() -> None:
+    """Close the module-level SQLite connection (process shutdown).
+
+    The singleton connection previously lived for the whole process with no
+    close path (audit B.10). Checkpoints the WAL so no -wal/-shm residue is
+    left behind, then closes and clears both singletons so a later
+    get_pipeline_logger() re-initializes cleanly.
+    """
+    global _conn, _pipeline_logger
+    if _conn is not None:
+        try:
+            _conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:  # noqa: BLE001 — best-effort on shutdown
+            pass
+        try:
+            _conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        _conn = None
+    _pipeline_logger = None

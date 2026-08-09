@@ -346,6 +346,10 @@ class LLMProvider:
                             retry_after = float(retry_header)
                         except (ValueError, TypeError):
                             pass
+                # Floor the backoff: a retry-after of 0 (or a fractional
+                # header) would otherwise spin a tight retry loop against an
+                # already-strained provider.
+                retry_after = max(1.0, retry_after)
                 logger.warning(
                     "Rate limited (429) — retrying after %.1fs with exponential backoff",
                     retry_after,
@@ -391,13 +395,46 @@ class LLMProvider:
                         transient=True,
                     ) from e
 
+            # ── Context-window overflow ─────────────────────────────────
+            # Providers reject over-long prompts with 400 (OpenAI
+            # "context_length_exceeded", Anthropic "invalid_request_error:
+            # prompt is too long", DeepSeek "context length", etc.). This is
+            # NOT a tool-schema problem and NOT transient — the only correct
+            # recovery is compact-and-retry. Tag it with kind so the
+            # supervisor/watchdog can route it to compaction instead of
+            # failing the turn or stripping tools.
+            detail_lower = detail.lower()
+            if status_code in (400, 413, 422) and any(
+                marker in detail_lower
+                for marker in (
+                    "context_length_exceeded",
+                    "maximum context length",
+                    "context window",
+                    "prompt is too long",
+                    "too many tokens",
+                    "input is too long",
+                    "exceeds the context",
+                    "context length",
+                )
+            ):
+                logger.warning(
+                    "Provider rejected request for context overflow (HTTP %s): %s",
+                    status_code,
+                    detail[:200],
+                )
+                raise LLMError(
+                    f"Prompt exceeds the model context window (HTTP {status_code}): "
+                    f"{detail[:300]}",
+                    transient=False,
+                    kind="context_overflow",
+                ) from e
+
             # ── Tool-definition fallback ────────────────────────────────
             # NVIDIA NIM / some providers reject tool-calling with a
             # 404 "Function not found for account" for models that don't
             # support function calling. OpenAI-compatible providers may
             # also reject malformed tool schemas with 400/422. Retry
             # without tools so the user still gets a text response.
-            detail_lower = detail.lower()
             # NOTE: the 404 "function not found" branch must stay (AGENTS.md).
             nim_function_not_found = (
                 status_code == 404 and "function" in detail_lower
@@ -722,8 +759,17 @@ class LLMError(Exception):
 
     Defaults to ``False`` (fail-closed: unknown errors are NOT retried) so
     that pre-existing ``LLMError(...)`` call sites keep their old behavior.
+
+    The optional ``kind`` tag gives watchdog/supervision layers a stable
+    machine-readable classification (``""`` = unclassified):
+
+    * ``"context_overflow"`` — the provider rejected the request because the
+      prompt exceeds the model's context window. NOT retryable as-is; the
+      correct recovery is compact-and-retry, so it is raised with
+      ``transient=False`` but is distinguishable from content/schema errors.
     """
 
-    def __init__(self, *args: Any, transient: bool = False) -> None:
+    def __init__(self, *args: Any, transient: bool = False, kind: str = "") -> None:
         super().__init__(*args)
         self.transient = bool(transient)
+        self.kind = str(kind or "")

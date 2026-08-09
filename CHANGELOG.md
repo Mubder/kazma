@@ -1,6 +1,47 @@
 # CHANGELOG
 
-## Unreleased — DS v5 "Abyss" UX rework: blue identity, light theme, single-owner mobile nav (2026-08-09)
+## Unreleased — Self-healing final: compaction unification, turn correlation IDs, OTLP export (2026-08-09)
+
+- **Compaction trigger unification:** `token_counter.resolve_context_window()` is now the single context-window ladder (Settings UI → YAML → model-aware table over the shipped default → 128k), shared by `KazmaAgent._resolve_context_window()` and the graph. The tool-worker mid-turn saturation route is model-aware: `min(24000, 60% × window)` — small-window models (GPT-4 8k) now compact in time instead of never; 128k+ models keep historical behavior. The entry-node `TOKEN_THRESHOLD` path is unchanged (pinned by tests).
+- **Turn correlation IDs:** new `observability/correlation.py` — `current_turn_id` ContextVar + `TurnIdFilter`. Bound per turn in `KazmaAgent.run()` and the SSE stream pump; `StructuredJSONFormatter` emits `turn_id` when present; the SSE `done`/`turn_complete` payload carries `turn_id`. Text log formats unchanged (no parser breakage).
+- **OTLP export:** `swarm/tracing.py` — `OtlpHttpExporter` (OTLP/HTTP JSON to `KAZMA_OTLP_ENDPOINT`, bounded 200-span buffer, drop-oldest, fire-and-forget via the shared http_pool) + `CompositeExporter` fan-out. Default `TracingEmitter()` is unchanged unless the env var is set (50/50 tracing tests pass).
+
+
+
+- **Supervised execution envelope:** new `kazma_core/agent/supervisor_watchdog.py` — `supervised_invoke()` wraps `graph.ainvoke` with (1) per-node **heartbeats** (`record_heartbeat` wired into the supervisor + tool-worker wrappers), (2) **stall detection** (no heartbeat within `agent.nonstop.watchdog.stall_threshold_seconds` → cancel the wedged invoke; adaptive poll granularity), (3) **incident classification** (`stalled / transient_llm / context_overflow / panic` via `LLMError.transient`/`kind`), (4) **rollback** to the last durable checkpoint (`aget_state` → `sanitize_tool_chains` → `aupdate_state`, falling back to fresh input when no checkpoint survived), (5) a bounded **reflection message** (`[KAZMA RECOVERY]` system note telling the model to change strategy), and (6) **bounded resume** with exponential backoff (`healing.backoff_*`), escalating after `healing.max_recovery_attempts`.
+- **Opt-in wiring:** `KazmaAgent.run()` uses the envelope only when `agent.nonstop.enabled` is true — the default path is byte-identical to before. Turn wall-clock budget (`KAZMA_TURN_TIMEOUT_SECONDS`) applies per attempt; outer cancellation (shutdown) is never swallowed.
+- **Verification:** fake-graph smoke tests cover panic→rollback→reflect→resume, stall cancel + escalation, and recovery-budget exhaustion; 52/52 graph integration tests pass.
+
+
+
+- **Model-aware context windows:** `model_registry.lookup_context_window()` — ordered prefix table (GPT-4.1 1M, GPT-5 400k, o-series/Claude 200k, GPT-4o 128k, GPT-4 8k, DeepSeek 64k, Gemini 1M, …) with per-model ConfigStore override (`models.context_window.<model>`). `KazmaAgent._resolve_context_window()` now resolves: explicit Settings/YAML value (non-default always wins) → active model's known window (over the shipped 128k default) → 128k fallback. Compaction now fires at the *model's* real 80%, not a global constant (audit §2.6).
+- **Tiered compaction preservation:** `compaction.py` — the last 3 user turns now survive compaction (folded into the compacted system block; previously only the latest user message survived, amputating task context on repeated compactions), and preserved tool results raised 8 → 12 (`KAZMA_COMPACT_PRESERVE_TOOL_RESULTS`).
+- **Hard cost ceiling:** `CostCircuitBreaker.hard_max_cost` (env `KAZMA_HARD_MAX_COST` / ConfigStore `safety.hard_max_cost`, default 3× soft max = $15) trips **immediately** regardless of the silence window — closes the "$5 in 15 minutes of unattended burn" gap (audit §2.4). `hard_max_cost <= 0` disables; soft behavior unchanged (23/23 tests pass).
+- **Streaming client leak:** `streaming.py` `stream_chat` now closes its dedicated per-call client in a `finally` (previously leaked when the generator errored or was abandoned mid-stream). Audit's other flagged httpx sites (mcp/manager, mcp/oauth, proxy/base) verified already safe (context-managed or handle-tracked + closed on disconnect).
+
+
+
+- **Non-stop config schema:** new `kazma_core/agent/nonstop.py` — `NonStopConfig` (watchdog / healing / failover / context / ledger) with `get_nonstop_config()` live-re-read (ConfigStore `agent.nonstop.*` overrides → YAML `agent.nonstop` → safe defaults, never raises; master toggle defaults OFF).
+- **Model failover chain:** `graph_builder` — after the primary model exhausts transient retries, the supervisor walks `agent.nonstop.failover.chain` via one-off `registry.get_client(model)` calls (active profile NOT mutated), with per-model cooldown (`failover.cooldown_seconds`, default 300s) and client caching. Permanent 4xx never triggers failover. `turn_failed` honest-failure semantics preserved when the whole chain fails.
+- **Semantic stagnation detection:** `tool_loop_breaker.py` gains `tool_signature()` (canonical JSON+sha1) and `detect_stagnation()` (sliding window 8, repeat threshold 3). `tool_worker_node` tracks signatures in the new `SupervisorState.tool_signatures` field and trips the synthesize-now path with a strategy-change hint when the model repeats identical calls without progress. Policy/user-deny/empty outcomes are excluded (control-plane, mirroring hard-breaker credit rules — pinned by `test_circuit_breaker_hardening`).
+- **Per-LLM-call ledger:** new `kazma_core/observability/llm_ledger.py` — durable SQLite WAL (`kazma-data/llm_calls.db`) recording thread/iteration/model/tokens/cost/latency/status/error_kind/failover_from per supervisor call; wired into both the success and failure paths of `supervisor_node`; best-effort (never raises); closed at shutdown; toggle `agent.nonstop.ledger.enabled` (default on).
+- **Tests:** 194 passed in the targeted suite; the 9 failures are the pre-existing set on clean HEAD. Smoke-verified: stagnation signatures canonicalize key order, config layering (YAML/ConfigStore), ledger write/query/close.
+
+
+
+Phase 1–2 of the non-stop/self-healing audit plan (full report in session artifacts; gap audit mapped Critical/Major/Minor findings across durability, context, fault isolation, leaks, observability).
+
+- **Startup orphan recovery:** `swarm/task_store.py::requeue_orphaned_running(max_recovery=3)` — tasks stranded in `status='running'` by a crash/kill are requeued to `pending` on boot (bounded by `metadata.recovery_count`; terminally `failed` past the cap). Wired into `app.py::_on_startup` next to `restore_paused_tasks()`. Idempotent, per-row, works on SQLite and Postgres.
+- **Graph HITL approval timeout:** new `kazma-ui/kazma_ui/hitl_timeout.py` watchdog — scans pending `hitl_approval` interrupts every 15s and auto-denies after `safety.hitl.approval_timeout_seconds` (default 60) when `auto_deny_on_timeout` is on (fail-closed; honors live ConfigStore overrides). Closes the graph-gate deadlock where a missed approval parked a turn forever (the swarm bus already had 60s; the graph gate had none). Started in `_on_startup`, cancelled in `_on_shutdown`.
+- **Per-tool timeout:** `graph_builder._exec_one` wraps every tool call in `asyncio.wait_for` (ConfigStore `agent.tool_timeout_seconds` → env `KAZMA_TOOL_TIMEOUT_SECONDS` → 120s default; ≤0 disables). A hung tool now returns a HARD tool error (feeds the loop breaker) instead of stalling the turn until the 600s turn budget.
+- **Context-overflow classification:** `LLMError` gains a machine-readable `kind` tag (default `""`); provider 400/413/422 matching `context_length_exceeded` / `maximum context length` / `prompt is too long` / etc. raise `kind="context_overflow"` (checked **before** the tool-schema fallback so it can't be misrouted to a tools-stripped retry). Enables future compact-and-retry recovery.
+- **429 backoff floor:** `retry-after` is floored at 1.0s — a `0` header no longer spins a tight retry loop.
+- **Retry config guard:** `_call_llm_with_retry` clamps `retry.max_attempts` to ≥1 (a `0` previously made `range(1,1)` empty and skipped the LLM call entirely).
+- **Shutdown completeness:** `_on_shutdown` now closes the swarm TaskStore, the LLM semantic-cache singleton, and the pipeline-logger SQLite connection (new `close_pipeline_logger()` with WAL `checkpoint(TRUNCATE)`) — all previously process-lifetime leaks.
+- **Bounded summaries:** `summarizer._summaries` is now a capped LRU (`OrderedDict`, `KAZMA_SUMMARIES_MAX_ENTRIES`, default 500) — previously an unbounded module-global dict.
+- **Verification:** targeted suites pass with zero new failures (3 `test_compaction.py` + 6 llm/retry/hitl failures are pre-existing on clean HEAD); smoke-verified orphan requeue lifecycle, watchdog auto-deny resume, overflow classification, timeout resolver.
+
+
 
 - **New design layer:** `kazma-ui/kazma_ui/static/css/kazma.v5.css` — loaded once after `kazma.css` in `base.html` (+ `login.html`); **rollback = remove the one `<link>`**. Phase-gated migration: tokens → shell → dashboard → chat → swarm/settings/purge.
 - **Palette remap:** every legacy CSS var re-pointed to the Abyss blues — accent royal blue `#3b82f6`, secondary sky `#38bdf8`, azure→royal→sky gradients, deep blue-black `#04070f` dark / ice-blue `#f0f4fa` light. Cyan `#22d3ee` and all purple/indigo retired. `--warning` → yellow `#facc15` (amber family left with cyan); `--info` → sky. New `--brand` alias → `--accent` (fixes agents.html indigo fallback).
