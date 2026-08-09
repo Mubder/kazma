@@ -640,7 +640,15 @@ class KazmaAppBuilder:
                 telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
             tg_adapter: TelegramAdapter | None = None
-            if telegram_token:
+            # connectors.<platform>.enabled is authoritative (audit N1):
+            # previously only token presence gated the adapter, so the YAML
+            # `enabled: false` flag was dead config.
+            tg_enabled = bool(
+                self.config.raw.get("connectors", {}).get("telegram", {}).get("enabled", True)
+            )
+            if not tg_enabled:
+                logger.info("[Gateway] Telegram disabled via connectors.telegram.enabled — skipped")
+            elif telegram_token:
                 voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
                 webhook_secret = (
                     self.config_store.get("connectors.telegram.webhook_secret", "")
@@ -680,7 +688,12 @@ class KazmaAppBuilder:
 
             # Discord adapter
             discord_token = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
-            if discord_token:
+            discord_enabled = bool(
+                self.config.raw.get("connectors", {}).get("discord", {}).get("enabled", True)
+            )
+            if not discord_enabled:
+                logger.info("[Gateway] Discord disabled via connectors.discord.enabled — skipped")
+            elif discord_token:
                 from kazma_gateway.adapters.discord import DiscordAdapter
 
                 discord_adapter = DiscordAdapter(token=discord_token)
@@ -706,7 +719,12 @@ class KazmaAppBuilder:
             _cs_slack_app = self.config_store.get("connectors.slack.app_token", "")
             slack_bot_token = (_cs_slack_bot if _cs_slack_bot.startswith("xoxb-") else "") or os.environ.get("SLACK_BOT_TOKEN", "")
             slack_app_token = (_cs_slack_app if _cs_slack_app.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
-            if slack_bot_token:
+            slack_enabled = bool(
+                self.config.raw.get("connectors", {}).get("slack", {}).get("enabled", True)
+            )
+            if not slack_enabled:
+                logger.info("[Gateway] Slack disabled via connectors.slack.enabled — skipped")
+            elif slack_bot_token:
                 from kazma_gateway.adapters.slack import SlackAdapter
 
                 # Team/channel allowlists — empty = allow all. Stored in
@@ -1417,6 +1435,17 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[TimeTravel] maintenance loop start failed: %s", e)
 
+        # ── Periodic health-alert watchdog (audit M3) ────────────────
+        # Proactive subsystem probes (memory degradation, RAM pressure) every
+        # 5 min; previously alerts only fired reactively on errors.
+        try:
+            from kazma_core.observability.alerts import start_health_watchdog
+
+            start_health_watchdog()
+            logger.info("[Alerts] periodic health watchdog started (5m cadence)")
+        except Exception as e:
+            logger.warning("[Alerts] health watchdog start failed: %s", e)
+
         if self.cron_store is not None:
             try:
                 await self.cron_store.init()
@@ -1612,6 +1641,14 @@ class KazmaAppBuilder:
             close_llm_ledger()
         except Exception as e:
             logger.debug("[app] LLM ledger close: %s", e)
+
+        # Stop the periodic alert health watchdog
+        try:
+            from kazma_core.observability.alerts import stop_health_watchdog
+
+            await stop_health_watchdog()
+        except Exception as e:
+            logger.debug("[app] alert watchdog stop: %s", e)
 
         # 6) Best-effort vector memory close & SessionManager close
         try:

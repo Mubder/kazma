@@ -12,7 +12,10 @@ Threat model notes
 from __future__ import annotations
 
 import os
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "client_tenant_spoof_allowed",
@@ -32,8 +35,16 @@ def multi_user_or_production() -> bool:
         from kazma_core.security.platform_rbac import multi_user_enabled
 
         return bool(multi_user_enabled())
-    except Exception:
-        return False
+    except Exception as exc:
+        # Fail-closed for posture, loud for operators (audit C2b): an RBAC
+        # store error previously fell through to single-tenant mode silently,
+        # relaxing tenant isolation exactly when the store was broken.
+        logger.warning(
+            "[tenant_isolation] multi_user_enabled() check failed (%s) — "
+            "treating as multi-user (fail-closed)",
+            exc,
+        )
+        return True
 
 
 def client_tenant_spoof_allowed() -> bool:

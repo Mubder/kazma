@@ -81,6 +81,10 @@ def run_macro_sleep(
     v2 = (cfg or {}).get("v2") or {}
     recall_idle = float(v2.get("recall_demote_idle_days", 30)) * 86400
     episodic_ttl = float(v2.get("episodic_ttl_days", 30)) * 86400
+    # Age-based recall archival (audit M2): the key existed in config but was
+    # never enforced — recall-tier rows previously lived forever unless they
+    # went idle. 0 disables (default keeps backward-compatible behavior).
+    recall_ttl = float(v2.get("recall_ttl_days", 90)) * 86400
     archive_after = float(v2.get("archive_after_days", 180)) * 86400
     promote_min_importance = int(v2.get("promote_to_recall_min_importance", 3))
     promote_min_access = int(v2.get("promote_to_recall_min_access", 2))
@@ -136,6 +140,17 @@ def run_macro_sleep(
                     "UPDATE episodes SET tier='recall' WHERE id=?", (eid,)
                 )
                 stats["promoted_to_recall"] += 1
+            # Demote recall→archived by pure age (recall_ttl_days) — bounds
+            # long-term recall growth even for frequently-idle items that
+            # never trip the idle demotion.
+            elif tier == "recall" and recall_ttl > 0 and created_age > recall_ttl:
+                primary_conn.execute(
+                    "UPDATE episodes SET tier='archived', "
+                    "summary_text=COALESCE(summary_text, SUBSTR(user_text, 1, 200)), "
+                    "user_text=NULL, assistant_text=NULL WHERE id=?",
+                    (eid,),
+                )
+                stats["demoted_recall"] += 1
             # Demote recall→episodic when idle past the threshold
             elif tier == "recall" and age > recall_idle:
                 primary_conn.execute(

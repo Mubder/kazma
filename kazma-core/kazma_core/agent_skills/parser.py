@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-__all__ = ["ParsedSkill", "parse_skill_md", "validate_skill_name"]
+__all__ = ["ParsedSkill", "parse_skill_md", "validate_manifest", "validate_skill_name"]
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,24 @@ def _lenient_yaml_load(text: str) -> dict[str, Any]:
     return {}
 
 
+def validate_manifest(manifest: dict[str, Any], *, source: str = "") -> list[str]:
+    """Validate a parsed skill manifest. Returns a list of problems (empty = ok).
+
+    A manifest that silently parsed to ``{}`` (or missed required fields)
+    previously loaded as a zero-capability skill with no signal (audit N6).
+    Callers log these at WARNING so a broken SKILL.md is visible.
+    """
+    problems: list[str] = []
+    if not manifest:
+        problems.append(f"empty or unparseable manifest ({source or 'unknown source'})")
+        return problems
+    if not str(manifest.get("name") or "").strip():
+        problems.append("missing required field: name")
+    if not str(manifest.get("version") or "").strip():
+        problems.append("missing required field: version")
+    return problems
+
+
 def parse_skill_md(
     content: str,
     *,
@@ -120,6 +138,14 @@ def parse_skill_md(
     body = (match.group(2) or "").strip()
     name = str(fm.get("name") or directory_name or "").strip()
     description = str(fm.get("description") or "").strip()
+
+    # Structural manifest validation (audit N6): surface missing name/version
+    # as warnings instead of silently loading a degraded skill.
+    manifest_problems = validate_manifest(
+        {**fm, "name": name or fm.get("name")}, source=str(path or name or "<string>")
+    )
+    for problem in manifest_problems:
+        logger.warning("SKILL.md manifest issue: %s (%s)", problem, path or name or "<string>")
 
     if not description:
         logger.warning("SKILL.md missing description — skipping: %s", path or name)

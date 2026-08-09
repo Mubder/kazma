@@ -188,8 +188,11 @@ class SQLiteCronStore:
                 "ALTER TABLE cron_jobs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
             )
             await self._db.commit()
-        except Exception:
-            pass  # column already exists
+        except Exception as exc:
+            # "duplicate column name" is the expected idempotency path; anything
+            # else (locked/corrupt DB, permission error) must be visible.
+            if "duplicate column" not in str(exc).lower():
+                logger.warning("[CronStore] tenant_id migration failed: %s", exc)
         # Idempotent delivery_target column for direct result routing
         # (the chat a reminder was scheduled from). Empty for legacy rows.
         try:
@@ -197,8 +200,9 @@ class SQLiteCronStore:
                 "ALTER TABLE cron_jobs ADD COLUMN delivery_target TEXT NOT NULL DEFAULT ''"
             )
             await self._db.commit()
-        except Exception:
-            pass  # column already exists
+        except Exception as exc:
+            if "duplicate column" not in str(exc).lower():
+                logger.warning("[CronStore] delivery_target migration failed: %s", exc)
         await self._db.commit()
         logger.info("[CronStore] Initialized at %s", self._db_path)
 

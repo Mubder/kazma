@@ -118,7 +118,9 @@ def get_lifecycle_config() -> dict[str, Any]:
                     raw_window,
                 )
     except Exception as exc:  # noqa: BLE001 — config must never break boot
-        logger.debug("[LifecycleNotifier] config read failed, using defaults: %s", exc)
+        logger.warning(
+            "[LifecycleNotifier] config read failed, using defaults: %s", exc
+        )
 
     return {
         "enabled": enabled,
@@ -153,7 +155,11 @@ def _consume_recent_shutdown(window_seconds: int) -> float | None:
         if raw is None:
             return None
         epoch = float(raw)
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError) as exc:
+        logger.debug("[LifecycleNotifier] malformed shutdown marker %r: %s", raw, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[LifecycleNotifier] failed reading shutdown marker: %s", exc)
         return None
     delta = time.time() - epoch
     if 0 <= delta <= window_seconds:

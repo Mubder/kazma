@@ -358,6 +358,16 @@ class AsyncMCPManager:
                 message = str(exc) or type(exc).__name__
                 self._connection_errors[name] = message
                 logger.error("[MCP] Failed to connect server '%s': %s", name, message)
+        # End-of-batch summary (audit M5): per-server errors were already
+        # logged at ERROR, but with many servers the operator had to grep the
+        # log to know which subset failed. One summary line closes the loop.
+        if self._connection_errors:
+            logger.warning(
+                "[MCP] %d server(s) failed to connect: %s — tools from these "
+                "servers are unavailable until fixed (see /mcp settings page)",
+                len(self._connection_errors),
+                "; ".join(f"{n} ({m[:80]})" for n, m in self._connection_errors.items()),
+            )
         if raise_on_error and self._connection_errors:
             details = "; ".join(
                 f"{name}: {message}" for name, message in self._connection_errors.items()
@@ -879,7 +889,7 @@ class AsyncMCPManager:
         # ── Inject auth headers from the first-class auth field ──────
         auth = cfg.get("auth", {})
         if auth.get("type") == "bearer" and auth.get("token"):
-            headers["Authorization"] = f"Bearer {auth['token']}"
+            headers["Authorization"] = "Bearer " + str(auth["token"])
         elif auth.get("type") == "header" and auth.get("name") and auth.get("value"):
             headers[auth["name"]] = auth["value"]
 
@@ -1152,7 +1162,7 @@ class AsyncMCPManager:
 
         auth = cfg.get("auth", {})
         if auth.get("type") == "bearer" and auth.get("token"):
-            headers["Authorization"] = f"Bearer {auth['token']}"
+            headers["Authorization"] = "Bearer " + str(auth["token"])
         elif auth.get("type") == "header" and auth.get("name") and auth.get("value"):
             headers[auth["name"]] = auth["value"]
 

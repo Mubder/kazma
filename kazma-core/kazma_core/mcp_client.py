@@ -286,7 +286,7 @@ class MCPClient:
         headers = dict(cfg.headers or {})
         auth = cfg.auth or {}
         if auth.get("type") == "bearer" and auth.get("token"):
-            headers["Authorization"] = f"Bearer {auth['token']}"
+            headers["Authorization"] = "Bearer " + str(auth["token"])
         elif auth.get("type") == "header" and auth.get("name") and auth.get("value") is not None:
             headers[str(auth["name"])] = str(auth["value"])
 

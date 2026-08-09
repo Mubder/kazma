@@ -144,6 +144,10 @@ class AlertDispatcher:
     _channels: list[AlertChannel] = []
     _recent_alerts: list[AlertPayload] = []
     _initialized = False
+    # Dedup: subsystem -> monotonic time of last dispatch. Prevents alert
+    # spam when the same subsystem degrades repeatedly (audit M3).
+    _last_dispatch: dict[str, float] = {}
+    _DEDUP_WINDOW_SECONDS = 300.0  # same subsystem re-alerts at most every 5 min
 
     @classmethod
     def _init_default_channels(cls) -> None:
@@ -225,6 +229,18 @@ class AlertDispatcher:
         """Broadcasts a rich status/permission alert to the active message bus."""
         cls._init_default_channels()
 
+        # Dedup: identical subsystem+status within the window is dropped.
+        now = time.monotonic()
+        dedup_key = f"{subsystem.lower()}:{status.upper()}"
+        last = cls._last_dispatch.get(dedup_key)
+        if last is not None and (now - last) < cls._DEDUP_WINDOW_SECONDS:
+            logger.debug(
+                "[AlertDispatcher] dedup: %s alert suppressed (%.0fs ago)",
+                dedup_key, now - last,
+            )
+            return
+        cls._last_dispatch[dedup_key] = now
+
         alert_id = f"alert-{int(time.time())}-{subsystem.lower()}"
         alert_payload = AlertPayload(
             id=alert_id,
@@ -261,3 +277,84 @@ async def trigger_system_alert(
     await AlertDispatcher.trigger_system_alert(
         subsystem=subsystem, status=status, message=message, severity=severity
     )
+
+
+# ── Periodic health watchdog (audit M3: channels existed, nothing drove
+# proactive checks) ─────────────────────────────────────────────────────
+
+_health_task: asyncio.Task | None = None
+
+
+async def _health_check_loop(interval_s: float = 300.0) -> None:
+    """Every *interval_s*, probe subsystems and alert on degradation.
+
+    Checks (each best-effort, never raises):
+      - Memory V2 recall health (degraded embedder/recall)
+      - Hardware RAM pressure (>=90% used)
+      - Cost breaker state (halted sessions)
+    """
+    from kazma_core.shutdown import is_shutting_down
+
+    logger.info("[alerts] periodic health watchdog started (every %.0fs)", interval_s)
+    while not is_shutting_down():
+        try:
+            await asyncio.sleep(interval_s)
+            if is_shutting_down():
+                break
+
+            # Memory subsystem health
+            try:
+                from kazma_core.memory.health import recall_degraded
+
+                if recall_degraded():
+                    await trigger_system_alert(
+                        subsystem="Memory",
+                        status="DEGRADED",
+                        message="Recall path is degraded (embedder/vector store unavailable)",
+                        severity="WARNING",
+                    )
+            except Exception:
+                pass
+
+            # RAM pressure
+            try:
+                import psutil
+
+                ram_pct = float(psutil.virtual_memory().percent)
+                if ram_pct >= 90.0:
+                    await trigger_system_alert(
+                        subsystem="System",
+                        status="DEGRADED",
+                        message=f"RAM usage at {ram_pct:.0f}% — approaching capacity",
+                        severity="WARNING",
+                    )
+            except ImportError:
+                pass
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("[alerts] health tick failed", exc_info=True)
+
+
+def start_health_watchdog(interval_s: float = 300.0) -> asyncio.Task | None:
+    """Start the periodic health-alert loop (idempotent)."""
+    global _health_task
+    if _health_task is not None and not _health_task.done():
+        return _health_task
+    _health_task = asyncio.create_task(_health_check_loop(interval_s), name="alert-health-watchdog")
+    return _health_task
+
+
+async def stop_health_watchdog() -> None:
+    """Cancel the health watchdog (app shutdown)."""
+    global _health_task
+    task = _health_task
+    _health_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass

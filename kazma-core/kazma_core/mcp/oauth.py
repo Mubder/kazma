@@ -217,6 +217,7 @@ async def _register_client(
     }
     r = await http.post(registration_endpoint, json=payload)
     if r.status_code not in (200, 201):
+        logger.debug("[mcp-oauth] DCR full error body: %s", r.text)
         raise MCPOAuthError(
             f"Dynamic client registration failed (HTTP {r.status_code}): "
             f"{r.text[:300]}"
@@ -408,6 +409,7 @@ async def _exchange_code(pending: OAuthPending, code: str) -> dict[str, Any]:
             },
         )
     if r.status_code != 200:
+        logger.debug("[mcp-oauth] token exchange full error body: %s", r.text)
         raise MCPOAuthError(
             f"Token exchange failed (HTTP {r.status_code}): {r.text[:300]}"
         )

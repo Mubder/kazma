@@ -80,6 +80,38 @@ _hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=Fals
 _graph_hitl_gate_ctx: ContextVar[bool] = ContextVar("_graph_hitl_gate", default=False)
 
 
+# ── YAML permission allowlist (opt-in) ───────────────────────────────
+_PERMISSION_MANAGER: Any = None
+_PERMISSION_MANAGER_RESOLVED = False
+
+
+def _get_permission_manager() -> Any:
+    """Return a PermissionManager when kazma-permissions.yaml defines a
+    ``users:`` map, else ``None`` (feature off — backward compatible).
+
+    The shipped kazma-permissions.yaml is a *divisions* template with no
+    ``users`` key; enforcing it as an allowlist would deny every tool on a
+    default install. Lazy + cached: the file is read once per process.
+    """
+    global _PERMISSION_MANAGER, _PERMISSION_MANAGER_RESOLVED
+    if _PERMISSION_MANAGER_RESOLVED:
+        return _PERMISSION_MANAGER
+    _PERMISSION_MANAGER_RESOLVED = True
+    try:
+        from kazma_core.permissions import PermissionManager
+
+        pm = PermissionManager()
+        users = pm.users()
+        if users:
+            _PERMISSION_MANAGER = pm
+            logger.info(
+                "[ToolRegistry] permissions allowlist active for users: %s", users
+            )
+    except Exception as exc:
+        logger.debug("[ToolRegistry] permissions manager unavailable: %s", exc)
+    return _PERMISSION_MANAGER
+
+
 def _record_procedural_outcome(tool_name: str, arguments: dict[str, Any], *, success: bool) -> None:
     """Feed a tool-execution outcome into the V2 procedural DAG memory.
 
@@ -465,6 +497,32 @@ class LocalToolRegistry:
             min_wait = 2
             max_wait = 10
 
+        # ── YAML permission allowlist (audit M4, opt-in) ─────────────
+        # kazma-permissions.yaml users.<user>.{allowed,denied} was parsed but
+        # never enforced outside MCP. Enforced HERE, the single tool-exec
+        # chokepoint, but ONLY when the file actually defines a `users:` map —
+        # the shipped file is a divisions template (no users), and enforcing
+        # an empty allowlist would deny everything on default installs.
+        try:
+            from kazma_core.permissions import PermissionManager
+
+            pm = _get_permission_manager()
+            if pm is not None and not pm.is_allowed(tool_name, user="default"):
+                logger.warning(
+                    "[ToolRegistry] '%s' denied by kazma-permissions.yaml allowlist",
+                    tool_name,
+                )
+                return {
+                    "content": (
+                        f"Error: Tool '{tool_name}' is not in the permissions allowlist "
+                        "(kazma-permissions.yaml users.default). Add it to `allowed` or "
+                        "remove the allowlist to enable."
+                    ),
+                    "is_error": True,
+                }
+        except Exception as exc:
+            logger.debug("[ToolRegistry] permissions check skipped: %s", exc)
+
         # ── Safety check — gate danger-tier tools (HITL) ───────────
         # Use the async check() so a real bus adapter can post an approval
         # request and await the operator's response. check_sync() only
@@ -529,6 +587,27 @@ class LocalToolRegistry:
                     sig = None
                     valid_params = arguments
 
+                # ── Type coercion against signature annotations ────────
+                # LLMs routinely pass numbers/bools as strings ("500",
+                # "true"). Coerce to the annotated type so strict
+                # comparisons and arithmetic inside tools don't blow up
+                # (audit M8). Best-effort: un-coercible values pass through
+                # unchanged (the tool's own validation reports the error).
+                if sig is not None:
+                    for pname, pval in list(valid_params.items()):
+                        ann = sig.parameters[pname].annotation
+                        if ann is _inspect.Parameter.empty or not isinstance(pval, str):
+                            continue
+                        try:
+                            if ann is int:
+                                valid_params[pname] = int(pval.strip())
+                            elif ann is float:
+                                valid_params[pname] = float(pval.strip())
+                            elif ann is bool:
+                                valid_params[pname] = pval.strip().lower() in ("1", "true", "yes", "on")
+                        except (ValueError, TypeError, AttributeError):
+                            pass  # leave as-is; tool validation handles it
+
                 # ── Argument validation BEFORE invocation ─────────────
                 # Models (notably DeepSeek under long contexts) sometimes
                 # emit empty/truncated tool-call JSON. Invoking the tool
@@ -578,7 +657,12 @@ class LocalToolRegistry:
                 if isinstance(result, str):
                     content = result
                 elif isinstance(result, dict | list):
-                    content = json.dumps(result, ensure_ascii=False, indent=2)
+                    try:
+                        content = json.dumps(result, ensure_ascii=False, indent=2)
+                    except (ValueError, TypeError):
+                        # Circular references / unserializable objects — never
+                        # let normalization itself kill the tool result.
+                        content = repr(result)
                 else:
                     content = str(result)
 
@@ -1898,6 +1982,103 @@ class LocalToolRegistry:
 
             now = datetime.now(UTC)
             return now.isoformat()
+
+        # ── Research planning / session tools (audit M1: previously defined
+        # and exported in tools/ but never registered — the model could not
+        # call them) ────────────────────────────────────────────────────
+
+        @self.register(
+            description=(
+                "Plan a research task: produces sub-questions, concrete web search "
+                "queries, and success criteria for a topic. Use before running "
+                "run_research_pipeline when you want to inspect or adjust the plan."
+            ),
+            category="research",
+        )
+        async def plan_research_queries(
+            topic: str, language: str = "", max_queries: int = 8, is_deep: bool = True
+        ) -> str:
+            try:
+                from kazma_core.tools.research_planner import plan_research_queries as _plan
+
+                plan = await _plan(topic, language=language, max_queries=max_queries, is_deep=is_deep)
+                return json.dumps(plan.to_dict(), ensure_ascii=False, indent=2)
+            except Exception as exc:
+                return f"Error: research planning failed — {exc}"
+
+        @self.register(
+            description=(
+                "Critique a research synthesis for unsupported claims and missing "
+                "angles; returns follow-up search suggestions. Use after drafting "
+                "an answer from multiple sources to check coverage."
+            ),
+            category="research",
+        )
+        async def critique_synthesis_gaps(
+            topic: str, synthesis: str, sources_summary: str = "", max_followups: int = 3
+        ) -> str:
+            try:
+                from kazma_core.tools.research_planner import critique_synthesis_gaps as _critique
+
+                report = await _critique(
+                    topic, synthesis, sources_summary=sources_summary, max_followups=max_followups
+                )
+                return json.dumps(report.to_dict(), ensure_ascii=False, indent=2)
+            except Exception as exc:
+                return f"Error: gap critique failed — {exc}"
+
+        @self.register(
+            description=(
+                "List saved research reports (papers) from past research pipeline runs. "
+                "Use to reference or continue earlier research."
+            ),
+            category="research",
+        )
+        async def list_research_papers(limit: int = 50) -> str:
+            try:
+                from kazma_core.tools.research_pipeline import list_research_papers as _list
+
+                papers = _list(limit=max(1, min(200, int(limit))))
+                return json.dumps(papers, ensure_ascii=False, indent=2)
+            except Exception as exc:
+                return f"Error: listing research papers failed — {exc}"
+
+        @self.register(
+            description=(
+                "Check research readiness: verifies search backends, fetch ladder, and "
+                "pipeline prerequisites are operational. Use to diagnose why research "
+                "is failing before launching a deep run."
+            ),
+            category="research",
+        )
+        async def research_readiness(probe_search: bool = False) -> str:
+            try:
+                from kazma_core.tools.research_readiness import research_readiness as _ready
+
+                report = _ready(probe_search=bool(probe_search))
+                return json.dumps(report, ensure_ascii=False, indent=2, default=str)
+            except Exception as exc:
+                return f"Error: readiness check failed — {exc}"
+
+        @self.register(
+            description=(
+                "Start a deep research session in the background: runs the full "
+                "research pipeline (plan → search → fetch → digest → synthesize) "
+                "and returns a session id to poll for progress. Prefer this over "
+                "run_research_pipeline for long tasks."
+            ),
+            category="research",
+        )
+        async def start_deep_research(
+            topic: str, depth: str = "deep", max_sources: int = 8, export_docx: bool = False
+        ) -> str:
+            try:
+                from kazma_core.tools.research_session import start_deep_research as _start
+
+                sess = await _start(topic, depth=depth, max_sources=max_sources, export_docx=export_docx)
+                return json.dumps(sess.to_dict(), ensure_ascii=False, indent=2, default=str)
+            except Exception as exc:
+                return f"Error: starting deep research failed — {exc}"
 
         @self.register(
             description=(

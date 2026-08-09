@@ -103,7 +103,7 @@ class ShellTool(BaseTool):
             return False
         if not args:
             return False
-        binary = args[0].split("/")[-1]
+        binary = args[0].split("/")[-1].split("\\")[-1].lower()
         return binary in cls._READ_ONLY_COMMANDS
 
     async def execute(self, **kwargs: Any) -> ToolResult:

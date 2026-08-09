@@ -100,11 +100,22 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             from kazma_core.mcp.oauth import oauth_status
 
             manager = getattr(agent.tools, "_mcp", None)
+            # Audit M5: surface per-server connection failures so the UI can
+            # badge them instead of silently showing a disconnected server.
+            conn_errors: dict[str, str] = {}
+            if manager is not None:
+                try:
+                    conn_errors = manager.connection_errors
+                except Exception:
+                    conn_errors = {}
             for s in servers:
                 name = s.get("name", "")
                 s["oauth_status"] = oauth_status(name)
                 if manager is not None and manager.oauth_challenge(name):
                     s["oauth_required"] = True
+                if name in conn_errors:
+                    s["connection_error"] = conn_errors[name]
+                    s["connected"] = False
         except Exception as exc:  # noqa: BLE001
             logger.debug("[mcp_api] oauth status annotation skipped: %s", exc)
         return servers

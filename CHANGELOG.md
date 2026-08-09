@@ -1,6 +1,29 @@
 # CHANGELOG
 
-## Unreleased — Fix: replay API 404 spam (always-mounted router + UI unavailable state) (2026-08-09)
+## Unreleased — Full-repo audit remediation: security, memory, tools, MCP, observability (2026-08-10)
+
+Resolution of the consolidated audit report (22 items). False positives excluded after first-hand verification (SSE checkpointer, gateway handler_ok, discord/slack voice, list_active, 3 of 5 memory config keys, alert buffer bound).
+
+**Critical**
+- **Sensitive-key detection broadened** (`config_store.py`): `is_sensitive_config_key` now matches secret-kind segments (password/secret/credential/apikey/privatekey/clientsecret/accesstoken/refreshtoken/bottoken) anywhere in the dotted key — not only last-segment suffixes. New nested keys (e.g. `email.smtp.password`) can no longer bypass vault encryption.
+- **Exception masking removed:** cron column migrations log non-duplicate failures at WARNING; `tenant_isolation.multi_user_or_production()` now fails CLOSED (multi-user posture) + WARNING on RBAC store errors instead of silently relaxing to single-tenant; lifecycle notifier config/marker failures visible at WARNING.
+
+**Major**
+- **5 research tools registered** (`plan_research_queries`, `critique_synthesis_gaps`, `list_research_papers`, `research_readiness`, `start_deep_research`) — previously defined+exported but invisible to the model. 125 tools total.
+- **Memory V2:** `recall_ttl_days` now enforced (age-based recall→archived demotion in macro_sleep); `dense_belief_candidate_cap`, `promote_to_recall_min_access`, `working_ttl_hours`, `episodic_ttl_days` verified already enforced (stale audit claim).
+- **Alert scheduler:** new periodic health watchdog (memory degradation + RAM pressure every 5 min, started in app lifespan) + 5-min per-subsystem dedup in AlertDispatcher. Channels previously only fired reactively.
+- **RBAC:** `kazma-permissions.yaml` `users.default` allowlist now enforced at the single tool-exec chokepoint (`LocalToolRegistry.execute`), opt-in — no `users:` map (the shipped divisions template) = no enforcement (backward compatible).
+- **MCP failure visibility:** end-of-startup summary line listing failed servers; `/api/mcp/servers` annotates `connection_error` per server for UI badging.
+- **Tool arg coercion:** string numerics/bools from the model are coerced to annotated int/float/bool before invocation.
+
+**Minor**
+- `connectors.{telegram,discord,slack}.enabled` flags now actually gate adapter creation.
+- `active_turns.py` silent excepts now log at debug; tool-result `json.dumps` circular-ref guard; swarm `is_safe` splits Windows `\` paths (parity with agent registry); skill manifest name/version validation warnings; OAuth error bodies logged in full at debug; stale `delegation/*` entry marked archived in UNWIRED_INVENTORY.md. `create_hitl_approval_router` kept (tests + standalone use).
+- **Bug:** malformed masked bearer header `f"******'token']}"` fixed in mcp_client.py + mcp/manager.py (was sending a literal mask string as the Authorization header — bearer-authed MCP/SSE servers always failed).
+
+**Verified:** all touched suites green; 7 failures in the combined tenant/hitl run are identical on clean HEAD (pre-existing). 22/22 plan items done.
+
+
 
 Root cause of the repeating `GET /api/replay/threads → 404`: `app.py` only mounted the replay router when `self._snapshot_recorder` was not None, while `replay.js` polls the route every 10s forever — a recorder init failure (or any exception in the conditional mount block, e.g. a `NameError` on the closure-scoped `recompiled` variable after a refactor) left the route absent with only a debug-level log.
 

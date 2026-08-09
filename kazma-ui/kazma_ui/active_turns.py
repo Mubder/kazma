@@ -98,7 +98,7 @@ def mark_turn_orphaned(thread_id: str) -> None:
             if task.done():
                 return
         except Exception:
-            pass
+            logger.debug("[active-turns] task.done() check failed for thread=%s", thread_id[:12], exc_info=True)
         if thread_id not in _orphaned_at:
             _orphaned_at[thread_id] = time.monotonic()
 
@@ -139,7 +139,7 @@ def get_orphan_stamp(thread_id: str) -> float | None:
             if task.done():
                 return None
         except Exception:
-            pass
+            logger.debug("[active-turns] task.done() check failed for thread=%s", thread_id[:12], exc_info=True)
         return _orphaned_at.get(thread_id)
 
 
@@ -160,7 +160,7 @@ def cancel_turn(thread_id: str) -> Any | None:
         try:
             task.cancel()
         except Exception:
-            pass
+            logger.debug("[active-turns] task.cancel() failed for thread=%s", thread_id[:12], exc_info=True)
         logger.info("[active-turns] cancelled turn for thread=%s", thread_id[:12])
     return task
 
@@ -186,4 +186,5 @@ def is_turn_running(thread_id: str) -> bool:
     try:
         return not task.done()
     except Exception:
+        logger.debug("[active-turns] task.done() check failed for thread=%s", thread_id[:12], exc_info=True)
         return True

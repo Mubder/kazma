@@ -65,18 +65,40 @@ _SENSITIVE_LAST_SEGMENTS = frozenset({
 
 
 def is_sensitive_config_key(key: str) -> bool:
-    """True when *key* should never sit in plaintext settings.db if vault is on."""
+    """True when *key* should never sit in plaintext settings.db if vault is on.
+
+    Detection is two-layer (audit C1):
+    1. Last-segment match against known sensitive names / suffixes.
+    2. Any-segment match on secret-kind words — so ``connectors.github.app_private_key``
+       or ``email.smtp.password``-style nesting can never slip through when a new
+       integration adds a differently-shaped key. Segment matching (split on dots
+       and underscores) avoids false positives like ``tokenizer`` / ``monkey``.
+    """
     if not key:
         return False
-    last = key.lower().replace("-", "_").rsplit(".", 1)[-1]
+    lowered = key.lower().replace("-", "_")
+    last = lowered.rsplit(".", 1)[-1]
     if last in _SENSITIVE_LAST_SEGMENTS:
         return True
-    return (
+    if (
         last.endswith("_token")
         or last.endswith("_secret")
         or last.endswith("_password")
         or last.endswith("_api_key")
-    )
+    ):
+        return True
+    # Layer 2: any segment that IS a secret-kind word (anywhere in the key).
+    segments = [seg for part in lowered.split(".") for seg in part.split("_") if seg]
+    secret_words = {"password", "passwd", "secret", "credential", "credentials", "apikey"}
+    if any(seg in secret_words for seg in segments):
+        return True
+    # Compound segments like "privatekey" / "clientsecret" / "accesstoken".
+    if any(
+        seg in segments
+        for seg in ("privatekey", "clientsecret", "accesstoken", "refreshtoken", "bottoken")
+    ):
+        return True
+    return False
 
 
 def is_vault_ref(value: Any) -> bool:
