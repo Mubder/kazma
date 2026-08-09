@@ -1552,12 +1552,12 @@ async def tool_worker_node(
                         f"Error: Your previous response was TRUNCATED by the output token "
                         f"limit (max_tokens), which severed the '{tc['name']}' arguments "
                         f"mid-JSON — the tool was NOT executed. Do NOT retry the same "
-                        f"large call. Instead: (1) write the file in SMALLER pieces — "
-                        f"first call creates the file with the initial section, then "
-                        f"append subsequent sections with additional calls (or use "
-                        f"shell_exec with append), keeping each call's content under "
-                        f"~1500 characters; or (2) reduce the content size. "
-                        f"Ask the user to raise max_tokens in Settings for large files."
+                        f"large call. Instead, write the file in SMALLER pieces: call "
+                        f"file_write once with the first section, then call file_append "
+                        f"for each following section (keep each chunk under ~1500 "
+                        f"characters). The provider already auto-retried with a doubled "
+                        f"output limit; if you still see this, the content is simply too "
+                        f"large for one response."
                     ),
                     "is_error": True,
                 }

@@ -699,6 +699,28 @@ class LocalToolRegistry:
 
         @self.register(
             description=(
+                "Append content to the end of a local file. Creates the file and parent "
+                "directories if needed. Use this to build LARGE files in chunks — one "
+                "file_write to create, then file_append for each subsequent section — "
+                "instead of one giant write that can exceed the model's output limit."
+            ),
+            category="filesystem",
+        )
+        async def file_append(path: str, content: str, encoding: str = "utf-8") -> str:
+            p = Path(path).expanduser().resolve()
+            scope_err = _workspace_scope_error(p, path, "writes")
+            if scope_err:
+                return scope_err
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with open(p, "a", encoding=encoding) as f:
+                    f.write(content)
+                return f"Appended {len(content)} chars to: {path}"
+            except Exception as exc:
+                return f"Error appending to {path}: {exc}"
+
+        @self.register(
+            description=(
                 "Delete a file or directory. Directories are removed recursively. "
                 "Restricted to the workspace. Danger-tier (requires HITL approval)."
             ),

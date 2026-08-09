@@ -517,7 +517,55 @@ class LLMProvider:
         duration_ms = (time.monotonic() - start) * 1000
 
         response = self._parse_response(data, duration_ms)
-        if cache_enabled:
+
+        # ── Auto-recover from output truncation ─────────────────────────
+        # finish_reason="length" means the provider cut the completion at
+        # max_tokens — tool-call JSON is severed mid-string and the task
+        # fails in a retry loop. Instead of telling the USER to bump
+        # Settings, transparently retry once with a doubled limit. Capped at
+        # 4x the configured value (or 32k) so a runaway can't balloon cost.
+        if response.finish_reason == "length" and not getattr(
+            self, "_in_truncation_retry", False
+        ):
+            current_cap = int(payload.get("max_tokens") or self.config.max_tokens)
+            retry_cap = min(current_cap * 2, max(self.config.max_tokens * 4, 32768))
+            logger.warning(
+                "[LLMProvider] Response truncated at max_tokens=%d — retrying once "
+                "with max_tokens=%d (model=%s)",
+                current_cap, retry_cap, payload.get("model"),
+            )
+            self._in_truncation_retry = True
+            try:
+                retry_resp = await client.post(
+                    "/chat/completions",
+                    json={**payload, "max_tokens": retry_cap},
+                )
+                retry_resp.raise_for_status()
+                retry_data = retry_resp.json()
+            except Exception as retry_exc:
+                logger.warning(
+                    "[LLMProvider] Truncation retry failed (%s) — keeping truncated response",
+                    retry_exc,
+                )
+            else:
+                retry_duration = (time.monotonic() - start) * 1000
+                retry_response = self._parse_response(retry_data, retry_duration)
+                if retry_response.finish_reason != "length":
+                    logger.info(
+                        "[LLMProvider] Truncation retry succeeded (finish_reason=%s)",
+                        retry_response.finish_reason,
+                    )
+                    response = retry_response
+                else:
+                    logger.warning(
+                        "[LLMProvider] Still truncated at max_tokens=%d — returning "
+                        "truncated response; tool worker will guide chunked writes",
+                        retry_cap,
+                    )
+            finally:
+                self._in_truncation_retry = False
+
+        if cache_enabled and response.finish_reason != "length":
             try:
                 response_dict = {
                     "content": response.content,
