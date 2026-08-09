@@ -30,7 +30,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 1: PROVIDERS & CONNECTORS (Unified Secrets Hub)
          ═══════════════════════════════════════════════════════════════ -->
-    <div :class="{ hidden: tab !== 'providers_connectors' }">
+    <div :class="{ hidden: tab !== 'providers_connectors' }" x-cloak>
         <!-- Sub-tab switcher -->
         <div class="settings-group" style="padding-bottom:0">
             <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -164,7 +164,7 @@
         <!-- ═══════════════════════════════════════════════════════════
              SUB-SECTION: Platform Connectors
              ═══════════════════════════════════════════════════════════ -->
-        <div :class="{ hidden: hubSubtab !== 'connectors' }">
+        <div :class="{ hidden: hubSubtab !== 'connectors' }" x-cloak>
             <div class="settings-group">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                     <h3>{{ t('settings.platform_connectors') }}</h3>
@@ -229,7 +229,7 @@
              ═══════════════════════════════════════════════════════════ -->
 
         <!-- Provider Add/Edit Modal -->
-        <div x-show="hubProviderModal" class="modal-overlay" @click.self="hubProviderModal = false">
+        <div x-show="hubProviderModal" x-cloak class="modal-overlay" @click.self="hubProviderModal = false">
             <div class="modal">
                 <h2 x-text="hubEditingProvider._existing ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
                 <div class="form-group" x-show="!hubEditingProvider._existing" style="margin-bottom: 16px;">
@@ -338,7 +338,7 @@
         </div>
 
         <!-- Connector Add/Edit Modal -->
-        <div x-show="hubConnectorModal" class="modal-overlay" @click.self="hubConnectorModal = false">
+        <div x-show="hubConnectorModal" x-cloak class="modal-overlay" @click.self="hubConnectorModal = false">
             <div class="modal">
                 <h2 x-text="hubEditingConnector.name ? '{{ t('settings.edit_connector') }}' : '{{ t('settings.add_connector') }}'"></h2>
                 <div class="form-group">
@@ -435,7 +435,7 @@
         </div>
 
         <!-- Saved Profile Modal -->
-        <div x-show="hubProfileModal" class="modal-overlay" @click.self="hubProfileModal = false">
+        <div x-show="hubProfileModal" x-cloak class="modal-overlay" @click.self="hubProfileModal = false">
             <div class="modal">
                 <h2 x-text="hubEditingProfile._existing ? '{{ t('settings.edit_profile') }}' : '{{ t('settings.save_profile') }}'"></h2>
                 <div class="form-group">
@@ -472,7 +472,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 3: AGENT
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'agent'" x-transition>
+    <div x-show="tab === 'agent'" x-transition x-cloak>
         <!-- Basic Config -->
         <div class="settings-group">
             <h3>{{ t('settings.agent_config') }}</h3>
@@ -606,7 +606,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB: MEMORY (isolation, KB merge, backends, Neo4j)
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'memory'" x-transition>
+    <div x-show="tab === 'memory'" x-transition x-cloak>
         <!-- Memory Tenant Mode -->
         <div class="settings-group">
             <h3>{{ t('settings.memory_isolation_title') }}</h3>
@@ -968,7 +968,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          MCP
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'mcp'" x-transition>
+    <div x-show="tab === 'mcp'" x-transition x-cloak>
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                 <h3>{{ t('settings.mcp_servers') }}</h3>
@@ -1047,7 +1047,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 6: SKILLS
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'skills'" x-transition>
+    <div x-show="tab === 'skills'" x-transition x-cloak>
         <div class="settings-group">
             <h3>{{ t('settings.installed_skills') }}</h3>
             <div class="search-bar">
@@ -1086,7 +1086,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 7: APPEARANCE
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'appearance'" x-transition>
+    <div x-show="tab === 'appearance'" x-transition x-cloak>
         <div class="settings-group">
             <h3>{{ t('settings.theme') }}</h3>
             <div style="display:flex;gap:12px;margin-bottom:16px">
@@ -1144,7 +1144,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 8: SHORTCUTS
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'shortcuts'" x-transition>
+    <div x-show="tab === 'shortcuts'" x-transition x-cloak>
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                 <h3>{{ t('settings.keyboard_shortcuts') }}</h3>
@@ -1177,7 +1177,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 9: ACCOUNT
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'account'" x-transition>
+    <div x-show="tab === 'account'" x-transition x-cloak>
         <!-- Password -->
         <div class="settings-group">
             <h3>{{ t('settings.change_password') }}</h3>
@@ -1332,7 +1332,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 10: TOOLS
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'tools'" x-transition>
+    <div x-show="tab === 'tools'" x-transition x-cloak>
         <div class="settings-group">
             <h3>{{ t('settings.tool_registry') }}</h3>
             <div class="search-bar">
@@ -1383,7 +1383,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 11: SYSTEM
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'system'" x-transition>
+    <div x-show="tab === 'system'" x-transition x-cloak>
         <!-- Diagnostics -->
         <div class="settings-group">
             <h3>{{ t('settings.system_diagnostics') }}</h3>
@@ -1579,7 +1579,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 12: PACKAGES & DEPENDENCIES
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'packages'" x-transition class="pkg-tab">
+    <div x-show="tab === 'packages'" x-transition x-cloak class="pkg-tab">
         <!-- Summary -->
         <div class="settings-group pkg-summary">
             <div class="pkg-summary-text">
@@ -1745,7 +1745,7 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 13: IMPORT/EXPORT
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'import'" x-transition>
+    <div x-show="tab === 'import'" x-transition x-cloak>
         <!-- Export -->
         <div class="settings-group">
             <h3>{{ t('settings.export_config') }}</h3>
