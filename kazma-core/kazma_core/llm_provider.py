@@ -544,7 +544,23 @@ class LLMProvider:
             args_raw = func.get("arguments", "{}")
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                if not isinstance(args, dict):
+                    # Model emitted a bare list/string instead of an object —
+                    # the registry would splat it into nothing. Keep it
+                    # visible so validation can produce a corrective error.
+                    logger.warning(
+                        "[LLMProvider] Tool call '%s' arguments are not a JSON object: %r",
+                        func.get("name", "?"), str(args)[:200],
+                    )
+                    args = {"_malformed": args}
             except json.JSONDecodeError:
+                # Truncated/malformed JSON (common with DeepSeek on long
+                # contexts). Log the raw payload for diagnosis; the tool
+                # registry will reject it with a corrective message.
+                logger.warning(
+                    "[LLMProvider] Tool call '%s' has unparseable arguments JSON: %r",
+                    func.get("name", "?"), str(args_raw)[:500],
+                )
                 args = {"raw": args_raw}
 
             tool_calls.append(

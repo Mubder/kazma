@@ -526,7 +526,43 @@ class LocalToolRegistry:
                             tool_name, dropped,
                         )
                 except (ValueError, TypeError):
+                    sig = None
                     valid_params = arguments
+
+                # ── Argument validation BEFORE invocation ─────────────
+                # Models (notably DeepSeek under long contexts) sometimes
+                # emit empty/truncated tool-call JSON. Invoking the tool
+                # with missing required args raises a raw TypeError whose
+                # message tells the model nothing — it retries the same
+                # broken call in a loop. Return a corrective error that
+                # names the missing params and the full expected schema so
+                # the model can self-repair on the next turn.
+                if sig is not None:
+                    required = [
+                        p.name for p in sig.parameters.values()
+                        if p.default is _inspect.Parameter.empty
+                        and p.kind in (
+                            _inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            _inspect.Parameter.KEYWORD_ONLY,
+                        )
+                    ]
+                    missing = [p for p in required if p not in valid_params]
+                    if missing:
+                        schema_hint = tool.input_schema or {}
+                        logger.warning(
+                            "Tool '%s' called without required args %s — raw arguments: %s",
+                            tool_name, missing, json.dumps(arguments, ensure_ascii=False)[:500],
+                        )
+                        _record_procedural_outcome(tool_name, arguments, success=False)
+                        return {
+                            "content": (
+                                f"Error: Tool '{tool_name}' was called with missing required "
+                                f"argument(s): {', '.join(missing)}. "
+                                f"Expected parameters: {json.dumps(schema_hint, ensure_ascii=False)[:800]}. "
+                                "Re-issue the tool call with ALL required arguments as valid JSON."
+                            ),
+                            "is_error": True,
+                        }
 
                 if tool.is_async:
                     result = await tool.func(**valid_params)
@@ -564,12 +600,29 @@ class LocalToolRegistry:
                     await asyncio.sleep(wait_time)
                 # If last attempt, fall through to error return below
 
+            except TypeError as exc:
+                # Argument-shape mismatch (e.g. wrong types from the model).
+                # Surface the ACTUAL error so the model can correct its call
+                # instead of retrying blind against "check server logs".
+                duration_ms = (time.monotonic() - start) * 1000
+                logger.error("Tool '%s' argument error after %.0fms: %s", tool_name, duration_ms, exc, exc_info=True)
+                _record_procedural_outcome(tool_name, arguments, success=False)
+                schema_hint = tool.input_schema or {}
+                return {
+                    "content": (
+                        f"Error: Tool '{tool_name}' rejected the arguments: {exc}. "
+                        f"Expected parameters: {json.dumps(schema_hint, ensure_ascii=False)[:800]}. "
+                        "Fix the argument names/types and call the tool again."
+                    ),
+                    "is_error": True,
+                }
+
             except Exception as exc:
                 # Non-retryable error — return immediately
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc, exc_info=True)
                 _record_procedural_outcome(tool_name, arguments, success=False)
-                return {"content": "Error: Tool execution failed. Check server logs for details.", "is_error": True}
+                return {"content": f"Error: Tool '{tool_name}' failed: {exc}", "is_error": True}
 
         # All retry attempts exhausted
         duration_ms = (time.monotonic() - start) * 1000
