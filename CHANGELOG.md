@@ -1304,30 +1304,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
   function doesn't accept caused `TypeError`. Now filtered via
   `inspect.signature()` before calling.
 
-## Unreleased — Time Travel Replay (2026-07-23)
+## v0.7.0 (2026-08-09)
 
-Full time-travel replay system — snapshot every supervisor iteration, rewind,
-branch, compare, and browse a timeline in the Web UI.
+### Feat
 
-- **Snapshot recording**: `SnapshotRecorder` wired into all 3
-  `build_supervisor_graph` call sites (run/streaming/child) + app.py
-  recompile. Captures state after every supervisor iteration into
-  `kazma-data/snapshots.db` (SQLite WAL, LRU-capped at 50/thread).
-- **Slash commands**: `/replay list`, `/replay <n>` (restore in-place —
-  rewinds the live thread via `graph.aupdate_state`), `/replay compare <a>
-  <b>` (structured diff table), `/replay clear`, and `/fork <n>` (branch
-  from a snapshot into a NEW thread — original stays intact, new thread
-  seeded with snapshot state + session context + Web UI session).
-- **Web UI panel** (`/replay`): timeline browser with thread picker,
-  snapshot cards, message detail view, Restore/Fork buttons, Compare tab
-  with structured diff table, About tab, live SSE snapshot events.
-- **Live events**: `snapshot` SSE event emitted after each turn so the
-  timeline grows in real-time.
-- **API**: `/api/replay/{threads,snapshots,restore,fork,compare,clear}`.
-- **Config**: `time_travel: {enabled, max_snapshots, db_path}` in kazma.yaml.
-- Reconciled the `/replay` stub (was calling an invented API) to the real
-  `SnapshotRecorder`/`ReplayEngine` surface. Added clean public
-  `list_distinct_threads()` to both `SnapshotStore` and `SnapshotRecorder`.
+- **tools**: mcp_test_server — agent-facing MCP diagnostics tool
 
 ## v0.6.7 (2026-08-09)
 
