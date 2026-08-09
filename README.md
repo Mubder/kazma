@@ -17,7 +17,7 @@ Kazma is the reliable multi-agent framework built for real deployment. Cryptogra
 <!-- Update from METRICS.md via: python scripts/generate_metrics.py --write -->
 | Lines of code | Tests | Commits | Contributors |
 |---|---:|---:|---:|
-| ~241K | 4,243 | 1,668+ | 7 |
+| ~248K Python (~271K Total) | 4,319 | 1,799+ | 7 |
 
 ![Kazma Dashboard](https://kazma.ai/screenshots/Hero-en.png)
 
@@ -40,6 +40,9 @@ We engineered Kazma on those same pillars — not as metaphor, but as architectu
 ### 🧠 Agent Brain & V2 Cognitive Memory
 LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80% context compaction, and **Pure V2 Cognitive Memory** — bi-temporal belief tracking (`valid_from` / `valid_until`), Local Ego-Graph Personalized PageRank (PPR), hybrid FTS + vector episode retrieval, and prompt-fenced per-turn context injection. **Knowledge Library** stays a separate store but can inject into chat (labeled) with federated search. Optional **Neo4j** dual-write and Postgres/Qdrant adapters — SQLite remains the zero-config default.
 
+### 🛡️ Non-Stop Execution & Self-Healing Engine
+Autonomous watchdog (`supervised_invoke()`) tracks node heartbeats, detects stalls, and performs automatic checkpoint rollbacks to clean state with `[KAZMA RECOVERY]` system reflection injection. Features model failover chains with per-provider cooldowns, durable SQLite **LLM Call Ledger** (`kazma-data/llm_calls.db`), orphan task startup recovery, and an automatic HITL approval timeout watchdog.
+
 ### 🐝 Swarm Orchestration & Autoscaler
 Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with a **Dynamic Swarm Autoscaler** that auto-spawns specialist workers from templates (`coder`, `researcher`, `generalist`) with automatic best-model-per-task routing (coding, reasoning, vision).
 
@@ -55,12 +58,12 @@ Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultura
 ### 🔌 Rich Ecosystem
 - **Any LLM** — OpenAI, Anthropic, Gemini, DeepSeek, xAI, Ollama, and 15+ more via plain HTTP with Vision Capability Routing
 - **MCP Marketplace** — One-click install from 85+ preset MCP servers with namespaced tools
-- **Pluggable Scraping Proxy** — Rotating residential/mobile proxy provider (`anyip.io`) with automatic 429/403 backoff retries and user-agent rotation
+- **Hardened Scraping & Auto-Retry** — 5 MB streaming byte limits (`KAZMA_FETCH_MAX_BYTES`), binary payload gates, exponential 5xx backoff, `robots.txt` options (`KAZMA_CRAWL_RESPECT_ROBOTS`), and automatic doubled `max_tokens` retry on truncation
 - **Knowledge Library** — Ingest entire documentation sites into searchable RAG corpora with cited sources
 - **IDE Subsystem** — Transport-agnostic coding backend: multi-tab editor, file-aware AI chat, `/ide` commands across all platforms
 - **Time-Travel Replay & Branching** — Snapshot every iteration to SQLite WAL (`snapshots.db`); restore in-place (`/replay`), fork threads (`/fork`), and compare paths
 - **Encrypted Vault** — AES-256-GCM storage for API keys and credentials
-- **Browser, Calendar & Documents** — Playwright automation, Google/Outlook calendar, PDF/DOCX/XLSX generation
+- **Browser, Calendar & Documents** — Playwright automation, Google/Outlook calendar, PDF/DOCX/XLSX generation, and chunked `file_append`
 - **Deep Research** — Multi-query web search → parallel acquire → digest → LLM synthesis with DOCX export
 
 ---
