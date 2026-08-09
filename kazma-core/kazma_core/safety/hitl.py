@@ -154,7 +154,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
 DEFAULT_DANGER_TOOLS: list[str] = list(CANONICAL_DANGER_TOOLS)
 
 
-def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
+def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Extract HITL config from raw kazma.yaml dict.
 
     Also checks ConfigStore for runtime overrides (set by the Settings UI).
@@ -163,11 +163,19 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     ``safety.hitl.enabled`` convention.
 
     Args:
-        raw_config: The full kazma.yaml dict.
+        raw_config: The full kazma.yaml dict (optional; auto-loads merged YAML if omitted/empty).
 
     Returns:
         HITL config dict with enabled, require_approval_for, timeout.
     """
+    if not raw_config:
+        try:
+            from kazma_core.config_loader import load_merged_yaml
+
+            raw_config = load_merged_yaml()
+        except Exception:
+            raw_config = {}
+
     safety = raw_config.get("safety", {})
     hitl = safety.get("hitl", {})
 

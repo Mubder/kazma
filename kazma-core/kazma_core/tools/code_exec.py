@@ -25,6 +25,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import kazma_core.tools.file_write as _fw
+
 __all__ = ["DEFAULT_DOCKER_IMAGE", "DEFAULT_TIMEOUT", "MAX_OUTPUT_CHARS", "MEMORY_LIMIT_MB", "docker_available", "python_exec", "reset_docker_probe", "use_docker_jail"]
 
 logger = logging.getLogger(__name__)

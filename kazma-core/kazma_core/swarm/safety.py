@@ -93,7 +93,14 @@ class SafetyMiddleware:
 
     def is_danger_tool(self, tool_name: str) -> bool:
         """Check if a tool requires approval."""
-        return tool_name in self._danger_tools
+        try:
+            from kazma_core.safety.hitl import get_hitl_config
+
+            hitl_cfg = get_hitl_config({})
+            danger = hitl_cfg.get("require_approval_for", self._danger_tools)
+            return tool_name in danger
+        except Exception:
+            return tool_name in self._danger_tools
 
     def is_sensitive_read(self, tool_name: str) -> bool:
         """Check if a tool is a sensitive read (allowed but logged)."""
