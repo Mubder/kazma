@@ -1436,88 +1436,506 @@ Fixes from the full-codebase audit (`1 CRITICAL + 7 HIGH + 4 MEDIUM`):
   serialization.
 - 95 email/audit/HITL regression tests pass.
 
-## Unreleased — Production readiness remediation (2026-07-21)
+## v0.6.5 (2026-08-09)
 
-Security and reliability hardening from
-`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` /
-`docs/audits/REMEDIATION_PLAN_2026-07-21.md`:
+### Feat
 
-### Security
-- **serve.py / CLI**: refuse known default secret; default bind `127.0.0.1`; non-loopback requires `KAZMA_SECRET`
-- **Auth**: default-deny all `/api/*` + admin HTML shells; remove dead always-cookie middleware
-- **NullBus**: `request_approval` fail-closed (`False`)
-- **YOLO**: disabled when `KAZMA_PRODUCTION=1` unless `KAZMA_ALLOW_YOLO=1`
-- **SSRF**: validate model discovery OpenAI-compatible URLs
-- **code_exec**: expand local import blocklist; production forces Docker
-- **shell_exec**: scrub env, workspace path policy, git denylist, drop `ps`/`kazma` in prod
-- **HITL**: empty `sender_id` fail-closed; web ownership errors deny
-- **Workspaces**: `KAZMA_WORKSPACE_ROOT` required in production
+- **scraper**: industry hardening — size caps, 5xx retry, robots.txt option
+- **self-healing**: roll out resilience to swarm workers, research, KB
+- **settings**: Non-Stop & Self-Healing settings section
+- **self-healing**: non-stop execution engine — watchdog, failover, recovery
+- **llm**: auto-retry truncated completions + file_append tool
+- **ui**: DS v5 'Abyss' UX rework — blue identity, light theme, single-owner mobile nav
+- **mcp**: OAuth 2.1 + DCR + PKCE for streamable_http servers
+- **app**: prioritize user workspace .env over CWD in _bootstrap_environment
+- **agent**: topic-shift focus soft-reset via turn intent classification
+- **core**: implement atomic file merger skill, autonomous continuation loop, and non-blocking tool runner
+- **agent**: implement stream truncation catch and auto-continuation loop (Task 5)
+- **research**: auto-record chat research tool executions into research_sessions store
+- **i18n**: implement two-stage PDF export engine, chat paste/formatting rendering, RTL plan alignment, and research event sync
+- **i18n**: upgrade Arabic language architecture and Flawless Rich Chat Interface
+- **ui**: dashboard feature cards + personality on /agents + fix provider blink
+- **documents**: advanced doc tools — OCR, conversion, redaction, forms, PPTX, tables/images
+- **documents**: industry-level document processing — read, parse, merge, split + RTL fix
+- **hitl**: 'Approve for task' button — one approval, all tools, auto-clear
+- **migrate**: v2 Postgres dump/restore — automated pg_dump/pg_restore
+- **migration+lifecycle**: cross-machine migration system + status notifications
+- **ui**: resort sidebar — Main → Tools → Capabilities → Configuration
+- **memory-ui**: mark-as-major — bigger nodes + violet color
+- **memory-ui**: blob-node compaction — prose notes render as chips
+- **memory-ui**: radial-tree layout — grouped nodes orbit their parent
+- **memory-ui**: graph grouping canvas — tier colors + Group-under action
+- **memory-ui**: graph groupings backend — view-only node associations
+- **memory-ui**: click-to-repoint (move) a belief endpoint
+- **memory-ui**: tag-chip linking + /vocab (naming-consistency fix)
+- **memory-ui**: entity protection flag + orphan warnings
+- **memory-ui**: isolation-safe graph rendering — dim, don't drop
+- **memory-ui**: Phase 5 — a11y, edit modal, E2E smoke
+- **memory-ui**: Phase 4 — multi-tenant correctness
+- **memory-ui**: Phase 2 — real FTS5 search + 'why recalled'
+- **memory-ui**: Phase 1.2 — action receipts + short undo window
+- **memory-ui**: Phase 1.1 + 1.3 — pagination + single ops bar
+- **memory**: move search and ops cards below known beliefs
+- **memory**: collapse component health groups by default
+- **memory**: cut hub shortcuts and per-edge Cut on graph inspect
+- **memory**: full-width graph layout and compact ops/filters
+- **memory**: graph-native link/merge/edit/unlink ops
+- **memory**: link list and graph, fix rename refresh, edit beliefs
+- **dashboard**: show 5 sessions with expand + industry polish
+- **memory**: move dashboard memory console into /memory hub
+- **memory**: admin UI for beliefs, entities, merge/link, hygiene
+- **chat+ops**: turn memory-explain panel and smoke matrix
+- **ui+memory**: polish B (smart search, cancel, KB metrics) and C (PPR, golden eval)
+- **kb**: smart re-index + hybrid RRF inject aligned with V2 federated stack
+- **research**: R4 deep-intent routing, rubric on sessions, eval API
+- **research**: R3 durable sessions, SSE progress, Research panel start UX
+- **research**: R2 adaptive planner and gap-fill verification loop
+- **research**: R0/R1 ranking, evidence claims, fail-closed deep, rubric
+- **web**: centralize search/scrape/crawl as web_acquire foundation
+- **memory**: partitioned reconsolidation + Neo4j env install default
+- **ui**: Dashboard memory polish + consolidate Settings homes
+- **memory**: Neo4j Test/Sync APIs and Settings controls
+- **memory**: polish wave — i18n, graph play scrub, best-path guide
+- **memory**: merge KB into chat path + Neo4j primary topology
+- **memory**: Horizon A federated search across memory and KB
+- **memory**: Postgres sparse recall assist + auth-bound tenants
+- **memory**: scale foundation — Postgres state, Neo4j graph, LLM entity T3
+- **memory**: P2 wave — remote vector write, graph export, quality
+- **memory**: P0/P1 priority max batch — VectorBackend base + ops polish
+- **memory**: finish Phases C–D, dashboard UX, backends UI, eval
+- **memory**: Phase B — FTS5, belief-graph PPR, explain recall
+- **memory**: Phase A — access bump, multi-tier dense, session bias
+- **ui**: rich markdown tables, lists, and quotes in chat
+- **reliability**: Sprint 2 heartbeats, model stamps, dashboard chip
+- **memory**: add snapshots.db support to scan_old_sessions.py and fix vision test mock
+- **memory**: UI-selectable tenant isolation mode (3 modes, default: shared)
+- **memory**: multi-tenant isolation + dashboard memory redesign
+- **memory**: V1→V2 full cutover — V2 cognitive engine is the single stack
+- **memory**: V2 belief topology canvas — force graph + bi-temporal slider
+- **memory**: V2 visibility + cost-gate — Dashboard panel, TUI tunables, docs
+- **memory**: production-ready V2 — backfill, Tier-2 entities, memory_store shim
+- **memory**: wire V2 cognitive loop live — extractor, worker, procedural feed
+- **memory**: V2.1 cognitive engine — bi-temporal beliefs, PPR recall, tier lifecycle
+- **scraping**: bulletproof proxy provider addon (anyip.io first) + UA rotation
+- **swarm**: dynamic autoscaler — auto-spawn workers + best-model-per-task
+- **settings**: configurable logging (level/format/retention) in System tab
+- **logging**: daily rotation with self-cleaning 7-day rolling window
+- **agent-skills**: real integrity verification + prompt-fence for skills
+- **ui**: add Configure App and PAT options to unauthenticated GitHub card state
+- **github**: add GitHub App integration, PR merging, and upstream branch pushing
+- **core/tools**: grant unconstrained file/exec tools capabilities (line slicing, shell pipes, workspace python_exec, 100k-200k char tool output limits)
+- **core/cost_breaker**: support disabling cost breaker via KAZMA_DISABLE_COST_BREAKER=1 or KAZMA_MAX_COST=0
+- **agent,ui**: structured config_read, tool-selection hints, depth presets
+- **memory**: hygiene P1–P3 — sqlite authorizer, retire empty FTS, swarm L4
+- **ui**: Max tool rounds control under Settings → Agent
+- **memory**: polish P2–P7 — cost, fence inject, shared Chroma, hard tenant, graph UX
+- **tui**: Phase 4 polish — collapsible nav, graph search/clear, panel density
+- **tui**: Phase 3 — nav rail, Memory tab, swarm sparklines, consolidator settings
+- **tui**: Phase 2 — memory health panel, panel polish, shared theme shell
+- **tui**: v2 professional shell — theme tokens, header, denser UI
+- **ui**: finish Memory & Governance dashboard KPIs and grouped health
+- **ui**: Packages tab memory stack health and full [rag] extra
+- **memory**: strengthen RAG stack, SQLite L2 graph, consolidator, graph UI
+- **research,kb**: Phase 3 polish — WS research, parallel pipeline, DOCX, smart KB, papers API
+- **kb,research**: harden KB ingest/search and ship deep research pipeline
+- **research,chat**: SearXNG discovery, hard-page recovery, workbench polish
+- **research,chat**: static-page ingest reliability + workbench plan chips
+- **chat**: unified turn workbench with plan + expanded tools
+- **tools**: harden web_search failover and add KB ingest agent tools
+- **chat**: message timestamps and live agent progress feed
+- **hitl**: add Clear All pending approvals endpoint and UI button
+- **telemetry**: bridge LangGraph events to WebSocket emitters and reactive Alpine store
+- **ui**: upgrade chat to Centralized WebSocket Event Bus & Reactive Alpine.js Agent Store
+- **ui**: refactor HITL approval pipeline to stream SSE events and status updates in real-time
+- **orchestration**: add auto-continuation guard and inline swarm background task badges
+- **gateway**: Telegram-depth voice path for Discord and Slack
+- **gateway**: Telegram-level Discord/Slack UX modules
+- **security,saas**: shared breakers, tenant MCP/cron, read-only shell
+- **security,saas,ops**: hard sandbox, tenant TaskStore/KB, replica affinity
+- **security,swarm,ops**: post-HITL harden, tenant isolation, multi-replica approvals
+- **mcp**: preset library — one-click Add Server from 85-server catalog
+- **mcp,kb,sse**: namespace MCP tools + KB citation footer + KB archive + retry btn
+- **ui**: Rubik Arabic font + English-in-RTL Inter scoping + clean KB toast
+- **mcp**: Add Server Phase 1A — shlex parse + auto-rewrite + validate-on-add
+- **paths,logging**: single-folder layout + real file logging
+- **knowledge**: Knowledge Library — RAG over ingested doc trees
+- **ui**: kill all native browser dialogs — global confirm/alert/prompt override
+- **research**: Archive/Restore for research results
+- **export**: Calibri font for PDF + DOCX export (matches Kazma UI)
+- **settings**: tunable max_iterations + research delete button
+- **deps**: move arabic-reshaper, python-bidi, reportlab, python-docx, openpyxl to core deps
+- **research**: full research results system — browse, compare, export
+- **swarm**: bridge chat→swarm — dispatch_swarm + check_swarm_task tools
+- **time-travel**: full replay system — snapshots, restore, fork, Web UI, live events
+- **mcp**: Streamable HTTP transport (MCP 2025-03-26 spec)
+- **providers**: Mistral/Together/Cohere/Fireworks/Perplexity/AI21 presets + native Anthropic/Azure/Bedrock
+- **tools**: native browser, multi-backend image-gen, doc-gen, calendar, DB drivers
+- **expansion**: media contract, voice on all platforms, cleanup
+- **si**: Kazma-wide self-improvement for chat and swarm
+- **email**: IMAP and POP connect modes for Gmail and Microsoft
+- **email**: browser OAuth for Gmail and Microsoft Graph
+- **ui**: Settings Connect Email for Gmail and Microsoft
+- **email**: OAuth device flow, multi-account, vault persist, docs polish
+- **email**: native email-manager with sandbox, Gmail, and Microsoft Graph
+- **research**: paging, crawl_site, digests, and dashboard metric fixes
+- **agent**: inject product knowledge and correct Arabic brand name
+- **ui**: show Postgres persistence on dashboard and packages
+- **ui**: replace emoji glyphs with high-quality SVG icons
+- **security**: production readiness, Postgres cutover, and SaaS multi-user
+- **workspace**: delete workspace from UI with optional on-disk wipe
 
-### Reliability
-- App shutdown drains cron + swarm before agent/gateway close
-- Swarm `reject_checkpoint` clears active maps; cancel single-finalize
-- Circuit breaker `release_probe` on cancel paths
-- LLM `reconfigure` acloses old httpx client
-- Cron: concurrency cap, stale RUNNING recovery, shutdown-aware poll
-- BoundedConcurrency instances cached per limit
+### Fix
 
-### Ops
-- docker-compose: vector path for `USER kazma`, `/health` check, prod env defaults
-- `.env.example` + `SECURITY.md` threat model updated for 0.6.x
-- **Portability hygiene**: `rbac` / `audit_logger` default DBs via `paths.py` (project root, not bare CWD); restored `docs/docs/ops/portability.md`
-- **Product knowledge**: inject Kazma self-knowledge into supervisor prompt (capabilities, how-to, troubleshooting); enforce Arabic brand **كاظمه/كاظمة** and forbid **كازما** (language lock + workers)
-- **Chat SSE**: prevent double `onDone` that painted a false “No response received” bubble after good replies
-- **Web tools**: browser-like UA; Playwright on thin/JS shells as well as bot walls; honest tool/skill descriptions (single-page, not anti-bot invincible)
-- **Dashboard metrics**: return numeric cost/tokens (API + WS); JS no longer `Number("$0.00")` → NaN after refresh; cost card uses max(trace store, cost breaker)
-- **Research web tools**: `KAZMA_READ_URL_MAX_CHARS` (default 16k) + `offset`/`max_chars` paging; higher graph truncate for research tools (`KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS`); `read_url_to_file` + `list_research_chunks` / `read_research_chunk` / `summarize_research_file`
-- **Research depth**: `crawl_site` (bounded same-domain multi-page); optional Firecrawl/Jina backends; workspace-anywhere saves (`KAZMA_RESEARCH_DIR`); `digest_research_file` for context-safe full-file digests
-- **Docs**: [Web research](docs/docs/guide/web-research.md) guide; tools catalog, env vars, FAQ, Web UI dashboard metrics, troubleshooting, sidebars
-- **Plan**: Full email integration (Gmail + Microsoft Graph + sandbox) — `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`
-- **Email skill**: native `email-manager` — sandbox SQLite mailbox, Gmail IMAP/SMTP, Microsoft Graph backends; tools list/get/send/delete/categorize/analyze; HITL on mutators
-- **Email IMAP/POP modes**: Settings → Email mode switcher **OAuth | IMAP | POP** for both Gmail and Microsoft; POP3+SMTP backend; host presets; `POST /api/email/protocol/connect|disconnect`; `EMAIL_GMAIL_AUTH` / `EMAIL_MS_AUTH`
-- **Gmail OAuth scopes**: probe Gmail API after OAuth; reject email-only tokens; consent-screen + test-user troubleshooting in email guide; clearer 403 insufficient-scopes errors
-- **Docs**: FAQ/API routes/Web UI/product knowledge updated for email OAuth·IMAP·POP; website (KazmaAI) email guide + landing/FAQ
-- **Self-improvement Kazma-wide**: chat (Web SSE + gateway) + swarm; `agent_evolution.json` Soul for supervisor; inject every turn; `KAZMA_SELF_IMPROVEMENT=0` kill-switch; failure analysis for WorkerResult `status=error`
-- **Email polish**: Microsoft device-code OAuth API (`/api/email/oauth/microsoft/*`), vault token persist on refresh, multi-account aliases (`EMAIL_ACCOUNTS`), Graph well-known folders + Gmail FLAGS/labels, [Email integration](docs/docs/guide/email-integration.md) guide
-- **Settings → Email**: Connect Gmail (app password → vault), Connect Microsoft (device code + poll UI), status/disconnect, accounts list
-- **Email OAuth (browser)**: Gmail authorization-code + Gmail API backend (Workspace-friendly); Microsoft authorization-code redirect + device-code fallback; open callbacks under `/api/email/oauth/*/callback`
+- **replay**: always mount /api/replay/* + stop UI 404 poll loop
+- **tools**: stop executing max_tokens-truncated tool calls
+- **tools**: corrective errors for malformed tool-call arguments
+- **mcp**: add streamable_http i18n entries, fix /mcp 500
+- **mcp**: streamable_http support, card scope, and auth wiring
+- **memory**: harden recall health, config overlay, ppr edges, and queue pragmas
+- **code_exec**: fallback to Popen on SelectorEventLoop to resolve 0ms python_exec failure
+- **code_exec**: add missing _fw import and dynamically sync Swarm SafetyMiddleware with hitl config
+- **code_exec**: resolve instant 0ms python_exec failures and harden Windows Job Object process handle extraction
+- **tools**: instruct LLM to output final confirmation in active chat session after send_file
+- **gateway**: add Telegram target fallback to send_file and auto-attach generated document paths
+- **i18n**: prevent premature Done title during background execution and keep panel active
+- **i18n**: catch Still working... (s) heartbeats and localize memory badges in chat.js
+- **i18n**: localize heartbeat status messages and memory context units in Arabic mode
+- **dashboard**: replace active capabilities emojis with vector SVGs in EN/AR versions
+- **ui**: elevate session kebab menu z-index and adjust RTL positioning to prevent clipping behind chat frame
+- **i18n**: return pure Unicode isolated string from formatMsgTime to prevent raw HTML tag rendering in DOM
+- **arabic**: markdown tables RTL — Arabic-dominant tables render right-to-left
+- **arabic**: dashboard feature cards localized + RTL layout
+- **arabic**: localize WS chat status messages (Completed execution / Task completed)
+- **arabic**: time format HH:mm locked to en-GB — prevents 47:08 reorder
+- **critical**: restore loopback WS trust + allow_all backward compat + task fix
+- **arabic**: list RTL + bidi skip for lists + localized message footer
+- **ui**: plan panel RTL — add dir=auto to plan-text spans
+- **arabic**: add dialect backoff — Kuwaiti → Saudi/Gulf → MSA priority
+- **arabic**: RTL streaming re-apply + Kuwaiti dialect directive in system prompt
+- **security**: shell_exec RCE + WS loopback trust + fail-closed gateways + CI/license/docs
+- **security+arch**: reviewer hardening — 6 fixes
+- **ui**: force-refresh gw-* sessions from Postgres on every messages request
+- **gateway**: re-sync session with final assistant response after sending to Telegram
+- **ui**: move post-turn memory after graph terminal state — no more CoT flicker
+- **memory**: recency diversification — same beliefs no longer dominate every turn
+- **migrate**: merge Knowledge Library tables during import (KB was empty)
+- **notify**: remove redundant header + duplicate "System" from Telegram alerts
+- **ui**: Telegram assistant responses missing from Web UI session view
+- **agent**: reset tool circuit breaker after context compaction
+- **tools**: file_search exclusion + new send_file tool for chat file delivery
+- **memory**: multi-tenant completeness + PPR tier + observability + docstrings
+- **mcp**: resolve .cmd shims on Windows so npx-based MCP servers connect
+- **win+pg**: uvicorn loop_factory for SelectorEventLoop (real fix for psycopg async)
+- **win+pg**: WindowsSelectorEventLoop for psycopg async + 3 related fixes
+- **pg+migrate**: Postgres boot crash + migration vault.db corruption
+- **memory-ui**: inspect panel text overflow — truncate + clip
+- **memory-ui**: clamp node labels to fit — no more text overflow
+- **memory-ui**: reheat sim when groupings exist so tree layout actually moves
+- **memory-ui**: tier derivation handles middle-out builds
+- **memory**: merged_into is now read — beliefs land on canonical entity
+- **memory-ui**: tier now flows to canvas points (colors actually fire)
+- **memory-ui**: /graph groupings read before conn.close (was: closed db)
+- **memory-ui**: /graph payload now reflects groupings (NameError was swallowed)
+- **memory-ui**: link from a virtual-fact node attaches to the clicked node
+- **self-improvement**: fence recalled memory fed to Soul-delta refiner
+- **swarm**: fence recalled context in phonebook worker dispatch
+- **memory**: fence recalled memories in compaction system prompt
+- **memory-ui**: graph empty after module split — _v2gWireControls undefined
+- **ui**: blink on refresh + mobile grids + docs (memory overhaul + cron)
+- **cron**: wire graph builder + capture delivery target for reminders
+- **agent**: do not treat multi-part PAT/repo tasks as graph-cleanup only
+- **memory**: bust cache for memory_console.js so Cut UI loads
+- **memory**: make graph link/unlink reliable
+- **chat**: hide self-improvement Soul injects from Web transcript
+- **memory**: graph cleanup tools; hide true/false entity nodes
+- **memory**: double-click for list; pin dragged graph nodes
+- **agent**: prioritize latest turn; stop store-paste memory hijack
+- **memory**: sync person User shells to graph hub display name
+- **memory**: dedupe entity/virtual graph nodes and add display rename
+- **memory**: make entities table fluid width with wrapping columns
+- **memory**: let entities list grow and shrink without fixed height
+- **memory**: put Graph and health console at top of /memory page
+- **memory**: memory_admin action defaults to help (empty call safe)
+- **memory**: memory_admin + purge_empty_entities so agent can actually clean
+- **agent**: same-session continuity after restart for Proceed/continue
+- **agent**: declare force_synthesis on SupervisorState so empty/leak turns synthesize
+- **agent**: reject DSML/tool-leak as final answers; add entity memory tools
+- **agent**: always synthesize on max-iter; add memory_list/invalidate tools
+- **memory**: noted near-dedupe + Option A maint script
+- **memory**: rotate current entitlement facts (Grok/ZCode next_reset)
+- **hitl**: deliver final reply after YOLO/approve without refresh
+- **industry**: close smoke/explain/research/SERP caveats (not scale)
+- **proxy**: cover Playwright, KB discover, and remote SERP
+- **ui**: Neo4j test auth, packages truth, Memory governance health
+- **memory**: hygiene — block bad subjects, Neo4j delete, FTS heal
+- **ui**: accent palette for V2 topology with distinct You node
+- **memory**: paint V2 topology from SQLite with Neo4j dual-write status
+- **ui**: make Neo4j settings obvious on Memory tab
+- **ui**: give Memory its own Settings tab for backends
+- **ui**: stop chat page blink from background poll reload loop
+- **chat**: resolve free-variable time crash and stuck pending bubbles
+- **reliability**: model switch SoT + long-horizon turn delivery
+- **memory**: purge retroactive_scan beliefs and concept entities from WSL memory_state.db
+- **core,ui**: ensure full response delivery, purge memory backfill garbage, and wire model dropdown switch to compiled graphs
+- **summarizer**: ensure prune_tool_outputs caps massive recent tool outputs when context budget is exceeded
+- **core**: register NodeName.CHECK_SATURATION in TOOL_WORKER conditional edges path_map
+- **core**: prevent empty agent responses with tool output pruning and synthesis fallback
+- **agent**: auto-prune oversized conversation contexts and auto-load sqlite_vec in database_client
+- **memory**: prevent event loop closed error by running scan in single loop and adding LLMProvider auto-recovery
+- **memory**: auto-init model registry fallback and add --ignore-filler to scan_old_sessions
+- **memory**: surface pre-flight LLM client status and warnings in scan_old_sessions
+- **memory**: unwrap LLMResponse content in belief_extractor and backfill_v2
+- **scan_old_sessions**: wire LLM extraction path + thread extraction_method
+- add shebang to scan_old_sessions.py
+- **memory**: episode recall SQL binding + never-supersede reminder beliefs
+- preserve scroll position when background poll reloads session
+- memory dashboard shows V2 metrics instead of legacy L1/L3 labels
+- chat flickering + memory dashboard legacy labels
+- skip disabled providers in find_provider_for_model()
+- auto-recover chat/swarm visibility after tab switch or page refresh
+- **settings**: context window revert to default on page reload
+- **vault**: stop 3-second vault store flood for GitHub App private key
+- **settings**: context window save — explicit keys, no nested prefix explosion
+- **chat**: detach graph execution from SSE stream — turns survive disconnects
+- **chat**: session messages API was stripping pending flag + ts
+- **chat**: handle refresh/tab-switch during active turns — no more lost responses
+- **telegram**: respect 429 retry_after instead of default jitter
+- **sse+context**: SSE keepalive for long LLM turns + context window from Settings
+- **swarm**: auto-create workers for dispatch — no more "not found" dead ends
+- **workspace**: inject GitHub token into clone URL for private repos
+- **workspace**: show Switch Repo button when GitHub PAT is configured
+- **memory**: close episode embedding pipeline gap
+- **safety**: intercept /yolo in WebSocket transport — prevent autonomous agent runs
+- **git_identity**: correct stale JWT iss comment + remove dead import
+- **memory**: belief embeddings + dense recall + graph user-node color
+- **post-v2-audit**: wire nightly backup/export + 7 audit fixes + regression tests
+- **v2-graph**: add virtual nodes for belief object text + full text in inspect
+- **memory**: inspect shows full belief text + filter reset redraws
+- **memory**: beliefs truncated in UI — full text + word wrap
+- **memory**: recall dedup collapsed set-valued beliefs to 1
+- **streaming**: kill the 'Done 0s' silence gap for good
+- **memory**: memory_search falls back to legacy when V2 empty + init registry
+- **memory**: init model registry for CLI backfill + clean ALL backfill beliefs
+- **memory**: use LLM for backfill belief extraction instead of regex
+- **memory**: strict object validation — reject sentence fragments
+- **memory**: extract beliefs from L3 memories + first-person patterns
+- **memory**: skip non-fact content entirely — no more 'noted' noise
+- **memory**: belief-click highlights OBJECT node + shows all beliefs
+- **memory**: data quality + interactive beliefs list
+- **memory**: V2 graph inspect shows full memory content, not truncated
+- **memory**: backfill memory_chunk nodes as beliefs (the real content)
+- **memory**: V2 graph — client-side filters, reset button, readable inspect
+- **memory**: backfill resolved hash IDs to labels + skip structural edges
+- **memory**: kill V2-thread httpx corruption (bound to a different event loop)
+- **agent**: recover empty LLM replies on iteration 0 (no more silent "Done")
+- **ui**: centralized session-expired handling (no more silent "Disconnected")
+- **logging**: restore readable text console + fix settings Save-failed toast
+- **ui**: prevent CancelledError traceback leak on Ctrl+C shutdown
+- **ui**: stabilize Property graph (L2) layout + add interactions
+- **metrics**: runtime test count (4,360) + all-contributor count (#69)
+- **security**: remediate 360° audit Phase 1 findings
+- **metrics**: count real human contributors (19 → 4) (#68)
+- **core**: stop silent finalization on LLM failure + route images to vision models
+- **ui**: unify Arabic font to Rubik in both English and Arabic UIs
+- prevent _try_app_email from overwriting explicit bot email with wrong-cased slug
+- **git**: authenticate git push via http.extraheader, not URL userinfo
+- **git**: disable ALL credential helpers so the App token isn't shadowed
+- **git**: prefer GitHub App token for push/pull over OAuth/PAT
+- **git**: split git_push_pull into explicit git_push + git_pull tools
+- **git**: verify push actually landed + surface real auth errors
+- **workspace**: stop double-scheduling MCP rebind on workspace delete/switch
+- **ui**: correct misleading GitHub App slug hint text
+- **hitl**: stop dumping full tool args into the approval prompt
+- **git**: recover from stale ghs_* token + auto-derive bot avatar email
+- **git_identity**: update bot email with exact bot user id for avatar linking
+- use dynamic url injection to bypass credential helpers in git_push_pull
+- **tools**: use Basic x-access-token for Git HTTPS protocol pushes
+- **git**: disable terminal interactive credential prompts globally across all processes
+- **tools**: set GIT_TERMINAL_PROMPT=0 to disable interactive credential prompts
+- **tools**: pass credential.helper= to bypass expired ~/.netrc tokens
+- **config**: ensure ConfigStore uses absolute settings_db path regardless of CWD
+- **tools**: ensure git_push_pull always passes target_branch and clarify tool docstring
+- **git_identity**: fix now variable reference in token cache expiry line
+- **git_identity**: fix 'now' variable scope and add persistent error banner on unauthenticated card
+- **git_identity**: safely handle empty or non-numeric App ID in _mint_github_jwt
+- **git_identity**: mint GitHub App JWT with integer iss claim required by GitHub REST API
+- **git_identity**: expand tilde (~) in private key file paths
+- **git_identity**: add PEM string normalization, iat clock-skew buffer, and error logging
+- **config**: remove hardcoded App ID and credentials from default kazma.yaml
+- **github**: disconnect revokes all stored tokens (OAuth/PAT/App) and updates UI
+- **ui**: restore workspace HTML structure by adding missing modal closing div
+- **workspace**: auto-register active project directory as workspace on boot
+- **github**: support authenticated remote URLs in parse_github_slug and inject token in git_push_pull
+- **ui/session_manager**: support Postgres checkpoints in auto-discovery and sync web session on turn start
+- **ui/session_manager**: add platform key to to_summary, auto-discover gw-* threads from checkpoints.db, and centralize db_path
+- **ui/session_manager**: expose cross-platform gateway (gw-*) and default tenant sessions in web UI session list
+- **core/cost_breaker**: load dotenv in cost_breaker module so .env variables take effect on boot
+- **core/cost_breaker**: refresh silence clock on turn start and raise default cost threshold to .00
+- **core/cost_breaker**: un-halt and refresh budget on user interaction in ws_chat
+- **ui/ws_chat**: scan graph checkpoint for pending HITL interrupts on connection
+- **gateway/discord**: log clean warning instead of full stack trace on transient socket drops
+- **tools/registry**: resolve alias keys in config_read and add log fallbacks in read_system_logs
+- **ui/settings**: sync active model and reset cached graphs instantly on model change
+- **core/swarm**: remediate audit report findings and add swarm timeouts
+- **mcp**: raise stdio StreamReader limit for large filesystem responses
+- **agent**: force max-iter synthesis when only short preamble remains
+- **workspace,mcp,memory**: bulletproof binding, MCP rebind, breaker, paths
+- **memory**: solid L3 timestamps/embeddings, FTS triggers, L2 graph
+- **ui**: Arabic plan RTL + localize HITL/CoT Activity strings
+- **agent**: always synthesize final answer after max-iter tool rabbit-hole
+- **ui**: localize chat CoT Activity strings for Arabic
+- **ui**: packages tab badge-secondary style
+- **ui**: packages tab layout — green status cards, no text overflow
+- **ui,mcp**: remove mock MCP stubs; Arabic i18n for voice/packages/skills/tools/memory; fix chat RTL
+- **voice,tui**: TTS reply toggle + sticky voice fix; equal cards and full nav labels
+- **tui**: restore ThemeManager auto_scroll/animations_enabled properties
+- **chat**: coalesce duplicate thinking Activity rows
+- **ui**: Arabic-dominant bidi, paper PDF export, localized tool descriptions
+- **research,ui**: list pipeline papers on Research tab; logo avatar in chat
+- **ui**: bidi mixed AR/EN, Arabic i18n gaps, HITL undefined, paper file open
+- **research**: use ModelRegistry.get_client() for synthesis
+- **scripts**: default smoke SearXNG URL to :8088, document .env loading
+- **ws-chat**: set recursion_limit=100 and self-host env awareness
+- **sse**: stamp assistant message timestamps on persist
+- **chat**: deliver post-YOLO answer after silent tool loops
+- **chat**: show new sessions in sidebar without full page refresh
+- **chat**: end stuck turns, honor YOLO on WS, and bind HITL thread ids
+- **chat**: delay session load to ensure Alpine store is initialized
+- **chat**: load current session messages on page refresh to prevent message loss
+- **hitl**: YOLO grants now bypass interrupt in graph path + approval event handling in frontend
+- **ws-chat**: correct import path for build_env_context from ide.env_context
+- **hitl**: implement solid fixes for HITL permission cards, approval transparency, and session persistence
+- **session**: persist assistant messages and turn history on WebSocket chat streams
+- **ws-chat**: prevent duplicate text backfill by tracking pre_msg_count per stream step
+- **ws-chat**: persist YOLO/tool grants on approval, backfill assistant text, and fix session msg append
+- **mcp**: use asyncio.to_thread for stderr reading to avoid blocking event loop
+- **sse**: use ainvoke() for HITL resume to prevent SSE stream hang
+- **core**: normalize langgraph message types across the codebase
+- WebSocket handshake auth + frontend WS wiring
+- **auth**: allow WSL2 virtual bridge and private LAN IPs in websocket_is_authenticated
+- **auth**: support loopback and session cookie auth for WebSocket chat gateway
+- **agent**: whitelist read-only MCP tools, fix circuit breaker routing, and preserve HITL state with UI input lock
+- **ui**: resolve HITL UI stuck state and invisible approval cards
+- **ui**: ensure HITL approval card renders in chat UI even if thread_id is omitted and auto-poll pending approvals
+- **graph**: set recursion_limit: 100 in graph execution config to allow max_iterations to finish
+- **core**: resolve agent stalls, graph recursion error, and MCP HITL classification
+- **core**: reset tool circuit breaker latch after override and on HITL approval to prevent permanent tool deadlock
+- **core**: fix indentation in sanitize_tool_chains to prevent assistant message duplication
+- **core,ui**: refactor sse streaming, thread safety, subprocess cleanup, and path checks
+- **orchestration**: sanitize tool chains in respond_node to prevent HTTP 400 on max iterations
+- **ui,swarm,auth**: abort typing cleanup, multi-bus fan-out, cache TTL read
+- **security,swarm,docs**: OAuth Host harden, /knowledge gate, handoff breaker
+- **swarm,kb**: global admission, hop budget, durable crawl jobs
+- **mcp**: unify dual store + audit P0 (classify, dispatch cancel, run_file)
+- **mcp**: Settings page test button finds servers saved to kazma.yaml
+- **mcp,i18n,sse**: persist Add/Remove Server to kazma.yaml + IDE Arabic + empty-turn recovery
+- **mcp,logging**: 90s handshake timeout + stderr on failure + idempotent logging
+- **kb**: stop shared-chrome chunk IDs from failing whole pages
+- **kb**: expand leaf-page discovery via parent map + Jina
+- **ui**: restore Arabic font + scope Inter features to LTR only
+- **mcp**: connect MCP servers in web boot path (was only in CLI path)
+- **kb**: filter infra URLs (sitemap.xml/robots.txt/feeds) from discovery
+- **kb**: use Firecrawl /v1/map as first discovery tier (bypasses bot wall)
+- **kb**: add 'tree' scope mode (default) for cross-prefix doc trees
+- **kb**: slugify at API boundary to fix create-or-use UNIQUE constraint race
+- **knowledge**: surface per-tier fetch errors + slug library IDs
+- **ui**: swap Calibri→Inter primary, add tabular numerals + sharpness features
+- **knowledge**: bot-walled crawl + live discovery progress + i18n + lang-switch guard
+- **research**: delete failed on Postgres — _get_conn() checked before _pg
+- **research**: proper Archived tab, toast key mismatch, auto-refresh
+- **research**: bump cache-buster v5→v6 to force emoji-free JS reload
+- **chat**: Stop button + Escape not aborting during generation
+- complete HITL timeout wiring, Arabic font 404, chat Stop button + input
+- **hitl**: defer safe tools on interrupt, unify gateway timeouts, and handle expired approvals
+- **graph**: NameError _resolve_llm_from_state in respond_node after max iterations
+- **hitl**: pending-approvals failed on Postgres — dict_row KeyError in _enumerate_thread_ids
+- **checkpoint**: decode message_count + created_at for Postgres JSONB blobs
+- **checkpoint**: Postgres list_checkpoints used tuple indexing but psycopg returns dict rows
+- **dashboard**: Session Management empty with Postgres — list_checkpoints was SQLite-only
+- **dashboard**: Session Management always empty — set_dashboard_context clobbered globals
+- **dashboard**: Session Management was always empty — checkpoint_manager was None
+- **pdf**: register Arabic-capable font (Amiri) — reportlab Helvetica has no Arabic glyphs
+- **chat**: use regex to detect /research and /swarm embedded in Arabic text
+- **swarm-worker**: 180s LLM timeout + 3 retries for research tasks
+- **router**: max_iter fallback was still 10 — now 15
+- **research**: detail view replaces list (not appended below) + Back button
+- **cache**: add ?v= cache-busting to research.js and replay.js script tags
+- **swarm-worker**: force final synthesis on max iterations + raise to 20
+- **safety**: remove spawn_agent/spawn_agents from HITL danger list
+- **safety**: remove dispatch_swarm from HITL danger list — no approval needed
+- **agent**: raise max iterations 10→15 + synthesize final answer on timeout
+- **chat**: /research and /swarm now detected when embedded in Arabic text
+- **export**: Arabic PDF shaping + DOCX heading levels + paragraph splitting
+- **research**: markdown rendering for detail view + in-memory task fallback
+- **research**: download works — use filename not abs path + window.open for auth cookie
+- **research**: constrain width, 2-line clamp on cards, revert to clean text rendering
+- **research**: rich text rendering, file download on export, layout fix
+- **swarm**: hold strong reference to background dispatch tasks — they were GC'd
+- **swarm-worker**: same circuit breaker fix as graph_builder — was STILL broken
+- **i18n**: translate all Research panel JS strings (compare desc, no results, table headers, comparing) to Arabic
+- **chat**: /swarm and /research now dispatch directly in Web UI chat
+- **swarm**: auto-register default 'researcher' worker when none exist
+- **i18n**: add | safe to about-section t() calls so HTML renders in both EN+AR
+- **i18n**: translate About sections in Time Travel + Research panels to Arabic
+- **i18n**: translate Time Travel + Research panel UI text to Arabic
+- **tools**: filter unexpected LLM-injected kwargs before calling tool functions
+- **circuit-breaker**: tripped breaker dead-loops + too-aggressive failure detection
+- **replay**: add nav.replay i18n key + clean list_distinct_threads API
+- **demo**: lock active model/provider when KAZMA_MODEL/KAZMA_PROVIDER set
+- **llm**: don't strip provider prefix from hosted model ids (groq/compound-mini 404)
+- **providers**: resolve api_key + active profile from env vars (demo Groq fix)
+- **demo**: KAZMA_DEMO_MODE bypasses auth so the public demo needs no login
+- **hitl**: enumerate threads on Postgres pool (was: 'AsyncConnectionPool' object has no attribute 'execute')
+- **ops**: auto-start cloudflared tunnel daemon on boot (was manual -> 1033s)
+- **ops**: stop recurring Cloudflare tunnel 1033 / manual wsl_fixed_access runs
+- **ui**: gate API docs behind auth; fix get_agent_runner health check
+- **voice**: TTS failures surface 503 + install hint, not bare 502
+- **security**: close H6 open-redirect fallback (Host header spoof)
+- **security**: deep-audit fixes (C1 prompt-injection, H1-H7, M2-M3)
+- **swarm**: self-improvement learns from WorkerResult status=error
+- **email**: reject Gmail OAuth without mail scopes; clearer 403 guidance
+- **email**: clearer Gmail OAuth 400 when Client ID/secret missing
+- **web**: harden read_url/search and stop double SSE onDone
+- **paths**: route rbac/audit defaults through project-root paths
+- **checkpoint**: Postgres pool autocommit for LangGraph setup
+- **config**: reconcile_from_yaml works with Postgres backend
+- **ui**: keep mobile chat/mic bar above bottom navigation
+- **ui**: serve /favicon.ico to stop browser 404 noise
+- **ui**: remove emojis from swarm orchestration pattern i18n labels
+- **ui**: clear remaining swarm/settings glyphs and toned icon headers
+- **ui**: stop SVG icon hydrate infinite loop pegging CPU
+- **ui**: accept opaque session cookie on WebSocket auth
+- **docs**: refresh Quick Start and document Windows port 9090 proxy
+- **workspace**: UI root resolution prefers active WorkspaceStore over env
+- **workspace**: Switch Repo re-pins tools + binding env context
+- **ui**: stop silent Thinking… — backfill SSE text and harden HITL cards
+- **ui**: show Partial for incomplete optional extras (e.g. test without fakeredis)
+- **cli**: stop hardcoding Kazma CLI v0.5.0; read version from pyproject
+- **cli**: reinstall post-pull in fresh process; auto-repair wiped RAG
+- **cli**: preserve optional extras on kazma update (stop uv sync wipe)
+- **hitl,ui**: session tool grants, web /yolo, stop silent-after-approve
+- **security**: production hardening — secrets, HITL, voice, YOLO TTL
 
-### Phase 3–4 follow-up
-- Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)
-- SessionManager lock + capped warm cache; FTS5 lock; VectorMemory.close()
-- Semantic cache TTL + max-row eviction
-- MCP untrusted tools force HITL (prod / non-allowlist)
-- Sub-agent `build_child_graph` honors hitl_config + full danger list
-- OAuth redirect prefers `KAZMA_PUBLIC_URL`
-- Settings mask: constant `***` (no last-4)
-- Production requires explicit `KAZMA_VAULT_KEY` (no silent invent)
-- Opaque web sessions (`kazma-session` cookie) + tenant header ignored in prod
+### Refactor
 
-### Phase 4.3–4.5 (SaaS foundation)
-- **Postgres backend**: `kazma_core.db` + pool (`KAZMA_DATABASE_URL`); optional `[postgres]` extra
-- **docker-compose.postgres.yml** for app + Postgres 16
-- **Platform RBAC**: viewer/operator/admin + local users + middleware gates
-- **OIDC**: `/api/auth/oidc/start|callback`, PKCE, JWKS verify best-effort
-- **DR**: `scripts/backup_kazma.py`, `scripts/restore_kazma.py`, `docs/ops/DISASTER_RECOVERY.md`
+- **skills**: enforce enterprise Arabic BiDi isolation and CLDR plurals in document processor
+- **memory-ui**: split memory_console.js into ES modules
+- **memory**: delete V1 modules + orphan tests (V1 removal Phase 4)
+- **memory**: strip V1 fallback branches from active paths (V1 removal Phase 3)
+- **memory**: rewire UI/health/maintenance to V2 (V1 removal Phase 2)
+- **memory**: relocate V2-shared symbols out of swarm/memory (V1 removal prep)
+- **git_identity**: use standard PyJWT for App JWT (spec-compliant string iss)
+- clean working tree and finalize tracing package migration
 
-### Full store cutover + SaaS UI
-- **ConfigStore Postgres cutover**: get/set/batch_set/delete/get_all when `KAZMA_DATABASE_URL` set
-- **SessionManager Postgres**: full chat history on `kazma_chat_sessions`
-- **TaskStore Postgres**: tasks + worker metrics on `kazma_swarm_*`
-- **LangGraph AsyncPostgresSaver** when URL set (`create_checkpointer` + agent_runner)
-- **migrate_sqlite_to_postgres.py** migrates settings + chat + swarm in one shot
-- **SaaS API** `/api/saas/*` users + tenants admin
-- **Login UI**: user / secret / OIDC; **Settings → Account** user & tenant management
-- **Header** principal badge + real logout
-- **docs/ops/SAAS_AND_POSTGRES.md**
+### Perf
 
-### Ops polish / multi-replica
-- **docker-compose.ha.yml** + `deploy/nginx-ha.conf` multi-replica demo
-- **/health/ready** pings Postgres when configured; open paths for LB probes
-- **Dockerfile** installs `[rag,postgres]`; entrypoint optional auto-migrate
-- **scripts/smoke_production.py** operator smoke suite
-- **docs/ops/MULTI_REGION.md**, **OIDC_IDP_SETUP.md**
-- **i18n** en/ar for SaaS account strings; dual-backend unit tests
+- **memory-ui**: Phase 3 — materialized entity counts
+
+## v0.6.1 (2026-07-21)
+
+### Feat
+
+- **config**: kazma.local.yaml overrides so updates never fight user settings
 
 ## v1.0.0 (2026-07-20)
 
