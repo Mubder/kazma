@@ -567,13 +567,13 @@ class LocalToolRegistry:
             except Exception as exc:
                 # Non-retryable error — return immediately
                 duration_ms = (time.monotonic() - start) * 1000
-                logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc)
+                logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc, exc_info=True)
                 _record_procedural_outcome(tool_name, arguments, success=False)
                 return {"content": "Error: Tool execution failed. Check server logs for details.", "is_error": True}
 
         # All retry attempts exhausted
         duration_ms = (time.monotonic() - start) * 1000
-        logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc)
+        logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc, exc_info=True)
         _record_procedural_outcome(tool_name, arguments, success=False)
         return {"content": f"Error: {last_exc}", "is_error": True}
 

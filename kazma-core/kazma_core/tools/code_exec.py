@@ -347,33 +347,67 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
     if _IS_UNIX:
         subprocess_kwargs["preexec_fn"] = _set_limits
 
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-I",
-        str(code_file),
-        **subprocess_kwargs,
-    )
-
-    job_handle = None
-    if sys.platform == "win32":
-        job_handle = _assign_to_job_object(proc)
-
     try:
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return f"[Exit code: 124 — timed out after {timeout}s]"
-        return _format_output(proc.returncode or 0, stdout, stderr)
-    finally:
-        if sys.platform == "win32" and job_handle:
-            try:
-                import ctypes
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-I",
+            str(code_file),
+            **subprocess_kwargs,
+        )
 
-                ctypes.windll.kernel32.CloseHandle(job_handle)
-            except Exception:
-                pass
+        job_handle = None
+        if sys.platform == "win32":
+            job_handle = _assign_to_job_object(proc)
+
+        try:
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return f"[Exit code: 124 — timed out after {timeout}s]"
+            return _format_output(proc.returncode or 0, stdout, stderr)
+        finally:
+            if sys.platform == "win32" and job_handle:
+                try:
+                    import ctypes
+
+                    ctypes.windll.kernel32.CloseHandle(job_handle)
+                except Exception:
+                    pass
+    except NotImplementedError:
+        import subprocess
+
+        sync_kwargs = subprocess_kwargs.copy()
+        sync_kwargs["stdout"] = subprocess.PIPE
+        sync_kwargs["stderr"] = subprocess.PIPE
+        if "preexec_fn" in sync_kwargs:
+            del sync_kwargs["preexec_fn"]
+
+        def _run_sync() -> str:
+            p = subprocess.Popen([sys.executable, "-I", str(code_file)], **sync_kwargs)
+            job = None
+            if sys.platform == "win32":
+                job = _assign_to_job_object(p)
+
+            try:
+                out, err = p.communicate(timeout=timeout)
+                return _format_output(p.returncode or 0, out, err)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+                return f"[Exit code: 124 — timed out after {timeout}s]"
+            finally:
+                if sys.platform == "win32" and job:
+                    try:
+                        import ctypes
+
+                        ctypes.windll.kernel32.CloseHandle(job)
+                    except Exception:
+                        pass
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_sync)
 
 
 async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
@@ -413,21 +447,38 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     ]
 
     logger.info("[code_exec] Docker jail: image=%s timeout=%s", image, timeout)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 15)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return f"[Exit code: 124 — docker timed out after {timeout}s]"
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 15)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return f"[Exit code: 124 — docker timed out after {timeout}s]"
 
-    # Prefix so operators know isolation mode was used
-    body = _format_output(proc.returncode or 0, stdout, stderr)
-    return f"[sandbox: docker network=none image={image}]\n{body}"
+        # Prefix so operators know isolation mode was used
+        body = _format_output(proc.returncode or 0, stdout, stderr)
+        return f"[sandbox: docker network=none image={image}]\n{body}"
+    except NotImplementedError:
+        import subprocess
+
+        def _run_docker_sync() -> str:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                out, err = p.communicate(timeout=timeout + 15)
+                body_str = _format_output(p.returncode or 0, out, err)
+                return f"[sandbox: docker network=none image={image}]\n{body_str}"
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+                return f"[Exit code: 124 — docker timed out after {timeout}s]"
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_docker_sync)
 
 
 async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
