@@ -909,6 +909,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.summarization_threshold": {"en": "Summarization Threshold:", "ar": "حد التلخيص:"},
     "settings.save_context": {"en": "Save Context Settings", "ar": "حفظ إعدادات السياق"},
 
+    # Settings — Non-Stop & Self-Healing
+    "settings.nonstop_title": {"en": "Non-Stop & Self-Healing", "ar": "التشغيل المتواصل والإصلاح الذاتي"},
+    "settings.nonstop_hint": {"en": "Supervised execution: stall detection, checkpoint rollback, bounded auto-recovery, and model failover. Applies live; off by default.", "ar": "تنفيذ خاضع للمراقبة: كشف التوقف، استرجاع نقاط الحفظ، استعادة تلقائية محدودة، وتبديل النموذج الاحتياطي. يعمل فورًا؛ معطّل افتراضيًا."},
+    "settings.nonstop_enabled": {"en": "Enable Non-Stop Mode", "ar": "تفعيل الوضع المتواصل"},
+    "settings.nonstop_stall": {"en": "Stall Threshold (seconds)", "ar": "حد كشف التوقف (ثانية)"},
+    "settings.nonstop_tool_timeout": {"en": "Per-Tool Timeout (seconds, 0 = disabled)", "ar": "مهلة الأداة (ثانية، 0 = معطّل)"},
+    "settings.nonstop_max_recovery": {"en": "Max Recovery Attempts", "ar": "أقصى محاولات استعادة"},
+    "settings.nonstop_backoff_base": {"en": "Backoff Base (seconds)", "ar": "أساس التراجع (ثانية)"},
+    "settings.nonstop_backoff_max": {"en": "Backoff Max (seconds)", "ar": "أقصى تراجع (ثانية)"},
+    "settings.nonstop_failover_enabled": {"en": "Enable Model Failover", "ar": "تفعيل التبديل الاحتياطي للنموذج"},
+    "settings.nonstop_failover_chain": {"en": "Failover Chain (comma-separated model ids)", "ar": "سلسلة التبديل الاحتياطي (معرّفات مفصولة بفواصل)"},
+    "settings.nonstop_failover_cooldown": {"en": "Failover Cooldown (seconds)", "ar": "فترة تهدئة التبديل (ثانية)"},
+    "settings.nonstop_ledger": {"en": "Record per-call LLM ledger", "ar": "تسجيل سجل لكل استدعاء نموذج"},
+    "settings.save_nonstop": {"en": "Save Non-Stop Settings", "ar": "حفظ إعدادات التشغيل المتواصل"},
+
     # Settings — Connectors tab
  "settings.telegram": {"en": "Telegram", "ar": "تيليجرام"},
     "settings.bot_token": {"en": "Bot Token", "ar": "رمز البوت"},

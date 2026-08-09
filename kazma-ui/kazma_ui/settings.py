@@ -548,6 +548,18 @@ class SettingsRouterBuilder:
             """Get context window settings (short keys for JS model)."""
             return _get_sm().get_context_settings()
 
+        @router.get("/api/settings/agent/nonstop")
+        async def api_get_nonstop() -> dict[str, Any]:
+            """Get non-stop / self-healing settings (agent.nonstop.*)."""
+            return _get_sm().get_nonstop_settings()
+
+        @router.put("/api/settings/agent/nonstop")
+        async def api_save_nonstop(req: dict[str, Any]) -> dict[str, str]:
+            """Save non-stop / self-healing settings. Live-re-read by the
+            supervisor path (get_nonstop_config) — no restart needed."""
+            _get_sm().save_nonstop_settings(req)
+            return {"status": "ok"}
+
         @router.get("/api/settings/voice")
         async def api_get_voice_settings() -> dict[str, Any]:
             """Get voice subsystem settings."""

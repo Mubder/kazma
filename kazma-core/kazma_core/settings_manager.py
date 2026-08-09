@@ -590,6 +590,92 @@ class SettingsManager:
             "summarization_threshold": self._cs.get("context.summarization_threshold", 0.8),
         }
 
+    # ── Non-Stop & Self-Healing (agent.nonstop.*) ─────────────────────
+
+    def get_nonstop_settings(self) -> dict[str, Any]:
+        """Get the non-stop / self-healing settings (agent.nonstop.* keys).
+
+        Mirrors the defaults in ``kazma_core.agent.nonstop.NonStopConfig`` so
+        the UI shows effective values even when nothing is stored yet.
+        """
+        from kazma_core.agent.nonstop import NonStopConfig
+
+        d = NonStopConfig()
+        return {
+            "enabled": self._cs.get("agent.nonstop.enabled", d.enabled),
+            "stall_threshold_seconds": self._cs.get(
+                "agent.nonstop.watchdog.stall_threshold_seconds", d.watchdog.stall_threshold_seconds
+            ),
+            "tool_timeout_seconds": self._cs.get(
+                "agent.nonstop.watchdog.tool_timeout_seconds", d.watchdog.tool_timeout_seconds
+            ),
+            "max_recovery_attempts": self._cs.get(
+                "agent.nonstop.healing.max_recovery_attempts", d.healing.max_recovery_attempts
+            ),
+            "backoff_base_seconds": self._cs.get(
+                "agent.nonstop.healing.backoff_base_seconds", d.healing.backoff_base_seconds
+            ),
+            "backoff_max_seconds": self._cs.get(
+                "agent.nonstop.healing.backoff_max_seconds", d.healing.backoff_max_seconds
+            ),
+            "failover_enabled": self._cs.get("agent.nonstop.failover.enabled", d.failover.enabled),
+            "failover_chain": self._cs.get("agent.nonstop.failover.chain", ""),
+            "failover_cooldown_seconds": self._cs.get(
+                "agent.nonstop.failover.cooldown_seconds", d.failover.cooldown_seconds
+            ),
+            "ledger_enabled": self._cs.get("agent.nonstop.ledger.enabled", d.ledger_enabled),
+        }
+
+    def save_nonstop_settings(self, data: dict[str, Any]) -> None:
+        """Save non-stop settings to ConfigStore (explicit key whitelist).
+
+        ``failover_chain`` accepts a comma-separated string or a list of
+        model ids. All values are validated/clamped before persisting.
+        """
+        if "enabled" in data:
+            self._cs.set("agent.nonstop.enabled", bool(data["enabled"]), category="agent")
+        if "stall_threshold_seconds" in data:
+            v = float(data["stall_threshold_seconds"])
+            if v < 10 or v > 3600:
+                raise ValueError("Stall threshold must be between 10 and 3600 seconds.")
+            self._cs.set("agent.nonstop.watchdog.stall_threshold_seconds", v, category="agent")
+        if "tool_timeout_seconds" in data:
+            v = float(data["tool_timeout_seconds"])
+            if v != 0 and (v < 5 or v > 3600):
+                raise ValueError("Tool timeout must be 0 (disabled) or between 5 and 3600 seconds.")
+            self._cs.set("agent.nonstop.watchdog.tool_timeout_seconds", v, category="agent")
+        if "max_recovery_attempts" in data:
+            v = int(data["max_recovery_attempts"])
+            if v < 0 or v > 10:
+                raise ValueError("Max recovery attempts must be between 0 and 10.")
+            self._cs.set("agent.nonstop.healing.max_recovery_attempts", v, category="agent")
+        if "backoff_base_seconds" in data:
+            v = float(data["backoff_base_seconds"])
+            if v < 0.5 or v > 600:
+                raise ValueError("Backoff base must be between 0.5 and 600 seconds.")
+            self._cs.set("agent.nonstop.healing.backoff_base_seconds", v, category="agent")
+        if "backoff_max_seconds" in data:
+            v = float(data["backoff_max_seconds"])
+            if v < 1 or v > 3600:
+                raise ValueError("Backoff max must be between 1 and 3600 seconds.")
+            self._cs.set("agent.nonstop.healing.backoff_max_seconds", v, category="agent")
+        if "failover_enabled" in data:
+            self._cs.set("agent.nonstop.failover.enabled", bool(data["failover_enabled"]), category="agent")
+        if "failover_chain" in data:
+            chain = data["failover_chain"]
+            if isinstance(chain, str):
+                chain = [p.strip() for p in chain.split(",") if p.strip()]
+            if not isinstance(chain, list) or len(chain) > 8:
+                raise ValueError("Failover chain must be a list of at most 8 model ids.")
+            self._cs.set("agent.nonstop.failover.chain", ",".join(str(m) for m in chain), category="agent")
+        if "failover_cooldown_seconds" in data:
+            v = float(data["failover_cooldown_seconds"])
+            if v < 10 or v > 86400:
+                raise ValueError("Failover cooldown must be between 10 and 86400 seconds.")
+            self._cs.set("agent.nonstop.failover.cooldown_seconds", v, category="agent")
+        if "ledger_enabled" in data:
+            self._cs.set("agent.nonstop.ledger.enabled", bool(data["ledger_enabled"]), category="agent")
+
     def save_context_settings(self, data: dict[str, Any]) -> None:
         """Update context window settings.
 

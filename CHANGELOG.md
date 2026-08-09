@@ -1,6 +1,13 @@
 # CHANGELOG
 
-## Unreleased — Self-healing final: compaction unification, turn correlation IDs, OTLP export (2026-08-09)
+## Unreleased — Settings UI: Non-Stop & Self-Healing section (2026-08-09)
+
+- **New settings card** on the Agent tab (`settings.html` + `settings.js`): enable toggle, stall threshold, per-tool timeout, max recovery attempts, backoff base/max, model failover toggle + chain (comma-separated) + cooldown, and the per-call ledger toggle. Sub-sections collapse with `x-cloak` (no first-paint blink); failover fields only show when failover is on.
+- **Backend:** `SettingsManager.get/save_nonstop_settings()` (validated, whitelisted `agent.nonstop.*` ConfigStore keys; chain accepts list or comma string) + `GET/PUT /api/settings/agent/nonstop` (`settings.py`). Live-re-read by `get_nonstop_config()` — saving applies without restart.
+- **i18n:** full EN/AR labels for the section.
+- **Verified:** 89/89 settings tests pass; roundtrip smoke (UI save → ConfigStore → `get_nonstop_config`) green; `node --check` clean.
+
+
 
 - **Compaction trigger unification:** `token_counter.resolve_context_window()` is now the single context-window ladder (Settings UI → YAML → model-aware table over the shipped default → 128k), shared by `KazmaAgent._resolve_context_window()` and the graph. The tool-worker mid-turn saturation route is model-aware: `min(24000, 60% × window)` — small-window models (GPT-4 8k) now compact in time instead of never; 128k+ models keep historical behavior. The entry-node `TOKEN_THRESHOLD` path is unchanged (pinned by tests).
 - **Turn correlation IDs:** new `observability/correlation.py` — `current_turn_id` ContextVar + `TurnIdFilter`. Bound per turn in `KazmaAgent.run()` and the SSE stream pump; `StructuredJSONFormatter` emits `turn_id` when present; the SSE `done`/`turn_complete` payload carries `turn_id`. Text log formats unchanged (no parser breakage).

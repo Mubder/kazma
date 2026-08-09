@@ -595,6 +595,84 @@
             <button class="btn btn-primary" @click="saveContext()">{{ t('settings.save_context') }}</button>
         </div>
 
+        <!-- Non-Stop & Self-Healing -->
+        <div class="settings-group">
+            <h3>{{ t('settings.nonstop_title') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;">
+                {{ t('settings.nonstop_hint') }}
+            </p>
+            <div class="form-row">
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px">
+                        <span>{{ t('settings.nonstop_enabled') }}</span>
+                        <label class="toggle">
+                            <input type="checkbox" x-model="nonstop.enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px">
+                        <span>{{ t('settings.nonstop_ledger') }}</span>
+                        <label class="toggle">
+                            <input type="checkbox" x-model="nonstop.ledger_enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                </div>
+            </div>
+            <div x-show="nonstop.enabled" x-cloak>
+                <div class="form-row two-col-grid">
+                    <div class="form-group">
+                        <label>{{ t('settings.nonstop_stall') }}</label>
+                        <input type="number" class="form-input" x-model.number="nonstop.stall_threshold_seconds" min="10" max="3600">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t('settings.nonstop_tool_timeout') }}</label>
+                        <input type="number" class="form-input" x-model.number="nonstop.tool_timeout_seconds" min="0" max="3600">
+                    </div>
+                </div>
+                <div class="form-row two-col-grid">
+                    <div class="form-group">
+                        <label>{{ t('settings.nonstop_max_recovery') }}</label>
+                        <input type="number" class="form-input" x-model.number="nonstop.max_recovery_attempts" min="0" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t('settings.nonstop_backoff_base') }}</label>
+                        <input type="number" class="form-input" x-model.number="nonstop.backoff_base_seconds" min="0.5" max="600" step="0.5">
+                    </div>
+                </div>
+                <div class="form-row two-col-grid">
+                    <div class="form-group">
+                        <label>{{ t('settings.nonstop_backoff_max') }}</label>
+                        <input type="number" class="form-input" x-model.number="nonstop.backoff_max_seconds" min="1" max="3600">
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:8px">
+                            <span>{{ t('settings.nonstop_failover_enabled') }}</span>
+                            <label class="toggle">
+                                <input type="checkbox" x-model="nonstop.failover_enabled">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </label>
+                    </div>
+                </div>
+                <div x-show="nonstop.failover_enabled" x-cloak>
+                    <div class="form-row two-col-grid">
+                        <div class="form-group">
+                            <label>{{ t('settings.nonstop_failover_chain') }}</label>
+                            <input type="text" class="form-input" x-model="nonstop.failover_chain" placeholder="gpt-4o, claude-sonnet-4.5, deepseek-chat">
+                        </div>
+                        <div class="form-group">
+                            <label>{{ t('settings.nonstop_failover_cooldown') }}</label>
+                            <input type="number" class="form-input" x-model.number="nonstop.failover_cooldown_seconds" min="10" max="86400">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-primary" @click="saveNonstop()">{{ t('settings.save_nonstop') }}</button>
+        </div>
+
         <div class="settings-group" style="padding:12px 16px;background:var(--accent-subtle);border:1px solid var(--border);border-radius:var(--radius-card);">
             <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
                 {{ t('settings.memory_moved_hint') }}

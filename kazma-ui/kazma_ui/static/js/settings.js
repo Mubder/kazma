@@ -52,6 +52,18 @@ function settingsApp() {
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
+        nonstop: {
+            enabled: false,
+            stall_threshold_seconds: 180,
+            tool_timeout_seconds: 120,
+            max_recovery_attempts: 3,
+            backoff_base_seconds: 5,
+            backoff_max_seconds: 300,
+            failover_enabled: false,
+            failover_chain: '',
+            failover_cooldown_seconds: 300,
+            ledger_enabled: true,
+        },
         memoryTenantMode: 'shared',
         memoryBackends: {
             mode: 'local',
@@ -260,7 +272,7 @@ function settingsApp() {
             this.loading = true;
             try {
                 // Load all settings in parallel
-                const [settings, providers, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg] = await Promise.all([
+                const [settings, providers, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg, nonstopCfg] = await Promise.all([
                     this._fetch('/api/settings'),
                     this._fetch('/api/settings/providers'),
                     this._fetch('/api/settings/agent/personalities'),
@@ -269,6 +281,7 @@ function settingsApp() {
                     this._fetch('/api/settings/agent/context'),
                     this._fetch('/api/settings/agent/safety'),
                     this._fetch('/api/settings/appearance'),
+                    this._fetch('/api/settings/agent/nonstop'),
                 ]);
 
                 if (settings) {
@@ -294,6 +307,7 @@ function settingsApp() {
                     }
                     if (safetyCfg) Object.assign(this.safety, safetyCfg);
                     if (contextCfg) Object.assign(this.context, contextCfg);
+                    if (nonstopCfg) Object.assign(this.nonstop, nonstopCfg);
                     // Load memory tenant mode from ConfigStore (stored under the
                     // "memory" category as key "memory.tenant_mode").
                     const memTenant = settings.memory && settings.memory['memory.tenant_mode'];
@@ -701,6 +715,27 @@ function settingsApp() {
                     body: JSON.stringify(this.context),
                 });
                 showToast('Context settings saved', 'success');
+            } catch (e) {
+                showToast('Save failed', 'error');
+            }
+            this.saving = false;
+        },
+
+        async saveNonstop() {
+            this.saving = true;
+            try {
+                const resp = await fetch('/api/settings/agent/nonstop', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.nonstop),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(function() { return {}; });
+                    showToast('Save failed: ' + (err.detail || resp.status), 'error');
+                    this.saving = false;
+                    return;
+                }
+                showToast('Non-stop settings saved — applies live', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
             }
