@@ -126,6 +126,12 @@ class SupervisorState(TypedDict, total=False):
     last_cost_usd: float
     """Dollar cost of the most recent LLM call."""
 
+    _last_finish_reason: str
+    """finish_reason of the most recent LLM call. ``"length"`` means the
+    provider truncated the completion at max_tokens — tool-call JSON may be
+    severed mid-string; the tool worker uses this to emit a truncation-aware
+    corrective error instead of executing garbage arguments."""
+
     # ── Identity / persistence ──────────────────────────────────────
     thread_id: str
     """Stable conversation thread ID (persists across checkpoints)."""

@@ -1360,6 +1360,17 @@ async def supervisor_node(
 
     pending = [PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments) for tc in response.tool_calls]
 
+    # Truncation detection: finish_reason="length" means the provider cut the
+    # response at max_tokens — tool-call JSON is likely severed mid-string.
+    # The tool worker reads this to give a truncation-specific corrective
+    # error ("write in smaller chunks") instead of a generic schema complaint.
+    _finish_reason = getattr(response, "finish_reason", "") or ""
+    if _finish_reason == "length":
+        logger.warning(
+            "[Supervisor] Response TRUNCATED at max_tokens (finish_reason=length); "
+            "tool-call arguments may be incomplete"
+        )
+
     # Tools imply an open multi-step focus (unless user already superseded).
     _tool_patch = dict(intent_patch)
     if _tool_patch.get("task_status") != "superseded":
@@ -1376,6 +1387,7 @@ async def supervisor_node(
         "last_model": response.model,
         "last_tokens": response.usage.get("total_tokens", 0),
         "last_cost_usd": response.cost_usd,
+        "_last_finish_reason": _finish_reason,
     }
 
 
@@ -1526,7 +1538,48 @@ async def tool_worker_node(
 
         async def _exec_one(tc: PendingToolCall) -> ToolResult:
             start = time.monotonic()
-            result = await tool_executor.execute(tc["name"], tc.get("arguments") or {})
+            _args = tc.get("arguments") or {}
+            # Truncated-response guard: the provider cut the completion at
+            # max_tokens (finish_reason="length"), severing the tool-call
+            # JSON mid-string. The args arrive as {"raw": "<partial…"} or
+            # empty. Don't execute — tell the model exactly what happened and
+            # how to recover (smaller chunks), or it will retry the identical
+            # oversized call until the circuit breaker trips.
+            _malformed = not _args or set(_args.keys()) <= {"raw", "_malformed"}
+            if _malformed and state.get("_last_finish_reason") == "length":
+                result = {
+                    "content": (
+                        f"Error: Your previous response was TRUNCATED by the output token "
+                        f"limit (max_tokens), which severed the '{tc['name']}' arguments "
+                        f"mid-JSON — the tool was NOT executed. Do NOT retry the same "
+                        f"large call. Instead: (1) write the file in SMALLER pieces — "
+                        f"first call creates the file with the initial section, then "
+                        f"append subsequent sections with additional calls (or use "
+                        f"shell_exec with append), keeping each call's content under "
+                        f"~1500 characters; or (2) reduce the content size. "
+                        f"Ask the user to raise max_tokens in Settings for large files."
+                    ),
+                    "is_error": True,
+                }
+                duration_ms = (time.monotonic() - start) * 1000
+                tracer.trace_tool_execution(
+                    tool_name=tc["name"],
+                    input_data=tc["arguments"],
+                    output_data=result,
+                    duration_ms=duration_ms,
+                    success=False,
+                )
+                logger.warning(
+                    "[ToolWorker] %s skipped — arguments truncated by max_tokens", tc["name"]
+                )
+                return ToolResult(
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                    content=result["content"],
+                    is_error=True,
+                    duration_ms=duration_ms,
+                )
+            result = await tool_executor.execute(tc["name"], _args)
             duration_ms = (time.monotonic() - start) * 1000
 
             tracer.trace_tool_execution(
