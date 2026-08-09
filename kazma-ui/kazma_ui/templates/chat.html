@@ -81,7 +81,7 @@
 
     <!-- Reactive HITL Pending Approval Card -->
     <div x-data x-cloak x-show="$store.agent && $store.agent.pendingApproval" class="hitl-approval-card" style="margin:12px 16px;">
-      <div class="hitl-approval-header">⚠ Approval Required</div>
+      <div class="hitl-approval-header"><span class="ki" data-icon="alert" aria-hidden="true"></span> Approval Required</div>
       <div class="hitl-approval-body">
         <p><strong>Tool:</strong> <code x-text="$store.agent?.pendingApproval?.tool"></code></p>
         <p x-show="$store.agent?.pendingApproval?.message" class="hitl-message" x-text="$store.agent?.pendingApproval?.message"></p>

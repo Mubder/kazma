@@ -232,7 +232,7 @@
         }
         if (statusEl) {
           statusEl.innerHTML =
-            '⚠ ' + escapeHtml(err) +
+            (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' + escapeHtml(err) +
             ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
             t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
           statusEl.className = 'hitl-approval-status hitl-status-error';

@@ -4,6 +4,9 @@
 
 Resolution of the consolidated audit report (22 items). False positives excluded after first-hand verification (SSE checkpointer, gateway handler_ok, discord/slack voice, list_active, 3 of 5 memory config keys, alert buffer bound).
 
+**Web UI**
+- Replaced fixed emoji UI chrome with the shared SVG icon registry across dashboard, memory, swarm, replay, Settings, knowledge, agents, chat errors, HITL, research, and memory-governance surfaces. Localized labels are now text-only, dynamic controls render accessible SVG icons, and stored personality emoji are converted to SVG at render time.
+
 **Critical**
 - **Sensitive-key detection broadened** (`config_store.py`): `is_sensitive_config_key` now matches secret-kind segments (password/secret/credential/apikey/privatekey/clientsecret/accesstoken/refreshtoken/bottoken) anywhere in the dotted key — not only last-segment suffixes. New nested keys (e.g. `email.smtp.password`) can no longer bypass vault encryption.
 - **Exception masking removed:** cron column migrations log non-duplicate failures at WARNING; `tenant_isolation.multi_user_or_production()` now fails CLOSED (multi-user posture) + WARNING on RBAC store errors instead of silently relaxing to single-tenant; lifecycle notifier config/marker failures visible at WARNING.

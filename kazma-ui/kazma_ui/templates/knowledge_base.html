@@ -54,7 +54,7 @@
 
   {# ── Intro / what this is ── #}
   <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
-    <strong>📚 {{ t('knowledge.title') }}</strong> — {{ t('knowledge.intro') }}
+    <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" data-icon="book" aria-hidden="true"></span> {{ t('knowledge.title') }}</strong> — {{ t('knowledge.intro') }}
   </div>
 
   {# ── Add library form ── #}
@@ -87,7 +87,7 @@
         @click="ingest('site')"
         :disabled="creating || !form.id || !form.seed_url"
       >
-        {{ t('knowledge.crawl_tree') }}
+        <span class="ki" data-icon="spider" aria-hidden="true"></span> {{ t('knowledge.crawl_tree') }}
       </button>
       <span x-show="creating" class="spinner-inline" style="align-self:center;"></span>
     </div>
@@ -101,7 +101,7 @@
     <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;border-left:3px solid var(--primary);">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
         <span class="spinner-inline" x-show="!jobDone()"></span>
-        <strong x-text="jobTitle()"></strong>
+        <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" x-html="KazmaIcons.get(jobIcon())" aria-hidden="true"></span><span x-text="jobTitle()"></span></strong>
       </div>
       <div style="font-size:0.88rem;color:var(--text-secondary);" x-text="activeJob.message || ''"></div>
       <div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">
@@ -184,16 +184,16 @@
             </div>
           </div>
           <div style="display:flex;gap:4px;flex-shrink:0;">
-            <button class="btn btn-secondary btn-sm" @click="testSearch(lib)" x-text="lib._t_test"></button>
-            <button class="btn btn-secondary btn-sm" @click="refresh(lib)" :disabled="!lib.seed_url" x-text="lib._t_refresh"></button>
-            <button class="btn btn-secondary btn-sm" @click="browse(lib)" x-text="lib._t_browse"></button>
+            <button class="btn btn-secondary btn-sm" @click="testSearch(lib)"><span class="ki" data-icon="search" aria-hidden="true"></span> <span x-text="lib._t_test"></span></button>
+            <button class="btn btn-secondary btn-sm" @click="refresh(lib)" :disabled="!lib.seed_url"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="lib._t_refresh"></span></button>
+            <button class="btn btn-secondary btn-sm" @click="browse(lib)"><span class="ki" data-icon="clipboard" aria-hidden="true"></span> <span x-text="lib._t_browse"></span></button>
             <template x-if="!viewArchived">
-              <button class="btn btn-secondary btn-sm" @click="archive(lib)" x-text="lib._t_archive"></button>
+              <button class="btn btn-secondary btn-sm" @click="archive(lib)"><span class="ki" data-icon="package" aria-hidden="true"></span> <span x-text="lib._t_archive"></span></button>
             </template>
             <template x-if="viewArchived">
-              <button class="btn btn-secondary btn-sm" @click="unarchive(lib)" x-text="lib._t_unarchive"></button>
+              <button class="btn btn-secondary btn-sm" @click="unarchive(lib)"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="lib._t_unarchive"></span></button>
             </template>
-            <button class="btn btn-secondary btn-sm" @click="del(lib)" style="color:var(--danger,#e53935);" x-text="lib._t_delete"></button>
+            <button class="btn btn-secondary btn-sm" @click="del(lib)" style="color:var(--danger,#e53935);"><span class="ki" data-icon="trash" aria-hidden="true"></span> <span x-text="lib._t_delete"></span></button>
           </div>
         </div>
         <div x-show="lib._search_open" style="margin-top:0.75rem;border-top:1px dashed var(--border);padding-top:0.6rem;">

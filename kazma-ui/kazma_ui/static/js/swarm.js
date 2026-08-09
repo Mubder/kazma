@@ -42,6 +42,7 @@
   function setText(id, text) { var el = $(id); if (el) el.textContent = text; }
   function showToast(msg, ok) { if (KS && KS.toast) KS.toast(msg, ok ? 'success' : 'error', 4000); }
   function showError(msg) { if (KS && KS.toast) KS.toast(msg, 'error', 5000); }
+  function icon(name) { return window.KazmaIcons ? KazmaIcons.span(name) : ''; }
 
   // i18n helper: looks up window.t (injected by base.html) with safe fallback.
   function t(key, vars) {
@@ -525,7 +526,7 @@
       })
       .finally(function() {
         var btn = $('btn-dispatch');
-        if (btn) { btn.disabled = false; btn.textContent = t('swarm.dispatch_btn'); }
+        if (btn) { btn.disabled = false; btn.innerHTML = icon('zap') + ' ' + esc(t('swarm.dispatch_btn')); }
       });
   }
 
@@ -908,7 +909,7 @@
       synthCard.className = 'task-result-card';
       synthCard.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--accent-subtle);border-radius:6px;background:var(--accent-subtle);';
       synthCard.innerHTML =
-        '<div style="font-weight:600;font-size:0.85rem;color:var(--accent-light);margin-bottom:6px;">' + esc(t('swarm.synthesized_answer')) + '</div>' +
+        '<div style="font-weight:600;font-size:0.85rem;color:var(--accent-light);margin-bottom:6px;">' + icon('brain') + ' ' + esc(t('swarm.synthesized_answer')) + '</div>' +
         '<div style="font-size:0.8rem;color:var(--text-secondary);white-space:pre-wrap;">' + esc(data.synthesized_output) + '</div>';
       listEl.insertBefore(synthCard, listEl.firstChild);
     }
@@ -1481,29 +1482,29 @@
 
     // Synthesized output
     if (task.synthesized_output) {
-      html += '<h4 style="margin-bottom:8px;">' + esc(t('swarm.synthesized_answer')) + '</h4>';
+      html += '<h4 style="margin-bottom:8px;">' + icon('brain') + ' ' + esc(t('swarm.synthesized_answer')) + '</h4>';
       html += '<div style="padding:12px;background:var(--accent-subtle);border:1px solid var(--accent-subtle);border-radius:var(--radius);color:var(--accent-light);white-space:pre-wrap;">' + esc(task.synthesized_output) + '</div>';
     }
 
     // Aggregated output
     if (task.aggregated_output && !task.synthesized_output) {
-      html += '<h4 style="margin-bottom:8px;">' + esc(t('swarm.aggregated_output')) + '</h4>';
+      html += '<h4 style="margin-bottom:8px;">' + icon('bar-chart') + ' ' + esc(t('swarm.aggregated_output')) + '</h4>';
       html += '<div style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);white-space:pre-wrap;">' + esc(task.aggregated_output) + '</div>';
     }
 
     // Metadata
     if (task.metadata && Object.keys(task.metadata).length) {
-      html += '<h4 style="margin-top:16px;margin-bottom:8px;">' + esc(t('swarm.metadata')) + '</h4>';
+      html += '<h4 style="margin-top:16px;margin-bottom:8px;">' + icon('clipboard') + ' ' + esc(t('swarm.metadata')) + '</h4>';
       html += '<pre style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
     }
 
     // Action buttons (cancel for running, retry for failed/timeout/cancelled)
     html += '<div style="display:flex;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-subtle);">';
     if (task.status === 'running' || task.status === 'pending' || task.status === 'paused') {
-      html += '<button class="btn btn-danger" data-action="cancel" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">' + esc(t('swarm.cancel_task')) + '</button>';
+      html += '<button class="btn btn-danger" data-action="cancel" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">' + icon('ban') + ' ' + esc(t('swarm.cancel_task')) + '</button>';
     }
     if (task.status === 'failed' || task.status === 'timeout' || task.status === 'cancelled' || task.status === 'error') {
-      html += '<button class="btn btn-primary" data-action="retry" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">' + esc(t('swarm.retry_task')) + '</button>';
+      html += '<button class="btn btn-primary" data-action="retry" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">' + icon('refresh') + ' ' + esc(t('swarm.retry_task')) + '</button>';
     }
     html += '</div>';
 
@@ -1873,7 +1874,7 @@
       panel.innerHTML = 
         '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid ' + (valid ? 'var(--success)' : 'var(--danger)') + '; background: ' + (valid ? 'var(--success-subtle)' : 'var(--danger-subtle)') + '; box-shadow: 0 0 12px ' + (valid ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)') + '; transition: all 0.3s ease;">' +
           '<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.8rem; color: ' + (valid ? 'var(--success)' : 'var(--danger)') + ';">' +
-            '<span>' + esc(valid ? t('swarm.pipeline_verified') : t('swarm.validation_issues')) + '</span>' +
+            '<span>' + icon(valid ? 'check-circle' : 'x') + ' ' + esc(valid ? t('swarm.pipeline_verified') : t('swarm.validation_issues')) + '</span>' +
           '</div>' +
           (errors.length > 0 ? 
             '<ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">' +
@@ -1888,7 +1889,7 @@
       panel.style.display = 'block';
       panel.innerHTML = 
         '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--danger); background: var(--danger-subtle);">' +
-          '<div style="font-weight: 600; font-size: 0.8rem; color: var(--danger);">' + esc(t('swarm.validation_api_error')) + '</div>' +
+          '<div style="font-weight: 600; font-size: 0.8rem; color: var(--danger);">' + icon('alert') + ' ' + esc(t('swarm.validation_api_error')) + '</div>' +
           '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(err.message || err) + '</div>' +
         '</div>';
     });
@@ -2389,7 +2390,7 @@
     var btn = $('btn-pipeline-run');
     if (btn) {
       btn.disabled = false;
-      btn.textContent = t('swarm.run_pipeline_btn');
+      btn.innerHTML = icon('rocket') + ' ' + esc(t('swarm.run_pipeline_btn'));
     }
   }
 
@@ -2683,7 +2684,7 @@
 
   function resetPlaygroundBtn() {
     var btn = $('btn-play-run');
-    if (btn) { btn.disabled = false; btn.textContent = t('swarm.run_task_btn'); }
+    if (btn) { btn.disabled = false; btn.innerHTML = icon('zap') + ' ' + esc(t('swarm.run_task_btn')); }
   }
 
   function approvePlaygroundHitl() {

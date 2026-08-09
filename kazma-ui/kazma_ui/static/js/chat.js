@@ -2931,9 +2931,9 @@
           var stuck = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
           if (stuck.length > 0) {
             var textNode = stuck[stuck.length - 1].querySelector('.message-text') || stuck[stuck.length - 1];
-            textNode.innerHTML = (window.KS && KS.markdown)
-              ? KS.markdown('⚠️ Previous turn ended without a stored reply (it may have failed). Send a new message to continue.')
-              : '<p><em>Previous turn ended without a stored reply. Send a new message to continue.</em></p>';
+            textNode.innerHTML = '<p class="error-message" style="display:flex;align-items:flex-start;gap:6px;">' +
+              (window.KazmaIcons ? KazmaIcons.span('alert') : '') +
+              '<em>Previous turn ended without a stored reply. Send a new message to continue.</em></p>';
           }
           return;
         }
@@ -3266,7 +3266,8 @@
       logProgress({ kind: 'error', title: ti('error', 'Error'), detail: String(errMsg || ''), state: 'failed' });
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = '<div class="error-message">⚠️ ' + escapeHtml(errMsg) + '</div>';
+      if (textEl) textEl.innerHTML = '<div class="error-message" style="display:flex;align-items:flex-start;gap:6px;">' +
+        (window.KazmaIcons ? KazmaIcons.span('alert') : '') + escapeHtml(errMsg) + '</div>';
       // endTurn is invoked by agentStore after graph_error; keep bubble closed.
       finalizeProgress(false);
       currentMsgEl = null;

@@ -59,11 +59,11 @@
              :style="agent.personality === p.name ? 'border-color:var(--brand,#6366f1);background:linear-gradient(135deg, color-mix(in srgb, var(--brand,#6366f1) 12%, transparent), transparent);' : ''"
              onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 4px 12px rgba(99,102,241,0.15)'"
              onmouseout="this.style.transform='';this.style.boxShadow=''">
-          <div style="font-size:1.5rem;margin-bottom:8px;line-height:1;" x-html="(window.KazmaIcons && KazmaIcons.fromEmoji(p.emoji)) || p.emoji || '🤖'"></div>
+          <div style="font-size:1.5rem;margin-bottom:8px;line-height:1;" x-html="window.KazmaIcons ? (p.emoji ? KazmaIcons.fromEmoji(p.emoji) : KazmaIcons.get('bot')) : ''"></div>
           <div style="font-weight:700;font-size:0.88rem;margin-bottom:4px;color:var(--text-primary);" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
           <div style="font-size:0.74rem;color:var(--text-secondary);line-height:1.4;" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
           <template x-if="agent.personality === p.name">
-            <div style="margin-top:8px;font-size:0.68rem;font-weight:600;color:var(--brand,#6366f1);text-transform:uppercase;letter-spacing:0.5px;">✓ Active</div>
+            <div style="margin-top:8px;font-size:0.68rem;font-weight:600;color:var(--brand,#6366f1);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:4px;"><span class="ki" data-icon="check" aria-hidden="true"></span> Active</div>
           </template>
         </div>
       </template>

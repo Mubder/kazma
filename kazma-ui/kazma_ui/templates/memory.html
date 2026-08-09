@@ -205,7 +205,7 @@
     {# Compact ops strip — chips + tabs, no long blurb #}
     <div class="card mem-ops-strip" style="padding:0.55rem 0.85rem;margin-bottom:0.75rem;">
       <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;">
-        <strong style="font-size:0.85rem;white-space:nowrap;" title="Browse entities, beliefs, merges, hygiene">🧠 Ops</strong>
+        <strong style="font-size:0.85rem;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;" title="Browse entities, beliefs, merges, hygiene"><span class="ki" data-icon="brain" aria-hidden="true"></span> Ops</strong>
         <template x-for="chip in summaryChips" :key="chip.k">
           <span style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);" :title="chip.k">
             <span style="color:var(--text-muted);" x-text="chip.k"></span>

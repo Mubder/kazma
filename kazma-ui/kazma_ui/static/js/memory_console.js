@@ -1002,8 +1002,8 @@
           '<span>' + _esc(m.source_entity_id) + ' → ' + _esc(m.target_entity_id) +
           ' <span style="color:var(--text-muted);">(' + _esc(m.merge_tier) + ' · ' +
           (m.confidence != null ? Number(m.confidence).toFixed(2) : '') + ')</span></span>' +
-          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;">✓</button>' +
-          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;">✗</button>' +
+          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="Approve">' + KazmaIcons.span('check') + '</button>' +
+          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="Reject">' + KazmaIcons.span('x') + '</button>' +
           '</div>';
       }).join('');
       el.querySelectorAll('.v2-merge-act').forEach(function(btn) {
@@ -2792,7 +2792,7 @@
       });
       if (!data.ok) { _v2gToast(data.error || 'Toggle failed', 'error'); return; }
       p.isMajor = newMajor;
-      _v2gToast((newMajor ? 'Marked ' : 'Unmarked ') + _v2gShortId(p.id) + (newMajor ? ' as major ★' : ''), 'success');
+      _v2gToast((newMajor ? 'Marked ' : 'Unmarked ') + _v2gShortId(p.id) + (newMajor ? ' as major' : ''), 'success');
       _v2gRepaint();
       try {
         window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'major', id: p.id, major: newMajor } }));
@@ -3106,7 +3106,7 @@
           else if (_v2gOps.mode === 'merge') modeHint = '<br><span style="color:var(--warning);">merge pick</span>';
           tip.innerHTML = '<b style="color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b><br><span style="color:var(--text-muted);">' +
             (_v2gIsUser(p) ? 'you · center of memory' : ('type: ' + p.type)) +
-            (p.isHighStakes ? ' · ⚠ high-stakes' : '') +
+            (p.isHighStakes ? ' · high-stakes' : '') +
             (p.isVirtual ? ' · fact' : '') +
             (p.id && _v2gDisplayName(p) !== p.id ? ' · id: ' + _v2gEsc(String(p.id).slice(0, 24)) : '') +
             '</span>' + modeHint;
@@ -3228,7 +3228,7 @@
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:6px;">';
     html += _v2gIsUser(p) ? 'you · memory hub' : ('type: ' + p.type);
     if (p.id) html += ' · id: <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
-    if (p.isHighStakes) html += ' · <span style="color:#ef4444;">⚠ high-stakes</span>';
+    if (p.isHighStakes) html += ' · <span style="color:#ef4444;display:inline-flex;align-items:center;gap:3px;">' + KazmaIcons.span('alert') + ' high-stakes</span>';
     if (p.isVirtual) html += ' · fact node';
     html += '</div>';
     // Collect connections once for cut-hub + list UI
@@ -3261,7 +3261,7 @@
       // bigger + violet. Hidden for the hub (always major) and virtual facts.
       if (!_v2gIsUser(p) && !p.isVirtual) {
         var isMaj = !!p.isMajor;
-        html += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' + (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') + '" title="Mark as major (bigger + violet)">' + (isMaj ? 'Major ★' : 'Major') + '</button>';
+        html += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' + (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') + '" title="Mark as major (bigger + violet)">' + (isMaj ? KazmaIcons.span('star') + ' Major' : 'Major') + '</button>';
       }
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="rename" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
       html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;" title="Highlight in entities list">In list</button>';
@@ -3887,7 +3887,7 @@
       var all = Object.keys(_v2gFilters.entity).map(function(k) { return { group: 'entity', key: k, label: 'entity:' + k }; })
         .concat(Object.keys(_v2gFilters.predicate).map(function(k) { return { group: 'predicate', key: k, label: 'pred:' + k }; }));
       var html = all.map(function(c, idx) {
-        return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;">' + c.label + ' ✕</span>';
+        return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
       }).join('');
       if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">Reset all</span>';
       chips.innerHTML = html;

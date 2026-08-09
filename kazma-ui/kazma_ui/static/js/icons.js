@@ -125,6 +125,11 @@ var KazmaIcons = (function () {
     'chevron-left': function (o) { return wrap('<polyline points="15 18 9 12 15 6"/>', o); },
     'chevron-up': function (o) { return wrap('<polyline points="18 15 12 9 6 15"/>', o); },
     'monitor': function (o) { return wrap('<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>', o); },
+    'moon': function (o) { return wrap('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>', o); },
+    'sun': function (o) { return wrap('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.41M17.66 6.34l1.41-1.41"/>', o); },
+    'mail': function (o) { return wrap('<rect x="3" y="5" width="18" height="14" rx="2"/><polyline points="3 7 12 13 21 7"/>', o); },
+    'spider': function (o) { return wrap('<circle cx="12" cy="12" r="4"/><circle cx="12" cy="5" r="2"/><path d="M8 10 4 7M8 12H3M8 14l-4 3M16 10l4-3M16 12h5M16 14l4 3"/>', o); },
+    'ban': function (o) { return wrap('<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>', o); },
     'construction': function (o) { return wrap('<rect x="2" y="6" width="20" height="8" rx="1"/><path d="M17 14v7"/><path d="M7 14v7"/><path d="M17 3v3"/><path d="M7 3v3"/><path d="M10 14 2.3 6.3"/><path d="m14 6 7.7 7.7"/><path d="m8 6 8 8"/>', o); },
     'box': function (o) { return wrap('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/>', o); },
   };
@@ -164,6 +169,9 @@ var KazmaIcons = (function () {
     '😊': 'smile', '🙂': 'smile',
     '⚡': 'zap',
     '📚': 'book',
+    '🌙': 'moon', '☀': 'sun', '☀️': 'sun',
+    '📧': 'mail', '📱': 'message', '🕷': 'spider', '🕷️': 'spider',
+    '♻': 'refresh', '♻️': 'refresh', '🚫': 'ban',
     '🐧': 'bot',
     '⏸': 'pause', '⏸️': 'pause',
     '⏹': 'square', '⏹️': 'square',
@@ -200,10 +208,10 @@ var KazmaIcons = (function () {
       var stripped = glyph.replace(/\uFE0F/g, '');
       return EMOJI_TO_ICON[stripped] || EMOJI_TO_ICON[stripped + '\uFE0F'] || null;
     },
-    /** SVG string for an emoji glyph; falls back to original text. */
+    /** SVG string for an emoji glyph; unknown glyphs use a neutral bot icon. */
     fromEmoji: function (glyph, opts) {
       var name = api.emojiName(glyph);
-      return name ? api.get(name, opts) : String(glyph || '');
+      return api.get(name || 'bot', opts);
     },
     /** Markup helper: <span class="ki" data-icon="name">…</span> already hydrated. */
     span: function (name, opts) {

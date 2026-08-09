@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "replay" %}
 {% block title %}Kazma — {{ t('replay.title') }}{% endblock %}
-{% block page_title %}🕰️ {{ t('replay.title') }}{% endblock %}
+{% block page_title %}<span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('replay.title') }}{% endblock %}
 
 {% block content %}
 <div class="replay-container" style="max-width:1200px;margin:0 auto;">
@@ -69,7 +69,7 @@
   <!-- ══ TAB: About ══ -->
   <div class="tab-panel" id="panel-about" style="display:none;">
     <div class="card" style="padding:1.5rem;line-height:1.7;">
-      <h3 style="margin-top:0;">{{ t('replay.about_title') }}</h3>
+      <h3 style="margin-top:0;display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('replay.about_title') }}</h3>
       <p>{{ t('replay.about_desc') }}</p>
       <ul>
         <li>{{ t('replay.about_browse') | safe }}</li>

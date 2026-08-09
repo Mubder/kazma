@@ -40,12 +40,12 @@ function knowledgePage() {
       _t_auto_inject: S.auto_inject || "auto-inject",
       _t_ai_on: S.auto_inject_on || "Auto-inject ON",
       _t_ai_off: S.auto_inject_off || "Auto-inject OFF",
-      _t_test: S.test || "🔍 Test",
-      _t_refresh: S.refresh || "↻ Refresh",
-      _t_browse: S.browse || "📋 Browse",
-      _t_archive: S.archive_label || "📦 Archive",
-      _t_unarchive: S.unarchive_label || "♻️ Restore",
-      _t_delete: S.delete || "🗑",
+      _t_test: S.test || "Test",
+      _t_refresh: S.refresh || "Refresh",
+      _t_browse: S.browse || "Browse",
+      _t_archive: S.archive_label || "Archive",
+      _t_unarchive: S.unarchive_label || "Restore",
+      _t_delete: S.delete || "Delete",
       _t_search_placeholder: S.search_placeholder || "Ask something…",
       _t_search_btn: S.search_btn || "Search",
       _t_searching: S.searching || "searching…",
@@ -205,9 +205,15 @@ function knowledgePage() {
     jobTitle() {
       if (!this.activeJob) return "";
       const p = this.activeJob.phase;
-      if (p === "done") return "✅ Done";
-      if (p === "error") return "⚠️ Error";
-      return "🕷️ Crawling…";
+      if (p === "done") return "Done";
+      if (p === "error") return "Error";
+      return "Crawling…";
+    },
+    jobIcon() {
+      if (!this.activeJob) return "info";
+      if (this.activeJob.phase === "done") return "check-circle";
+      if (this.activeJob.phase === "error") return "alert";
+      return "spider";
     },
     jobDone() {
       return this.activeJob && (this.activeJob.phase === "done" || this.activeJob.phase === "error");

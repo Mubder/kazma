@@ -109,7 +109,7 @@
 
   <!-- ── Feature Cards: Active Skills ── -->
   <div id="feature-cards-section" style="margin-bottom:1.25rem;">
-    <h3 class="chart-title" style="margin:0 0 10px 0;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">{{ t('dashboard.active_capabilities') if t('dashboard.active_capabilities') else 'Active Capabilities' }}</h3>
+    <h3 class="chart-title" style="margin:0 0 10px 0;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;"><span class="ki" data-icon="zap" aria-hidden="true"></span> {{ t('dashboard.active_capabilities') if t('dashboard.active_capabilities') else 'Active Capabilities' }}</h3>
     <div id="feature-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">
       <!-- Populated by dashboard.js initFeatureCards() -->
     </div>

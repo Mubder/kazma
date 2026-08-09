@@ -797,7 +797,7 @@
 <!-- ── Edit Worker Modal ── -->
 <div id="edit-worker-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)KazmaSwarm.closeEditWorker()">
   <div class="modal">
-    <h2>{{ t('swarm.edit_worker_modal') }}</h2>
+    <h2 style="display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="edit" aria-hidden="true"></span> {{ t('swarm.edit_worker_modal') }}</h2>
     <input type="hidden" id="edit-worker-name">
     <div class="form-group">
       <label class="form-label">{{ t('swarm.role') }}</label>

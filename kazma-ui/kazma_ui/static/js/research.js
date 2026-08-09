@@ -773,7 +773,7 @@
       var meta;
       var rubricBit = (t.rubric_score != null && t.rubric_score !== '')
         ? (' · rubric ' + Math.round(Number(t.rubric_score)) +
-           (t.rubric_ok === true ? '✓' : (t.rubric_ok === false ? '·' : '')))
+           (t.rubric_ok === true ? ' passed' : (t.rubric_ok === false ? ' failed' : '')))
         : '';
       if (isSession) {
         meta = 'session · ' + esc(t.status || '') +

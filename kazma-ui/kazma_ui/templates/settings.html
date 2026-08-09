@@ -219,7 +219,7 @@
                         <strong>{{ t('settings.gateway_adapters') }}</strong>
                         <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">{{ t('settings.gateway_adapters_desc') }}</p>
                     </div>
-                    <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving" x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></button>
+                    <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
                 </div>
             </div>
         </div>
@@ -1168,9 +1168,9 @@
         <div class="settings-group">
             <h3>{{ t('settings.theme') }}</h3>
             <div style="display:flex;gap:12px;margin-bottom:16px">
-                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')">{{ t('settings.dark') }}</button>
-                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')">{{ t('settings.light') }}</button>
-                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'">{{ t('settings.auto') }}</button>
+                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')"><span class="ki" data-icon="moon" aria-hidden="true"></span> {{ t('settings.dark') }}</button>
+                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')"><span class="ki" data-icon="sun" aria-hidden="true"></span> {{ t('settings.light') }}</button>
+                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.auto') }}</button>
             </div>
         </div>
 
@@ -1231,7 +1231,7 @@
 
             <!-- Conflict warnings -->
             <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px">
-                <div style="color:var(--warning);font-weight:600;margin-bottom:4px">{{ t('settings.conflicts_detected') }}</div>
+                <div style="color:var(--warning);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.conflicts_detected') }}</div>
                 <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
                     <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" ` + t('settings.kb_and') + ` "${c.action2}" ` + t('settings.kb_both_use') + ` ${c.keys}`"></div>
                 </template>
@@ -1598,7 +1598,7 @@
                     </label>
                 </label>
             </div>
-            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-text="proxyTestResult?.success ? ('✓ ' + (window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : ('✗ ' + (proxyTestResult?.error || 'Test failed'))"></div>
+            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'"><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error || 'Test failed')"></span></span></div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary" @click="saveProxy()">{{ t('settings.proxy_save') }}</button>
                 <button class="btn btn-secondary" @click="testProxy()" :disabled="proxyTesting">{{ t('settings.proxy_test') }}</button>
@@ -1631,9 +1631,9 @@
         <div class="settings-group">
             <h3>{{ t('settings.backup_maintenance') }}</h3>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-secondary" @click="createBackup()">{{ t('settings.download_backup') }}</button>
-                <button class="btn btn-secondary" @click="checkUpdates()">{{ t('settings.check_updates') }}</button>
-                <button class="btn btn-danger" @click="systemReset()">{{ t('settings.system_reset') }}</button>
+                <button class="btn btn-secondary" @click="createBackup()"><span class="ki" data-icon="package" aria-hidden="true"></span> {{ t('settings.download_backup') }}</button>
+                <button class="btn btn-secondary" @click="checkUpdates()"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.check_updates') }}</button>
+                <button class="btn btn-danger" @click="systemReset()"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.system_reset') }}</button>
             </div>
             <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
                 <template x-if="updateInfo?.update_available">
@@ -1644,7 +1644,7 @@
                     </div>
                 </template>
                 <template x-if="updateInfo && !updateInfo?.update_available && !updateInfo?.error">
-                    <span class="text-success">{{ t('settings.running_latest') }}</span>
+                    <span class="text-success" style="display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> {{ t('settings.running_latest') }}</span>
                 </template>
                 <template x-if="updateInfo?.error">
                     <span class="text-error" x-text="updateInfo.error"></span>
@@ -1855,7 +1855,7 @@
             <div style="display:flex;gap:12px;margin-bottom:12px">
                 <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem">
                     <input type="file" accept=".yaml,.yml,.json" @change="handleFileUpload($event)" style="display:none" id="import-file-input">
-                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()">{{ t('settings.upload_file') }}</button>
+                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()"><span class="ki" data-icon="folder" aria-hidden="true"></span> {{ t('settings.upload_file') }}</button>
                 </label>
             </div>
             <div class="form-group">

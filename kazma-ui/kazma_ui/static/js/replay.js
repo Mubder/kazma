@@ -58,7 +58,7 @@
         sel.innerHTML = '';
         var opt = document.createElement('option');
         opt.value = '';
-        opt.textContent = '⚠ Time travel unavailable (API ' + status + ')';
+        opt.textContent = 'Time travel unavailable (API ' + status + ')';
         sel.appendChild(opt);
       }
       var listEl = $('replay-timeline-list');
@@ -272,7 +272,8 @@
                 row('Next node', d.original_next_node || '—', d.replayed_next_node || '—', d.routing_changed ? 'changed' : 'same') +
               '</tbody>' +
             '</table>' +
-            (d.identical ? '<p style="margin-top:1rem;color:var(--success);">✅ States are identical.</p>' : '');
+            (d.identical ? '<p style="margin-top:1rem;color:var(--success);display:flex;align-items:center;gap:6px;">' +
+              KazmaIcons.span('check-circle') + ' States are identical.</p>' : '');
         })
         .catch(function () { toast('Compare failed', 'error'); });
     },
