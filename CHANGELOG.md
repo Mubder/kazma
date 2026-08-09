@@ -1,6 +1,14 @@
 # CHANGELOG
 
-## Unreleased — Scraper industry hardening: size caps, 5xx retry, robots.txt option (2026-08-09)
+## Unreleased — Fix: replay API 404 spam (always-mounted router + UI unavailable state) (2026-08-09)
+
+Root cause of the repeating `GET /api/replay/threads → 404`: `app.py` only mounted the replay router when `self._snapshot_recorder` was not None, while `replay.js` polls the route every 10s forever — a recorder init failure (or any exception in the conditional mount block, e.g. a `NameError` on the closure-scoped `recompiled` variable after a refactor) left the route absent with only a debug-level log.
+
+- **Backend:** the replay router is now ALWAYS mounted. When the recorder is unavailable, every `/api/replay/*` endpoint returns a structured **503 `time_travel_unavailable`** with an actionable detail message instead of a bare 404. Recorder-creation failure now logs at WARNING with traceback (`[Replay] snapshot recorder creation failed`), and unavailable-mode mounting logs its own WARNING. Fixed the `graph=recompiled` NameError in the mount call (now resolves via `_hitl_state`/`_graph_holder` getters).
+- **Frontend:** `replay.js` stops the 10s poll and shows a clear "Time travel unavailable (API 404/503)" panel state with a Retry button the moment the API answers 404/503, instead of polling a dead route forever.
+- **Verified:** live server boot → `[Replay] Time-travel API mounted at /api/replay/*` → `GET /api/replay/threads` returns 200 with 75 threads; replay command tests 6/6 green; settings suite 89/89.
+
+
 
 Audit verdict: the stack was already strong (tiered Firecrawl→httpx+trafilatura→Jina→Playwright-stealth ladder, full-record SSRF DNS pinning, bot-wall heuristics, proxy rotation, UA pool, polite crawl delays). Three industry-grade gaps closed:
 

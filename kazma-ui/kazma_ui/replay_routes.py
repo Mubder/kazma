@@ -44,9 +44,25 @@ def create_replay_router(
     """
     router = APIRouter(tags=["replay"])
 
+    def _unavailable() -> JSONResponse:
+        return JSONResponse(
+            {
+                "threads": [],
+                "count": 0,
+                "error": "time_travel_unavailable",
+                "detail": (
+                    "Snapshot recorder not initialized — check server startup log "
+                    "for '[Replay] snapshot recorder creation failed'."
+                ),
+            },
+            status_code=503,
+        )
+
     @router.get("/api/replay/threads")
     async def list_threads() -> JSONResponse:
         """List distinct thread_ids that have at least one snapshot."""
+        if recorder is None:
+            return _unavailable()
         try:
             threads = recorder.list_distinct_threads()
             return JSONResponse({"threads": threads, "count": len(threads)})
@@ -57,6 +73,8 @@ def create_replay_router(
     @router.get("/api/replay/snapshots/{thread_id}")
     async def list_snapshots(thread_id: str) -> JSONResponse:
         """List snapshots for a thread, ordered by iteration."""
+        if recorder is None:
+            return _unavailable()
         try:
             snaps = recorder.list_snapshots(thread_id)
             items = [
@@ -77,6 +95,8 @@ def create_replay_router(
     @router.get("/api/replay/snapshots/{thread_id}/{iteration}")
     async def get_snapshot(thread_id: str, iteration: int) -> JSONResponse:
         """Get a single snapshot's detail (state + messages)."""
+        if recorder is None:
+            return _unavailable()
         try:
             state = engine.replay_from(thread_id, iteration)
             if state is None:
@@ -101,6 +121,8 @@ def create_replay_router(
 
         Body: ``{"thread_id": "...", "iteration": N}``
         """
+        if recorder is None:
+            return _unavailable()
         if graph is None:
             return JSONResponse({"error": "graph not available"}, status_code=503)
         thread_id = body.get("thread_id", "")
@@ -130,6 +152,8 @@ def create_replay_router(
         Body: ``{"thread_id": "...", "iteration": N}``
         Returns: ``{"new_thread_id": "...", "message_count": N}``
         """
+        if recorder is None:
+            return _unavailable()
         if graph is None:
             return JSONResponse({"error": "graph not available"}, status_code=503)
         import uuid
@@ -176,6 +200,8 @@ def create_replay_router(
 
         Body: ``{"thread_id": "...", "a": N, "b": M}``
         """
+        if recorder is None:
+            return _unavailable()
         thread_id = body.get("thread_id", "")
         a = body.get("a")
         b = body.get("b")
@@ -195,6 +221,8 @@ def create_replay_router(
     @router.delete("/api/replay/threads/{thread_id}")
     async def clear_snapshots(thread_id: str) -> JSONResponse:
         """Clear all snapshots for a thread."""
+        if recorder is None:
+            return _unavailable()
         try:
             count = recorder.clear_snapshots(thread_id)
             return JSONResponse({"ok": True, "cleared": count})

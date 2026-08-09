@@ -17,6 +17,7 @@
   var currentThread = '';
   var currentIteration = null;
   var pollTimer = null;
+  var unavailable = false;  // set when the replay API is missing (404/503)
 
   // ── Helpers ──
   function $(id) { return document.getElementById(id); }
@@ -48,6 +49,37 @@
       pollTimer = setInterval(this.loadThreads.bind(this), 10000);
     },
 
+    /** Stop polling + mark the panel as backend-unavailable (404/503). */
+    _markUnavailable: function (status) {
+      unavailable = true;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      var sel = $('replay-thread-select');
+      if (sel) {
+        sel.innerHTML = '';
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '⚠ Time travel unavailable (API ' + status + ')';
+        sel.appendChild(opt);
+      }
+      var listEl = $('replay-timeline-list');
+      if (listEl) {
+        listEl.innerHTML =
+          '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' +
+          'Time travel is unavailable on this server (replay API returned ' + status + '). ' +
+          'Check the server log for "[Replay] snapshot recorder creation failed" and restart the server. ' +
+          '<button class="btn btn-sm btn-primary" style="margin-top:12px" onclick="KazmaReplay.retry()">Retry</button>' +
+          '</div>';
+      }
+    },
+
+    /** Manual recovery after a server restart fixed the recorder. */
+    retry: function () {
+      unavailable = false;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      this.loadThreads();
+      pollTimer = setInterval(this.loadThreads.bind(this), 10000);
+    },
+
     switchTab: function (name) {
       document.querySelectorAll('#panel-timeline, #panel-diff, #panel-about').forEach(function (p) {
         p.style.display = 'none';
@@ -60,9 +92,17 @@
     },
 
     loadThreads: function () {
+      if (unavailable) return;
       fetch('/api/replay/threads', { credentials: 'same-origin' })
-        .then(function (r) { return r.ok ? r.json() : { threads: [], count: 0 }; })
+        .then(function (r) {
+          if (r.status === 404 || r.status === 503) {
+            KazmaReplay._markUnavailable(r.status);
+            return null;
+          }
+          return r.ok ? r.json() : { threads: [], count: 0 };
+        })
         .then(function (data) {
+          if (data === null) return;  // unavailable — already handled
           var sel = $('replay-thread-select');
           if (!sel) return;
           var prev = sel.value;
@@ -74,7 +114,7 @@
           });
           if (prev && (data.threads || []).indexOf(prev) !== -1) sel.value = prev;
         })
-        .catch(function () { /* silent — will retry on poll */ });
+        .catch(function () { /* network blip — retry on next poll */ });
     },
 
     loadTimeline: function (threadId) {

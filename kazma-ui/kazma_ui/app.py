@@ -1262,7 +1262,9 @@ class KazmaAppBuilder:
 
             # Time Travel — reuse the agent's snapshot recorder so the SSE
             # path captures snapshots too. Create lazily if the agent hasn't
-            # built its graph yet.
+            # built its graph yet. Failure is LOUD (warning, not debug): a
+            # silent None here previously left /api/replay/* unmounted while
+            # the UI polled it forever (the 404-spam symptom).
             _recorder = getattr(self.agent, "_snapshot_recorder", None)
             if _recorder is None:
                 try:
@@ -1270,7 +1272,7 @@ class KazmaAppBuilder:
                     _recorder = create_recorder(config=self.config.raw)
                     self.agent._snapshot_recorder = _recorder
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug("[App] snapshot recorder unavailable: %s", exc)
+                    logger.warning("[Replay] snapshot recorder creation failed: %s", exc, exc_info=True)
             self._snapshot_recorder = _recorder
 
             def _recompile_holder_graph() -> None:
@@ -1317,20 +1319,33 @@ class KazmaAppBuilder:
                 logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
 
             # ── Time Travel: mount replay API + page route ──────────
-            if self._snapshot_recorder is not None:
-                try:
-                    from kazma_core.time_travel import ReplayEngine
-                    from kazma_ui.replay_routes import create_replay_router
+            # ALWAYS mounted — even when the recorder failed to initialize.
+            # The router then serves a structured 503 (time_travel_unavailable)
+            # instead of a bare 404, so the UI can show a clear state and stop
+            # polling instead of spamming 404s every 10s forever.
+            try:
+                from kazma_core.time_travel import ReplayEngine
+                from kazma_ui.replay_routes import create_replay_router
 
-                    _replay_engine = ReplayEngine(self._snapshot_recorder)
-                    self.app.include_router(create_replay_router(
-                        recorder=self._snapshot_recorder,
-                        engine=_replay_engine,
-                        graph=recompiled,
-                    ))
+                _replay_engine = (
+                    ReplayEngine(self._snapshot_recorder)
+                    if self._snapshot_recorder is not None
+                    else None
+                )
+                self.app.include_router(create_replay_router(
+                    recorder=self._snapshot_recorder,
+                    engine=_replay_engine,
+                    graph=self._hitl_state.get("graph") or self._graph_holder.get("graph"),
+                ))
+                if self._snapshot_recorder is not None:
                     logger.info("[Replay] Time-travel API mounted at /api/replay/*")
-                except Exception as exc:
-                    logger.warning("[Replay] Failed to mount replay API: %s", exc)
+                else:
+                    logger.warning(
+                        "[Replay] Time-travel API mounted in UNAVAILABLE mode "
+                        "(recorder init failed) — /api/replay/* returns 503"
+                    )
+            except Exception as exc:
+                logger.warning("[Replay] Failed to mount replay API: %s", exc)
 
             # ── Research panel API ────────────────────────────────
             try:
