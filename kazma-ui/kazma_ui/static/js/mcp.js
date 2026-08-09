@@ -27,6 +27,16 @@ function notify(message, type) {
     }
 }
 
+/* Fallback dialog when the toast store is unavailable — OAuth errors MUST be
+   visible or the button looks dead. */
+function notifyOAuthError(message) {
+    if (typeof window !== 'undefined' && typeof window.kazmaAlert === 'function') {
+        window.kazmaAlert({ title: 'OAuth login failed', message: message, variant: 'btn-danger' });
+        return;
+    }
+    notify(message, 'error');
+}
+
 /* ── shlex-style command parser (JS port of Python's shlex.split) ────────── */
 function parseCommand(str) {
     // Handles: single quotes, double quotes (with \" escapes), backslash
@@ -491,13 +501,19 @@ function mcpApp() {
                     method: 'POST'
                 });
                 var result = await resp.json();
-                if (result.status === 'ok') {
+                if (result.status === 'ok' && result.authorization_url) {
+                    // Open the provider's login page in a NEW TAB so the flow
+                    // is visibly started even if the backend couldn't open a
+                    // browser itself (headless / remote server).
+                    window.open(result.authorization_url, '_blank', 'noopener');
+                    notify('Browser login opened. Return here after signing in, then press Start.', 'success');
+                } else if (result.status === 'ok') {
                     notify('Browser login opened. Return here after signing in, then press Start.', 'success');
                 } else {
-                    notify('OAuth login failed: ' + (result.error || 'unknown error'), 'error');
+                    notifyOAuthError(result.error || 'unknown error');
                 }
             } catch (e) {
-                notify('OAuth login failed: ' + e.message, 'error');
+                notifyOAuthError(e.message || String(e));
             } finally {
                 this.actionPending = '';
             }

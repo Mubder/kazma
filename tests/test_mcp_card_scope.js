@@ -19,6 +19,7 @@ const required = [
     '$parent.startServer',
     '$parent.stopServer',
     '$parent.testServer',
+    '$parent.oauthLogin',
 ];
 
 let failed = false;
