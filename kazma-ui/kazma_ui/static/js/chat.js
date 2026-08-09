@@ -1192,7 +1192,7 @@
     return arr.map(function(s) {
       var key = String(s || '').toLowerCase();
       var color = '#94a3b8';
-      if (key.indexOf('ppr') >= 0) color = '#a78bfa';
+      if (key.indexOf('ppr') >= 0) color = '#93c5fd';
       else if (key.indexOf('dense') >= 0) color = '#38bdf8';
       else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = '#34d399';
       else if (key.indexOf('session') >= 0) color = '#fbbf24';

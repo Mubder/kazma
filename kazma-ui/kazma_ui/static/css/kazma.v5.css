@@ -1,0 +1,500 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Kazma Design System v5 — "ABYSS"  (token layer + shell polish)
+   ───────────────────────────────────────────────────────────────────
+   Loaded AFTER kazma.css. Rollback = remove the one <link> in base.html.
+
+   Phase 1 (this file):
+     • Palette remap — every legacy var re-pointed at the Abyss blues.
+       All v4 components consume these vars, so the whole app re-skins
+       without touching any component rule.
+     • Shell polish — sidebar (badge logo, gradient active rail),
+       header, bottom-nav, and the single-owner mobile nav pattern
+       (bottom tab bar owns the menu; hamburger retired ≤768px).
+
+   Identity: royal blue #3b82f6 · sky #38bdf8 · azure→royal→sky gradient
+   Dark: deep blue-black #04070f · Light: ice blue #f0f4fa
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Dark palette (default) ───────────────────────────────────── */
+:root {
+  color-scheme: dark;
+
+  /* Backgrounds — deep blue-black */
+  --bg: #04070f;
+  --bg-2: #080d1a;
+  --bg-panel: #080d1a;
+  --bg-surface: #0d1526;
+  --bg-elevated: #16233c;
+  --bg-hover: rgba(59, 130, 246, 0.07);
+  --bg-active: rgba(59, 130, 246, 0.12);
+  --grid: rgba(59, 130, 246, 0.035);
+
+  /* Text — cool ice blue-grays */
+  --text-primary: #eef3fb;
+  --text-secondary: #9fb0c9;
+  --text-tertiary: #5d6f8a;
+  --text-muted: #4a5b78;
+  --text-inverse: #040815;
+
+  /* Accent — royal blue */
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-light: #93c5fd;
+  --accent-subtle: rgba(59, 130, 246, 0.12);
+  --accent-glow: rgba(59, 130, 246, 0.28);
+  --accent-rgb: 59, 130, 246;
+  --gradient-accent: linear-gradient(135deg, #60a5fa 0%, #3b82f6 55%, #38bdf8 100%);
+
+  /* Secondary — sky blue */
+  --secondary: #38bdf8;
+  --secondary-hover: #7dd3fc;
+  --secondary-light: #bae6fd;
+  --secondary-subtle: rgba(56, 189, 248, 0.12);
+  --secondary-glow: rgba(56, 189, 248, 0.20);
+
+  /* Brand gradient — azure → royal → sky */
+  --gradient-primary: linear-gradient(135deg, #60a5fa, #3b82f6, #38bdf8);
+  --gradient-header: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #38bdf8 100%);
+
+  /* Brand alias — agents.html references var(--brand) with an indigo
+     fallback; aliasing it to accent keeps every page in-family */
+  --brand: var(--accent);
+
+  /* Status — warning moves to yellow (amber family retired with cyan) */
+  --warning: #facc15;
+  --warning-subtle: rgba(250, 204, 21, 0.12);
+  --warning-bg: rgba(250, 204, 21, 0.12);
+  --info: #38bdf8;
+  --info-subtle: rgba(56, 189, 248, 0.12);
+}
+
+/* ── 2. Light palette — ice blue paper ───────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f0f4fa;
+  --bg-2: #e6edf7;
+  --bg-deep: #f0f4fa;
+  --bg-primary: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-elevated: #e6edf7;
+  --bg-hover: rgba(37, 99, 235, 0.06);
+  --bg-active: rgba(37, 99, 235, 0.10);
+  --grid: rgba(12, 21, 38, 0.04);
+  --tint: rgba(12, 21, 38, 0.025);
+  --tint-strong: rgba(12, 21, 38, 0.05);
+
+  --text-primary: #0c1526;
+  --text-secondary: #44546e;
+  --text-tertiary: #5d6f8a;
+  --text-muted: #8b9bb8;
+  --text-inverse: #ffffff;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #2563eb;
+  --accent-subtle: rgba(37, 99, 235, 0.10);
+  --accent-glow: rgba(37, 99, 235, 0.22);
+  --accent-rgb: 37, 99, 235;
+  --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+
+  --secondary: #0284c7;
+  --secondary-hover: #0369a1;
+  --secondary-light: #0284c7;
+  --secondary-subtle: rgba(2, 132, 199, 0.10);
+  --secondary-glow: rgba(2, 132, 199, 0.18);
+
+  --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
+  --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
+
+  --warning: #ca8a04;
+  --warning-subtle: rgba(202, 138, 4, 0.12);
+  --warning-bg: rgba(202, 138, 4, 0.12);
+  --info: #0284c7;
+  --info-subtle: rgba(2, 132, 199, 0.10);
+
+  --border-subtle: rgba(12, 21, 38, 0.07);
+  --border: rgba(12, 21, 38, 0.10);
+  --border-strong: rgba(12, 21, 38, 0.16);
+}
+
+/* System-preference auto-light — mirrors the block above (same values) */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f0f4fa;
+    --bg-2: #e6edf7;
+    --bg-deep: #f0f4fa;
+    --bg-primary: #ffffff;
+    --bg-panel: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-elevated: #e6edf7;
+    --bg-hover: rgba(37, 99, 235, 0.06);
+    --bg-active: rgba(37, 99, 235, 0.10);
+    --grid: rgba(12, 21, 38, 0.04);
+    --tint: rgba(12, 21, 38, 0.025);
+    --tint-strong: rgba(12, 21, 38, 0.05);
+    --text-primary: #0c1526;
+    --text-secondary: #44546e;
+    --text-tertiary: #5d6f8a;
+    --text-muted: #8b9bb8;
+    --text-inverse: #ffffff;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: #2563eb;
+    --accent-subtle: rgba(37, 99, 235, 0.10);
+    --accent-glow: rgba(37, 99, 235, 0.22);
+    --accent-rgb: 37, 99, 235;
+    --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+    --secondary: #0284c7;
+    --secondary-hover: #0369a1;
+    --secondary-light: #0284c7;
+    --secondary-subtle: rgba(2, 132, 199, 0.10);
+    --secondary-glow: rgba(2, 132, 199, 0.18);
+    --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
+    --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
+    --warning: #ca8a04;
+    --warning-subtle: rgba(202, 138, 4, 0.12);
+    --warning-bg: rgba(202, 138, 4, 0.12);
+    --info: #0284c7;
+    --info-subtle: rgba(2, 132, 199, 0.10);
+    --border-subtle: rgba(12, 21, 38, 0.07);
+    --border: rgba(12, 21, 38, 0.10);
+    --border-strong: rgba(12, 21, 38, 0.16);
+  }
+}
+
+/* ── 3. Shell — sidebar ──────────────────────────────────────────── */
+
+/* Brand badge — the logo's dark tile is INTENTIONAL (app-icon look):
+   inset padding lets the artwork breathe; accent ring + top inner
+   highlight make it a crafted badge on both themes. */
+.sidebar .logo-img {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  object-fit: cover;
+  background: #05070d;
+  padding: 3px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  box-shadow: 0 4px 14px -2px rgba(var(--accent-rgb), 0.45),
+              inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.sidebar .logo-img:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px -4px rgba(var(--accent-rgb), 0.60),
+              inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+[data-theme="light"] .sidebar .logo-img {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 4px 12px -3px rgba(37, 99, 235, 0.35),
+              inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Sidebar footer avatar — same intentional dark-tile badge, round */
+.sidebar .user-avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #05070d;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  flex-shrink: 0;
+}
+
+/* Active nav item — gradient rail indicator (azure → sky) */
+.nav-link.active {
+  background: var(--accent-subtle);
+  color: var(--accent-light);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22);
+}
+.nav-link.active::before {
+  background: linear-gradient(180deg, var(--accent), var(--secondary));
+}
+.nav-link:hover {
+  color: var(--text-primary);
+}
+
+/* Model selector — softer pill */
+.sidebar-model-dropdown {
+  border-radius: 10px;
+}
+.sidebar-model-dropdown:hover,
+.sidebar-model-dropdown:focus {
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+/* ── 4. Shell — header ───────────────────────────────────────────── */
+.page-header {
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+}
+.header-btn {
+  border-radius: 10px;
+  min-height: 34px;
+}
+.header-btn:hover {
+  background: var(--accent-subtle);
+  border-color: rgba(var(--accent-rgb), 0.40);
+  color: var(--accent-light);
+}
+.notification-dot {
+  background: var(--secondary);
+  box-shadow: 0 0 6px var(--secondary-glow);
+}
+
+/* ── 5. Shell — mobile navigation (single-owner pattern) ───────────
+   The bottom tab bar is the ONLY menu entry on phones: its "More" tab
+   opens the drawer. The topbar hamburger is retired ≤768px, and the
+   sidebar's collapse button doubles as the in-drawer close button
+   (template: it calls closeMobileNav() on small screens). */
+@media (max-width: 768px) {
+  .hamburger-btn { display: none !important; }
+
+  /* In-drawer close button (v4 hides .sidebar-toggle on mobile — bring
+     it back only while the drawer is open) */
+  .sidebar.mobile-open .sidebar-toggle { display: flex; }
+
+  /* Drawer presentation — slightly wider, deeper shadow */
+  .sidebar {
+    width: min(300px, 85vw);
+    box-shadow: 0 0 48px rgba(0, 0, 0, 0.55);
+  }
+
+  /* Bottom tab bar — theme-aware blur surface + glowing active tab */
+  .bottom-nav {
+    background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+    border-top-color: var(--border-subtle);
+  }
+  .bottom-nav a { transition: color var(--transition-fast); }
+  .bottom-nav a.active { color: var(--accent); }
+  .bottom-nav a.active svg {
+    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.5));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Phase 3 — DASHBOARD
+   Left-aligned metric cards with accent icon tiles + hover lift,
+   pill range selector, surfaced chart cards. Structure untouched —
+   all dashboard.js element IDs keep working.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Metric cards — preview "stat" pattern */
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: start;
+  padding: 18px;
+  transition: border-color var(--transition-fast),
+              box-shadow var(--transition-fast),
+              transform var(--transition-fast);
+}
+.metric-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(var(--accent-rgb), 0.32);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(var(--accent-rgb), 0.10);
+}
+/* Icon tile (v4 flattened these to bare icons — v5 restores the tile) */
+.metric-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.metric-icon svg,
+.metric-icon .ki svg {
+  width: 18px;
+  height: 18px;
+  opacity: 1;
+}
+.metric-value {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.metric-label {
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+/* Chart cards — real surface treatment */
+.chart-card {
+  background: var(--bg-panel);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.chart-title {
+  color: var(--text-tertiary);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+/* Range selector — segmented pill */
+.range-selector {
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  background: var(--bg-surface);
+  border-color: var(--border-subtle);
+}
+.range-btn {
+  border-radius: var(--radius-pill);
+  padding: 5px 14px;
+}
+.range-btn.active {
+  background: var(--gradient-accent);
+  color: var(--text-inverse);
+  box-shadow: 0 2px 8px -2px rgba(var(--accent-rgb), 0.5);
+}
+[data-theme="light"] .range-btn.active { color: #ffffff; }
+
+/* Progress bars — brand gradient fill */
+.progress-fill {
+  background: var(--gradient-accent);
+}
+
+/* HITL pending approvals — accent ring when action is needed */
+.hitl-panel.has-pending {
+  border-color: rgba(var(--accent-rgb), 0.40);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10), var(--shadow);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Phase 4 — CHAT
+   Composer glow, brand-gradient send/user bubbles with theme-correct
+   ink, active session pill, badge welcome logo, accent typing dots.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Session list — active conversation reads as a selected pill */
+.session-item {
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.session-item.active {
+  background: var(--accent-subtle);
+  border-color: rgba(var(--accent-rgb), 0.20);
+}
+
+/* Composer — deeper radius + real glow on focus */
+.input-wrapper {
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+}
+.input-wrapper:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.35),
+              0 8px 30px -8px rgba(var(--accent-rgb), 0.35);
+}
+
+/* Send button — theme-correct ink on the gradient */
+.send-btn {
+  color: var(--text-inverse);
+  border-radius: 12px;
+}
+[data-theme="light"] .send-btn { color: #ffffff; }
+
+/* Bubbles — gradient user bubble ink adapts to theme */
+.message-user .message-text { color: var(--text-inverse); }
+[data-theme="light"] .message-user .message-text { color: #ffffff; }
+.message-avatar.u { color: var(--text-inverse); }
+[data-theme="light"] .message-avatar.u { color: #ffffff; }
+
+/* Welcome screen — logo gets the intentional dark-tile badge */
+.welcome-logo {
+  border-radius: 16px;
+  background: #05070d;
+  padding: 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 8px 24px -6px rgba(var(--accent-rgb), 0.45),
+              inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* Hint chips — kill the last indigo remnant, accent hover */
+.hint-chip:hover {
+  background: var(--accent-subtle);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  color: var(--accent-light);
+}
+
+/* Typing indicator — accent dots */
+.thinking-indicator .dot {
+  background: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Phase 5 — SWARM / SETTINGS + PURPLE PURGE
+   v4 hardcoded indigo/violet literals (94,106,210 · 139,92,246 ·
+   a78bfa · 5e6ad2) remapped to the Abyss blue family. v5 loads last,
+   so these win without editing the v4 file.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* "Premium" badge — was violet, now sky */
+.badge-premium {
+  background: var(--secondary-subtle);
+  color: var(--secondary);
+}
+
+/* Memory explain panel (chat) — was violet-tinted */
+.agent-memory-explain {
+  background: color-mix(in srgb, var(--accent-light) 7%, transparent);
+}
+
+/* v4 gave active sessions a 3px accent bar — v5 uses a uniform pill ring */
+.session-item.active {
+  border-left-width: 1px;
+}
+[dir="rtl"] .session-item.active {
+  border-left-width: 3px;   /* RTL bar lives on the right in v4 markup */
+  border-left-color: rgba(var(--accent-rgb), 0.20);
+}
+
+/* Search highlight <mark> in session titles — was indigo */
+.session-info .session-title mark {
+  background: rgba(var(--accent-rgb), 0.25);
+}
+
+/* Message reactions — was indigo */
+.reaction-btn.active {
+  background: var(--accent-subtle);
+  border-color: rgba(var(--accent-rgb), 0.30);
+}
+
+/* Info toast — was indigo */
+.toast-info {
+  background: var(--accent-subtle);
+  color: var(--accent-light);
+  border-color: rgba(var(--accent-rgb), 0.30);
+}
+
+/* Global search result kind chip — was indigo */
+.search-result-kind {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+/* Settings toggles — gradient "on" state (preview pattern) */
+.toggle input:checked + .toggle-slider {
+  background: var(--gradient-accent);
+  border-color: transparent;
+}
+
+/* Settings group cards — surfaced */
+.settings-group {
+  background: var(--bg-panel);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}

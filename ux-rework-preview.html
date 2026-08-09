@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kazma UX Rework — Design Preview (DS v5 "Aurora")</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   KAZMA DESIGN SYSTEM v5 — "AURORA"  (proposal, preview only)
+   ── Dark-first, layered depth, cyan→violet gradient identity
+   ── Container-query responsive (this file uses a resizable stage so
+      every breakpoint can be previewed without resizing the browser)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Design tokens ─────────────────────────────────────────────── */
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  /* Dark theme (default) */
+  --bg-0: #05080d;            /* app canvas */
+  --bg-1: #0a0f16;            /* sidebar / header */
+  --bg-2: #0e141d;            /* cards */
+  --bg-3: #141c28;            /* elevated / hover */
+  --glass: rgba(255,255,255,0.03);
+  --glass-strong: rgba(255,255,255,0.06);
+
+  --text-1: #eef3f8;
+  --text-2: #a8b3c2;
+  --text-3: #6b7686;
+
+  --accent: #22d3ee;
+  --accent-soft: rgba(34,211,238,0.12);
+  --accent-2: #8b5cf6;        /* NEW: violet — AI / swarm identity */
+  --accent-2-soft: rgba(139,92,246,0.14);
+  --grad: linear-gradient(135deg, #22d3ee 0%, #6366f1 60%, #8b5cf6 100%);
+  --grad-soft: linear-gradient(135deg, rgba(34,211,238,0.14), rgba(139,92,246,0.14));
+
+  --ok: #34d399;  --ok-soft: rgba(52,211,153,0.12);
+  --warn: #fbbf24; --warn-soft: rgba(251,191,36,0.12);
+  --err: #f87171;  --err-soft: rgba(248,113,113,0.12);
+
+  --line: rgba(255,255,255,0.07);
+  --line-strong: rgba(255,255,255,0.13);
+
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --r-pill: 999px;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.35);
+  --shadow-2: 0 6px 20px -6px rgba(0,0,0,.5);
+  --shadow-3: 0 18px 50px -12px rgba(0,0,0,.65);
+  --glow: 0 0 0 1px rgba(34,211,238,.25), 0 8px 30px -8px rgba(34,211,238,.35);
+
+  --sidebar-w: 264px;
+  --rail-w: 76px;
+  --header-h: 60px;
+  --bottomnav-h: 64px;
+
+  --fs-xs: 11.5px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px;
+  --fs-xl: 20px; --fs-2xl: 26px; --fs-3xl: 32px;
+}
+
+[data-theme="light"] {
+  --bg-0: #eef1f6;
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #f1f4f9;
+  --glass: rgba(15,23,42,0.03);
+  --glass-strong: rgba(15,23,42,0.06);
+  --text-1: #0f172a;
+  --text-2: #475569;
+  --text-3: #94a3b8;
+  --accent: #0891b2;
+  --accent-soft: rgba(8,145,178,0.10);
+  --accent-2: #7c3aed;
+  --accent-2-soft: rgba(124,58,237,0.10);
+  --line: rgba(15,23,42,0.08);
+  --line-strong: rgba(15,23,42,0.16);
+  --shadow-1: 0 1px 2px rgba(15,23,42,.06);
+  --shadow-2: 0 6px 20px -8px rgba(15,23,42,.15);
+  --shadow-3: 0 18px 50px -16px rgba(15,23,42,.25);
+  --glow: 0 0 0 1px rgba(8,145,178,.25), 0 8px 24px -8px rgba(8,145,178,.25);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  font-family: var(--font-sans);
+  background: #020409;
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+}
+button { font-family: inherit; cursor: pointer; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--glass-strong); border-radius: 8px; }
+
+/* ══ PREVIEW CHROME (not part of the design — the tooling bar) ══ */
+.preview-bar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 18px;
+  background: #0b0e14; color: #cbd5e1;
+  border-bottom: 1px solid #1e2530;
+  font-size: 13px; z-index: 50;
+}
+.preview-bar .brand { font-weight: 700; letter-spacing: .02em; display:flex; align-items:center; gap:8px; }
+.preview-bar .brand .dot { width:9px; height:9px; border-radius:50%; background: var(--grad); box-shadow: 0 0 10px rgba(34,211,238,.6); }
+.pb-group { display: flex; gap: 6px; align-items: center; background: #121722; border: 1px solid #232b38; border-radius: var(--r-pill); padding: 4px; }
+.pb-group > span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; padding: 0 8px 0 10px; }
+.pb-btn {
+  border: none; background: transparent; color: #94a3b8;
+  font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: var(--r-pill);
+  transition: all .15s ease; display:flex; align-items:center; gap:6px;
+}
+.pb-btn:hover { color: #e2e8f0; }
+.pb-btn.on { background: var(--grad); color: #04070c; }
+.pb-sep { width:1px; height:22px; background:#232b38; }
+.stage-wrap { flex: 1; overflow: auto; padding: 28px; display: flex; justify-content: center; background:
+  radial-gradient(1200px 500px at 50% -10%, rgba(34,211,238,.06), transparent),
+  radial-gradient(900px 500px at 90% 110%, rgba(139,92,246,.06), transparent), #020409; }
+
+/* The resizable device stage — container queries respond to THIS width */
+.stage {
+  width: 1380px; max-width: 100%;
+  height: calc(100vh - 130px); min-height: 560px;
+  resize: horizontal; overflow: hidden;
+  container-type: inline-size; container-name: app;
+  border-radius: 18px; border: 1px solid #1e2530;
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,.8);
+  background: var(--bg-0);
+  position: relative;
+}
+.stage-grip { position:absolute; right:2px; top:50%; transform:translateY(-50%); color:var(--text-3); font-size:10px; writing-mode: vertical-rl; letter-spacing:.2em; pointer-events:none; opacity:.5; }
+
+/* ══ APP SHELL ══ */
+.app { display: flex; height: 100%; background: var(--bg-0); color: var(--text-1); font-size: var(--fs-md); }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w); flex-shrink: 0;
+  background: var(--bg-1); border-inline-end: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  transition: width .25s cubic-bezier(.4,0,.2,1), transform .25s cubic-bezier(.4,0,.2,1);
+  z-index: 20;
+}
+.side-head { display:flex; align-items:center; gap:10px; padding: 16px 18px; }
+.logo-mark {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink:0;
+  background: var(--grad); display:grid; place-items:center;
+  font-weight: 800; color: #04070c; font-size: 15px;
+  box-shadow: 0 4px 14px -2px rgba(34,211,238,.45);
+}
+.logo-word { font-weight: 800; font-size: 17px; letter-spacing: -0.01em; white-space: nowrap; }
+.logo-word em { font-style: normal; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.side-nav { flex: 1; overflow-y: auto; padding: 6px 12px 12px; display:flex; flex-direction:column; gap:2px; }
+.nav-sec { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); padding: 14px 10px 6px; white-space:nowrap; }
+.nav-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 8.5px 10px; border-radius: 10px;
+  color: var(--text-2); text-decoration: none; font-weight: 500; font-size: var(--fs-sm);
+  transition: all .14s ease; position: relative; border: 1px solid transparent; white-space: nowrap;
+}
+.nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+.nav-item:hover { background: var(--glass-strong); color: var(--text-1); }
+.nav-item.active {
+  background: var(--accent-soft); color: var(--accent); border-color: rgba(34,211,238,.18);
+}
+.nav-item.active::before {
+  content:''; position:absolute; inset-inline-start:-12px; top:8px; bottom:8px; width:3px;
+  border-radius: 3px; background: var(--grad);
+}
+.nav-kbd { margin-inline-start: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-3); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+.side-foot { padding: 12px; border-top: 1px solid var(--line); display:flex; flex-direction:column; gap:10px; }
+.model-pill {
+  display:flex; align-items:center; gap:8px; padding: 8px 10px; border-radius: 10px;
+  background: var(--glass); border: 1px solid var(--line); font-size: var(--fs-xs); color: var(--text-2); white-space:nowrap; overflow:hidden;
+}
+.model-pill .pulse { width:7px; height:7px; border-radius:50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: pulse 2s infinite; flex-shrink:0; }
+@keyframes pulse { 50% { opacity: .4; } }
+.user-chip { display:flex; align-items:center; gap:10px; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--grad); display:grid; place-items:center; font-weight:700; color:#04070c; font-size:12px; flex-shrink:0; }
+.user-meta { line-height: 1.25; white-space:nowrap; }
+.user-meta b { font-size: var(--fs-sm); display:block; }
+.user-meta span { font-size: var(--fs-xs); color: var(--text-3); }
+
+/* ── Main column ── */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.topbar {
+  height: var(--header-h); flex-shrink: 0;
+  display: flex; align-items: center; gap: 14px; padding: 0 22px;
+  background: color-mix(in srgb, var(--bg-1) 82%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 10;
+}
+.hamburger { display:none; border:1px solid var(--line); background:var(--glass); color:var(--text-2); width:36px; height:36px; border-radius:10px; align-items:center; justify-content:center; }
+.crumbs { font-size: var(--fs-sm); color: var(--text-3); display:flex; gap:8px; align-items:center; white-space:nowrap; }
+.crumbs b { color: var(--text-1); font-weight: 600; }
+.cmdk {
+  margin-inline-start: auto; display:flex; align-items:center; gap:8px;
+  border: 1px solid var(--line); background: var(--glass); color: var(--text-3);
+  border-radius: var(--r-pill); padding: 7px 14px; font-size: var(--fs-sm); min-width: 220px;
+  transition: all .15s ease;
+}
+.cmdk:hover { border-color: var(--line-strong); color: var(--text-2); }
+.cmdk kbd { margin-inline-start:auto; font-family: var(--font-mono); font-size:10px; border:1px solid var(--line); border-radius:5px; padding:1px 6px; }
+.status-pill {
+  display:flex; align-items:center; gap:7px; font-size: var(--fs-xs); font-weight:600;
+  color: var(--ok); background: var(--ok-soft); border: 1px solid rgba(52,211,153,.25);
+  padding: 6px 12px; border-radius: var(--r-pill); white-space:nowrap;
+}
+.status-pill .pulse { width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); animation:pulse 2s infinite; }
+.icon-btn { width:36px; height:36px; border-radius:10px; border:1px solid var(--line); background:var(--glass); color:var(--text-2); display:grid; place-items:center; transition:all .14s; position:relative; }
+.icon-btn:hover { background:var(--glass-strong); color:var(--text-1); }
+.icon-btn .badge { position:absolute; top:-4px; inset-inline-end:-4px; min-width:16px; height:16px; border-radius:8px; background:var(--accent-2); color:#fff; font-size:9.5px; font-weight:700; display:grid; place-items:center; padding:0 4px; }
+
+.content { flex: 1; overflow-y: auto; padding: 26px 26px 40px; }
+
+/* ── Shared components ── */
+.hero { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom: 22px; }
+.hero h1 { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; }
+.hero h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip:text; color: transparent; }
+.hero p { color: var(--text-2); font-size: var(--fs-sm); margin-top: 4px; }
+.btn {
+  display:inline-flex; align-items:center; gap:8px; border-radius: 10px; font-weight:600; font-size: var(--fs-sm);
+  padding: 9px 16px; border: 1px solid var(--line); background: var(--glass); color: var(--text-1); transition: all .15s ease;
+}
+.btn:hover { background: var(--glass-strong); transform: translateY(-1px); }
+.btn.primary { background: var(--grad); border: none; color: #04070c; box-shadow: 0 6px 18px -6px rgba(34,211,238,.5); }
+.btn.primary:hover { filter: brightness(1.08); }
+
+.card {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1); transition: all .18s ease;
+}
+.card.hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--line-strong); }
+.card-pad { padding: 18px; }
+.card-head { display:flex; align-items:center; justify-content:space-between; padding: 16px 18px 0; }
+.card-title { font-size: var(--fs-sm); font-weight: 700; letter-spacing:.01em; }
+.card-link { font-size: var(--fs-xs); color: var(--accent); text-decoration:none; font-weight:600; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+.stat { padding: 16px 18px; position: relative; overflow: hidden; }
+.stat .ico { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; margin-bottom:12px; }
+.stat .val { font-size: var(--fs-2xl); font-weight: 800; letter-spacing:-0.02em; font-variant-numeric: tabular-nums; }
+.stat .lbl { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; font-weight: 500; }
+.stat .delta { position:absolute; top:14px; inset-inline-end:14px; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius: var(--r-pill); }
+.delta.up { color: var(--ok); background: var(--ok-soft); }
+.delta.warn { color: var(--warn); background: var(--warn-soft); }
+
+.two-col { display:grid; grid-template-columns: 1.7fr 1fr; gap: 14px; }
+.list-row { display:flex; align-items:center; gap:12px; padding: 11px 18px; border-top: 1px solid var(--line); transition: background .12s; }
+.list-row:hover { background: var(--glass); }
+.list-row .ava { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; font-size:12px; font-weight:700; flex-shrink:0; }
+.list-row .meta { min-width:0; flex:1; }
+.list-row .meta b { display:block; font-size: var(--fs-sm); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.list-row .meta span { font-size: var(--fs-xs); color: var(--text-3); }
+.chip { font-size:10.5px; font-weight:700; padding:3px 9px; border-radius: var(--r-pill); white-space:nowrap; }
+.chip.ok { color: var(--ok); background: var(--ok-soft); }
+.chip.warn { color: var(--warn); background: var(--warn-soft); }
+.chip.violet { color: var(--accent-2); background: var(--accent-2-soft); }
+.chip.cyan { color: var(--accent); background: var(--accent-soft); }
+
+.bars { display:flex; align-items:flex-end; gap:8px; height: 120px; padding: 8px 18px 16px; }
+.bars .bar { flex:1; border-radius: 6px 6px 3px 3px; background: linear-gradient(180deg, rgba(34,211,238,.85), rgba(139,92,246,.5)); min-height:6px; opacity:.85; transition: all .2s; position:relative; }
+.bars .bar:hover { opacity:1; box-shadow: var(--glow); }
+.bars .bar.dim { background: var(--glass-strong); }
+
+.qa-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; padding: 14px 18px 18px; }
+.qa {
+  display:flex; flex-direction:column; gap:8px; padding:14px; border-radius: var(--r-md);
+  background: var(--glass); border:1px solid var(--line); transition: all .15s; text-align:start;
+}
+.qa:hover { background: var(--grad-soft); border-color: rgba(34,211,238,.3); transform: translateY(-1px); }
+.qa b { font-size: var(--fs-sm); color: var(--text-1); }
+.qa span { font-size: var(--fs-xs); color: var(--text-2); }
+.qa .ico { width:30px; height:30px; border-radius:8px; background: var(--accent-soft); color: var(--accent); display:grid; place-items:center; }
+
+.plat-row { display:flex; align-items:center; gap:10px; padding: 10px 18px; border-top: 1px solid var(--line); font-size: var(--fs-sm); }
+.plat-row .dot { width:8px; height:8px; border-radius:50%; }
+.plat-row .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.plat-row .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.plat-row .lat { margin-inline-start:auto; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3); }
+
+/* ── Chat page ── */
+.chat-layout { display:flex; height:100%; }
+.thread-rail { width: 280px; flex-shrink:0; border-inline-end: 1px solid var(--line); background: var(--bg-1); display:flex; flex-direction:column; }
+.rail-search { margin: 14px; display:flex; align-items:center; gap:8px; background: var(--glass); border:1px solid var(--line); border-radius:10px; padding: 8px 12px; color: var(--text-3); font-size: var(--fs-sm); }
+.thread-list { flex:1; overflow-y:auto; padding: 0 8px 12px; display:flex; flex-direction:column; gap:2px; }
+.thread-item { padding: 10px 12px; border-radius: 10px; cursor:pointer; transition: background .12s; border: 1px solid transparent; }
+.thread-item:hover { background: var(--glass); }
+.thread-item.active { background: var(--accent-soft); border-color: rgba(34,211,238,.18); }
+.thread-item b { font-size: var(--fs-sm); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.thread-item span { font-size: var(--fs-xs); color: var(--text-3); }
+.chat-main { flex:1; display:flex; flex-direction:column; min-width:0; }
+.messages { flex:1; overflow-y:auto; padding: 24px; display:flex; flex-direction:column; gap:18px; }
+.msg { display:flex; gap:12px; max-width: 780px; }
+.msg .ava { width:32px; height:32px; border-radius:10px; flex-shrink:0; display:grid; place-items:center; font-weight:700; font-size:12px; }
+.msg.user { align-self: flex-end; flex-direction: row-reverse; }
+.msg.user .ava { background: var(--glass-strong); color: var(--text-1); }
+.msg.ai .ava { background: var(--grad); color:#04070c; }
+.bubble { padding: 12px 16px; border-radius: var(--r-lg); font-size: var(--fs-md); line-height: 1.6; }
+.msg.ai .bubble { background: var(--bg-2); border: 1px solid var(--line); border-start-start-radius: 6px; }
+.msg.user .bubble { background: var(--accent-soft); border: 1px solid rgba(34,211,238,.2); border-start-end-radius: 6px; }
+.bubble .tools { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
+.tool-chip { display:inline-flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--accent-2); background: var(--accent-2-soft); border-radius: var(--r-pill); padding: 4px 10px; }
+.tool-chip.done { color: var(--ok); background: var(--ok-soft); }
+.typing { display:inline-flex; gap:4px; padding: 4px 2px; }
+.typing i { width:6px; height:6px; border-radius:50%; background: var(--text-3); animation: blink 1.2s infinite; }
+.typing i:nth-child(2){ animation-delay:.2s } .typing i:nth-child(3){ animation-delay:.4s }
+@keyframes blink { 30% { opacity:.25; transform: translateY(-2px);} }
+.composer-wrap { padding: 14px 24px 20px; }
+.composer {
+  background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-xl);
+  padding: 12px 14px; box-shadow: var(--shadow-2); transition: box-shadow .2s, border-color .2s;
+}
+.composer:focus-within { border-color: rgba(34,211,238,.5); box-shadow: var(--glow); }
+.composer textarea { width:100%; background:transparent; border:none; outline:none; resize:none; color: var(--text-1); font-family: inherit; font-size: var(--fs-md); min-height: 24px; }
+.composer-bar { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.cbtn { width:32px; height:32px; border-radius:9px; border:none; background:transparent; color: var(--text-3); display:grid; place-items:center; transition:all .14s; }
+.cbtn:hover { background: var(--glass-strong); color: var(--text-1); }
+.model-chip { font-size: var(--fs-xs); font-weight:600; color: var(--text-2); border:1px solid var(--line); background: var(--glass); border-radius: var(--r-pill); padding:5px 11px; }
+.send-btn { margin-inline-start:auto; width:36px; height:36px; border-radius:11px; border:none; background: var(--grad); color:#04070c; display:grid; place-items:center; box-shadow: 0 4px 14px -2px rgba(34,211,238,.5); transition: all .15s; }
+.send-btn:hover { transform: translateY(-1px) scale(1.04); }
+
+/* ── Swarm page ── */
+.worker-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
+.worker { padding: 16px 18px; }
+.worker .wtop { display:flex; align-items:center; gap:10px; margin-bottom: 10px; }
+.worker .wico { width:36px; height:36px; border-radius:10px; display:grid; place-items:center; background: var(--accent-2-soft); color: var(--accent-2); }
+.worker b { font-size: var(--fs-md); }
+.worker .wrole { font-size: var(--fs-xs); color: var(--text-3); }
+.worker .wstats { display:flex; gap:14px; font-size: var(--fs-xs); color: var(--text-2); margin-top:12px; }
+.worker .wstats b { font-family: var(--font-mono); color: var(--text-1); }
+.task-row { display:flex; align-items:center; gap:12px; padding: 12px 18px; border-top: 1px solid var(--line); font-size: var(--fs-sm); }
+.task-row .tid { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3); width: 74px; flex-shrink:0; }
+.progress { flex:1; max-width: 220px; height:6px; border-radius:3px; background: var(--glass-strong); overflow:hidden; }
+.progress i { display:block; height:100%; border-radius:3px; background: var(--grad); }
+
+/* ── Settings page ── */
+.settings-layout { display:grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+.settings-nav { position: sticky; top: 0; display:flex; flex-direction:column; gap:2px; }
+.settings-nav a { padding: 9px 12px; border-radius: 10px; font-size: var(--fs-sm); font-weight:500; color: var(--text-2); text-decoration:none; transition: all .13s; }
+.settings-nav a:hover { background: var(--glass-strong); color: var(--text-1); }
+.settings-nav a.active { background: var(--accent-soft); color: var(--accent); }
+.set-card { padding: 4px 0; margin-bottom: 16px; }
+.set-row { display:flex; align-items:center; gap:16px; padding: 15px 20px; border-top: 1px solid var(--line); }
+.set-row:first-of-type { border-top: none; }
+.set-row .meta { flex:1; min-width:0; }
+.set-row .meta b { font-size: var(--fs-sm); display:block; }
+.set-row .meta span { font-size: var(--fs-xs); color: var(--text-3); }
+.toggle { width:42px; height:24px; border-radius: var(--r-pill); background: var(--glass-strong); border:1px solid var(--line); position:relative; transition: all .2s; flex-shrink:0; }
+.toggle::after { content:''; position:absolute; top:2px; inset-inline-start:2px; width:18px; height:18px; border-radius:50%; background: var(--text-3); transition: all .2s; }
+.toggle.on { background: var(--grad); border-color: transparent; }
+.toggle.on::after { inset-inline-start: 20px; background: #04070c; }
+.select-mock { border:1px solid var(--line); background: var(--bg-3); border-radius:9px; padding:7px 12px; font-size: var(--fs-sm); color: var(--text-1); display:flex; gap:18px; align-items:center; }
+
+/* ── Plan page ── */
+.plan-doc { max-width: 860px; }
+.plan-doc h2 { font-size: var(--fs-xl); margin: 26px 0 10px; letter-spacing:-0.01em; }
+.plan-doc h2 .num { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:8px; background: var(--grad); color:#04070c; font-size:14px; margin-inline-end:10px; vertical-align: 3px; }
+.plan-doc p, .plan-doc li { color: var(--text-2); font-size: var(--fs-md); line-height: 1.7; }
+.plan-doc ul { padding-inline-start: 22px; margin: 8px 0; }
+.plan-doc li::marker { color: var(--accent); }
+.token-table { width:100%; border-collapse: collapse; margin: 12px 0; font-size: var(--fs-sm); }
+.token-table th { text-align:start; color: var(--text-3); font-size: var(--fs-xs); text-transform:uppercase; letter-spacing:.06em; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.token-table td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); }
+.token-table td:first-child { color: var(--accent); }
+.swatch { display:inline-block; width:14px; height:14px; border-radius:4px; vertical-align:-2px; margin-inline-end:8px; border: 1px solid var(--line); }
+
+/* ── Bottom nav (mobile) ── */
+.bottom-nav {
+  display: none; height: var(--bottomnav-h); flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent); backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line);
+  align-items: stretch; z-index: 15;
+}
+.bottom-nav a { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color: var(--text-3); text-decoration:none; font-size: 10px; font-weight:600; }
+.bottom-nav a svg { width:20px; height:20px; }
+.bottom-nav a.active { color: var(--accent); }
+
+/* ── Drawer scrim ── */
+.scrim { display:none; position:absolute; inset:0; background: rgba(2,4,9,.6); backdrop-filter: blur(2px); z-index: 18; }
+
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE — CONTAINER QUERIES (respond to the stage width)
+   BP1 ≤1100px : sidebar → icon rail
+   BP2 ≤768px  : sidebar → off-canvas drawer + bottom nav, single column
+   BP3 ≤520px  : compact stats, tighter padding
+   ════════════════════════════════════════════════════════════════ */
+@container app (max-width: 1100px) {
+  .sidebar { width: var(--rail-w); }
+  .sidebar .logo-word, .sidebar .nav-sec, .sidebar .nav-label, .sidebar .nav-kbd,
+  .sidebar .model-pill, .sidebar .user-meta { display: none; }
+  .sidebar .nav-item { justify-content: center; padding: 10px; }
+  .sidebar .side-head { justify-content: center; padding: 14px 8px; }
+  .sidebar .user-chip { justify-content: center; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
+  .worker-grid { grid-template-columns: repeat(2, 1fr); }
+  .thread-rail { width: 230px; }
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-nav { flex-direction: row; overflow-x: auto; position: static; padding-bottom: 4px; }
+  .settings-nav a { white-space: nowrap; }
+}
+
+@container app (max-width: 768px) {
+  .sidebar { position: absolute; inset-inline-start: 0; top: 0; bottom: 0; width: 270px; transform: translateX(-102%); box-shadow: var(--shadow-3); }
+  [dir="rtl"] .sidebar { transform: translateX(102%); }
+  .app.drawer-open .sidebar { transform: translateX(0); }
+  .app.drawer-open .scrim { display: block; }
+  .sidebar .logo-word, .sidebar .nav-sec, .sidebar .nav-label,
+  .sidebar .model-pill, .sidebar .user-meta { display: block; }
+  .sidebar .nav-item { justify-content: flex-start; padding: 8.5px 10px; }
+  .hamburger { display: flex; }
+  .bottom-nav { display: flex; }
+  .content { padding: 18px 16px 28px; }
+  .cmdk { min-width: 0; }
+  .cmdk .ph, .cmdk kbd { display: none; }
+  .status-pill span { display: none; }
+  .hero h1 { font-size: var(--fs-xl); }
+  .thread-rail { display: none; }
+  .crumbs .root { display:none; }
+}
+
+@container app (max-width: 520px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat { padding: 13px 14px; }
+  .stat .val { font-size: var(--fs-xl); }
+  .worker-grid { grid-template-columns: 1fr; }
+  .qa-grid { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: stretch; }
+  .messages { padding: 16px 14px; }
+  .composer-wrap { padding: 10px 14px 14px; }
+  .task-row .progress { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ════ PREVIEW TOOLING BAR (not part of the product design) ════ -->
+<div class="preview-bar">
+  <div class="brand"><span class="dot"></span> Kazma UX Preview · DS v5 “Aurora”</div>
+  <div class="pb-group"><span>Device</span>
+    <button class="pb-btn on" data-w="1380">Desktop 1380</button>
+    <button class="pb-btn" data-w="1024">Laptop 1024</button>
+    <button class="pb-btn" data-w="820">Tablet 820</button>
+    <button class="pb-btn" data-w="390">Phone 390</button>
+  </div>
+  <div class="pb-group"><span>Page</span>
+    <button class="pb-btn on" data-page="dashboard">Dashboard</button>
+    <button class="pb-btn" data-page="chat">Chat</button>
+    <button class="pb-btn" data-page="swarm">Swarm</button>
+    <button class="pb-btn" data-page="settings">Settings</button>
+    <button class="pb-btn" data-page="plan">Rework Plan</button>
+  </div>
+  <div class="pb-group"><span>Theme</span>
+    <button class="pb-btn on" id="th-dark">Dark</button>
+    <button class="pb-btn" id="th-light">Light</button>
+  </div>
+  <div class="pb-group"><span>Dir</span>
+    <button class="pb-btn on" id="dir-ltr">LTR</button>
+    <button class="pb-btn" id="dir-rtl">RTL ع</button>
+  </div>
+  <span style="color:#64748b;font-size:12px">↔ drag the stage's right edge to free-resize</span>
+</div>
+
+<div class="stage-wrap">
+  <div class="stage" id="stage">
+    <span class="stage-grip">DRAG ⟷</span>
+
+    <div class="app" id="app">
+      <div class="scrim" onclick="toggleDrawer(false)"></div>
+
+      <!-- ══ SIDEBAR ══ -->
+      <aside class="sidebar">
+        <div class="side-head">
+          <div class="logo-mark">K</div>
+          <div class="logo-word">Kaz<em>ma</em></div>
+        </div>
+        <nav class="side-nav">
+          <div class="nav-sec">Primary</div>
+          <a class="nav-item active" data-nav="dashboard" href="#" onclick="goPage('dashboard');return false;">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M3 12l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>
+            <span class="nav-label">Dashboard</span><span class="nav-kbd">⌘1</span></a>
+          <a class="nav-item" data-nav="chat" href="#" onclick="goPage('chat');return false;">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            <span class="nav-label">Chat</span><span class="nav-kbd">⌘2</span></a>
+          <a class="nav-item" data-nav="swarm" href="#" onclick="goPage('swarm');return false;">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6 8l6 8 6-8M8 6h8"/></svg>
+            <span class="nav-label">Swarm</span><span class="nav-kbd">⌘3</span></a>
+          <div class="nav-sec">Workspace</div>
+          <a class="nav-item" href="#" onclick="return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="nav-label">Workspace</span></a>
+          <a class="nav-item" href="#" onclick="return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span class="nav-label">IDE</span></a>
+          <a class="nav-item" href="#" onclick="return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg><span class="nav-label">Agents</span></a>
+          <a class="nav-item" href="#" onclick="return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M12 2a7 7 0 00-7 7c0 4 7 13 7 13s7-9 7-13a7 7 0 00-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><span class="nav-label">Memory</span></a>
+          <div class="nav-sec">System</div>
+          <a class="nav-item" data-nav="settings" href="#" onclick="goPage('settings');return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 1v3m0 16v3M4.2 4.2l2.1 2.1m11.4 11.4l2.1 2.1M1 12h3m16 0h3M4.2 19.8l2.1-2.1m11.4-11.4l2.1-2.1"/></svg><span class="nav-label">Settings</span><span class="nav-kbd">⌘,</span></a>
+          <a class="nav-item" data-nav="plan" href="#" onclick="goPage('plan');return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-4 10.5c.8.7 1 1.5 1 2.5h6c0-1 .2-1.8 1-2.5A6 6 0 0012 3z"/></svg><span class="nav-label">Rework Plan</span></a>
+        </nav>
+        <div class="side-foot">
+          <div class="model-pill"><span class="pulse"></span> gemini-2.5-pro · Google</div>
+          <div class="user-chip">
+            <div class="avatar">MB</div>
+            <div class="user-meta"><b>Mubder</b><span>Admin · local</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ══ MAIN ══ -->
+      <div class="main">
+        <header class="topbar">
+          <button class="hamburger" onclick="toggleDrawer()" aria-label="Menu">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+          <div class="crumbs"><span class="root">Kazma</span><span class="root">/</span><b id="crumb-page">Dashboard</b></div>
+          <button class="cmdk">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <span class="ph">Search or command…</span><kbd>⌘K</kbd>
+          </button>
+          <div class="status-pill"><span class="pulse"></span><span>All systems nominal</span></div>
+          <button class="icon-btn" title="Notifications"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0"/></svg><span class="badge">3</span></button>
+        </header>
+
+        <!-- ════════ PAGE: DASHBOARD ════════ -->
+        <div class="content page" id="page-dashboard">
+          <div class="hero">
+            <div>
+              <h1>Good evening, <span class="grad">Mubder</span></h1>
+              <p>Your swarm handled 23 tasks today across 4 platforms. Here's the pulse.</p>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn">＋ New task</button>
+              <button class="btn primary" onclick="goPage('chat')">Open chat →</button>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="card hover stat">
+              <span class="delta up">▲ 12%</span>
+              <div class="ico" style="background:var(--accent-soft);color:var(--accent)"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg></div>
+              <div class="val">7</div><div class="lbl">Active workers</div>
+            </div>
+            <div class="card hover stat">
+              <span class="delta up">▲ 8%</span>
+              <div class="ico" style="background:var(--accent-2-soft);color:var(--accent-2)"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg></div>
+              <div class="val">23</div><div class="lbl">Tasks completed today</div>
+            </div>
+            <div class="card hover stat">
+              <span class="delta up">▼ 0.3s</span>
+              <div class="ico" style="background:var(--ok-soft);color:var(--ok)"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+              <div class="val">1.2s</div><div class="lbl">Avg first token</div>
+            </div>
+            <div class="card hover stat">
+              <span class="delta warn">24h</span>
+              <div class="ico" style="background:var(--warn-soft);color:var(--warn)"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 2a7 7 0 00-7 7c0 4 7 13 7 13s7-9 7-13a7 7 0 00-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg></div>
+              <div class="val">1,847</div><div class="lbl">Memory items (V2)</div>
+            </div>
+          </div>
+
+          <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+              <div class="card">
+                <div class="card-head"><span class="card-title">Swarm throughput · last 14 days</span><a class="card-link" href="#">Full metrics →</a></div>
+                <div class="bars">
+                  <div class="bar dim" style="height:30%"></div><div class="bar dim" style="height:45%"></div>
+                  <div class="bar" style="height:52%"></div><div class="bar" style="height:38%"></div>
+                  <div class="bar" style="height:64%"></div><div class="bar" style="height:48%"></div>
+                  <div class="bar" style="height:72%"></div><div class="bar" style="height:58%"></div>
+                  <div class="bar" style="height:81%"></div><div class="bar" style="height:66%"></div>
+                  <div class="bar" style="height:90%"></div><div class="bar" style="height:74%"></div>
+                  <div class="bar" style="height:96%"></div><div class="bar" style="height:84%"></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head"><span class="card-title">Recent sessions</span><a class="card-link" href="#">View all →</a></div>
+                <div style="padding-top:8px">
+                  <div class="list-row"><div class="ava" style="background:var(--accent-soft);color:var(--accent)">UX</div><div class="meta"><b>UX rework planning — responsive design</b><span>Web · 12 messages · 4m ago</span></div><span class="chip cyan">active</span></div>
+                  <div class="list-row"><div class="ava" style="background:var(--accent-2-soft);color:var(--accent-2)">SW</div><div class="meta"><b>Swarm: refactor auth module + tests</b><span>Telegram · 3 workers · 1h ago</span></div><span class="chip ok">done</span></div>
+                  <div class="list-row"><div class="ava" style="background:var(--ok-soft);color:var(--ok)">KB</div><div class="meta"><b>Ingest docs/ into knowledge base</b><span>Web · pipeline · 3h ago</span></div><span class="chip ok">done</span></div>
+                  <div class="list-row"><div class="ava" style="background:var(--warn-soft);color:var(--warn)">CR</div><div class="meta"><b>Reminder: weekly backup verification</b><span>Cron · scheduled · fires 06:00</span></div><span class="chip warn">pending</span></div>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+              <div class="card">
+                <div class="card-head"><span class="card-title">Quick actions</span></div>
+                <div class="qa-grid">
+                  <button class="qa"><span class="ico"><svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg></span><b>Spawn worker</b><span>Autoscale from template</span></button>
+                  <button class="qa"><span class="ico"><svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><b>Deep research</b><span>Multi-source report</span></button>
+                  <button class="qa"><span class="ico"><svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span><b>Open IDE</b><span>Code in workspace</span></button>
+                  <button class="qa"><span class="ico"><svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><b>Time travel</b><span>Replay a snapshot</span></button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head"><span class="card-title">Platform health</span></div>
+                <div style="padding-top:6px">
+                  <div class="plat-row"><span class="dot ok"></span>Telegram<span class="lat">42ms</span></div>
+                  <div class="plat-row"><span class="dot ok"></span>Discord<span class="lat">61ms</span></div>
+                  <div class="plat-row"><span class="dot ok"></span>Slack<span class="lat">88ms</span></div>
+                  <div class="plat-row"><span class="dot warn"></span>MCP · filesystem<span class="lat">rebind</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ════════ PAGE: CHAT ════════ -->
+        <div class="content page" id="page-chat" style="display:none;padding:0">
+          <div class="chat-layout" style="height:100%">
+            <div class="thread-rail">
+              <div class="rail-search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search sessions…</div>
+              <div class="thread-list">
+                <div class="thread-item active"><b>UX rework planning</b><span>4m ago · Web</span></div>
+                <div class="thread-item"><b>Refactor auth module</b><span>1h ago · Telegram</span></div>
+                <div class="thread-item"><b>Weekly backup verification</b><span>3h ago · Cron</span></div>
+                <div class="thread-item"><b>Translate onboarding to Arabic</b><span>Yesterday · Web</span></div>
+                <div class="thread-item"><b>Fix MCP filesystem rebind</b><span>Yesterday · Discord</span></div>
+              </div>
+            </div>
+            <div class="chat-main">
+              <div class="messages">
+                <div class="msg user"><div class="ava">MB</div><div class="bubble">Plan a full UX rework with a fully responsive design that works on every device.</div></div>
+                <div class="msg ai"><div class="ava">K</div><div class="bubble">
+                  Here's a proposed design system — <b>DS v5 “Aurora”</b>. Key moves: layered depth, container-query breakpoints, and a cyan→violet identity that distinguishes swarm/AI surfaces from navigation.
+                  <div class="tools"><span class="tool-chip done">✓ file_read kazma.css</span><span class="tool-chip done">✓ analyze sidebar.html</span><span class="tool-chip">⟳ draft preview.html</span></div>
+                </div></div>
+                <div class="msg user"><div class="ava">MB</div><div class="bubble">Show me the mobile layout too.</div></div>
+                <div class="msg ai"><div class="ava">K</div><div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div></div>
+              </div>
+              <div class="composer-wrap">
+                <div class="composer">
+                  <textarea rows="1" placeholder="Message Kazma…  ( / for skills · @ for files )"></textarea>
+                  <div class="composer-bar">
+                    <button class="cbtn" title="Attach"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><path d="M21.4 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.2-9.19a4 4 0 015.65 5.66l-9.2 9.19a2 2 0 01-2.82-2.83l8.49-8.48"/></svg></button>
+                    <button class="cbtn" title="Voice"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4"/></svg></button>
+                    <button class="model-chip">gemini-2.5-pro ▾</button>
+                    <button class="send-btn" title="Send"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2"><path d="M12 19V5m-7 7l7-7 7 7"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ════════ PAGE: SWARM ════════ -->
+        <div class="content page" id="page-swarm" style="display:none">
+          <div class="hero">
+            <div><h1>Swarm <span class="grad">control</span></h1><p>7 workers registered · autoscaler idle · circuit breakers closed</p></div>
+            <button class="btn primary">＋ Spawn worker</button>
+          </div>
+          <div class="worker-grid">
+            <div class="card hover worker"><div class="wtop"><div class="wico"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div><div><b>coder-1</b><div class="wrole">template · coder</div></div></div><span class="chip ok">working</span><div class="wstats"><span>tasks <b>41</b></span><span>success <b>97%</b></span><span>model <b>gpt-5.4</b></span></div></div>
+            <div class="card hover worker"><div class="wtop"><div class="wico"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div><div><b>researcher-1</b><div class="wrole">template · researcher</div></div></div><span class="chip cyan">idle</span><div class="wstats"><span>tasks <b>18</b></span><span>success <b>100%</b></span><span>model <b>gemini-2.5</b></span></div></div>
+            <div class="card hover worker"><div class="wtop"><div class="wico"><svg width="17" height="17" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg></div><div><b>generalist-1</b><div class="wrole">auto-spawned · 2h ago</div></div></div><span class="chip violet">handoff</span><div class="wstats"><span>tasks <b>9</b></span><span>success <b>89%</b></span><span>depth <b>2/5</b></span></div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">Task queue</span><a class="card-link" href="#">Open TaskStore →</a></div>
+            <div style="padding-top:6px">
+              <div class="task-row"><span class="tid">#a91f</span><span style="flex:1">Refactor auth module + write tests</span><div class="progress"><i style="width:72%"></i></div><span class="chip cyan">72%</span></div>
+              <div class="task-row"><span class="tid">#a920</span><span style="flex:1">Crawl docs site → knowledge base</span><div class="progress"><i style="width:34%"></i></div><span class="chip cyan">34%</span></div>
+              <div class="task-row"><span class="tid">#a921</span><span style="flex:1">Translate settings page (AR)</span><div class="progress"><i style="width:100%"></i></div><span class="chip ok">review</span></div>
+              <div class="task-row"><span class="tid">#a922</span><span style="flex:1">Nightly memory export</span><div class="progress"><i style="width:8%"></i></div><span class="chip warn">queued</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ════════ PAGE: SETTINGS ════════ -->
+        <div class="content page" id="page-settings" style="display:none">
+          <div class="hero"><div><h1>Settings</h1><p>Configuration is stored in ConfigStore — changes apply live.</p></div></div>
+          <div class="settings-layout">
+            <nav class="settings-nav card card-pad">
+              <a class="active" href="#" onclick="return false;">General</a>
+              <a href="#" onclick="return false;">Models & Providers</a>
+              <a href="#" onclick="return false;">Platforms</a>
+              <a href="#" onclick="return false;">Safety & HITL</a>
+              <a href="#" onclick="return false;">Memory</a>
+              <a href="#" onclick="return false;">Proxy</a>
+              <a href="#" onclick="return false;">Appearance</a>
+            </nav>
+            <div>
+              <div class="card set-card">
+                <div class="card-head" style="padding-bottom:6px"><span class="card-title">Models & Providers</span></div>
+                <div class="set-row"><div class="meta"><b>Active model</b><span>Switches provider automatically via model registry</span></div><div class="select-mock">gemini-2.5-pro <span style="color:var(--text-3)">▾</span></div></div>
+                <div class="set-row"><div class="meta"><b>Auto model routing</b><span>Best-model-per-task for swarm workers (models/selection.py)</span></div><div class="toggle on"></div></div>
+                <div class="set-row"><div class="meta"><b>Vision fallback</b><span>Route images to a vision-capable model when active model is text-only</span></div><div class="toggle on"></div></div>
+              </div>
+              <div class="card set-card">
+                <div class="card-head" style="padding-bottom:6px"><span class="card-title">Safety & HITL</span></div>
+                <div class="set-row"><div class="meta"><b>Require approval for danger tools</b><span>CANONICAL_DANGER_TOOLS — graph interrupt + swarm bus + pipeline gates</span></div><div class="toggle on"></div></div>
+                <div class="set-row"><div class="meta"><b>Headless danger bypass</b><span>Dev escape hatch (allow_headless_danger) — keep OFF in production</span></div><div class="toggle"></div></div>
+                <div class="set-row"><div class="meta"><b>Lifecycle notifications</b><span>Push boot / shutdown / restart status to all platforms via the bus</span></div><div class="toggle on"></div></div>
+              </div>
+              <div class="card set-card">
+                <div class="card-head" style="padding-bottom:6px"><span class="card-title">Appearance</span></div>
+                <div class="set-row"><div class="meta"><b>Theme</b><span>Dark-first; light theme is a token swap</span></div><div class="select-mock">Dark (Aurora) <span style="color:var(--text-3)">▾</span></div></div>
+                <div class="set-row"><div class="meta"><b>UI language</b><span>Full RTL layout when Arabic is active</span></div><div class="select-mock">English <span style="color:var(--text-3)">▾</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ════════ PAGE: REWORK PLAN ════════ -->
+        <div class="content page" id="page-plan" style="display:none">
+          <div class="hero"><div><h1>UX Rework <span class="grad">Plan</span></h1><p>Phased migration from kazma.css v4 → DS v5 “Aurora”. Zero backend changes.</p></div></div>
+          <div class="plan-doc">
+            <div class="card card-pad">
+              <h2><span class="num">1</span>Design tokens & foundation</h2>
+              <p>Introduce a semantic token layer on top of today's raw palette. Everything maps onto existing CSS variables, so old templates keep rendering while pages migrate one-by-one.</p>
+              <table class="token-table">
+                <tr><th>Token</th><th>Dark</th><th>Light</th><th>Used for</th></tr>
+                <tr><td>--bg-0</td><td><span class="swatch" style="background:#05080d"></span>#05080d</td><td>#eef1f6</td><td>app canvas</td></tr>
+                <tr><td>--bg-2</td><td><span class="swatch" style="background:#0e141d"></span>#0e141d</td><td>#ffffff</td><td>cards</td></tr>
+                <tr><td>--accent</td><td><span class="swatch" style="background:#22d3ee"></span>#22d3ee</td><td>#0891b2</td><td>primary actions (kept brand cyan)</td></tr>
+                <tr><td>--accent-2</td><td><span class="swatch" style="background:#8b5cf6"></span>#8b5cf6</td><td>#7c3aed</td><td>NEW — AI / swarm identity</td></tr>
+                <tr><td>--grad</td><td colspan="2">cyan → indigo → violet</td><td>brand moments, active states</td></tr>
+              </table>
+              <ul>
+                <li>Semantic aliases: <b>surface/card/elevated</b>, <b>text-1/2/3</b>, <b>line/line-strong</b> — replaces 40+ ad-hoc rgba() literals.</li>
+                <li>Light theme becomes a pure token swap on <code>[data-theme="light"]</code> (today: dark-only).</li>
+                <li>Type scale fixed to 8 steps (11.5 → 32px), tabular numerals for all metrics.</li>
+              </ul>
+            </div>
+            <div class="card card-pad" style="margin-top:14px">
+              <h2><span class="num">2</span>Responsive architecture (every device)</h2>
+              <ul>
+                <li><b>Breakpoints:</b> ≥1100px full sidebar · 768–1100px icon rail · ≤768px off-canvas drawer + bottom tab bar · ≤520px compact density.</li>
+                <li><b>Container queries</b> for components (cards, chat composer) so embeds/panels respond to their own width, not just the viewport.</li>
+                <li>All inline 2-col grids → <code>.two-col-grid</code> (already collapses ≤768px); audit and replace stragglers.</li>
+                <li>Bottom tab bar gains the 4 core destinations + “More” drawer; desktop keeps ⌘1–4 shortcuts.</li>
+                <li>Touch targets ≥ 36px, hover states get pointer: fine media guards.</li>
+                <li>RTL verified at every breakpoint (this preview has a live RTL toggle — try it).</li>
+              </ul>
+            </div>
+            <div class="card card-pad" style="margin-top:14px">
+              <h2><span class="num">3</span>Navigation & shell</h2>
+              <ul>
+                <li>Sidebar regrouped: <b>Primary / Workspace / System</b> (3 groups instead of 4) with active-rail indicator.</li>
+                <li>Topbar: breadcrumb + ⌘K command palette + live system status pill + notifications.</li>
+                <li>Model selector moves into a persistent footer pill (visible on every screen, shows provider).</li>
+              </ul>
+            </div>
+            <div class="card card-pad" style="margin-top:14px">
+              <h2><span class="num">4</span>Page-by-page uplift</h2>
+              <ul>
+                <li><b>Dashboard:</b> greeting hero, 4 stat cards with deltas, throughput chart, platform health, quick actions.</li>
+                <li><b>Chat:</b> session rail, tool-call chips with live status, focused composer glow, model chip inline.</li>
+                <li><b>Swarm:</b> worker cards (status/success/model), queue rows with progress bars.</li>
+                <li><b>Settings:</b> section-nav + rows pattern; toggles replace checkboxes.</li>
+              </ul>
+            </div>
+            <div class="card card-pad" style="margin-top:14px">
+              <h2><span class="num">5</span>Migration strategy (safe rollout)</h2>
+              <ul>
+                <li>New file <code>kazma.v5.css</code> loaded <b>after</b> kazma.css — pages opt in via a body class; rollback = remove one link tag.</li>
+                <li>Migrate in order: tokens → shell (sidebar/topbar) → dashboard → chat → swarm → settings → long tail.</li>
+                <li>Each phase is one PR with before/after screenshots at 4 widths (1380/1024/820/390).</li>
+                <li>Respect existing conventions: x-cloak global rule, kazmaConfirm/kazmaAlert dialogs, single toast system, two-col-grid.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /main -->
+
+      <!-- ══ BOTTOM NAV (mobile) ══ -->
+      <nav class="bottom-nav" style="position:absolute;bottom:0;left:0;right:0">
+        <a href="#" class="active" onclick="goPage('dashboard');return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M3 12l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>Home</a>
+        <a href="#" onclick="goPage('chat');return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Chat</a>
+        <a href="#" onclick="goPage('swarm');return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6 8l6 8 6-8M8 6h8"/></svg>Swarm</a>
+        <a href="#" onclick="toggleDrawer(true);return false;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.7"><path d="M3 6h18M3 12h18M3 18h18"/></svg>More</a>
+      </nav>
+    </div><!-- /app -->
+  </div>
+</div>
+
+<script>
+(function () {
+  var stage = document.getElementById('stage');
+  var app = document.getElementById('app');
+
+  // Device presets
+  document.querySelectorAll('[data-w]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('[data-w]').forEach(function (b) { b.classList.remove('on'); });
+      btn.classList.add('on');
+      stage.style.width = btn.dataset.w + 'px';
+    });
+  });
+
+  // Page switcher
+  window.goPage = function (name) {
+    document.querySelectorAll('.page').forEach(function (p) { p.style.display = 'none'; });
+    document.getElementById('page-' + name).style.display = 'block';
+    document.querySelectorAll('[data-page]').forEach(function (b) { b.classList.toggle('on', b.dataset.page === name); });
+    document.querySelectorAll('[data-nav]').forEach(function (n) { n.classList.toggle('active', n.dataset.nav === name); });
+    document.getElementById('crumb-page').textContent = name.charAt(0).toUpperCase() + name.slice(1);
+    toggleDrawer(false);
+  };
+  document.querySelectorAll('[data-page]').forEach(function (btn) {
+    btn.addEventListener('click', function () { goPage(btn.dataset.page); });
+  });
+
+  // Drawer (mobile)
+  window.toggleDrawer = function (force) {
+    var open = typeof force === 'boolean' ? force : !app.classList.contains('drawer-open');
+    app.classList.toggle('drawer-open', open);
+  };
+
+  // Theme
+  document.getElementById('th-dark').addEventListener('click', function () {
+    stage.removeAttribute('data-theme'); this.classList.add('on');
+    document.getElementById('th-light').classList.remove('on');
+  });
+  document.getElementById('th-light').addEventListener('click', function () {
+    stage.setAttribute('data-theme', 'light'); this.classList.add('on');
+    document.getElementById('th-dark').classList.remove('on');
+  });
+
+  // Direction
+  document.getElementById('dir-ltr').addEventListener('click', function () {
+    app.setAttribute('dir', 'ltr'); this.classList.add('on');
+    document.getElementById('dir-rtl').classList.remove('on');
+  });
+  document.getElementById('dir-rtl').addEventListener('click', function () {
+    app.setAttribute('dir', 'rtl'); this.classList.add('on');
+    document.getElementById('dir-ltr').classList.remove('on');
+  });
+})();
+</script>
+</body>
+</html>

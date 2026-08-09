@@ -69,22 +69,22 @@
     };
 
     var features = isAr ? [
-      { icon: svgIcons.doc, name: 'معالج المستندات', desc: 'قراءة ودمج وتقسيم وتعرف ضوئي وتحويل وتنقيح PDF و DOCX و XLSX', color: '#6366f1' },
+      { icon: svgIcons.doc, name: 'معالج المستندات', desc: 'قراءة ودمج وتقسيم وتعرف ضوئي وتحويل وتنقيح PDF و DOCX و XLSX', color: '#3b82f6' },
       { icon: svgIcons.web, name: 'زاحف الويب', desc: 'كشط متقدم مع Jina و Firecrawl + دوران البروكسي', color: '#0ea5e9' },
-      { icon: svgIcons.brain, name: 'الذاكرة المعرفية', desc: 'معتقدات ثنائية الزمن، استرجاع الحلقات، رسم بياني PPR', color: '#8b5cf6' },
+      { icon: svgIcons.brain, name: 'الذاكرة المعرفية', desc: 'معتقدات ثنائية الزمن، استرجاع الحلقات، رسم بياني PPR', color: '#38bdf8' },
       { icon: svgIcons.swarm, name: 'محرك السرب', desc: 'توسيع تلقائي للعمال + قواطع دوائر الموثوقية', color: '#f59e0b' },
       { icon: svgIcons.shield, name: 'أمان HITL', desc: 'بوابات موافقة ثلاثية + منح على مستوى المهمة', color: '#ef4444' },
       { icon: svgIcons.time, name: 'السفر عبر الزمن', desc: 'إعادة تشغيل اللقطات وتفريع سجل المحادثة', color: '#10b981' },
-      { icon: svgIcons.email, name: 'مدير البريد', desc: 'مصادقة Gmail و Microsoft + وضع الحماية', color: '#6366f1' },
+      { icon: svgIcons.email, name: 'مدير البريد', desc: 'مصادقة Gmail و Microsoft + وضع الحماية', color: '#3b82f6' },
       { icon: svgIcons.culture, name: 'العربية والثقافة', desc: 'لهجة خليجية، واجهة RTL، بروتوكول المجلس، ترجمة', color: '#ec4899' },
     ] : [
-      { icon: svgIcons.doc, name: 'Document Processor', desc: 'Read, merge, split, OCR, convert & redact PDFs/DOCX/XLSX', color: '#6366f1' },
+      { icon: svgIcons.doc, name: 'Document Processor', desc: 'Read, merge, split, OCR, convert & redact PDFs/DOCX/XLSX', color: '#3b82f6' },
       { icon: svgIcons.web, name: 'Web Crawler', desc: 'Advanced scraping with Jina/Firecrawl + proxy rotation', color: '#0ea5e9' },
-      { icon: svgIcons.brain, name: 'Cognitive Memory', desc: 'Bi-temporal beliefs, episode recall, V2 PPR graph', color: '#8b5cf6' },
+      { icon: svgIcons.brain, name: 'Cognitive Memory', desc: 'Bi-temporal beliefs, episode recall, V2 PPR graph', color: '#38bdf8' },
       { icon: svgIcons.swarm, name: 'Swarm Engine', desc: 'Dynamic worker autoscaling + reliability circuit breakers', color: '#f59e0b' },
       { icon: svgIcons.shield, name: 'HITL Safety', desc: 'Triple-wired approval gates + task-scoped grants', color: '#ef4444' },
       { icon: svgIcons.time, name: 'Time Travel', desc: 'Snapshot replay & fork for conversation history', color: '#10b981' },
-      { icon: svgIcons.email, name: 'Email Manager', desc: 'Gmail/Microsoft OAuth + sandbox mode', color: '#6366f1' },
+      { icon: svgIcons.email, name: 'Email Manager', desc: 'Gmail/Microsoft OAuth + sandbox mode', color: '#3b82f6' },
       { icon: svgIcons.culture, name: 'Arabic & Cultural', desc: 'Khaleeji dialect, RTL UI, Majlis protocol, i18n', color: '#ec4899' },
     ];
 
@@ -337,19 +337,19 @@
       var y = h - 15 - barH;
 
       var gradient = ctx.createLinearGradient(x, y, x, h - 15);
-      gradient.addColorStop(0, 'rgba(94, 106, 210, 0.8)');
-      gradient.addColorStop(1, 'rgba(94, 106, 210, 0.15)');
+      gradient.addColorStop(0, 'rgba(59, 130, 246, 0.85)');
+      gradient.addColorStop(1, 'rgba(56, 189, 248, 0.18)');
       ctx.fillStyle = gradient;
       ctx.fillRect(x, y, barW, barH);
 
       // Rounded top
-      ctx.fillStyle = 'rgba(94, 106, 210, 1)';
+      ctx.fillStyle = 'rgba(96, 165, 250, 1)';
       ctx.fillRect(x, y, barW, 2);
     });
 
-    // Label
-    ctx.fillStyle = 'var(--text-muted)';
-    ctx.font = '10px var(--font-sans)';
+    // Label — canvas can't resolve CSS vars; read the computed token
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
+    ctx.font = '10px Inter, sans-serif';
     ctx.fillText(KS.formatTokens(max) + ' tokens max', 12, 12);
   }
 
@@ -398,8 +398,8 @@
       ctx.fill();
     });
 
-    ctx.fillStyle = 'var(--text-muted)';
-    ctx.font = '10px var(--font-sans)';
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
+    ctx.font = '10px Inter, sans-serif';
     ctx.fillText('$' + max.toFixed(4) + ' max', 18, 12);
   }
 

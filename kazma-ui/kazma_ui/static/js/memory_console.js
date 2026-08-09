@@ -817,7 +817,7 @@
         return arr.map(function(s) {
           var color = '#94a3b8';
           var key = String(s || '').toLowerCase();
-          if (key.indexOf('ppr') >= 0 || key.indexOf('belief_ppr') >= 0) color = '#a78bfa';
+          if (key.indexOf('ppr') >= 0 || key.indexOf('belief_ppr') >= 0) color = '#93c5fd';
           else if (key.indexOf('dense') >= 0) color = '#38bdf8';
           else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = '#34d399';
           else if (key.indexOf('session') >= 0) color = '#fbbf24';
@@ -1205,7 +1205,7 @@
           _v2gSelectByBelief(subj, obj);
           list.querySelectorAll('.v2-belief-row').forEach(function(r) { r.style.background = 'transparent'; r.style.borderLeft = ''; });
           row.style.background = 'rgba(99,102,241,0.12)';
-          row.style.borderLeft = '3px solid #6366f1';
+          row.style.borderLeft = '3px solid #3b82f6';
         });
       });
     } catch (e) { /* silent */ }
@@ -1493,7 +1493,7 @@
   // color. The hub keeps its amber user color regardless.
   var _V2G_TIER_COLORS = {
     0: '#f59e0b',  // main  — amber/orange (the hub; matches existing hub style)
-    1: '#22d3ee',  // major — cyan
+    1: '#3b82f6',  // major — royal blue
     2: '#3b82f6',  // sub   — blue
     3: '#94a3b8',  // leaf  — slate
   };
@@ -3887,7 +3887,7 @@
       var all = Object.keys(_v2gFilters.entity).map(function(k) { return { group: 'entity', key: k, label: 'entity:' + k }; })
         .concat(Object.keys(_v2gFilters.predicate).map(function(k) { return { group: 'predicate', key: k, label: 'pred:' + k }; }));
       var html = all.map(function(c, idx) {
-        return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.15);color:#a5b4fc;cursor:pointer;">' + c.label + ' ✕</span>';
+        return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;">' + c.label + ' ✕</span>';
       }).join('');
       if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">Reset all</span>';
       chips.innerHTML = html;
@@ -4016,7 +4016,7 @@
       if (!A || !B) continue;
       parts.push('<line x1="' + _v2gSX(A.x).toFixed(1) + '" y1="' + _v2gSY(A.y).toFixed(1) +
         '" x2="' + _v2gSX(B.x).toFixed(1) + '" y2="' + _v2gSY(B.y).toFixed(1) +
-        '" stroke="#22d3ee" stroke-opacity="0.45" stroke-width="1.5"/>');
+        '" stroke="#3b82f6" stroke-opacity="0.45" stroke-width="1.5"/>');
     }
     for (var i = 0; i < _v2gPts.length; i++) {
       var p = _v2gPts[i];

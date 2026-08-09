@@ -7,12 +7,14 @@
     {# Header / Logo #}
     <div class="sidebar-header">
         <a href="/" class="logo" style="text-decoration:none">
-            <img src="/static/img/kazma-logo.png" alt="Kazma" class="logo-img" style="height:32px;width:auto;border-radius:4px;">
+            <img src="/static/img/kazma-logo.png" alt="Kazma" class="logo-img">
             <span class="logo-text" x-show="!sidebarCollapsed">Kazma</span>
         </a>
+        {# On mobile (≤768px) the sidebar is a drawer — this button closes it
+           instead of collapsing (DS v5 single-owner mobile nav). #}
         <button class="sidebar-toggle"
-                @click="toggleSidebar()"
-                :title="sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'">
+                @click="window.innerWidth <= 768 ? closeMobileNav() : toggleSidebar()"
+                :title="window.innerWidth <= 768 ? 'Close menu' : (sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)')">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
                 <template x-if="!sidebarCollapsed">
                     <g>

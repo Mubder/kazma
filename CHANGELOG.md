@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Unreleased — DS v5 "Abyss" UX rework: blue identity, light theme, single-owner mobile nav (2026-08-09)
+
+- **New design layer:** `kazma-ui/kazma_ui/static/css/kazma.v5.css` — loaded once after `kazma.css` in `base.html` (+ `login.html`); **rollback = remove the one `<link>`**. Phase-gated migration: tokens → shell → dashboard → chat → swarm/settings/purge.
+- **Palette remap:** every legacy CSS var re-pointed to the Abyss blues — accent royal blue `#3b82f6`, secondary sky `#38bdf8`, azure→royal→sky gradients, deep blue-black `#04070f` dark / ice-blue `#f0f4fa` light. Cyan `#22d3ee` and all purple/indigo retired. `--warning` → yellow `#facc15` (amber family left with cyan); `--info` → sky. New `--brand` alias → `--accent` (fixes agents.html indigo fallback).
+- **Light theme:** full `[data-theme="light"]` + `prefers-color-scheme` token sets (was dark-first); `color-scheme` declared for native controls.
+- **Shell:** logo/avatar icon badges use an intentional dark tile with accent ring + inner highlight (looks deliberate on both themes); gradient active-nav rail; header buttons get accent hover rings; notification dot → sky with glow.
+- **Mobile nav — single owner:** bottom tab bar is the only menu ≤768px (hamburger retired); drawer is `min(300px, 85vw)` with deeper shadow and an in-drawer close button (sidebar toggle doubles as close on small screens via `sidebar.html`); active bottom-tab gets an accent glow.
+- **Dashboard:** left-aligned metric cards with accent icon tiles, hover lift + accent ring, tabular numerals; surfaced chart cards; segmented-pill range selector with gradient active state; gradient progress fills; HITL pending panel gets an accent ring.
+- **Chat:** composer focus glow (`--radius-xl` + accent ring + soft shadow), theme-correct ink on gradient send button/user bubbles, active session pill, badge welcome logo, accent typing dots.
+- **Purple purge:** all hardcoded `94,106,210` / `139,92,246` / `#a78bfa` / `#5e6ad2` / `#6366f1` literals neutralized — via v5 overrides (badge-premium → sky, memory-explain, reactions, toast-info, search chips, session pills) or direct edits (`dashboard.js` charts+feature cards, `chat.js`, `memory_console.js` graph colors, `settings.js/.html` accent defaults, `login.html`).
+- **Preview artifacts:** `ux-rework-preview.html` (v1 "Aurora", reference) + `ux-rework-preview-v2.html` (v2 "Abyss", approved) — interactive device/theme/RTL switcher, delete before shipping if undesired.
+
 ## Unreleased — Topic-shift focus soft-reset (turn intent + TaskStatus + embedding drift) (2026-08-08)
 
 - **Feature:** per-turn intent classification so the supervisor soft-resets focus when the user changes subject, instead of forcing a `/reset`.

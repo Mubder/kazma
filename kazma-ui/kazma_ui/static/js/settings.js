@@ -145,7 +145,7 @@ function settingsApp() {
         skillFilter: '',
 
         // ── Appearance Tab ──
-        appearance: { theme: 'dark', accent_color: '#5e6ad2', font_size: 14, sidebar_position: 'left', custom_css: '' },
+        appearance: { theme: 'dark', accent_color: '#3b82f6', font_size: 14, sidebar_position: 'left', custom_css: '' },
 
         // ── Shortcuts Tab ──
         shortcuts: {},
