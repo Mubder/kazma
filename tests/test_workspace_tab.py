@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 _UI_DIR = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
@@ -78,6 +79,52 @@ class TestWorkspaceApiUnit:
         assert _human_size(512) == "512 B"
         assert _human_size(2048) == "2.0 KB"
         assert _human_size(5 * 1024 * 1024) == "5.0 MB"
+
+
+class TestWorkspaceCommandRouting:
+    """Workspace command controls must use the shared HITL-gated IDE route."""
+
+    def test_workspace_terminal_uses_ide_run_route(self) -> None:
+        source = (_UI_DIR / "templates" / "workspace.html").read_text(encoding="utf-8")
+
+        assert "fetch('/api/ide/run'" in source
+        assert "/api/workspace/run" not in source
+        assert "if (!response.ok || !data.ok)" in source
+
+    def test_build_and_deploy_are_disabled_without_configured_actions(self) -> None:
+        source = (_UI_DIR / "templates" / "workspace.html").read_text(encoding="utf-8")
+
+        assert 'class="btn btn-sm btn-secondary" disabled' in source
+        assert "No workspace build action is configured" in source
+        assert "No workspace deploy action is configured" in source
+        assert "Build command dispatched." not in source
+        assert "Deploy command dispatched." not in source
+
+    def test_ide_run_delegates_to_service_and_preserves_result(self) -> None:
+        from kazma_ui.ide_api import create_ide_router
+
+        service = MagicMock()
+        service.refresh_root = MagicMock()
+        service.run = AsyncMock(
+            return_value={"ok": False, "output": "", "error": "Approval required"}
+        )
+        app = FastAPI()
+        app.include_router(create_ide_router())
+
+        with patch("kazma_core.ide.get_ide_service", return_value=service):
+            response = TestClient(app).post(
+                "/api/ide/run",
+                json={"command": "pytest tests/ -q", "timeout": 120},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": False,
+            "output": "",
+            "error": "Approval required",
+        }
+        service.refresh_root.assert_called_once_with()
+        service.run.assert_awaited_once_with("pytest tests/ -q", timeout=120)
 
 
 # ══════════════════════════════════════════════════════════════════════════

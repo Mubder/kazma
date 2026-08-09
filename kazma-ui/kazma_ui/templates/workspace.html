@@ -219,11 +219,13 @@
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="5 12 10 17 19 8"/></svg>
       {{ t('workspace.qa_run_tests') }}
     </button>
-    <button class="btn btn-sm btn-secondary" @click="build()">
+    <button class="btn btn-sm btn-secondary" disabled
+            title="No workspace build action is configured. Use Terminal to run an approved build command.">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
       {{ t('workspace.qa_build') }}
     </button>
-    <button class="btn btn-sm btn-secondary" @click="deploy()">
+    <button class="btn btn-sm btn-secondary" disabled
+            title="No workspace deploy action is configured. Use Terminal to run an approved deployment command.">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       {{ t('workspace.qa_deploy') }}
     </button>
@@ -1419,65 +1421,42 @@ function workspaceApp() {
       return icons[ext] || '<span class="ki" data-icon="file" aria-hidden="true"></span>';
     },
 
-    runTests() {
-      this.showTerminal = true;
-      this.termOutput.push('$ pytest tests/ -q --tb=line');
-      this.termOutput.push('Running tests...');
-      fetch('/api/workspace/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'pytest tests/ -q --tb=line' })
-      }).then(function(r) { return r.json(); })
-        .then(function(data) {
-          const lines = (data.output || '').split('\n');
-          lines.forEach(function(l) { this.termOutput.push(l); }.bind(this));
-        }.bind(this))
-        .catch(function(e) {
-          this.termOutput.push('Error: ' + e.message);
-        }.bind(this));
-    },
-
-    build() {
-      KazmaStream.toast(t('workspace.toast_build_started'), 'info', 3000);
-      this.showTerminal = true;
-      this.termOutput.push('$ make build');
-      this.termOutput.push('Build command dispatched.');
-    },
-
-    async deploy() {
-      if (!(await window.kazmaConfirm({
-        title: 'Deploy',
-        message: t('workspace.deploy_confirm'),
-        confirmText: 'Deploy',
-        danger: true,
-      }))) return;
-      KazmaStream.toast(t('workspace.toast_deploy_initiated'), 'info', 3000);
-      this.termOutput.push('$ make deploy');
-      this.termOutput.push('Deploy command dispatched.');
+    async runTests() {
+      await this.runWorkspaceCommand('pytest tests/ -q --tb=line');
     },
 
     openTerminal() {
       this.showTerminal = !this.showTerminal;
     },
 
-    runTermCommand() {
+    async runTermCommand() {
       const cmd = this.termCommand.trim();
       if (!cmd) return;
-      this.termOutput.push('$ ' + cmd);
       this.termCommand = '';
+      await this.runWorkspaceCommand(cmd);
+    },
 
-      fetch('/api/workspace/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd })
-      }).then(function(r) { return r.json(); })
-        .then(function(data) {
-          const lines = (data.output || '').split('\n');
-          lines.forEach(function(l) { this.termOutput.push(l); }.bind(this));
-        }.bind(this))
-        .catch(function(e) {
-          this.termOutput.push('Error: ' + e.message);
-        }.bind(this));
+    async runWorkspaceCommand(command) {
+      this.showTerminal = true;
+      this.termOutput.push('$ ' + command);
+      try {
+        const response = await fetch('/api/ide/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: command })
+        });
+        const data = await response.json();
+        if (data.output) {
+          data.output.split('\n').forEach((line) => this.termOutput.push(line));
+        }
+        if (!response.ok || !data.ok) {
+          this.termOutput.push('Error: ' + (data.error || `Request failed (HTTP ${response.status})`));
+        } else if (!data.output) {
+          this.termOutput.push('Command completed.');
+        }
+      } catch (e) {
+        this.termOutput.push('Error: ' + e.message);
+      }
     },
 
     async addBookmark() {

@@ -15,7 +15,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import aiosqlite
 import yaml
@@ -557,6 +557,8 @@ class KazmaAgent:
         url: str = "",
         env: dict[str, str] | None = None,
         working_dir: str | None = None,
+        auth: dict[str, str] | None = None,
+        trust: Literal["trusted", "approval_required", "sandboxed"] = "approval_required",
     ) -> dict[str, str]:
         """Add an MCP server and dual-write ConfigStore + kazma.yaml.
 
@@ -583,6 +585,9 @@ class KazmaAgent:
             new_server["url"] = url
         if env:
             new_server["env"] = env
+        if auth:
+            new_server["auth"] = auth
+        new_server["trust"] = trust
 
         try:
             upsert_mcp_server(

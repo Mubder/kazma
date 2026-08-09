@@ -89,7 +89,7 @@
                     <path d="M3 5l3 3 3-3"/>
                 </svg>
             </button>
-            <div class="user-menu-dropdown" x-show="open" x-transition @keydown.escape.window="open = false">
+            <div class="user-menu-dropdown" x-show="open" x-transition x-cloak @keydown.escape.window="open = false">
                 <button class="dropdown-item" @click="window.location.href='/settings'">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2"/></svg>
                     {{ t('header.settings') }}

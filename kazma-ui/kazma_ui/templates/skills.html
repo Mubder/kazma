@@ -17,7 +17,7 @@
     </div>
 
     <!-- Installed Skills -->
-    <div x-show="tab === 'installed'">
+    <div x-show="tab === 'installed'" x-cloak>
         <div class="skills-grid">
             {% for skill in installed_skills %}
             <div class="skill-card">
@@ -50,7 +50,7 @@
     </div>
 
     <!-- Hub Browse + Agent Skills install -->
-    <div x-show="tab === 'hub'">
+    <div x-show="tab === 'hub'" x-cloak>
         <div class="settings-group" style="margin-bottom:1.25rem">
             <h3>{{ t('skills.install_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:0.75rem">
@@ -93,7 +93,7 @@
     </div>
 
     <!-- Validate -->
-    <div x-show="tab === 'validate'">
+    <div x-show="tab === 'validate'" x-cloak>
         <div class="settings-group">
             <h3>{{ t('skills.validate_heading') }}</h3>
             <div class="form-row">
@@ -106,7 +106,7 @@
                     <button class="btn btn-primary" @click="validateSkill()">{{ t('skills.validate_btn') }}</button>
                 </div>
             </div>
-            <div x-show="validateResult" class="validation-result">
+            <div x-show="validateResult" x-cloak class="validation-result">
                 <div :class="validateResult?.passed ? 'text-success' : 'text-error'" x-text="validateResult?.passed ? t('skills.validate_passed') : t('skills.validate_failed')"></div>
                 <div x-text="'Score: ' + (validateResult?.score || 0) + '/100'"></div>
                 <template x-if="validateResult?.errors?.length">

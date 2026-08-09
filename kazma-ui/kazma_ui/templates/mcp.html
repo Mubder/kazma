@@ -47,7 +47,7 @@
                         hx-delete="/api/mcp/servers/{{ server.name }}"
                         hx-on::after-request="showToast('Server removed', 'success')">Remove</button>
             </div>
-            <div x-show="expanded" class="mcp-tools-list">
+            <div x-show="expanded" x-cloak class="mcp-tools-list">
                 {% for tool in server.tools %}
                 <div class="tool-item">
                     <code class="tool-name">{{ tool.name }}</code>
@@ -69,7 +69,7 @@
     </div>
 
     <!-- Add Server Modal -->
-    <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none" x-init="loadPresets()">
+    <div class="modal-overlay" x-show="showAddModal" x-cloak @click.self="showAddModal = false" x-init="loadPresets()">
         <div class="modal">
             <h2>{{ t('mcp.modal_title') }}</h2>
             {# Preset dropdown — one-click setup for known MCP servers.

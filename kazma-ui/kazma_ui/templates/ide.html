@@ -157,7 +157,7 @@
         <code x-text="treePath || '(root)'"></code>
       </div>
       <div>
-        <div x-show="treePath" @click="goUp()" class="ide-tree-row ide-tree-up">
+        <div x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row ide-tree-up">
           <span class="ide-tree-icon" x-html="KazmaIcons['arrow-up']({class:'icon-sm'})"></span>
           <span>..</span>
         </div>
@@ -167,7 +167,7 @@
             <span class="ide-tree-name" x-text="item.name" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
           </div>
         </template>
-        <div x-show="tree.length === 0 && !busy" class="ide-tree-empty">Empty</div>
+        <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">Empty</div>
       </div>
     </div>
 

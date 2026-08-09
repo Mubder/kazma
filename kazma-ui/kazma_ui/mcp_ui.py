@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from kazma_ui.models import MCPServerAddRequest
+from kazma_ui.models import MCPServerAddRequest, MCPServerTestRequest
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -123,13 +123,17 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             url=req.url,
             env=req.env,
             working_dir=req.working_dir,
+            auth=req.auth,
+            trust=req.trust,
         )
         return result
 
     @router.delete("/api/mcp/servers/{name}")
     async def api_remove_server(name: str) -> dict[str, str]:
         """Remove an MCP server from configuration."""
-        agent.remove_mcp_server(name)
+        result = agent.remove_mcp_server(name)
+        if result.get("status") != "ok":
+            return result
 
         # Disconnect if running — use the unified executor's public API.
         if agent.tools.is_server_connected(name):
@@ -199,6 +203,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                 url=server_cfg.get("url", ""),
                 env=server_cfg.get("env", {}),
                 working_dir=server_cfg.get("working_dir"),
+                auth=server_cfg.get("auth", {}),
+                trust=server_cfg.get("trust", "approval_required"),
             )
             await client.connect(config)
             tools = await client.list_tools()
@@ -235,6 +241,11 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         if not server_cfg:
             return {"success": False, "error": "Missing server config"}
 
+        try:
+            server_cfg = MCPServerTestRequest.model_validate(server_cfg).model_dump()
+        except Exception:
+            return {"success": False, "error": "Invalid server config"}
+
         client = MCPClient()
         try:
             config = MCPServerConfig(
@@ -244,6 +255,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                 url=server_cfg.get("url", ""),
                 env=server_cfg.get("env", {}),
                 working_dir=server_cfg.get("working_dir"),
+                auth=server_cfg.get("auth", {}),
+                trust=server_cfg.get("trust", "approval_required"),
             )
             await client.connect(config)
             tools = await client.list_tools()

@@ -10,7 +10,9 @@ Endpoints:
 Security:
   - All file paths are resolved and checked to be within the workspace root
     (path traversal prevention).
-  - No write or execute operations are exposed.
+  - Write and execute operations are deliberately not exposed here. The Web
+    workspace terminal uses ``/api/ide/run`` so commands follow the shared
+    ``IdeService`` -> ``LocalToolRegistry`` -> HITL safety chain.
 """
 
 from __future__ import annotations

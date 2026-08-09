@@ -22,7 +22,7 @@ const moduleApi = (() => {
     return eval(wrapped)(sandbox.module, sandbox.exports);
 })();
 
-const { parseCommand, autoRewriteCommand } = moduleApi;
+const { parseCommand, autoRewriteCommand, removalError } = moduleApi;
 
 let failures = 0;
 
@@ -87,6 +87,24 @@ assertEqual(r5.rewritten, false, 'already-run not flagged rewritten');
 const r6 = autoRewriteCommand('docker run -it some-mcp');
 assertEqual(r6.command, ['docker', 'run', '-it', 'some-mcp'], 'docker run unchanged');
 assertEqual(r6.rewritten, false, 'docker run not rewritten');
+
+// ── remove response handling ────────────────────────────────────────────────
+
+assertEqual(
+    removalError({ ok: true, status: 200 }, { status: 'ok' }),
+    '',
+    'confirmed removal response permits success UI',
+);
+assertEqual(
+    removalError({ ok: true, status: 200 }, { status: 'error', error: 'Persist failed' }),
+    'Persist failed',
+    'application-level removal error blocks success UI',
+);
+assertEqual(
+    removalError({ ok: false, status: 500 }, { error: 'Persist failed' }),
+    'Persist failed',
+    'HTTP removal error surfaces backend detail',
+);
 
 console.log('');
 if (failures === 0) {

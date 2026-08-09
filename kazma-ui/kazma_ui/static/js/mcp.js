@@ -143,6 +143,60 @@ function autoRewriteCommand(commandStr) {
     return { command: tokens, rewritten: false, notice: '' };
 }
 
+function removalError(response, result) {
+    if (!response.ok) {
+        return (result && result.error) || ('Request failed (' + response.status + ')');
+    }
+    if (!result || result.status !== 'ok') {
+        return (result && result.error) || 'Server removal was not confirmed.';
+    }
+    return '';
+}
+
+async function removeMcpServer(button) {
+    var endpoint = button.getAttribute('hx-delete');
+    if (!endpoint) return;
+
+    button.disabled = true;
+    try {
+        var response = await fetch(endpoint, {
+            method: 'DELETE',
+            headers: { 'Accept': 'application/json' }
+        });
+        var result = null;
+        try {
+            result = await response.json();
+        } catch (parseError) {
+            // Preserve the status-based message below for non-JSON failures.
+        }
+        var error = removalError(response, result);
+        if (error) throw new Error(error);
+
+        var card = button.closest('.mcp-card');
+        if (card) card.remove();
+        showToast('Server removed', 'success');
+    } catch (error) {
+        showToast('Failed to remove server: ' + error.message, 'error');
+        button.disabled = false;
+    }
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('click', function(event) {
+        var target = event.target;
+        var button = target && target.closest
+            ? target.closest('button[hx-delete^="/api/mcp/servers/"]')
+            : null;
+        if (!button) return;
+
+        // The template's legacy htmx handler always toasts success after any
+        // response. Take ownership before htmx dispatches so failures remain visible.
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        removeMcpServer(button);
+    }, true);
+}
+
 function mcpApp() {
     return {
         showAddModal: false,
@@ -426,5 +480,9 @@ function mcpApp() {
 
 // Expose the parser/rewriter for unit testing (kazma-cli tests import via Node).
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parseCommand: parseCommand, autoRewriteCommand: autoRewriteCommand };
+    module.exports = {
+        parseCommand: parseCommand,
+        autoRewriteCommand: autoRewriteCommand,
+        removalError: removalError
+    };
 }

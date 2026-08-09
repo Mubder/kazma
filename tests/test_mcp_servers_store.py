@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -76,6 +77,64 @@ def test_upsert_dual_writes_configstore_and_yaml(dual_env):
     on_disk = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     names = [s.get("name") for s in on_disk["mcp"]["servers"]]
     assert "Playwright" in names
+
+
+def test_upsert_preserves_sse_bearer_auth_and_trust(dual_env):
+    """SSE credentials and the explicit trust policy survive both stores."""
+    yaml_path = dual_env["yaml_path"]
+    store_data = dual_env["store_data"]
+
+    server = upsert_mcp_server(
+        {
+            "name": "remote",
+            "transport": "sse",
+            "url": "https://mcp.example.test/sse",
+            "auth": {"type": "bearer", "token": "test-token"},
+            "trust": "trusted",
+        },
+        yaml_path=yaml_path,
+    )
+
+    assert server["auth"] == {"type": "bearer", "token": "test-token"}
+    assert server["trust"] == "trusted"
+    stored = json.loads(store_data[CONFIG_KEY])
+    assert stored[0]["auth"] == {"type": "bearer", "token": "test-token"}
+    on_disk = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    assert on_disk["mcp"]["servers"][0]["trust"] == "trusted"
+
+
+def test_agent_add_forwards_sse_bearer_auth_and_trust() -> None:
+    """The agent facade must not discard security settings before persistence."""
+    from kazma_core.agent_runner import KazmaAgent
+
+    captured: dict[str, object] = {}
+    agent = SimpleNamespace(
+        config=SimpleNamespace(raw={"mcp": {"servers": []}}),
+        _mcp_yaml_path=lambda: "unused.yaml",
+    )
+
+    def capture_upsert(data, **_kwargs):
+        captured.update(data)
+
+    with patch(
+        "kazma_core.mcp_servers_store.list_mcp_servers",
+        return_value=[],
+    ), patch(
+        "kazma_core.mcp_servers_store.upsert_mcp_server",
+        side_effect=capture_upsert,
+    ):
+        result = KazmaAgent.add_mcp_server(
+            agent,
+            name="remote",
+            transport="sse",
+            url="https://mcp.example.test/sse",
+            auth={"type": "bearer", "token": "test-token"},
+            trust="trusted",
+        )
+
+    assert result == {"status": "ok"}
+    assert captured["auth"] == {"type": "bearer", "token": "test-token"}
+    assert captured["trust"] == "trusted"
 
 
 def test_list_merges_yaml_only_server_into_settings_view(dual_env):

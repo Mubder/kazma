@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -103,6 +103,9 @@ class MCPServerTestRequest(BaseModel):
     command: list[str] = Field(default_factory=list)
     url: str = ""
     env: dict[str, str] = Field(default_factory=dict)
+    working_dir: str | None = None
+    auth: dict[str, str] = Field(default_factory=dict)
+    trust: Literal["trusted", "approval_required", "sandboxed"] = "approval_required"
 
 
 # ── Skills ────────────────────────────────────────────────────────────
@@ -136,7 +139,7 @@ class MCPServerAddRequest(BaseModel):
     # Auth: {"type": "bearer", "token": "..."} or {"type": "header", "name": "...", "value": "..."}
     auth: dict[str, str] = Field(default_factory=dict)
     # Trust level: "trusted" | "approval_required" | "sandboxed"
-    trust: str = "approval_required"
+    trust: Literal["trusted", "approval_required", "sandboxed"] = "approval_required"
 
 
 class MCPServerToggleRequest(BaseModel):
