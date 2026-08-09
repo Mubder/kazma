@@ -134,7 +134,7 @@ for i in range(5):
     @pytest.mark.asyncio
     async def test_python_exec_exit_code_format(self) -> None:
         """Output format includes exit code."""
-        result = await python_exec("import sys; sys.exit(42)")
+        result = await python_exec("raise SystemExit(42)")
         assert "[Exit code: 42]" in result
 
 

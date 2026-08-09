@@ -238,20 +238,39 @@ def _assign_to_job_object(proc: Any) -> Any:
             kernel32.CloseHandle(job_handle)
             return None
 
-        proc_handle = None
-        if (
-            hasattr(proc, "_transport")
-            and hasattr(proc._transport, "_proc")
-            and hasattr(proc._transport._proc, "_handle")
-        ):
-            proc_handle = proc._transport._proc._handle
+        raw_handle = None
+        opened_handle = False
 
-        if proc_handle:
-            res = kernel32.AssignProcessToJobObject(job_handle, int(proc_handle))
-            if not res:
-                kernel32.CloseHandle(job_handle)
-                return None
-            return job_handle
+        if hasattr(proc, "pid") and proc.pid:
+            # PROCESS_SET_QUOTA (0x0100) | PROCESS_TERMINATE (0x0001)
+            raw_handle = kernel32.OpenProcess(0x0100 | 0x0001, False, proc.pid)
+            if raw_handle:
+                opened_handle = True
+
+        if not raw_handle:
+            proc_handle = None
+            if (
+                hasattr(proc, "_transport")
+                and hasattr(proc._transport, "_proc")
+                and hasattr(proc._transport._proc, "_handle")
+            ):
+                proc_handle = proc._transport._proc._handle
+            if proc_handle is not None:
+                try:
+                    raw_handle = int(proc_handle)
+                except (ValueError, TypeError):
+                    raw_handle = None
+
+        if raw_handle:
+            try:
+                res = kernel32.AssignProcessToJobObject(job_handle, int(raw_handle))
+                if not res:
+                    kernel32.CloseHandle(job_handle)
+                    return None
+                return job_handle
+            finally:
+                if opened_handle and raw_handle:
+                    kernel32.CloseHandle(raw_handle)
 
         kernel32.CloseHandle(job_handle)
         return None

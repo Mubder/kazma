@@ -117,25 +117,25 @@ safety:
     - file_write
     - file_delete
     - shell_exec
-    - code_exec
-    - python_exec
-    - schedule_task
-    - cancel_scheduled
+#    - code_exec
+#    - python_exec
+#    - schedule_task
+#    - cancel_scheduled
     - vault_retrieve
     - vault_delete
-    - config_save
-    - run_tests
-    - git_commit
-    - git_push_pull
-    - github_create_pr
+#    - config_save
+#    - run_tests
+#    - git_commit
+#    - git_push_pull
+#    - github_create_pr
     - github_merge_pr
-    - install_python_packages
-    - install_npm_packages
-    - install_agent_skill
-    - uninstall_agent_skill
+#    - install_python_packages
+#    - install_npm_packages
+#    - install_agent_skill
+#    - uninstall_agent_skill
     - email_send
     - email_delete
-    - email_categorize
+#    - email_categorize
     - browser_eval_js
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
