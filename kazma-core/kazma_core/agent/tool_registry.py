@@ -1983,8 +1983,69 @@ class LocalToolRegistry:
             now = datetime.now(UTC)
             return now.isoformat()
 
-        # ── Research planning / session tools (audit M1: previously defined
-        # and exported in tools/ but never registered — the model could not
+        # ── MCP server diagnostics (agent-facing) ─────────────────────
+        # Exposed because an agent asked to "test the MCP server" otherwise
+        # has no valid path: python_exec blocks network imports, shell_exec
+        # blocks curl, browser JS hits CORS — and it loops generic tools
+        # until the stagnation breaker fires. This runs the same
+        # initialize → tools/list handshake the /mcp UI Test button uses.
+
+        @self.register(
+            description=(
+                "Test a configured MCP server connection: runs the real "
+                "initialize → tools/list handshake and reports tool count or the "
+                "exact error (auth failure, spawn error, timeout). Use this when "
+                "asked to test/check/verify an MCP server — do NOT probe the "
+                "server URL with curl/python_exec (sandboxed)."
+            ),
+            category="system",
+        )
+        async def mcp_test_server(name: str) -> str:
+            try:
+                from kazma_core.mcp.manager import AsyncMCPManager
+                from kazma_core.mcp_servers_store import list_mcp_servers
+
+                servers = list_mcp_servers()
+                target = None
+                for s in servers:
+                    if str(s.get("name", "")).lower() == (name or "").strip().lower():
+                        target = s
+                        break
+                if target is None:
+                    known = ", ".join(str(s.get("name")) for s in servers) or "(none)"
+                    return f"Error: MCP server '{name}' not found. Configured servers: {known}"
+
+                try:
+                    from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
+
+                    target = apply_workspace_to_server_config(dict(target))
+                except Exception:
+                    pass
+
+                manager = AsyncMCPManager()
+                try:
+                    count = await manager.connect_from_config(
+                        [dict(target)], raise_on_error=True
+                    )
+                    tools = [
+                        str((t.get("function") or {}).get("name") or t.get("name") or "")
+                        for t in manager.get_all_tool_schemas()
+                    ]
+                    return (
+                        f"OK: '{target.get('name')}' connected — {count} tool(s): "
+                        + (", ".join(t for t in tools[:20] if t) or "(none)")
+                    )
+                finally:
+                    try:
+                        await manager.disconnect_all()
+                    except Exception:
+                        pass
+            except Exception as exc:
+                # raise_on_error surfaces the real handshake error (401, spawn
+                # failure, etc.) — report it verbatim; that's the whole point.
+                return f"Error: MCP test failed — {exc}"
+
+        # ── Research planning / session tools (audit M1: previously defined        # and exported in tools/ but never registered — the model could not
         # call them) ────────────────────────────────────────────────────
 
         @self.register(
