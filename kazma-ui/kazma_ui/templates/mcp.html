@@ -97,7 +97,7 @@
                 <select x-model="newServer.transport" class="form-select">
                     <option value="stdio">{{ t('mcp.transport_stdio') }}</option>
                     <option value="sse">{{ t('mcp.transport_sse') }}</option>
-                    <option value="streamable_http">{{ t('mcp.transport_streamable_http', 'Streamable HTTP') }}</option>
+                    <option value="streamable_http">{{ t('mcp.transport_streamable_http') }}</option>
                 </select>
             </div>
             <template x-if="newServer.transport === 'stdio'">
