@@ -1154,6 +1154,7 @@ def _episode_ppr(
         for i, a in enumerate(session_eps):
             for b in session_eps[i + 1 :]:
                 edges.append((a, b, 1.0))
+                edges.append((b, a, 1.0))
     if not edges:
         return {}
     try:

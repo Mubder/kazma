@@ -64,11 +64,13 @@ def enqueue_task(
     the caller (post-turn hook) is never blocked.
     """
     try:
+        from kazma_core.config_store import apply_sqlite_pragmas
         from kazma_core.memory.schema_v2 import ensure_ops_schema
         from kazma_core.paths import memory_ops_db
 
         conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
         try:
+            apply_sqlite_pragmas(conn)
             ensure_ops_schema(conn)
             tid = "t_" + uuid.uuid4().hex[:20]
             now = time.time()
@@ -159,11 +161,13 @@ class _MemoryWorker:
     def _claim_batch(self, batch_size: int = 8) -> list[dict[str, Any]]:
         """Atomically claim up to ``batch_size`` pending/stuck tasks."""
         try:
+            from kazma_core.config_store import apply_sqlite_pragmas
             from kazma_core.paths import memory_ops_db
 
             conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             try:
+                apply_sqlite_pragmas(conn)
                 now = time.time()
                 stuck_cutoff = now - _STUCK_THRESHOLD_SEC
                 # Claim pending tasks + reclaim stuck 'processing' ones
@@ -215,10 +219,12 @@ class _MemoryWorker:
     def _ack(self, task: dict[str, Any], *, success: bool, error: str | None) -> None:
         """Mark a task completed (success) or retry/dead-letter (failure)."""
         try:
+            from kazma_core.config_store import apply_sqlite_pragmas
             from kazma_core.paths import memory_ops_db
 
             conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
             try:
+                apply_sqlite_pragmas(conn)
                 now = time.time()
                 if success:
                     conn.execute(

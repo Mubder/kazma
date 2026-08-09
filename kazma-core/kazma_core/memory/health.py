@@ -82,6 +82,10 @@ def build_memory_health() -> dict[str, Any]:
     cfg = _read_memory_cfg()
     components: list[dict[str, Any]] = []
     demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+    recall_state = recall_degraded()
+    recall_fail_count = int(recall_state.get("fail_count") or 0)
+    recall_degraded_now = recall_fail_count > 0
+    recall_last_reason = str(recall_state.get("last_reason") or "").strip()
 
     # ── Config flags ──────────────────────────────────────────────────
     mem_enabled = bool(cfg.get("enabled", True)) and not demo
@@ -128,6 +132,19 @@ def build_memory_health() -> dict[str, Any]:
             else "Disabled (memory.auto_store=false) — only memory_store tool / compaction write."
         ),
         meta={"mode": auto_mode},
+    ))
+
+    components.append(_comp(
+        "recall_failures",
+        "Recall pipeline reliability",
+        ok=not recall_degraded_now,
+        status="warn" if recall_degraded_now else "ok",
+        detail=(
+            f"Recall failures detected: {recall_fail_count} (last: {recall_last_reason or 'unknown'})."
+            if recall_degraded_now
+            else "No recall failures recorded in this process."
+        ),
+        meta=recall_state,
     ))
 
     # ── Embedder ──────────────────────────────────────────────────────
@@ -640,7 +657,7 @@ def build_memory_health() -> dict[str, Any]:
     )
     if demo:
         overall = "DEMO"
-    elif core_errors or (mem_enabled and not has_search_layer):
+    elif core_errors or (mem_enabled and (not has_search_layer or recall_degraded_now)):
         overall = "DEGRADED"
     else:
         overall = "ACTIVE"
