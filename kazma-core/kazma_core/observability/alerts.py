@@ -302,15 +302,25 @@ async def _health_check_loop(interval_s: float = 300.0) -> None:
             if is_shutting_down():
                 break
 
-            # Memory subsystem health
+            # Memory subsystem health — recall_degraded() returns a STATE DICT
+            # (always truthy); only alert when failures were actually recorded
+            # AND the last failure is recent (a stale counter from an old boot
+            # issue must not page forever).
             try:
                 from kazma_core.memory.health import recall_degraded
 
-                if recall_degraded():
+                _rd = recall_degraded() or {}
+                _fail_count = int(_rd.get("fail_count", 0) or 0)
+                _last_fail = float(_rd.get("last_failure_epoch", 0) or 0)
+                _recent = _last_fail > 0 and (time.time() - _last_fail) < 3600
+                if _fail_count > 0 and _recent:
                     await trigger_system_alert(
                         subsystem="Memory",
                         status="DEGRADED",
-                        message="Recall path is degraded (embedder/vector store unavailable)",
+                        message=(
+                            f"Recall path degraded: {_fail_count} failure(s), "
+                            f"latest: {_rd.get('last_reason', 'unknown')}"
+                        ),
                         severity="WARNING",
                     )
             except Exception:
