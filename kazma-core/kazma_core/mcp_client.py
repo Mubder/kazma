@@ -144,29 +144,35 @@ class MCPClient:
 
         self._config = cfg
 
-        if cfg.transport == "stdio":
-            await self._connect_stdio(cfg)
-        elif cfg.transport == "sse":
-            await self._connect_sse(cfg)
-        else:
-            raise MCPConnectionError(f"Unsupported transport: {cfg.transport}")
+        try:
+            if cfg.transport == "stdio":
+                await self._connect_stdio(cfg)
+            elif cfg.transport == "sse":
+                await self._connect_sse(cfg)
+            else:
+                raise MCPConnectionError(f"Unsupported transport: {cfg.transport}")
 
-        # MCP handshake: send initialize, then initialized notification
-        result = await self._send(
-            "initialize",
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {"listChanged": False}},
-                "clientInfo": {"name": "kazma-mcp-client", "version": "0.1.0"},
-            },
-        )
-        if not isinstance(result, dict):
-            raise MCPConnectionError("Server returned non-dict initialize result")
+            # MCP handshake: send initialize, then initialized notification
+            result = await self._send(
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {"listChanged": False}},
+                    "clientInfo": {"name": "kazma-mcp-client", "version": "0.1.0"},
+                },
+            )
+            if not isinstance(result, dict):
+                raise MCPConnectionError("Server returned non-dict initialize result")
 
-        await self._notify("notifications/initialized", {})
-        self._connected = True
-        logger.info("Connected to MCP server '%s' via %s", cfg.name, cfg.transport)
-        return True
+            await self._notify("notifications/initialized", {})
+            self._connected = True
+            logger.info("Connected to MCP server '%s' via %s", cfg.name, cfg.transport)
+            return True
+        except Exception:
+            # A test/start failure must never leave a child process or HTTP
+            # connection alive for the caller to discover and clean up.
+            await self.disconnect()
+            raise
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """List available tools from the connected server.
@@ -215,11 +221,12 @@ class MCPClient:
                 logger.debug("Failed to close MCP stdin: %s", exc)
             try:
                 self._process.terminate()
-                self._process.wait(timeout=5)
+                await asyncio.to_thread(self._process.wait, timeout=5)
             except Exception as exc:
                 logger.debug("MCP terminate failed: %s, trying kill", exc)
                 try:
                     self._process.kill()
+                    await asyncio.to_thread(self._process.wait, timeout=5)
                 except Exception as kill_exc:
                     logger.warning("Failed to kill MCP process: %s", kill_exc)
             self._process = None
@@ -303,8 +310,21 @@ class MCPClient:
             if proc is None or proc.stdin is None:
                 return
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, proc.stdin.write, raw.encode())
-            await loop.run_in_executor(None, proc.stdin.flush)
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, proc.stdin.write, raw.encode()),
+                    timeout=self._config.timeout,
+                )
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, proc.stdin.flush),
+                    timeout=self._config.timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                self._connected = False
+                raise MCPConnectionError(
+                    f"stdio notification to '{self.server_name}' timed out after "
+                    f"{self._config.timeout:g}s"
+                ) from exc
         elif self._config.transport == "sse" and self._http is not None:
             await self._http.post("/notifications", content=raw, headers={"Content-Type": "application/json"})
 
@@ -313,14 +333,30 @@ class MCPClient:
         if proc is None or proc.stdin is None or proc.stdout is None:
             raise MCPConnectionError("stdio process not running")
 
-        # Write in a thread to avoid blocking the event loop
+        # stdio responses have no background JSON-RPC dispatcher here, so
+        # serialize a complete write/read transaction to preserve response
+        # ownership when callers execute tools concurrently.
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, proc.stdin.write, raw.encode())
-        await loop.run_in_executor(None, proc.stdin.flush)
-
-        # Read response line (blocking read in executor)
         async with self._read_lock:
-            line = await loop.run_in_executor(None, proc.stdout.readline)
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, proc.stdin.write, raw.encode()),
+                    timeout=self._config.timeout if self._config else 90.0,
+                )
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, proc.stdin.flush),
+                    timeout=self._config.timeout if self._config else 90.0,
+                )
+                line = await asyncio.wait_for(
+                    loop.run_in_executor(None, proc.stdout.readline),
+                    timeout=self._config.timeout if self._config else 90.0,
+                )
+            except asyncio.TimeoutError as exc:
+                self._connected = False
+                timeout = self._config.timeout if self._config else 90.0
+                raise MCPConnectionError(
+                    f"stdio request to '{self.server_name}' timed out after {timeout:g}s"
+                ) from exc
 
         if not line:
             raise MCPConnectionError("Server closed stdout (EOF)")
@@ -331,13 +367,23 @@ class MCPClient:
         if self._http is None:
             raise MCPConnectionError("SSE client not initialised")
 
-        resp = await self._http.post(
-            "/jsonrpc",
-            content=raw,
-            headers={"Content-Type": "application/json"},
-        )
-        resp.raise_for_status()
-        return _jsonrpc_response(resp.text)
+        try:
+            resp = await self._http.post(
+                "/jsonrpc",
+                content=raw,
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            return _jsonrpc_response(resp.text)
+        except httpx.HTTPError as exc:
+            detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    detail = exc.response.text.strip().replace("\n", " ")[:400]
+                except Exception:
+                    pass
+            suffix = f" — response: {detail}" if detail else ""
+            raise MCPConnectionError(f"SSE request failed: {exc}{suffix}") from exc
 
     # -- helpers -----------------------------------------------------------
 

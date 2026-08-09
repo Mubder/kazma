@@ -40,6 +40,7 @@ import itertools
 import json
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -115,7 +116,11 @@ def classify_mcp_tool(tool_name: str) -> str:
     has_sensitive_read = any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
     if has_danger or has_sensitive_read:
         return "danger"
-    has_safe = any(kw in name_lower for kw in _SAFE_KEYWORDS)
+    # Safe verbs need whole token matches.  A substring match would classify
+    # arbitrary names such as ``frobnicate`` (contains ``cat``) as safe and
+    # bypass the default-unknown HITL gate.
+    tokens = set(re.split(r"[^a-z0-9]+", name_lower))
+    has_safe = any(kw in tokens for kw in _SAFE_KEYWORDS)
     if has_safe:
         return "safe"
     return "unknown"
@@ -175,6 +180,7 @@ class MCPServerHandle:
     tools: list[dict[str, Any]] = field(default_factory=list)
     connected: bool = False
     read_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    timeout: float = 60.0
     # trust level: "trusted" (no HITL), "approval_required" (HITL for danger tools)
     trust: str = "approval_required"
 
@@ -201,10 +207,24 @@ class AsyncMCPManager:
 
     def __init__(self) -> None:
         self._servers: dict[str, MCPServerHandle] = {}
+        # Connection setup deliberately remains best-effort for application
+        # startup.  Retain failures so strict callers (for example, a
+        # connection test) can report the actual reason instead of "0 tools".
+        self._connection_errors: dict[str, str] = {}
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
-    async def connect_from_config(self, servers: list[dict[str, Any]]) -> int:
+    @property
+    def connection_errors(self) -> dict[str, str]:
+        """Return failures from the most recent :meth:`connect_from_config` call."""
+        return dict(self._connection_errors)
+
+    async def connect_from_config(
+        self,
+        servers: list[dict[str, Any]],
+        *,
+        raise_on_error: bool = False,
+    ) -> int:
         """Connect to all servers from a config list.
 
         Args:
@@ -214,10 +234,29 @@ class AsyncMCPManager:
             Total number of tools discovered across all servers.
         """
         total_tools = 0
+        self._connection_errors.clear()
         for cfg in servers:
-            name = cfg.get("name", "unnamed")
+            if not isinstance(cfg, dict):
+                name = "unnamed"
+                message = "server configuration must be an object"
+                self._connection_errors[name] = message
+                logger.error("[MCP] Failed to connect server '%s': %s", name, message)
+                continue
+
+            name = str(cfg.get("name") or "unnamed")
             transport = cfg.get("transport", "stdio")
             try:
+                # A repeated startup/start request must not orphan the prior
+                # child process or HTTP client.  A healthy handle is already
+                # serving the configured tools, so report it idempotently.
+                existing = self._servers.get(name)
+                if existing is not None:
+                    self.list_servers()
+                    if existing.connected:
+                        total_tools += len(existing.tools)
+                        continue
+                    await self.disconnect_server(name)
+
                 if transport == "stdio":
                     count = await self._connect_stdio(name, cfg)
                 elif transport == "sse":
@@ -226,33 +265,65 @@ class AsyncMCPManager:
                     count = await self._connect_streamable_http(name, cfg)
                 else:
                     logger.warning("[MCP] Unknown transport '%s' for server '%s'", transport, name)
+                    self._connection_errors[name] = f"unsupported transport '{transport}'"
                     continue
                 total_tools += count
+                self._connection_errors.pop(name, None)
             except Exception as exc:
-                logger.error("[MCP] Failed to connect server '%s': %s", name, exc)
+                message = str(exc) or type(exc).__name__
+                self._connection_errors[name] = message
+                logger.error("[MCP] Failed to connect server '%s': %s", name, message)
+        if raise_on_error and self._connection_errors:
+            details = "; ".join(
+                f"{name}: {message}" for name, message in self._connection_errors.items()
+            )
+            raise MCPBridgeError(f"MCP connection failed: {details}")
         return total_tools
 
     async def shutdown(self) -> None:
         """Disconnect all servers and clean up processes."""
-        for name, handle in self._servers.items():
+        for name in list(self._servers):
+            await self.disconnect_server(name)
+
+    async def disconnect_server(self, name: str) -> bool:
+        """Disconnect one server, safely handling an already-dead transport."""
+        handle = self._servers.pop(name, None)
+        if handle is None:
+            return False
+        await self._close_handle(handle)
+        return True
+
+    async def _close_handle(self, handle: MCPServerHandle) -> None:
+        """Release a subprocess/HTTP client exactly once, without masking cleanup."""
+        process = handle.process
+        if process is not None:
             try:
-                if handle.process is not None:
-                    handle.process.terminate()
+                if process.returncode is None:
+                    process.terminate()
                     try:
-                        await asyncio.wait_for(handle.process.wait(), timeout=5.0)
+                        await asyncio.wait_for(process.wait(), timeout=5.0)
                     except TimeoutError:
-                        handle.process.kill()
-                        await handle.process.wait()
-                    logger.info("[MCP] Terminated stdio process '%s'", name)
-
-                if handle.http is not None:
-                    await handle.http.aclose()
-                    logger.info("[MCP] Closed SSE client '%s'", name)
-
-                handle.connected = False
+                        process.kill()
+                        await process.wait()
+                logger.info("[MCP] Terminated stdio process '%s'", handle.name)
+            except ProcessLookupError:
+                pass
             except Exception as exc:
-                logger.warning("[MCP] Error shutting down '%s': %s", name, exc)
-        self._servers.clear()
+                logger.warning("[MCP] Error closing stdio server '%s': %s", handle.name, exc)
+            finally:
+                handle.process = None
+
+        http = handle.http
+        if http is not None:
+            try:
+                await http.aclose()
+                logger.info("[MCP] Closed HTTP client '%s'", handle.name)
+            except Exception as exc:
+                logger.warning("[MCP] Error closing HTTP client '%s': %s", handle.name, exc)
+            finally:
+                handle.http = None
+
+        handle.connected = False
 
     # ── Schema discovery ────────────────────────────────────────────
 
@@ -276,9 +347,18 @@ class AsyncMCPManager:
             if not handle.connected:
                 continue
             for tool in handle.tools:
+                if not isinstance(tool, dict):
+                    logger.warning(
+                        "[MCP] Ignoring malformed tool descriptor from '%s'", handle.name
+                    )
+                    continue
                 raw_name = tool.get("name", "")
                 desc = tool.get("description", "")
-                input_schema = tool.get("inputSchema", {"type": "object", "properties": {}})
+                input_schema = tool.get("inputSchema")
+                if not isinstance(input_schema, dict):
+                    input_schema = {"type": "object", "properties": {}}
+                else:
+                    input_schema = dict(input_schema)
 
                 # Normalize: MCP inputSchema → OpenAI parameters
                 if "type" not in input_schema:
@@ -320,6 +400,8 @@ class AsyncMCPManager:
             if not handle.connected:
                 continue
             for tool in handle.tools:
+                if not isinstance(tool, dict):
+                    continue
                 raw_name = tool.get("name", "")
                 if raw_name:
                     namespaced = f"mcp__{handle.name}__{raw_name}"
@@ -463,14 +545,17 @@ class AsyncMCPManager:
                 server, raw = parts[1], parts[2]
                 handle = self._servers.get(server)
                 if handle and handle.connected:
-                    return any(t.get("name") == raw for t in handle.tools)
+                    return any(
+                        isinstance(t, dict) and t.get("name") == raw
+                        for t in handle.tools
+                    )
             return False
         # Raw form → scan all servers.
         for handle in self._servers.values():
             if not handle.connected:
                 continue
             for tool in handle.tools:
-                if tool.get("name") == tool_name:
+                if isinstance(tool, dict) and tool.get("name") == tool_name:
                     return True
         return False
 
@@ -487,7 +572,10 @@ class AsyncMCPManager:
                 server, raw = parts[1], parts[2]
                 handle = self._servers.get(server)
                 if handle and handle.connected:
-                    if any(t.get("name") == raw for t in handle.tools):
+                    if any(
+                        isinstance(t, dict) and t.get("name") == raw
+                        for t in handle.tools
+                    ):
                         return handle.name
             return None
         # Raw form → scan all servers.
@@ -495,13 +583,13 @@ class AsyncMCPManager:
             if not handle.connected:
                 continue
             for tool in handle.tools:
-                if tool.get("name") == tool_name:
+                if isinstance(tool, dict) and tool.get("name") == tool_name:
                     return handle.name
         return None
 
     def list_servers(self) -> list[dict[str, Any]]:
         """Return status info for all managed servers.
-        
+
         O3 fix: for stdio transport, verify the process is still alive before
         reporting connected=True. If the process has exited (returncode is not
         None), mark it disconnected to avoid the "reconnect lie" where status
@@ -519,7 +607,7 @@ class AsyncMCPManager:
                             h.name, h.process.returncode
                         )
                         h.connected = False
-            
+
             result.append({
                 "name": h.name,
                 "transport": h.transport,
@@ -601,24 +689,29 @@ class AsyncMCPManager:
         except OSError as exc:
             raise MCPBridgeError(f"Failed to start process: {exc}") from exc
 
+        # Keep one timeout for the handshake and every later request.  A
+        # server-specific setting must not silently revert to the generic 60s
+        # limit immediately after it connects.
+        request_timeout = self._resolve_timeout(
+            cfg.get("timeout"),
+            env_value=os.environ.get("KAZMA_MCP_TIMEOUT_MS"),
+            default=90.0,
+            env_is_milliseconds=True,
+        )
         handle = MCPServerHandle(
             name=name,
             transport="stdio",
             process=process,
             command=command,
+            timeout=request_timeout,
         )
 
-        # MCP handshake.  The readline wait in ``_send`` defaults to 60s,
-        # which is too short for ``npx`` cold starts (npm fetch of a fresh
-        # package can take 30-90s on slow networks).  Allow a per-server
-        # override via ``cfg["timeout"]`` or the ``KAZMA_MCP_TIMEOUT_MS``
-        # env; default 90s for stdio.
-        handshake_timeout = float(
-            cfg.get("timeout")
-            or (os.environ.get("KAZMA_MCP_TIMEOUT_MS") or "90000")
-            and str(int(os.environ.get("KAZMA_MCP_TIMEOUT_MS") or 90000) / 1000.0)
-        )
         try:
+            # MCP handshake.  The readline wait in ``_send`` defaults to 60s,
+            # which is too short for ``npx`` cold starts (npm fetch of a fresh
+            # package can take 30-90s on slow networks).  Allow a per-server
+            # override via ``cfg["timeout"]`` or the ``KAZMA_MCP_TIMEOUT_MS``
+            # env; default 90s for stdio.
             await self._send(
                 handle,
                 "initialize",
@@ -627,7 +720,7 @@ class AsyncMCPManager:
                     "capabilities": {"tools": {"listChanged": False}},
                     "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
                 },
-                timeout=handshake_timeout,
+                timeout=handle.timeout,
             )
             await self._notify(handle, "notifications/initialized", {})
         except asyncio.TimeoutError:
@@ -635,35 +728,36 @@ class AsyncMCPManager:
             # user can see WHY (npm fetch failure / missing dependency /
             # bad config) instead of an opaque empty error.
             stderr_tail = await self._drain_stderr(handle, max_bytes=1024)
-            try:
-                process.terminate()
-            except Exception:
-                pass
             reason = "timed out waiting for initialize response"
             if stderr_tail:
                 reason += f" — server stderr: {stderr_tail.strip()[:400]}"
-            raise MCPBridgeError(f"Handshake failed for '{name}': {reason}")
+            await self._close_handle(handle)
+            raise MCPBridgeError(f"Handshake failed for '{name}': {reason}") from None
         except Exception as exc:
             stderr_tail = await self._drain_stderr(handle, max_bytes=1024)
-            try:
-                process.terminate()
-            except Exception:
-                pass
             msg = f"Handshake failed for '{name}': {exc}"
             if stderr_tail:
                 msg += f" — server stderr: {stderr_tail.strip()[:400]}"
+            await self._close_handle(handle)
             raise MCPBridgeError(msg) from exc
 
-        # Discover tools
-        result = await self._send(handle, "tools/list", {})
-        tools = result.get("tools", []) if isinstance(result, dict) else []
-        handle.tools = tools
-        handle.connected = True
-        handle.trust = cfg.get("trust", "approval_required")
+        try:
+            # Discovering tools is part of connection setup.  Do not leave a
+            # successfully-handshaken child process behind if this fails.
+            result = await self._send(handle, "tools/list", {})
+            tools = result.get("tools", []) if isinstance(result, dict) else []
+            if not isinstance(tools, list):
+                raise MCPBridgeError("tools/list returned a non-list 'tools' field")
+            handle.tools = tools
+            handle.connected = True
+            handle.trust = cfg.get("trust", "approval_required")
 
-        self._servers[name] = handle
-        logger.info("[MCP] Connected to '%s' (stdio, pid=%d, tools=%d)", name, process.pid, len(tools))
-        return len(tools)
+            self._servers[name] = handle
+            logger.info("[MCP] Connected to '%s' (stdio, pid=%d, tools=%d)", name, process.pid, len(tools))
+            return len(tools)
+        except Exception:
+            await self._close_handle(handle)
+            raise
 
     # ════════════════════════════════════════════════════════════════
     # Internal: SSE transport
@@ -676,7 +770,7 @@ class AsyncMCPManager:
             raise MCPBridgeError(f"SSE server '{name}' requires a 'url'")
 
         headers = dict(cfg.get("headers", {}))
-        timeout = cfg.get("timeout", 30.0)
+        timeout = self._resolve_timeout(cfg.get("timeout"), default=30.0)
 
         # ── Inject auth headers from the first-class auth field ──────
         auth = cfg.get("auth", {})
@@ -714,16 +808,23 @@ class AsyncMCPManager:
             await http.aclose()
             raise MCPBridgeError(f"Handshake failed for '{name}': {exc}") from exc
 
-        # Discover tools
-        result = await self._send(handle, "tools/list", {})
-        tools = result.get("tools", []) if isinstance(result, dict) else []
-        handle.tools = tools
-        handle.connected = True
-        handle.trust = cfg.get("trust", "approval_required")
+        try:
+            # Discovering tools is part of connection setup.  Close the HTTP
+            # pool on a malformed/erroring tools/list response.
+            result = await self._send(handle, "tools/list", {})
+            tools = result.get("tools", []) if isinstance(result, dict) else []
+            if not isinstance(tools, list):
+                raise MCPBridgeError("tools/list returned a non-list 'tools' field")
+            handle.tools = tools
+            handle.connected = True
+            handle.trust = cfg.get("trust", "approval_required")
 
-        self._servers[name] = handle
-        logger.info("[MCP] Connected to '%s' (sse, url=%s, tools=%d)", name, url, len(tools))
-        return len(tools)
+            self._servers[name] = handle
+            logger.info("[MCP] Connected to '%s' (sse, url=%s, tools=%d)", name, url, len(tools))
+            return len(tools)
+        except Exception:
+            await self._close_handle(handle)
+            raise
 
     # ════════════════════════════════════════════════════════════════
     # Internal: JSON-RPC transport
@@ -754,6 +855,28 @@ class AsyncMCPManager:
             return await self._send_streamable_http(handle, raw)
         return await self._send_sse(handle, raw)
 
+    @staticmethod
+    def _resolve_timeout(
+        configured: Any,
+        *,
+        default: float,
+        env_value: str | None = None,
+        env_is_milliseconds: bool = False,
+    ) -> float:
+        """Resolve a positive timeout without letting malformed config leak resources."""
+        value = configured
+        if value is None and env_value:
+            value = env_value
+        try:
+            seconds = float(value) if value is not None else default
+            if env_value and configured is None and env_is_milliseconds:
+                seconds /= 1000.0
+            if seconds > 0:
+                return seconds
+        except (TypeError, ValueError):
+            pass
+        return default
+
     async def _drain_stderr(self, handle: MCPServerHandle, *, max_bytes: int = 2048) -> str:
         """Best-effort non-blocking read of a stdio server's stderr.
 
@@ -769,7 +892,7 @@ class AsyncMCPManager:
             # Use asyncio.to_thread to avoid blocking the event loop
             stderr = proc.stderr
             read_result: dict[str, str] = {"data": ""}
-            
+
             def _sync_read() -> None:
                 try:
                     if hasattr(stderr, "read1"):
@@ -783,7 +906,10 @@ class AsyncMCPManager:
                 except Exception:
                     pass
 
-            await asyncio.to_thread(_sync_read)
+            # ``read1`` on a pipe blocks until output arrives.  This is used
+            # while reporting a failure, so diagnostics must never turn a
+            # bounded handshake timeout into an unbounded hang.
+            await asyncio.wait_for(asyncio.to_thread(_sync_read), timeout=0.25)
             return read_result["data"]
         except Exception:
             return ""
@@ -825,16 +951,17 @@ class AsyncMCPManager:
         if proc is None or proc.stdin is None or proc.stdout is None:
             raise MCPBridgeError(f"stdio process '{handle.name}' not running")
 
-        # Write request
-        proc.stdin.write(raw.encode())
-        await proc.stdin.drain()
-
-        # Read response (one line per JSON-RPC message)
+        # stdio is a single bidirectional byte stream.  MCP responses can be
+        # out of order, while this compact bridge does not keep an ID→future
+        # reader.  Keep write+read as one transaction so concurrent tool calls
+        # cannot consume one another's responses.
         async with handle.read_lock:
             try:
+                proc.stdin.write(raw.encode())
+                await proc.stdin.drain()
                 line = await asyncio.wait_for(
                     proc.stdout.readline(),
-                    timeout=timeout or 60.0,
+                    timeout=timeout or handle.timeout,
                 )
             except Exception as exc:
                 # On read error, attempt to dump stderr and re-raise with diagnostic
@@ -846,17 +973,20 @@ class AsyncMCPManager:
                     "chunk exceed" in exc_s.lower()
                     or "separator is not found" in exc_s.lower()
                 ):
-                    handle.connected = False
                     logger.error(
                         "[MCP] stdio framing overflow for '%s' (raise KAZMA_MCP_STDIO_LIMIT "
                         "or avoid huge directory_tree). Marking disconnected.",
                         handle.name,
                     )
+                # A timed-out/failed read leaves an unknown response in the
+                # pipe.  Future requests cannot be correlated safely.
+                handle.connected = False
                 raise MCPBridgeError(
                     f"stdio read error for '{handle.name}': {exc}\nstderr: {stderr_snippet[:500]}"
                 ) from exc
 
         if not line:
+            handle.connected = False
             # Check if process died
             retcode = proc.returncode
             if retcode is not None:
@@ -877,13 +1007,26 @@ class AsyncMCPManager:
         if handle.http is None:
             raise MCPBridgeError(f"SSE client '{handle.name}' not initialized")
 
-        resp = await handle.http.post(
-            "/jsonrpc",
-            content=raw,
-            headers={"Content-Type": "application/json"},
-        )
-        resp.raise_for_status()
-        return _jsonrpc_parse(resp.text)
+        try:
+            resp = await handle.http.post(
+                "/jsonrpc",
+                content=raw,
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            return _jsonrpc_parse(resp.text)
+        except httpx.HTTPError as exc:
+            handle.connected = False
+            detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    detail = exc.response.text.strip().replace("\n", " ")[:400]
+                except Exception:
+                    pass
+            suffix = f" — response: {detail}" if detail else ""
+            raise MCPBridgeError(
+                f"SSE request to '{handle.name}' failed: {exc}{suffix}"
+            ) from exc
 
     # ── Streamable HTTP transport (MCP 2025-03-26 spec) ──────────────
     #
@@ -901,7 +1044,7 @@ class AsyncMCPManager:
 
         headers = dict(cfg.get("headers", {}))
         headers.setdefault("Accept", "application/json, text/event-stream")
-        timeout = cfg.get("timeout", 30.0)
+        timeout = self._resolve_timeout(cfg.get("timeout"), default=30.0)
 
         auth = cfg.get("auth", {})
         if auth.get("type") == "bearer" and auth.get("token"):
@@ -938,18 +1081,24 @@ class AsyncMCPManager:
             await http.aclose()
             raise MCPBridgeError(f"Handshake failed for '{name}': {exc}") from exc
 
-        result = await self._send(handle, "tools/list", {})
-        tools = result.get("tools", []) if isinstance(result, dict) else []
-        handle.tools = tools
-        handle.connected = True
-        handle.trust = cfg.get("trust", "approval_required")
+        try:
+            result = await self._send(handle, "tools/list", {})
+            tools = result.get("tools", []) if isinstance(result, dict) else []
+            if not isinstance(tools, list):
+                raise MCPBridgeError("tools/list returned a non-list 'tools' field")
+            handle.tools = tools
+            handle.connected = True
+            handle.trust = cfg.get("trust", "approval_required")
 
-        self._servers[name] = handle
-        logger.info(
-            "[MCP] Connected to '%s' (streamable_http, url=%s, session=%s, tools=%d)",
-            name, url, handle.session_id or "?", len(tools),
-        )
-        return len(tools)
+            self._servers[name] = handle
+            logger.info(
+                "[MCP] Connected to '%s' (streamable_http, url=%s, session=%s, tools=%d)",
+                name, url, handle.session_id or "?", len(tools),
+            )
+            return len(tools)
+        except Exception:
+            await self._close_handle(handle)
+            raise
 
     async def _send_streamable_http(self, handle: MCPServerHandle, raw: str) -> Any:
         """POST a JSON-RPC request to the streamable HTTP endpoint.
@@ -1321,8 +1470,14 @@ class UnifiedToolExecutor:
                 for handle in self._mcp._servers.values():
                     if handle.name != server_name:
                         continue
+                    raw_tool_name = tool_name.removeprefix(
+                        f"mcp__{server_name}__"
+                    )
                     for tool in handle.tools:
-                        if tool.get("name") == tool_name:
+                        if (
+                            isinstance(tool, dict)
+                            and tool.get("name") == raw_tool_name
+                        ):
                             description = tool.get("description", "")
                             break
                     break
@@ -1363,36 +1518,23 @@ class UnifiedToolExecutor:
             return False
         return any(s["name"] == name and s["connected"] for s in self._mcp.list_servers())
 
-    async def disconnect_server(self, name: str) -> bool:
+    async def disconnect_server(self, name: str, *, forget_config: bool = True) -> bool:
         """Disconnect a single MCP server by name.
 
         Returns True if a server was disconnected.
         """
         if self._mcp is None:
             return False
-        handle = self._mcp._servers.pop(name, None)
-        if handle is None:
-            return False
-        try:
-            if handle.process is not None:
-                handle.process.terminate()
-                try:
-                    import asyncio as _asyncio
-
-                    await _asyncio.wait_for(handle.process.wait(), timeout=5.0)
-                except TimeoutError:
-                    handle.process.kill()
-                    await handle.process.wait()
-            if handle.http is not None:
-                await handle.http.aclose()
-            handle.connected = False
-            return True
-        except Exception as exc:
-            logger.warning("[Unified] Error disconnecting server '%s': %s", name, exc)
-            return False
+        disconnected = await self._mcp.disconnect_server(name)
+        if forget_config:
+            # A manually stopped/deleted workspace-bound server must not be
+            # resurrected by the next workspace-switch rebind event.
+            self._server_configs.pop(name, None)
+        return disconnected
 
     async def disconnect_all(self) -> None:
         """Shutdown all backends."""
         if self._mcp is not None:
             await self._mcp.shutdown()
+        self._server_configs.clear()
         # Local registry needs no cleanup

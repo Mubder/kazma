@@ -17,6 +17,16 @@
  *      No more "saved silently, 0 tools, no idea why".
  */
 
+function notify(message, type) {
+    if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+        window.showToast(message, type);
+        return;
+    }
+    if (typeof console !== 'undefined') {
+        console[type === 'error' ? 'error' : 'info']('[MCP] ' + message);
+    }
+}
+
 /* ── shlex-style command parser (JS port of Python's shlex.split) ────────── */
 function parseCommand(str) {
     // Handles: single quotes, double quotes (with \" escapes), backslash
@@ -174,9 +184,9 @@ async function removeMcpServer(button) {
 
         var card = button.closest('.mcp-card');
         if (card) card.remove();
-        showToast('Server removed', 'success');
+        notify('Server removed', 'success');
     } catch (error) {
-        showToast('Failed to remove server: ' + error.message, 'error');
+        notify('Failed to remove server: ' + error.message, 'error');
         button.disabled = false;
     }
 }
@@ -201,6 +211,7 @@ function mcpApp() {
     return {
         showAddModal: false,
         adding: false,            // disable button during validate-then-save
+        actionPending: '',        // start:<name> | stop:<name> | test:<name>
         addError: '',             // inline error during Add Server
         rewriteNotice: '',        // auto-rewrite explanation shown to user
         selectedPreset: '',       // preset dropdown selection (server id or '')
@@ -322,7 +333,7 @@ function mcpApp() {
                 // Surface the rewrite to the user before validating — they
                 // should know we changed their input.
                 if (rewrite.rewritten) {
-                    showToast(rewrite.notice, 'info');
+                    notify(rewrite.notice, 'info');
                 }
 
                 // Validate-on-add: test the connection BEFORE persisting.
@@ -341,12 +352,12 @@ function mcpApp() {
                         if (testResult.stderr) {
                             this.addError += '\nServer stderr:\n' + testResult.stderr.slice(0, 500);
                         }
-                        showToast('Test failed — server not saved. See inline error.', 'error');
+                        notify('Test failed — server not saved. See inline error.', 'error');
                         return;
                     }
                     if (testResult.tool_count === 0) {
                         this.addError = 'Server connected but exposed 0 tools. This usually means the package name is wrong or the server failed to initialise. Not saving.';
-                        showToast('0 tools — server not saved', 'warning');
+                        notify('0 tools — server not saved', 'warning');
                         return;
                     }
                 } catch (testErr) {
@@ -365,7 +376,7 @@ function mcpApp() {
                     });
                     var result = await resp.json();
                     if (result.status === 'ok') {
-                        showToast('Server added — ' + (testResult ? testResult.tool_count : '?') + ' tools', 'success');
+                        notify('Server added — ' + (testResult ? testResult.tool_count : '?') + ' tools', 'success');
                         this.showAddModal = false;
                         this.resetNewServer();
                         location.reload();
@@ -407,55 +418,67 @@ function mcpApp() {
         },
 
         async startServer(name) {
+            if (this.actionPending) return;
+            this.actionPending = 'start:' + name;
             try {
                 var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/start', {
                     method: 'POST'
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    showToast('Server started with ' + result.tool_count + ' tools', 'success');
+                    notify('Server started with ' + result.tool_count + ' tools', 'success');
                     location.reload();
                 } else {
-                    showToast('Failed: ' + (result.error || ''), 'error');
+                    notify('Failed: ' + (result.error || 'Unable to start server'), 'error');
                 }
             } catch (e) {
-                showToast('Failed to start server', 'error');
+                notify('Failed to start server: ' + e.message, 'error');
+            } finally {
+                this.actionPending = '';
             }
         },
 
         async stopServer(name) {
+            if (this.actionPending) return;
+            this.actionPending = 'stop:' + name;
             try {
                 var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/stop', {
                     method: 'POST'
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    showToast('Server stopped', 'info');
+                    notify('Server stopped', 'info');
                     location.reload();
                 } else {
-                    showToast('Failed: ' + (result.error || ''), 'error');
+                    notify('Failed: ' + (result.error || 'Unable to stop server'), 'error');
                 }
             } catch (e) {
-                showToast('Failed to stop server', 'error');
+                notify('Failed to stop server: ' + e.message, 'error');
+            } finally {
+                this.actionPending = '';
             }
         },
 
         async testServer(name) {
-            showToast('Testing connection...', 'info');
+            if (this.actionPending) return;
+            this.actionPending = 'test:' + name;
+            notify('Testing connection...', 'info');
             try {
                 var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/test', {
                     method: 'POST'
                 });
                 var result = await resp.json();
                 if (result.success) {
-                    showToast('Connected! ' + result.tool_count + ' tools found', 'success');
+                    notify('Connected! ' + result.tool_count + ' tools found', 'success');
                 } else {
                     var msg = 'Test failed: ' + (result.error || 'no detail');
                     if (result.stderr) msg += '\n' + String(result.stderr).slice(0, 400);
-                    showToast(msg, 'error');
+                    notify(msg, 'error');
                 }
             } catch (e) {
-                showToast('Test failed', 'error');
+                notify('Test failed: ' + e.message, 'error');
+            } finally {
+                this.actionPending = '';
             }
         },
 
@@ -483,6 +506,8 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseCommand: parseCommand,
         autoRewriteCommand: autoRewriteCommand,
-        removalError: removalError
+        removalError: removalError,
+        mcpApp: mcpApp,
+        notify: notify
     };
 }

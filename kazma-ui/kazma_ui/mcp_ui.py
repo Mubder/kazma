@@ -160,8 +160,9 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         try:
             count = await agent.tools.connect_server(server_cfg)
             return {"status": "ok", "tool_count": count}
-        except Exception:
-            return {"status": "error", "error": "Internal error"}
+        except Exception as exc:
+            logger.exception("[mcp_api] Failed to start MCP server %s", name)
+            return {"status": "error", "error": f"Failed to start server: {exc}"}
 
     @router.post("/api/mcp/servers/{name}/stop")
     async def api_stop_server(name: str) -> dict[str, str]:
@@ -169,8 +170,9 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         if agent.tools.is_server_connected(name):
             try:
                 await agent.tools.disconnect_server(name)
-            except Exception:
-                return {"status": "error", "error": "Internal error"}
+            except Exception as exc:
+                logger.exception("[mcp_api] Failed to stop MCP server %s", name)
+                return {"status": "error", "error": f"Failed to stop server: {exc}"}
         return {"status": "ok"}
 
     @router.post("/api/mcp/servers/{name}/test")

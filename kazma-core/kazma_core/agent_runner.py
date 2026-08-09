@@ -439,6 +439,12 @@ class KazmaAgent:
         servers = self.get_mcp_servers_config()
         total = 0
         for server_cfg in servers:
+            if not server_cfg.get("enabled", True):
+                logger.info(
+                    "MCP server '%s' disabled in configuration; skipping startup",
+                    server_cfg.get("name", "unnamed"),
+                )
+                continue
             count = await self.tools.connect_server(server_cfg)
             total += count
             if count > 0:

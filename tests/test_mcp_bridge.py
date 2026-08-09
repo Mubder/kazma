@@ -134,7 +134,7 @@ class TestAsyncMCPManager:
 
         s0 = schemas[0]
         assert s0["type"] == "function"
-        assert s0["function"]["name"] == "read_file"
+        assert s0["function"]["name"] == "mcp__test_server__read_file"
         assert s0["function"]["description"] == "Read a file"
         assert s0["function"]["parameters"]["properties"]["path"]["type"] == "string"
         assert s0["_mcp_server"] == "test_server"
@@ -146,7 +146,10 @@ class TestAsyncMCPManager:
 
         # Test get_tool_server_map
         mapping = manager.get_tool_server_map()
-        assert mapping == {"read_file": "test_server", "list_dir": "test_server"}
+        assert mapping == {
+            "mcp__test_server__read_file": "test_server",
+            "mcp__test_server__list_dir": "test_server",
+        }
 
         # Test is_mcp_tool
         assert manager.is_mcp_tool("read_file") is True
@@ -308,7 +311,7 @@ class TestUnifiedToolExecutor:
         assert len(defs) == 2
         names = [d["function"]["name"] for d in defs]
         assert "my_local" in names
-        assert "mcp_tool" in names
+        assert "mcp__test__mcp_tool" in names
 
         # Verify _mcp_server is stripped in clean schemas
         for d in defs:

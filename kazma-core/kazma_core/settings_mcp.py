@@ -126,11 +126,15 @@ class MCPSettingsService:
             from kazma_core.mcp.manager import AsyncMCPManager
 
             manager = AsyncMCPManager()
-            count = await manager.connect_from_config([server])
-            tool_schemas = manager.get_all_tool_schemas()
-            tool_names = [t.get("function", {}).get("name", "") for t in tool_schemas]
-            await manager.shutdown()
-            return {"success": True, "tool_count": count, "tools": tool_names[:20]}
+            try:
+                count = await manager.connect_from_config([server], raise_on_error=True)
+                tool_schemas = manager.get_all_tool_schemas()
+                tool_names = [t.get("function", {}).get("name", "") for t in tool_schemas]
+                return {"success": True, "tool_count": count, "tools": tool_names[:20]}
+            finally:
+                # A failed test can still have completed a stdio handshake or
+                # allocated an HTTP pool.  Always release it before reporting.
+                await manager.shutdown()
         except Exception as e:
             return {"success": False, "error": str(e)}
 

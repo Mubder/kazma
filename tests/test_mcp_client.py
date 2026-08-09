@@ -64,7 +64,7 @@ class TestMCPServerConfig:
         assert cfg.transport == "stdio"
         assert cfg.command == []
         assert cfg.url == ""
-        assert cfg.timeout == 30.0
+        assert cfg.timeout == 90.0
 
     def test_sse_config(self) -> None:
         cfg = MCPServerConfig(
