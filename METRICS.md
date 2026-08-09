@@ -43,7 +43,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | Metric | Count |
 |---|---:|
 | Test files | **314** |
-| Collected at runtime | n/a |
+| Collected at runtime | **4,781** |
 | `def test_*` functions | 3,095 |
 | `async def test_*` functions | 1,224 |
 | `Test*` classes | 937 |
@@ -85,8 +85,8 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 |---|---:|
 | Commits | **1,801** |
 | Contributors | 7 |
-| Branches | 1 |
-| Tags | 6 |
+| Branches | 10 |
+| Tags | 7 |
 
 ## Largest Python files (top 15)
 
