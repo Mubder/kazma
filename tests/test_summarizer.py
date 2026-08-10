@@ -142,7 +142,9 @@ class TestDeterministicTrimAndWorkingMemory:
 
     def test_audit_only_filters_write_tools(self) -> None:
         from kazma_core.agent.turn_input import (
+            AUDIT_ONLY_ALLOWLIST,
             filter_tools_for_constraints,
+            is_tool_allowed_under_constraints,
             parse_hard_constraints,
         )
 
@@ -156,17 +158,123 @@ class TestDeterministicTrimAndWorkingMemory:
             {"type": "function", "function": {"name": "shell_exec", "parameters": {}}},
             {"type": "function", "function": {"name": "file_list", "parameters": {}}},
             {"type": "function", "function": {"name": "send_file", "parameters": {}}},
+            {"type": "function", "function": {"name": "python_exec", "parameters": {}}},
+            {"type": "function", "function": {"name": "update_scratchpad", "parameters": {}}},
         ]
         filtered = filter_tools_for_constraints(tools, cons)
         names = []
         for t in filtered:
             fn = t.get("function") or {}
             names.append(fn.get("name") or t.get("name"))
+        # Strict allowlist — not denylist
         assert "read_document" in names
         assert "file_list" in names
+        assert "update_scratchpad" in names
         assert "generate_docx" not in names
         assert "shell_exec" not in names
         assert "send_file" not in names
+        assert "python_exec" not in names
+        assert not is_tool_allowed_under_constraints("generate_docx", cons)
+        assert is_tool_allowed_under_constraints("read_document", cons)
+        assert "read_document" in AUDIT_ONLY_ALLOWLIST
+
+    def test_goal_survives_40_round_deterministic_trim(self) -> None:
+        """Invariant: active user goal is never purged by mid-loop trim."""
+        from kazma_core.agent.turn_input import (
+            WORKING_MEMORY_MARKER,
+            format_working_memory_anchor,
+            trim_messages_deterministic,
+        )
+
+        goal = (
+            "Ok now tell me what is wrong with this document and why it is LTR "
+            "while it is Arabic? DONT CHANGE CODES JUST AUDIT now"
+        )
+        wm = format_working_memory_anchor(
+            active_goal=goal,
+            active_attachments=[{"filename": "Kazma_Executive_Summary_AR_v6.docx"}],
+            hard_constraints=["audit_only", "no_code_change"],
+            scratchpad={"bidi_count": "0 w:bidi in gold"},
+        )
+        messages: list[dict] = [
+            {"role": "system", "content": "You are Kazma."},
+            {"role": "user", "content": "what is my all weekly reset"},
+            {"role": "assistant", "content": "here are your resets..."},
+            {"role": "user", "content": goal},
+        ]
+        for i in range(40):
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": f"c{i}", "name": "file_read", "args": {"path": f"f{i}"}}
+                    ],
+                }
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": f"c{i}",
+                    "content": ("x" * 2000) + f" tool_round_{i}",
+                }
+            )
+        trimmed = trim_messages_deterministic(
+            messages,
+            max_tokens=4000,
+            keep_last_tool_rounds=6,
+            active_goal=goal,
+            working_memory_block=wm,
+        )
+        blob = "\n".join(str(m.get("content") or "") for m in trimmed)
+        assert "JUST AUDIT" in blob or goal[:40] in blob
+        assert WORKING_MEMORY_MARKER in blob
+        assert "bidi_count" in blob or "0 w:bidi" in blob
+        user_contents = [
+            str(m.get("content") or "")
+            for m in trimmed
+            if m.get("role") == "user"
+        ]
+        assert any("JUST AUDIT" in u or "LTR while it is Arabic" in u for u in user_contents)
+        assert len(trimmed) < len(messages)
+
+    def test_documents_search_quarantine(self) -> None:
+        from kazma_core.agent.turn_input import (
+            filter_file_search_path,
+            reset_active_turn_context,
+            set_active_turn_context,
+        )
+
+        tok = set_active_turn_context(
+            quarantine_documents_search=True,
+            active_attachments=[{"filename": "Kazma_Executive_Summary_AR_v6.docx"}],
+        )
+        try:
+            err = filter_file_search_path("kazma-data/documents")
+            assert err and "BLOCKED" in err
+            # Active attachment path still allowed
+            assert filter_file_search_path(
+                "kazma-data/attachments/Kazma_Executive_Summary_AR_v6.docx"
+            ) is None
+        finally:
+            reset_active_turn_context(tok)
+
+    def test_scratchpad_write_survives_drain(self) -> None:
+        from kazma_core.agent.turn_input import (
+            apply_scratchpad_write,
+            bind_scratchpad_thread,
+            drain_scratchpad_writes,
+            reset_scratchpad_thread,
+        )
+
+        tok = bind_scratchpad_thread("t-test-sp")
+        try:
+            apply_scratchpad_write("root_cause", "missing w:bidi on body")
+            d = drain_scratchpad_writes("t-test-sp")
+            assert d["root_cause"] == "missing w:bidi on body"
+            assert drain_scratchpad_writes("t-test-sp") == {}
+        finally:
+            reset_scratchpad_thread(tok)
 
     @pytest.mark.asyncio
     async def test_summary_persisted_to_memory(self) -> None:

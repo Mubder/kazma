@@ -1591,6 +1591,24 @@ def create_sse_chat_router(
             ),
         )
         input_state["messages"] = messages
+        # Transport-level working-memory pin (before supervisor loop)
+        try:
+            from kazma_core.agent.turn_input import build_turn_working_memory
+
+            _wm = build_turn_working_memory(
+                user_message,
+                messages=messages,
+                client_attachments=list(raw_attachments or []),
+            )
+            input_state.update(_wm)
+            if _wm.get("hard_constraints"):
+                logger.info(
+                    "[SSE] Pinned working memory constraints=%s attachments=%d",
+                    _wm.get("hard_constraints"),
+                    len(_wm.get("active_attachments") or []),
+                )
+        except Exception:
+            logger.debug("[SSE] working-memory pin skipped", exc_info=True)
 
         # ── Trace the request ──────────────────────────────────────
         if tracer:

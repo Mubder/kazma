@@ -1154,6 +1154,28 @@ def create_ws_chat_router(
                         ),
                     )
                     input_state["messages"] = full_messages
+                    # Transport-level working-memory pin (before supervisor loop)
+                    try:
+                        from kazma_core.agent.turn_input import build_turn_working_memory
+
+                        _wm = build_turn_working_memory(
+                            text,
+                            messages=full_messages,
+                            client_attachments=list(raw_attachments or []),
+                        )
+                        input_state.update(_wm)
+                        if _wm.get("hard_constraints"):
+                            logger.info(
+                                "[WS-Chat] Pinned working memory constraints=%s "
+                                "attachments=%d goal_chars=%d",
+                                _wm.get("hard_constraints"),
+                                len(_wm.get("active_attachments") or []),
+                                len(_wm.get("active_goal") or ""),
+                            )
+                    except Exception:
+                        logger.debug(
+                            "[WS-Chat] working-memory pin skipped", exc_info=True
+                        )
 
                     async def _run_prompt_stream():
                         from kazma_core.safety.hitl import (

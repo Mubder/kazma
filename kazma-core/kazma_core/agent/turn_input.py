@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from contextvars import ContextVar, Token
 from typing import Any
 
 __all__ = [
@@ -42,14 +43,27 @@ __all__ = [
     # Explicit working memory + deterministic pruning
     "WORKING_MEMORY_MARKER",
     "AUDIT_ONLY_CONSTRAINTS",
+    "AUDIT_ONLY_ALLOWLIST",
     "WRITE_EXECUTE_TOOL_NAMES",
     "parse_hard_constraints",
     "extract_active_attachments",
     "extract_latest_user_text",
     "format_working_memory_anchor",
     "filter_tools_for_constraints",
+    "is_tool_allowed_under_constraints",
     "trim_messages_deterministic",
     "resolve_trim_token_budget",
+    "build_turn_working_memory",
+    "set_active_turn_context",
+    "reset_active_turn_context",
+    "get_active_turn_context",
+    "should_suppress_memory_recall",
+    "should_quarantine_documents_search",
+    "filter_file_search_path",
+    "bind_scratchpad_thread",
+    "reset_scratchpad_thread",
+    "apply_scratchpad_write",
+    "drain_scratchpad_writes",
 ]
 
 logger = logging.getLogger(__name__)
@@ -574,6 +588,27 @@ AUDIT_ONLY_CONSTRAINTS = frozenset(
     }
 )
 
+# Strict allowlist under audit_only / read_only (prefer allowlist over denylist).
+AUDIT_ONLY_ALLOWLIST = frozenset(
+    {
+        "read_document",
+        "parse_document",
+        "ocr_document",
+        "file_read",
+        "file_list",
+        "file_search",
+        "file_view",
+        "read_file_part",
+        "current_datetime",
+        "context_info",
+        "memory_list_entities",
+        "memory_list_beliefs",
+        "memory_search",
+        "update_scratchpad",  # typed findings only — does not mutate files
+        "web_search",  # optional; still no writes
+    }
+)
+
 # Tools that mutate filesystem/code, execute shell, or deliver outbound files.
 # Matched by exact name or prefix (mcp__* write-ish names checked separately).
 WRITE_EXECUTE_TOOL_NAMES = frozenset(
@@ -607,6 +642,11 @@ WRITE_EXECUTE_TOOL_NAMES = frozenset(
         "browser_type",
         "browser_screenshot",
     }
+)
+
+# Per-async-task turn context (set by supervisor / tool_worker).
+_active_turn_ctx: ContextVar[dict[str, Any] | None] = ContextVar(
+    "kazma_active_turn_ctx", default=None
 )
 
 _AUDIT_ONLY_RE = re.compile(
@@ -751,8 +791,9 @@ def format_working_memory_anchor(
     active_attachments: list[dict[str, Any]] | None = None,
     hard_constraints: list[str] | None = None,
     intent_mode: str = "",
+    scratchpad: dict[str, str] | None = None,
 ) -> str:
-    """Build the immutable system-prompt working-memory block."""
+    """Build the immutable system-prompt working-memory block (+ typed scratchpad)."""
     goal = (active_goal or "").strip() or "(no goal captured)"
     constraints = [str(c) for c in (hard_constraints or []) if c]
     atts = active_attachments or []
@@ -764,20 +805,213 @@ def format_working_memory_anchor(
     att_block = "\n".join(att_lines) if att_lines else "- (none)"
     cons_block = ", ".join(constraints) if constraints else "(none)"
     intent_bit = f"\nIntent mode: {intent_mode}" if intent_mode else ""
+    pad = scratchpad or {}
+    if pad:
+        pad_lines = [
+            f"- **{k}:** {str(v)[:800]}"
+            for k, v in list(pad.items())[:24]
+            if str(k).strip()
+        ]
+        pad_block = "\n".join(pad_lines) if pad_lines else "- (empty)"
+    else:
+        pad_block = "- (empty — use update_scratchpad to save lasting findings)"
     return (
         f"{WORKING_MEMORY_MARKER}\n"
-        "## Active Turn Working Memory (IMMUTABLE — do not replace with recalled topics)\n"
+        "## Active Turn Working Memory (IMMUTABLE goal — do not replace with recalled topics)\n"
         f"**Active goal:** {goal[:2000]}\n"
         f"**Hard constraints:** {cons_block}\n"
         f"**Active attachments (prefer these paths over unrelated disk hits):**\n{att_block}"
         f"{intent_bit}\n"
+        f"**Typed findings scratchpad (survives history trim):**\n{pad_block}\n"
         "Rules:\n"
         "1. Fulfill the Active goal above. Summary/history/memory are supporting only.\n"
         "2. If Hard constraints include audit_only / read_only / no_code_change / no_writes, "
-        "do NOT write files, regenerate documents, run shell mutations, or send outbound files.\n"
+        "only read/inspect tools are available — do NOT write, regenerate, shell, or send files.\n"
         "3. Do not resume superseded tasks from conversation history.\n"
+        "4. Save durable intermediate conclusions with update_scratchpad(key, finding) "
+        "so they survive deterministic context trim.\n"
         f"{WORKING_MEMORY_MARKER}"
     )
+
+
+def build_turn_working_memory(
+    user_text: str,
+    *,
+    messages: list[dict[str, Any]] | None = None,
+    client_attachments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build working-memory fields at transport accept (before graph runs).
+
+    Returns keys suitable for ``SupervisorState``:
+    ``active_goal``, ``active_attachments``, ``hard_constraints``, ``scratchpad``.
+    """
+    goal = (user_text or "").strip()[:4000]
+    atts = extract_active_attachments(messages, user_text=goal)
+    for raw in client_attachments or []:
+        if not isinstance(raw, dict):
+            continue
+        atts.append(
+            {
+                "kind": str(raw.get("kind") or "file"),
+                "id": str(raw.get("id") or ""),
+                "filename": str(raw.get("filename") or raw.get("name") or ""),
+                "path": str(raw.get("path") or ""),
+                "mime": str(raw.get("mime") or ""),
+            }
+        )
+    # Dedupe by filename/id
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for a in atts:
+        key = f"{a.get('id')}|{a.get('filename')}|{a.get('path')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(a)
+    return {
+        "active_goal": goal,
+        "active_attachments": deduped,
+        "hard_constraints": parse_hard_constraints(goal),
+        "scratchpad": {},
+    }
+
+
+def set_active_turn_context(
+    *,
+    active_goal: str = "",
+    active_attachments: list[dict[str, Any]] | None = None,
+    hard_constraints: list[str] | None = None,
+    intent_mode: str = "",
+    suppress_memory_recall: bool = False,
+    quarantine_documents_search: bool = False,
+) -> Token:
+    """Bind turn scope for tool implementations (file_search quarantine, etc.)."""
+    return _active_turn_ctx.set(
+        {
+            "active_goal": active_goal or "",
+            "active_attachments": list(active_attachments or []),
+            "hard_constraints": list(hard_constraints or []),
+            "intent_mode": intent_mode or "",
+            "suppress_memory_recall": bool(suppress_memory_recall),
+            "quarantine_documents_search": bool(quarantine_documents_search),
+        }
+    )
+
+
+def reset_active_turn_context(token: Token) -> None:
+    try:
+        _active_turn_ctx.reset(token)
+    except Exception:
+        pass
+
+
+def get_active_turn_context() -> dict[str, Any]:
+    return dict(_active_turn_ctx.get() or {})
+
+
+def should_suppress_memory_recall(
+    *,
+    intent_mode: str = "",
+    hard_constraints: list[str] | None = None,
+) -> bool:
+    """True when V2 recall should be skipped for this turn (shift / audit)."""
+    cons = {str(c).lower() for c in (hard_constraints or []) if c}
+    if cons.intersection({"audit_only", "read_only"}):
+        return True
+    if (intent_mode or "").strip().lower() == "shift":
+        return True
+    return False
+
+
+def should_quarantine_documents_search(
+    *,
+    intent_mode: str = "",
+    hard_constraints: list[str] | None = None,
+    active_attachments: list[dict[str, Any]] | None = None,
+) -> bool:
+    """True when broad kazma-data/documents searches should be blocked."""
+    if should_suppress_memory_recall(
+        intent_mode=intent_mode, hard_constraints=hard_constraints
+    ):
+        return True
+    # Always prefer attachment-first when attachments exist
+    if active_attachments:
+        return True
+    return False
+
+
+# Scratchpad mutation buffer (tool → tool_worker merge). Keyed by thread_id.
+_scratchpad_buffers: dict[str, dict[str, str]] = {}
+_scratchpad_thread_ctx: ContextVar[str | None] = ContextVar(
+    "kazma_scratchpad_thread", default=None
+)
+
+
+def bind_scratchpad_thread(thread_id: str) -> Token:
+    return _scratchpad_thread_ctx.set(thread_id or "")
+
+
+def reset_scratchpad_thread(token: Token) -> None:
+    try:
+        _scratchpad_thread_ctx.reset(token)
+    except Exception:
+        pass
+
+
+def apply_scratchpad_write(key: str, finding: str) -> str:
+    """Called by the update_scratchpad tool — buffers until tool_worker merges."""
+    tid = _scratchpad_thread_ctx.get() or "_default"
+    key_s = str(key or "").strip()[:80]
+    if not key_s:
+        return "Error: key must be non-empty"
+    val = str(finding or "").strip()[:4000]
+    buf = _scratchpad_buffers.setdefault(tid, {})
+    buf[key_s] = val
+    return f"Scratchpad saved: {key_s} ({len(val)} chars). Survives context trim."
+
+
+def drain_scratchpad_writes(thread_id: str) -> dict[str, str]:
+    """Pop buffered writes for *thread_id* (merge into SupervisorState.scratchpad)."""
+    tid = thread_id or "_default"
+    return dict(_scratchpad_buffers.pop(tid, {}) or {})
+
+
+def filter_file_search_path(path: str) -> str | None:
+    """Return an error string if *path* is quarantined for this turn; else None."""
+    ctx = get_active_turn_context()
+    if not ctx.get("quarantine_documents_search"):
+        return None
+    p = (path or ".").replace("\\", "/").lower()
+    # Allow explicit active attachment filenames anywhere
+    atts = ctx.get("active_attachments") or []
+    for a in atts:
+        name = str(a.get("filename") or a.get("path") or "").lower()
+        if name and name in p:
+            return None
+    # Quarantine bulk document store / gold corpora
+    banned_fragments = (
+        "kazma-data/documents",
+        "kazma-data\\documents",
+        "/documents/",
+        "\\documents\\",
+    )
+    if any(b in p for b in banned_fragments) or p.rstrip("/").endswith("documents"):
+        names = [
+            str(a.get("filename") or a.get("path") or "")
+            for a in atts
+            if a.get("filename") or a.get("path")
+        ]
+        hint = (
+            f" Active attachments only: {', '.join(names[:5])}."
+            if names
+            else " Read the active attachment first."
+        )
+        return (
+            "BLOCKED: broad search under documents/ is quarantined this turn "
+            "(topic shift / audit_only / active attachment preferred)."
+            f"{hint} Use read_document / file_read on the active file path."
+        )
+    return None
 
 
 def _tool_name_from_def(td: dict[str, Any]) -> str:
@@ -816,11 +1050,40 @@ def _is_write_execute_tool(name: str) -> bool:
     return False
 
 
+def is_tool_allowed_under_constraints(
+    name: str,
+    hard_constraints: list[str] | None,
+) -> bool:
+    """Return False if *name* is structurally forbidden this turn."""
+    cons = {str(c).lower() for c in (hard_constraints or []) if c}
+    if not cons:
+        return True
+    n = (name or "").strip()
+    if not n:
+        return False
+    # Strict allowlist when audit/read-only is active (YOLO cannot expand this).
+    if cons.intersection({"audit_only", "read_only", "no_code_change", "no_writes"}):
+        if n in AUDIT_ONLY_ALLOWLIST:
+            return True
+        # MCP read-ish names only
+        if n.startswith("mcp__") and not _MCP_WRITE_RE.search(n):
+            # still block filesystem write MCP even if regex misses
+            if any(x in n.lower() for x in ("write", "delete", "move", "create")):
+                return False
+            return "read" in n.lower() or "list" in n.lower() or "get" in n.lower()
+        return False
+    if "no_send" in cons and n in ("send_file", "send_email", "email_send"):
+        return False
+    if _is_write_execute_tool(n) and cons.intersection(AUDIT_ONLY_CONSTRAINTS):
+        return False
+    return True
+
+
 def filter_tools_for_constraints(
     tool_definitions: list[dict[str, Any]] | None,
     hard_constraints: list[str] | None,
 ) -> list[dict[str, Any]]:
-    """Omit write/execute tools when audit_only / read_only is active."""
+    """Filter tool schemas under hard_constraints (strict allowlist for audit_only)."""
     tools = list(tool_definitions or [])
     if not tools:
         return tools
@@ -832,21 +1095,16 @@ def filter_tools_for_constraints(
     dropped: list[str] = []
     for td in tools:
         name = _tool_name_from_def(td)
-        drop = False
-        if cons.intersection({"audit_only", "read_only", "no_code_change", "no_writes"}):
-            if _is_write_execute_tool(name):
-                drop = True
-        if "no_send" in cons and name in ("send_file", "send_email", "email_send"):
-            drop = True
-        if drop:
-            dropped.append(name or "?")
-        else:
+        if is_tool_allowed_under_constraints(name, list(cons)):
             filtered.append(td)
+        else:
+            dropped.append(name or "?")
     if dropped:
         logger.info(
-            "[turn_input] Structural tool filter removed %d tool(s) under constraints=%s: %s",
+            "[turn_input] Allowlist filter removed %d tool(s) under constraints=%s: kept=%s dropped=%s",
             len(dropped),
             sorted(cons),
+            [_tool_name_from_def(t) for t in filtered][:20],
             dropped[:20],
         )
     return filtered

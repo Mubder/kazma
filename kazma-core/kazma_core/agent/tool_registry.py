@@ -861,6 +861,16 @@ class LocalToolRegistry:
         ) -> str:
             import re
 
+            # Topic-shift / audit quarantine: block broad documents/ gold corpus
+            try:
+                from kazma_core.agent.turn_input import filter_file_search_path
+
+                qerr = filter_file_search_path(path)
+                if qerr:
+                    return qerr
+            except Exception:
+                pass
+
             root = Path(path).expanduser().resolve()
             if not root.exists():
                 return f"Error: Path not found: {path}"
@@ -3034,6 +3044,30 @@ class LocalToolRegistry:
             )
         except Exception as e:
             logger.error("Failed to register agent skills tools: %s", e, exc_info=True)
+
+        # Typed findings scratchpad — survives deterministic context trim
+        try:
+            from kazma_core.agent.turn_input import apply_scratchpad_write
+
+            async def update_scratchpad(key: str, finding: str) -> str:
+                """Save a durable finding for this turn (survives history trim)."""
+                return apply_scratchpad_write(key, finding)
+
+            self.register_function(
+                "update_scratchpad",
+                update_scratchpad,
+                description=(
+                    "Save a durable intermediate finding/conclusion for THIS turn into the "
+                    "typed scratchpad (key → finding). Scratchpad entries are re-injected "
+                    "into the system working-memory block every iteration and SURVIVE "
+                    "deterministic context trim (unlike raw tool output). "
+                    "Use for audit facts, bidi counts, root-cause notes. "
+                    "Args: key (short label), finding (text ≤4000 chars)."
+                ),
+                category="memory",
+            )
+        except Exception as e:
+            logger.error("Failed to register update_scratchpad: %s", e, exc_info=True)
 
         # Load and register Top 10 Native Skills
         try:

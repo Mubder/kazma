@@ -945,15 +945,44 @@ async def supervisor_node(
         WORKING_MEMORY_MARKER,
     )
 
+    from kazma_core.agent.turn_input import (
+        should_suppress_memory_recall,
+        should_quarantine_documents_search,
+        set_active_turn_context,
+        reset_active_turn_context,
+        bind_scratchpad_thread,
+        reset_scratchpad_thread,
+        drain_scratchpad_writes,
+    )
+
+    # Merge any tool-side scratchpad writes from the previous tool_worker hop.
+    _scratch = dict(state.get("scratchpad") or {})
+    try:
+        _delta = drain_scratchpad_writes(str(state.get("thread_id") or ""))
+        if _delta:
+            _scratch.update(_delta)
+    except Exception:
+        pass
+
     working_memory_patch: dict[str, Any] = {}
     if iteration == 0:
-        _goal = (last_user_content or extract_latest_user_text(messages) or "").strip()
-        _atts = extract_active_attachments(messages, user_text=_goal)
-        _constraints = parse_hard_constraints(_goal)
+        # Prefer transport-pinned fields when already set on input_state.
+        _goal = str(state.get("active_goal") or "").strip()
+        if not _goal:
+            _goal = (last_user_content or extract_latest_user_text(messages) or "").strip()
+        _atts = list(state.get("active_attachments") or [])
+        if not _atts:
+            _atts = extract_active_attachments(messages, user_text=_goal)
+        _constraints = list(state.get("hard_constraints") or [])
+        if not _constraints:
+            _constraints = parse_hard_constraints(_goal)
+        if state.get("scratchpad"):
+            _scratch = dict(state.get("scratchpad") or {})
         working_memory_patch = {
             "active_goal": _goal[:4000],
             "active_attachments": _atts,
             "hard_constraints": _constraints,
+            "scratchpad": _scratch,
         }
         if _constraints:
             logger.info(
@@ -967,6 +996,7 @@ async def supervisor_node(
             "active_goal": str(state.get("active_goal") or ""),
             "active_attachments": list(state.get("active_attachments") or []),
             "hard_constraints": list(state.get("hard_constraints") or []),
+            "scratchpad": _scratch,
         }
         # If iter>0 but goal empty (old checkpoint), backfill from messages once.
         if not working_memory_patch["active_goal"] and last_user_content:
@@ -983,11 +1013,36 @@ async def supervisor_node(
     # Merge working memory into intent_patch so every return path persists it.
     intent_patch = {**working_memory_patch, **intent_patch}
 
+    _intent_for_anchor = str(
+        intent_patch.get("intent_mode") or state.get("intent_mode") or ""
+    )
+    _suppress_recall = should_suppress_memory_recall(
+        intent_mode=_intent_for_anchor,
+        hard_constraints=list(intent_patch.get("hard_constraints") or []),
+    )
+    _quarantine_docs = should_quarantine_documents_search(
+        intent_mode=_intent_for_anchor,
+        hard_constraints=list(intent_patch.get("hard_constraints") or []),
+        active_attachments=list(intent_patch.get("active_attachments") or []),
+    )
+
+    # Bind tool-side ContextVars for this supervisor hop (file_search quarantine, etc.)
+    _turn_tok = set_active_turn_context(
+        active_goal=str(intent_patch.get("active_goal") or ""),
+        active_attachments=list(intent_patch.get("active_attachments") or []),
+        hard_constraints=list(intent_patch.get("hard_constraints") or []),
+        intent_mode=_intent_for_anchor,
+        suppress_memory_recall=_suppress_recall,
+        quarantine_documents_search=_quarantine_docs,
+    )
+    _sp_tok = bind_scratchpad_thread(str(state.get("thread_id") or ""))
+
     _wm_block = format_working_memory_anchor(
         active_goal=str(intent_patch.get("active_goal") or ""),
         active_attachments=list(intent_patch.get("active_attachments") or []),
         hard_constraints=list(intent_patch.get("hard_constraints") or []),
-        intent_mode=str(intent_patch.get("intent_mode") or state.get("intent_mode") or ""),
+        intent_mode=_intent_for_anchor,
+        scratchpad=dict(intent_patch.get("scratchpad") or {}),
     )
     # Replace any prior working-memory system message, then pin at index 0/1.
     messages = [
@@ -1039,8 +1094,22 @@ async def supervisor_node(
     except Exception:
         pass
 
-    if _per_turn_on and iteration == 0 and last_user_content:
+    if _suppress_recall and iteration == 0:
+        logger.info(
+            "[Supervisor] V2 recall suppressed (intent=%s constraints=%s)",
+            _intent_for_anchor,
+            list(intent_patch.get("hard_constraints") or []),
+        )
+
+    if (
+        _per_turn_on
+        and iteration == 0
+        and last_user_content
+        and not _suppress_recall
+    ):
         # ── V2 cognitive recall (single memory stack) ─────────────────
+        # Suppressed on topic-shift / audit_only so prior radiology/ZCode
+        # beliefs cannot hijack the active attachment turn.
         # When memory.v2.use_new_stack is False, skip injection entirely
         # (V1 RRF was removed — there is no legacy rollback path).
         _use_v2 = False
@@ -1817,30 +1886,54 @@ async def tool_worker_node(
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
 
     # ── Structural hard_constraints gate (defense in depth) ────────
-    # Schema filtering at supervisor is primary; this blocks any write/exec
-    # tool the model still emits under audit_only / read_only.
+    # Schema allowlist at supervisor is primary; YOLO cannot expand it —
+    # any non-allowlisted tool is blocked here too.
     constraint_blocked_results: list[ToolResult] = []
-    _hc = {str(c).lower() for c in (state.get("hard_constraints") or []) if c}
-    if _hc.intersection({"audit_only", "read_only", "no_code_change", "no_writes", "no_send"}):
+    _hc_list = list(state.get("hard_constraints") or [])
+    try:
+        from kazma_core.agent.turn_input import (
+            is_tool_allowed_under_constraints,
+            set_active_turn_context,
+            reset_active_turn_context,
+            bind_scratchpad_thread,
+            reset_scratchpad_thread,
+            drain_scratchpad_writes,
+            should_quarantine_documents_search,
+        )
+
+        _turn_tok_tw = set_active_turn_context(
+            active_goal=str(state.get("active_goal") or ""),
+            active_attachments=list(state.get("active_attachments") or []),
+            hard_constraints=_hc_list,
+            intent_mode=str(state.get("intent_mode") or ""),
+            quarantine_documents_search=should_quarantine_documents_search(
+                intent_mode=str(state.get("intent_mode") or ""),
+                hard_constraints=_hc_list,
+                active_attachments=list(state.get("active_attachments") or []),
+            ),
+        )
+        _sp_tok_tw = bind_scratchpad_thread(str(state.get("thread_id") or ""))
+    except Exception:
+        _turn_tok_tw = None
+        _sp_tok_tw = None
+        logger.debug("[ToolWorker] turn context bind skipped", exc_info=True)
+
+    if _hc_list:
         try:
-            from kazma_core.agent.turn_input import _is_write_execute_tool
+            from kazma_core.agent.turn_input import is_tool_allowed_under_constraints
 
             allowed: list[PendingToolCall] = []
             for tc in pending:
                 name = str(tc.get("name") or "")
-                ban = _is_write_execute_tool(name)
-                if "no_send" in _hc and name in ("send_file", "send_email", "email_send"):
-                    ban = True
-                if ban:
+                if not is_tool_allowed_under_constraints(name, _hc_list):
                     constraint_blocked_results.append(
                         ToolResult(
                             tool_call_id=tc["id"],
                             name=name,
                             content=(
-                                f"BLOCKED by hard_constraints {sorted(_hc)}: "
-                                f"tool '{name}' is not allowed this turn "
-                                "(audit_only / read_only / no_writes). "
-                                "Provide an audit answer without mutating state."
+                                f"BLOCKED by hard_constraints {_hc_list}: "
+                                f"tool '{name}' is not on the audit_only allowlist. "
+                                "YOLO cannot override this. Use read/inspect tools only."
                             ),
                             is_error=True,
                             duration_ms=0.0,
@@ -1851,7 +1944,7 @@ async def tool_worker_node(
             if constraint_blocked_results:
                 logger.warning(
                     "[ToolWorker] hard_constraints=%s blocked tools: %s",
-                    sorted(_hc),
+                    _hc_list,
                     [r.get("name") for r in constraint_blocked_results],
                 )
             pending = allowed
@@ -1871,12 +1964,24 @@ async def tool_worker_node(
         cumulative = dict(state.get("tool_results", {}))
         for tr in constraint_blocked_results:
             cumulative[tr["tool_call_id"]] = tr
+        try:
+            if _turn_tok_tw is not None:
+                from kazma_core.agent.turn_input import reset_active_turn_context
+
+                reset_active_turn_context(_turn_tok_tw)
+            if _sp_tok_tw is not None:
+                from kazma_core.agent.turn_input import reset_scratchpad_thread
+
+                reset_scratchpad_thread(_sp_tok_tw)
+        except Exception:
+            pass
         return {
             "messages": messages + tool_messages,
             "tool_calls_pending": [],
             "tool_calls_done": list(constraint_blocked_results),
             "tool_results": cumulative,
             "next_node": NodeName.SUPERVISOR,
+            "scratchpad": dict(state.get("scratchpad") or {}),
         }
 
     if not pending:
@@ -2303,6 +2408,15 @@ async def tool_worker_node(
             out["_research_depth_nudged"] = True
         if state.get("_research_pipeline_nudged"):
             out["_research_pipeline_nudged"] = True
+        # Merge typed scratchpad writes from update_scratchpad this hop
+        try:
+            from kazma_core.agent.turn_input import drain_scratchpad_writes
+
+            _sp = dict(state.get("scratchpad") or {})
+            _sp.update(drain_scratchpad_writes(str(state.get("thread_id") or "")))
+            out["scratchpad"] = _sp
+        except Exception:
+            pass
         return out
     finally:
         # Always restore prior ContextVar values, even if a tool raised or
@@ -2320,6 +2434,17 @@ async def tool_worker_node(
         reset_current_tenant_id(_state_tenant_token)
         if _delivery_token is not None:
             reset_current_delivery_target(_delivery_token)
+        try:
+            if _turn_tok_tw is not None:
+                from kazma_core.agent.turn_input import reset_active_turn_context
+
+                reset_active_turn_context(_turn_tok_tw)
+            if _sp_tok_tw is not None:
+                from kazma_core.agent.turn_input import reset_scratchpad_thread
+
+                reset_scratchpad_thread(_sp_tok_tw)
+        except Exception:
+            pass
 
 
 async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:

@@ -194,6 +194,9 @@ class SupervisorState(TypedDict, total=False):
     hard_constraints: list[str]
     """Structural turn constraints (e.g. audit_only, no_code_change, read_only)."""
 
+    scratchpad: dict[str, str]
+    """Typed findings scratchpad — survives deterministic trim; updated via update_scratchpad."""
+
     # ── Turn failure ────────────────────────────────────────────────
     turn_failed: bool
     """Set when the supervisor's LLM call failed (after retries) and could not produce a real answer.
@@ -294,6 +297,7 @@ def initial_supervisor_state(
         active_goal="",
         active_attachments=[],
         hard_constraints=[],
+        scratchpad={},
         force_synthesis=False,
         turn_failed=False,
         error_message="",
