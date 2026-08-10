@@ -205,10 +205,12 @@ exclude_commit_patterns = [
     "Merge branch.*",
 ]
 
-# Light 0.x policy: feat is NOT a minor jump.
-# 0.12.0 → 0.12.1 → 0.12.2 (not 0.13.0 every feature).
-# Minor only via manual Release workflow force_level=minor.
-# Major stays empty until deliberate 1.0.0.
+# Legacy semantic-release config (manual Release workflow now uses
+# scripts/light_version_bump.py). Kept so `semantic-release version --print`
+# still understands light patch policy if someone runs it locally.
+# Real SoT: docs/VERSIONING.md + scripts/light_version_bump.py
+#   auto: patch only → 0.12.N+gSHA
+#   minor/major: manual + CONFIRM only
 [tool.semantic_release.commit_parser_options]
 allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "test", "ci", "chore", "build", "style"]
 minor_tags = []
@@ -219,8 +221,9 @@ major_tags = []
 type = "github"
 token = { env = "GH_TOKEN" }
 
-# Commitizen (auto bump on main): same light policy as semantic-release.
-# cz_customize so feat → PATCH (cz_conventional_commits maps feat → MINOR).
+# Commitizen is NOT used by CI anymore (too easy to minor-bump).
+# Prefer: python scripts/light_version_bump.py
+# Kept for optional local `cz` habits with patch-only map.
 [tool.commitizen]
 name = "cz_customize"
 tag_format = "v$version"
@@ -235,12 +238,10 @@ major_version_zero = true
 bump_message = "chore(release): version $current_version → $new_version [skip ci]"
 
 [tool.commitizen.customize]
-# Conventional-commit prefix → SemVer level under 0.x (light bumps).
-# BREAKING / feat! → MINOR (biggest auto step while major stays 0).
-# feat / fix / perf / refactor → PATCH only.
 message_template = "{{change_type}}{% if scope %}({{scope}}){% endif %}: {{message}}"
 schema_pattern = "(?s)(build|ci|docs|feat|fix|perf|refactor|style|test|chore|revert|break)(\\([\\w\\-\\.]+\\))?(!)?:\\s.+"
 bump_pattern = "^(break|BREAKING CHANGE|feat|fix|perf|refactor)(\\([\\w\\-\\.]+\\))?(!)?"
-bump_map = {"break" = "MINOR", "BREAKING CHANGE" = "MINOR", "feat" = "PATCH", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
+# Everything → PATCH. Middle digit only via light_version_bump --level minor --confirm CONFIRM
+bump_map = {"break" = "PATCH", "BREAKING CHANGE" = "PATCH", "feat" = "PATCH", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
 change_type_order = ["BREAKING CHANGE", "feat", "fix", "perf", "refactor", "docs", "chore"]
 

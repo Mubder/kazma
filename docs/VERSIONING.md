@@ -1,102 +1,77 @@
 # Versioning & Releases
 
-Kazma uses **light automatic versioning on the 0.x line**. Day-to-day work
-should feel like small steps (`0.12.0` → `0.12.1` → `0.12.2`), **not** a hard
-minor jump on every feature (`0.10` → `0.11` → `0.12`).
+Kazma uses **light 0.x versioning** with an embedded **git commit id**.
 
-Four-part schemes like `0.10.1.0011` are **not** used (PEP 440 / PyPI prefer
-`X.Y.Z`). The same “light” intent is expressed as a **rising patch**:
-`0.12.11`, `0.12.12`, …
+## Format
 
-## Current product line
+| Piece | Example | Meaning |
+|-------|---------|---------|
+| Public SemVer | `0.12.1` | What tags use (`v0.12.1`) |
+| Full product version | `0.12.1+g92c55af` | Stored in `pyproject.toml` + `kazma.yaml` |
+| `+g……` | PEP 440 **local** segment | Short git SHA (`g` = git). Portable “commit code”. |
 
-| Version | Notes |
+Why not `0.12.1.abs1234` / four dots? That is **not** PEP 440 and breaks
+packaging / installers. `+g92c55af` is the standard way to attach a commit id.
+
+## What moves automatically
+
+| Digit | Example | Auto on push to `main`? | How to change |
+|-------|---------|-------------------------|---------------|
+| **patch** (last) | `0.12.**1**` | **Yes** — every light release | `version-bump.yml` / Release `patch` |
+| **minor** (middle) | `0.**12**.1` | **Never** | Manual **Release** workflow + type **`CONFIRM`** |
+| **major** (first) | `**0**.12.1` | **Never** | Manual **Release** + **`CONFIRM`** (real 1.0.0) |
+
+This is why we no longer leap `0.6 → 0.10 → 0.11 → 0.12` in one day from
+ordinary `feat:` merges. The middle digit is a **milestone**, not a feature
+counter.
+
+## Bump policy
+
+| Trigger | Result |
 |---------|--------|
-| **0.12.x** | Active line (`pyproject.toml` is source of truth) |
-| 0.10.x – 0.11.x | Recent line; minors jumped too hard when `feat` mapped to MINOR |
-| 0.6.x tags | Older tags; may lag `pyproject` after dual-tool history |
-| **1.0.0** | **Not** a real launch unless we ship it deliberately |
+| Push to `main` (feat/fix/…) | `0.12.N` → `0.12.N+1` **+ new `+gSHA`** |
+| Release workflow `patch` | Same light step |
+| Release workflow `minor` + `confirm=CONFIRM` | `0.12.x` → `0.13.0+g…` |
+| Release workflow `major` + `confirm=CONFIRM` | `0.x` → `1.0.0+g…` |
+| Release minor/major **without** `CONFIRM` | **Refused** |
 
-## Bump policy (0.x light)
-
-| Commit type | Auto bump | Example |
-|-------------|-----------|---------|
-| `feat:` | **patch** | `0.12.0` → `0.12.1` |
-| `fix:` / `perf:` / `refactor:` | **patch** | `0.12.1` → `0.12.2` |
-| `feat!:` / `BREAKING CHANGE:` / `break:` | **minor** | `0.12.5` → `0.13.0` (largest auto step while major stays 0) |
-| `chore:` / `docs:` / `test:` / `ci:` | no release bump | tooling only |
-| Manual **major** | only via Release workflow | deliberate `1.0.0` |
-
-**Invariant:** under 0.x, **`feat` never jumps the middle digit**. That was the
-bug that produced 0.10 → 0.11 → 0.12 on ordinary feature merges.
-
-## Config vs updates (no dirty-yaml hell)
-
-| Layer | Where | Git? | Day-to-day edits? |
-|-------|--------|------|-------------------|
-| Shipped defaults | `kazma.yaml` | **tracked** | **No** — product defaults only |
-| Local file overrides | `kazma.local.yaml` | **ignored** | Optional (ports, flags) |
-| Runtime / UI | `kazma-data/settings.db` | ignored | **Yes** (Settings, `/config`) |
-
-**Rule for operators:** never put machine secrets or ports only in tracked `kazma.yaml`.
-Use the Web Settings UI, or copy `kazma.local.yaml.example` → `kazma.local.yaml`.
-
-## How automation works
-
-| Tool | When | Role |
-|------|------|------|
-| **Commitizen** (`version-bump.yml`) | Push to `main` | Auto tag + bump using **light** `cz_customize` map |
-| **python-semantic-release** (`release.yml`) | Manual workflow only | Controlled `patch` / `minor` / `major` |
-
-Both tools share the same intent: **patch by default**, minor only for
-breakers or an intentional manual minor.
-
+Script SoT: `scripts/light_version_bump.py`  
 Workflows:
 
-- `.github/workflows/version-bump.yml` — light auto bump on main  
-- `.github/workflows/release.yml` — manual Release (default **patch**)
+- `.github/workflows/version-bump.yml` — auto **patch only**
+- `.github/workflows/release.yml` — manual; minor/major need confirmation
 
-## Commit message format
+## Commit messages
+
+Still use conventional commits for humans/changelog:
 
 ```
-feat(skills): install Agent Skills without Node
-
-fix(gateway): keep Telegram typing alive during agent runs
-
-docs: explain versioning policy
+feat(skills): …
+fix(gateway): …
 ```
 
-Scope in parentheses is optional but recommended.
+They no longer drive a **minor** jump. Auto release is always **patch**.
 
 ## Source of truth
 
 | File | Role |
 |------|------|
-| `pyproject.toml` → `project.version` | **Canonical** package version |
-| `kazma.yaml` → `agent.version` | Runtime banner (kept in sync by bump tools) |
-| `CHANGELOG.md` | Human-readable history |
-| Git tags `v*` | Immutable release markers |
-
-## Manual override
-
-Actions → **Release** → Run workflow → `force_level`:
-
-- **patch** (default) — light step  
-- **minor** — notable 0.x milestone  
-- **major** — only when shipping a real 1.0.0+  
+| `pyproject.toml` → `project.version` | Full version incl. `+gSHA` |
+| `kazma.yaml` → `agent.version` | Same full string (banner) |
+| Git tag `v0.12.1` | Public immutable marker (no `+`) |
+| `CHANGELOG.md` | Human history |
 
 ## Local dry-run
 
 ```bash
-pip install commitizen python-semantic-release==9.21.1
-cz bump --dry-run
-semantic-release version --print
+python scripts/light_version_bump.py --dry-run
+python scripts/light_version_bump.py --level patch --write   # local only
+python scripts/light_version_bump.py --level minor --confirm CONFIRM --dry-run
 ```
 
 ## What not to do
 
-- Do **not** hand-edit version numbers for routine product releases  
-- Do **not** map `feat` back to **minor** in config (reintroduces hard jumps)  
-- Do **not** set `allow_zero_version = false` (forced a fake 1.0.0 before)  
-- Use `feat` / `fix` when the change should ship a **patch** bump  
-- Use `feat!` / `BREAKING CHANGE` only when a real compatibility break needs a **minor** under 0.x  
+- Do **not** map `feat` back to minor in Commitizen / semantic-release  
+- Do **not** hand-edit versions for routine releases  
+- Do **not** bump the middle digit without Release + `CONFIRM`  
+- Do **not** set `allow_zero_version = false` (forced a fake 1.0.0 once)  

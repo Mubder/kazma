@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Version + commit id; minor only with CONFIRM (2026-08-10)
+
+- Full version embeds short git SHA: `0.12.1+g92c55af` (PEP 440 local).
+- Auto bump is **patch only**; middle digit never auto-moves.
+- Manual **Release** workflow: minor/major require typing `CONFIRM`.
+- SoT script: `scripts/light_version_bump.py` (replaces Commitizen on CI).
+
 ## Unreleased — Light 0.x versioning (feat → patch) (2026-08-10)
 
 Stop hard minor jumps on every feature (`0.10 → 0.11 → 0.12`).

@@ -1,10 +1,11 @@
-# Versioning is MANUAL until the product deliberately ships 1.0.0.
+# Manual release — only place the middle digit ("12") or major can move.
 #
-# Trigger: Actions → Release → Run workflow
-# Optional force_level: patch | minor | major
+# * patch  — light (default); no confirmation
+# * minor  — requires typing CONFIRM (e.g. 0.12.x → 0.13.0)
+# * major  — requires typing CONFIRM (deliberate 1.0.0+)
 #
-# Do NOT auto-run on every push — bad config previously produced
-# fake 0.1/0.2 and accidental 1.0.0 tags (see docs/VERSIONING.md).
+# Always embeds +gSHORTSHA in pyproject / kazma.yaml (PEP 440 local).
+# See docs/VERSIONING.md.
 
 name: Release
 
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       force_level:
-        description: "Bump level (patch|minor|major). Required for a controlled release."
+        description: "Bump level. minor/major need confirm=CONFIRM."
         required: true
         default: "patch"
         type: choice
@@ -20,6 +21,11 @@ on:
           - patch
           - minor
           - major
+      confirm:
+        description: 'Type CONFIRM to allow minor or major (middle/major digit). Leave empty for patch.'
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -27,13 +33,14 @@ permissions:
 
 jobs:
   release:
-    name: Semantic release (manual)
+    name: Light / confirmed release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
@@ -41,35 +48,64 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install release tooling
-        run: |
-          pip install --upgrade pip
-          pip install python-semantic-release==9.21.1
-
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run semantic-release
+      - name: Guard minor/major confirmation
+        env:
+          LEVEL: ${{ github.event.inputs.force_level }}
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [[ "$LEVEL" == "minor" || "$LEVEL" == "major" ]]; then
+            if [[ "$CONFIRM" != "CONFIRM" ]]; then
+              echo "::error::level=$LEVEL refused — type confirm=CONFIRM to move the middle/major digit"
+              exit 1
+            fi
+            echo "Confirmed $LEVEL bump"
+          else
+            echo "Patch-level light release (no confirmation required)"
+          fi
+
+      - name: Bump version
+        env:
+          LEVEL: ${{ github.event.inputs.force_level }}
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [[ "$LEVEL" == "minor" || "$LEVEL" == "major" ]]; then
+            EXTRA=(--confirm CONFIRM)
+          fi
+          python scripts/light_version_bump.py \
+            --level "$LEVEL" \
+            "${EXTRA[@]}" \
+            --write \
+            --commit \
+            --tag
+
+      - name: Push commit and tags
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main --follow-tags
+
+      - name: Create GitHub Release (best-effort)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          LEVEL="${{ github.event.inputs.force_level }}"
-          echo "Manual release bump: $LEVEL"
-          semantic-release version --"$LEVEL"
-          # Sync kazma.yaml agent.version with pyproject
-          python - <<'PY'
-          import re, pathlib, tomllib
-          ver = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
-          p = pathlib.Path("kazma.yaml")
-          text = p.read_text(encoding="utf-8")
-          new, n = re.subn(r"(?m)^(  version:\s*).+$", rf"\g<1>{ver}", text, count=1)
-          if n:
-              p.write_text(new, encoding="utf-8")
-              print(f"synced kazma.yaml agent.version -> {ver}")
+          VER=$(python - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("pyproject.toml").read_text(encoding="utf-8")
+          m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+          print(m.group(1) if m else "")
           PY
-          git add kazma.yaml pyproject.toml CHANGELOG.md || true
-          git diff --cached --quiet || git commit -m "chore(release): sync yaml after $LEVEL [skip ci]" || true
-          semantic-release publish || true
+          )
+          PUBLIC="${VER%%+*}"
+          TAG="v${PUBLIC}"
+          NOTES="Kazma **${VER}** (public tag ${TAG})"
+          gh release create "$TAG" --title "$TAG" --notes "$NOTES" || \
+            gh release edit "$TAG" --notes "$NOTES" || true
