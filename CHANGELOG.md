@@ -1300,53 +1300,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
   in-flight (was silently orphaning the polling timer).
 - **Tests**: 55 KB tests + 20 MCP JS tests, all passing.
 
-## Unreleased — Knowledge Library + Research system + chat→swarm bridge + fixes (2026-07-25)
+## v0.8.0 (2026-08-10)
 
-### Knowledge Library (RAG over ingested docs)
-- **New subsystem**: point Kazma at a documentation root (e.g. the Meta
-  WhatsApp Cloud API) and it ingests the **whole doc tree** once — then the
-  agent reasons over the corpus and **cites sources** (URL + section header)
-  when you ask questions. RAG over a curated, updatable corpus; not live
-  scraping; not fine-tuning.
-- **Full-tree ingestion** (`kazma-core/kazma_core/stores/knowledge_ingest.py`):
-  sitemap-first discovery (robots.txt → `sitemap.xml`/`sitemap_index.xml`)
-  with path-prefix scoping (`/docs/whatsapp/overview` → `/docs/whatsapp/`),
-  BFS+Playwright fallback for SPA nav, and **Playwright full-DOM extraction
-  for tabbed/JS pages** so per-tab content isn't lost. Caps:
-  `KAZMA_KB_MAX_PAGES` (200/1000), `KAZMA_KB_MAX_DEPTH` (10),
-  `KAZMA_KB_DELAY_MS` (300), `KAZMA_KB_SCOPE_MODE` (`prefix` default).
-- **Hierarchy-aware chunker** (`stores/knowledge_chunker.py`): pure-stdlib
-  (no LangChain dep — the off-the-shelf `RecursiveCharacterTextSplitter`
-  approach silently splits oversized code blocks, which we rejected).
-  Splits on `#`–`####` with section breadcrumbs; **fenced code blocks are
-  atomic** regardless of size; backfills `total_chunks` + `content_hash`.
-- **Per-library retrieval** (`stores/knowledge_index.py`): dedicated
-  ChromaDB collection `kazma_kb_<id>` + dedicated FTS5 table + SQLite source
-  of truth, RRF-blended (k=60). **Hard isolation from chat memory**
-  (`agent_memory`) — the shared `UnifiedMemoryAdapter` was the wrong host
-  (leaks into chat recall, doesn't filter FTS5 by metadata, collides on
-  bare content-hash UIDs). True cross-library RRF via `search_all`.
-- **Agent tool** `knowledge_search(query, library="", top_k=5)`: cited
-  hits; empty `library` → cross-library RRF.
-- **`/kb` slash commands** (Telegram/Discord/Slack): `list`, `add`
-  (single page, sync), `crawl` (whole tree, background), `refresh`,
-  `search`, `status`, `delete`.
-- **`/knowledge` web page** + `/api/kb/*` router: add library, ingest
-  (page/site) with live job polling, in-page test search, chunk browser,
-  refresh, delete. Sidebar nav link. Uses unified
-  `window.showToast`/`window.kazmaConfirm` (no native dialogs).
-- **Auto-inject (Phase 2, opt-in)**: per-library toggle folds top-k chunks
-  for the user's latest message into the system prompt at the 3 injection
-  sites (`agent_runner`, `sse_chat`, gateway `graph.py`) — **fenced as
-  untrusted data** via `format_untrusted_block` so adversarial doc content
-  can't smuggle instructions. Live kill switch `KAZMA_KB_AUTO_INJECT=0`;
-  tunable `KAZMA_KB_AUTO_INJECT_TOP_K` (default 3).
-- **Provenance**: each ingested page saved as raw markdown under
-  `research/kb/<library_id>/` for re-debugging.
-- **Tests**: 39 new (`test_knowledge_chunker/store/index/ingest.py`) —
-  code-fence atomicity, library isolation, dedup, sitemap parsing,
-  path-prefix scoping, auto-inject kill switch + opt-in gating.
-- **Docs**: `docs/docs/guide/knowledge-library.md`.
+### Feat
+
+- Document Intelligence Platform + Self-Healing Engine (Phases 1-10)
 
 ## v0.7.1 (2026-08-09)
 
