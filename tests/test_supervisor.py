@@ -58,7 +58,14 @@ class TestSupervisorState:
         assert NodeName.SUPERVISOR == "supervisor"
         assert NodeName.TOOL_WORKER == "tool_worker"
         assert NodeName.RESPOND == "respond"
-        assert NodeName.SUMMARIZE == "summarize"
+        # Mid-turn LLM summarize path removed (Explicit State + Deterministic Trim)
+        assert not hasattr(NodeName, "SUMMARIZE") or "SUMMARIZE" not in NodeName.__members__
+
+    def test_initial_state_has_working_memory_fields(self):
+        state = initial_supervisor_state()
+        assert state.get("active_goal") == ""
+        assert state.get("active_attachments") == []
+        assert state.get("hard_constraints") == []
 
     def test_partial_state_update(self):
         """LangGraph merges partial dicts — verify partial updates work."""

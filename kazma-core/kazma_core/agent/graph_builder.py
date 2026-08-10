@@ -3,37 +3,25 @@
 Graph topology
 ══════════════
 
-    ┌───────────────────┐    (over 80% token budget)
-    │ CHECK_SATURATION  │ ──────────────────────► ┌───────────┐
-    │  ← entry point    │                        │ SUMMARIZE │ ─┐
-    └────────┬──────────┘                        └───────────┘ │
-             │ (under budget)                                   │
-             ▼                                                  │
-    ┌──────────────┐     ┌────────────────┐                     │
-    │  SUPERVISOR  │────►│  TOOL_WORKER   │                     │
-    └──┬────────┬──┘     └───────┬────────┘                     │
-       │        │                │ (loop back)                  │
-       │        │          SUPERVISOR                            │
-       │        │                                              │
-       │        └────────────────────────┐                     │
-       ▼                                 ▼                     │
-    ┌──────────┐                 ┌──────────┐                   │
-    │ RESPOND  │                 │ (re-enter│ ◄─────────────────┘
-    └────┬─────┘                 │SUPERVISOR)│
-         │                       └──────────┘
-         ▼
-        END
+    START → SUPERVISOR ⇄ TOOL_WORKER
+                │
+                ▼
+             RESPOND → END
 
-CHECK_SATURATION is the entry point. When token usage exceeds 80% it
-routes to SUMMARIZE (compaction), then back to SUPERVISOR. Otherwise it
-goes straight to SUPERVISOR. The Supervisor decides TOOL_WORKER (tool
-calls) or RESPOND (final text). TOOL_WORKER always loops back to
-SUPERVISOR. RESPOND is terminal.
+Explicit State & Deterministic Pruning (no mid-turn LLM summarization):
+  * ``active_goal`` / ``active_attachments`` / ``hard_constraints`` are
+    parsed at iteration 0 and re-injected as a system Working Memory
+    anchor on **every** supervisor iteration.
+  * Oversized contexts are trimmed deterministically
+    (System Anchor + Turn-0 user + last N tool rounds) — never via an
+    LLM ``summarize_node``.
+  * ``hard_constraints`` (e.g. audit_only) structurally filter
+    write/execute tools from the schema for the whole turn.
 
 The Supervisor is the decision-maker.  On each iteration it:
-  1. Calls the LLM with the current messages + tool schemas.
-  2. If the LLM returns tool_calls → routes to TOOL_WORKER.
-  3. If context is ≥ 80% full → compacts inline and re-enters SUPERVISOR.
+  1. Injects Working Memory + applies deterministic trim if over budget.
+  2. Calls the LLM with messages + (possibly filtered) tool schemas.
+  3. If the LLM returns tool_calls → routes to TOOL_WORKER.
   4. If the LLM returns a final text response → routes to RESPOND.
   5. If max_iterations is hit → forced RESPOND.
 
@@ -76,11 +64,9 @@ from kazma_core.summarizer import _normalize_msg
 __all__ = [
     "TOOL_RESULT_MAX_CHARS",
     "build_supervisor_graph",
-    "check_saturation_node",
     "is_unusable_assistant_content",
     "respond_node",
     "sanitize_tool_chains",
-    "summarize_node",
     "supervisor_node",
     "tool_worker_node",
     "truncate_tool_result",
@@ -713,33 +699,24 @@ async def supervisor_node(
             ],
         }
 
-    # ── 80% context compaction check ───────────────────────────────
-    # On compaction, CONTINUE this supervisor call with the compacted
-    # messages instead of returning early. The old early-return routed to
-    # RESPOND (there is no supervisor self-edge), which ended the turn with
-    # no answer and replaced the checkpoint with just the summary — the
-    # "agent forgot everything and said nothing" bug.
-    state_for_check = {**state, "messages": messages}
-    compacted_state = await authority.check_and_enforce(state_for_check)
-    if compacted_state is not state_for_check:
-        logger.info("[Supervisor] Context compacted — continuing turn with compacted context")
-        messages = list(compacted_state.get("messages", []))
-        # Reset the tool circuit breaker on compaction. The breaker may have
-        # tripped from tool failures in the pre-compaction context (e.g. a
-        # 212-second file_search, or consecutive errors). After compaction
-        # the context is fresh — stale breaker state would bypass ALL tool
-        # execution for the rest of the turn, making the agent unable to
-        # use tools even though the context that caused the failures is gone.
-        # This is the root cause of the "Circuit breaker is active! Bypassing
-        # all execution" after /compact — the breaker persisted across the
-        # compaction boundary.
-        breaker_reset = {
-            **breaker_reset,
-            "needs_compaction": False,
-            "circuit_breaker_tripped": False,
-            "consecutive_tool_failures": 0,
-        }
-        logger.info("[Supervisor] Tool circuit breaker reset after compaction")
+    # Mid-turn LLM summarization removed. Oversized contexts are handled
+    # later via deterministic trim_messages (after Working Memory is set).
+    # ContextAuthority may still run for observability / needs_compaction
+    # flag, but we never replace messages with an LLM summary mid-loop.
+    try:
+        state_for_check = {**state, "messages": messages}
+        if authority is not None and hasattr(authority, "counter"):
+            if authority.counter.should_compact(messages) or state.get("needs_compaction"):
+                breaker_reset = {
+                    **breaker_reset,
+                    "needs_compaction": True,
+                }
+                logger.info(
+                    "[Supervisor] Context over budget — will apply deterministic trim "
+                    "(no LLM summarize)"
+                )
+    except Exception:
+        logger.debug("[Supervisor] budget probe skipped", exc_info=True)
 
     # ── Ensure system prompt and personality are present ───────────
     # The personality prompt is injected at position 0, replacing any
@@ -954,6 +931,81 @@ async def supervisor_node(
     except Exception:
         logger.debug("[Supervisor] continuation/store intent expand skipped", exc_info=True)
         intent_patch = {}
+
+    # ── Explicit Working Memory (immutable turn anchors) ───────────
+    # Parse once at iteration 0; re-inject the system anchor every iteration.
+    from kazma_core.agent.turn_input import (
+        extract_active_attachments,
+        extract_latest_user_text,
+        filter_tools_for_constraints,
+        format_working_memory_anchor,
+        parse_hard_constraints,
+        resolve_trim_token_budget,
+        trim_messages_deterministic,
+        WORKING_MEMORY_MARKER,
+    )
+
+    working_memory_patch: dict[str, Any] = {}
+    if iteration == 0:
+        _goal = (last_user_content or extract_latest_user_text(messages) or "").strip()
+        _atts = extract_active_attachments(messages, user_text=_goal)
+        _constraints = parse_hard_constraints(_goal)
+        working_memory_patch = {
+            "active_goal": _goal[:4000],
+            "active_attachments": _atts,
+            "hard_constraints": _constraints,
+        }
+        if _constraints:
+            logger.info(
+                "[Supervisor] hard_constraints=%s attachments=%d goal_chars=%d",
+                _constraints,
+                len(_atts),
+                len(_goal),
+            )
+    else:
+        working_memory_patch = {
+            "active_goal": str(state.get("active_goal") or ""),
+            "active_attachments": list(state.get("active_attachments") or []),
+            "hard_constraints": list(state.get("hard_constraints") or []),
+        }
+        # If iter>0 but goal empty (old checkpoint), backfill from messages once.
+        if not working_memory_patch["active_goal"] and last_user_content:
+            working_memory_patch["active_goal"] = last_user_content.strip()[:4000]
+            if not working_memory_patch["hard_constraints"]:
+                working_memory_patch["hard_constraints"] = parse_hard_constraints(
+                    last_user_content
+                )
+            if not working_memory_patch["active_attachments"]:
+                working_memory_patch["active_attachments"] = extract_active_attachments(
+                    messages, user_text=last_user_content
+                )
+
+    # Merge working memory into intent_patch so every return path persists it.
+    intent_patch = {**working_memory_patch, **intent_patch}
+
+    _wm_block = format_working_memory_anchor(
+        active_goal=str(intent_patch.get("active_goal") or ""),
+        active_attachments=list(intent_patch.get("active_attachments") or []),
+        hard_constraints=list(intent_patch.get("hard_constraints") or []),
+        intent_mode=str(intent_patch.get("intent_mode") or state.get("intent_mode") or ""),
+    )
+    # Replace any prior working-memory system message, then pin at index 0/1.
+    messages = [
+        m
+        for m in messages
+        if not (
+            m.get("role") == "system"
+            and WORKING_MEMORY_MARKER in str(m.get("content") or "")
+        )
+    ]
+    _wm_ins = 1 if messages and messages[0].get("role") == "system" else 0
+    messages.insert(_wm_ins, {"role": "system", "content": _wm_block})
+
+    # Structural tool filter for the whole turn (audit_only / read_only / …).
+    effective_tool_definitions = filter_tools_for_constraints(
+        tool_definitions,
+        list(intent_patch.get("hard_constraints") or []),
+    )
 
     # Classify and route to optimal model if router is available
     routed_model = None
@@ -1201,10 +1253,38 @@ async def supervisor_node(
     from kazma_core.summarizer import prune_tool_outputs
     messages = prune_tool_outputs(messages, max_tokens=24000)
 
+    # Deterministic trim (PATH B replacement): never LLM-summarize mid-loop.
+    _lm_for_trim = state.get("last_model") or routed_model
+    _trim_budget = resolve_trim_token_budget(
+        last_model=_lm_for_trim if isinstance(_lm_for_trim, str) else None
+    )
+    _before_trim = len(messages)
+    messages = trim_messages_deterministic(
+        messages,
+        max_tokens=_trim_budget,
+        keep_last_tool_rounds=8,
+        active_goal=str(intent_patch.get("active_goal") or ""),
+        working_memory_block=_wm_block,
+    )
+    messages = sanitize_tool_chains(messages)
+    if len(messages) < _before_trim:
+        breaker_reset = {
+            **breaker_reset,
+            "needs_compaction": False,
+            "circuit_breaker_tripped": False,
+            "consecutive_tool_failures": 0,
+        }
+        logger.info(
+            "[Supervisor] Deterministic trim applied: %d → %d messages (budget=%d)",
+            _before_trim,
+            len(messages),
+            _trim_budget,
+        )
+
     # Soft force-plan: on the first supervisor hop of a tool-capable turn,
     # remind the model to open with a ```plan fence so the UI workbench
     # can pin a checklist (providers rarely expose true chain-of-thought).
-    if iteration == 0 and tool_definitions:
+    if iteration == 0 and effective_tool_definitions:
         _plan_nudge = (
             "UI WORKBENCH: If you will call any tools this turn, put a short "
             "```plan fence (3–7 bullets) in your content field before or "
@@ -1217,7 +1297,7 @@ async def supervisor_node(
             messages.append({"role": "system", "content": _plan_nudge})
 
     # R4: soft-route deep research intent toward run_research_pipeline
-    if iteration == 0 and tool_definitions and last_user_content:
+    if iteration == 0 and effective_tool_definitions and last_user_content:
         try:
             from kazma_core.agent.research_policy import deep_research_route_hint
 
@@ -1263,7 +1343,7 @@ async def supervisor_node(
                 try:
                     return await llm.chat(
                         messages=messages,
-                        tools=tool_definitions if tool_definitions else None,
+                        tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
                     )
                 except retryable_exc as exc:
@@ -1360,7 +1440,7 @@ async def supervisor_node(
                     )
                     response = await client.chat(
                         messages=messages,
-                        tools=tool_definitions if tool_definitions else None,
+                        tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=fb_model,
                     )
                     logger.warning(
@@ -1736,6 +1816,73 @@ async def tool_worker_node(
 
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
 
+    # ── Structural hard_constraints gate (defense in depth) ────────
+    # Schema filtering at supervisor is primary; this blocks any write/exec
+    # tool the model still emits under audit_only / read_only.
+    constraint_blocked_results: list[ToolResult] = []
+    _hc = {str(c).lower() for c in (state.get("hard_constraints") or []) if c}
+    if _hc.intersection({"audit_only", "read_only", "no_code_change", "no_writes", "no_send"}):
+        try:
+            from kazma_core.agent.turn_input import _is_write_execute_tool
+
+            allowed: list[PendingToolCall] = []
+            for tc in pending:
+                name = str(tc.get("name") or "")
+                ban = _is_write_execute_tool(name)
+                if "no_send" in _hc and name in ("send_file", "send_email", "email_send"):
+                    ban = True
+                if ban:
+                    constraint_blocked_results.append(
+                        ToolResult(
+                            tool_call_id=tc["id"],
+                            name=name,
+                            content=(
+                                f"BLOCKED by hard_constraints {sorted(_hc)}: "
+                                f"tool '{name}' is not allowed this turn "
+                                "(audit_only / read_only / no_writes). "
+                                "Provide an audit answer without mutating state."
+                            ),
+                            is_error=True,
+                            duration_ms=0.0,
+                        )
+                    )
+                else:
+                    allowed.append(tc)
+            if constraint_blocked_results:
+                logger.warning(
+                    "[ToolWorker] hard_constraints=%s blocked tools: %s",
+                    sorted(_hc),
+                    [r.get("name") for r in constraint_blocked_results],
+                )
+            pending = allowed
+        except Exception:
+            logger.debug("[ToolWorker] constraint filter skipped", exc_info=True)
+
+    if not pending and constraint_blocked_results:
+        messages = [_normalize_msg(m) for m in state.get("messages", [])]
+        tool_messages = [
+            {
+                "role": "tool",
+                "tool_call_id": tr["tool_call_id"],
+                "content": tr["content"],
+            }
+            for tr in constraint_blocked_results
+        ]
+        cumulative = dict(state.get("tool_results", {}))
+        for tr in constraint_blocked_results:
+            cumulative[tr["tool_call_id"]] = tr
+        return {
+            "messages": messages + tool_messages,
+            "tool_calls_pending": [],
+            "tool_calls_done": list(constraint_blocked_results),
+            "tool_results": cumulative,
+            "next_node": NodeName.SUPERVISOR,
+        }
+
+    if not pending:
+        logger.warning("[ToolWorker] No pending tool calls after filters — routing back")
+        return {"next_node": NodeName.SUPERVISOR}
+
     # ── Bind session messages to the current async context ─────────
     # Tools such as export_session and context_info need access to the
     # current conversation messages, but the LLM does not pass them as
@@ -2004,7 +2151,7 @@ async def tool_worker_node(
                     approved_ids = {str(x) for x in raw_ids}
 
         # ── Execute safe tools in parallel ────────────────────────────
-        results: list[ToolResult] = []
+        results: list[ToolResult] = list(constraint_blocked_results)
         if safe_tools:
             results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
 
@@ -2435,72 +2582,6 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     }
 
 
-async def check_saturation_node(state: SupervisorState) -> dict[str, Any]:
-    """Check if conversation has exceeded the summarization threshold.
-
-    Routes to SUMMARIZE if over threshold, otherwise to SUPERVISOR.
-    """
-    from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
-
-    messages = [_normalize_msg(m) for m in state.get("messages", [])]
-    estimated = estimate_tokens(messages)
-
-    if estimated > TOKEN_THRESHOLD:
-        logger.info(
-            "[CheckSaturation] Estimated %d tokens > threshold %d — routing to summarize",
-            estimated,
-            TOKEN_THRESHOLD,
-        )
-        return {"next_node": NodeName.SUMMARIZE}
-
-    logger.debug("[CheckSaturation] Estimated %d tokens — under threshold, proceeding", estimated)
-    return {"next_node": NodeName.SUPERVISOR}
-
-
-async def summarize_node(
-    state: SupervisorState,
-    *,
-    llm: Any,
-) -> dict[str, Any]:
-    """Summarize the conversation and inject as a SystemMessage at position 0."""
-    from kazma_core.summarizer import format_summary, get_summary, summarize
-
-    messages = [_normalize_msg(m) for m in state.get("messages", [])]
-    thread_id = state.get("thread_id", "")
-
-    # Check if we already have a summary for this thread
-    existing = get_summary(thread_id)
-    if existing:
-        # Use cached summary, but regenerate if conversation has grown significantly
-        summary_text = format_summary(existing)
-    else:
-        summary_text = await summarize(messages, llm, thread_id=thread_id)
-
-    # Inject summary as system message at position 0
-    summary_msg = {"role": "system", "content": summary_text}
-
-    # Remove any existing summary messages (to avoid duplicates)
-    filtered = [
-        m for m in messages if not (m.get("role") == "system" and "CONVERSATION SUMMARY" in str(m.get("content", "")))
-    ]
-
-    system_msgs = [m for m in filtered if m.get("role") == "system"]
-    recent_msgs = [m for m in filtered if m.get("role") != "system"][-6:]
-
-    new_messages = system_msgs + [summary_msg] + recent_msgs
-    new_messages = sanitize_tool_chains(new_messages)
-
-    logger.info(
-        "[Summarize] Injected summary (%d chars) at position 0; compacted messages from %d to %d",
-        len(summary_text), len(messages), len(new_messages),
-    )
-
-    return {
-        "messages": new_messages,
-        "next_node": NodeName.SUPERVISOR,
-    }
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # Graph builder
 # ══════════════════════════════════════════════════════════════════════════
@@ -2616,12 +2697,6 @@ def build_supervisor_graph(
     async def _respond(state: SupervisorState) -> dict[str, Any]:
         return await respond_node(state, llm=llm)
 
-    async def _check_saturation(state: SupervisorState) -> dict[str, Any]:
-        return await check_saturation_node(state)
-
-    async def _summarize(state: SupervisorState) -> dict[str, Any]:
-        return await summarize_node(state, llm=llm)
-
     # ── Routing function ────────────────────────────────────────────
     def _route(state: SupervisorState) -> str:
         """Route from Supervisor based on next_node field."""
@@ -2673,69 +2748,24 @@ def build_supervisor_graph(
         return NodeName.RESPOND
 
     def _route_from_worker(state: SupervisorState) -> str:
-        """Route from Tool Worker — respects next_node (e.g. RESPOND when circuit breaker trips)."""
+        """Route from Tool Worker — no mid-turn summarize; always back to supervisor.
+
+        Oversized context is handled inside supervisor via deterministic trim.
+        """
         next_n = state.get("next_node")
         if next_n == NodeName.RESPOND or state.get("circuit_breaker_tripped") or (state.get("consecutive_tool_failures", 0) >= 3):
             return NodeName.RESPOND
-        from kazma_core.summarizer import estimate_tokens
-        msgs = state.get("messages", [])
-        # Model-aware mid-turn saturation (audit: unification) — the 24000
-        # constant could never fire for small-window models (e.g. GPT-4 8k).
-        # Threshold = min(24000, 60% of the resolved window), so 128k+ models
-        # keep the historical behavior while small windows compact in time.
-        _threshold = 24000
-        try:
-            from kazma_core.token_counter import resolve_context_window
-
-            _window = resolve_context_window(None, state.get("last_model") or None)
-            _threshold = max(4000, min(24000, int(_window * 0.6)))
-        except Exception:
-            pass
-        _MID_TURN_SATURATION_THRESHOLD = _threshold
-        if estimate_tokens(msgs) > _MID_TURN_SATURATION_THRESHOLD:
-            logger.info("[Router] Context tokens (%d) > mid-turn threshold (%d) — routing to check_saturation", estimate_tokens(msgs), _MID_TURN_SATURATION_THRESHOLD)
-            return NodeName.CHECK_SATURATION
         return state.get("next_node", NodeName.SUPERVISOR)
-
-    def _route_from_saturation(state: SupervisorState) -> str:
-        """Route from Check Saturation — to summarize if over threshold, else supervisor."""
-        next_node = state.get("next_node", NodeName.SUPERVISOR)
-        if next_node == NodeName.SUMMARIZE:
-            return NodeName.SUMMARIZE
-        return NodeName.SUPERVISOR
-
-    def _route_from_summarize(state: SupervisorState) -> str:
-        """Route from Summarize — always to Supervisor."""
-        return NodeName.SUPERVISOR
 
     # ── Build the graph ─────────────────────────────────────────────
     graph = StateGraph(SupervisorState)
 
-    graph.add_node(NodeName.CHECK_SATURATION, _check_saturation)
     graph.add_node(NodeName.SUPERVISOR, _supervisor)
     graph.add_node(NodeName.TOOL_WORKER, _tool_worker)
     graph.add_node(NodeName.RESPOND, _respond)
-    graph.add_node(NodeName.SUMMARIZE, _summarize)
 
-    # Entry: START → check_saturation
-    graph.set_entry_point(NodeName.CHECK_SATURATION)
-
-    # check_saturation → {summarize, supervisor}
-    graph.add_conditional_edges(
-        NodeName.CHECK_SATURATION,
-        _route_from_saturation,
-        {
-            NodeName.SUMMARIZE: NodeName.SUMMARIZE,
-            NodeName.SUPERVISOR: NodeName.SUPERVISOR,
-        },
-    )
-
-    # summarize → supervisor
-    graph.add_conditional_edges(
-        NodeName.SUMMARIZE,
-        _route_from_summarize,
-        {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
-    )
+    # Entry: START → supervisor (no LLM summarize path)
+    graph.set_entry_point(NodeName.SUPERVISOR)
 
     # Supervisor → {tool_worker, respond}
     graph.add_conditional_edges(
@@ -2747,14 +2777,13 @@ def build_supervisor_graph(
         },
     )
 
-    # Tool Worker → Supervisor / Respond / Check Saturation
+    # Tool Worker → Supervisor / Respond
     graph.add_conditional_edges(
         NodeName.TOOL_WORKER,
         _route_from_worker,
         {
             NodeName.SUPERVISOR: NodeName.SUPERVISOR,
             NodeName.RESPOND: NodeName.RESPOND,
-            NodeName.CHECK_SATURATION: NodeName.CHECK_SATURATION,
         },
     )
 

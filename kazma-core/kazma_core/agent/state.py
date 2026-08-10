@@ -32,13 +32,15 @@ __all__ = [
 
 
 class NodeName(StrEnum):
-    """Canonical names for every node in the Supervisor graph."""
+    """Canonical names for every node in the Supervisor graph.
+
+    Mid-turn LLM summarization (CHECK_SATURATION / SUMMARIZE) was removed —
+    the graph uses Explicit State + Deterministic Trimming instead.
+    """
 
     SUPERVISOR = "supervisor"
     TOOL_WORKER = "tool_worker"
     RESPOND = "respond"
-    CHECK_SATURATION = "check_saturation"
-    SUMMARIZE = "summarize"
 
 
 class TaskStatus(StrEnum):
@@ -182,6 +184,16 @@ class SupervisorState(TypedDict, total=False):
     intent_mode: str
     """Last classified turn intent: continue|store|cleanup|multi_part|shift|normal."""
 
+    # ── Explicit Working Memory (immutable for the active turn) ─────
+    active_goal: str
+    """User goal for *this* turn — set at iteration 0, never overwritten by tools/trim."""
+
+    active_attachments: list[dict[str, Any]]
+    """Attachment descriptors (id/filename/path/kind) bound at iteration 0."""
+
+    hard_constraints: list[str]
+    """Structural turn constraints (e.g. audit_only, no_code_change, read_only)."""
+
     # ── Turn failure ────────────────────────────────────────────────
     turn_failed: bool
     """Set when the supervisor's LLM call failed (after retries) and could not produce a real answer.
@@ -279,6 +291,9 @@ def initial_supervisor_state(
         task_status=TaskStatus.IDLE,
         task_goal_summary="",
         intent_mode="normal",
+        active_goal="",
+        active_attachments=[],
+        hard_constraints=[],
         force_synthesis=False,
         turn_failed=False,
         error_message="",

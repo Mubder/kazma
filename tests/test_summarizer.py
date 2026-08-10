@@ -82,53 +82,91 @@ class TestSummarize:
         assert len(result) > 50
 
 
-class TestSummaryInjection:
-    """Tests for summary injection into graph state."""
+class TestDeterministicTrimAndWorkingMemory:
+    """Mid-turn LLM summarize_node is gone — trim + anchors replace it."""
 
-    @pytest.mark.asyncio
-    async def test_check_saturation_under_threshold(self) -> None:
-        """Short conversation routes to supervisor (under threshold)."""
-        from kazma_core.agent.graph_builder import check_saturation_node
+    def test_trim_preserves_user_goal_and_last_tools(self) -> None:
+        from kazma_core.agent.turn_input import (
+            WORKING_MEMORY_MARKER,
+            format_working_memory_anchor,
+            trim_messages_deterministic,
+        )
 
-        # 100 chars = 25 tokens, well under 4000 threshold
-        state = {"messages": [{"role": "user", "content": "x" * 100}]}
-        result = await check_saturation_node(state)
+        goal = "JUST AUDIT this document — do not change code"
+        wm = format_working_memory_anchor(
+            active_goal=goal,
+            active_attachments=[{"filename": "AR_v6.docx", "kind": "file"}],
+            hard_constraints=["audit_only", "no_code_change"],
+        )
+        messages: list[dict] = [
+            {"role": "system", "content": "You are Kazma."},
+            {"role": "user", "content": "old zcode question"},
+            {"role": "assistant", "content": "zcode answer"},
+            {"role": "user", "content": goal},
+        ]
+        # Inflate with many tool rounds
+        for i in range(40):
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"id": f"c{i}", "name": "file_read", "args": {}}],
+                }
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": f"c{i}",
+                    "content": ("blob " * 500) + f" round {i}",
+                }
+            )
 
-        assert result["next_node"] == "supervisor"
+        trimmed = trim_messages_deterministic(
+            messages,
+            max_tokens=3000,
+            keep_last_tool_rounds=4,
+            active_goal=goal,
+            working_memory_block=wm,
+        )
+        roles = [m.get("role") for m in trimmed]
+        assert "user" in roles
+        user_msgs = [m for m in trimmed if m.get("role") == "user"]
+        assert any(goal in str(m.get("content")) for m in user_msgs)
+        assert any(
+            WORKING_MEMORY_MARKER in str(m.get("content") or "")
+            for m in trimmed
+            if m.get("role") == "system"
+        )
+        # Must not keep the entire 40-round history
+        assert len(trimmed) < len(messages)
 
-    @pytest.mark.asyncio
-    async def test_check_saturation_over_threshold(self) -> None:
-        """Long conversation routes to summarize (over threshold)."""
-        from kazma_core.agent.graph_builder import check_saturation_node
+    def test_audit_only_filters_write_tools(self) -> None:
+        from kazma_core.agent.turn_input import (
+            filter_tools_for_constraints,
+            parse_hard_constraints,
+        )
 
-        # 20000 chars = 5000 tokens, over 4000 threshold
-        state = {"messages": [{"role": "user", "content": "x" * 20000}]}
-        result = await check_saturation_node(state)
-
-        assert result["next_node"] == "summarize"
-
-    @pytest.mark.asyncio
-    async def test_summary_injected_as_system_message(self) -> None:
-        """Summary is injected as a SystemMessage at position 0."""
-        from kazma_core.agent.graph_builder import summarize_node
-
-        mock_llm = MagicMock()
-        mock_llm.chat = AsyncMock(return_value=MagicMock(content="Summary of conversation."))
-
-        state = {
-            "messages": [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi!"},
-            ],
-            "thread_id": "test-inject",
-        }
-
-        result = await summarize_node(state, llm=mock_llm)
-        messages = result["messages"]
-
-        assert len(messages) >= 3  # summary + original 2
-        assert messages[0]["role"] == "system"
-        assert "CONVERSATION SUMMARY" in messages[0]["content"]
+        cons = parse_hard_constraints(
+            "what is wrong with this document? DONT CHANGE CODES JUST AUDIT now"
+        )
+        assert "audit_only" in cons
+        tools = [
+            {"type": "function", "function": {"name": "read_document", "parameters": {}}},
+            {"type": "function", "function": {"name": "generate_docx", "parameters": {}}},
+            {"type": "function", "function": {"name": "shell_exec", "parameters": {}}},
+            {"type": "function", "function": {"name": "file_list", "parameters": {}}},
+            {"type": "function", "function": {"name": "send_file", "parameters": {}}},
+        ]
+        filtered = filter_tools_for_constraints(tools, cons)
+        names = []
+        for t in filtered:
+            fn = t.get("function") or {}
+            names.append(fn.get("name") or t.get("name"))
+        assert "read_document" in names
+        assert "file_list" in names
+        assert "generate_docx" not in names
+        assert "shell_exec" not in names
+        assert "send_file" not in names
 
     @pytest.mark.asyncio
     async def test_summary_persisted_to_memory(self) -> None:

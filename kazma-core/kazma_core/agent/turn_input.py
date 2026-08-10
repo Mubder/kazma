@@ -39,6 +39,17 @@ __all__ = [
     "stub_prior_tool_chains",
     "should_stub_prior_tools",
     "semantic_topic_drift",
+    # Explicit working memory + deterministic pruning
+    "WORKING_MEMORY_MARKER",
+    "AUDIT_ONLY_CONSTRAINTS",
+    "WRITE_EXECUTE_TOOL_NAMES",
+    "parse_hard_constraints",
+    "extract_active_attachments",
+    "extract_latest_user_text",
+    "format_working_memory_anchor",
+    "filter_tools_for_constraints",
+    "trim_messages_deterministic",
+    "resolve_trim_token_budget",
 ]
 
 logger = logging.getLogger(__name__)
@@ -544,6 +555,463 @@ def latest_turn_priority_note(
             "Do not answer as if they asked about unrelated prior conversation topics."
         )
     return base
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Explicit Working Memory + Deterministic Pruning (no mid-turn LLM summary)
+# ═══════════════════════════════════════════════════════════════════════════
+
+WORKING_MEMORY_MARKER = "[KAZMA_WORKING_MEMORY]"
+
+# Constraint tags placed into SupervisorState.hard_constraints at iter 0.
+AUDIT_ONLY_CONSTRAINTS = frozenset(
+    {
+        "audit_only",
+        "read_only",
+        "no_code_change",
+        "no_writes",
+        "no_send",
+    }
+)
+
+# Tools that mutate filesystem/code, execute shell, or deliver outbound files.
+# Matched by exact name or prefix (mcp__* write-ish names checked separately).
+WRITE_EXECUTE_TOOL_NAMES = frozenset(
+    {
+        "shell_exec",
+        "python_exec",
+        "file_write",
+        "file_create",
+        "file_delete",
+        "file_edit",
+        "file_move",
+        "file_rename",
+        "generate_docx",
+        "generate_pdf",
+        "generate_pptx",
+        "generate_xlsx",
+        "convert_document",
+        "send_file",
+        "send_email",
+        "email_send",
+        "memory_store",
+        "memory_delete_entity",
+        "memory_invalidate",
+        "memory_merge_entities",
+        "memory_link_entities",
+        "git_commit",
+        "git_push",
+        "git_write",
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
+        "browser_screenshot",
+    }
+)
+
+_AUDIT_ONLY_RE = re.compile(
+    r"(?is)\b("
+    r"just\s+audit|audit\s+only|read[\s-]?only|"
+    r"don'?t\s+change\s+(codes?|code|anything)|"
+    r"do\s+not\s+change\s+(codes?|code|anything)|"
+    r"no\s+code\s+changes?|without\s+changing\s+code|"
+    r"don'?t\s+(edit|modify|write|regenerate)|"
+    r"do\s+not\s+(edit|modify|write|regenerate)|"
+    r"no\s+writes?|inspect\s+only|diagnose\s+only"
+    r")\b"
+)
+_NO_SEND_RE = re.compile(
+    r"(?is)\b(don'?t\s+send|do\s+not\s+send|no\s+telegram|no\s+email\s+send)\b"
+)
+
+# MCP tools that write/exec — blocked under audit_only.
+_MCP_WRITE_RE = re.compile(
+    r"(?i)(write|delete|move|rename|create|remove|unlink|exec|shell|run|put|patch|post)"
+)
+
+
+def extract_latest_user_text(messages: list[dict[str, Any]] | None) -> str:
+    """Return the text of the most recent user message (multimodal-aware)."""
+    if not messages:
+        return ""
+    for m in reversed(messages):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            parts: list[str] = []
+            for p in content:
+                if isinstance(p, dict):
+                    if p.get("type") == "text" and p.get("text"):
+                        parts.append(str(p["text"]))
+                    elif p.get("type") == "image_url":
+                        parts.append("[image attachment]")
+                elif p:
+                    parts.append(str(p))
+            return "\n".join(parts).strip()
+        return str(content or "").strip()
+    return ""
+
+
+def parse_hard_constraints(text: str) -> list[str]:
+    """Parse structural hard constraints from the user message (iter 0)."""
+    t = (text or "").strip()
+    if not t:
+        return []
+    found: list[str] = []
+    if _AUDIT_ONLY_RE.search(t):
+        found.extend(["audit_only", "read_only", "no_code_change", "no_writes"])
+    if _NO_SEND_RE.search(t):
+        found.append("no_send")
+    # Dedupe preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in found:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def extract_active_attachments(
+    messages: list[dict[str, Any]] | None,
+    *,
+    user_text: str = "",
+) -> list[dict[str, Any]]:
+    """Extract attachment descriptors from the latest user turn / stubs."""
+    atts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(item: dict[str, Any]) -> None:
+        key = (
+            str(item.get("id") or "")
+            + "|"
+            + str(item.get("filename") or item.get("path") or item.get("name") or "")
+        )
+        if key in seen or key == "|":
+            return
+        seen.add(key)
+        atts.append(item)
+
+    # From multimodal user content blocks
+    if messages:
+        for m in reversed(messages):
+            if not isinstance(m, dict) or m.get("role") != "user":
+                continue
+            content = m.get("content")
+            if isinstance(content, list):
+                for p in content:
+                    if not isinstance(p, dict):
+                        continue
+                    if p.get("type") == "image_url":
+                        url = ""
+                        iu = p.get("image_url")
+                        if isinstance(iu, dict):
+                            url = str(iu.get("url") or "")
+                        _add({"kind": "image", "filename": url[-80:] or "image", "url": url})
+                    # Some transports embed attachment metadata
+                    if p.get("filename") or p.get("attachment_id"):
+                        _add(
+                            {
+                                "kind": str(p.get("kind") or "file"),
+                                "id": str(p.get("attachment_id") or p.get("id") or ""),
+                                "filename": str(p.get("filename") or ""),
+                                "path": str(p.get("path") or ""),
+                            }
+                        )
+            break
+
+    # From textual stubs: [Attached: name — …] or [Attached file: name]
+    blob = user_text or extract_latest_user_text(messages)
+    for m in re.finditer(
+        r"\[Attached(?:\s+file)?[:\s]+([^\]]+?)\]",
+        blob or "",
+        flags=re.IGNORECASE,
+    ):
+        raw = m.group(1).strip()
+        # Strip trailing " — use file_read…" clauses
+        name = re.split(r"\s+[—\-]\s+", raw, maxsplit=1)[0].strip()
+        if name:
+            _add({"kind": "file", "filename": name, "path": name})
+
+    # Bare .docx/.pdf mentions often are the active attachment name
+    for m in re.finditer(
+        r"([\w.\-]+\.(?:docx|pdf|pptx|xlsx|doc|txt|md|html))",
+        blob or "",
+        flags=re.IGNORECASE,
+    ):
+        _add({"kind": "file", "filename": m.group(1), "path": m.group(1)})
+
+    return atts
+
+
+def format_working_memory_anchor(
+    *,
+    active_goal: str,
+    active_attachments: list[dict[str, Any]] | None = None,
+    hard_constraints: list[str] | None = None,
+    intent_mode: str = "",
+) -> str:
+    """Build the immutable system-prompt working-memory block."""
+    goal = (active_goal or "").strip() or "(no goal captured)"
+    constraints = [str(c) for c in (hard_constraints or []) if c]
+    atts = active_attachments or []
+    att_lines: list[str] = []
+    for a in atts[:12]:
+        name = a.get("filename") or a.get("path") or a.get("id") or a.get("name") or "?"
+        kind = a.get("kind") or "file"
+        att_lines.append(f"- ({kind}) {name}")
+    att_block = "\n".join(att_lines) if att_lines else "- (none)"
+    cons_block = ", ".join(constraints) if constraints else "(none)"
+    intent_bit = f"\nIntent mode: {intent_mode}" if intent_mode else ""
+    return (
+        f"{WORKING_MEMORY_MARKER}\n"
+        "## Active Turn Working Memory (IMMUTABLE — do not replace with recalled topics)\n"
+        f"**Active goal:** {goal[:2000]}\n"
+        f"**Hard constraints:** {cons_block}\n"
+        f"**Active attachments (prefer these paths over unrelated disk hits):**\n{att_block}"
+        f"{intent_bit}\n"
+        "Rules:\n"
+        "1. Fulfill the Active goal above. Summary/history/memory are supporting only.\n"
+        "2. If Hard constraints include audit_only / read_only / no_code_change / no_writes, "
+        "do NOT write files, regenerate documents, run shell mutations, or send outbound files.\n"
+        "3. Do not resume superseded tasks from conversation history.\n"
+        f"{WORKING_MEMORY_MARKER}"
+    )
+
+
+def _tool_name_from_def(td: dict[str, Any]) -> str:
+    if not isinstance(td, dict):
+        return ""
+    if td.get("name"):
+        return str(td["name"])
+    fn = td.get("function")
+    if isinstance(fn, dict) and fn.get("name"):
+        return str(fn["name"])
+    return ""
+
+
+def _is_write_execute_tool(name: str) -> bool:
+    n = (name or "").strip()
+    if not n:
+        return False
+    if n in WRITE_EXECUTE_TOOL_NAMES:
+        return True
+    # MCP tools: block write/exec-ish names under audit_only
+    if n.startswith("mcp__") and _MCP_WRITE_RE.search(n):
+        return True
+    low = n.lower()
+    for banned in (
+        "write",
+        "delete",
+        "generate_",
+        "send_file",
+        "shell_exec",
+        "file_write",
+        "file_delete",
+        "move_file",
+    ):
+        if banned in low:
+            return True
+    return False
+
+
+def filter_tools_for_constraints(
+    tool_definitions: list[dict[str, Any]] | None,
+    hard_constraints: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Omit write/execute tools when audit_only / read_only is active."""
+    tools = list(tool_definitions or [])
+    if not tools:
+        return tools
+    cons = {str(c).lower() for c in (hard_constraints or []) if c}
+    if not cons.intersection(AUDIT_ONLY_CONSTRAINTS) and "no_send" not in cons:
+        return tools
+
+    filtered: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    for td in tools:
+        name = _tool_name_from_def(td)
+        drop = False
+        if cons.intersection({"audit_only", "read_only", "no_code_change", "no_writes"}):
+            if _is_write_execute_tool(name):
+                drop = True
+        if "no_send" in cons and name in ("send_file", "send_email", "email_send"):
+            drop = True
+        if drop:
+            dropped.append(name or "?")
+        else:
+            filtered.append(td)
+    if dropped:
+        logger.info(
+            "[turn_input] Structural tool filter removed %d tool(s) under constraints=%s: %s",
+            len(dropped),
+            sorted(cons),
+            dropped[:20],
+        )
+    return filtered
+
+
+def resolve_trim_token_budget(
+    *,
+    last_model: str | None = None,
+    default: int = 24000,
+) -> int:
+    """Token budget for deterministic mid-turn trimming (chars/4 estimate)."""
+    try:
+        from kazma_core.token_counter import resolve_context_window
+
+        window = resolve_context_window(None, last_model)
+        # Keep headroom under 60% of window, capped at *default*.
+        return max(4000, min(int(default), int(window * 0.6)))
+    except Exception:
+        return default
+
+
+def trim_messages_deterministic(
+    messages: list[dict[str, Any]] | None,
+    *,
+    max_tokens: int = 24000,
+    keep_last_tool_rounds: int = 8,
+    active_goal: str = "",
+    working_memory_block: str = "",
+) -> list[dict[str, Any]]:
+    """Deterministically trim history without LLM summarization.
+
+    Preserves, in order:
+      1. System messages that are anchors (working memory, personality, env)
+      2. The Turn-0 user prompt (latest user message, or synthetic from active_goal)
+      3. The last N assistant/tool interaction rounds after that user message
+
+    Middle execution history is dropped (not summarized).
+    """
+    from kazma_core.summarizer import _normalize_msg, estimate_tokens
+
+    if not messages:
+        return []
+
+    normalized = [_normalize_msg(m) for m in messages]
+    if estimate_tokens(normalized) <= max_tokens:
+        # Still ensure working-memory system block is present when provided.
+        if working_memory_block and not any(
+            WORKING_MEMORY_MARKER in str(m.get("content") or "")
+            for m in normalized
+            if m.get("role") == "system"
+        ):
+            normalized.insert(0, {"role": "system", "content": working_memory_block})
+        return sanitize_message_list(normalized)
+
+    # Partition
+    system_msgs = [m for m in normalized if m.get("role") == "system"]
+    # Prefer a single working-memory block (drop older duplicates)
+    wm_msgs = [
+        m
+        for m in system_msgs
+        if WORKING_MEMORY_MARKER in str(m.get("content") or "")
+    ]
+    other_system = [
+        m
+        for m in system_msgs
+        if WORKING_MEMORY_MARKER not in str(m.get("content") or "")
+    ]
+    # Cap non-WM system noise (memory injects grow) — keep first env + last few
+    if len(other_system) > 6:
+        other_system = other_system[:2] + other_system[-4:]
+    if working_memory_block:
+        anchor_system = [{"role": "system", "content": working_memory_block}] + other_system
+    elif wm_msgs:
+        anchor_system = [wm_msgs[-1]] + other_system
+    else:
+        anchor_system = other_system
+
+    # Find latest user index
+    latest_user_idx = -1
+    for i in range(len(normalized) - 1, -1, -1):
+        if normalized[i].get("role") == "user":
+            latest_user_idx = i
+            break
+
+    if latest_user_idx >= 0:
+        turn0_user = dict(normalized[latest_user_idx])
+        tail = normalized[latest_user_idx + 1 :]
+    else:
+        # Reconstruct user from active_goal if history lost it
+        goal = (active_goal or "").strip()
+        turn0_user = {
+            "role": "user",
+            "content": goal or "(active goal unavailable — check working memory)",
+        }
+        tail = [m for m in normalized if m.get("role") in ("assistant", "tool", "function")]
+
+    # Keep last N tool rounds: each "round" ≈ assistant (optional tool_calls) + following tools
+    # Simpler: keep last keep_last_tool_rounds*2 messages from tail (assistant+tool pairs)
+    keep_n = max(2, int(keep_last_tool_rounds) * 2)
+    if len(tail) > keep_n:
+        tail = tail[-keep_n:]
+
+    trimmed = anchor_system + [turn0_user] + tail
+    # Drop dangling tool messages whose parent assistant tool_calls were sliced away.
+    trimmed = _drop_orphan_tool_messages(trimmed)
+
+    # If still over budget, drop older tool bodies harder
+    if estimate_tokens(trimmed) > max_tokens:
+        hardened: list[dict[str, Any]] = []
+        for m in trimmed:
+            if m.get("role") in ("tool", "function"):
+                content = m.get("content", "")
+                if isinstance(content, str) and len(content) > 800:
+                    m = dict(m)
+                    m["content"] = (
+                        content[:800]
+                        + f"\n\n[Tool output truncated from {len(content)} chars — deterministic trim]"
+                    )
+            hardened.append(m)
+        trimmed = hardened
+
+    # Last resort: keep only anchor + user + last 4 messages
+    if estimate_tokens(trimmed) > max_tokens:
+        non_sys = [m for m in trimmed if m.get("role") != "system"]
+        user = next((m for m in non_sys if m.get("role") == "user"), turn0_user)
+        rest = [m for m in non_sys if m is not user][-4:]
+        trimmed = anchor_system + [user] + rest
+        trimmed = _drop_orphan_tool_messages(trimmed)
+
+    logger.info(
+        "[turn_input] Deterministic trim: %d → %d msgs (~%d tokens budget=%d)",
+        len(normalized),
+        len(trimmed),
+        estimate_tokens(trimmed),
+        max_tokens,
+    )
+    return trimmed
+
+
+def _drop_orphan_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove tool/function rows that no longer follow an assistant tool_calls."""
+    out: list[dict[str, Any]] = []
+    pending_ids: set[str] = set()
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant":
+            pending_ids = set()
+            for tc in m.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    tid = str(tc.get("id") or "")
+                    if tid:
+                        pending_ids.add(tid)
+            out.append(m)
+        elif role in ("tool", "function"):
+            tid = str(m.get("tool_call_id") or m.get("id") or "")
+            if pending_ids and tid and tid not in pending_ids:
+                continue
+            if not pending_ids and tid:
+                # No open tool_calls parent in the kept window — drop orphan.
+                continue
+            out.append(m)
+        else:
+            pending_ids = set()
+            out.append(m)
+    return out
 
 
 def contentful_turn_count(msgs: list[dict[str, Any]]) -> int:
