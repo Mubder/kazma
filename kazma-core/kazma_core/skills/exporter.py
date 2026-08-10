@@ -1,20 +1,22 @@
-"""Industry-Grade PDF Export Architecture for Kazma — Two-Stage HTML/PDF Compilation Pipeline.
+"""Industry-Grade PDF Export Architecture — Two-Stage HTML/PDF pipeline.
 
-Provides prepare_markdown_for_pdf() and generate_pdf_html_document() for generating
-enterprise PDF reports with full Arabic RTL support, LTR code/math isolation,
-running page footers, and IBM Plex fonts.
+Uses the **same visual theme** as reportlab PDF generation
+(``kazma_core.documents.style_theme``) so EN and AR exports match.
+Arabic gets ``dir=rtl``; English gets ``dir=ltr``. Styling tokens are shared.
 """
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
 import re
-from typing import Optional
 
 try:
     import markdown
 except ImportError:
     markdown = None  # type: ignore
+
+from kazma_core.documents.style_theme import THEME, localized_chrome
 
 logger = logging.getLogger(__name__)
 
@@ -24,185 +26,17 @@ __all__ = [
     "prepare_markdown_for_pdf",
 ]
 
-PDF_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <title>{title}</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
-    @page {{
-      size: A4;
-      margin: 20mm 15mm 20mm 15mm;
-      @bottom-left {{
-        content: "صفحة " counter(page) " من " counter(pages);
-        font-family: 'IBM Plex Sans Arabic', sans-serif;
-        font-size: 8pt;
-        color: #6c757d;
-      }}
-      @bottom-right {{
-        content: "منظومة كاظمة للذكاء الاصطناعي";
-        font-family: 'IBM Plex Sans Arabic', sans-serif;
-        font-size: 8pt;
-        color: #6c757d;
-      }}
-    }}
-
-    *, *::before, *::after {{
-      box-sizing: border-box;
-    }}
-
-    :root {{
-      --font-arabic: 'IBM Plex Sans Arabic', -apple-system, sans-serif;
-      --font-mono: 'IBM Plex Mono', monospace;
-      --primary: #0f172a;
-      --border: #e2e8f0;
-      --bg-alt: #f8fafc;
-    }}
-
-    body {{
-      font-family: var(--font-arabic);
-      direction: rtl;
-      text-align: justify;
-      text-align-last: right;
-      line-height: 1.65;
-      color: #1e293b;
-      font-size: 10pt;
-    }}
-
-    .header-card {{
-      border-bottom: 2px solid var(--primary);
-      padding-bottom: 12px;
-      margin-bottom: 20px;
-    }}
-
-    .header-card h1 {{
-      font-size: 18pt;
-      margin: 0 0 8px 0;
-      color: var(--primary);
-    }}
-
-    .metadata-grid {{
-      font-size: 8.5pt;
-      color: #475569;
-      display: table;
-      width: 100%;
-    }}
-
-    .metadata-item {{
-      display: table-cell;
-      padding-inline-end: 15px;
-    }}
-
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-      direction: rtl;
-      font-size: 9.5pt;
-    }}
-
-    th, td {{
-      border: 1px solid var(--border);
-      padding: 8px 12px;
-      text-align: right;
-    }}
-
-    th {{
-      background-color: var(--bg-alt);
-      font-weight: 600;
-      color: var(--primary);
-    }}
-
-    pre, code {{
-      font-family: var(--font-mono), Consolas, "Courier New", monospace !important;
-      direction: ltr !important;
-      text-align: left !important;
-      text-align-last: left !important;
-      unicode-bidi: isolate !important;
-    }}
-
-    pre {{
-      background-color: #0f172a;
-      color: #f8fafc;
-      padding: 1rem 1.2rem;
-      border-radius: 8px;
-      box-sizing: border-box !important;
-      max-width: 100% !important;
-      font-size: 0.78rem !important;
-      line-height: 1.55;
-      white-space: pre-wrap !important;
-      overflow-wrap: anywhere !important;
-      word-break: break-word !important;
-      page-break-inside: avoid;
-    }}
-
-    p code, td code {{
-      background-color: #f1f5f9;
-      color: #0f172a;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 8.5pt;
-      border: 1px solid #e2e8f0;
-    }}
-
-    .bidi-isolate, bdi, [dir="ltr"] {{
-      direction: ltr !important;
-      unicode-bidi: isolate !important;
-      display: inline-block;
-    }}
-
-    .math-inline {{
-      direction: ltr !important;
-      unicode-bidi: isolate !important;
-      display: inline-block;
-      padding: 0 4px;
-    }}
-
-    .math-block {{
-      direction: ltr !important;
-      text-align: center !important;
-      unicode-bidi: isolate !important;
-      margin: 16px 0;
-      padding: 10px;
-      background-color: var(--bg-alt);
-      border-radius: 4px;
-    }}
-
-    a {{
-      color: #2563eb;
-      text-decoration: none;
-      word-break: break-all;
-    }}
-  </style>
-</head>
-<body>
-  <div class="header-card">
-    <h1>{title}</h1>
-    <div class="metadata-grid">
-      <div class="metadata-item"><strong>النموذج:</strong> <bdi dir="ltr">{model}</bdi></div>
-      <div class="metadata-item"><strong>الجلسة:</strong> <bdi dir="ltr">{session_id}</bdi></div>
-      <div class="metadata-item"><strong>التاريخ:</strong> <bdi dir="ltr">{timestamp}</bdi></div>
-    </div>
-  </div>
-  <div class="content-body">
-    {content}
-  </div>
-</body>
-</html>
-"""
+# Legacy name kept for importers; prefer generate_pdf_html_document().
+PDF_HTML_TEMPLATE = ""
 
 
 def prepare_markdown_for_pdf(raw_markdown: str) -> str:
-    """Stage 1 Pre-processing: Clean markdown, isolate metadata/math, and compile to HTML5."""
+    """Stage 1: clean markdown, isolate LTR tokens, compile to HTML5."""
     if not raw_markdown:
         return ""
 
-    # 1. Fix escaped currency symbols (\$0.0035 -> $0.0035)
     text = raw_markdown.replace(r"\$", "$")
 
-    # 2. Isolate URLs, model names, and standards
     url_pattern = re.compile(r'(https?://[^\s<>"\'`]+[^\s<>"\'`\.,?!])')
     text = url_pattern.sub(r'<bdi dir="ltr">\1</bdi>', text)
 
@@ -211,7 +45,6 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
     )
     text = iso_pattern.sub(r'<bdi dir="ltr">\1</bdi>', text)
 
-    # 3. Process Display Math ($$ ... $$) & Inline Math ($ ... $)
     text = re.sub(
         r"\$\$(.*?)\$\$",
         r'<div class="math-block" dir="ltr">\1</div>',
@@ -220,7 +53,6 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
     )
     text = re.sub(r"\$(.*?)\$", r'<span class="math-inline" dir="ltr">\1</span>', text)
 
-    # 4. Compile Markdown to semantic HTML5
     if markdown is not None:
         try:
             return markdown.markdown(
@@ -237,23 +69,211 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
             logger.debug("[exporter] markdown extension compile fallback: %s", exc)
             return markdown.markdown(text)
 
-    # Fallback if markdown library is missing
-    return f"<pre>{text}</pre>"
+    return f"<pre>{html_lib.escape(text)}</pre>"
+
+
+def _css(*, rtl: bool, brand: str) -> str:
+    """Unified stylesheet — EN and AR differ only by direction / text-align-last."""
+    t = THEME
+    text_align_last = "right" if rtl else "left"
+    direction = "rtl" if rtl else "ltr"
+    return f"""
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+    @page {{
+      size: A4;
+      margin: 20mm 15mm 20mm 15mm;
+      @bottom-left {{
+        content: counter(page);
+        font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif;
+        font-size: 8pt;
+        color: {t["muted"]};
+      }}
+      @bottom-right {{
+        content: "{brand}";
+        font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif;
+        font-size: 8pt;
+        color: {t["muted"]};
+      }}
+    }}
+
+    *, *::before, *::after {{ box-sizing: border-box; }}
+
+    body {{
+      font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', -apple-system, sans-serif;
+      direction: {direction};
+      text-align: justify;
+      text-align-last: {text_align_last};
+      line-height: 1.65;
+      color: {t["body"]};
+      font-size: 10.5pt;
+    }}
+
+    .header-card {{
+      background: {t["accent"]};
+      color: #fff;
+      padding: 14px 16px;
+      margin: 0 0 20px 0;
+      border-radius: 4px;
+    }}
+
+    .header-card h1 {{
+      font-size: 18pt;
+      margin: 0 0 8px 0;
+      color: #fff;
+    }}
+
+    .metadata-grid {{
+      font-size: 8.5pt;
+      color: #e2e8f0;
+      display: table;
+      width: 100%;
+    }}
+
+    .metadata-item {{
+      display: table-cell;
+      padding-inline-end: 15px;
+    }}
+
+    h1, h2 {{
+      background: {t["heading_fill"]};
+      color: #fff !important;
+      padding: 8px 12px;
+      margin: 18px 0 10px 0;
+      border-radius: 3px;
+      font-size: 14pt;
+    }}
+
+    h3 {{
+      color: {t["heading"]};
+      border-bottom: 2px solid {t["border"]};
+      padding-bottom: 4px;
+      margin: 14px 0 8px 0;
+    }}
+
+    p {{
+      text-align: justify;
+      margin: 0 0 0.75em 0;
+    }}
+
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      direction: inherit;
+      font-size: 9.5pt;
+    }}
+
+    th, td {{
+      border: 1px solid {t["table_grid"]};
+      padding: 8px 12px;
+      text-align: start;
+    }}
+
+    th {{
+      background-color: {t["table_header_bg"]};
+      font-weight: 600;
+      color: {t["table_header_fg"]};
+    }}
+
+    td {{
+      background-color: {t["table_row_bg"]};
+    }}
+
+    pre, code {{
+      font-family: 'IBM Plex Mono', Consolas, monospace !important;
+      direction: ltr !important;
+      text-align: left !important;
+      unicode-bidi: isolate !important;
+    }}
+
+    pre {{
+      background-color: {t["accent"]};
+      color: #f8fafc;
+      padding: 1rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.78rem !important;
+      line-height: 1.55;
+      white-space: pre-wrap !important;
+      page-break-inside: avoid;
+    }}
+
+    p code, td code {{
+      background-color: {t["code_bg"]};
+      color: {t["accent"]};
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 8.5pt;
+      border: 1px solid {t["border"]};
+    }}
+
+    .bidi-isolate, bdi, [dir="ltr"] {{
+      direction: ltr !important;
+      unicode-bidi: isolate !important;
+      display: inline-block;
+    }}
+
+    ul, ol {{
+      padding-inline-start: 1.4em;
+      margin: 0.5em 0 1em 0;
+    }}
+
+    blockquote {{
+      margin: 12px 0;
+      padding: 8px 14px;
+      background: {t["bg_alt"]};
+      border-inline-start: 3px solid {t["heading"]};
+      color: {t["quote"]};
+    }}
+
+    a {{ color: #2563eb; text-decoration: none; word-break: break-all; }}
+"""
 
 
 def generate_pdf_html_document(
     markdown_content: str,
-    title: str = "تقرير تقني",
-    model: str = "gemini-2.5-flash",
-    session_id: str = "sec-9901-b442-a11c",
-    timestamp: str = "2026-08-08 16:45:00",
+    title: str = "Technical Report",
+    model: str = "model",
+    session_id: str = "session",
+    timestamp: str = "",
+    *,
+    lang: str | None = None,
+    rtl: bool | None = None,
 ) -> str:
-    """Stage 2 Compilation: Render full HTML document ready for PDF engines (WeasyPrint / ReportLab / Playwright)."""
+    """Stage 2: full HTML document ready for WeasyPrint / Playwright.
+
+    EN and AR share the same CSS theme; only ``dir`` / brand strings change.
+    """
+    sample = f"{title}\n{markdown_content}"
+    if rtl is None:
+        ar = sum(1 for c in sample if "\u0600" <= c <= "\u06ff")
+        rtl = ar > 20 or (lang or "").lower() in ("ar", "arabic", "rtl")
+    chrome = localized_chrome(rtl=bool(rtl))
     compiled_body = prepare_markdown_for_pdf(markdown_content)
-    return PDF_HTML_TEMPLATE.format(
-        title=title,
-        model=model,
-        session_id=session_id,
-        timestamp=timestamp,
-        content=compiled_body,
-    )
+    safe_title = html_lib.escape(title)
+    css = _css(rtl=bool(rtl), brand=chrome["brand"].replace('"', ""))
+
+    return f"""<!DOCTYPE html>
+<html lang="{chrome["lang"]}" dir="{chrome["dir"]}">
+<head>
+  <meta charset="UTF-8">
+  <title>{safe_title}</title>
+  <style>
+{css}
+  </style>
+</head>
+<body>
+  <div class="header-card">
+    <h1>{safe_title}</h1>
+    <div class="metadata-grid">
+      <div class="metadata-item"><strong>Model:</strong> <bdi dir="ltr">{html_lib.escape(model)}</bdi></div>
+      <div class="metadata-item"><strong>Session:</strong> <bdi dir="ltr">{html_lib.escape(session_id)}</bdi></div>
+      <div class="metadata-item"><strong>Date:</strong> <bdi dir="ltr">{html_lib.escape(timestamp)}</bdi></div>
+    </div>
+  </div>
+  <div class="content-body">
+    {compiled_body}
+  </div>
+</body>
+</html>
+"""

@@ -14,6 +14,46 @@ from kazma_core.documents.rich_render import (
 )
 
 
+def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
+    """EN and AR PDFs must use the same visual theme (bars + brand chrome)."""
+    from kazma_core.documents.renderer_worker import _generate_pdf
+    from kazma_core.documents.style_theme import THEME, localized_chrome
+    from kazma_core.skills.exporter import generate_pdf_html_document
+
+    body = (
+        "## Overview\n\n"
+        "A professional paragraph with enough words to exercise justified layout "
+        "in both language modes of the shared document theme.\n\n"
+        "| Feature | Status |\n|---|---|\n| Unified theme | Yes |\n"
+    )
+    body_ar = (
+        "## نظرة عامة\n\n"
+        "فقرة مهنية عربية طويلة بما يكفي لاختبار التبرير ونفس قالب التصميم.\n\n"
+        "| الميزة | الحالة |\n|---|---|\n| قالب موحّد | نعم |\n"
+    )
+    w: list[str] = []
+    en = tmp_path / "en.pdf"
+    ar = tmp_path / "ar.pdf"
+    _generate_pdf(
+        en,
+        {"title": "What is Kazma?", "lang": "en", "sections": [{"heading": "Main", "body": body}]},
+        w,
+    )
+    _generate_pdf(
+        ar,
+        {"title": "ما هي كاظمة؟", "lang": "ar", "sections": [{"heading": "رئيسي", "body": body_ar}]},
+        w,
+    )
+    assert en.stat().st_size > 2000 and ar.stat().st_size > 2000
+    # HTML exporter shares THEME tokens
+    html_en = generate_pdf_html_document(body, title="What is Kazma?", rtl=False)
+    html_ar = generate_pdf_html_document(body_ar, title="ما هي كاظمة؟", rtl=True)
+    assert THEME["heading_fill"] in html_en and THEME["heading_fill"] in html_ar
+    assert 'dir="ltr"' in html_en and 'dir="rtl"' in html_ar
+    assert localized_chrome(rtl=False)["brand"] in html_en or "Kazma" in html_en
+    assert localized_chrome(rtl=True)["brand"] in html_ar or "كاظمة" in html_ar
+
+
 def test_is_arabic_dominant() -> None:
     assert is_arabic_dominant("هذا نص عربي طويل بما يكفي") is True
     assert is_arabic_dominant("Hello English only document") is False

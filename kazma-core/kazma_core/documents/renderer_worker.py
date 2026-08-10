@@ -259,62 +259,77 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
     if payload.get("rtl") is False:
         rtl = False
 
-    align = TA_RIGHT if rtl else TA_LEFT
+    # ── Unified theme (EN == AR visual design; only dir/shape differ) ──
+    from kazma_core.documents.style_theme import (
+        THEME,
+        localized_chrome,
+        theme_colors_reportlab,
+    )
+
+    chrome = localized_chrome(rtl=rtl)
+    th = theme_colors_reportlab()
     # Justified body in both languages. After shape_for_pdf() (reshape+get_display),
-    # ReportLab must draw the *visual* string LTR — do NOT set wordWrap="RTL" or
-    # the line will double-reverse and look flipped again.
-    body_align = TA_JUSTIFY
+    # ReportLab must draw the *visual* string LTR — do NOT set wordWrap="RTL".
     shape_ar = rtl or is_arabic_dominant(sample)
     wrap = "CJK"
+    # Headings: same edge alignment for both — start-of-reading-direction
+    align = TA_RIGHT if rtl else TA_LEFT
+    body_align = TA_JUSTIFY
 
-    title_size = size("title_font_size", 20, 10, 36)
-    heading_size = size("heading_font_size", 14, 8, 28)
-    body_size = size("body_font_size", 11, 6, 18)
-    accent = colors.HexColor(str(style.get("accent_color", "#0f172a")))
-    heading_color = colors.HexColor(str(style.get("heading_color", "#1e3a5f")))
-    body_color = colors.HexColor(str(style.get("body_color", "#1e293b")))
+    title_size = size("title_font_size", float(THEME["title_size"]), 10, 36)
+    heading_size = size("heading_font_size", float(THEME["h2_size"]), 8, 28)
+    body_size = size("body_font_size", float(THEME["body_size"]), 6, 18)
+    accent = th["accent"]
+    if style.get("accent_color"):
+        try:
+            accent = colors.HexColor(str(style["accent_color"]))
+        except Exception:
+            pass
+    heading_fill = th["heading_fill"]
+    body_color = th["body"]
 
+    # On-bar heading text is always white (same EN/AR)
     title_style = ParagraphStyle(
         "KazmaTitle",
         fontName=bold_font,
         fontSize=title_size,
         leading=title_size * 1.35,
-        spaceAfter=14,
-        textColor=accent,
-        alignment=TA_CENTER if not rtl else TA_RIGHT,
-        wordWrap=wrap,
-    )
-    h1_style = ParagraphStyle(
-        "KazmaH1",
-        fontName=bold_font,
-        fontSize=heading_size + 2,
-        leading=(heading_size + 2) * 1.35,
-        spaceBefore=16,
-        spaceAfter=8,
-        textColor=heading_color,
+        textColor=th["heading_text"],
         alignment=align,
         wordWrap=wrap,
-        borderPadding=3,
+        spaceBefore=0,
+        spaceAfter=0,
     )
-    h2_style = ParagraphStyle(
-        "KazmaH2",
+    h1_bar = ParagraphStyle(
+        "KazmaH1Bar",
+        fontName=bold_font,
+        fontSize=float(THEME["h1_size"]),
+        leading=float(THEME["h1_size"]) * 1.35,
+        textColor=th["heading_text"],
+        alignment=align,
+        wordWrap=wrap,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    h2_bar = ParagraphStyle(
+        "KazmaH2Bar",
         fontName=bold_font,
         fontSize=heading_size,
-        leading=heading_size * 1.4,
-        spaceBefore=12,
-        spaceAfter=6,
-        textColor=heading_color,
+        leading=heading_size * 1.35,
+        textColor=th["heading_text"],
         alignment=align,
         wordWrap=wrap,
+        spaceBefore=0,
+        spaceAfter=0,
     )
     h3_style = ParagraphStyle(
         "KazmaH3",
         fontName=bold_font,
-        fontSize=heading_size - 1,
-        leading=(heading_size - 1) * 1.4,
+        fontSize=float(THEME["h3_size"]),
+        leading=float(THEME["h3_size"]) * 1.4,
         spaceBefore=10,
         spaceAfter=4,
-        textColor=colors.HexColor("#334155"),
+        textColor=th["heading"],
         alignment=align,
         wordWrap=wrap,
     )
@@ -322,35 +337,31 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         "KazmaBody",
         fontName=font,
         fontSize=body_size,
-        leading=body_size * 1.65,
+        leading=body_size * float(THEME["line_height"]),
         textColor=body_color,
-        alignment=body_align,  # TA_JUSTIFY — full justify for body
+        alignment=body_align,
         wordWrap=wrap,
-        spaceAfter=6,
+        spaceAfter=8,
         firstLineIndent=0,
     )
+    # Lists: same indent both sides so EN/AR feel symmetric
     bullet_style = ParagraphStyle(
         "KazmaBullet",
         parent=body_style,
-        leftIndent=14 if not rtl else 0,
-        rightIndent=14 if rtl else 0,
+        leftIndent=16,
+        rightIndent=16,
         bulletIndent=0,
-        alignment=align if rtl else TA_LEFT,
-        spaceAfter=3,
+        alignment=align,
+        spaceAfter=4,
     )
-    number_style = ParagraphStyle(
-        "KazmaNumber",
-        parent=bullet_style,
-    )
+    number_style = ParagraphStyle("KazmaNumber", parent=bullet_style)
     quote_style = ParagraphStyle(
         "KazmaQuote",
         parent=body_style,
-        textColor=colors.HexColor("#475569"),
+        textColor=th["quote"],
         leftIndent=12,
         rightIndent=12,
-        borderColor=colors.HexColor("#94a3b8"),
-        borderWidth=0,
-        backColor=colors.HexColor("#f8fafc"),
+        backColor=th["bg_alt"],
         spaceBefore=4,
         spaceAfter=8,
     )
@@ -359,29 +370,14 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         fontName=font,
         fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#0f172a"),
-        backColor=colors.HexColor("#f1f5f9"),
+        textColor=th["accent"],
+        backColor=th["code_bg"],
         alignment=TA_LEFT,
         wordWrap="CJK",
         leftIndent=6,
         rightIndent=6,
         spaceBefore=4,
         spaceAfter=8,
-    )
-    # White text on dark heading bars (flowables draw the fill)
-    h1_bar = ParagraphStyle(
-        "KazmaH1Bar",
-        parent=h1_style,
-        textColor=colors.white,
-        spaceBefore=0,
-        spaceAfter=0,
-    )
-    h2_bar = ParagraphStyle(
-        "KazmaH2Bar",
-        parent=h2_style,
-        textColor=colors.white,
-        spaceBefore=0,
-        spaceAfter=0,
     )
     rich_styles = {
         "body": body_style,
@@ -392,57 +388,83 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         "number": number_style,
         "quote": quote_style,
         "code": code_style,
-        "heading_fill": colors.HexColor("#1e3a5f"),
+        "heading_fill": heading_fill,
     }
 
-    header = str(payload.get("header", ""))
-    footer = str(payload.get("footer", ""))
+    def _bar(text_html: str, para_style: Any, *, fill: Any | None = None) -> Any:
+        """Full-width filled heading bar — identical chrome for EN and AR."""
+        para = Paragraph(text_html, para_style)
+        fill_c = fill if fill is not None else heading_fill
+        tbl = Table([[para]], colWidths=["*"])
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), fill_c),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        return tbl
+
+    header = str(payload.get("header") or chrome["brand"])
+    footer = str(payload.get("footer") or chrome["brand"])
     page_numbers = bool(payload.get("page_numbers", True))
 
     def decorate(canvas: Any, document: Any) -> None:
         canvas.saveState()
         canvas.setFont(font, 8)
-        canvas.setFillColor(colors.HexColor("#64748b"))
-        # Accent line under header
-        canvas.setStrokeColor(colors.HexColor("#e2e8f0"))
-        canvas.setLineWidth(0.6)
+        canvas.setFillColor(th["muted"])
+        canvas.setStrokeColor(th["border"])
+        canvas.setLineWidth(0.8)
+        # Top brand rule
         canvas.line(
             document.leftMargin,
             A4[1] - 30,
             A4[0] - document.rightMargin,
             A4[1] - 30,
         )
-        if header:
-            hdr = shape_for_pdf(header) if shape_ar else header
-            if rtl:
-                canvas.drawRightString(A4[0] - document.rightMargin, A4[1] - 22, hdr)
-            else:
-                canvas.drawString(document.leftMargin, A4[1] - 22, hdr)
-        if footer:
-            ftr = shape_for_pdf(footer) if shape_ar else footer
-            if rtl:
-                canvas.drawRightString(A4[0] - document.rightMargin, 28, ftr)
-            else:
-                canvas.drawString(document.leftMargin, 28, ftr)
+        # Bottom rule
+        canvas.line(
+            document.leftMargin,
+            36,
+            A4[0] - document.rightMargin,
+            36,
+        )
+        hdr = shape_for_pdf(header) if shape_ar else header
+        ftr = shape_for_pdf(footer) if shape_ar else footer
+        if rtl:
+            canvas.drawRightString(A4[0] - document.rightMargin, A4[1] - 22, hdr)
+            canvas.drawRightString(A4[0] - document.rightMargin, 22, ftr)
+        else:
+            canvas.drawString(document.leftMargin, A4[1] - 22, hdr)
+            canvas.drawString(document.leftMargin, 22, ftr)
         if page_numbers:
-            page_label = str(document.page)
-            if rtl:
-                page_label = shape_for_pdf(f"صفحة {document.page}")
-            canvas.drawCentredString(A4[0] / 2, 18, page_label)
+            label = chrome["page_fmt"].format(n=document.page)
+            if shape_ar:
+                label = shape_for_pdf(label)
+            canvas.drawCentredString(A4[0] / 2, 22, label)
         canvas.restoreState()
 
     title_raw = str(payload.get("title", "Document"))
     title_html = inline_markdown_to_reportlab(title_raw, shape_arabic=shape_ar)
-    story: list[Any] = [Paragraph(title_html, title_style), Spacer(1, 10)]
+    # Title bar uses accent (darker) — same card treatment EN/AR
+    story: list[Any] = [
+        _bar(title_html, title_style, fill=accent),
+        Spacer(1, 14),
+    ]
 
     if payload.get("toc"):
-        toc_label = "المحتويات" if rtl else "Contents"
         story.append(
-            Paragraph(
-                inline_markdown_to_reportlab(toc_label, shape_arabic=shape_ar),
-                h2_style,
+            _bar(
+                inline_markdown_to_reportlab(chrome["toc"], shape_arabic=shape_ar),
+                h2_bar,
             )
         )
+        story.append(Spacer(1, 6))
         for index, item in enumerate(sections, 1):
             if item["heading"]:
                 line = f"{index}. {item['heading']}"
@@ -457,14 +479,15 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
     for item in sections:
         if item["heading"]:
             story.append(
-                Paragraph(
+                _bar(
                     inline_markdown_to_reportlab(
                         item["heading"].lstrip("#").strip(),
                         shape_arabic=shape_ar,
                     ),
-                    h1_style,
+                    h1_bar,
                 )
             )
+            story.append(Spacer(1, 8))
         body = item.get("body") or ""
         if body.strip():
             story.extend(
@@ -492,11 +515,12 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
             rows = value.get("rows")
             if heading:
                 story.append(
-                    Paragraph(
+                    _bar(
                         inline_markdown_to_reportlab(heading, shape_arabic=shape_ar),
-                        h2_style,
+                        h2_bar,
                     )
                 )
+                story.append(Spacer(1, 6))
             if isinstance(headers, list) and isinstance(rows, list) and headers:
                 def _cell(val: object) -> str:
                     s = str(val)
@@ -516,11 +540,11 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                         (
                             ("FONTNAME", (0, 0), (-1, -1), font),
                             ("FONTNAME", (0, 0), (-1, 0), bold_font),
-                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
-                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                            ("BACKGROUND", (0, 0), (-1, 0), th["table_header_bg"]),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), th["table_header_fg"]),
+                            ("BACKGROUND", (0, 1), (-1, -1), th["table_row_bg"]),
                             ("TEXTCOLOR", (0, 1), (-1, -1), body_color),
-                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
+                            ("GRID", (0, 0), (-1, -1), 0.5, th["table_grid"]),
                             ("VALIGN", (0, 0), (-1, -1), "TOP"),
                             ("ALIGN", (0, 0), (-1, -1), "RIGHT" if rtl else "LEFT"),
                             ("TOPPADDING", (0, 0), (-1, -1), 6),
@@ -533,13 +557,15 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                 story.extend((table, Spacer(1, 10)))
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
-        ref_label = "المراجع" if rtl else "References"
         story.append(
-            Paragraph(
-                inline_markdown_to_reportlab(ref_label, shape_arabic=shape_ar),
-                h2_style,
+            _bar(
+                inline_markdown_to_reportlab(
+                    chrome["references"], shape_arabic=shape_ar
+                ),
+                h2_bar,
             )
         )
+        story.append(Spacer(1, 6))
         for index, item in enumerate(citations, 1):
             line = f"{index}. {item}"
             story.append(
@@ -562,13 +588,14 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                 "disconnected or reversed in PDF"
             )
 
+    margin = float(THEME.get("page_margin", 54))
     SimpleDocTemplate(
         str(output),
         pagesize=A4,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=56,
-        bottomMargin=50,
+        leftMargin=margin,
+        rightMargin=margin,
+        topMargin=margin + 4,
+        bottomMargin=margin,
     ).build(story, onFirstPage=decorate, onLaterPages=decorate)
 
 
@@ -585,6 +612,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
         docx_write_rich_body,
         is_arabic_dominant,
     )
+    from kazma_core.documents.style_theme import THEME, localized_chrome
 
     document = Document()
     sections = _sections(payload.get("sections"))
@@ -604,31 +632,37 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     if payload.get("rtl") is False:
         rtl = False
 
+    chrome = localized_chrome(rtl=rtl)
+    # Theme fills (no #) for DOCX shading — same EN/AR
+    fill_title = str(THEME["accent"]).lstrip("#")
+    fill_h = str(THEME["heading_fill"]).lstrip("#")
+
     # Normal style: always justify (EN + AR); RTL via bidi on each para
     try:
         normal = document.styles["Normal"]
         normal.font.name = "Arial"
-        normal.font.size = Pt(11)
+        normal.font.size = Pt(float(THEME["body_size"]))
         normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         normal.paragraph_format.space_after = Pt(8)
-        normal.paragraph_format.line_spacing = 1.15
+        normal.paragraph_format.line_spacing = float(THEME["line_height"])
     except Exception:
         pass
 
     title = document.add_heading(str(payload.get("title", "Document")), 0)
-    docx_set_paragraph_shading(title, "0F172A")
+    docx_set_paragraph_shading(title, fill_title)
     try:
         if title.runs:
             title.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
     except Exception:
         pass
+    # Same treatment EN/AR: reading-direction align on the title bar
     if rtl:
         docx_set_rtl_paragraph(title, justify=False)
     else:
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    header = str(payload.get("header", ""))
-    footer = str(payload.get("footer", ""))
+    header = str(payload.get("header") or chrome["brand"])
+    footer = str(payload.get("footer") or chrome["brand"])
     for section in document.sections:
         if header:
             section.header.paragraphs[0].text = header
@@ -640,8 +674,8 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
                 docx_set_rtl_paragraph(section.footer.paragraphs[0], justify=False)
 
     if payload.get("toc"):
-        toc = document.add_heading("المحتويات" if rtl else "Contents", 1)
-        docx_set_paragraph_shading(toc, "1E3A5F")
+        toc = document.add_heading(chrome["toc"], 1)
+        docx_set_paragraph_shading(toc, fill_h)
         try:
             if toc.runs:
                 toc.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
@@ -658,7 +692,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     for item in sections:
         if item["heading"]:
             h = document.add_heading(item["heading"].lstrip("#").strip(), 1)
-            docx_set_paragraph_shading(h, "1E3A5F")
+            docx_set_paragraph_shading(h, fill_h)
             try:
                 if h.runs:
                     h.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
@@ -681,7 +715,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
             rows = value.get("rows")
             if heading:
                 h = document.add_heading(heading, 2)
-                docx_set_paragraph_shading(h, "1E3A5F")
+                docx_set_paragraph_shading(h, fill_h)
                 try:
                     if h.runs:
                         h.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
@@ -703,8 +737,8 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
 
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
-        ref = document.add_heading("المراجع" if rtl else "References", 1)
-        docx_set_paragraph_shading(ref, "1E3A5F")
+        ref = document.add_heading(chrome["references"], 1)
+        docx_set_paragraph_shading(ref, fill_h)
         try:
             if ref.runs:
                 ref.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
