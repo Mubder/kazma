@@ -10,11 +10,11 @@ Kazma's gateway intercepts slash commands and resolves them **instantly (&lt;50m
 
 ---
 
-## Documents (`/documents`, alias `/docs`)
+## Documents {#documents}
 
 Surfaces the shared **Document Intelligence** platform (`DocumentIngestionService`)
-across Telegram, Discord, Slack, and other gateway chats. Reads use opaque IDs;
-no raw server paths from the user.
+via `/documents` (alias `/docs`) across Telegram, Discord, Slack, and other
+gateway chats. Reads use opaque IDs; no raw server paths from the user.
 
 | Subcommand | Usage | Description |
 |---|---|---|

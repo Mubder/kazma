@@ -73,7 +73,8 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Path | Purpose |
 |------|---------|
 | `docs/audits/` | Security & architecture audits |
-| `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md)) |
+| `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md), [Document docs goal](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md), [Document residuals](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_RESIDUALS_GOAL.md)) |
+| `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` | Document Intelligence certification report |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
 | `docs/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan |
 | `AGENTS.md` | Rules for coding agents working in the repo |

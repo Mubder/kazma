@@ -4,6 +4,11 @@ sidebar_position: 3
 
 # Hardening Guide
 
+**Document Intelligence:** treat every upload as hostile — enable ClamAV for production
+intake (`documents.security.malware_scan=on` when `clamscan`/`clamdscan` is on PATH),
+keep fences on, and review [Document security](./document-security). Prefer
+`document-platform` over legacy generators for multi-user deployments.
+
 ## Server binding
 
 Kazma defaults to **localhost-only** (`127.0.0.1`) for security. To bind on all interfaces:

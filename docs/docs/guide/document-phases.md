@@ -12,9 +12,16 @@ This page is the **source of truth for phase narrative**. Product usage lives in
 [Document security](../security/document-security.md); ops in
 [Document processing](../ops/document-processing.md).
 
+**Start here if you only want to use the product:** [Document Intelligence](./document-intelligence.md)
+(operator walkthrough + install). Use this phase map for engineering history
+and test ownership.
+
 Phases were implemented primarily as code + tests; only phases **9–10** have
 dedicated CHANGELOG product entries. The map below reconstructs **0–8** from
 modules and phase-named tests so operators and contributors share one timeline.
+
+**Post-phase residuals (malware, Settings UI, Postgres metadata, soak):**
+`docs/plans/DOCUMENT_RESIDUALS_GOAL.md` + CHANGELOG “Document residuals” entry.
 
 ---
 

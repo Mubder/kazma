@@ -24,7 +24,14 @@ Built with **Textual** (`kazma-tui`). Provides a dashboard for chat, status, fil
 | Status | Models, gateway, health |
 | Demo mode | `KAZMA_DEMO_MODE` (never use in real prod) |
 
-Nav binding: Documents is a first-class tab (shortcut key **8** in the nav rail). Guide: [Document Intelligence](../guide/document-intelligence).
+### Documents tab
+
+- Nav rail entry **Documents** (keyboard **8**).
+- Lists tenant-scoped documents from the same process-wide ingestion service as Web.
+- Select a row to preview fenced processed content when `ready`.
+- **Upload / convert / GC** remain on Web `/documents` or agent tools — TUI is inspect-first.
+
+Guide: [Document Intelligence](../guide/document-intelligence).
 
 ## Config
 

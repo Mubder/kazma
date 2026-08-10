@@ -35,6 +35,37 @@ the deep docs when you need detail.
 
 ---
 
+## 1a. Document Intelligence (product path)
+
+### What it does
+
+End-to-end **secure document platform**: streamed intake → quarantine CAS →
+policy sniff → isolated parse/OCR → durable jobs → optional Knowledge index,
+generate/convert/redact, ops (capacity, GC, audit, cert).
+
+### How to run
+
+| Entry | How |
+|-------|-----|
+| **Web** | `/documents` upload + ops; Settings → **Documents** |
+| **Agent** | `document_import` / `document_read` / `document_index` / … |
+| **Gateway** | `/documents list\|read\|status\|…` (alias `/docs`) |
+| **TUI** | Documents tab |
+| **Cert** | `python scripts/certify_documents.py` |
+
+### Install engines (optional)
+
+```bash
+pip install -e ".[document-platform]"
+# System: Tesseract (OCR), ClamAV (malware), LibreOffice (some convert)
+```
+
+Deep docs: [Document Intelligence](./document-intelligence) ·
+[Ops](../ops/document-processing) · [Security](../security/document-security) ·
+[Phases 0–10](./document-phases).
+
+---
+
 ## 1. Deep research (product path)
 
 ### What it does

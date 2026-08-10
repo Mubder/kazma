@@ -145,15 +145,22 @@ tenant-scoped, restart-safe work.
 ### Live configuration
 
 All limits, retention, GC, capacity, and rollout flags are **ConfigStore-backed**
-(primary keys are nested). Toggle via `PUT /api/settings/single` or `kazma.yaml`
-without restart. There is no separate Documents tab in Settings — use dotted
-keys or YAML. Document config is **not** primarily env-driven.
+(primary keys are nested). Changes apply **without restart**.
+
+| How to configure | Path |
+|---|---|
+| **Settings UI** | `/settings?tab=documents` (rollout, intake, workers, OCR, malware, GC) |
+| **REST** | `GET/PUT /api/settings/documents` or `PUT /api/settings/single` |
+| **YAML** | `kazma.yaml` seeds on first boot; DB overrides win afterward |
+| **Env (backends only)** | `KAZMA_DOCUMENTS_JOBS_BACKEND`, `KAZMA_DOCUMENTS_METADATA_BACKEND` |
+
+Document limits are **not** primarily env-driven — use ConfigStore keys.
 
 | Area | Primary key prefix | Notes |
 |---|---|---|
 | Intake | `documents.intake.*` | aliases: `documents.intake_max_*` |
 | Parser / limits | `documents.limits.*` | e.g. `documents.limits.max_pages` |
-| Security | `documents.security.*` | malware knobs may be config-only |
+| Security | `documents.security.*` | malware: `malware_scan` + `malware_fail_closed` |
 | OCR | `documents.ocr.*` | |
 | Workers | `documents.workers.*` | timeout, memory, concurrency, leases |
 | Indexing | `documents.indexing.*` | |
@@ -275,13 +282,106 @@ See [Phase map](./document-phases.md) and the repo audit report
 
 ## Multi-replica
 
-When Postgres is configured, **job claiming** uses `SELECT … FOR UPDATE SKIP
-LOCKED` — safe for multiple app replicas. Document **metadata**
-(documents/versions/blobs/artifacts) remains SQLite, so
-`GET /api/documents/ops/readiness` honestly reports `metadata_single_replica`.
+| Layer | Backend | Multi-replica? |
+|---|---|---|
+| **Job claiming** | Postgres when pool is up (`jobs_pg.py`) | Yes — `SELECT … FOR UPDATE SKIP LOCKED` |
+| **Metadata** (documents/versions/blobs/artifacts/chunks) | SQLite default; Postgres when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` or `auto` with PG jobs (`repository_pg.py`) | Yes when Postgres metadata is active |
+| **Content blobs** | Content-addressed tree under `documents.storage_root` | Shared filesystem / volume required across replicas |
+| **GC mark/sweep** | SQLite SQL today | **Skipped** on Postgres metadata with honest error `gc_postgres_metadata_sql_port_pending` (no silent deletes) |
 
-Do not run more than one replica against a shared document store until
-metadata is ported to Postgres.
+Env:
+
+| Variable | Values | Effect |
+|---|---|---|
+| `KAZMA_DOCUMENTS_JOBS_BACKEND` | `auto` (default) / `sqlite` | Force SQLite jobs, or follow platform Postgres |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` / `sqlite` / `postgres` | `auto` follows jobs backend |
+
+Check: `GET /api/documents/ops/readiness` → `jobs_multi_replica`, `metadata_multi_replica`, `degraded_reasons`.
+
+---
+
+## Install & enable
+
+### Python extras
+
+```bash
+# Simple PDF/DOCX/XLSX generators only (legacy skill)
+pip install -e ".[document]"
+
+# Full platform engines (OCR helpers, WeasyPrint, PyMuPDF redaction/raster)
+pip install -e ".[document-platform]"
+
+# Everything
+pip install -e ".[all]"
+```
+
+### System packages (optional)
+
+| Package | Purpose |
+|---|---|
+| **Tesseract** + language packs (`eng`, `ara`, …) | OCR |
+| **ClamAV** (`clamscan` / `clamdscan` on PATH) | Malware scan on intake |
+| **LibreOffice** | Some format conversions |
+| OS fonts | WeasyPrint HTML→PDF |
+
+### First operator walkthrough
+
+1. Start Kazma and open **`/documents`**.
+2. (Optional) **Settings → Documents** — leave `enabled`, tune malware to `auto` or `on` if ClamAV is installed.
+3. Upload a small PDF or `.txt` → wait for state **`ready`**.
+4. Preview content (BiDi-safe with `dir="auto"`).
+5. Set a `library_id` → **Index** → search via UI/API/`document_search`.
+6. Ops panel: capacity, readiness, audit; GC = dry-run then confirm.
+7. Cert smoke: `python scripts/certify_documents.py`
+
+### Chat & agent
+
+- Attach a PDF in chat → auto-parse excerpt (fenced) when a parser is available.
+- Agent tools: `document_import` (workspace path), `document_read`, `document_index`, …
+- Gateway: `/documents list`, `/documents read <id>`, …
+
+---
+
+## Supported formats (typical)
+
+| Kind | Examples | Notes |
+|---|---|---|
+| Text / data | `.txt`, `.csv`, `.md`, JSON-ish | Sniff + text parsers |
+| Office OOXML | `.docx`, `.xlsx`, `.pptx` | Structural defenses before parse |
+| PDF | `.pdf` | Policy rejects encrypt/JS/polyglot by default |
+| Images | PNG/JPEG/… | OCR path when enabled |
+
+Exact readiness is reported per parser/renderer at `GET /api/documents/health`.
+
+---
+
+## Malware scanning
+
+Intake scans quarantined bytes via `documents.security.malware_scan`:
+
+| Mode | Behavior |
+|---|---|
+| `auto` (default) | Scan if ClamAV on PATH; otherwise skip (unless fail-closed) |
+| `on` | Require scanner; missing scanner → reject |
+| `off` | Never scan |
+
+Infected files → error code `malware_detected`. See [Document security](../security/document-security.md).
+
+---
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Upload 413 / 429 / 503 / 507 | Capacity limits; Settings or ops capacity snapshot |
+| State stuck / dead_letter | Job events; worker running; `GET /api/documents/health` |
+| Empty preview | Not `ready` yet; parser failure code on job |
+| Convert/redact 422/503 | Optional engine missing — install `document-platform` + system deps |
+| Malware rejections unexpected | ClamAV false positive, or `on` without scanner |
+| Multi-replica weirdness | `ops/readiness`; shared blob volume; GC skipped on PG metadata |
+| Cross-tenant 404 | Expected — tenant/actor ACL |
+
+More ops detail: [Document processing](../ops/document-processing.md).
 
 ---
 

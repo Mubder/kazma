@@ -79,6 +79,8 @@ Telegram is the **most feature-complete** adapter.
 
 > **Slash commands:** Slack blocks bot-issued slash commands, so the HITL approval prompt is issued as `hitl approve|deny &lt;id>` **without** the `/` prefix (`graph.py:184`).
 
+**Documents:** all platforms that reach the agent handler support `/documents` (alias `/docs`) for list/status/read/convert/redact/search/health against the shared Document Intelligence service. Chat attachments may auto-parse document types into fenced excerpts. See [Slash commands — Documents](../reference/slash-commands.md) and [Document Intelligence](./document-intelligence.md).
+
 ---
 
 ## 3. Platform isolation (the core invariant)

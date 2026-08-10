@@ -4,11 +4,30 @@ title: Document Processing Operations
 
 # Document Processing — Operations & Scale
 
-Phase 9 operational surface for the
-[document intelligence platform](../guide/document-intelligence.md).
-Everything here is driven by the shared `DocumentIngestionService`; there is no
-second parser or parallel write path. Agent tools:
-[tools catalog — document-platform](../reference/tools-catalog.md).
+Operational surface for the
+[document intelligence platform](../guide/document-intelligence.md)
+(Phase 9+ residuals). Everything is driven by the shared
+`DocumentIngestionService`; there is no second parser or parallel write path.
+
+**Related:** [API routes](../reference/api-routes.md#documents--document-intelligence) ·
+[Document security](../security/document-security.md) ·
+[Phase map](../guide/document-phases.md) ·
+[Production checklist](./production-checklist.md) ·
+[Smoke matrix](./smoke-matrix.md)
+
+---
+
+## Day-2 operator surfaces
+
+| Surface | Use |
+|---|---|
+| Web `/documents` | Upload, library, detail, ops panel (capacity, readiness, audit, GC) |
+| Settings `/settings?tab=documents` | Live rollout, intake, workers, OCR, malware, GC |
+| `GET /api/documents/ops/*` | Metrics, capacity, readiness, retention, audit |
+| `POST /api/documents/ops/maintenance/{dry-run,run}` | Admin GC |
+| `python scripts/certify_documents.py` | Cert smoke / `--soak` |
+
+---
 
 ## Metrics
 
@@ -37,14 +56,19 @@ job/attempt/parser) — never document content, filenames, redaction terms, or
 secrets. Optional OpenTelemetry spans are emitted when `opentelemetry` is
 installed; otherwise they no-op.
 
+---
+
 ## Operational audit
 
 Every operator/tenant-facing action (intake, access, index, generate, convert,
 mutate, redact, download, cancel, retry, delete, GC) is appended to an
-immutable, tenant-scoped audit trail (`document_audit_events` in
-`documents.db`). It complements — does not duplicate — the per-job stage event
+immutable, tenant-scoped audit trail (`document_audit_events`). On SQLite it
+lives in `documents.db`; on Postgres metadata it uses the same table name in
+the shared pool. It complements — does not duplicate — the per-job stage event
 history. Read a page with `GET /api/documents/ops/audit?limit=&before_id=`.
 Details are allowlisted to safe scalars; content never enters the audit.
+
+---
 
 ## Backpressure, capacity, and rate limits
 
@@ -62,11 +86,16 @@ The durable queue capacity is authoritative; the in-memory rate/byte window is
 an additional burst guard. `GET /api/documents/ops/capacity` returns an
 alert-compatible snapshot with machine-readable `degraded_reasons`.
 
+Default free-floor is **512 MiB**; many production hosts raise it to ≥ 1 GiB
+via Settings → Documents or ConfigStore.
+
+---
+
 ## Retention and garbage collection
 
 Retention is live ConfigStore-backed (`documents.retention.*`, `documents.gc.*`).
 The collector is a crash-safe **mark/sweep** with the database as the sole
-authority:
+authority (SQLite metadata path):
 
 - Reclaims orphan/unreferenced blobs, post-promotion quarantine copies,
   expired-tombstone content, terminally-failed (rejected/dead-letter) version
@@ -81,30 +110,77 @@ A scheduled loop runs every `documents.gc.interval_hours` (cancelled cleanly on
 shutdown). Operators can **dry-run then confirm** from the Documents page or via
 `POST /api/documents/ops/maintenance/dry-run` and `…/run` (admin-gated).
 
+**Postgres metadata:** CRUD is multi-replica-safe, but GC mark/sweep SQL is still
+SQLite-shaped. When metadata backend is Postgres, GC **skips** with error
+`gc_postgres_metadata_sql_port_pending` (fail closed — no silent deletes).
+
+---
+
+## Malware scanning
+
+Intake runs ClamAV when configured (`documents.security.malware_scan` =
+`auto`/`on`/`off`). Probe appears on readiness and Settings → Documents.
+See [Document security](../security/document-security.md).
+
+---
+
 ## Backup
 
 The nightly native backup snapshots `documents.db` **first**
-(`sqlite3.backup()` → point-in-time), then copies the content it references and
-verifies every blob/manifest checksum — a torn DB/blob snapshot is impossible
-because blob files are always written before their rows. Backups land under
-`kazma-data/backups/document-store-<ts>/` with a `manifest.json`.
+(`sqlite3.backup()` → point-in-time) when metadata is SQLite, then copies the
+content it references and verifies every blob/manifest checksum — a torn
+DB/blob snapshot is impossible because blob files are always written before
+their rows. Backups land under `kazma-data/backups/document-store-<ts>/` with a
+`manifest.json`.
+
+When metadata is Postgres, relational state is part of the platform DB backup
+story (`pg_dump` / `kazma migrate`); still backup the content-addressed tree.
+
+---
 
 ## Migration
 
-`kazma migrate export|verify|import` bundles now carry `documents.db` + the
-content-addressed tree + manifests. documents.db has no embedded paths, so it
+`kazma migrate export|verify|import` carries `documents.db` (when present) + the
+content-addressed tree + manifests. `documents.db` has no embedded paths, so it
 needs no rewrite; the importer restores it and the tree into the target's
 document-store root through the existing atomic stage → verify → backup → swap
-flow.
+flow. See [Migration](./migration.md).
+
+---
 
 ## Multi-replica readiness
 
-When `KAZMA_DATABASE_URL`/`KAZMA_DB_BACKEND=postgres` is configured, document
-**job claiming** uses a real Postgres queue with `SELECT … FOR UPDATE SKIP
-LOCKED` + compare-and-swap leases — safe for multiple replicas. SQLite remains
-the single-node default (WAL + `BEGIN IMMEDIATE`).
+| Component | Multi-replica | How |
+|---|---|---|
+| Job queue | Yes (Postgres) | `KAZMA_DATABASE_URL` + `jobs_pg.py`; override with `KAZMA_DOCUMENTS_JOBS_BACKEND=sqlite` |
+| Metadata | Yes (Postgres) | `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` or `auto`; `repository_pg.py` |
+| Metadata | No (SQLite default) | Single app replica against a shared store |
+| Blobs | Shared volume | All replicas must see the same `documents.storage_root` tree |
+| GC | SQLite only today | Skipped on PG metadata with honest error |
 
-Document **metadata** (documents/versions/blobs/artifacts) is still SQLite, so a
-multi-replica deployment is **degraded**: `GET /api/documents/ops/readiness`
-reports `metadata_single_replica` honestly. Do not run more than one replica
-against a shared document store until metadata is ported to Postgres.
+Always read `GET /api/documents/ops/readiness`:
+
+```json
+{
+  "status": "ready|degraded",
+  "jobs_backend": "postgres|sqlite",
+  "jobs_multi_replica": true,
+  "metadata_backend": "postgres|sqlite",
+  "metadata_multi_replica": true,
+  "degraded_reasons": [],
+  "malware": { "available": true, "scanner": "clamdscan", "mode": "auto" }
+}
+```
+
+---
+
+## Certification & soak
+
+```bash
+python scripts/certify_documents.py
+python scripts/certify_documents.py --soak --soak-iterations 100
+python scripts/certify_documents.py --output report.json
+```
+
+Pytest: `tests/test_document_certification_phase10.py` (architecture, crash,
+a11y, rollout). Report history: `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md`.

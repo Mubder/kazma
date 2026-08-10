@@ -43,6 +43,45 @@ There is **no** `/research` slash command. Ask in **chat** (e.g. “Research X a
 
 `read_url` returns a **window** (default 16k, env `KAZMA_READ_URL_MAX_CHARS`) and supports `offset` / `max_chars` paging. For the full page, use `read_url_to_file` then `digest_research_file` or `read_research_chunk`. Graph results for research tools allow a higher truncate cap (`KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS`).
 
+### How do I process PDFs / Office docs securely?
+
+Use **Document Intelligence** — not a one-off script path:
+
+1. Web: open **`/documents`**, upload, wait for state `ready`.
+2. Agent: `document_import` (workspace-safe path) → `document_read` / `document_index`.
+3. Chat gateway: `/documents list|read|…` (alias `/docs`).
+
+Content is sniffed, parsed out-of-process, fenced for the LLM, and stored
+content-addressed. See [Document Intelligence](document-intelligence) and
+[Document security](../security/document-security).
+
+### What’s the difference between `generate_pdf` and `document_import`?
+
+| Path | Skill / API | Stores |
+|------|-------------|--------|
+| **Simple / legacy** | `document-generator` tools (`generate_pdf`, …) | Files under `kazma-data/documents/` — no durable jobs/ACL |
+| **Platform** | `document-platform` tools + `/api/documents/*` | Opaque IDs, jobs, tenants, restart-safe pipeline |
+
+Prefer the platform for multi-user or production document work.
+
+### How do I index an uploaded file into Knowledge Library?
+
+After the document is `ready`: UI **Index** with a `library_id`, or
+`document_index` / `POST /api/documents/{id}/index`. Auto-index is **off** by
+default. Search with `document_search` or library tools. See
+[Knowledge Library — document bridge](knowledge-library#document-intelligence--library-bridge).
+
+### Why is convert / redact failing?
+
+Optional engines may be missing. Install `pip install -e ".[document-platform]"`
+and check `GET /api/documents/health` (renderers/mutators readiness). API returns
+truthful **422/503** when degraded.
+
+### How do I enable malware scanning?
+
+Install ClamAV so `clamscan` or `clamdscan` is on PATH. Settings → Documents →
+malware scan `auto` or `on`. Readiness includes `malware.available`.
+
 ---
 
 ## Providers & models

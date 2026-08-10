@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Document Intelligence comprehensive docs wire-up (2026-08-10)
+
+Expanded product documentation so Document Intelligence is a first-class part of
+the Kazma docs tree: operator walkthrough, install/engines, multi-replica truth,
+Settings/FAQ/glossary/system-map/diagnosis/DR/multi-replica/web/TUI/gateway/
+configuration/quickstart/recent-features, and full ops rewrite for readiness +
+malware + GC honesty.
+
+
 ## Unreleased — Document residuals: malware, Settings, PG metadata, soak (2026-08-10)
 
 Shipped previously out-of-scope residuals from the document docs goal:

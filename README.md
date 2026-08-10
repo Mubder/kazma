@@ -55,15 +55,33 @@ Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph 
 ### 📜 Arabic-Native
 Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol. Built in Kuwait, for the world.
 
+### 📄 Document Intelligence Platform
+Production document pipeline: streamed intake → content-addressed quarantine → MIME/OOXML/PDF policy sniff → **isolated subprocess parse/OCR** → durable job queue (leases, retries, dead-letter) → optional Knowledge Library index, generate/convert/redact, and ops (capacity, GC, immutable audit).
+
+| Surface | Entry |
+|---|---|
+| Web | `/documents` + Settings → **Documents** |
+| API | `/api/documents/*` (upload, jobs, convert, redact, index, ops) |
+| Agent | `document-platform` tools (`document_import`, `document_read`, `document_index`, …) |
+| Chat | `/documents` / `/docs` slash commands |
+| TUI | Documents tab |
+
+- **Hostile-by-default** — XXE/macro/polyglot/encryption rejection, prompt fences (`<kazma:data untrusted>`), optional **ClamAV** malware scan (`auto`/`on`/`off`)
+- **Multi-replica ready** — Postgres job claims (`SKIP LOCKED`) + optional Postgres metadata; content tree stays CAS on disk
+- **Canary rollout** — `enabled` / `shadow` / `default_authoritative` live ConfigStore flags
+- **Certification** — `python scripts/certify_documents.py` (+ hostile corpus, soak)
+
+Docs: [Document Intelligence](docs/docs/guide/document-intelligence.md) · [Ops](docs/docs/ops/document-processing.md) · [Security](docs/docs/security/document-security.md) · [Phases 0–10](docs/docs/guide/document-phases.md)
+
 ### 🔌 Rich Ecosystem
 - **Any LLM** — OpenAI, Anthropic, Gemini, DeepSeek, xAI, Ollama, and 15+ more via plain HTTP with Vision Capability Routing
 - **MCP Marketplace** — One-click install from 85+ preset MCP servers with namespaced tools
 - **Hardened Scraping & Auto-Retry** — 5 MB streaming byte limits (`KAZMA_FETCH_MAX_BYTES`), binary payload gates, exponential 5xx backoff, `robots.txt` options (`KAZMA_CRAWL_RESPECT_ROBOTS`), and automatic doubled `max_tokens` retry on truncation
-- **Knowledge Library** — Ingest entire documentation sites into searchable RAG corpora with cited sources
+- **Knowledge Library** — Ingest entire documentation sites into searchable RAG corpora with cited sources; **document_index** bridges platform uploads into the same libraries
 - **IDE Subsystem** — Transport-agnostic coding backend: multi-tab editor, file-aware AI chat, `/ide` commands across all platforms
 - **Time-Travel Replay & Branching** — Snapshot every iteration to SQLite WAL (`snapshots.db`); restore in-place (`/replay`), fork threads (`/fork`), and compare paths
 - **Encrypted Vault** — AES-256-GCM storage for API keys and credentials
-- **Browser, Calendar & Documents** — Playwright automation, Google/Outlook calendar, PDF/DOCX/XLSX generation, and chunked `file_append`
+- **Browser, Calendar & Document generation** — Playwright automation, Google/Outlook calendar, legacy `generate_pdf`/`docx`/`xlsx` skills, plus the full **Document Intelligence** platform above
 - **Deep Research** — Multi-query web search → parallel acquire → digest → LLM synthesis with DOCX export
 
 ---
@@ -82,6 +100,7 @@ Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultura
 | **Time-travel replay** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Skill integrity** | ✅ HMAC-SHA256 | ❌ | ❌ | ❌ | ❌ |
 | **Web UI included** | ✅ | ❌ | ❌ | ❌ | ✅ |
+| **Document Intelligence** | ✅ secure pipeline | ⚠️ ad-hoc | ❌ | ❌ | ⚠️ limited |
 
 ---
 
@@ -94,6 +113,8 @@ Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultura
 | Swarm Task Builder | Skills | MCP Servers |
 |---|---|---|
 | ![Swarm](https://kazma.ai/screenshots/Swarm-Task-Builder-en.png) | ![Skills](https://kazma.ai/screenshots/Skills-en.png) | ![MCP](https://kazma.ai/screenshots/MCP-en.png) |
+
+> **Documents:** open `/documents` after `kazma serve` for secure upload → parse → index (see [Document Intelligence](docs/docs/guide/document-intelligence.md)).
 
 ---
 
@@ -129,7 +150,7 @@ py -3.13 -m venv .venv
 pip install -e ".[rag,dev]"
 ```
 
-> **Extras:** `rag` = vector memory; `dev` = tests/lint; `web` = Playwright; `document` = PDF/DOCX/XLSX; `database` = Postgres/MySQL/Mongo. Install everything with `pip install -e ".[all]"` or `uv sync --all-extras`.
+> **Extras:** `rag` = vector memory; `dev` = tests/lint; `web` = Playwright; `document` = simple PDF/DOCX/XLSX generators; `document-platform` = full Document Intelligence engines (OCR helpers, WeasyPrint, PyMuPDF); `database` = Postgres/MySQL/Mongo; `postgres` = multi-replica shared state (also document jobs/metadata when configured). Install everything with `pip install -e ".[all]"` or `uv sync --all-extras`.
 
 ### 2. Configure
 
@@ -157,7 +178,9 @@ kazma serve
 kazma-tui
 ```
 
-> **Full guides:** [Quickstart](docs/docs/guide/quickstart.md) · [Configuration](docs/docs/guide/configuration.md) · [Troubleshooting](docs/docs/guide/troubleshooting-and-workarounds.md)
+Open **http://127.0.0.1:9090/documents** for Document Intelligence (upload → parse → index).
+
+> **Full guides:** [Quickstart](docs/docs/guide/quickstart.md) · [Configuration](docs/docs/guide/configuration.md) · [Document Intelligence](docs/docs/guide/document-intelligence.md) · [Troubleshooting](docs/docs/guide/troubleshooting-and-workarounds.md)
 
 ---
 
@@ -172,6 +195,7 @@ Supervisor Graph (LangGraph ReAct loop)
     ├── ContextAuthority (80% compaction + per-turn RAG retrieval)
     ├── UnifiedToolExecutor (LocalToolRegistry + native skills + MCP)
     ├── IdeService (workspace-scoped file/exec/git)
+    ├── DocumentIngestionService (durable docs: CAS + jobs + isolated parse)
     ├── HITL Gate (interrupt before danger tools)
     └── LLM Provider (any OpenAI-compatible endpoint)
     ↓
@@ -197,7 +221,7 @@ Kazma operates on a **V2 Cognitive Engine** for personal memory (single SoT for 
 | **Bi-Temporal Beliefs** | SQLite SoT | Functional / set / state beliefs with temporal scrubbing; Dashboard topology paints from SQLite |
 | **Episode Retrieval** | FTS5 + `sqlite-vec` | Sparse + dense fusion for “what we said” |
 | **Associative PPR** | Local Ego-Graph | Multi-hop weight expansion over the belief graph |
-| **Knowledge Library** | Separate store | Docs + citations; inject / federated search (`MEM` / `KB` labels) |
+| **Knowledge Library** | Separate store | Docs + citations; inject / federated search (`MEM` / `KB` labels); **document_index** from Document Intelligence |
 | **Optional Neo4j** | Dual-write | Belief triples when configured; never required for install |
 | **Procedural Memory** | Parametric Action DAGs | Tool skills with confidence smoothing and quarantine |
 
@@ -251,12 +275,12 @@ Full guide: [Swarm Orchestration](docs/docs/guide/swarm-orchestration.md)
 ## 📦 Project Structure
 
 ```
-kazma-core/       Agent runner, LLM provider, swarm engine, memory/RAG, IDE, safety
-kazma-gateway/    Telegram/Discord/Slack adapters, slash commands
-kazma-ui/         FastAPI web app, IDE page, SSE chat, dashboard
-kazma-tui/        Textual terminal dashboard + IDE editor
+kazma-core/       Agent runner, LLM provider, swarm, memory/RAG, IDE, safety, documents/
+kazma-gateway/    Telegram/Discord/Slack adapters, slash commands (/documents)
+kazma-ui/         FastAPI web app, /documents, Settings, IDE, SSE chat, dashboard
+kazma-tui/        Textual terminal dashboard + IDE + Documents tab
 kazma-memory/     Arabic tokenizer + FTS5 search backend
-kazma-skills/     Native skills (vault, database, crawler, coding, …)
+kazma-skills/     Native skills (document-platform, vault, database, crawler, …)
 kazma-cli/        The `kazma` command surface
 ```
 
@@ -267,6 +291,9 @@ kazma-cli/        The `kazma` command surface
 | Document | What's inside |
 |---|---|
 | [Docs home](docs/docs/intro.md) | Full documentation map |
+| [Document Intelligence](docs/docs/guide/document-intelligence.md) | Secure document pipeline (ingest → OCR → index → ops) |
+| [Document processing ops](docs/docs/ops/document-processing.md) | Metrics, capacity, GC, multi-replica readiness |
+| [Document security](docs/docs/security/document-security.md) | Threat model, sandbox, malware, fences |
 | [Quickstart](docs/docs/guide/quickstart.md) | Install paths, minimal config, first message |
 | [Architecture](docs/docs/guide/architecture.md) | Engine internals, data-flow diagrams |
 | [Configuration](docs/docs/guide/configuration.md) | `kazma.yaml`, ConfigStore, providers |

@@ -235,10 +235,20 @@ def create_documents_router() -> APIRouter:
                 return _capacity_error(exc)
             if isinstance(exc, DocumentIngestionError):
                 return _ingestion_error(exc)
-            logger.warning("[documents_api] upload failed type=%s", type(exc).__name__)
+            # Log full detail for operators; return a short safe message to clients.
+            logger.warning(
+                "[documents_api] upload failed type=%s detail=%s",
+                type(exc).__name__,
+                str(exc)[:300],
+                exc_info=True,
+            )
             return JSONResponse(
                 status_code=400,
-                content={"ok": False, "error": f"Upload failed ({type(exc).__name__})"},
+                content={
+                    "ok": False,
+                    "error": f"Upload failed ({type(exc).__name__}: {str(exc)[:160]})",
+                    "code": "upload_failed",
+                },
             )
         finally:
             tmp_path.unlink(missing_ok=True)

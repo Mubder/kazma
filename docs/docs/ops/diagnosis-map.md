@@ -388,6 +388,23 @@ When you **merge** two paths into one, add a test that would have failed under t
 | Soul / self_improvement | all inject sites + prompt_fence |
 | Swarm bus adapter | FanOut vs Null, IDE fail-closed UX |
 | `read_url` recovery | knowledge_ingest, crawl, web_research |
+| Document durable path | Web API, tools, gateway `/documents`, TUI — all → `DocumentIngestionService` only |
+| Document parse execution | `DocumentService` (workers + chat transient attachments) — never import `documents.parsers` from gateway/UI |
+| Document jobs vs metadata | `jobs_pg` multi-replica; `repository_pg` optional; GC SQLite SQL only |
+| Document danger-ish redaction | UI `kazmaConfirm` only; API/tools ACL still apply |
+
+### Document Intelligence symptoms
+
+| Symptom | Related paths | Invariant |
+|---------|---------------|-----------|
+| Upload rejected 429/503/507 | `capacity.py`, Settings Documents | Truthful status + Retry-After |
+| Job stuck | worker pool, leases, `recover_expired_leases` | Restart reclaim + heartbeat |
+| Cross-tenant access | repository ACL | Tenant + actor on every read |
+| Convert/redact unavailable | health renderers/mutators | 422/503, no silent fake success |
+| Multi-replica inconsistency | readiness metadata/jobs backends + shared blob volume | Check `ops/readiness` before scaling |
+| Parser import from gateway | architecture compliance tests | Forbidden modules list |
+
+Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document processing](./document-processing).
 
 ---
 

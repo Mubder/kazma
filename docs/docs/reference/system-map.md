@@ -17,12 +17,12 @@ That file is the engineering single source of truth for *how packages wire toget
 
 | Package | Role |
 |---------|------|
-| `kazma-core` | Agent brain, swarm, tools, model registry, vault, IDE service, ConfigStore |
-| `kazma-gateway` | Telegram / Discord / Slack adapters + agent handler |
-| `kazma-ui` | FastAPI web UI, SSE chat, settings, IDE, swarm panel |
-| `kazma-tui` | Textual dashboard / editor |
-| `kazma-cli` | `kazma` CLI entrypoints |
-| `kazma-skills` | Skill manifests + native skills |
+| `kazma-core` | Agent brain, swarm, tools, model registry, vault, IDE service, ConfigStore, **document intelligence** (`documents/`) |
+| `kazma-gateway` | Telegram / Discord / Slack adapters + agent handler (`/documents` slash, attachment parse) |
+| `kazma-ui` | FastAPI web UI, SSE chat, settings, IDE, swarm panel, **`/documents`** + documents API |
+| `kazma-tui` | Textual dashboard / editor / **Documents tab** |
+| `kazma-cli` | `kazma` CLI entrypoints (incl. migrate with document store) |
+| `kazma-skills` | Skill manifests + native skills (`document-platform`, `document-generator`, …) |
 | `kazma-memory` | Arabic tokenizer / search helpers |
 
 ## Critical runtime rules
@@ -31,7 +31,8 @@ That file is the engineering single source of truth for *how packages wire toget
 2. Platform IDs never enter LangGraph state.  
 3. Three HITL gates: graph interrupt, swarm bus, pipeline checkpoints.  
 4. IDE mutations go through `LocalToolRegistry` (shared HITL).  
-5. ConfigStore via `get_config_store()` only.
+5. ConfigStore via `get_config_store()` only.  
+6. Document durable path uses `DocumentIngestionService` only — no gateway/UI imports of parser internals (`AGENTS.md` §19).
 
 ## Multi-path diagnosis
 

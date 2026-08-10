@@ -68,12 +68,17 @@ Optional extras (only install the ones you need):
 | `[tui]` | `textual>=8.0.0`, `python-bidi>=0.4.0` | Terminal dashboard (`kazma-tui`) |
 | `[observability]` | `prometheus-client>=0.20.0` | `/metrics` scrape endpoint |
 | `[web]` | `playwright>=1.40` | Browser-automation skill (run `playwright install chromium` after) |
-| `[document]` | `reportlab>=4.0.0`, `python-docx>=1.1.0`, `openpyxl>=3.1.0` | Document-generator skill (PDF/DOCX/XLSX) |
+| `[document]` | `reportlab`, `python-docx`, `openpyxl`, `pypdf`, … | Legacy **document-generator** skill (simple PDF/DOCX/XLSX files) |
+| `[ocr]` | `pytesseract`, `pdf2image`, `pillow` | OCR helpers for Document Intelligence (needs system Tesseract) |
+| `[convert]` | `weasyprint` | HTML→PDF style conversion engines |
+| `[document-platform]` | `document` + `ocr` + `convert` + `pymupdf` | **Full Document Intelligence** engines (redaction/raster/render) |
 | `[database]` | `psycopg[binary]>=3.1.0`, `pymysql>=1.1.0`, `pymongo>=4.7.0` | Postgres/MySQL/Mongo in the database-client skill |
-| `[postgres]` | `psycopg[binary,pool]>=3.1.0`, `langgraph-checkpoint-postgres>=2.0.0` | Multi-replica SaaS shared state |
+| `[postgres]` | `psycopg[binary,pool]>=3.1.0`, `langgraph-checkpoint-postgres>=2.0.0` | Multi-replica SaaS shared state (also document jobs/metadata when configured) |
 | `[all]` | meta — installs every extra above | Convenience |
 
-> The native skills (browser, calendar, document-generator, database) **always load** — their tools are registered even when the optional package is absent; calling a tool whose backend isn't installed returns a friendly install-hint string instead of failing. Install the extra to activate that backend.
+> The native skills (browser, calendar, document-generator, **document-platform**, database) **always load** — their tools are registered even when the optional package is absent; calling a tool whose backend isn't installed returns a friendly install-hint string instead of failing. Install the extra to activate that backend.
+
+**Document Intelligence first use:** open `/documents` after start (core text parsers work without extras). For convert/redact engines: `pip install -e ".[document-platform]"`. Optional system packages: Tesseract (OCR), ClamAV (malware scan), LibreOffice (some conversions). Guide: [Document Intelligence](document-intelligence).
 
 ### Path B — Production Docker Compose
 

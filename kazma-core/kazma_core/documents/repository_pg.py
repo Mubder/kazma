@@ -1117,14 +1117,22 @@ class PostgresDocumentRepository:
         digest = _sha256(sha256)
         if storage_kind is not None and storage_kind not in _BLOB_KINDS:
             raise ValueError(f"invalid storage kind: {storage_kind!r}")
+        # Branch instead of ``(%s IS NULL OR col = %s)`` — Postgres/psycopg3
+        # cannot infer the type of an untyped NULL bind (IndeterminateDatatype).
+        kind_clause = ""
+        params: list[Any] = [tenant, digest]
+        if storage_kind is not None:
+            kind_clause = " AND b.storage_kind = %s"
+            params.append(storage_kind)
+        params.extend([tenant, tenant])
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT 1
                     FROM document_blobs b
                     WHERE b.tenant_id = %s AND b.sha256 = %s
-                      AND (%s IS NULL OR b.storage_kind = %s)
+                      {kind_clause}
                       AND b.id IN (
                         SELECT source_blob_id FROM document_versions WHERE tenant_id = %s
                         UNION
@@ -1132,7 +1140,7 @@ class PostgresDocumentRepository:
                       )
                     LIMIT 1
                     """,
-                    (tenant, digest, storage_kind, storage_kind, tenant, tenant),
+                    params,
                 )
                 row = cur.fetchone()
             conn.commit()

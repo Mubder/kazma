@@ -26,7 +26,7 @@ This is RAG (Retrieval-Augmented Generation) over a curated, updatable corpus �
 
 If you instead want the agent to *search the live web* per question, see [Web research](./web-research.md) — that's a different feature (ephemeral results, no indexed corpus).
 
-### Document Intelligence → library bridge
+### Document Intelligence → library bridge {#document-intelligence--library-bridge}
 
 You can also **publish a processed local document** (upload / `document_import`)
 into a Knowledge library after it reaches `ready`:

@@ -8,14 +8,24 @@
 |------|------|
 | Docs home | [`docs/docs/intro.md`](docs/intro.md) |
 | Guide | [`docs/docs/guide/`](docs/guide/) |
+| **Document Intelligence** | [`docs/docs/guide/document-intelligence.md`](docs/guide/document-intelligence.md) · [phases](docs/guide/document-phases.md) · [ops](docs/ops/document-processing.md) · [security](docs/security/document-security.md) |
 | Products (Web, IDE, TUI, SaaS) | [`docs/docs/products/`](docs/products/) |
-| Reference (tools, env, slash, API) | [`docs/docs/reference/`](docs/reference/) |
+| Reference (tools, env, slash, API) | [`docs/docs/reference/`](docs/reference/) — includes `/api/documents/*`, `document_*` tools, `/documents` slash |
 | Ops | [`docs/docs/ops/`](docs/ops/) |
 | Consolidation plan | [`DOCS_CONSOLIDATION_PLAN.md`](DOCS_CONSOLIDATION_PLAN.md) |
-| Engineering audits | [`audits/`](audits/) (not in site sidebar) |
+| Document docs goals | [`plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md`](plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md) · [residuals](plans/DOCUMENT_RESIDUALS_GOAL.md) |
+| Engineering audits | [`audits/`](audits/) — includes [`AUDIT_DOCUMENT_CERTIFICATION.md`](audits/AUDIT_DOCUMENT_CERTIFICATION.md) |
 | Full system map | [`ARCHITECTURE_AND_SYSTEM_MAP.md`](ARCHITECTURE_AND_SYSTEM_MAP.md) |
 
 **Edit `docs/docs/**` only** for user-facing content.
+
+### Document Intelligence (quick pointer)
+
+Secure durable document pipeline (ingest → sniff → isolated parse/OCR → jobs →
+index/convert/redact/ops). Surfaces: Web `/documents`, Settings → Documents,
+`document-platform` tools, gateway `/documents`, TUI Documents tab. Install
+engines with `pip install -e ".[document-platform]"`; certify with
+`python scripts/certify_documents.py`.
 
 ## Develop / build
 

@@ -25,7 +25,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
 | Dashboard | `/dashboard` | Observability + **Memory & Governance** (health board, L2 property graph explorer, backups) |
-| Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`), **Proxy Provider** (System tab) |
+| Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`), **Documents** (`?tab=documents`), **Proxy Provider** (System tab) |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
 | Research | `/research` | **Start deep research** (live SSE sessions), results list, archive, compare, export |
@@ -33,7 +33,15 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
 
-Document REST: `/api/documents/*` (see [API routes](../reference/api-routes.md#documents--document-intelligence)). Guide: [Document Intelligence](../guide/document-intelligence).
+### Documents page (product path)
+
+1. Drop or pick a file (optional **Force OCR**).
+2. Library lists opaque ids + processing state (`received` … `ready` / fail states).
+3. Detail: fenced content preview (`dir="auto"` for BiDi), versions, jobs, convert/PDF tools when engines are ready.
+4. Ops card: capacity `degraded_reasons`, readiness (jobs/metadata multi-replica), audit, GC dry-run → `kazmaConfirm` → run.
+5. Settings → **Documents** for live limits and malware/rollout without editing YAML.
+
+REST: `/api/documents/*` · Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document processing](../ops/document-processing).
 
 ## Dashboard metrics
 

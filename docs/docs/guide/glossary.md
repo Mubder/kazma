@@ -94,6 +94,23 @@ Historical inter-agent task handoff with cryptographic integrity (Ed25519 / AES-
 **DISPATCH**
 A swarm pattern: one worker handles a task.
 
+**Document Intelligence**
+Durable document platform under `kazma_core/documents/`: quarantine → sniff →
+isolated parse/OCR → optional index/generate/redact. Public durable boundary is
+`DocumentIngestionService`; execution is `DocumentService`. Surfaces: Web
+`/documents`, `/api/documents/*`, `document-platform` tools, gateway
+`/documents`, TUI Documents tab. See [Document Intelligence](document-intelligence).
+
+**DocumentIR**
+Canonical immutable intermediate representation of a parsed document (pages,
+blocks, hashes) stored as a per-version manifest — paged reads do not re-parse
+hostile bytes.
+
+**DocumentJobState**
+Durable job lifecycle enum: `received` → `quarantined` → `validating` →
+`ready_to_parse` / `ocr_required` → `parsing` / `ocr_running` → … → `ready`
+(plus `retry_wait`, `rejected`, `cancelled`, `dead_letter`).
+
 **Dormant gate**
 A HITL gate that is inactive because `hitl_config` was not passed at graph build time (all tools go to `safe_tools`).
 

@@ -31,6 +31,17 @@ design. Hardening (2026-07 residual batch):
 mutate the host for the trusted operator. Treat YOLO and long HITL grants
 as elevated.
 
+## Document Intelligence (jobs + metadata)
+
+| Layer | Multi-replica status |
+|-------|----------------------|
+| Job claim/lease | **Yes** on Postgres (`documents/jobs_pg.py`) when `KAZMA_DATABASE_URL` is set |
+| Metadata CRUD | **Yes** when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` or `auto` with PG (`repository_pg.py`) |
+| Content blobs | Shared filesystem/volume on `documents.storage_root` required |
+| GC | Still SQLite SQL — **skipped** on PG metadata (honest error, no silent deletes) |
+
+Always check `GET /api/documents/ops/readiness`. See [Document processing ops](./document-processing) and [Document Intelligence](../guide/document-intelligence#multi-replica).
+
 ## Multi-tenant isolation
 
 | Layer | Status |
@@ -38,6 +49,7 @@ as elevated.
 | Tenant ContextVar | `tenant_context` + middleware |
 | Client `X-Tenant-ID` | **Ignored** when production **or** multi-user; JWT / principal only |
 | Opaque sessions | Forced when multi-user |
+| Document ACL | Per-tenant document + principal ACL on repository |
 | Vault secrets | Tenant column + ContextVar filter |
 | Vector memory | Metadata `tenant_id` filter on query |
 | Swarm tasks | `metadata.tenant_id` stamped on dispatch |

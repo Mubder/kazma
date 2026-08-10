@@ -6,6 +6,9 @@ description: Kazma Security & Safety — code-audited reference (unified docs, v
 ---
 > Kazma's safety model in full: the **three independent HITL gates**, the three danger-tool lists, fail-closed behavior everywhere, cryptographic integrity (HMAC skills, Ed25519 delegation), and hardening recommendations. Every claim is source-referenced.
 
+**Also see:** [Document security](../security/document-security) — hostile intake,
+sandbox, fencing, malware scan, redaction model for Document Intelligence.
+
 ---
 
 ## 1. The three HITL gates (and why there are three)

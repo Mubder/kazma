@@ -25,6 +25,8 @@ description: Disaster Recovery — production ops
 | Swarm tasks | `kazma-data/swarm_tasks.db` | Medium–High |
 | Memory / vectors / graph | `kazma-data/vector_memory/`, `memory.db`, `vector.db`, `knowledge_graph.db` | Medium |
 | Cron jobs | `kazma-data/cron.db` | Medium |
+| Document Intelligence metadata | `{documents.storage_root}/documents.db` (or Postgres when metadata backend is PG) | High — library + jobs |
+| Document content-addressed blobs | `{documents.storage_root}/` (`quarantine`/`originals`/`artifacts` + manifests) | **Critical** — irrecoverable without backup |
 | Opaque web sessions | ConfigStore / Postgres | Low (users re-login) |
 
 **Out of band (never only on the app disk):**

@@ -311,6 +311,41 @@ Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `sy
 - **`standard`** — 4 stages: `researcher` (worker `core`) → `refiner` (worker `bridge`) → `builder` (worker `core`) → `validator` (worker `bridge`).
 - **`quick`** — 2 stages: `researcher` (worker `core`) → `builder` (worker `core`).
 
+### `documents.*` — Document Intelligence (ConfigStore / Settings UI)
+
+Not every key is in the shipped `kazma.yaml` skeleton; the authoritative defaults
+live on `DocumentConfig` (`kazma_core/documents/config.py`) and are read **live**
+via `get_document_config()`. Configure with:
+
+- **Settings → Documents** (`/settings?tab=documents`)
+- `GET/PUT /api/settings/documents`
+- `PUT /api/settings/single` with a nested key
+- optional `kazma.yaml` seed under a `documents:` section
+
+| Key prefix | Purpose |
+|---|---|
+| `documents.enabled` / `shadow` / `default_authoritative` | Rollout mode (disabled / shadow / compatibility / authoritative) |
+| `documents.intake.*` | Max bytes/files, remote fetch limits |
+| `documents.limits.*` | Pages, cells, archive members, compression, pixels, … |
+| `documents.security.*` | Malware scan mode, fence, encrypted/external-resource policy |
+| `documents.ocr.*` | Enable, languages, DPI, confidence, concurrency |
+| `documents.workers.*` | Timeout, memory, concurrency, lease, retries |
+| `documents.indexing.*` | Chunk tokens, overlap, preserve tables/pages |
+| `documents.retention.*` / `documents.gc.*` | Retention windows + GC schedule / bounds |
+| `documents.capacity.*` | Queue caps, rate/byte windows, storage free floor |
+| `documents.quotas.*` | Per-tenant byte / daily page quotas |
+
+**Env (backend selection only):**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `KAZMA_DOCUMENTS_JOBS_BACKEND` | auto | `sqlite` forces SQLite job queue; else Postgres when platform uses PG |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs) |
+| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Cert soak iterations |
+
+Full product guide: [Document Intelligence](document-intelligence). Ops:
+[Document processing](../ops/document-processing).
+
 ---
 
 ## 3. Environment variables
