@@ -324,9 +324,10 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         fontSize=body_size,
         leading=body_size * 1.65,
         textColor=body_color,
-        alignment=body_align,
+        alignment=body_align,  # TA_JUSTIFY — full justify for body
         wordWrap=wrap,
-        spaceAfter=4,
+        spaceAfter=6,
+        firstLineIndent=0,
     )
     bullet_style = ParagraphStyle(
         "KazmaBullet",
@@ -367,15 +368,31 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         spaceBefore=4,
         spaceAfter=8,
     )
+    # White text on dark heading bars (flowables draw the fill)
+    h1_bar = ParagraphStyle(
+        "KazmaH1Bar",
+        parent=h1_style,
+        textColor=colors.white,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    h2_bar = ParagraphStyle(
+        "KazmaH2Bar",
+        parent=h2_style,
+        textColor=colors.white,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
     rich_styles = {
         "body": body_style,
-        "h1": h1_style,
-        "h2": h2_style,
+        "h1": h1_bar,
+        "h2": h2_bar,
         "h3": h3_style,
         "bullet": bullet_style,
         "number": number_style,
         "quote": quote_style,
         "code": code_style,
+        "heading_fill": colors.HexColor("#1e3a5f"),
     }
 
     header = str(payload.get("header", ""))
@@ -458,6 +475,10 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                     Spacer=Spacer,
                     Paragraph=Paragraph,
                     colors=colors,
+                    Table=Table,
+                    TableStyle=TableStyle,
+                    font_name=font,
+                    bold_font_name=bold_font,
                 )
             )
 
@@ -557,6 +578,9 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     from docx.shared import Pt, RGBColor
 
     from kazma_core.documents.rich_render import (
+        docx_add_table,
+        docx_force_justify,
+        docx_set_paragraph_shading,
         docx_set_rtl_paragraph,
         docx_write_rich_body,
         is_arabic_dominant,
@@ -580,26 +604,28 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     if payload.get("rtl") is False:
         rtl = False
 
-    # Normal style: justify + optional RTL
+    # Normal style: always justify (EN + AR); RTL via bidi on each para
     try:
         normal = document.styles["Normal"]
         normal.font.name = "Arial"
         normal.font.size = Pt(11)
-        if rtl:
-            normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        normal.paragraph_format.space_after = Pt(8)
+        normal.paragraph_format.line_spacing = 1.15
     except Exception:
         pass
 
     title = document.add_heading(str(payload.get("title", "Document")), 0)
+    docx_set_paragraph_shading(title, "0F172A")
+    try:
+        if title.runs:
+            title.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    except Exception:
+        pass
     if rtl:
         docx_set_rtl_paragraph(title, justify=False)
     else:
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    try:
-        if title.runs:
-            title.runs[0].font.color.rgb = RGBColor(0x0F, 0x17, 0x2A)
-    except Exception:
-        pass
 
     header = str(payload.get("header", ""))
     footer = str(payload.get("footer", ""))
@@ -615,6 +641,12 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
 
     if payload.get("toc"):
         toc = document.add_heading("المحتويات" if rtl else "Contents", 1)
+        docx_set_paragraph_shading(toc, "1E3A5F")
+        try:
+            if toc.runs:
+                toc.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        except Exception:
+            pass
         if rtl:
             docx_set_rtl_paragraph(toc, justify=False)
         for index, item in enumerate(sections, 1):
@@ -626,26 +658,66 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     for item in sections:
         if item["heading"]:
             h = document.add_heading(item["heading"].lstrip("#").strip(), 1)
-            if rtl:
-                docx_set_rtl_paragraph(h, justify=False)
+            docx_set_paragraph_shading(h, "1E3A5F")
             try:
                 if h.runs:
-                    h.runs[0].font.color.rgb = RGBColor(0x1E, 0x3A, 0x5F)
+                    h.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
             except Exception:
                 pass
+            if rtl:
+                docx_set_rtl_paragraph(h, justify=False)
         body = item.get("body") or ""
         if body.strip():
             docx_write_rich_body(document, body, rtl=rtl)
 
+    # Structured tables from payload (same as PDF path)
+    tables = payload.get("tables")
+    if isinstance(tables, list):
+        for value in tables:
+            if not isinstance(value, dict):
+                continue
+            heading = str(value.get("heading", ""))
+            headers = value.get("headers")
+            rows = value.get("rows")
+            if heading:
+                h = document.add_heading(heading, 2)
+                docx_set_paragraph_shading(h, "1E3A5F")
+                try:
+                    if h.runs:
+                        h.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                except Exception:
+                    pass
+                if rtl:
+                    docx_set_rtl_paragraph(h, justify=False)
+            if isinstance(headers, list) and isinstance(rows, list) and headers:
+                docx_add_table(
+                    document,
+                    [str(c) for c in headers],
+                    [
+                        [str(c) for c in row]
+                        for row in rows
+                        if isinstance(row, list)
+                    ],
+                    rtl=rtl,
+                )
+
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
         ref = document.add_heading("المراجع" if rtl else "References", 1)
+        docx_set_paragraph_shading(ref, "1E3A5F")
+        try:
+            if ref.runs:
+                ref.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        except Exception:
+            pass
         if rtl:
             docx_set_rtl_paragraph(ref, justify=False)
         for value in citations:
             p = document.add_paragraph(str(value), style="List Number")
             if rtl:
                 docx_set_rtl_paragraph(p, justify=False)
+            else:
+                docx_force_justify(p)
     document.save(output)
 
 

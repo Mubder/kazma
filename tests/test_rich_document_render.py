@@ -138,6 +138,54 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     assert has_bidi
 
 
+def test_markdown_table_and_docx_justify_shading(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    from kazma_core.documents.renderer_worker import _generate_docx, _generate_pdf
+    from kazma_core.documents.rich_render import parse_rich_blocks
+
+    body = (
+        "## Overview\n\n"
+        "A longer paragraph that must be justified in the DOCX output so spacing "
+        "looks even across full lines of professional body text for export tests.\n\n"
+        "| Feature | Status |\n"
+        "|---|---|\n"
+        "| Tables | Yes |\n"
+        "| Justify | Yes |\n"
+    )
+    blocks = parse_rich_blocks(body)
+    assert any(b["type"] == "table" for b in blocks)
+
+    pdf = tmp_path / "t.pdf"
+    docx = tmp_path / "t.docx"
+    warnings: list[str] = []
+    payload = {
+        "title": "Parity Test",
+        "lang": "en",
+        "sections": [{"heading": "Main", "body": body}],
+        "tables": [{"heading": "Extra", "headers": ["A", "B"], "rows": [["1", "2"]]}],
+    }
+    _generate_pdf(pdf, payload, warnings)
+    _generate_docx(docx, payload)
+    assert pdf.is_file() and pdf.stat().st_size > 500
+    doc = Document(str(docx))
+    assert len(doc.tables) >= 2  # markdown + payload
+    found_jc = False
+    found_shade = False
+    for p in doc.paragraphs:
+        if "longer paragraph" in p.text and p._p.pPr is not None:
+            jc = p._p.pPr.find(qn("w:jc"))
+            if jc is not None and jc.get(qn("w:val")) == "both":
+                found_jc = True
+        if p.style and str(p.style.name).startswith("Heading") and p._p.pPr is not None:
+            shd = p._p.pPr.find(qn("w:shd"))
+            if shd is not None and shd.get(qn("w:fill")):
+                found_shade = True
+    assert found_jc
+    assert found_shade
+
+
 def test_generate_pdf_english_lists(tmp_path: Path) -> None:
     from kazma_core.documents.renderer_worker import _generate_pdf
 

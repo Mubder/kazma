@@ -26,6 +26,9 @@ __all__ = [
     "pdf_flowables_from_body",
     "docx_write_rich_body",
     "docx_set_rtl_paragraph",
+    "docx_force_justify",
+    "docx_set_paragraph_shading",
+    "docx_add_table",
 ]
 
 _AR_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
@@ -33,6 +36,9 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 _UL_RE = re.compile(r"^(\s*)([-*•])\s+(.+)$")
 _OL_RE = re.compile(r"^(\s*)(\d+)[.)]\s+(.+)$")
 _HR_RE = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
+# GFM-style table row: | a | b |
+_TABLE_ROW_RE = re.compile(r"^\|.+\|$")
+_TABLE_SEP_RE = re.compile(r"^\|[\s:\-|]+\|$")
 _INLINE_MD_RE = re.compile(
     r"(\*\*[^*]+\*\*|__[^_]+__|"
     r"(?<!\*)\*(?!\*)([^*]+)\*(?!\*)|"
@@ -156,6 +162,26 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
             flush_para()
             flush_list()
             i += 1
+            continue
+
+        # Markdown table: header + separator + rows
+        if (
+            _TABLE_ROW_RE.match(stripped)
+            and i + 1 < len(lines)
+            and _TABLE_SEP_RE.match(lines[i + 1].strip())
+        ):
+            flush_para()
+            flush_list()
+            def _split_row(row: str) -> list[str]:
+                inner = row.strip().strip('|')
+                return [c.strip() for c in inner.split('|')]
+            headers = _split_row(stripped)
+            i += 2
+            trows: list[list[str]] = []
+            while i < len(lines) and _TABLE_ROW_RE.match(lines[i].strip()):
+                trows.append(_split_row(lines[i].strip()))
+                i += 1
+            blocks.append({'type': 'table', 'headers': headers, 'rows': trows})
             continue
 
         hm = _HEADING_RE.match(stripped)
@@ -282,6 +308,10 @@ def pdf_flowables_from_body(
     HRFlowable: Any = None,
     KeepTogether: Any = None,
     colors: Any = None,
+    Table: Any = None,
+    TableStyle: Any = None,
+    font_name: str = "Helvetica",
+    bold_font_name: str = "Helvetica-Bold",
 ) -> list[Any]:
     """Build ReportLab flowables from a rich body string."""
     if Paragraph is None or Spacer is None:
@@ -296,11 +326,25 @@ def pdf_flowables_from_body(
         except ImportError:
             _HR = None  # type: ignore[misc, assignment]
         HRFlowable = _HR
+    if Table is None or TableStyle is None:
+        try:
+            from reportlab.platypus import Table as _T
+            from reportlab.platypus import TableStyle as _TS
+
+            Table, TableStyle = _T, _TS
+        except ImportError:
+            Table = TableStyle = None  # type: ignore[misc, assignment]
+    if colors is None:
+        try:
+            from reportlab.lib import colors as _colors
+
+            colors = _colors
+        except ImportError:
+            pass
 
     flow: list[Any] = []
     blocks = parse_rich_blocks(body)
     if not blocks and body.strip():
-        # Fallback: plain paragraphs
         blocks = [
             {"type": "paragraph", "text": p.strip()}
             for p in body.split("\n\n")
@@ -312,6 +356,69 @@ def pdf_flowables_from_body(
     code_style = styles.get("code", body_style)
     bullet_style = styles.get("bullet", body_style)
     number_style = styles.get("number", body_style)
+    heading_fill = styles.get("heading_fill")  # reportlab Color or None
+
+    def _heading_bar(text_html: str, st: Any, level: int) -> None:
+        """Heading with optional solid background bar (parity with styled PDF)."""
+        para = Paragraph(text_html, st)
+        if Table is None or colors is None or heading_fill is None:
+            flow.append(para)
+            flow.append(Spacer(1, 6))
+            return
+        fill = heading_fill if level <= 2 else colors.HexColor("#e2e8f0")
+        tbl = Table([[para]], colWidths=["*"])
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), fill),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        flow.append(tbl)
+        flow.append(Spacer(1, 8))
+
+    def _md_table(headers: list[str], rows: list[list[str]]) -> None:
+        if Table is None or TableStyle is None or colors is None:
+            # Fallback: plain lines
+            line = " | ".join(headers)
+            flow.append(
+                Paragraph(
+                    inline_markdown_to_reportlab(line, shape_arabic=shape_arabic),
+                    body_style,
+                )
+            )
+            return
+
+        def cell(val: str) -> str:
+            return shape_for_pdf(val) if shape_arabic else val
+
+        data = [[cell(h) for h in headers]]
+        for row in rows:
+            data.append([cell(c) for c in row])
+        tbl = Table(data, repeatRows=1)
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, -1), font_name),
+                    ("FONTNAME", (0, 0), (-1, 0), bold_font_name),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        flow.extend((tbl, Spacer(1, 10)))
 
     for block in blocks:
         btype = block["type"]
@@ -319,22 +426,30 @@ def pdf_flowables_from_body(
             level = int(block.get("level") or 2)
             key = f"h{min(level, 3)}"
             st = styles.get(key, styles.get("h2", body_style))
-            text = inline_markdown_to_reportlab(block["text"], shape_arabic=shape_arabic)
-            flow.append(Paragraph(text, st))
-            flow.append(Spacer(1, 6))
+            text_html = inline_markdown_to_reportlab(
+                block["text"], shape_arabic=shape_arabic
+            )
+            _heading_bar(text_html, st, level)
         elif btype == "paragraph":
-            text = inline_markdown_to_reportlab(block["text"], shape_arabic=shape_arabic)
-            flow.append(Paragraph(text, body_style))
+            text_html = inline_markdown_to_reportlab(
+                block["text"], shape_arabic=shape_arabic
+            )
+            flow.append(Paragraph(text_html, body_style))
             flow.append(Spacer(1, 8))
         elif btype == "quote":
-            text = inline_markdown_to_reportlab(block["text"], shape_arabic=shape_arabic)
-            flow.append(Paragraph(f"<i>{text}</i>", quote_style))
+            text_html = inline_markdown_to_reportlab(
+                block["text"], shape_arabic=shape_arabic
+            )
+            flow.append(Paragraph(f"<i>{text_html}</i>", quote_style))
             flow.append(Spacer(1, 8))
         elif btype == "code":
             raw = block.get("text") or ""
-            # Code stays LTR — no Arabic reshape (would corrupt identifiers)
             escaped = html.escape(raw).replace("\n", "<br/>")
-            flow.append(Paragraph(f'<font face="Courier" size="8">{escaped}</font>', code_style))
+            flow.append(
+                Paragraph(
+                    f'<font face="Courier" size="8">{escaped}</font>', code_style
+                )
+            )
             flow.append(Spacer(1, 8))
         elif btype == "list":
             ordered = bool(block.get("ordered"))
@@ -344,15 +459,16 @@ def pdf_flowables_from_body(
                 inner = inline_markdown_to_reportlab(
                     item.get("text") or "", shape_arabic=shape_arabic
                 )
-                # For shaped Arabic, put bullet after visual text is awkward;
-                # use "prefix + space + text" and right-align style for AR.
                 line = f"{html.escape(prefix)}&nbsp;&nbsp;{inner}"
                 st = number_style if ordered else bullet_style
-                # Indent via left/right padding on a clone would need style factory;
-                # use non-breaking spaces for nesting.
                 pad = "&nbsp;" * (level * 4)
                 flow.append(Paragraph(pad + line, st))
             flow.append(Spacer(1, 6))
+        elif btype == "table":
+            _md_table(
+                list(block.get("headers") or []),
+                list(block.get("rows") or []),
+            )
         elif btype == "hr":
             if HRFlowable is not None and colors is not None:
                 flow.append(
@@ -369,6 +485,37 @@ def pdf_flowables_from_body(
     return flow
 
 
+def docx_force_justify(paragraph: Any) -> None:
+    """Force Word justification via both alignment enum and w:jc=both."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_pr = paragraph._p.get_or_add_pPr()
+    jc = p_pr.find(qn("w:jc"))
+    if jc is None:
+        jc = OxmlElement("w:jc")
+        p_pr.append(jc)
+    jc.set(qn("w:val"), "both")
+
+
+def docx_set_paragraph_shading(paragraph: Any, fill_hex: str = "1E3A5F") -> None:
+    """Solid background fill on a paragraph (heading bar)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    fill = (fill_hex or "1E3A5F").lstrip("#").upper()
+    p_pr = paragraph._p.get_or_add_pPr()
+    shd = p_pr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        p_pr.append(shd)
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill)
+
+
 def docx_set_rtl_paragraph(paragraph: Any, *, justify: bool = True) -> None:
     """Mark a python-docx paragraph as RTL and optionally justify."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -376,12 +523,11 @@ def docx_set_rtl_paragraph(paragraph: Any, *, justify: bool = True) -> None:
     from docx.oxml.ns import qn
 
     if justify:
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        docx_force_justify(paragraph)
     else:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     p_pr = paragraph._p.get_or_add_pPr()
-    # w:bidi enables RTL paragraph direction in Word
     existing = p_pr.find(qn("w:bidi"))
     if existing is None:
         bidi = OxmlElement("w:bidi")
@@ -389,6 +535,60 @@ def docx_set_rtl_paragraph(paragraph: Any, *, justify: bool = True) -> None:
         p_pr.append(bidi)
     else:
         existing.set(qn("w:val"), "1")
+
+
+def docx_add_table(
+    document: Any,
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    rtl: bool = False,
+) -> None:
+    """Insert a styled Word table (header band + grid)."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    if not headers:
+        return
+    ncols = len(headers)
+    table = document.add_table(rows=1 + len(rows), cols=ncols)
+    table.style = "Table Grid"
+
+    def _shade_cell(cell: Any, fill: str) -> None:
+        tc = cell._tc
+        tc_pr = tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:fill"), fill)
+        shd.set(qn("w:val"), "clear")
+        tc_pr.append(shd)
+
+    def _fill_cell(cell: Any, text: str, *, header: bool = False) -> None:
+        cell.text = ""
+        p = cell.paragraphs[0]
+        run = p.add_run(text)
+        run.font.size = Pt(10)
+        run.font.name = "Arial"
+        if header:
+            run.bold = True
+            run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+            _shade_cell(cell, "1E3A5F")
+        else:
+            _shade_cell(cell, "F8FAFC")
+        if rtl:
+            docx_set_rtl_paragraph(p, justify=False)
+        else:
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    for ci, h in enumerate(headers):
+        _fill_cell(table.rows[0].cells[ci], str(h), header=True)
+    for ri, row in enumerate(rows):
+        for ci in range(ncols):
+            val = row[ci] if ci < len(row) else ""
+            _fill_cell(table.rows[ri + 1].cells[ci], str(val), header=False)
+    # Spacer paragraph after table
+    document.add_paragraph("")
 
 
 def _docx_add_runs_with_inline_md(paragraph: Any, text: str) -> None:
@@ -442,6 +642,17 @@ def docx_write_rich_body(
         if btype == "heading":
             level = min(3, max(1, int(block.get("level") or 2)))
             p = document.add_heading(block.get("text") or "", level=level)
+            # Heading bar fill (dark for H1/H2, light for H3)
+            fill = "1E3A5F" if level <= 2 else "E2E8F0"
+            docx_set_paragraph_shading(p, fill)
+            try:
+                if p.runs:
+                    if level <= 2:
+                        p.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                    else:
+                        p.runs[0].font.color.rgb = RGBColor(0x1E, 0x3A, 0x5F)
+            except Exception:
+                pass
             if rtl:
                 docx_set_rtl_paragraph(p, justify=False)
         elif btype == "paragraph":
@@ -450,7 +661,7 @@ def docx_write_rich_body(
             if rtl:
                 docx_set_rtl_paragraph(p, justify=True)
             else:
-                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                docx_force_justify(p)
         elif btype == "quote":
             p = document.add_paragraph()
             run = p.add_run(block.get("text") or "")
@@ -459,24 +670,30 @@ def docx_write_rich_body(
             if rtl:
                 docx_set_rtl_paragraph(p, justify=True)
             else:
-                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                docx_force_justify(p)
             p.paragraph_format.left_indent = Pt(18)
         elif btype == "code":
             p = document.add_paragraph()
             run = p.add_run(block.get("text") or "")
             run.font.name = "Consolas"
             run.font.size = Pt(9)
-            p.alignment = WD_ALIGN_PARAGRAPH.LEFT  # code always LTR
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         elif btype == "list":
             style = "List Number" if block.get("ordered") else "List Bullet"
             for item in block.get("items") or []:
                 p = document.add_paragraph(style=style)
-                # Clear default empty run if any
                 if p.runs:
                     p.runs[0].text = ""
                 _docx_add_runs_with_inline_md(p, item.get("text") or "")
                 if rtl:
                     docx_set_rtl_paragraph(p, justify=False)
+        elif btype == "table":
+            docx_add_table(
+                document,
+                list(block.get("headers") or []),
+                list(block.get("rows") or []),
+                rtl=rtl,
+            )
         elif btype == "hr":
             p = document.add_paragraph("─" * 40)
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER

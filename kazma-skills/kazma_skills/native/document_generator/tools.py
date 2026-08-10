@@ -112,19 +112,22 @@ async def generate_pdf(
 async def generate_docx(
     title: str,
     sections: list[dict[str, str]] | None = None,
+    tables: list[dict[str, Any]] | None = None,
     lang: str | None = None,
     rtl: bool | None = None,
 ) -> str:
-    """Generate a verified DOCX with heading/list styles and RTL when Arabic.
+    """Generate a verified DOCX with PDF-parity styling.
 
-    Body markdown is the same subset as ``generate_pdf`` (headings, lists,
-    bold/italic). Word performs its own Arabic shaping — we set ``w:bidi`` +
-    justify so layout is correct without pre-shaping.
+    Body markdown: headings, lists, **bold**, GFM tables, quotes.
+    Also accepts structured ``tables=[{heading, headers, rows}]`` like PDF.
+    Word shapes Arabic; we set ``w:bidi``, justify (``w:jc=both``), heading
+    fills, and styled tables.
     """
 
     payload: dict[str, Any] = {
         "title": title,
         "sections": _sections(sections),
+        "tables": tables or [],
     }
     if lang:
         payload["lang"] = lang
