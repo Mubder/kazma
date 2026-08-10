@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — Document convert + PDF intake fixes (Windows) (2026-08-10)
+
+- **DOCX→PDF without LibreOffice:** new `reportlab-office` fallback extracts
+  text via python-docx and renders PDF with reportlab (lossy layout; warning
+  emitted). Registry prefers any **ready** engine over unavailable LibreOffice.
+- **LibreOffice discovery:** `find_soffice()` checks PATH plus common Windows
+  Program Files install paths.
+- **PDF sniff:** stop rejecting harmless `/OpenAction`/`/AA` GoTo destinations;
+  still block JavaScript/Launch/EmbeddedFile.
+- **Sandbox paths:** parser/renderer workers always receive absolute
+  request/result/source paths (relative paths broke under `cwd=run_dir` on Windows).
+- The Windows Job Object "CPU-time quota" line is a **warning only**, not a
+  convert failure.
+
 ## Unreleased — Security policy honesty (no bounty, real security.txt) (2026-08-10)
 
 Aligned public security posture with reality — responsible disclosure only:

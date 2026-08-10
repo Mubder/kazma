@@ -976,9 +976,14 @@ class DocumentService:
         run_dir.mkdir(parents=False, exist_ok=False)
         request_path = run_dir / "request.json"
         result_path = run_dir / "result.json"
+        # Absolute paths: the sandbox sets cwd=run_dir, so relative request/
+        # result paths would resolve incorrectly and fail to open request.json.
+        source_abs = source.resolve()
+        request_abs = request_path.resolve()
+        result_abs = result_path.resolve()
         request = {
             "protocol_version": _PROTOCOL_VERSION,
-            "source_path": str(source),
+            "source_path": str(source_abs),
             "source_sha256": source_sha,
             "mime_type": sniffed.mime_type,
             "extension": sniffed.extension,
@@ -1011,8 +1016,8 @@ class DocumentService:
                 "-I",
                 "-c",
                 bootstrap,
-                str(request_path),
-                str(result_path),
+                str(request_abs),
+                str(result_abs),
             ),
             work_dir=run_dir,
             timeout_seconds=self.config.worker_timeout_seconds,

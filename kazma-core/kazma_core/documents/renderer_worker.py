@@ -432,10 +432,71 @@ def _weasy_pdf(output: Path, source: str, assets: Path) -> None:
     HTML(string=source, base_url=assets.as_uri() + "/", url_fetcher=fetch).write_pdf(output)
 
 
+def _extract_docx_text(source: Path) -> tuple[str, list[str]]:
+    """Pull paragraph + table text from a DOCX for lossy PDF conversion."""
+
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise WorkerError(
+            "renderer_unavailable",
+            "python-docx is required for DOCX→PDF text fallback (install python-docx)",
+        ) from exc
+
+    warnings: list[str] = []
+    document = Document(str(source))
+    chunks: list[str] = []
+    for paragraph in document.paragraphs:
+        text = (paragraph.text or "").strip()
+        if text:
+            chunks.append(text)
+    for table in document.tables:
+        for row in table.rows:
+            cells = [(cell.text or "").strip() for cell in row.cells]
+            line = " | ".join(cell for cell in cells if cell)
+            if line:
+                chunks.append(line)
+    if not chunks:
+        warnings.append("DOCX had no extractable text; emitted a titled blank PDF")
+        return "", warnings
+    return "\n\n".join(chunks), warnings
+
+
+def _office_text_to_pdf(
+    output: Path,
+    *,
+    title: str,
+    body: str,
+    warnings: list[str],
+) -> None:
+    """Render plain extracted text to PDF via the reportlab generator."""
+
+    _generate_pdf(
+        output,
+        {
+            "title": title or "Document",
+            "sections": [{"heading": "", "body": body or "(empty document)"}],
+            "page_numbers": True,
+        },
+        warnings,
+    )
+    warnings.append(
+        "Converted via text extraction (reportlab-office); layout, images, and "
+        "styles are not preserved. Install LibreOffice (soffice) for high-fidelity "
+        "Office→PDF conversion."
+    )
+
+
 def _libreoffice(request: dict[str, Any], source: Path, output: Path) -> None:
-    executable = shutil.which("soffice")
+    from kazma_core.documents.binaries import find_soffice
+
+    executable = shutil.which("soffice") or shutil.which("libreoffice") or find_soffice()
     if not executable:
-        raise WorkerError("renderer_unavailable", "Healthy headless LibreOffice is unavailable")
+        raise WorkerError(
+            "renderer_unavailable",
+            "Healthy headless LibreOffice is unavailable (soffice not found on PATH "
+            "or under Program Files\\LibreOffice)",
+        )
     profile = output.parent / "lo-profile"
     profile.mkdir()
     target = output.suffix.lstrip(".")
@@ -518,12 +579,37 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
                 "sections": [{"heading": "", "body": source.read_text(encoding="utf-8")}],
             },
         )
-    elif operation in {"convert:markdown:pdf", "convert:html:pdf"}:
+    elif operation in {"convert:markdown:pdf", "convert:html:pdf"} and renderer != "reportlab-office":
         assert source is not None
         text = source.read_text(encoding="utf-8")
         if operation.startswith("convert:markdown"):
             text = _markdown_html(text)
         _weasy_pdf(output, text, output.parent / "assets")
+    elif renderer == "reportlab-office":
+        assert source is not None
+        if operation == "convert:docx:pdf":
+            body, extract_warnings = _extract_docx_text(source)
+            warnings.extend(extract_warnings)
+            _office_text_to_pdf(output, title=source.stem, body=body, warnings=warnings)
+        elif operation in {
+            "convert:markdown:pdf",
+            "convert:md:pdf",
+            "convert:txt:pdf",
+            "convert:text:pdf",
+        }:
+            try:
+                body = source.read_text(encoding="utf-8")
+            except UnicodeError as exc:
+                raise WorkerError(
+                    "invalid_document_encoding",
+                    "Text conversion source must be valid UTF-8",
+                ) from exc
+            _office_text_to_pdf(output, title=source.stem, body=body, warnings=warnings)
+        else:
+            raise WorkerError(
+                "unsupported_operation",
+                f"reportlab-office cannot handle {operation}",
+            )
     elif renderer == "libreoffice":
         assert source is not None
         _libreoffice(request, source, output)

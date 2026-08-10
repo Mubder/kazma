@@ -111,9 +111,15 @@ class DocumentOperations:
                 "unsupported_document_operation", "The requested document operation is unsupported"
             )
         if not capability.available:
+            reason = capability.reason or f"{capability.renderer_id} is unavailable"
+            if capability.renderer_id == "libreoffice" or "soffice" in reason.lower():
+                reason = (
+                    f"{reason}. Install LibreOffice for high-fidelity Office→PDF, "
+                    "or ensure a pure-Python fallback (reportlab + python-docx) is installed."
+                )
             return DocumentOperations._error(
                 "document_engine_unavailable",
-                capability.reason or f"{capability.renderer_id} is unavailable",
+                reason,
             )
         return capability
 
@@ -307,7 +313,8 @@ class DocumentOperations:
                 "renderer_version": capability.renderer_version,
                 "output_name": f"output.{extension}",
                 "payload": payload,
-                "source_path": str(sources[0]) if len(sources) == 1 else None,
+                # Absolute path: worker sandbox cwd is run_dir.
+                "source_path": str(sources[0].resolve()) if len(sources) == 1 else None,
                 "source_sha256": source_hashes[0] if len(source_hashes) == 1 else None,
                 "approved_assets": asset_records,
                 "library_timeout_seconds": min(self.config.worker_timeout_seconds, 120),
@@ -483,7 +490,7 @@ class DocumentOperations:
             "renderer_version": capability.renderer_version,
             "output_name": "output.pdf",
             "sources": [
-                {"path": str(path), "sha256": digest}
+                {"path": str(path.resolve()), "sha256": digest}
                 for path, digest in zip(sources, hashes, strict=True)
             ],
             "max_files": self.config.intake_max_files,
@@ -522,8 +529,9 @@ class DocumentOperations:
                     "-I",
                     "-c",
                     bootstrap,
-                    str(request_path),
-                    str(result_path),
+                    # Absolute paths: sandbox cwd is run_dir.
+                    str(request_path.resolve()),
+                    str(result_path.resolve()),
                 ),
                 work_dir=run_dir,
                 timeout_seconds=self.config.worker_timeout_seconds,

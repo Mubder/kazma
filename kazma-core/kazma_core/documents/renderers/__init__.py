@@ -12,6 +12,8 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
+from kazma_core.documents.binaries import find_soffice
+
 __all__ = [
     "RendererCapability",
     "RendererPlugin",
@@ -100,9 +102,17 @@ def _binary_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None], str
     versions: dict[str, str | None] = {}
     for name in names:
         executable = shutil.which(name)
+        if not executable and name in {"soffice", "soffice.exe", "libreoffice"}:
+            executable = find_soffice()
         if not executable:
             versions[name] = None
-            return versions, f"required system binary {name} was not found"
+            hint = ""
+            if name in {"soffice", "soffice.exe", "libreoffice"}:
+                hint = (
+                    " (install LibreOffice and ensure soffice is on PATH, "
+                    "or under Program Files\\LibreOffice on Windows)"
+                )
+            return versions, f"required system binary {name} was not found{hint}"
         try:
             modified_ns = Path(executable).stat().st_mtime_ns
         except OSError:
@@ -175,8 +185,25 @@ def builtin_plugins() -> tuple[RendererPlugin, ...]:
                 "convert:pptx:pdf",
             ),
             ("doc", "xls", "ppt", "docx", "xlsx", "pptx", "pdf"),
-            ("headless", "isolated-profile", "no-network"),
+            ("headless", "isolated-profile", "no-network", "high-fidelity"),
             system_binaries=("soffice",),
+        ),
+        # Pure-Python text extraction → PDF when LibreOffice / WeasyPrint are absent.
+        # Layout/images/styles are lossy; prefer LibreOffice for Office fidelity.
+        RendererPlugin(
+            "reportlab-office",
+            "1",
+            (
+                "convert:docx:pdf",
+                "convert:txt:pdf",
+                "convert:text:pdf",
+                "convert:md:pdf",
+                "convert:markdown:pdf",
+            ),
+            ("docx", "txt", "md", "markdown", "pdf"),
+            ("text-extract", "layout-lossy", "no-libreoffice"),
+            # reportlab only at probe time; python-docx is imported on-demand for DOCX.
+            ("reportlab",),
         ),
     )
 
@@ -224,10 +251,23 @@ class RendererRegistry:
         return self._capabilities
 
     def resolve(self, operation: str) -> RendererCapability:
-        for capability in self._capabilities:
-            if operation in capability.operations:
-                return capability
-        raise ValueError(f"unsupported document operation: {operation}")
+        """Return the best engine for ``operation``.
+
+        When multiple plugins claim the same op (e.g. LibreOffice + reportlab
+        fallback for ``convert:docx:pdf``), prefer a **ready** engine. If all
+        matches are unavailable, return the first so the caller can surface its
+        reason.
+        """
+
+        matches = [
+            capability
+            for capability in self._capabilities
+            if operation in capability.operations
+        ]
+        if not matches:
+            raise ValueError(f"unsupported document operation: {operation}")
+        available = [item for item in matches if item.available]
+        return available[0] if available else matches[0]
 
 
 def get_renderer_registry() -> RendererRegistry:

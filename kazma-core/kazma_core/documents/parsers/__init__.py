@@ -42,7 +42,9 @@ def _pdf_health() -> tuple[ParserReadiness, str | None]:
 
 
 def builtin_plugins() -> tuple[ParserPlugin, ...]:
-    libreoffice = shutil.which("soffice") or shutil.which("libreoffice") or "soffice"
+    from kazma_core.documents.binaries import find_soffice
+
+    libreoffice = find_soffice() or shutil.which("soffice") or shutil.which("libreoffice") or "soffice"
     return (
         ParserPlugin(
             "image",

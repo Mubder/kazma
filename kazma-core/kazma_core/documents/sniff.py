@@ -58,8 +58,11 @@ _NESTED_ARCHIVE_EXTENSIONS = frozenset(
     {".7z", ".bz2", ".gz", ".rar", ".tar", ".tgz", ".xz", ".zip"}
 )
 _EMBEDDED_MEMBER_PARTS = frozenset({"activex", "embeddings", "oleobjects"})
+# High-risk PDF features only. Do NOT treat mere /OpenAction or /AA as hostile —
+# many legitimate PDFs open to a page or set field actions with /GoTo destinations.
+# The hostile-corpus sample uses /OpenAction + /JavaScript, which still matches.
 _PDF_ACTIVE_CONTENT_RE = re.compile(
-    rb"/(?:aa|embeddedfile|filespec|javascript|js|launch|openaction)\b",
+    rb"/(?:JavaScript|JS|Launch|EmbeddedFile|RichMedia|GoToE)\b",
     re.IGNORECASE,
 )
 _ARCHIVE_CHUNK_BYTES = 64 * 1024
@@ -259,7 +262,12 @@ def _stream_contains(path: Path, markers: tuple[bytes, ...]) -> set[bytes]:
 
 
 def _pdf_has_active_content(path: Path) -> bool:
-    """Scan a PDF for active/embedded object declarations without loading it."""
+    """Scan a PDF for high-risk active/embedded object declarations.
+
+    Rejects JavaScript, Launch, EmbeddedFile, RichMedia, and GoToE. Harmless
+    ``/OpenAction`` / ``/AA`` GoTo destinations are allowed so normal office
+    exports can be ingested.
+    """
 
     tail = b""
     with path.open("rb") as stream:
@@ -300,7 +308,7 @@ def sniff_document(path: Path, config: DocumentConfig) -> SniffResult:
             raise DocumentEncryptedError("Encrypted PDFs are not supported")
         if _pdf_has_active_content(path):
             raise DocumentSecurityError(
-                "PDF active actions and embedded files are disabled"
+                "PDF JavaScript, Launch, or embedded-file content is disabled"
             )
         mime = "application/pdf"
         container = None

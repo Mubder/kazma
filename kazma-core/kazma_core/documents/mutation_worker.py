@@ -72,8 +72,26 @@ def _reader(path: Path) -> Any:
     if reader.is_encrypted:
         raise WorkerError("encrypted_document", "Encrypted PDFs are not supported")
     root = reader.trailer.get("/Root", {})
-    forbidden = ("/OpenAction", "/AA", "/JavaScript", "/Launch")
-    if any(key in root for key in forbidden):
+
+    def _action_is_dangerous(action: Any) -> bool:
+        """True for JS/Launch-style actions; plain GoTo OpenAction is allowed."""
+        if action is None:
+            return False
+        try:
+            obj = action.get_object() if hasattr(action, "get_object") else action
+        except Exception:
+            return False
+        try:
+            subtype = str(obj.get("/S", "") or "")
+        except Exception:
+            return False
+        return subtype in {"/JavaScript", "/JS", "/Launch", "/RichMedia", "/GoToE"}
+
+    # Catalog-level OpenAction / AA are common for "open to page N"; only
+    # reject when they point at executable actions.
+    if _action_is_dangerous(root.get("/OpenAction")):
+        raise WorkerError("unsafe_document", "PDF contains executable actions")
+    if "/JavaScript" in root or "/Launch" in root:
         raise WorkerError("unsafe_document", "PDF contains executable actions")
     names = root.get("/Names")
     if names is not None:
@@ -81,12 +99,20 @@ def _reader(path: Path) -> Any:
         if any(key in names for key in ("/JavaScript", "/EmbeddedFiles")):
             raise WorkerError("unsafe_document", "PDF contains scripts or attachments")
     for page in reader.pages:
-        if "/AA" in page:
+        if "/AA" in page and _action_is_dangerous(page.get("/AA")):
             raise WorkerError("unsafe_document", "PDF page contains executable actions")
-        for reference in page.get("/Annots", ()):
-            annotation = reference.get_object()
-            if any(key in annotation for key in ("/A", "/AA", "/JS", "/JavaScript")):
-                raise WorkerError("unsafe_document", "PDF annotation contains executable actions")
+        for reference in page.get("/Annots", ()) or ():
+            try:
+                annotation = reference.get_object()
+            except Exception:
+                continue
+            if any(
+                key in annotation and _action_is_dangerous(annotation.get(key))
+                for key in ("/A", "/AA", "/JS", "/JavaScript")
+            ) or "/JS" in annotation or "/JavaScript" in annotation:
+                raise WorkerError(
+                    "unsafe_document", "PDF annotation contains executable actions"
+                )
     return reader
 
 
