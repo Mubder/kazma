@@ -1369,6 +1369,7 @@ class TelegramAdapter(BaseAdapter):
         # with slash_commands help + gateway intercepts (_try_skill, _try_ide, …).
         commands = [
             {"command": "help", "description": "Show available commands"},
+            {"command": "long", "description": "Long-task mode on/off (deep audits)"},
             {"command": "reset", "description": "Clear conversation history"},
             {"command": "status", "description": "Gateway health overview"},
             {"command": "model", "description": "Show active model"},

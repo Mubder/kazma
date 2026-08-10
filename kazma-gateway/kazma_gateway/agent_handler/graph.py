@@ -452,9 +452,16 @@ def create_graph_handler(
         # ── Build platform-agnostic state ──────────────────────────
         state = await _build_initial_state(msg, _store)
 
+        try:
+            from kazma_core.agent.long_task import resolve_turn_budgets
+
+            _budgets = resolve_turn_budgets(thread_id)
+            _recursion_limit = int(_budgets["recursion_limit"])
+        except Exception:
+            _recursion_limit = 100
         config = {
             "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
-            "recursion_limit": 100,
+            "recursion_limit": _recursion_limit,
         }
 
         # ── Interactive model selector (/models, /_models_provider, /_models_select) ──
@@ -672,6 +679,71 @@ def create_graph_handler(
             ))
             logger.info("[agent-handler] /yolo cmd=%s thread=%s", cmd, thread_id)
             return
+
+        # ── /long: Long-task capacity mode (NOT HITL bypass) ───────
+        # Raises max_iterations + recursion_limit together. Orthogonal to /yolo.
+        if msg.text:
+            _lt_raw = msg.text.strip().lower()
+            _lt_parts = _lt_raw.split()
+            if _lt_parts and _lt_parts[0] in ("/long", "long"):
+                from kazma_core.agent.long_task import (
+                    disable_long_task,
+                    enable_long_task,
+                    format_status_message,
+                )
+
+                actor = msg.sender_id or "gateway"
+                sub = _lt_parts[1] if len(_lt_parts) > 1 else "status"
+                if sub in ("status", "?", "info"):
+                    reply_msg = format_status_message(thread_id)
+                elif sub in ("off", "disable", "0"):
+                    disable_long_task(thread_id, actor=actor)
+                    reply_msg = (
+                        "📋 Long-task mode **OFF**. Chat baselines restored "
+                        "(Settings → Max tool rounds).\n"
+                        "HITL unchanged. Re-enable: `/long on`"
+                    )
+                elif sub in ("on", "enable", "1", "research", "deep", "chat"):
+                    preset = "research" if sub in ("on", "enable", "1") else sub
+                    st = enable_long_task(thread_id, actor=actor, preset=preset)
+                    rem = st.get("remaining_seconds")
+                    ttl_note = (
+                        f"Auto-expires in ~{rem // 60}m."
+                        if rem is not None
+                        else "No auto-expiry."
+                    )
+                    reply_msg = (
+                        f"🧠 **Long-task ON** ({st.get('preset', preset)}).\n"
+                        f"Budgets: **{st.get('max_iterations')}** tool rounds · "
+                        f"**~{st.get('recursion_limit')}** graph steps.\n"
+                        f"{ttl_note}\n"
+                        "Does **not** skip HITL — use `/yolo` for danger-tool auto-approve.\n"
+                        "Disable: `/long off`"
+                    )
+                elif sub.isdigit():
+                    st = enable_long_task(
+                        thread_id, actor=actor, max_iterations=int(sub)
+                    )
+                    reply_msg = (
+                        f"🧠 **Long-task ON** (custom {st.get('max_iterations')} rounds · "
+                        f"~{st.get('recursion_limit')} steps).\n"
+                        "Disable: `/long off`"
+                    )
+                else:
+                    reply_msg = (
+                        "Usage: `/long` · `/long on` · `/long deep` · "
+                        "`/long research` · `/long 50` · `/long off`"
+                    )
+
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=out_text,
+                    context_metadata=out_ctx,
+                ))
+                logger.info("[agent-handler] /long sub=%s thread=%s", sub, thread_id)
+                return
 
         # ── /undo: Remove last assistant response ──────────────────
         if msg.text and msg.text.strip().lower() == "/undo":
@@ -1235,7 +1307,7 @@ def create_graph_handler(
                 # the store (which may be the source of the original exception)
                 ctx = msg.context_metadata
                 err_msg = "⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)"
-                # LangGraph tool-loop cap — tell the user to restate unfinished steps
+                # LangGraph tool-loop cap — salvage partial work + guide recovery
                 _exc_name = type(inv_exc).__name__
                 _exc_s = str(inv_exc or "")
                 if (
@@ -1243,13 +1315,72 @@ def create_graph_handler(
                     or "Recursion limit" in _exc_s
                     or "recursion_limit" in _exc_s.lower()
                 ):
-                    err_msg = (
-                        "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
-                        "⚠️ Turn stopped: tool loop hit the recursion limit before finishing.\n"
-                        "Reply with the *remaining* steps only (e.g. read GitHub repos, "
-                        "compare projects, job/email advice) so we continue without "
-                        "re-doing graph cleanup."
-                    )
+                    partial = ""
+                    try:
+                        snap = await graph.aget_state(config)
+                        vals = getattr(snap, "values", None) or {}
+                        msgs = vals.get("messages") or []
+                        for m in reversed(list(msgs)):
+                            if not isinstance(m, dict):
+                                continue
+                            if m.get("role") not in ("assistant", "ai"):
+                                continue
+                            if m.get("tool_calls"):
+                                continue
+                            content = m.get("content") or ""
+                            if isinstance(content, str) and content.strip():
+                                partial = content.strip()
+                                break
+                        if not partial:
+                            # Summarize last tool results for a usable footer
+                            tool_bits: list[str] = []
+                            for m in reversed(list(msgs)):
+                                if not isinstance(m, dict) or m.get("role") != "tool":
+                                    continue
+                                tc = str(m.get("content") or "").strip()
+                                if tc:
+                                    tool_bits.append(tc[:400])
+                                if len(tool_bits) >= 3:
+                                    break
+                            if tool_bits:
+                                partial = (
+                                    "(Partial tool findings before budget hit)\n\n"
+                                    + "\n---\n".join(reversed(tool_bits))
+                                )
+                    except Exception:
+                        logger.debug(
+                            "[agent-handler] recursion salvage failed",
+                            exc_info=True,
+                        )
+                    long_hint = ""
+                    try:
+                        from kazma_core.agent.long_task import is_long_task_active
+
+                        if not is_long_task_active(thread_id):
+                            long_hint = (
+                                "\n\n💡 Tip: enable `/long on` for Research budgets "
+                                "(more tool rounds + graph steps), then continue with "
+                                "*only remaining steps*."
+                            )
+                    except Exception:
+                        pass
+                    if partial:
+                        err_msg = (
+                            partial[:3500]
+                            + "\n\n---\n"
+                            "⚠️ Budget reached (graph recursion limit). "
+                            "Above is salvaged progress — reply with *remaining steps only*."
+                            + long_hint
+                        )
+                    else:
+                        err_msg = (
+                            "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
+                            "⚠️ Turn stopped: tool loop hit the recursion limit "
+                            "before finishing.\n"
+                            "Reply with the *remaining* steps only so we continue "
+                            "without re-doing graph cleanup."
+                            + long_hint
+                        )
                 err_text, err_ctx = _prepare_tg_outbound(msg, err_msg, ctx)
                 await manager.send(
                     OutboundMessage(

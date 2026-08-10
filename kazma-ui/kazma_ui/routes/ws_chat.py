@@ -52,8 +52,14 @@ def ti_(key: str, fallback: str, **kwargs) -> str:
 
 ws_chat_router = APIRouter(tags=["ws-chat"])
 
-# Match sse_chat / agent_runner / gateway — LangGraph default (25) is too low.
-_GRAPH_RECURSION_LIMIT = 100
+def _ws_recursion_limit(thread_id: str | None = None) -> int:
+    """Aligned with gateway / long-task budgets (not a hard-coded 100)."""
+    try:
+        from kazma_core.agent.long_task import resolve_turn_budgets
+
+        return int(resolve_turn_budgets(thread_id)["recursion_limit"])
+    except Exception:
+        return 100
 
 
 def _make_ws_sender(websocket: WebSocket) -> tuple[Callable[[dict[str, Any]], Any], Callable[[], bool]]:
@@ -529,14 +535,13 @@ def create_ws_chat_router(
 
         session, thread_id = _get_session_and_thread(session_id)
         # LangGraph default recursion_limit is 25 — far too low for multi-tool
-        # YOLO/smoke turns (each Supervisor↔ToolWorker hop burns steps).
-        # Keep in lockstep with sse_chat / agent_runner / gateway (100).
+        # turns. Derive from long-task / agent.max_iterations (same as gateway).
         config: dict[str, Any] = {
             "configurable": {
                 "thread_id": thread_id,
                 "checkpoint_ns": "",
             },
-            "recursion_limit": _GRAPH_RECURSION_LIMIT,
+            "recursion_limit": _ws_recursion_limit(thread_id),
         }
 
         # Scan graph state on connection/reconnection for any pending HITL interrupts
@@ -1362,7 +1367,7 @@ def create_ws_chat_router(
                             "thread_id": target_thread_id,
                             "checkpoint_ns": "",
                         },
-                        "recursion_limit": _GRAPH_RECURSION_LIMIT,
+                        "recursion_limit": _ws_recursion_limit(target_thread_id),
                     }
 
                     from kazma_ui.sse_utils import ApprovalEventBridge

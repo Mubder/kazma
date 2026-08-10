@@ -222,14 +222,21 @@ def initial_supervisor_state(
             key ``agent.max_iterations`` (default 15). Settable via the
             Web UI Settings page.
     """
-    # Read max_iterations from ConfigStore so it's tunable at runtime
-    # (Settings → Agent → Max tool rounds). Clamp to a safe range.
+    # Budgets: long-task mode (thread) or Settings max_iterations, with
+    # recursion aligned via long_task.derive_recursion_limit (callers also
+    # use resolve_turn_budgets for LangGraph config).
     if max_iterations is None:
         try:
-            from kazma_core.config_store import get_config_store
-            max_iterations = int(get_config_store().get("agent.max_iterations", 15))
+            from kazma_core.agent.long_task import resolve_turn_budgets
+
+            max_iterations = resolve_turn_budgets(thread_id)["max_iterations"]
         except Exception:
-            max_iterations = 15
+            try:
+                from kazma_core.config_store import get_config_store
+
+                max_iterations = int(get_config_store().get("agent.max_iterations", 15))
+            except Exception:
+                max_iterations = 15
     try:
         max_iterations = max(5, min(100, int(max_iterations)))
     except (TypeError, ValueError):

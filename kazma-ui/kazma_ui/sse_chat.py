@@ -1428,12 +1428,18 @@ def create_sse_chat_router(
             logger.exception("[SSE] failed to persist user message for session=%s", session_id)
 
         # ── LangGraph config with thread_id for checkpointing ──────
+        try:
+            from kazma_core.agent.long_task import resolve_turn_budgets
+
+            _sse_recursion = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+        except Exception:
+            _sse_recursion = 100
         graph_config = {
             "configurable": {
                 "thread_id": thread_id,
                 "checkpoint_ns": "",
             },
-            "recursion_limit": 100,
+            "recursion_limit": _sse_recursion,
         }
 
         # ── Build agent messages from CHECKPOINTER (source of truth) ─

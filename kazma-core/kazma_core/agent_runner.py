@@ -935,9 +935,17 @@ class KazmaAgent:
 
         graph_state = initial_supervisor_state(thread_id=self._thread_id)
         graph_state["messages"] = messages
+        try:
+            from kazma_core.agent.long_task import resolve_turn_budgets
+
+            _run_recursion = int(
+                resolve_turn_budgets(self._thread_id)["recursion_limit"]
+            )
+        except Exception:
+            _run_recursion = 100
         config = {
             "configurable": {"thread_id": self._thread_id},
-            "recursion_limit": 100,
+            "recursion_limit": _run_recursion,
         }
 
         from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
