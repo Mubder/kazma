@@ -192,25 +192,54 @@ function documentsPage() {
     async upload(file) {
       this.uploading = true;
       try {
-        const url = "/api/documents" + (this.forceOcr ? "?force_ocr=1" : "");
+        // Encode filename: HTTP headers are Latin-1 only. Arabic/emoji/smart
+        // quotes in PDF names used to throw in fetch → bare "Upload failed".
+        const encodedName = encodeURIComponent(file.name || "upload.bin");
+        const qs = new URLSearchParams();
+        if (this.forceOcr) qs.set("force_ocr", "1");
+        qs.set("filename", encodedName);
+        const url = "/api/documents?" + qs.toString();
         const r = await fetch(url, {
           method: "POST",
           headers: {
-            "X-Document-Filename": file.name,
+            "X-Document-Filename": encodedName,
             "Content-Type": "application/octet-stream",
+            Accept: "application/json",
           },
           body: file,
         });
-        const j = await r.json();
+        let j = {};
+        try {
+          j = await r.json();
+        } catch (_) {
+          this.toast(
+            r.status === 401
+              ? "Upload failed: not authenticated (re-login / set secret)"
+              : `Upload failed (HTTP ${r.status || "network"})`,
+            "error",
+          );
+          return;
+        }
         if (!r.ok || !j.ok) {
-          this.toast(j.error || "Upload failed", "error");
+          const msg =
+            j.error ||
+            (r.status === 401
+              ? "Not authenticated — re-login or check KAZMA_SECRET"
+              : `Upload failed (HTTP ${r.status})`);
+          this.toast(msg, "error");
           return;
         }
         this.toast("Uploaded — processing started", "success");
         await this.loadDocuments();
         await this.openDocument(j.document_id);
       } catch (e) {
-        this.toast("Upload failed", "error");
+        console.warn("[documents] upload error", e);
+        this.toast(
+          e && e.message
+            ? `Upload failed: ${e.message}`
+            : "Upload failed (network)",
+          "error",
+        );
       } finally {
         this.uploading = false;
       }

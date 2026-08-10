@@ -172,11 +172,22 @@ def create_documents_router() -> APIRouter:
         if svc is None:
             return _unavailable()
         tenant, actor, workspace = _resolve_scope(request)
-        filename = (
+        raw_name = (
             request.headers.get("X-Document-Filename")
             or request.query_params.get("filename")
             or ""
         ).strip()
+        # Clients send encodeURIComponent(...) so non-ASCII names are safe in
+        # HTTP headers (Latin-1 only). Accept both encoded and plain names.
+        filename = raw_name
+        if raw_name:
+            from urllib.parse import unquote
+
+            try:
+                filename = unquote(raw_name)
+            except Exception:  # noqa: BLE001
+                filename = raw_name
+        filename = (filename or "").strip()
         if not filename:
             return JSONResponse(
                 status_code=400,
