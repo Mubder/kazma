@@ -1234,24 +1234,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
 - **Shell mutate off** in multi-user/prod (`mkdir`/`cp`/`mv`/`touch`) unless
   `KAZMA_SHELL_ALLOW_MUTATE=1` — prefer `file_write` tool.
 
-## Unreleased — remaining gaps: hard sandbox, tenant stores, replica affinity (2026-07-25)
+## v0.10.2 (2026-08-10)
 
-### Hard sandbox (post-HITL / host power)
-- **No host-local `python_exec`** when production or multi-user (Docker
-  required). Escape hatch: `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` (lab only).
+### Fix
 
-### Multi-tenant data plane
-- **TaskStore.list_tasks** auto-filters `metadata.tenant_id` in multi-user/prod
-  (`KAZMA_TENANT_FILTER=0` or `tenant_id=*` to opt out).
-- **Knowledge libraries** get `tenant_id` column; list/get scoped to current
-  tenant when multi-user/prod.
-
-### Multi-replica
-- **Affinity cookie** `kazma-replica` (`KAZMA_REPLICA_ID`) for LB sticky SSE.
-
-### Platform parity + UI
-- Slack bus `set_reaction` API.
-- Chat session delete surfaces non-OK HTTP status.
+- **documents**: encode non-ASCII upload filenames
 
 ## v0.10.1 (2026-08-10)
 
