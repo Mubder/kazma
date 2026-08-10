@@ -6,7 +6,32 @@ description: Gateway slash commands reference (instant, no LLM)
 ---
 Kazma's gateway intercepts slash commands and resolves them **instantly (&lt;50ms)** without any LLM call. Commands that involve `kazma_core` tools (marked `[core]`) are processed by the agent's tool layer with minimal overhead.
 
-> **Web research** is **not** a slash command. There is no `/research`. Ask in normal chat or use `/swarm research …`. See [Web research](../guide/web-research).
+> **Web research:** deep research also has gateway/UI entry points (`/research deep …`, Web `/research` panel). Prefer normal chat or those entry points rather than inventing ad-hoc slash variants. See [Web research](../guide/web-research) and [Recent features](../guide/recent-features).
+
+---
+
+## Documents (`/documents`, alias `/docs`)
+
+Surfaces the shared **Document Intelligence** platform (`DocumentIngestionService`)
+across Telegram, Discord, Slack, and other gateway chats. Reads use opaque IDs;
+no raw server paths from the user.
+
+| Subcommand | Usage | Description |
+|---|---|---|
+| *(help)* | `/documents` | Help + recent documents |
+| `list` | `/documents list` | List id, title, state |
+| `status` | `/documents status <id>` | Job/document durable state |
+| `read` | `/documents read <id>` | Paged fenced content when ready |
+| `convert` | `/documents convert <id> <format>` | Convert to pdf/html/docx/markdown |
+| `pdf-info` | `/documents pdf-info <id>` | Structural PDF report |
+| `redact` | `/documents redact <id> <term[,term…]>` | Physical redact → new artifact |
+| `search` | `/documents search <library> <query>` | Search an indexed library |
+| `health` | `/documents health` | Capability + worker readiness |
+
+Alias: `/docs …` accepts the same subcommands.
+
+Guide: [Document Intelligence](../guide/document-intelligence) ·
+API: [API routes — Documents](./api-routes.md#documents--document-intelligence).
 
 ---
 

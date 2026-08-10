@@ -556,11 +556,12 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 | IDE CodeMirror-style editor | `ide.html`, `ide.js`, `ide_api.py`, `ide/service.py` |
 | SSE streaming chat | `sse_chat.py`, `streaming.js` |
 | WebSocket voice | `routes_voice_ws.py`, `voice.js` |
+| Document Intelligence | `documents/*`, `documents_api.py`, `documents.html`/`js`, gateway `/documents`, `document_platform` skill, TUI `DocumentsPanel`, `scripts/certify_documents.py` |
 | Guardian health | `health.py`, cron, circuit breakers, cost_breaker |
 | Cultural/Arabic | dialect, tokenizers, i18n ar, tone/pacing, majlis library |
 | Multi-agent | SwarmEngine live; `delegation/*` library-only |
 | SaaS multi-user | login multi-mode, `/api/saas`, header principal |
-| Postgres multi-replica | `db/*`, dual stores, HA compose |
+| Postgres multi-replica | `db/*`, dual stores, HA compose; document **jobs** optional PG (`jobs_pg.py`) |
 
 ---
 
@@ -571,6 +572,10 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 | `docs/audits/REPO_CLEANUP_PLAN.md` | Hygiene matrix |
 | `docs/audits/REMEDIATION_PLAN_2026-07-21.md` | WP checklist (complete) |
 | `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` | Security audit + remediation footer |
+| `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` | Document Intelligence cert report |
+| `docs/docs/guide/document-intelligence.md` | Document product guide |
+| `docs/docs/guide/document-phases.md` | Document phases 0–10 |
+| `docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md` | Document docs remediation goal |
 | `docs/audits/UNWIRED_INVENTORY.md` | Library-only packages |
 | `docs/ops/SAAS_AND_POSTGRES.md` | Cutover guide |
 | `docs/ops/DISASTER_RECOVERY.md` | DR runbook |

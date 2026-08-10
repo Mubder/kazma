@@ -1,7 +1,7 @@
 /**
  * Settings.js — Alpine.js state management for the Kazma Settings panel.
  * Tabs: providers_connectors, agent, memory (+embedder), mcp, skills, appearance,
- * shortcuts, account, tools, system, packages, import.
+ * shortcuts, account, tools, system, packages, import, voice, email, documents.
  * Each tab section is a separate method/object for clean separation.
  * Deep-link: /settings?tab=packages
  */
@@ -64,6 +64,25 @@ function settingsApp() {
             failover_cooldown_seconds: 300,
             ledger_enabled: true,
         },
+        documents: {
+            enabled: true,
+            shadow: false,
+            default_authoritative: false,
+            mode: '',
+            intake_max_bytes: 52428800,
+            intake_max_files: 10,
+            ocr_enabled: true,
+            worker_timeout_seconds: 300,
+            worker_memory_mb: 1024,
+            capacity_storage_free_floor_bytes: 536870912,
+            security_malware_scan: 'auto',
+            security_malware_fail_closed: false,
+            gc_enabled: true,
+            indexing_enabled: true,
+            malware_probe: { available: false },
+        },
+        documentsSaving: false,
+        documentsStatus: '',
         memoryTenantMode: 'shared',
         memoryBackends: {
             mode: 'local',
@@ -380,6 +399,16 @@ function settingsApp() {
                     this.loadHubConnectors(),
                     this.loadHubProfiles(),
                 ]);
+
+                // Load Document Intelligence settings
+                try {
+                    const docSettings = await this._fetch('/api/settings/documents');
+                    if (docSettings && !docSettings.error) {
+                        Object.assign(this.documents, docSettings);
+                    }
+                } catch (e) {
+                    console.error('[Settings] Failed to load document config:', e);
+                }
 
                 // Load Voice Subsystem Settings
                 try {
@@ -961,6 +990,43 @@ function settingsApp() {
                 }
             } catch (e) { /* keep defaults */ }
             this.proxyTestResult = null;
+        },
+
+        async saveDocuments() {
+            this.documentsSaving = true;
+            this.documentsStatus = '';
+            try {
+                const body = {
+                    enabled: !!this.documents.enabled,
+                    shadow: !!this.documents.shadow,
+                    default_authoritative: !!this.documents.default_authoritative,
+                    intake_max_bytes: Number(this.documents.intake_max_bytes),
+                    intake_max_files: Number(this.documents.intake_max_files),
+                    ocr_enabled: !!this.documents.ocr_enabled,
+                    worker_timeout_seconds: Number(this.documents.worker_timeout_seconds),
+                    worker_memory_mb: Number(this.documents.worker_memory_mb),
+                    capacity_storage_free_floor_bytes: Number(this.documents.capacity_storage_free_floor_bytes),
+                    security_malware_scan: this.documents.security_malware_scan || 'auto',
+                    security_malware_fail_closed: !!this.documents.security_malware_fail_closed,
+                    gc_enabled: !!this.documents.gc_enabled,
+                    indexing_enabled: !!this.documents.indexing_enabled,
+                };
+                const resp = await fetch('/api/settings/documents', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) throw new Error('save failed');
+                const refreshed = await this._fetch('/api/settings/documents');
+                if (refreshed && !refreshed.error) Object.assign(this.documents, refreshed);
+                this.documentsStatus = 'Saved';
+                if (window.showToast) window.showToast('Document settings saved', 'success');
+            } catch (e) {
+                this.documentsStatus = 'Save failed';
+                if (window.showToast) window.showToast('Document settings save failed', 'error');
+            } finally {
+                this.documentsSaving = false;
+            }
         },
 
         async saveProxy() {

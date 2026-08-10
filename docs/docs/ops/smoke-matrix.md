@@ -2,13 +2,14 @@
 id: smoke-matrix
 title: Smoke test matrix
 sidebar_label: Smoke matrix
-description: Manual verification matrix for research, KB, proxy, memory, and chat explain
+description: Manual verification matrix for research, KB, proxy, memory, chat explain, and documents
 ---
 
 # Smoke test matrix
 
-Run after pulls that touch research, Knowledge Library, proxy, or V2 memory.
-Check off each row; note environment (local / Docker / SearXNG / proxy).
+Run after pulls that touch research, Knowledge Library, proxy, V2 memory, or
+**Document Intelligence**. Check off each row; note environment (local / Docker /
+SearXNG / proxy).
 
 **Automated (offline) subset — industry CI:**
 
@@ -76,7 +77,23 @@ eval, and docs presence. **Live network / LLM rows below still need a human.**
 
 ---
 
-## 5. Regression quick hits
+## 5. Document Intelligence
+
+| # | Action | Expect | Pass |
+|---|--------|--------|------|
+| D1 | Open `/documents` → upload a small `.txt` / PDF | Document appears; state progresses to `ready` (or clear fail code) | ☐ |
+| D2 | Open detail → content preview | Fenced/readable text; BiDi OK for Arabic if used (`dir=auto`) | ☐ |
+| D3 | Index into a library_id → search | Hits return with citations inside untrusted fence | ☐ |
+| D4 | Ops panel: capacity + readiness | Snapshot loads; multi-replica honesty if applicable | ☐ |
+| D5 | Gateway: `/documents list` (or `/docs list`) | Opaque ids + titles | ☐ |
+| D6 | Agent tool `document_import` on workspace file | Returns document_id; not a path escape | ☐ |
+| D7 | `python scripts/certify_documents.py` | `overall_status` not `FAIL`; canary_ready when core parsers ready | ☐ |
+
+Guide: [Document Intelligence](../guide/document-intelligence) · [Phase map](../guide/document-phases).
+
+---
+
+## 6. Regression quick hits
 
 | # | Action | Expect | Pass |
 |---|--------|--------|------|
@@ -95,4 +112,4 @@ eval, and docs presence. **Live network / LLM rows below still need a human.**
 | Tester | |
 | Notes | |
 
-Related: [Recent features guide](../guide/recent-features) · [Production checklist](./production-checklist) · [Web research](../guide/web-research) · [Knowledge library](../guide/knowledge-library) · [Diagnosis map](./diagnosis-map).
+Related: [Recent features guide](../guide/recent-features) · [Production checklist](./production-checklist) · [Web research](../guide/web-research) · [Knowledge library](../guide/knowledge-library) · [Document Intelligence](../guide/document-intelligence) · [Diagnosis map](./diagnosis-map).

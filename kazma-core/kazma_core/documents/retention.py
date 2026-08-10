@@ -120,6 +120,16 @@ class DocumentGarbageCollector:
             started_at=now.isoformat(),
             budget=int(cfg.gc_max_deletions_per_run),
         )
+        # Mark/sweep SQL is SQLite-shaped today. Postgres metadata is multi-replica
+        # safe for CRUD; GC SQL port is tracked separately — fail closed (no deletes).
+        if getattr(self._repo, "backend_name", "sqlite") == "postgres":
+            report.errors.append("gc_postgres_metadata_sql_port_pending")
+            report.finished_at = datetime.now(UTC).isoformat()
+            logger.info(
+                "[documents.retention] GC skipped — metadata backend is Postgres "
+                "(CRUD multi-replica live; GC SQL port pending)"
+            )
+            return report
         try:
             marks = self._mark(cfg, now)
         except Exception as exc:  # noqa: BLE001 - report, don't fabricate success

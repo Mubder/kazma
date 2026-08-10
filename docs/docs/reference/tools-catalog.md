@@ -65,7 +65,7 @@ These modules implement or support tools (some registered at startup, some via s
  |
 | `crawl_page` | advanced-web-crawler | web | safe/read | Fetch ONE public URL and extract readable text (alias of read_url). Not multi-page crawl. Playwright fallback for bot walls / thin JS shells when installed.
  |
-| `parse_document` | advanced-web-crawler | filesystem | safe/read | Parse structured text from local files including CSV, JSON, XLS, or PDF. |
+| `parse_document` | advanced-web-crawler | filesystem | safe/read | Parse structured text from local files including CSV, JSON, XLS, or PDF. Separate from durable `document_import` / `document_read` (document-platform). |
 | `arabic_translate` | arabic-bilingual-nlp | nlp | safe/read | Translate context-preserving between Arabic and English. |
 | `hijri_convert` | arabic-bilingual-nlp | nlp | safe/read | Convert dates between Gregorian calendar (YYYY-MM-DD) and Hijri calendar. |
 | `insert_diacritics` | arabic-bilingual-nlp | nlp | safe/read | Apply correct vowel diacritics (tashkeel/harakat) to Arabic text based on semantic grammar. |
@@ -100,14 +100,18 @@ These modules implement or support tools (some registered at startup, some via s
 | `inspect_db_schema` | database-client | database | safe/read | Extract list of tables, column names, data types, primary/foreign keys, and indexes from SQLite databases. |
 | `execute_db_query` | database-client | database | safe/read | Execute a read-only SQL SELECT query against a local SQLite database file. |
 | `sqlite_query` | database-client | database | safe/read | Execute a read-only SQL query against the local SQLite database. SELECT queries only. Returns rows as JSON. |
-| `generate_pdf` | document-generator | document | safe/read | Generate a PDF document from a title and a list of sections (heading + body text). Returns the saved file path.
- |
-| `generate_docx` | document-generator | document | safe/read | Generate a Word .docx document from a title and a list of sections (heading + body text). Returns the saved file path.
- |
-| `generate_xlsx` | document-generator | document | safe/read | Generate an Excel .xlsx workbook from a list of sheets, each with a list of row-lists (the first row is the header). Returns the file path.
- |
-| `generate_markdown_doc` | document-generator | document | safe/read | Generate a Markdown (.md) document from a title and a list of sections (heading + body). Returns the saved file path.
- |
+| `document_import` | document-platform | document | safe/read | Ingest a **workspace-safe** local file into the durable document platform (quarantine → validate → isolated parse). Returns opaque `document_id` / job state. Arbitrary server paths refused. |
+| `document_status` | document-platform | document | safe/read | Durable processing state for a `document_id` or `job_id` (stage, attempts, safe error codes). |
+| `document_read` | document-platform | document | safe/read | Paged, fenced content of a processed document by opaque id (`max_chars` / page selectors). |
+| `document_index` | document-platform | document | safe/read | Publish current immutable version into a Knowledge library (`library_id`). Auto-index is off by default. |
+| `document_search` | document-platform | document | safe/read | Search a Knowledge library; hits returned inside an untrusted-data fence with citations. |
+| `document_cancel` | document-platform | document | safe/read | Cooperative cancel of a document job by opaque `job_id`. |
+| `document_convert` | document-platform | document | safe/read | Convert a processed document (opaque id) to another format via isolated renderer; returns artifact id. |
+| `document_redact` | document-platform | document | safe/read | Physical redaction of terms on a processed PDF by opaque id → new verified artifact (no UI confirm dialog; privileged actor). |
+| `generate_pdf` | document-generator | document | safe/read | **Legacy/simple path:** generate a PDF from title + sections to `kazma-data/documents/` (reportlab). Not the durable platform. Prefer `document-platform` for tenant-scoped work. |
+| `generate_docx` | document-generator | document | safe/read | **Legacy/simple path:** Word `.docx` via python-docx. |
+| `generate_xlsx` | document-generator | document | safe/read | **Legacy/simple path:** Excel `.xlsx` via openpyxl. |
+| `generate_markdown_doc` | document-generator | document | safe/read | **Legacy/simple path:** Markdown file write (no heavy deps). |
 | `email_list` | email-manager | email | safe/read | List, search, and page emails in a folder (INBOX default). Args: folder, query, limit, offset, unread_only, provider (auto\|sandbox\|gmail\|microsoft\|imap), account (optional multi-account alias).
  |
 | `email_get` | email-manager | email | safe/read | Fetch full email by message_id. Args: message_id, include_body, max_body_chars, provider.

@@ -226,11 +226,16 @@ def _sanitize_detail(detail: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _event(row: Any) -> DocumentAuditEvent:
+    if not isinstance(row, dict):
+        try:
+            row = dict(row)
+        except Exception:  # noqa: BLE001
+            row = {k: row[k] for k in row.keys()}  # type: ignore[index]
     try:
         detail = json.loads(row["detail_json"])
         if not isinstance(detail, dict):
             detail = {}
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, KeyError):
         detail = {}
     return DocumentAuditEvent(
         id=int(row["id"]),
@@ -238,26 +243,38 @@ def _event(row: Any) -> DocumentAuditEvent:
         event_type=row["event_type"],
         action=row["action"],
         outcome=row["outcome"],
-        actor_id=row["actor_id"],
-        workspace_id=row["workspace_id"],
-        document_id=row["document_id"],
-        version_id=row["version_id"],
-        job_id=row["job_id"],
+        actor_id=row.get("actor_id"),
+        workspace_id=row.get("workspace_id"),
+        document_id=row.get("document_id"),
+        version_id=row.get("version_id"),
+        job_id=row.get("job_id"),
         detail=detail,
-        created_at=row["created_at"],
+        created_at=str(row["created_at"]),
     )
 
 
 class DocumentAuditStore:
-    """Append-only operational audit sharing the repository connection/lock."""
+    """Append-only operational audit sharing the repository connection/lock.
 
-    def __init__(self, repository: DocumentRepository) -> None:
-        if not isinstance(repository, DocumentRepository):
-            raise TypeError("repository must be a DocumentRepository")
-        self._conn = repository._conn  # noqa: SLF001 - shared connection by design
-        self._lock = repository._lock  # noqa: SLF001
-        with self._lock:
-            self._conn.executescript(_SCHEMA)
+    Supports SQLite :class:`DocumentRepository` (shared ``documents.db``) and
+    Postgres :class:`~kazma_core.documents.repository_pg.PostgresDocumentRepository`
+    (``document_audit_events`` table created with metadata schema).
+    """
+
+    def __init__(self, repository: Any) -> None:
+        self._repo = repository
+        self._pg = bool(getattr(repository, "backend_name", "") == "postgres")
+        self._lock = getattr(repository, "_lock", None)
+        if not self._pg:
+            if not isinstance(repository, DocumentRepository):
+                raise TypeError("repository must be a DocumentRepository or Postgres backend")
+            self._conn = repository._conn  # noqa: SLF001 - shared connection by design
+            lock = self._lock
+            assert lock is not None
+            with lock:
+                self._conn.executescript(_SCHEMA)
+        else:
+            self._conn = None
 
     def record(
         self,
@@ -292,6 +309,37 @@ class DocumentAuditStore:
                 sort_keys=True,
                 separators=(",", ":"),
             )
+            args = (
+                tenant,
+                etype,
+                act,
+                result,
+                _opt(actor_id),
+                _opt(workspace_id),
+                _opt(document_id),
+                _opt(version_id),
+                _opt(job_id),
+                payload,
+                _now(),
+            )
+            if self._pg:
+                pool = getattr(self._repo, "_pool", None)
+                if pool is None:
+                    return
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO document_audit_events (
+                                tenant_id, event_type, action, outcome, actor_id,
+                                workspace_id, document_id, version_id, job_id,
+                                detail_json, created_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            args,
+                        )
+                    conn.commit()
+                return
             with self._lock:
                 self._conn.execute(
                     """
@@ -301,19 +349,7 @@ class DocumentAuditStore:
                         detail_json, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        tenant,
-                        etype,
-                        act,
-                        result,
-                        _opt(actor_id),
-                        _opt(workspace_id),
-                        _opt(document_id),
-                        _opt(version_id),
-                        _opt(job_id),
-                        payload,
-                        _now(),
-                    ),
+                    args,
                 )
         except Exception:  # noqa: BLE001 - audit must never break operations
             logger.debug("[documents.audit] failed to record %s/%s", event_type, action, exc_info=True)
@@ -334,8 +370,48 @@ class DocumentAuditStore:
         """
         tenant = _clean(tenant_id)
         page_size = max(1, min(int(limit), 200))
+        if self._pg:
+            clauses = ["tenant_id = %s"]
+            params: list[Any] = [tenant]
+            if document_id is not None:
+                clauses.append("document_id = %s")
+                params.append(str(document_id))
+            if event_type is not None:
+                etype = str(event_type).strip().lower()
+                if etype in AUDIT_EVENT_TYPES:
+                    clauses.append("event_type = %s")
+                    params.append(etype)
+            if before_id is not None:
+                clauses.append("id < %s")
+                params.append(int(before_id))
+            params.append(page_size + 1)
+            where = " AND ".join(clauses)
+            pool = getattr(self._repo, "_pool", None)
+            rows = []
+            if pool is not None:
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""
+                            SELECT * FROM document_audit_events
+                            WHERE {where}
+                            ORDER BY id DESC
+                            LIMIT %s
+                            """,
+                            params,
+                        )
+                        rows = cur.fetchall()
+                    conn.commit()
+            events = [_event(row) for row in rows[:page_size]]
+            has_more = len(rows) > page_size
+            return {
+                "events": [e.to_dict() for e in events],
+                "has_more": has_more,
+                "next_before_id": events[-1].id if (has_more and events) else None,
+            }
+
         clauses = ["tenant_id = ?"]
-        params: list[Any] = [tenant]
+        params = [tenant]
         if document_id is not None:
             clauses.append("document_id = ?")
             params.append(str(document_id))
@@ -370,6 +446,23 @@ class DocumentAuditStore:
 
     def count(self, *, tenant_id: str) -> int:
         tenant = _clean(tenant_id)
+        if self._pg:
+            pool = getattr(self._repo, "_pool", None)
+            if pool is None:
+                return 0
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) AS c FROM document_audit_events WHERE tenant_id = %s",
+                        (tenant,),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+            if row is None:
+                return 0
+            if isinstance(row, dict):
+                return int(row.get("c") or 0)
+            return int(row[0] if not hasattr(row, "keys") else row["c"])
         with self._lock:
             row = self._conn.execute(
                 "SELECT COUNT(*) AS c FROM document_audit_events WHERE tenant_id = ?",

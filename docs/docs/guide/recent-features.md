@@ -13,7 +13,7 @@ graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
 
 **Smoke checklist (when you test later):** [Smoke matrix](../ops/smoke-matrix).  
-**Architecture context:** [Web research](./web-research) · [Knowledge Library](./knowledge-library) · [Memory best path](./memory-best-path).
+**Architecture context:** [Web research](./web-research) · [Knowledge Library](./knowledge-library) · [Document Intelligence](./document-intelligence) · [Document phases](./document-phases) · [Memory best path](./memory-best-path).
 
 ---
 
@@ -22,8 +22,9 @@ the deep docs when you need detail.
 | Area | What you get | Where |
 |------|----------------|--------|
 | Deep research | Multi-source pipeline, live sessions, routing, rubric | `/research`, chat, `/research deep` |
+| **Document Intelligence** | Secure ingest, OCR, index, generate/convert/redact, ops (capacity/GC/audit), cert | `/documents`, `/api/documents/*`, `/documents` slash, `document_*` tools, TUI Documents |
 | Proxy Provider | Residential proxy for scrape/crawl/Playwright/SERP | Settings → System |
-| Knowledge Library | Smart re-index, gone-URL prune, hybrid inject | `/knowledge`, Settings → Memory |
+| Knowledge Library | Smart re-index, gone-URL prune, hybrid inject; **document_index** bridge | `/knowledge`, Settings → Memory, Documents → Index |
 | Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand | `/memory` |
 | Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |

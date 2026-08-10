@@ -603,6 +603,69 @@ class SettingsRouterBuilder:
             config_store.set("voice.tts_output_format", req.tts_output_format, category="voice")
             return {"status": "ok"}
 
+        @router.get("/api/settings/documents")
+        async def api_get_document_settings() -> dict[str, Any]:
+            """Live Document Intelligence settings (ConfigStore-backed)."""
+            try:
+                from kazma_core.documents.config import get_document_config, get_document_rollout
+                from kazma_core.documents.malware import probe_malware_scanner
+
+                cfg = get_document_config()
+                rollout = get_document_rollout()
+                return {
+                    "enabled": cfg.enabled,
+                    "shadow": cfg.shadow,
+                    "default_authoritative": cfg.default_authoritative,
+                    "mode": rollout.mode,
+                    "intake_max_bytes": cfg.intake_max_bytes,
+                    "intake_max_files": cfg.intake_max_files,
+                    "ocr_enabled": cfg.ocr_enabled,
+                    "worker_timeout_seconds": cfg.worker_timeout_seconds,
+                    "worker_memory_mb": cfg.worker_memory_mb,
+                    "capacity_storage_free_floor_bytes": cfg.capacity_storage_free_floor_bytes,
+                    "security_malware_scan": cfg.security_malware_scan,
+                    "security_malware_fail_closed": cfg.security_malware_fail_closed,
+                    "malware_probe": probe_malware_scanner(),
+                    "gc_enabled": cfg.gc_enabled,
+                    "indexing_enabled": cfg.indexing_enabled,
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("document settings get failed: %s", exc)
+                return {"error": str(exc)}
+
+        @router.put("/api/settings/documents")
+        async def api_save_document_settings(req: dict[str, Any]) -> dict[str, str]:
+            """Persist document platform keys (nested ConfigStore primary keys)."""
+            mapping = {
+                "enabled": ("documents.enabled", "documents"),
+                "shadow": ("documents.shadow", "documents"),
+                "default_authoritative": ("documents.default_authoritative", "documents"),
+                "intake_max_bytes": ("documents.intake.max_bytes", "documents"),
+                "intake_max_files": ("documents.intake.max_files", "documents"),
+                "ocr_enabled": ("documents.ocr.enabled", "documents"),
+                "worker_timeout_seconds": ("documents.workers.timeout_seconds", "documents"),
+                "worker_memory_mb": ("documents.workers.memory_mb", "documents"),
+                "capacity_storage_free_floor_bytes": (
+                    "documents.capacity.storage_free_floor_bytes",
+                    "documents",
+                ),
+                "security_malware_scan": ("documents.security.malware_scan", "documents"),
+                "security_malware_fail_closed": (
+                    "documents.security.malware_fail_closed",
+                    "documents",
+                ),
+                "gc_enabled": ("documents.gc.enabled", "documents"),
+                "indexing_enabled": ("documents.indexing.enabled", "documents"),
+            }
+            items: list[tuple[str, Any, str]] = []
+            for field, (key, cat) in mapping.items():
+                if field not in req:
+                    continue
+                items.append((key, req[field], cat))
+            if items:
+                config_store.batch_set(items)
+            return {"status": "ok", "updated": str(len(items))}
+
         @router.get("/api/voice/providers")
         async def api_get_voice_providers() -> dict[str, list[str]]:
             """Get available voice providers for STT and TTS."""

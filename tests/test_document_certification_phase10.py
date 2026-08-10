@@ -183,6 +183,8 @@ class TestCertificationRunner:
 
 def _setup_job_infra(
     tmp_path: Path,
+    *,
+    clock=None,
 ) -> tuple[
     "DocumentRepository", "ContentAddressedStorage", "DocumentJobRepository"
 ]:
@@ -209,8 +211,42 @@ def _setup_job_infra(
         source_blob_id=blob_rec.id, source_sha256=blob.sha256,
         original_filename="test.txt", mime_type="text/plain",
     )
-    jobs = DocumentJobRepository(repo)
+    kwargs: dict = {}
+    if clock is not None:
+        kwargs["clock"] = clock
+        kwargs["jitter"] = lambda _base: 0
+    jobs = DocumentJobRepository(repo, **kwargs)
     return repo, storage, jobs
+
+
+def _advance_to_ready_to_parse(jobs, record):
+    """RECEIVED → QUARANTINED → VALIDATING → READY_TO_PARSE (claimable)."""
+    from kazma_core.documents.models import DocumentJobState
+
+    record = jobs.transition(
+        tenant_id="t1",
+        job_id=record.id,
+        expected_state=DocumentJobState.RECEIVED,
+        expected_version=record.version,
+        new_state=DocumentJobState.QUARANTINED,
+        stage="quarantine",
+    )
+    record = jobs.transition(
+        tenant_id="t1",
+        job_id=record.id,
+        expected_state=DocumentJobState.QUARANTINED,
+        expected_version=record.version,
+        new_state=DocumentJobState.VALIDATING,
+        stage="validate",
+    )
+    return jobs.transition(
+        tenant_id="t1",
+        job_id=record.id,
+        expected_state=DocumentJobState.VALIDATING,
+        expected_version=record.version,
+        new_state=DocumentJobState.READY_TO_PARSE,
+        stage="ready_to_parse",
+    )
 
 
 class TestCrashRecoveryMatrix:
@@ -241,8 +277,27 @@ class TestCrashRecoveryMatrix:
         assert replay.id == record.id, "Idempotent replay returned a different job"
 
     def test_transition_and_recovery_reclaims_expired_leases(self, tmp_path):
-        _repo, _storage, jobs = _setup_job_infra(tmp_path)
-        from kazma_core.documents.models import DocumentId, VersionId, DocumentJobState
+        """Claim a job, expire its lease, prove reclaim is exactly-once."""
+        from datetime import UTC, datetime, timedelta
+
+        from kazma_core.documents.models import (
+            DocumentId,
+            DocumentJobState,
+            VersionId,
+        )
+
+        class _Clock:
+            def __init__(self) -> None:
+                self.value = datetime(2026, 1, 1, tzinfo=UTC)
+
+            def __call__(self) -> datetime:
+                return self.value
+
+            def advance(self, seconds: float) -> None:
+                self.value += timedelta(seconds=seconds)
+
+        clock = _Clock()
+        _repo, _storage, jobs = _setup_job_infra(tmp_path, clock=clock)
 
         docs = _repo.list_documents(tenant_id="t1")
         doc_id = DocumentId(docs[0].id)
@@ -254,16 +309,22 @@ class TestCrashRecoveryMatrix:
             document_id=doc_id, version_id=ver_id,
             idempotency_key="ik-recover-2",
         )
-        # Advance to a claimable state (RECEIVED -> QUARANTINED is allowed)
-        jobs.transition(
-            tenant_id="t1", job_id=record.id,
-            expected_state=DocumentJobState.RECEIVED,
-            expected_version=0,
-            new_state=DocumentJobState.QUARANTINED,
-            stage="quarantine",
-        )
+        _advance_to_ready_to_parse(jobs, record)
+        claimed = jobs.claim_next(owner="worker-crash", lease_seconds=5, tenant_id="t1")
+        assert claimed is not None, "claimable job was not claimed"
+        assert claimed.state is DocumentJobState.PARSING
+        assert claimed.lease_owner == "worker-crash"
+
+        clock.advance(6)
         recovered = jobs.recover_expired_leases(tenant_id="t1")
-        assert isinstance(recovered, int), "recover_expired_leases must return count"
+        assert recovered == 1, f"expected exactly 1 reclaimed lease, got {recovered}"
+        assert jobs.recover_expired_leases(tenant_id="t1") == 0, "reclaim must be exactly-once"
+
+        refreshed = jobs.get(tenant_id="t1", job_id=claimed.id)
+        assert refreshed is not None
+        assert refreshed.state is DocumentJobState.RETRY_WAIT
+        assert refreshed.lease_owner is None
+        assert refreshed.error_code == "lease_expired"
 
     def test_retry_increments_attempt_count(self, tmp_path):
         _repo, _storage, jobs = _setup_job_infra(tmp_path)
@@ -374,6 +435,40 @@ class TestCrashRecoveryMatrix:
 # Group 4: Architecture compliance
 # ---------------------------------------------------------------------------
 
+def _module_is_forbidden(module_str: str, forbidden_prefixes: tuple[str, ...]) -> bool:
+    """True when *module_str* is a forbidden package or a subpackage of one."""
+    return any(
+        module_str == prefix or module_str.startswith(prefix + ".")
+        for prefix in forbidden_prefixes
+    )
+
+
+def _collect_import_modules(tree: object) -> list[str]:
+    """Return every imported module name from Import and ImportFrom nodes."""
+    import ast
+
+    modules: list[str] = []
+    for node in ast.walk(tree):  # type: ignore[arg-type]
+        if isinstance(node, ast.ImportFrom) and node.module:
+            modules.append(str(node.module))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name:
+                    modules.append(str(alias.name))
+    return modules
+
+
+_FORBIDDEN_PARSER_PREFIXES = (
+    "kazma_core.documents.parsers",
+    "kazma_core.documents.ocr",
+    "kazma_core.documents.renderers",
+    "kazma_core.documents.mutation",
+    "kazma_core.documents.parser_worker",
+    "kazma_core.documents.mutation_worker",
+    "kazma_core.documents.renderer_worker",
+)
+
+
 class TestArchitectureCompliance:
     """Every document ingestion path must route through DocumentService or DocumentIngestionService."""
 
@@ -383,17 +478,14 @@ class TestArchitectureCompliance:
         import os
 
         gateway_root = _KZ_ROOT / "kazma-gateway" / "kazma_gateway"
-        forbidden = {
-            "kazma_core.documents.parsers",
-            "kazma_core.documents.ocr",
-            "kazma_core.documents.renderers",
-            "kazma_core.documents.mutation",
-            "kazma_core.documents.parser_worker",
-            "kazma_core.documents.mutation_worker",
-        }
         violations: list[str] = []
 
         for dirpath, _dirnames, filenames in os.walk(gateway_root):
+            # Skip tests — architecture boundary applies to production code.
+            if f"{os.sep}tests{os.sep}" in (dirpath + os.sep) or dirpath.endswith(
+                f"{os.sep}tests"
+            ):
+                continue
             for filename in filenames:
                 if not filename.endswith(".py"):
                     continue
@@ -402,18 +494,14 @@ class TestArchitectureCompliance:
                     tree = ast.parse(filepath.read_text(encoding="utf-8"))
                 except (SyntaxError, UnicodeDecodeError):
                     continue
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.Import, ast.ImportFrom)):
-                        module = getattr(node, "module", None)
-                        if module:
-                            module_str = str(module)
-                            if module_str in forbidden:
-                                violations.append(f"{filepath}: imports {module_str}")
+                for module_str in _collect_import_modules(tree):
+                    if _module_is_forbidden(module_str, _FORBIDDEN_PARSER_PREFIXES):
+                        violations.append(f"{filepath}: imports {module_str}")
 
         assert not violations, (
             f"Gateway code directly imports document internals:\n"
             + "\n".join(violations)
-            + "\nGateway must use DocumentIngestionService or coordinating tools only."
+            + "\nGateway must use DocumentIngestionService or DocumentService only."
         )
 
     def test_no_ui_module_directly_imports_document_parsers(self):
@@ -422,17 +510,13 @@ class TestArchitectureCompliance:
         import os
 
         ui_root = _KZ_ROOT / "kazma-ui" / "kazma_ui"
-        forbidden = {
-            "kazma_core.documents.parsers",
-            "kazma_core.documents.ocr",
-            "kazma_core.documents.renderers",
-            "kazma_core.documents.mutation",
-            "kazma_core.documents.parser_worker",
-            "kazma_core.documents.mutation_worker",
-        }
         violations: list[str] = []
 
         for dirpath, _dirnames, filenames in os.walk(ui_root):
+            if f"{os.sep}tests{os.sep}" in (dirpath + os.sep) or dirpath.endswith(
+                f"{os.sep}tests"
+            ):
+                continue
             for filename in filenames:
                 if not filename.endswith(".py"):
                     continue
@@ -441,15 +525,9 @@ class TestArchitectureCompliance:
                     tree = ast.parse(filepath.read_text(encoding="utf-8"))
                 except (SyntaxError, UnicodeDecodeError):
                     continue
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.Import, ast.ImportFrom)):
-                        module = getattr(node, "module", None)
-                        if module:
-                            module_str = str(module)
-                            if module_str in forbidden:
-                                # Allow ingestion.py and service.py to import internals
-                                if "ingestion" not in str(filepath) and "service" not in str(filepath):
-                                    violations.append(f"{filepath}: imports {module_str}")
+                for module_str in _collect_import_modules(tree):
+                    if _module_is_forbidden(module_str, _FORBIDDEN_PARSER_PREFIXES):
+                        violations.append(f"{filepath}: imports {module_str}")
 
         assert not violations, (
             f"UI code directly imports document internals:\n"
@@ -567,7 +645,7 @@ class TestDocumentA11y:
                 )
 
     def test_document_ui_has_dir_auto_for_bidi(self):
-        """Arabic/English content containers should use dir=auto."""
+        """Arabic/English content containers must use dir=auto (Phase 10 a11y)."""
         ui_root = _KZ_ROOT / "kazma-ui" / "kazma_ui"
         templates = self._collect_html_templates(ui_root)
         doc_templates = [t for t in templates if "document" in str(t).lower()]
@@ -576,10 +654,11 @@ class TestDocumentA11y:
 
         for template in doc_templates:
             content = template.read_text(encoding="utf-8", errors="ignore")
-            if "document-body" in content or "document-content" in content or "fenced" in content:
-                # dir=auto should be somewhere in the template for content displays
-                assert "dir" in content, (
-                    f"{template.name}: document content area should specify dir attribute"
+            # Content preview is the user-visible document body — require BiDi.
+            if "doc-preview" in content or "document-content" in content:
+                assert 'dir="auto"' in content or "dir='auto'" in content, (
+                    f"{template.name}: document content preview must set dir=\"auto\" "
+                    "for Arabic/English BiDi rendering"
                 )
 
 

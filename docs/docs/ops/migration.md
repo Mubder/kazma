@@ -44,10 +44,14 @@ A `.zip` archive with:
 | `config.yaml` | Full ConfigStore settings (secrets are `vault://` refs, not plaintext) |
 | `data/vault.db` | Encrypted secrets store (29+ secrets) — travels WITH the vault key |
 | `data/*.db` | All SQLite databases (snapshots, memory, cron, chat, checkpoints, etc.) |
+| `data/documents.db` | **Document Intelligence** metadata (jobs, ACL, audit, versions) when the platform store is present |
+| `document-store/` (bundle tree) | Content-addressed blobs + manifests for the document platform (immutable SHA-256 tree). Restored into the target `documents.storage_root` |
 | `data/postgres.dump` | Postgres dump (only when source is Postgres-backed) |
 | `data/workspaces.db` | Workspace table (root paths rewritten on import) |
-| `assets/` | Binary artifacts: attachments, documents, exports, images, fonts |
+| `assets/` | Binary artifacts: chat attachments, exports, images, fonts (distinct from the document-platform CAS tree) |
 | `pathmap.json` | Source workspace root + data dir (for path translation) |
+
+**Document store notes:** `documents.db` has **no embedded absolute paths** that need rewrite (content is content-addressed). Export snapshots the DB first, then copies referenced blobs/manifests with checksum verification. Import backs up any live store, then swaps staged DB + tree into the target document-store root (resolved after config import so a custom `documents.storage_root` is honored). See [Document processing ops](./document-processing.md).
 
 ---
 

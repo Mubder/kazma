@@ -157,12 +157,29 @@ class DocumentIngestionService:
     ) -> None:
         self.config = config or get_document_config()
         self.storage = storage or ContentAddressedStorage(self.config.storage_root)
-        self.repository = repository or DocumentRepository(
+        sqlite_meta = repository or DocumentRepository(
             self.config.storage_root / "documents.db",
             tenant_quota_bytes=self.config.quota_tenant_bytes,
         )
+        # Prefer Postgres multi-replica metadata when configured; fall back to SQLite.
+        from .repository_pg import resolve_document_repository
+
+        self.repository = resolve_document_repository(
+            sqlite_meta,
+            tenant_quota_bytes=self.config.quota_tenant_bytes,
+        )
+        # Job queue needs a SQLite DocumentRepository only as a local fallback
+        # when Postgres jobs are unavailable. If metadata is already SQLite,
+        # share that connection; otherwise use a sidecar jobs-only DB.
+        if getattr(self.repository, "backend_name", "sqlite") == "postgres":
+            jobs_meta = DocumentRepository(
+                self.config.storage_root / "documents-jobs-fallback.db",
+                tenant_quota_bytes=self.config.quota_tenant_bytes,
+            )
+        else:
+            jobs_meta = self.repository
         sqlite_jobs = jobs or DocumentJobRepository(
-            self.repository,
+            jobs_meta,
             retry_base_seconds=float(self.config.worker_retry_base_seconds),
             retry_max_seconds=float(self.config.worker_retry_max_seconds),
         )
@@ -367,6 +384,25 @@ class DocumentIngestionService:
         except BlobChecksumError as exc:
             self._audit_intake_rejection(tenant, workspace, actor, "intake_corrupt")
             raise DocumentIngestionError("intake_corrupt", str(exc)) from exc
+
+        # 1b) Optional malware scan on the quarantined bytes (ClamAV when present).
+        try:
+            from .malware import scan_if_configured
+
+            quarantine_path = self.storage.blob_path(
+                kind="quarantine", sha256=stored.sha256
+            )
+            scan_if_configured(quarantine_path, self.config)
+        except DocumentParseError as exc:
+            self._audit_intake_rejection(
+                tenant, workspace, actor, getattr(exc, "code", "unsafe_document")
+            )
+            telemetry.record_intake(accepted=False)
+            telemetry.record_intake_rejection(getattr(exc, "code", "unsafe_document"))
+            raise DocumentIngestionError(
+                getattr(exc, "code", "unsafe_document"),
+                getattr(exc, "safe_message", str(exc)),
+            ) from exc
 
         # 2) Register blob + document + immutable version.
         blob = self.repository.register_blob(
@@ -1595,7 +1631,19 @@ class DocumentIngestionService:
 
     def readiness(self) -> dict[str, Any]:
         """Report multi-replica readiness of document storage (truthful)."""
-        data = document_storage_readiness(jobs_repo=self.jobs)
+        data = document_storage_readiness(
+            jobs_repo=self.jobs, metadata_repo=self.repository
+        )
+        try:
+            from .malware import probe_malware_scanner
+
+            data["malware"] = {
+                **probe_malware_scanner(),
+                "mode": self.config.security_malware_scan,
+                "fail_closed": self.config.security_malware_fail_closed,
+            }
+        except Exception:  # noqa: BLE001
+            data["malware"] = {"available": False, "mode": self.config.security_malware_scan}
         rollout = get_document_rollout()
         data["rollout"] = rollout.to_dict()
         data["accepting_durable_writes"] = rollout.enabled

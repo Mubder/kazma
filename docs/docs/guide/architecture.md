@@ -26,7 +26,7 @@ Kazma is a monorepo of seven installable packages (declared in `pyproject.toml` 
 
 | Package | Path | Responsibility |
 |---|---|---|
-| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, model registry, swarm engine, ConfigStore, safety, memory, skills, MCP, hub, compaction, Majlis (delegation = library/archive only — SwarmEngine is the live multi-worker path) |
+| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, model registry, swarm engine, ConfigStore, safety, memory, **document intelligence** (`documents/`), skills, MCP, hub, compaction, Majlis (delegation = library/archive only — SwarmEngine is the live multi-worker path) |
 | `kazma-gateway` | `kazma-gateway/kazma_gateway/` | Telegram/Discord/Slack adapters, agent handler (graph bridge), slash commands, session store |
 | `kazma-ui` | `kazma-ui/kazma_ui/` | FastAPI app factory, SSE chat, swarm panel, settings, dashboard, i18n, static assets |
 | `kazma-tui` | `kazma-tui/kazma_tui/` | Textual TUI dashboard (read-mostly consumer of core singletons) |
@@ -327,6 +327,17 @@ PRAGMA synchronous=NORMAL;     -- WAL-safe, faster than FULL
 | Hub registry | `~/.kazma/hub/registry.db` | Installed skills |
 | Vector memory | `~/.kazma/vector_memory` | ChromaDB persistent client |
 | Session store (gateway) | configurable | Platform ID ↔ thread_id mapping |
+| Document store | `{documents.storage_root}/documents.db` + CAS tree | Document Intelligence metadata + content-addressed blobs (default under `kazma-data/document-store`) |
+
+### Document Intelligence (subsystem)
+
+Durable document ingest/parse/OCR/index/generate lives under
+`kazma_core/documents/`. **Public durable boundary:** `DocumentIngestionService`
+(Web `/api/documents/*`, tools, gateway `/documents`, TUI). **Execution boundary:**
+`DocumentService` (isolated subprocess parsers). Job claiming can use Postgres
+(`jobs_pg.py`); document **metadata remains SQLite** (single-replica honesty on
+readiness). Full guide: [Document Intelligence](./document-intelligence.md) ·
+[Phase map](./document-phases.md) · [Security](../security/document-security.md).
 
 ---
 

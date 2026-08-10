@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Unreleased — Document residuals: malware, Settings, PG metadata, soak (2026-08-10)
+
+Shipped previously out-of-scope residuals from the document docs goal:
+
+- **Malware scan live:** `documents/malware.py` + intake hook; ClamAV
+  `clamscan`/`clamdscan` when on PATH; modes `auto`/`on`/`off` + fail-closed;
+  readiness exposes probe; tests `test_document_malware.py`
+- **Settings → Documents tab:** GET/PUT `/api/settings/documents`, UI + i18n
+- **Postgres metadata repository:** `repository_pg.py` +
+  `KAZMA_DOCUMENTS_METADATA_BACKEND`; audit dual-backend; GC skips on PG with
+  honest error until SQL port; readiness reports `metadata_multi_replica`
+- **Extras:** `pip install -e ".[document-platform]"` (document+ocr+convert+pymupdf)
+- **Soak:** `scripts/certify_documents.py --soak` recorded (20-iter residual run
+  PASS on performance; overall CONDITIONAL for engines/external review)
+- **Docusaurus build** regenerated
+
+Plan: `docs/plans/DOCUMENT_RESIDUALS_GOAL.md`.
+
+
+## Unreleased — Document docs remediation goal (phases 0–10 docs) (2026-08-10)
+
+Full documentation remediation for Document Intelligence (accuracy, surfaces,
+security honesty, phase map, Agents.md §19). Plan:
+`docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md`. New page:
+`docs/docs/guide/document-phases.md`. Fixes wrong job-state narrative, nested
+ConfigStore keys, API/slash/tools/native-skills coverage, migration/production
+smoke, dual-stack (`document-platform` vs legacy `document-generator`), and
+security overclaims (malware config-only, redaction confirm UI-only, soft
+sandbox network isolation).
+
+
 ## Unreleased — Document Intelligence Platform Phase 9: Operations & Scale (2026-08-10)
 
 Operationalizes the document platform: observable, bounded, cleanable without
@@ -61,12 +92,13 @@ claiming when Postgres is configured.
   dead-letters/storage/readiness/audit) with a dry-run-then-`kazmaConfirm` GC
   action — no emoji, no native dialogs, `x-cloak`/responsive conventions.
 
-**Tests:** `tests/test_document_operations_phase9.py` (27 cases) — reference-safe
+**Tests:** `tests/test_document_operations_phase9.py` (**29** cases) — reference-safe
 GC + grace/dry-run/symlink-escape/bounded-batch, capacity caps + 429/503/507,
 immutable/sanitized/tenant-isolated audit, content-free metrics, cancellable
 maintenance, PG SKIP LOCKED/CAS/lease semantics (SQLite-backed fake pool),
 backup consistency, and the DB+blob+manifest migration round-trip. Real
-Postgres claim/CAS path validated live. 108 document tests green; no regressions.
+Postgres claim/CAS path validated live. Full document suite later reached
+**217 passed / 2 skipped** with Phase 10; no regressions.
 
 **Limitation:** document *metadata* (documents/versions/blobs/artifacts) remains
 SQLite; only *job claiming* is multi-replica-safe on Postgres — readiness
@@ -114,6 +146,16 @@ reports this honestly until the metadata port lands.
 
 **Tests:** `tests/test_document_certification_phase10.py` (29 cases). Full document
 suite: **217 passed, 2 skipped, 0 failures** across 18 test files. No regressions.
+
+**Phase 10 recheck (post-cert):**
+- Crash-recovery lease test now claims → expires → reclaims (exactly-once) instead
+  of only asserting `recover_expired_leases()` returns an int
+- Architecture compliance now matches submodules + bare `import` statements
+  (previously only exact `ImportFrom` module names)
+- Documents UI content preview now sets `dir="auto"` for BiDi; a11y test actually
+  requires it (previously a dead-path false pass)
+- Docs: intake limits clarified (platform 50 MiB vs gateway chat 20 MiB);
+  certification audit count 28 → 29
 
 
 ## Unreleased — Full-repo audit remediation: security, memory, tools, MCP, observability (2026-08-10)

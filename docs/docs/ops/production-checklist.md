@@ -45,11 +45,28 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] `KAZMA_PUBLIC_URL` correct for redirects
 - [ ] HA compose / LB only if Postgres shared state verified
 
+## Document Intelligence (if enabled)
+
+- [ ] `documents.enabled` intentional (default compatibility: enabled, not default-authoritative)
+- [ ] Do **not** run multi-replica against a shared document store until metadata is Postgres — check `GET /api/documents/ops/readiness`
+- [ ] `documents.capacity.storage_free_floor_bytes` set conservatively (default 512 MiB)
+- [ ] Nightly document backup path known (`kazma-data/backups/document-store-*` or equivalent)
+- [ ] Migration plan includes `documents.db` + content tree ([Migration](./migration))
+- [ ] Optional engines understood (fitz / WeasyPrint / LibreOffice may be CONDITIONAL)
+- [ ] Malware: install ClamAV (`clamscan`/`clamdscan` on PATH); consider `documents.security.malware_scan=on` + fail-closed; check readiness `malware.available`
+- [ ] Cert smoke: `python scripts/certify_documents.py` exits non-FAIL; record report if promoting canary
+
+Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document processing](./document-processing).
+
 ## Smoke
 
 ```powershell
 & .venv\Scripts\python.exe scripts\smoke_production.py --base http://127.0.0.1:9090 --secret $env:KAZMA_SECRET
+# Document platform (optional but recommended when documents.enabled):
+& .venv\Scripts\python.exe scripts\certify_documents.py
 ```
+
+Also run document rows in the [Smoke matrix](./smoke-matrix).
 
 ## Related ops
 
@@ -58,4 +75,5 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [Disaster recovery](disaster-recovery)  
 - [Multi-region](multi-region)  
 - [OIDC](oidc-setup)  
+- [Document processing](document-processing)  
 - [Environment variables](../reference/environment-variables)  

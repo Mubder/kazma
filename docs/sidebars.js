@@ -22,6 +22,7 @@ const sidebars = {
         'guide/recent-features',
         'guide/email-integration',
         'guide/document-intelligence',
+        'guide/document-phases',
         'guide/api-and-extension-points',
         'guide/swarm-orchestration',
         'guide/memory-and-rag',

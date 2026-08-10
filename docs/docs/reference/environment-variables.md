@@ -16,6 +16,27 @@ description: Master reference for Kazma environment variables (dev, single-opera
 
 Generic `ConfigStore.get()` does **not** automatically overlay every env var — only documented keys below that code explicitly reads.
 
+### Document Intelligence
+
+Document platform limits, OCR, workers, retention, capacity, and rollout flags
+are **ConfigStore / `kazma.yaml` keys** (live-read), not a parallel env matrix.
+Primary keys are nested, for example:
+
+- `documents.enabled` / `documents.shadow` / `documents.default_authoritative`
+- `documents.intake.max_bytes`, `documents.limits.max_pages`
+- `documents.ocr.*`, `documents.workers.*`, `documents.capacity.*`
+- `documents.retention.*`, `documents.gc.*`, `documents.security.*`
+
+See [Document Intelligence — live configuration](../guide/document-intelligence.md#live-configuration)
+and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
+`KAZMA_DOCUMENT_SOAK_ITERATIONS` (used by `scripts/certify_documents.py --soak`).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KAZMA_DOCUMENTS_JOBS_BACKEND` | auto | Force `sqlite` for job queue (else follow Postgres when configured) |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs backend). Postgres metadata enables multi-replica CRUD; GC SQL still SQLite-only (skipped on PG with honest error) |
+| `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Soak iteration count for `certify_documents.py --soak` |
+
 ---
 
 ## Core process & bind

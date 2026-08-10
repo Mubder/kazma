@@ -4,9 +4,11 @@ title: Document Processing Operations
 
 # Document Processing — Operations & Scale
 
-Phase 9 operational surface for the [document intelligence platform](../reference/tools-catalog.md).
+Phase 9 operational surface for the
+[document intelligence platform](../guide/document-intelligence.md).
 Everything here is driven by the shared `DocumentIngestionService`; there is no
-second parser or parallel write path.
+second parser or parallel write path. Agent tools:
+[tools catalog — document-platform](../reference/tools-catalog.md).
 
 ## Metrics
 

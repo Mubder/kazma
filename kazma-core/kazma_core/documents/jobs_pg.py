@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PostgresDocumentJobRepository",
     "document_jobs_backend",
+    "document_metadata_backend",
     "document_storage_readiness",
     "resolve_job_repository",
 ]
@@ -970,21 +971,52 @@ def resolve_job_repository(
         return sqlite_repo
 
 
-def document_storage_readiness(*, jobs_repo: Any = None) -> dict[str, Any]:
+def document_metadata_backend() -> str:
+    """Return active document metadata backend ('postgres' or 'sqlite')."""
+    forced = (os.environ.get("KAZMA_DOCUMENTS_METADATA_BACKEND") or "").strip().lower()
+    if forced in {"sqlite", "sqlite3"}:
+        return "sqlite"
+    if forced in {"postgres", "postgresql", "pg"}:
+        return "postgres"
+    # Auto: follow the jobs backend (Postgres when the platform is multi-replica).
+    if forced in {"", "auto"}:
+        return document_jobs_backend()
+    return "sqlite"
+
+
+def document_storage_readiness(
+    *, jobs_repo: Any = None, metadata_repo: Any = None
+) -> dict[str, Any]:
     """Report the honest multi-replica readiness of document storage.
 
-    Job claiming is multi-replica-safe on Postgres; metadata (documents/
-    versions/blobs/artifacts) remains SQLite, so a multi-replica deployment
-    is **degraded** until the metadata port lands. Never lies about it.
+    Job claiming is multi-replica-safe on Postgres. Metadata is multi-replica
+    when a Postgres-backed repository is active (see
+    ``resolve_document_repository``); otherwise it remains SQLite single-replica.
+    Never lies about it.
     """
     backend = document_jobs_backend()
-    jobs_multi = backend == "postgres" and isinstance(jobs_repo, PostgresDocumentJobRepository)
+    jobs_multi = backend == "postgres" and isinstance(
+        jobs_repo, PostgresDocumentJobRepository
+    )
+    meta_backend = "sqlite"
+    meta_multi = False
+    if metadata_repo is not None:
+        meta_backend = str(
+            getattr(metadata_repo, "backend_name", None)
+            or getattr(type(metadata_repo), "backend_name", "sqlite")
+        )
+        meta_multi = bool(getattr(metadata_repo, "multi_replica", False))
+    else:
+        meta_backend = document_metadata_backend()
+        meta_multi = meta_backend == "postgres"
     reasons: list[str] = []
-    if backend == "postgres":
-        if not jobs_multi:
-            reasons.append("jobs_postgres_unavailable_fell_back_to_sqlite")
-        # Metadata is always SQLite in this phase.
+    if backend == "postgres" and not jobs_multi:
+        reasons.append("jobs_postgres_unavailable_fell_back_to_sqlite")
+    if not meta_multi:
         reasons.append("metadata_single_replica")
+    if jobs_multi and meta_multi:
+        status = "ready"
+    elif backend == "postgres" or meta_backend == "postgres":
         status = "degraded"
     else:
         status = "ready"
@@ -992,7 +1024,7 @@ def document_storage_readiness(*, jobs_repo: Any = None) -> dict[str, Any]:
         "status": status,
         "jobs_backend": backend,
         "jobs_multi_replica": jobs_multi,
-        "metadata_backend": "sqlite",
-        "metadata_multi_replica": False,
+        "metadata_backend": meta_backend,
+        "metadata_multi_replica": meta_multi,
         "degraded_reasons": reasons,
     }

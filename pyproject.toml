@@ -102,6 +102,13 @@ ocr = [
 convert = [
     "weasyprint>=60.0",
 ]
+# Full Document Intelligence platform engines (parse/redact/render)
+# System deps still needed: Tesseract (OCR), LibreOffice (some conversions),
+# ClamAV clamscan/clamdscan (optional malware), OS fonts for WeasyPrint.
+document-platform = [
+    "kazma[document,ocr,convert]",
+    "pymupdf>=1.24.0",
+]
 # Database drivers beyond SQLite (database_client skill)
 database = [
     "psycopg[binary]>=3.1.0",
@@ -111,7 +118,7 @@ database = [
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
 all = [
-    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert]",
+    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert,document-platform]",
 ]
 
 [project.scripts]

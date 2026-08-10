@@ -26,6 +26,22 @@ This is RAG (Retrieval-Augmented Generation) over a curated, updatable corpus �
 
 If you instead want the agent to *search the live web* per question, see [Web research](./web-research.md) — that's a different feature (ephemeral results, no indexed corpus).
 
+### Document Intelligence → library bridge
+
+You can also **publish a processed local document** (upload / `document_import`)
+into a Knowledge library after it reaches `ready`:
+
+| Path | How |
+|------|-----|
+| Web | Documents page → Index with `library_id` |
+| API | `POST /api/documents/{document_id}/index` with library id |
+| Agent | tool `document_index(document_id, library_id)` |
+| Search | `document_search` / `POST /api/documents/search` — hits are **fenced** as untrusted data |
+
+Auto-index after parse is **off by default** (explicit index only). Crawl-based
+KB ingestion (this page) and document-platform indexing share library ids but
+are different intake pipelines. See [Document Intelligence](./document-intelligence.md).
+
 ## How ingestion works
 
 When you give Kazma a seed URL (e.g. `https://developers.facebook.com/docs/whatsapp/cloud-api`):

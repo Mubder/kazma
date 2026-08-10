@@ -385,6 +385,9 @@ def _chunk(row: sqlite3.Row) -> DocumentChunkRecord:
 class DocumentRepository:
     """Durable Phase 2 metadata store with mandatory tenant constraints."""
 
+    backend_name = "sqlite"
+    multi_replica = False
+
     def __init__(
         self,
         db_path: str | Path,

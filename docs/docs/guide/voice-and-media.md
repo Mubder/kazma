@@ -91,12 +91,17 @@ When you send an image or document, the attachment builder
 
 | Attachment type | Behavior |
 |---|---|
-| **Image** (PNG/JPEG/WEBP/GIF, ≤ 8 MB) | Inlined as a base64 `image_url` vision block — the LLM sees it directly. |
-| **Document** (PDF/DOCX/large image/audio/...) | Saved to `kazma-data/attachments/`; the prompt gets a `[Attached: foo.pdf — use file_read to open: <path>]` stub so the agent can open it via the file tools. This keeps prompt size bounded. |
+| **Image** (PNG/JPEG/WEBP/GIF, ≤ 8 MB, vision-capable model) | Inlined as a base64 `image_url` vision block — the LLM sees it directly. Text-only models get a persist-and-stub path instead of `image_url` (avoids provider 400s). |
+| **Document** (PDF/DOCX/XLSX/PPTX/CSV/… when a document parser capability is available) | Saved under `kazma-data/attachments/`. The platform **auto-parses a bounded excerpt** via `DocumentService.read_transient_sync`, wraps it in an untrusted fence (`source="document_attachment"`), and adds a pointer for full content (prefer durable `document_read` / platform tools when the file is also ingested). |
+| **Other / unparsable / over-cap media** | Persisted and represented as a text stub (`file_read` or path hint) so prompt size stays bounded. |
+
+**Limits (chat gateway attachment path):** 20 MiB per file, 10 files, 50 MiB
+aggregate. The durable [Document Intelligence](./document-intelligence.md)
+platform uses its own intake limits (50 MiB default per file).
 
 The multimodal content follows the OpenAI vision format
 (`content: [{type:image_url,...}, {type:text,...}]`) and passes through
-`llm_provider.py` verbatim — any vision-capable model works.
+`llm_provider.py` verbatim — any vision-capable model works for inlined images.
 
 ### Per-platform support
 

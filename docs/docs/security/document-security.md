@@ -11,6 +11,10 @@ The document intelligence platform is designed with the assumption that every
 document is hostile until proven otherwise. This page documents the security
 architecture, threat model, and defense-in-depth measures.
 
+**Related:** [Document Intelligence](../guide/document-intelligence.md) ·
+[Document processing ops](../ops/document-processing.md) ·
+[Phase map](../guide/document-phases.md)
+
 ---
 
 ## Threat model
@@ -25,8 +29,8 @@ architecture, threat model, and defense-in-depth measures.
 
 ### Attacker capabilities (out of scope / mitigated externally)
 
-- Filesystem access (workspace root sandboxing).
-- Network access from isolated subprocesses (no network in sandbox).
+- Filesystem access (workspace root sandboxing for import paths).
+- Full OS-level network isolation of parser processes (see Layer 3 honesty notes).
 - GPU/memory side-channels beyond the resource limits enforced by the OS.
 
 ---
@@ -35,10 +39,12 @@ architecture, threat model, and defense-in-depth measures.
 
 ### Layer 1: Intake gate
 
-- **Streamed limits:** 20 MiB per file, 10 files per request, 50 MiB aggregate.
-  Limits are enforced before buffering.
-- **Workspace containment:** All write paths resolve through
-  `workspace.binding.resolve_active_root()`; `..` path traversal refused.
+- **Streamed limits:** document platform defaults to 50 MiB per file / 10 files
+  per request (`documents.intake.*`); chat gateway attachments use 20 MiB per
+  file / 50 MiB aggregate. Limits are enforced while streaming, before unbounded
+  buffering.
+- **Workspace containment (import path):** workspace-safe local imports resolve
+  through `workspace.binding.resolve_active_root()`; `..` path traversal refused.
 - **Extension/content mismatch:** MIME sniffing rejects mismatched file
   extensions before any parser sees the content.
 
@@ -58,16 +64,35 @@ Before any parser or renderer is invoked, the content sniffing layer checks:
 
 Every parse, OCR, render, and mutation job runs in a host subprocess:
 
-- `python -I` (isolated mode — no user site packages, no parent environment).
-- Memory limit enforced by OS (Windows Job Objects, Unix `setrlimit`).
+- `python -I` (isolated mode — no user site packages).
+- **Scrubbed environment** (parent secrets and unsafe env vars removed).
+- Memory limit enforced by OS where available (Windows Job Objects, Unix `setrlimit`).
 - Configurable timeout — process killed, not leaked.
-- No network access (sandboxed imports in parser worker).
 - Stdout/stderr bounded; output size limited.
 - On timeout/OOM/silent exit: **fail closed** — no partial data escapes.
 
+**Honesty note — network:** isolation is **not** a full network namespace /
+firewall jail. Defense is “scrubbed env + no intentional network clients in
+parser workers + fail-closed on missing output.” Do not treat this as
+air-gapped execution.
+
+**Malware scan (ClamAV, pluggable):** Intake runs
+`kazma_core.documents.malware.scan_if_configured` on quarantined bytes.
+
+| Mode (`documents.security.malware_scan`) | Behavior |
+|---|---|
+| `off` | Never scan |
+| `auto` (default) | Scan when `clamscan` or `clamdscan` is on PATH; otherwise skip (unless fail-closed) |
+| `on` | Require a scanner; missing/broken scanner fails closed |
+
+`documents.security.malware_fail_closed=true` treats scanner missing/errors as
+hard rejects even in `auto`. Infected files raise `malware_detected`. Install
+ClamAV system packages separately (not a pip dependency).
+
 ### Layer 4: Prompt fencing
 
-Every byte of document content that reaches the LLM passes through:
+Platform durable/transient reads that surface document body text to the model
+use an untrusted-data fence, for example:
 
 ```
 <kazma:data source="document" untrusted="true">
@@ -75,31 +100,41 @@ Every byte of document content that reaches the LLM passes through:
 </kazma:data>
 ```
 
+Chat **attachment** auto-excerpts may use `source="document_attachment"` via
+`format_untrusted_block()` after a best-effort `DocumentService` parse.
+
 This fence tells the model that the content is observation data, not
 instructions — mitigating prompt injection from document text.
 
-Self-improvement prompt deltas go through the same fence via
+Self-improvement prompt deltas go through the same fence machinery via
 `format_untrusted_block()` with the `prompt_fence` safety check.
 
 ### Layer 5: Redaction verification
 
 The redaction pipeline:
-1. Renders document pages to images.
-2. Applies conservative raster redaction (overwrites at redaction coordinates).
-3. Verifies post-redaction byte count ≤ pre-redaction byte count.
-4. Requires interactive confirmation (`kazmaPrompt`/`kazmaConfirm`) — no
-   unattended redaction.
 
-Insecure overlay redaction (placing opaque boxes over text without removing
-the underlying content) was identified in the pre-platform code and **disabled**
-— the platform only supports raster redaction.
+1. Uses a verified mutation/redaction path (optional engines required for some PDF modes).
+2. Applies conservative physical/raster redaction (not insecure overlay-only boxes).
+3. Verifies post-redaction integrity checks (including size/structure expectations).
+4. Produces a **new immutable artifact** — originals are not silently rewritten.
+
+**Confirmation model:**
+
+| Path | Interactive confirm? |
+|---|---|
+| Web UI Documents page | Yes — `kazmaPrompt` / `kazmaConfirm` before `POST …/redact` |
+| REST API / agent `document_redact` / gateway `/documents redact` | No UI dialog — caller is trusted as an authenticated actor; ACL still applies |
+
+Insecure overlay redaction (opaque boxes over text without removing underlying
+content) was identified in pre-platform code and is **not** the platform path.
 
 ### Layer 6: Audit immutability
 
 `document_audit_events` has UPDATE/DELETE triggers that **reject** any
-modification after insert. The audit trail is append-only and tenant-scoped.
-Details are allowlisted to safe scalars — document content, filenames,
-redaction terms, and secrets never enter the audit.
+modification after insert (retention sweep uses a guarded control path). The
+audit trail is append-only and tenant-scoped. Details are allowlisted to safe
+scalars — document content, filenames, redaction terms, and secrets never enter
+the audit.
 
 ### Layer 7: Storage integrity
 
@@ -133,6 +168,7 @@ corpus (19 cases) covering:
 | Parser crash | Synthetic crash containment test |
 
 Every case has:
+
 - A reviewed description.
 - Expected disposition (reject / fenced).
 - Expected error codes.
@@ -142,6 +178,8 @@ The committed manifest (`tests/fixtures/documents/hostile_manifest.json`)
 is verified at certification time — if the generated corpus differs, release
 is blocked.
 
+Run: `python scripts/certify_documents.py`
+
 ---
 
 ## Rollback safety
@@ -149,8 +187,8 @@ is blocked.
 | Action | Safe? | Detail |
 |---|---|---|
 | Set `documents.enabled=false` | ✅ | Stops new durable writes; existing blobs, jobs, manifests, metadata preserved |
-| Set `documents.shadow=true` | ✅ | Runs alongside legacy path; no data loss |
-| Set `documents.default_authoritative=true` | ✅ | Routes all operations to new platform; rollback preserves data |
+| Set `documents.shadow=true` | ✅ | Shadow/canary posture; no data loss on toggle |
+| Set `documents.default_authoritative=true` | ✅ | Routes product path to platform; rollback preserves data |
 | Delete `documents.db` | ❌ | Destroys metadata, job state, audit trail — backup first |
 | Delete content store directory | ❌ | Destroys all blobs — irrecoverable without backup |
 
@@ -158,10 +196,15 @@ is blocked.
 
 ## Recommendations for production
 
-1. **Enable `security_malware_scan`** (ClamAV integration) — defaults to `"auto"`.
-2. **Set `capacity_storage_free_floor_bytes`** conservatively (≥ 1 GiB).
-3. **Review `retention_*` settings** for your compliance requirements.
+1. **Install ClamAV** (`clamscan`/`clamdscan` on PATH) for production; verify
+   readiness `malware.available` and consider `security_malware_scan=on` +
+   fail-closed.
+2. **Set `documents.capacity.storage_free_floor_bytes` conservatively** (default
+   is 512 MiB; many operators prefer ≥ 1 GiB).
+3. **Review `documents.retention.*` / `documents.gc.*`** for compliance.
 4. **Run `scripts/certify_documents.py --soak`** before first production deploy.
 5. **Monitor** `GET /api/documents/ops/capacity` for degraded reasons.
 6. **Audit** `GET /api/documents/ops/audit` periodically.
 7. **Backup** the nightly document backup alongside your primary backup.
+8. **Treat redaction via API/tools as privileged** — UI confirm is not a
+   server-side gate on those paths.

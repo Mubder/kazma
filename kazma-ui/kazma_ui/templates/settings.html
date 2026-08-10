@@ -22,6 +22,7 @@
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'documents' }" @click="onTabChange('documents')">{{ t('settings.tab_documents') }}</button>
     </nav>
 
     <!-- Loading indicator -->
@@ -1892,6 +1893,80 @@
     <!-- ═══════════════════════════════════════════════════════════════
          TAB: EMAIL (Connect Gmail / Microsoft / status)
          ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'documents'" x-transition x-cloak>
+        <div class="settings-group">
+            <h3>{{ t('settings.documents_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.documents_hint') }}
+                <a href="/documents" style="margin-left:8px;">Open Documents page →</a>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.enabled"> Enabled (durable writes)</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.shadow"> Shadow mode</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.default_authoritative"> Default authoritative</label>
+            </div>
+            <div class="form-group">
+                <label>Mode (live)</label>
+                <div class="form-hint" x-text="documents.mode || '—'"></div>
+            </div>
+            <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-group">
+                    <label>Max file bytes</label>
+                    <input type="number" class="form-input" x-model.number="documents.intake_max_bytes" min="1024">
+                </div>
+                <div class="form-group">
+                    <label>Max files / request</label>
+                    <input type="number" class="form-input" x-model.number="documents.intake_max_files" min="1" max="100">
+                </div>
+                <div class="form-group">
+                    <label>Worker timeout (s)</label>
+                    <input type="number" class="form-input" x-model.number="documents.worker_timeout_seconds" min="5">
+                </div>
+                <div class="form-group">
+                    <label>Worker memory (MB)</label>
+                    <input type="number" class="form-input" x-model.number="documents.worker_memory_mb" min="64">
+                </div>
+                <div class="form-group">
+                    <label>Storage free floor (bytes)</label>
+                    <input type="number" class="form-input" x-model.number="documents.capacity_storage_free_floor_bytes" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Malware scan</label>
+                    <select class="form-select" x-model="documents.security_malware_scan">
+                        <option value="auto">auto</option>
+                        <option value="on">on</option>
+                        <option value="off">off</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.security_malware_fail_closed"> Malware fail-closed</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.ocr_enabled"> OCR enabled</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.gc_enabled"> GC enabled</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" x-model="documents.indexing_enabled"> Indexing enabled</label>
+            </div>
+            <div class="form-hint" style="margin-bottom:8px;">
+                Scanner:
+                <span x-text="documents.malware_probe && documents.malware_probe.available ? (documents.malware_probe.scanner + ' available') : 'not on PATH (auto skips unless fail-closed)'"></span>
+            </div>
+            <button class="btn btn-primary" @click="saveDocuments()" :disabled="documentsSaving">
+                {{ t('settings.documents_save') }}
+            </button>
+            <span class="form-hint" style="margin-left:8px;" x-text="documentsStatus"></span>
+        </div>
+    </div>
+
     <div x-show="tab === 'email'" x-transition x-cloak>
         <div class="settings-group">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">

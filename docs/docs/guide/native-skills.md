@@ -72,9 +72,34 @@ Use `provider="auto"` (default) to pick the first credentialed backend, or
 
 ---
 
-## Document generation (`document_generator`)
+## Document platform (`document_platform`) — preferred
 
-Create documents from structured content. Requires the `[document]` extra:
+Durable, tenant-scoped document intelligence via the shared
+`DocumentIngestionService`. Opaque IDs, restart-safe jobs, fenced reads.
+See [Document Intelligence](./document-intelligence.md).
+
+| Tool | Purpose |
+|---|---|
+| `document_import` | Workspace-safe file → durable ingest + parse |
+| `document_status` | Job / document state |
+| `document_read` | Paged fenced content by opaque id |
+| `document_index` | Publish into a Knowledge library (`library_id`) |
+| `document_search` | Search library (fenced hits) |
+| `document_cancel` | Cancel job by id |
+| `document_convert` | Convert format → artifact id |
+| `document_redact` | Physical PDF redaction → new artifact |
+
+No special `[document]` extra is required for the coordinator itself; optional
+render/redaction engines (pymupdf, WeasyPrint, LibreOffice) affect conversion
+and some PDF mutations only.
+
+## Document generation (`document_generator`) — simple / legacy path
+
+Create **simple** documents from structured content **without** the durable
+platform. Files land under `kazma-data/documents/`. Prefer `document_platform`
+when you need opaque IDs, ACL, jobs, or re-ingest.
+
+Requires the `[document]` extra for PDF/DOCX/XLSX:
 
 ```bash
 pip install -e ".[document]"   # reportlab, python-docx, openpyxl

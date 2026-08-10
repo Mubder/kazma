@@ -148,13 +148,14 @@
           </template>
         </details>
 
-        {# Content preview #}
+        {# Content preview — dir=auto for Arabic/English BiDi (Phase 10 a11y) #}
         <div style="margin-bottom:.6rem;">
           <div style="display:flex;align-items:center;justify-content:space-between;">
             <span style="font-size:.75rem;color:var(--text-muted);">Content preview</span>
             <span class="doc-meta" x-show="pageCount" x-text="pageCount + ' page(s)'"></span>
           </div>
-          <div class="doc-preview" x-text="preview || (currentState === 'ready' ? '(empty)' : 'Not ready — still processing.')"></div>
+          <div class="doc-preview document-content" dir="auto"
+               x-text="preview || (currentState === 'ready' ? '(empty)' : 'Not ready — still processing.')"></div>
         </div>
 
         {# Versions #}

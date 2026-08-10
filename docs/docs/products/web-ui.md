@@ -29,8 +29,11 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
 | Research | `/research` | **Start deep research** (live SSE sessions), results list, archive, compare, export |
+| Documents | `/documents` | Document Intelligence: upload, library, content preview, convert/redact, **ops panel** (capacity, readiness, audit, GC dry-run + confirm) |
 | IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
+
+Document REST: `/api/documents/*` (see [API routes](../reference/api-routes.md#documents--document-intelligence)). Guide: [Document Intelligence](../guide/document-intelligence).
 
 ## Dashboard metrics
 

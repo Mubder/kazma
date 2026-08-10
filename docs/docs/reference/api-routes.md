@@ -103,6 +103,59 @@ Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag)
 | GET/PUT | `/api/settings/agent/nonstop` | Session / Admin | Non-Stop & Self-Healing watchdog/failover/ledger settings |
 | * | Workspace routes `/api/workspaces*` | Session | WorkspaceStore CRUD |
 
+## Documents / Document Intelligence
+
+Mounted from `documents_api.py` at `/api/documents/*`. Thin transport over the
+shared `DocumentIngestionService` (no parallel parser path). Tenant/actor come
+from request context — clients never supply trusted paths for remote intake.
+
+Guide: [Document Intelligence](../guide/document-intelligence) ·
+Ops: [Document processing](../ops/document-processing) ·
+Security: [Document security](../security/document-security).
+
+### Intake, library, jobs
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/documents` | Session | Streamed upload intake (bounded; 413 on overflow) |
+| POST | `/api/documents/import` | Session | Workspace-safe local file intake |
+| POST | `/api/documents/generate` | Session | Generate + durably ingest (payload ≤ 1 MiB) |
+| GET | `/api/documents` | Session | List documents (tenant/actor scoped) |
+| GET | `/api/documents/health` | Session | Parser/OCR/renderer readiness + worker status |
+| POST | `/api/documents/merge` | Session | Merge several documents' PDFs by opaque IDs |
+| GET | `/api/documents/{document_id}` | Session | Detail (versions + jobs + artifacts) |
+| GET | `/api/documents/{document_id}/versions` | Session | Version list |
+| GET | `/api/documents/{document_id}/content` | Session | Paged normalized/fenced content |
+| GET | `/api/documents/{document_id}/artifacts` | Session | Derived artifacts for a document |
+| GET | `/api/documents/artifacts/{artifact_id}/download` | Session | Download artifact by opaque ID |
+| POST | `/api/documents/{document_id}/convert` | Session | Convert current version to target format |
+| GET | `/api/documents/{document_id}/pdf-info` | Session | Structural PDF report |
+| POST | `/api/documents/{document_id}/split` | Session | Split page range from PDF version |
+| POST | `/api/documents/{document_id}/fill-form` | Session | Fill AcroForm fields |
+| POST | `/api/documents/{document_id}/redact` | Session | Physical redact terms → new artifact (no UI confirm on API) |
+| POST | `/api/documents/{document_id}/index` | Session | Publish current version to a Knowledge library |
+| POST | `/api/documents/{document_id}/unindex` | Session | Remove from a library |
+| POST | `/api/documents/search` | Session | Library search (fenced hits) |
+| GET | `/api/documents/jobs/{job_id}` | Session | Job status |
+| GET | `/api/documents/jobs/{job_id}/events` | Session | Append-only job event history |
+| POST | `/api/documents/jobs/{job_id}/cancel` | Session | Cooperative cancel |
+| POST | `/api/documents/jobs/{job_id}/retry` | Session | Re-enqueue dead-letter/rejected job |
+| POST | `/api/documents/{document_id}/delete` | Session | Tombstone / delete document |
+
+### Operations (`/api/documents/ops/*`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/documents/ops/metrics` | Session | Content-free metrics snapshot |
+| GET | `/api/documents/ops/capacity` | Session | Backpressure snapshot + `degraded_reasons` |
+| GET | `/api/documents/ops/readiness` | Session | Multi-replica honesty (`metadata_single_replica`, jobs backend) |
+| GET | `/api/documents/ops/retention` | Session | Live retention/GC policy view |
+| GET | `/api/documents/ops/audit` | Session | Keyset-paged operational audit (`?limit=&before_id=`) |
+| POST | `/api/documents/ops/maintenance/dry-run` | Admin | GC dry-run report |
+| POST | `/api/documents/ops/maintenance/run` | Admin | GC run after dry-run/confirm in UI |
+
+HTML page: `GET /documents` (session). TUI Documents tab uses the same coordinator.
+
 ## Email (`email_api.py`)
 
 | Method | Path | Auth | Description |

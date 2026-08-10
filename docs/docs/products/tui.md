@@ -19,9 +19,12 @@ Built with **Textual** (`kazma-tui`). Provides a dashboard for chat, status, fil
 |------|-------|
 | Chat | Talk to the same agent brain as Web/gateway |
 | Editor / files | IDE-style workspace operations via shared `IdeService` / tools |
+| Documents | **Documents** tab (`DocumentsPanel`) — list/inspect processed docs via shared `DocumentIngestionService` (upload still Web/chat) |
 | HITL | Approval modal widgets for danger tools |
 | Status | Models, gateway, health |
 | Demo mode | `KAZMA_DEMO_MODE` (never use in real prod) |
+
+Nav binding: Documents is a first-class tab (shortcut key **8** in the nav rail). Guide: [Document Intelligence](../guide/document-intelligence).
 
 ## Config
 

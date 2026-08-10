@@ -560,6 +560,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tab_import": {"en": "Import/Export", "ar": "استيراد/تصدير"},
     "settings.tab_voice": {"en": "Voice", "ar": "الصوت"},
     "settings.tab_email": {"en": "Email", "ar": "البريد"},
+    "settings.tab_documents": {"en": "Documents", "ar": "المستندات"},
+    "settings.documents_title": {"en": "Document Intelligence", "ar": "ذكاء المستندات"},
+    "settings.documents_hint": {
+        "en": "Live ConfigStore keys for the document platform. Changes apply without restart.",
+        "ar": "مفاتيح ConfigStore الحية لمنصة المستندات. تُطبَّق التغييرات دون إعادة تشغيل.",
+    },
+    "settings.documents_save": {"en": "Save document settings", "ar": "حفظ إعدادات المستندات"},
     "settings.embedder_title": {"en": "Memory Embedder", "ar": "مُضمِّن الذاكرة"},
     "settings.embedder_hint": {
         "en": "The embedding model powers semantic memory recall. Changes are saved here and applied after a server restart (the model loads once at boot).",

@@ -568,6 +568,71 @@ embedded paths).
 - `kazma-cli/kazma_cli/migrate.py` — CLI dispatch (`kazma migrate export|verify|import`)
 - `memory/backup.py:backup_one()` — the WAL-safe SQLite copier reused by the
   importer's pre-swap safety backup (promoted from `_backup_one`).
+- Document store export/import is also wired (`documents.db` + content-addressed
+  tree under the document-store root) — see §19 and `migration/exporter.py`.
+
+### 19. Document Intelligence (`kazma-core/kazma_core/documents/`)
+
+Secure durable document platform (phases 0–10). Docs SoT:
+`docs/docs/guide/document-intelligence.md`, phases
+`docs/docs/guide/document-phases.md`, security
+`docs/docs/security/document-security.md`, ops
+`docs/docs/ops/document-processing.md`.
+
+**A. Two boundaries — do not invent a third path.**
+- **Durable public boundary:** `DocumentIngestionService` — Web
+  `/api/documents/*` (`documents_api.py`), native `document-platform` tools,
+  gateway `/documents`/`/docs`, TUI `DocumentsPanel`. Tenant/actor ACL, capacity,
+  audit, jobs, index.
+- **Execution boundary:** `DocumentService` — sniff/parse/OCR/render inside
+  isolated subprocesses. Durable workers call it; chat
+  `agent_handler/attachments.py` may call it for **transient** fenced excerpts
+  only (not a second durable store).
+- Gateway/UI **must not** import `documents.parsers`, `documents.ocr`,
+  `documents.renderers`, `parser_worker`, `mutation_worker`, etc.
+
+**B. Job state machine (canonical).**
+`received → quarantined → validating → ready_to_parse|ocr_required →
+parsing|ocr_running → normalizing → indexing → verifying → ready`
+(+ `retry_wait`, `rejected`, `cancelled`, `dead_letter`). Do not reintroduce
+generic PENDING/ACCEPTED/PROCESSING labels in product code or docs.
+
+**C. Config is ConfigStore-nested.** Primary keys are
+`documents.intake.*`, `documents.limits.*`, `documents.ocr.*`,
+`documents.workers.*`, `documents.capacity.*`, `documents.retention.*`,
+`documents.gc.*`, `documents.security.*`, plus rollout
+`documents.enabled` / `shadow` / `default_authoritative`. Prefer
+`get_document_config()` live reads. Flat aliases exist only for a few intake
+keys — do not invent `documents.max_pages` style flat keys without wiring
+aliases.
+
+**D. Multi-replica honesty.**
+`jobs_pg.py` can claim jobs with `SELECT … FOR UPDATE SKIP LOCKED` when
+Postgres is configured. Document **metadata** (documents/versions/blobs) is
+still SQLite — readiness must report single-replica for metadata. Never claim
+full multi-replica document HA until metadata is ported.
+
+**E. Fence + security honesty.**
+LLM-visible document text goes through untrusted fences
+(`source="document"` or chat `document_attachment`). Auto-index is **off** by
+default. Redaction UI confirm is Web-only; API/tools can redact under ACL.
+**Malware:** `documents/malware.py` runs on quarantine via
+`scan_if_configured` (`auto`/`on`/`off` + fail-closed). Uses system
+`clamscan`/`clamdscan` only — no third-party upload of document bytes.
+Sandbox: scrubbed env + resource limits; not a full network namespace.
+
+**F. Multi-replica backends.**
+Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when
+`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and pool is up. GC mark/sweep
+SQL remains SQLite-shaped — collector **skips** with
+`gc_postgres_metadata_sql_port_pending` when metadata is Postgres (no silent
+deletes). Audit works on both backends.
+
+**G. Certification.**
+`scripts/certify_documents.py` + `tests/test_document_certification_phase10.py`
++ `hostile_corpus.py` / committed `tests/fixtures/documents/hostile_manifest.json`.
+Keep CLI gates and pytest groups honest (architecture/a11y/crash matrix are
+pytest; CLI has NOT RUN placeholders for soak/Postgres/external review).
 
 ## UI Conventions (Web)
 
@@ -614,11 +679,17 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
 - `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the single stack; the V1 4-layer RRF was removed in the V1→V2 cutover)
+- `docs/docs/guide/document-intelligence.md` — Document Intelligence product guide
+- `docs/docs/guide/document-phases.md` — Document phases 0–10 map
+- `docs/docs/security/document-security.md` — Document threat model
+- `docs/docs/ops/document-processing.md` — Document ops (metrics/GC/capacity)
+- `docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md` — Document docs remediation goal
 - `docs/plans/MEMORY_REMAINING.md` — Memory done vs later backlog
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
 - `docs/docs/reference/tools-catalog.md` — Built-in + native tools
 - `docs/docs/ops/production-checklist.md` — Production go-live checklist
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
+- `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report
 - `docs/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan
 - `CHANGELOG.md` — Sprint history
 - Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees.
