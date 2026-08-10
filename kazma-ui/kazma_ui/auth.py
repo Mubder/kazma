@@ -197,6 +197,9 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/status",
     "/api/telemetry",
     "/favicon.ico",
+    # RFC 9116 security contact file — must be reachable without auth.
+    "/.well-known/security.txt",
+    "/security.txt",
     # MCP preset catalog — read-only metadata (server names + npx commands),
     # no secrets or user data. Open so the Add Server dropdown works without
     # a stale-auth 401 on first page load / localhost probes.

@@ -588,12 +588,15 @@ class TestDependabotStyleScanner:
 
     @pytest.mark.asyncio
     async def test_generate_advisory(self, dep_scanner: DependabotStyleScanner):
-        """Test advisory generation."""
+        """Test advisory generation preserves upstream IDs (no fake CVE- mint)."""
         vuln = Vulnerability("flask", "2.0.0", "GHSA-advisory", "CRITICAL", "XSS in templates")
         advisory = await dep_scanner.generate_advisory(vuln)
 
         assert "cve_id" in advisory
-        assert advisory["cve_id"].startswith("CVE-")
+        assert "advisory_id" in advisory
+        # Upstream GHSA/OSV/CVE ids are kept; we do not invent CVE- placeholders.
+        assert advisory["cve_id"] == "GHSA-advisory"
+        assert advisory["advisory_id"] == "GHSA-advisory"
         assert advisory["package"] == "flask"
         assert advisory["severity"] == "CRITICAL"
         assert "advisory_content" in advisory

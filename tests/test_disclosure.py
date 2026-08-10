@@ -91,11 +91,11 @@ class TestDataclasses:
     def test_advisory_fields(self):
         adv = Advisory(
             report_id="VR-001",
-            cve_id="CVE-2025-1234567",
+            cve_id="KAZMA-ADV-2025-ABCDEF1",
             content="Advisory content",
             published_at="2025-01-01T00:00:00",
         )
-        assert adv.cve_id.startswith("CVE-")
+        assert adv.cve_id.startswith("KAZMA-ADV-")
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +373,10 @@ class TestAdvisory:
     async def test_publish_advisory(self, disclosure: VulnerabilityDisclosure, full_lifecycle_report: str):
         result = await disclosure.publish_advisory(full_lifecycle_report)
         assert result["report_id"] == full_lifecycle_report
-        assert result["cve_id"].startswith("CVE-")
+        # Internal advisory ids — never mint a fake MITRE CVE- prefix.
+        assert result["advisory_id"].startswith("KAZMA-ADV-")
+        assert result["cve_id"] == result["advisory_id"]
+        assert not result["cve_id"].startswith("CVE-")
         assert len(result["advisory_content"]) > 0
         assert result["published_at"] is not None
 

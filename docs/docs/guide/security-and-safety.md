@@ -227,7 +227,7 @@ This is inter-agent delegation — unrelated to MCP or skills.
 
 ## 8. Security config files
 
-`kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty`, and `hardening` (8 checks: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration#7-security-config-files). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
+`kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty` (**disabled** — no paid program), and `hardening` (8 checks: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration#7-security-config-files) and root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
 
 ### 8.1 Hardening runner (`security/hardening.py`)
 
@@ -260,9 +260,9 @@ Both parse `requirements.txt` and `pyproject.toml`. `DependabotStyleScanner` add
 
 ### 8.3 Disclosure workflow (`security/disclosure.py`)
 
-SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → acknowledged → investigating → confirmed → patched → closed`. `publish_advisory()` generates a CVE placeholder + markdown template, but only from `patched`/`closed` states. `encrypt_report()` HMAC-SHA256-signs the JSON payload with `KAZMA_DISCLOSURE_KEY`.
+SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → acknowledged → investigating → confirmed → patched → closed`. `publish_advisory()` mints an internal **`KAZMA-ADV-YYYY-…`** id (not a MITRE CVE) plus a markdown template, only from `patched`/`closed` states. `encrypt_report()` HMAC-SHA256-signs the JSON payload with `KAZMA_DISCLOSURE_KEY`.
 
-`kazma-security.yaml`: response window 48 h, assessment 7 d, PGP key URL, encrypted channels (email + Signal), bug bounty USD $50–$2000.
+`kazma-security.yaml`: response window 48 h, assessment 7 d, `security_txt_url` (RFC 9116 contact file — **not** a PGP key), channels email + GitHub private reporting. **`bug_bounty.enabled: false`** (no paid bounty). Canonical policy: root `SECURITY.md` and [Vulnerability reporting](../security/vulnerability-reporting).
 
 > **Verify runtime enforcement** of `kazma-security.yaml` checks against the hardening runner before relying on them. The file declares policy; confirm the runner enforces each check at startup (`hardening.run_on_startup: true`, `fail_on_critical: true`).
 

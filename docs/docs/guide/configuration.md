@@ -525,8 +525,8 @@ cross_division_rules:
 | Section | Key options |
 |---|---|
 | `scanning` | `enabled`, `interval: "24h"`, `sources: [osv, github_advisories, nvd]`, `auto_create_issues`, `severity_threshold: medium`, `ignore`. |
-| `disclosure` | `enabled`, `response_window: "48h"`, `assessment_window: "7d"`, `pgp_key_url`, `encrypted_channels`. |
-| `bug_bounty` | `enabled`, `min_payout: 50`, `max_payout: 2000`, `currency: USD`, `tiers` (`critical` `[500,2000]`, `high` `[200,500]`, `medium` `[50,200]`, `low` Hall of Fame). |
+| `disclosure` | `enabled`, `response_window: "48h"`, `assessment_window: "7d"`, `security_txt_url` (RFC 9116 contact file, not a PGP key), `encrypted_channels` (email + GitHub private reporting). |
+| `bug_bounty` | **`enabled: false`** — no paid program. Payout fields are reserved/zeroed; do not advertise tiers as active. See root `SECURITY.md`. |
 | `hardening` | `run_on_startup`, `fail_on_critical`, `auto_fix: false`, `checks` (8: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). |
 
 > These files declare a security **policy posture**. Whether every check is actively enforced at runtime should be verified against the hardening runner before relying on it in production — see [Security & Safety](security-and-safety).

@@ -1,0 +1,14 @@
+# Kazma security contact (RFC 9116)
+# https://www.rfc-editor.org/rfc/rfc9116
+
+Contact: mailto:admin@kazma.ai
+Contact: https://github.com/Mubder/kazma/security/advisories/new
+Expires: 2027-08-10T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://kazma.ai/.well-known/security.txt
+Policy: https://github.com/Mubder/kazma/blob/main/SECURITY.md
+Acknowledgments: https://github.com/Mubder/kazma/security/advisories
+
+# No PGP Encryption key is published yet. Prefer private GitHub reporting
+# or plaintext email; request encrypted mail coordination if required.
+# No bug bounty program at this time — see SECURITY.md.

@@ -627,11 +627,27 @@ class DependabotStyleScanner:
             return f"Failed to create issue: {exc}"
 
     async def generate_advisory(self, vulnerability: Vulnerability) -> dict:
-        """Generate a security advisory document for publication."""
+        """Generate a security advisory document for publication.
+
+        Uses an internal ``KAZMA-ADV-…`` id. Prefer the upstream
+        ``vulnerability.vuln_id`` (GHSA/OSV/CVE) when it is already a real
+        advisory identifier. Never mint a fake ``CVE-`` prefix.
+        """
         now = datetime.now(UTC).isoformat()
-        cve_id = f"CVE-{now[:4]}-{abs(hash(vulnerability.vuln_id)) % 10**7:07d}"
+        year = now[:4]
+        upstream = (vulnerability.vuln_id or "").strip()
+        # Keep real upstream IDs (CVE-*, GHSA-*, OSV-*, …); mint KAZMA-ADV only
+        # when the scanner has no authoritative id.
+        if upstream and not upstream.upper().startswith("KAZMA-ADV-"):
+            # Reject only if someone already stored a synthetic-looking blank.
+            advisory_id = upstream
+        else:
+            digest = abs(hash(f"{vulnerability.package}:{vulnerability.vuln_id}:{vulnerability.version}")) % 10**7
+            advisory_id = f"KAZMA-ADV-{year}-{digest:07d}"
         return {
-            "cve_id": cve_id,
+            "advisory_id": advisory_id,
+            # Legacy key: same as advisory_id (may be a real upstream CVE/GHSA).
+            "cve_id": advisory_id,
             "package": vulnerability.package,
             "affected_version": vulnerability.version,
             "fixed_version": vulnerability.fixed_version or "N/A",
@@ -639,7 +655,8 @@ class DependabotStyleScanner:
             "description": vulnerability.description,
             "published_at": now,
             "advisory_content": (
-                f"# Security Advisory: {vulnerability.vuln_id}\n\n"
+                f"# Security Advisory: {advisory_id}\n\n"
+                f"**Upstream ID:** {vulnerability.vuln_id}\n"
                 f"**Package:** {vulnerability.package}\n"
                 f"**Affected:** {vulnerability.version}\n"
                 f"**Fixed in:** {vulnerability.fixed_version or 'N/A'}\n"

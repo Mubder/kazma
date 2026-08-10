@@ -1,5 +1,7 @@
 # Kazma Security Configuration
-# Controls automated scanning, disclosure workflow, bug bounty, and hardening.
+# Declares scanning, disclosure workflow, bounty posture, and hardening checks.
+# This file is policy posture — confirm runtime enforcement against the
+# hardening runner and SECURITY.md before relying on every check in production.
 
 scanning:
   enabled: true
@@ -17,31 +19,24 @@ disclosure:
   enabled: true
   response_window: "48h"
   assessment_window: "7d"
-  pgp_key_url: "https://kazma.ai/.well-known/security.txt"
+  # RFC 9116 contact file (also served by the app at /.well-known/security.txt).
+  # Not a PGP key URL — we do not publish a PGP key at this time.
+  security_txt_url: "https://kazma.ai/.well-known/security.txt"
   encrypted_channels:
     - type: email
       address: "admin@kazma.ai"
-    - type: signal
-      number: "+1-XXX-XXX-XXXX"
+    - type: github
+      url: "https://github.com/Mubder/kazma/security/advisories/new"
 
+# Paid bug bounty is OFF. Do not advertise payout tiers as active.
+# Historical draft ranges below are reserved for a future program only.
 bug_bounty:
-  enabled: true
-  min_payout: 50
-  max_payout: 2000
+  enabled: false
+  min_payout: 0
+  max_payout: 0
   currency: USD
-  tiers:
-    critical:
-      range: [500, 2000]
-      criteria: "Remote code execution, full RBAC bypass, data exfiltration"
-    high:
-      range: [200, 500]
-      criteria: "Privilege escalation, authentication bypass, significant info leak"
-    medium:
-      range: [50, 200]
-      criteria: "Limited information disclosure, CSRF, stored XSS"
-    low:
-      range: [0, 0]
-      criteria: "Hall of Fame recognition"
+  notes: "No paid bounty at this time. Responsible disclosure only — see SECURITY.md."
+  tiers: {}
 
 hardening:
   run_on_startup: true

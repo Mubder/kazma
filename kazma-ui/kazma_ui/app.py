@@ -403,6 +403,36 @@ class KazmaAppBuilder:
                 headers={"Cache-Control": "public, max-age=86400"},
             )
 
+        # RFC 9116 security.txt — prefer repo root .well-known/, fall back to
+        # package-local copy so installs without a git checkout still work.
+        # _PACKAGE_DIR = …/kazma-ui/kazma_ui → parents[2] = monorepo root.
+        _repo_security_txt = _PACKAGE_DIR.parents[2] / ".well-known" / "security.txt"
+        _pkg_security_txt = _PACKAGE_DIR / "well_known" / "security.txt"
+        _security_txt = (
+            _repo_security_txt
+            if _repo_security_txt.is_file()
+            else _pkg_security_txt
+        )
+
+        async def _security_txt_response() -> FileResponse:
+            if not _security_txt.is_file():
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404, detail="security.txt not found")
+            return FileResponse(
+                path=str(_security_txt),
+                media_type="text/plain; charset=utf-8",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+
+        @self.app.get("/.well-known/security.txt", include_in_schema=False)
+        async def _well_known_security_txt() -> FileResponse:
+            return await _security_txt_response()
+
+        @self.app.get("/security.txt", include_in_schema=False)
+        async def _root_security_txt() -> FileResponse:
+            return await _security_txt_response()
+
         # Setup Jinja2 templates (auto_reload=True so template edits
         # are picked up without restarting — essential for development).
         _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)

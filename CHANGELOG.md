@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Unreleased — Security policy honesty (no bounty, real security.txt) (2026-08-10)
+
+Aligned public security posture with reality — responsible disclosure only:
+
+- **`SECURITY.md` rewrite:** no paid bug bounty; best-effort response targets;
+  honest threat model; no PGP/Signal placeholders; maintainer review (not
+  "two maintainers"); internal `KAZMA-ADV-` ids vs real CVEs
+- **`kazma-security.yaml`:** `bug_bounty.enabled: false`; removed fake Signal
+  number; `security_txt_url` (not a PGP key URL)
+- **`disclosure.py` / `dependency_scanner.py`:** stop minting fake `CVE-`
+  prefixes; use `KAZMA-ADV-YYYY-…` or keep real upstream GHSA/OSV/CVE ids
+- **RFC 9116 `security.txt`:** repo `.well-known/security.txt` + package copy;
+  app serves `/.well-known/security.txt` and `/security.txt` (auth-open)
+- **Docs/CONTRIBUTING:** vulnerability-reporting, security-policy,
+  configuration, security-and-safety aligned with no-bounty policy
+
 ## Unreleased — Document Intelligence comprehensive docs wire-up (2026-08-10)
 
 Expanded product documentation so Document Intelligence is a first-class part of

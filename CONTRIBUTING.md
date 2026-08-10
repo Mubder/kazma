@@ -393,12 +393,17 @@ Each issue deducts from the security score (0-100).
 
 ### Reporting Vulnerabilities
 
-If you discover a security vulnerability, please report it responsibly:
+If you discover a security vulnerability, please report it responsibly.
+**Canonical policy:** repository root [`SECURITY.md`](SECURITY.md).
 
 1. **Do NOT** open a public GitHub issue
-2. Email security details to the maintainers
-3. Include: description, steps to reproduce, potential impact
-4. Allow 90 days for a fix before public disclosure
+2. Email **admin@kazma.ai**, or use GitHub private vulnerability reporting when enabled
+3. Include: description, steps to reproduce, potential impact, affected version
+4. Coordinate public disclosure after a fix is available (or ~90 days if none is ready)
+
+There is **no paid bug bounty** at this time. Contact details are also published
+in [`.well-known/security.txt`](.well-known/security.txt) (served at
+`/.well-known/security.txt` on a running instance).
 
 ### Audit Trail
 

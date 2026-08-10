@@ -49,7 +49,12 @@ class StatusTransition:
 
 @dataclass
 class Advisory:
-    """A published security advisory."""
+    """A published security advisory.
+
+    ``cve_id`` stores the advisory identifier. Internally generated values use
+    the ``KAZMA-ADV-YYYY-…`` form and are **not** MITRE CVEs. A real CVE ID may
+    replace that value only after formal assignment.
+    """
 
     report_id: str
     cve_id: str
@@ -76,7 +81,10 @@ class VulnerabilityDisclosure:
     advisories, and maintains an audit trail of all status transitions.
     """
 
-    PGP_KEY_URL = "https://kazma.ai/.well-known/security.txt"
+    # RFC 9116 security.txt (contact policy) — not a PGP key endpoint.
+    SECURITY_TXT_URL = "https://kazma.ai/.well-known/security.txt"
+    # Backward-compatible alias (older docs referred to this as PGP_KEY_URL).
+    PGP_KEY_URL = SECURITY_TXT_URL
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         """Initialise the disclosure tracker.
@@ -368,8 +376,12 @@ class VulnerabilityDisclosure:
             report_id: The patched report to create an advisory for.
 
         Returns:
-            Dictionary with ``report_id``, ``cve_id``, ``advisory_content``,
+            Dictionary with ``report_id``, ``advisory_id`` (and legacy alias
+            ``cve_id`` for the same value), ``advisory_content``,
             ``published_at``.
+
+            ``advisory_id`` is an internal ``KAZMA-ADV-YYYY-…`` identifier, not
+            a MITRE CVE. Replace with a real CVE only after formal assignment.
 
         Raises:
             ValueError: If the report does not exist or has not been patched.
@@ -398,9 +410,10 @@ class VulnerabilityDisclosure:
 
             report = dict(row)
 
-        # Generate CVE placeholder and advisory
-        cve_id = f"CVE-{now[:4]}-{uuid.uuid4().hex[:7].upper()}"
-        advisory_content = self.generate_advisory_template(report)
+        # Internal advisory ID — never mint a fake CVE- prefix.
+        year = now[:4]
+        advisory_id = f"KAZMA-ADV-{year}-{uuid.uuid4().hex[:7].upper()}"
+        advisory_content = self.generate_advisory_template(report, advisory_id=advisory_id)
 
         with self._lock:
             conn = self._get_conn()
@@ -409,13 +422,15 @@ class VulnerabilityDisclosure:
                 INSERT INTO advisories (report_id, cve_id, content, published_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                (report_id, cve_id, advisory_content, now),
+                (report_id, advisory_id, advisory_content, now),
             )
             conn.commit()
 
         return {
             "report_id": report_id,
-            "cve_id": cve_id,
+            "advisory_id": advisory_id,
+            # Legacy key: same string as advisory_id (not a MITRE CVE).
+            "cve_id": advisory_id,
             "advisory_content": advisory_content,
             "published_at": now,
         }
@@ -423,8 +438,8 @@ class VulnerabilityDisclosure:
     async def encrypt_report(self, report: dict) -> bytes:
         """Sign and serialize a report for tamper-evident storage.
 
-        Uses HMAC-SHA256 to sign the JSON payload. For full PGP encryption,
-        install python-gnupg and set disclosure.pgp_key in kazma.yaml.
+        Uses HMAC-SHA256 to sign the JSON payload. Full PGP encryption is not
+        wired by default — no published PGP key; see SECURITY.md / security.txt.
 
         Args:
             report: The report dictionary to sign and serialize.
@@ -451,20 +466,30 @@ class VulnerabilityDisclosure:
         # Append signature as a comment line (verifiable but separable)
         return payload + b"\n-- HMAC-SHA256: " + signature.encode()
 
-    def generate_advisory_template(self, report: dict) -> str:
+    def generate_advisory_template(
+        self,
+        report: dict,
+        advisory_id: str | None = None,
+    ) -> str:
         """Generate a markdown security advisory template.
 
         Args:
             report: Report dictionary (must contain ``id``, ``title``,
                     ``severity``, ``description``, ``impact``).
+            advisory_id: Optional internal ``KAZMA-ADV-…`` id (not a MITRE CVE).
 
         Returns:
             Markdown-formatted advisory string.
         """
+        adv_line = (
+            f"**Advisory ID:** {advisory_id} (internal; not a MITRE CVE unless later assigned)\n"
+            if advisory_id
+            else ""
+        )
         return f"""# Security Advisory
 
 **Report ID:** {report.get("id", "UNKNOWN")}
-**Severity:** {report.get("severity", "UNKNOWN")}
+{adv_line}**Severity:** {report.get("severity", "UNKNOWN")}
 **Status:** {report.get("status", "UNKNOWN")}
 
 ## Summary
@@ -489,5 +514,6 @@ class VulnerabilityDisclosure:
 
 ## References
 
-- Disclosure policy: {self.PGP_KEY_URL}
+- Disclosure policy: {self.SECURITY_TXT_URL}
+- SECURITY.md: https://github.com/Mubder/kazma/blob/main/SECURITY.md
 """

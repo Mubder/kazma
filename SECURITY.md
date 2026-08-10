@@ -5,12 +5,12 @@
 | Version | Supported          |
 | ------- | ------------------ |
 | 0.6.x   | :white_check_mark: |
-| 0.5.x   | :white_check_mark: (security fixes only) |
+| 0.5.x   | :white_check_mark: (critical security fixes only) |
 | < 0.5   | :x:                |
 
-Only the latest 0.6.x release receives feature work and security patches.
-0.5.x receives critical security fixes for a limited window. Users are
-strongly encouraged to upgrade to the latest supported version.
+Only the latest **0.6.x** release receives feature work and routine security
+patches. **0.5.x** may receive critical fixes for a limited window. Upgrade to
+the latest supported version when possible.
 
 ## Threat Model (operator)
 
@@ -24,7 +24,7 @@ Kazma is designed as a **single-operator trusted-host agent** by default:
 
 **Production flags (summary):**
 
-- `KAZMA_HOST=127.0.0.1` default; non-loopback requires strong secret
+- `KAZMA_HOST=127.0.0.1` default; non-loopback requires a strong secret
 - `KAZMA_TRUST_LAN=0` (default) — no LAN auto-cookie
 - `KAZMA_PRODUCTION=1` — Docker code_exec, YOLO off (override: `KAZMA_ALLOW_YOLO=1`), workspace root required
 - `KAZMA_VAULT_KEY` — encrypt secrets at rest
@@ -34,169 +34,133 @@ Kazma is designed as a **single-operator trusted-host agent** by default:
 
 - Shared state: `KAZMA_DATABASE_URL=postgresql://…` + `pip install -e ".[postgres]"` — never share SQLite across replicas
 - Roles: viewer / operator / admin (`platform_rbac`); OIDC via `KAZMA_OIDC_*`
-- DR: `docs/ops/DISASTER_RECOVERY.md` + `scripts/backup_kazma.py` / `restore_kazma.py`
+- DR: `docs/docs/ops/disaster-recovery.md` + `scripts/backup_kazma.py` / `restore_kazma.py`
 
 ## Reporting a Vulnerability
 
-The Kazma team takes the security of our software seriously. If you discover a
-security vulnerability, please report it responsibly through the channels below.
-**Do not open a public GitHub issue for security vulnerabilities.**
+We take security seriously. If you discover a vulnerability in Kazma,
+**please report it privately**. Do **not** open a public GitHub issue for
+security vulnerabilities.
 
-### Encrypted Disclosure Channels
+### Preferred channels
 
-| Channel  | Contact                           | Use Case                        |
-| -------- | --------------------------------- | ------------------------------- |
-| Email    | admin@kazma.ai                    | All vulnerabilities             |
-| GitHub   | Private vulnerability reporting   | Structured reports (enable below) |
+| Channel | Contact | Notes |
+| ------- | ------- | ----- |
+| Email | **admin@kazma.ai** | Primary channel for all vulnerability reports |
+| GitHub | [Private vulnerability reporting](https://github.com/Mubder/kazma/security/advisories/new) | Use when enabled on the repository |
 
-- **PGP Key**: A PGP key for encrypting email reports is available at
-  `https://kazma.ai/.well-known/security.txt`. Always encrypt sensitive
-  details.
-- **Signal** is preferred for critical vulnerabilities that are actively being
-  exploited or have immediate impact on production deployments.
+Machine-readable contact policy (RFC 9116):
 
-### Response Timeline
+- Served by the app at `/.well-known/security.txt` and `/security.txt`
+- Source of truth in the repo: [`.well-known/security.txt`](.well-known/security.txt)
+- Canonical public URL (when the site is live): `https://kazma.ai/.well-known/security.txt`
 
-| Milestone             | Target     |
-| --------------------- | ---------- |
-| Acknowledgment        | 48 hours   |
-| Initial assessment    | 7 days     |
-| Severity determination| 14 days    |
-| Patch release         | 30 days    |
-| Public disclosure     | 90 days    |
+**Encryption:** we do **not** currently publish a PGP key. Send reports over
+email or GitHub private reporting. If you need encrypted mail, say so in your
+initial contact and we will coordinate out of band.
 
-We commit to acknowledging your report within **48 hours** and providing an
-initial assessment within **7 days**. If a patch takes longer, we will keep you
-informed of our progress.
+### Response targets (best effort)
 
-## What to Include in a Report
+These are **targets**, not contractual SLAs. Small open-source projects may
+miss them under load; we still aim to keep you informed.
 
-To help us triage and respond quickly, please include as much of the following
-as possible:
+| Milestone | Target |
+| --------- | ------ |
+| Acknowledgment | 48 hours |
+| Initial assessment | 7 days |
+| Severity determination | 14 days |
+| Patch (when fix is in our control) | 30 days when practical |
+| Coordinated public disclosure | After a fix is available, or ~90 days if no fix is ready — coordinated with the reporter |
 
-- **Description**: A clear summary of the vulnerability and its potential impact.
-- **Reproduction steps**: Step-by-step instructions to reproduce the issue, including
-  any relevant configuration, commands, or API calls.
-- **Impact assessment**: Your evaluation of the severity — who is affected, what data
-  or systems are at risk, and whether exploitation is trivial or requires special
-  conditions.
-- **Suggested fix** (optional): If you have a recommendation for remediation, please
-  include it.
-- **Affected version**: The version(s) of Kazma where you observed the issue.
-- **Environment**: Operating system, Python version, deployment method (Docker,
-  bare metal, cloud).
+### What to include
+
+- **Description** — what is wrong and why it matters
+- **Reproduction** — steps, config, commands, or API calls
+- **Impact** — who/what is affected; exploit difficulty
+- **Affected version** — tag, commit, or package version
+- **Environment** — OS, Python version, Docker vs bare metal
+- **Suggested fix** (optional)
 
 ## Scope
 
-### In Scope
+### In scope
 
-The following components and attack surfaces are covered by this policy:
+| Component | Description |
+| --------- | ----------- |
+| Core engine | Task scheduling, session management, LLM dispatch |
+| MCP client | Model Context Protocol client connections |
+| Skill manifests | SKILL.md parsing, validation, and loading |
+| Delegation protocol | Agent-to-agent communication and task handoff |
+| RBAC / permissions | Role-based access control, tenant isolation |
+| Configuration system | Config loading, secrets handling, provider keys |
+| CLI interface | Command-line input handling, injection classes |
+| Data persistence | Session DB, memory stores, SQLite/Postgres |
+| Network layer | API endpoints, webhook handlers, gateway sockets |
+| Plugin / skill system | Loading, lifecycle, permission boundaries |
+| Document Intelligence | Intake, sandbox, storage, indexing (see docs) |
 
-| Component                  | Description                                        |
-| -------------------------- | -------------------------------------------------- |
-| Core engine                | Task scheduling, session management, LLM dispatch  |
-| MCP client                 | Model Context Protocol client connections           |
-| Skill manifests            | SKILL.md parsing, validation, and loading          |
-| Delegation protocol        | Agent-to-agent communication and task handoff      |
-| RBAC / permissions         | Role-based access control, tenant isolation         |
-| Configuration system       | Config loading, secrets handling, provider keys     |
-| CLI interface              | Command-line input handling, shell injection        |
-| Data persistence           | Session DB, memory stores, SQLite operations        |
-| Network layer              | API endpoints, webhook handlers, gateway sockets    |
-| Plugin system              | Plugin loading, lifecycle, sandboxing               |
+### Out of scope
 
-### Out of Scope
+- **Third-party dependencies** — report to upstream; we will help coordinate when relevant
+- **Social engineering** of maintainers or users outside the software
+- **Volume-based DoS** against hosted instances (resource-exhaustion *bugs in code* remain in scope)
+- **Physical security** of the deployment host
+- **Issues solely in upstream LLM providers** (OpenAI, Anthropic, etc.)
 
-- **Third-party dependencies**: Vulnerabilities in upstream packages should be
-  reported to the respective maintainers. We will assist with coordination if
-  needed.
-- **Social engineering**: Attacks targeting Kazma maintainers, contributors, or
-  users outside the software itself.
-- **Denial of service**: Volume-based DoS attacks against hosted instances (though
-  resource exhaustion bugs in the code are in scope).
-- **Physical security**: Attacks requiring physical access to the deployment
-  environment.
-- **Recently disclosed zero-days in LLM providers**: Issues originating entirely
-  within upstream model providers (OpenAI, Anthropic, etc.) are not in scope for
-  our bounty, though we will help coordinate disclosure.
+## No bug bounty (at this time)
 
-## Bug Bounty Program
+Kazma does **not** currently operate a paid bug bounty program. There are **no**
+guaranteed cash payouts, tiers, or SLAs for compensation.
 
-Kazma operates a bug bounty program to reward responsible security researchers.
-Bounties are paid in USD via the method of your choice after validation.
+We still welcome responsible reports. At our discretion we may:
 
-| Severity | Bounty Range | Criteria                                                        |
-| -------- | ------------ | --------------------------------------------------------------- |
-| Critical | $500–$2,000  | Remote code execution, full RBAC bypass, data exfiltration     |
-| High     | $200–$500    | Privilege escalation, authentication bypass, significant info leak |
-| Medium   | $50–$200     | Limited information disclosure, CSRF, stored XSS                |
-| Low      | Hall of Fame | Minor issues, defense-in-depth improvements, best-practice gaps |
+- Credit you in release notes or GitHub Security Advisories (with your consent)
+- Offer non-cash thanks (swag, public thanks) when practical
 
-### Bounty Rules
+Do **not** treat any historical draft language, sample YAML, or third-party
+summaries as an active bounty. The authoritative statement is this file and
+`bug_bounty.enabled: false` in [`kazma-security.yaml`](kazma-security.yaml).
 
-1. Reports must follow the disclosure process above (encrypted channel, no
-   public disclosure before patch).
-2. One bounty per unique vulnerability. Duplicate reports go to the first
-   reporter.
-3. Severity is determined at our sole discretion based on the CVSS framework
-   and real-world impact.
-4. Contributors who report vulnerabilities are eligible for the Hall of Fame
-   regardless of severity tier.
-5. Bounties are paid within 30 days of patch release.
-
-## Security Update Process
-
-All security fixes follow this pipeline:
+## Security update process
 
 ```
-Report → Acknowledge → Patch → CVE → Advisory → Notify
+Report → Acknowledge → Investigate → Patch → Advisory → Notify
 ```
 
-1. **Report**: Researcher submits vulnerability via encrypted channel.
-2. **Acknowledge**: Team confirms receipt within 48 hours and assigns a tracking
-   ID.
-3. **Patch**: Fix is developed, reviewed by at least two maintainers, and merged
-   to the release branch.
-4. **CVE**: A CVE identifier is requested (if applicable) and associated with
-   the fix.
-5. **Advisory**: A security advisory is published on GitHub and at
-   `https://kazma.ai/security`.
-6. **Notify**: Affected users are notified via the mailing list, release notes,
-   and (for critical issues) direct communication.
+1. **Report** — private channel above
+2. **Acknowledge** — tracking ID / confirmation when we can
+3. **Investigate** — severity and impact
+4. **Patch** — fix developed and reviewed (maintainer review; dual review when available)
+5. **Advisory ID** — internal IDs use `KAZMA-ADV-YYYY-…`. A real **CVE** is requested
+   only when appropriate (e.g. via GitHub Security Advisories / CVE assignment).
+   Generated IDs are **not** MITRE CVEs.
+6. **Notify** — GitHub Security Advisories and/or release notes when a fix ships
 
-Patches for critical vulnerabilities may be backported to older supported versions
-at the team's discretion.
+Critical fixes may be backported to older supported versions at our discretion.
 
-## Security Hardening Checklist
+## Hardening checklist (operator recommendations)
 
-The following hardening measures are applied to all Kazma deployments:
+These are **recommended** controls for deployments — not an assertion that every
+host automatically enforces all of them:
 
-- [ ] **Secrets are never logged or committed.** API keys, tokens, and PGP keys
-  are stored outside version control and redacted from all log outputs.
-- [ ] **Input validation on all external surfaces.** CLI arguments, API payloads,
-  skill manifests, and configuration files are validated against schemas before
-  processing.
-- [ ] **RBAC enforced at every access point.** Tenant isolation and role-based
-  permissions are checked before any data or action is exposed.
-- [ ] **Dependencies audited regularly.** Automated scanning via OSV, GitHub
-  Advisories, and NVD runs every 24 hours (see `kazma-security.yaml`).
-- [ ] **Least-privilege execution.** Agents run with minimal required
-  permissions; skill sandboxes restrict filesystem and network access.
-- [ ] **Encrypted transport.** All API and gateway communication uses TLS 1.2+.
-  PGP is used for sensitive disclosure channels.
-- [ ] **Audit trail for privileged operations.** All RBAC changes, config
-  mutations, and security-relevant actions are logged immutably.
-- [ ] **Regular security reviews.** At minimum quarterly reviews of the security
-  configuration, dependency landscape, and incident response process.
+- [ ] Secrets never logged or committed; vault + strong `KAZMA_SECRET`
+- [ ] Input validation on external surfaces (API, CLI, skill manifests)
+- [ ] HITL / RBAC on for multi-user or network-exposed hosts
+- [ ] Dependency audits (OSV / GitHub Advisories) on a regular cadence
+- [ ] Least-privilege process user; skill/MCP permissions reviewed
+- [ ] TLS for any non-localhost exposure
+- [ ] Audit trail enabled for privileged operations where configured
+- [ ] Periodic review of `kazma-security.yaml` / `kazma-permissions.yaml` posture
+
+See also: [Security & Safety](docs/docs/guide/security-and-safety.md),
+[Hardening guide](docs/docs/security/hardening-guide.md).
 
 ## Contact
 
-For questions about this security policy, contact the Kazma security team:
-
-- **Email**: admin@kazma.ai
-- **GitHub**: [github.com/Mubder/kazma](https://github.com/Mubder/kazma)
-  (for non-sensitive inquiries only)
+- **Security email:** admin@kazma.ai
+- **GitHub:** [github.com/Mubder/kazma](https://github.com/Mubder/kazma) (non-sensitive issues only)
+- **Policy (docs mirror):** [Vulnerability reporting](docs/docs/security/vulnerability-reporting.md)
 
 ---
 
-*This policy is effective as of June 2026 and will be reviewed quarterly.*
+*Policy reviewed August 2026. No paid bounty. Re-review when program posture changes.*
