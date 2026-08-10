@@ -35,8 +35,11 @@ __all__ = [
     "format_status_message",
     "get_progress_sender",
     "is_long_task_active",
+    "is_mission_mode",
     "long_task_status",
     "maybe_heartbeat",
+    "mission_hard_rounds",
+    "mission_recursion_limit",
     "record_budget_exhausted",
     "record_long_task_event",
     "reset_progress_sender",
@@ -62,19 +65,27 @@ PRESETS: dict[str, int] = {
 
 _DEFAULT_TTL_SECONDS = 4 * 3600  # 4 hours, same spirit as YOLO
 _MIN_ITER = 5
-_MAX_ITER = 100
+_MAX_ITER = 100  # budget-mode soft ceiling
 _MIN_RECURSION = 50
-_MAX_RECURSION = 500
+_MAX_RECURSION = 500  # budget-mode LangGraph cap
+_MAX_MISSION_ITER = 2000
+_MAX_MISSION_RECURSION = 5000
 _DEFAULT_ITER = 15
 _DEFAULT_RECURSION = 100
 
 
-def clamp_iterations(value: Any, *, default: int = _DEFAULT_ITER) -> int:
+def clamp_iterations(
+    value: Any,
+    *,
+    default: int = _DEFAULT_ITER,
+    hard_cap: int | None = None,
+) -> int:
     try:
         n = int(value)
     except (TypeError, ValueError):
         return default
-    return max(_MIN_ITER, min(_MAX_ITER, n))
+    cap = hard_cap if hard_cap is not None else _MAX_ITER
+    return max(_MIN_ITER, min(cap, n))
 
 
 def derive_recursion_limit(max_iterations: int) -> int:
@@ -120,52 +131,114 @@ def _baseline_iterations() -> int:
         return _DEFAULT_ITER
 
 
+def mission_hard_rounds() -> int:
+    """Safety ceiling for mission mode (real run-until-done cap).
+
+    Not infinite — ops must be able to stop runaway cost/loops. Default 500
+    tool rounds (~hours of work). Override with ``KAZMA_MISSION_MAX_ROUNDS``.
+    """
+    raw = (os.environ.get("KAZMA_MISSION_MAX_ROUNDS") or "").strip()
+    if raw.isdigit():
+        return max(40, min(_MAX_MISSION_ITER, int(raw)))
+    return 500
+
+
+def mission_recursion_limit() -> int:
+    """LangGraph node-hop budget for mission (must track hard rounds)."""
+    raw = (os.environ.get("KAZMA_MISSION_RECURSION") or "").strip()
+    if raw.isdigit():
+        return max(500, min(_MAX_MISSION_RECURSION, int(raw)))
+    # ~5 hops × hard rounds, capped
+    return min(_MAX_MISSION_RECURSION, max(500, mission_hard_rounds() * 5))
+
+
 def enable_long_task(
     thread_id: str,
     *,
     actor: str = "unknown",
     preset: str = "research",
     max_iterations: int | None = None,
+    mode: str = "budget",
 ) -> dict[str, Any]:
-    """Enable long-task mode for *thread_id*. Returns status dict."""
+    """Enable long-task mode for *thread_id*. Returns status dict.
+
+    Modes:
+      - ``budget`` (default): raised soft ceilings (Research = 40). Still
+        force-stops and may reply PARTIAL — user must continue.
+      - ``mission``: true run-until-done for this chat — ``max_iterations``
+        and LangGraph recursion are set to the mission hard wall (default
+        500 rounds / ~2500 steps). Not literally infinite (cost, process
+        lifetime, hard wall) but no soft 40-round PARTIAL stop.
+    """
     from kazma_core.config_store import get_config_store
 
-    preset_key = (preset or "research").strip().lower()
-    if max_iterations is not None:
-        mi = clamp_iterations(max_iterations)
-        preset_key = "custom"
-    elif preset_key in PRESETS:
-        mi = PRESETS[preset_key]
-    elif preset_key.isdigit():
-        mi = clamp_iterations(int(preset_key))
-        preset_key = "custom"
+    mode_key = (mode or "budget").strip().lower()
+    if mode_key in ("mission", "unlimited", "unbounded", "auto", "full"):
+        mode_key = "mission"
     else:
-        preset_key = "research"
-        mi = PRESETS["research"]
+        mode_key = "budget"
 
-    mi = min(mi, _env_max_iter_cap())
-    recursion = derive_recursion_limit(mi)
+    preset_key = (preset or "research").strip().lower()
+    if preset_key in ("mission", "unlimited", "unbounded"):
+        mode_key = "mission"
+        preset_key = "mission"
+
+    if mode_key == "mission":
+        # Real ceiling = hard wall. Optional custom max raises within mission cap.
+        hard = mission_hard_rounds()
+        if max_iterations is not None:
+            mi = clamp_iterations(max_iterations, hard_cap=_MAX_MISSION_ITER)
+            mi = max(mi, PRESETS["research"])
+            hard = max(hard, mi)
+        else:
+            mi = hard
+        recursion = mission_recursion_limit()
+        # Keep recursion aligned if hard wall raised via custom max
+        recursion = max(recursion, min(_MAX_MISSION_RECURSION, mi * 5))
+        preset_key = "mission"
+    else:
+        if max_iterations is not None:
+            mi = clamp_iterations(max_iterations)
+            preset_key = "custom"
+        elif preset_key in PRESETS:
+            mi = PRESETS[preset_key]
+        elif preset_key.isdigit():
+            mi = clamp_iterations(int(preset_key))
+            preset_key = "custom"
+        else:
+            preset_key = "research"
+            mi = PRESETS["research"]
+
+        mi = min(mi, _env_max_iter_cap())
+        recursion = derive_recursion_limit(mi)
+        hard = mi
+
     now = time.time()
     ttl = _ttl_seconds()
     payload = {
         "enabled": True,
+        "mode": mode_key,
         "preset": preset_key,
         "max_iterations": mi,
         "recursion_limit": recursion,
+        "mission_hard_rounds": hard,
         "since": now,
         "actor": actor,
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
     }
     get_config_store().set(f"long_task.{thread_id}", payload, category="agent")
-    record_long_task_event("enable")
+    record_long_task_event("enable_mission" if mode_key == "mission" else "enable")
     logger.info(
-        "[long_task] ENABLED thread=%s actor=%s preset=%s max_iter=%s recursion=%s ttl=%s",
+        "[long_task] ENABLED thread=%s actor=%s mode=%s preset=%s max_iter=%s "
+        "recursion=%s hard=%s ttl=%s",
         thread_id,
         actor,
-        preset_key,
+        mode_key,
+        payload["preset"],
         mi,
         recursion,
+        hard,
         ttl or "none",
     )
     return long_task_status(thread_id)
@@ -222,16 +295,44 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
         except (TypeError, ValueError):
             remaining = None
 
-    mi = clamp_iterations(raw.get("max_iterations", PRESETS["research"]))
-    recursion = int(raw.get("recursion_limit") or derive_recursion_limit(mi))
-    recursion = min(_MAX_RECURSION, max(_MIN_RECURSION, recursion))
+    mode = str(raw.get("mode") or "budget").lower()
+    if mode not in ("budget", "mission"):
+        mode = "budget"
+
+    if mode == "mission":
+        hard = int(
+            raw.get("mission_hard_rounds")
+            or raw.get("max_iterations")
+            or mission_hard_rounds()
+        )
+        hard = max(40, min(_MAX_MISSION_ITER, hard))
+        mi = clamp_iterations(
+            raw.get("max_iterations", hard),
+            hard_cap=_MAX_MISSION_ITER,
+        )
+        # Mission ceiling is the hard wall — never re-clamp to budget 100.
+        mi = min(_MAX_MISSION_ITER, max(mi, hard, PRESETS["research"]))
+        recursion = int(raw.get("recursion_limit") or mission_recursion_limit())
+        recursion = max(
+            recursion,
+            mission_recursion_limit(),
+            min(_MAX_MISSION_RECURSION, mi * 5),
+        )
+        recursion = min(_MAX_MISSION_RECURSION, max(500, recursion))
+    else:
+        mi = clamp_iterations(raw.get("max_iterations", PRESETS["research"]))
+        recursion = int(raw.get("recursion_limit") or derive_recursion_limit(mi))
+        recursion = min(_MAX_RECURSION, max(_MIN_RECURSION, recursion))
+        hard = mi
 
     return {
         "active": True,
         "thread_id": thread_id,
+        "mode": mode,
         "preset": raw.get("preset", "research"),
         "max_iterations": mi,
         "recursion_limit": recursion,
+        "mission_hard_rounds": hard,
         "actor": raw.get("actor", "unknown"),
         "since": raw.get("since"),
         "ttl_seconds": raw.get("ttl_seconds"),
@@ -240,11 +341,20 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
     }
 
 
-def resolve_turn_budgets(thread_id: str | None = None) -> dict[str, int]:
-    """Return effective ``max_iterations`` + ``recursion_limit`` for a turn.
+def is_mission_mode(thread_id: str | None) -> bool:
+    """True when this thread should auto-extend past soft max_iterations."""
+    if not thread_id:
+        return False
+    st = long_task_status(thread_id)
+    return bool(st.get("active") and st.get("mode") == "mission")
 
-    Prefer active per-thread long-task mode; else Settings baseline
-    (and optional global long-task default).
+
+def resolve_turn_budgets(thread_id: str | None = None) -> dict[str, Any]:
+    """Return effective budgets for a turn.
+
+    Keys: ``max_iterations``, ``recursion_limit``, ``mode`` (budget|mission),
+    ``mission_hard_rounds``. Prefer active per-thread long-task; else Settings
+    baseline (and optional global long-task default).
     """
     if thread_id:
         st = long_task_status(thread_id)
@@ -252,6 +362,10 @@ def resolve_turn_budgets(thread_id: str | None = None) -> dict[str, int]:
             return {
                 "max_iterations": int(st["max_iterations"]),
                 "recursion_limit": int(st["recursion_limit"]),
+                "mode": str(st.get("mode") or "budget"),
+                "mission_hard_rounds": int(
+                    st.get("mission_hard_rounds") or st["max_iterations"]
+                ),
             }
 
     mi = _baseline_iterations()
@@ -275,6 +389,8 @@ def resolve_turn_budgets(thread_id: str | None = None) -> dict[str, int]:
     return {
         "max_iterations": mi,
         "recursion_limit": derive_recursion_limit(mi),
+        "mode": "budget",
+        "mission_hard_rounds": mi,
     }
 
 
@@ -286,20 +402,35 @@ def format_status_message(thread_id: str) -> str:
         return (
             "📋 **Long-task mode is OFF** for this chat.\n"
             f"Baseline: {base['max_iterations']} tool rounds · "
-            f"~{base['recursion_limit']} graph steps "
-            f"(Settings → Agent → Max tool rounds).\n"
-            "Enable: `/long on` (Research) · `/long deep` · `/long research`\n"
-            "This does **not** skip HITL — use `/yolo` separately for danger tools."
+            f"~{base['recursion_limit']} graph steps.\n"
+            "**Budget mode** (still stops & asks you to continue):\n"
+            "  `/long on` · `/long deep` · `/long research`\n"
+            "**Mission mode** (auto-continues until done or hard safety wall):\n"
+            "  `/long mission`  or  `/mission on`\n"
+            "HITL is separate — use `/yolo` for danger-tool auto-approve."
         )
     rem = st.get("remaining_seconds")
     ttl_note = f"Expires in ~{rem // 60}m." if rem is not None else "No auto-expiry."
+    if st.get("mode") == "mission":
+        hard = st.get("mission_hard_rounds", mission_hard_rounds())
+        return (
+            "🚀 **MISSION mode ON** — run until done (or hard safety wall).\n"
+            f"Tool rounds: **{st['max_iterations']}** · "
+            f"graph steps ~**{st['recursion_limit']}** · "
+            f"hard wall: **{hard}**.\n"
+            f"{ttl_note}\n"
+            "This is **not** infinite (cost, process lifetime, hard wall). "
+            "It **is** far past Research/40 PARTIAL stops.\n"
+            "HITL still on unless `/yolo`. Disable: `/long off`"
+        )
     return (
-        f"🧠 **Long-task mode ON** ({st.get('preset', 'research')}).\n"
-        f"Budgets: **{st['max_iterations']}** tool rounds · "
-        f"**~{st['recursion_limit']}** graph steps.\n"
+        f"🧠 **Long-task BUDGET mode ON** ({st.get('preset', 'research')}).\n"
+        f"Soft ceiling: **{st['max_iterations']}** tool rounds · "
+        f"**~{st['recursion_limit']}** graph steps — then forced answer "
+        f"(may say PARTIAL).\n"
         f"{ttl_note}\n"
-        "HITL still applies. `/yolo` is separate (danger-tool auto-approve).\n"
-        "Disable: `/long off`"
+        "For real long runs without the soft stop: `/long mission`\n"
+        "HITL separate (`/yolo`). Disable: `/long off`"
     )
 
 

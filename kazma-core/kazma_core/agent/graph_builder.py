@@ -570,6 +570,94 @@ async def supervisor_node(
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
+    # ── Mission mode: auto-extend past soft max_iterations ─────────
+    # Budget /long still force-stops. Mission mode resets the wave counter
+    # and continues until mission_hard_rounds (safety wall), without asking
+    # the user to "Proceed" after every 40 rounds.
+    _mission_patch: dict[str, Any] = {}
+    try:
+        from kazma_core.agent.long_task import (
+            is_mission_mode,
+            mission_hard_rounds,
+            record_long_task_event,
+        )
+
+        _tid = str(state.get("thread_id") or "") or None
+        _max_iter = int(state.get("max_iterations") or 15)
+        _rounds_used = int(state.get("mission_rounds_used") or 0)
+        if (
+            _tid
+            and is_mission_mode(_tid)
+            and iteration >= _max_iter
+        ):
+            _hard = int(state.get("mission_hard_rounds") or mission_hard_rounds())
+            _next_used = _rounds_used + max(iteration, _max_iter)
+            if _next_used < _hard:
+                logger.warning(
+                    "[Supervisor] MISSION wave extend: used≈%d hard=%d "
+                    "(reset iteration %d→0)",
+                    _next_used,
+                    _hard,
+                    iteration,
+                )
+                record_long_task_event("mission_wave")
+                messages = list(messages) + [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"[MISSION AUTO-CONTINUE — wave complete, "
+                            f"~{_next_used}/{_hard} rounds used]\n"
+                            "Do **not** stop for user confirmation. "
+                            "Continue remaining work only; avoid re-doing "
+                            "completed steps. When the full user goal is "
+                            "satisfied, write the final report with "
+                            "no further tool calls."
+                        ),
+                    }
+                ]
+                iteration = 0
+                _mission_patch = {
+                    "mission_rounds_used": _next_used,
+                    "mission_hard_rounds": _hard,
+                    "messages": messages,
+                    "auto_continue": True,
+                }
+            else:
+                logger.warning(
+                    "[Supervisor] MISSION hard wall reached used≈%d hard=%d — "
+                    "forcing final synthesis",
+                    _next_used,
+                    _hard,
+                )
+                record_long_task_event("mission_hard_wall")
+                _mission_patch = {
+                    "mission_rounds_used": _next_used,
+                    "force_synthesis": True,
+                    "next_node": NodeName.RESPOND,
+                }
+    except Exception:
+        logger.debug("[Supervisor] mission extend skipped", exc_info=True)
+
+    if _mission_patch.get("next_node") == NodeName.RESPOND:
+        return {
+            **_mission_patch,
+            "iteration": iteration,
+            "messages": messages,
+        }
+    if _mission_patch.get("messages") is not None:
+        messages = _mission_patch["messages"]
+
+    # Carry mission counters on every later return from this supervisor visit
+    _mission_carry: dict[str, Any] = {}
+    for _mk in ("mission_rounds_used", "mission_hard_rounds", "auto_continue"):
+        if _mk in _mission_patch:
+            _mission_carry[_mk] = _mission_patch[_mk]
+    if not _mission_carry and int(state.get("mission_hard_rounds") or 0) > 0:
+        _mission_carry = {
+            "mission_rounds_used": int(state.get("mission_rounds_used") or 0),
+            "mission_hard_rounds": int(state.get("mission_hard_rounds") or 0),
+        }
+
     # Long-task progress heartbeat (Telegram/gateway when progress sender set)
     try:
         from kazma_core.agent.long_task import maybe_heartbeat
@@ -579,12 +667,21 @@ async def supervisor_node(
             for t in (state.get("tool_calls_done") or [])[:6]
             if isinstance(t, dict)
         ]
+        _wave = int(state.get("mission_rounds_used") or 0) + int(iteration or 0)
         await maybe_heartbeat(
             thread_id=str(state.get("thread_id") or "") or None,
-            iteration=int(iteration or 0),
+            iteration=int(iteration or 0) if not _mission_patch else max(1, int(iteration or 0) or 5),
             max_iterations=int(state.get("max_iterations") or 15),
             last_tools=_recent_tools,
         )
+        # Extra heartbeat on mission wave boundaries
+        if _mission_patch.get("mission_rounds_used"):
+            await maybe_heartbeat(
+                thread_id=str(state.get("thread_id") or "") or None,
+                iteration=5,  # force send
+                max_iterations=int(state.get("max_iterations") or 15),
+                last_tools=[f"mission_wave≈{_mission_patch['mission_rounds_used']}"],
+            )
     except Exception:
         logger.debug("[Supervisor] long-task heartbeat skipped", exc_info=True)
 
@@ -605,6 +702,7 @@ async def supervisor_node(
         logger.warning("[Supervisor] Cost breaker tripped — forcing respond")
         return {
             **breaker_reset,
+            **_mission_carry,
             "next_node": NodeName.RESPOND,
             "messages": messages
             + [
@@ -1323,6 +1421,7 @@ async def supervisor_node(
         return {
             **breaker_reset,
             **intent_patch,
+            **_mission_carry,
             "next_node": NodeName.RESPOND,
             "turn_failed": True,
             "error_message": error_content,
@@ -1462,6 +1561,7 @@ async def supervisor_node(
             return {
                 **breaker_reset,
                 **intent_patch,
+                **_mission_carry,
                 "messages": messages + [assistant_msg, continuation_msg],
                 "next_node": NodeName.SUPERVISOR,
                 "iteration": iteration + 1,
@@ -1480,6 +1580,7 @@ async def supervisor_node(
             return {
                 **breaker_reset,
                 **intent_patch,
+                **_mission_carry,
                 "messages": messages,
                 "next_node": NodeName.RESPOND,
                 "force_synthesis": True,
@@ -1504,6 +1605,7 @@ async def supervisor_node(
         return {
             **breaker_reset,
             **_done_patch,
+            **_mission_carry,
             "messages": messages + [assistant_msg],
             "next_node": NodeName.RESPOND,
             "last_model": response.model,
@@ -1554,6 +1656,7 @@ async def supervisor_node(
     return {
         **breaker_reset,
         **_tool_patch,
+        **_mission_carry,
         "messages": messages + [assistant_msg],
         "tool_calls_pending": pending,
         "tool_calls_done": [],  # reset for this iteration
@@ -2526,23 +2629,44 @@ def build_supervisor_graph(
         iteration = state.get("iteration", 0)
         max_iter = state.get("max_iterations", 15)
 
-        # Force respond on max iterations
+        # Force respond on max iterations — unless mission mode still has
+        # hard-wall budget left (wave extend / high mission ceiling).
         if iteration >= max_iter:
-            logger.warning("[Router] Max iterations (%d) hit — forcing respond", max_iter)
-            # Inject a final instruction so the LLM synthesizes what it has
-            # instead of producing an empty response.
-            _msgs = state.get("messages", [])
-            _has_final = any(
-                isinstance(m, dict) and m.get("role") == "assistant" and (m.get("content") or "").strip()
-                and not m.get("tool_calls")
-                for m in _msgs[-3:]
+            _allow_mission_continue = False
+            try:
+                from kazma_core.agent.long_task import (
+                    is_mission_mode,
+                    mission_hard_rounds,
+                )
+
+                _tid = str(state.get("thread_id") or "") or None
+                if _tid and is_mission_mode(_tid):
+                    _used = int(state.get("mission_rounds_used") or 0) + int(iteration or 0)
+                    _hard = int(
+                        state.get("mission_hard_rounds") or mission_hard_rounds()
+                    )
+                    # Mission max_iterations is normally the hard wall; if a
+                    # soft wave is smaller, still allow tool_worker under wall.
+                    if _used < _hard and next_node == NodeName.TOOL_WORKER:
+                        _allow_mission_continue = True
+                    elif _used < _hard and max_iter < _hard:
+                        # Soft wave hit but hard wall remains — let tools run;
+                        # supervisor will wave-extend on the next entry.
+                        if next_node == NodeName.TOOL_WORKER:
+                            _allow_mission_continue = True
+            except Exception:
+                logger.debug("[Router] mission check failed", exc_info=True)
+
+            if not _allow_mission_continue:
+                logger.warning(
+                    "[Router] Max iterations (%d) hit — forcing respond", max_iter
+                )
+                return NodeName.RESPOND
+            logger.info(
+                "[Router] Mission under hard wall — allowing %s past soft max %d",
+                next_node,
+                max_iter,
             )
-            if not _has_final:
-                # No recent text answer — the model was stuck in tool loops.
-                # We can't mutate state here (routing function), but the
-                # respond_node will handle synthesizing from tool results.
-                pass
-            return NodeName.RESPOND
 
         if next_node == NodeName.TOOL_WORKER:
             return NodeName.TOOL_WORKER

@@ -380,16 +380,18 @@ When you **merge** two paths into one, add a test that would have failed under t
 
 | Matter | SoT |
 |--------|-----|
-| Per-chat enable | ConfigStore `long_task.{thread_id}` via `/long on` |
+| Per-chat **budget** | ConfigStore `long_task.{thread_id}` via `/long on` (soft Research ~40 — may PARTIAL) |
+| Per-chat **mission** | `/long mission` or `/mission on` — hard wall default **500** rounds / ~2500 steps |
 | Baseline tool rounds | `agent.max_iterations` (Settings → Agent) |
-| LangGraph step cap | **Derived** `resolve_turn_budgets()` → `recursion_limit` (not a fixed 100) |
+| LangGraph step cap | **Derived** `resolve_turn_budgets()` → `recursion_limit` (mission uses `mission_recursion_limit()`) |
+| Mission env knobs | `KAZMA_MISSION_MAX_ROUNDS`, `KAZMA_MISSION_RECURSION` |
 | Continue after budget | `long_task.continue.{thread_id}` stored on exhaust; injected next turn |
 | Metrics | Prometheus `kazma_long_task_events_total{kind=…}` |
-| HITL vs capacity | `/yolo` = danger bypass; `/long` = budgets only |
+| HITL vs capacity | `/yolo` = danger bypass; `/long` = budgets only; mission ≠ infinite |
 
-**Invariant:** raising Max tool rounds without deriving `recursion_limit` reintroduces `GraphRecursionError` on Research-depth tasks. Always go through `kazma_core.agent.long_task`.
+**Invariant:** raising Max tool rounds without deriving `recursion_limit` reintroduces `GraphRecursionError` on Research-depth tasks. Always go through `kazma_core.agent.long_task`. Budget mode is **not** “no limits”; use mission for run-until-done with a safety wall.
 
-**Verify:** `/long` status; Settings agent response includes `recursion_limit`; log `long_task` + `budget_recursion` events.
+**Verify:** `/long` status; `/long mission` shows hard wall ≥100; Settings agent response includes `recursion_limit`; log `long_task` + `budget_recursion` / `mission_*` events.
 
 ---
 

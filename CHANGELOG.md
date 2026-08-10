@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Unreleased — Document export: real formatting + Arabic PDF shaping (2026-08-10)
+
+Root cause of “plain PDFs / flipped Arabic letters”:
+
+- `renderer_worker` treated body as plain paragraphs (`html.escape` only) — no
+  headings, lists, bold, or justify.
+- ReportLab never ran **arabic-reshaper + python-bidi**, so Arabic glyphs were
+  isolated and often reversed (deps were installed but unused).
+
+Fix:
+
+- New `kazma_core/documents/rich_render.py` — markdown blocks, inline styles,
+  `shape_for_pdf()`, DOCX RTL (`w:bidi`) + justify.
+- PDF: styled title/H1–H3 colors, justified body, bullets/numbers, tables,
+  Arabic auto-detect (`lang`/`rtl` override). No double-BiDi (`wordWrap=RTL`
+  avoided after `get_display`).
+- DOCX: Heading styles, list styles, bold/italic runs, justified paragraphs,
+  RTL paragraph flags (Word shapes Arabic itself).
+- Skill `generate_pdf` / `generate_docx` docs: pass markdown in section bodies.
+
+## Unreleased — Mission mode: real run-until-done (`/long mission`) (2026-08-10)
+
+Honest fix after budget `/long` was oversold as “no limits”:
+
+- **Budget `/long on`** still means soft Research ceilings (e.g. 40) → may
+  PARTIAL and ask you to Proceed. That is intentional capacity, not infinity.
+- **`/long mission`** / **`/mission on`**: sets `max_iterations` + LangGraph
+  `recursion_limit` to the mission hard wall (default **500** rounds /
+  ~**2500** graph steps). No soft 40-round force-stop.
+- Env knobs: `KAZMA_MISSION_MAX_ROUNDS`, `KAZMA_MISSION_RECURSION`.
+- Still not literally infinite (cost, process lifetime, hard wall) — that is
+  impossible without a safety ceiling.
+- Router + state no longer clamp mission back to budget 100/500.
+
 ## Unreleased — Long-task quality + HITL stale UX (2026-08-10)
 
 - **HITL:** late/duplicate Approve no longer claims “Nothing was executed”;

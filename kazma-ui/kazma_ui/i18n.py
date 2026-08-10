@@ -910,8 +910,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "استخدم ميزانيات المهام الطويلة لكل المحادثات (وليس فقط بعد /long on)",
     },
     "settings.long_task_help": {
-        "en": "Raises tool rounds and LangGraph step budget together so long audits finish instead of hitting a hard recursion wall. Does not skip HITL — use /yolo for danger-tool auto-approve. Per-chat: /long on · /long off on Telegram.",
-        "ar": "يرفع جولات الأدوات وخطوات الرسم معًا حتى تكتمل عمليات التدقيق الطويلة بدل الاصطدام بحد التكرار. لا يتجاوز HITL — استخدم /yolo لموافقة الأدوات الخطرة. لكل محادثة: /long on · /long off في تيليجرام.",
+        "en": "Budget /long raises soft tool-round ceilings (may still PARTIAL). For real run-until-done use /long mission (hard wall ~500 rounds, env-tunable). Does not skip HITL — use /yolo. Per-chat: /long on · /long mission · /long off.",
+        "ar": "وضع الميزانية /long يرفع سقف الجولات الناعم (قد يتوقف جزئيًا). للتشغيل حتى الانتهاء: /long mission (جدار أمان ~500 جولة). لا يتجاوز HITL — استخدم /yolo. لكل محادثة: /long on · /long mission · /long off.",
     },
     "settings.personality_templates": {"en": "Personality Templates", "ar": "قوالب الشخصية"},
     "settings.safety_hitl": {"en": "Safety (HITL)", "ar": "الأمان (الموافقة البشرية)"},
@@ -1993,8 +1993,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tool.desc.update_event": {"en": "Update a calendar event.", "ar": "تحديث حدث في التقويم."},
     "tool.desc.delete_event": {"en": "Delete a calendar event.", "ar": "حذف حدث من التقويم."},
     "tool.desc.find_free_slots": {"en": "Find free time slots on the calendar.", "ar": "العثور على أوقات فارغة في التقويم."},
-    "tool.desc.generate_pdf": {"en": "Generate a PDF document.", "ar": "توليد مستند PDF."},
-    "tool.desc.generate_docx": {"en": "Generate a DOCX document.", "ar": "توليد مستند DOCX."},
+    "tool.desc.generate_pdf": {
+        "en": "Generate a styled PDF (headings, lists, bold/italic, justified). Use markdown in section bodies. Arabic is auto-shaped (lang=ar).",
+        "ar": "توليد PDF منسّق (عناوين، قوائم، عريض/مائل، تبرير). استخدم markdown في body. العربية تُشكَّل تلقائياً (lang=ar).",
+    },
+    "tool.desc.generate_docx": {
+        "en": "Generate a styled Word document (Heading styles, lists, justify, RTL for Arabic). Markdown in section bodies.",
+        "ar": "توليد مستند Word منسّق (أنماط عناوين، قوائم، تبرير، RTL للعربية). markdown في body الأقسام.",
+    },
     "tool.desc.generate_xlsx": {"en": "Generate an Excel spreadsheet.", "ar": "توليد جدول Excel."},
     "tool.desc.generate_markdown_doc": {"en": "Generate a Markdown document.", "ar": "توليد مستند Markdown."},
     "tool.desc.vault_store": {"en": "Store a secret in the encrypted vault.", "ar": "تخزين سر في الخزنة المشفّرة."},

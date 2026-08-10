@@ -204,6 +204,12 @@ class SupervisorState(TypedDict, total=False):
     (2026-08-03 empty-reply regression).
     """
 
+    mission_rounds_used: int
+    """Cumulative tool rounds already consumed in mission mode (wave tracking)."""
+
+    mission_hard_rounds: int
+    """Mission safety wall (from long_task / env). 0 = not in mission."""
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
@@ -220,16 +226,21 @@ def initial_supervisor_state(
         thread_id: Stable conversation thread ID.  Auto-generated if omitted.
         max_iterations: ReAct loop ceiling. If None, reads from ConfigStore
             key ``agent.max_iterations`` (default 15). Settable via the
-            Web UI Settings page.
+            Web UI Settings page. Mission mode may go well above 100.
     """
     # Budgets: long-task mode (thread) or Settings max_iterations, with
     # recursion aligned via long_task.derive_recursion_limit (callers also
     # use resolve_turn_budgets for LangGraph config).
+    _mission_hard = 0
+    _mode = "budget"
     if max_iterations is None:
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 
-            max_iterations = resolve_turn_budgets(thread_id)["max_iterations"]
+            _budgets = resolve_turn_budgets(thread_id)
+            max_iterations = _budgets["max_iterations"]
+            _mode = str(_budgets.get("mode") or "budget")
+            _mission_hard = int(_budgets.get("mission_hard_rounds") or 0)
         except Exception:
             try:
                 from kazma_core.config_store import get_config_store
@@ -238,7 +249,8 @@ def initial_supervisor_state(
             except Exception:
                 max_iterations = 15
     try:
-        max_iterations = max(5, min(100, int(max_iterations)))
+        _cap = 2000 if _mode == "mission" else 100
+        max_iterations = max(5, min(_cap, int(max_iterations)))
     except (TypeError, ValueError):
         max_iterations = 15
     now = datetime.now(UTC).isoformat()
@@ -270,4 +282,6 @@ def initial_supervisor_state(
         force_synthesis=False,
         turn_failed=False,
         error_message="",
+        mission_rounds_used=0,
+        mission_hard_rounds=_mission_hard if _mode == "mission" else 0,
     )

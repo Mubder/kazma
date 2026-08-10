@@ -165,15 +165,31 @@ def _safe_html(text: str) -> None:
 
 
 def _font_paths() -> tuple[Path | None, Path | None]:
+    """Prefer fonts with solid Arabic coverage (glyphs + metrics)."""
     candidates = (
+        # Windows — Arial/Tahoma cover Arabic; Traditional Arabic is AR-first
         (Path("C:/Windows/Fonts/arial.ttf"), Path("C:/Windows/Fonts/arialbd.ttf")),
+        (Path("C:/Windows/Fonts/tahoma.ttf"), Path("C:/Windows/Fonts/tahomabd.ttf")),
+        (Path("C:/Windows/Fonts/trado.ttf"), Path("C:/Windows/Fonts/trado.ttf")),
+        (
+            Path("C:/Windows/Fonts/NotoSansArabic-Regular.ttf"),
+            Path("C:/Windows/Fonts/NotoSansArabic-Bold.ttf"),
+        ),
         (
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         ),
         (
+            Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf"),
+        ),
+        (
             Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
             Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
+        ),
+        (
+            Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
         ),
     )
     return next(((regular, bold) for regular, bold in candidates if regular.is_file()), (None, None))
@@ -181,6 +197,7 @@ def _font_paths() -> tuple[Path | None, Path | None]:
 
 def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) -> None:
     from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.pdfbase import pdfmetrics
@@ -192,6 +209,13 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         Spacer,
         Table,
         TableStyle,
+    )
+
+    from kazma_core.documents.rich_render import (
+        inline_markdown_to_reportlab,
+        is_arabic_dominant,
+        pdf_flowables_from_body,
+        shape_for_pdf,
     )
 
     regular, bold = _font_paths()
@@ -216,30 +240,144 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
             warnings.append(f"Invalid {name} style token; deterministic default applied")
             return default
 
-    title_size = size("title_font_size", 19, 10, 36)
+    # Detect document language from title + section text
+    sections = _sections(payload.get("sections"))
+    sample_parts = [str(payload.get("title", ""))]
+    for item in sections:
+        sample_parts.append(item.get("heading", ""))
+        sample_parts.append((item.get("body") or "")[:1500])
+    sample = "\n".join(sample_parts)
+    rtl = is_arabic_dominant(sample)
+    # Explicit payload override: lang=ar|en or rtl=true
+    lang = str(payload.get("lang") or payload.get("language") or "").strip().lower()
+    if lang in ("ar", "arabic", "rtl"):
+        rtl = True
+    elif lang in ("en", "english", "ltr"):
+        rtl = False
+    if payload.get("rtl") is True:
+        rtl = True
+    if payload.get("rtl") is False:
+        rtl = False
+
+    align = TA_RIGHT if rtl else TA_LEFT
+    # Justified body in both languages. After shape_for_pdf() (reshape+get_display),
+    # ReportLab must draw the *visual* string LTR — do NOT set wordWrap="RTL" or
+    # the line will double-reverse and look flipped again.
+    body_align = TA_JUSTIFY
+    shape_ar = rtl or is_arabic_dominant(sample)
+    wrap = "CJK"
+
+    title_size = size("title_font_size", 20, 10, 36)
     heading_size = size("heading_font_size", 14, 8, 28)
-    body_size = size("body_font_size", 10.5, 6, 18)
+    body_size = size("body_font_size", 11, 6, 18)
+    accent = colors.HexColor(str(style.get("accent_color", "#0f172a")))
+    heading_color = colors.HexColor(str(style.get("heading_color", "#1e3a5f")))
+    body_color = colors.HexColor(str(style.get("body_color", "#1e293b")))
+
     title_style = ParagraphStyle(
         "KazmaTitle",
         fontName=bold_font,
         fontSize=title_size,
-        leading=title_size * 1.3,
-        spaceAfter=16,
+        leading=title_size * 1.35,
+        spaceAfter=14,
+        textColor=accent,
+        alignment=TA_CENTER if not rtl else TA_RIGHT,
+        wordWrap=wrap,
     )
-    heading_style = ParagraphStyle(
-        "KazmaHeading",
+    h1_style = ParagraphStyle(
+        "KazmaH1",
+        fontName=bold_font,
+        fontSize=heading_size + 2,
+        leading=(heading_size + 2) * 1.35,
+        spaceBefore=16,
+        spaceAfter=8,
+        textColor=heading_color,
+        alignment=align,
+        wordWrap=wrap,
+        borderPadding=3,
+    )
+    h2_style = ParagraphStyle(
+        "KazmaH2",
         fontName=bold_font,
         fontSize=heading_size,
         leading=heading_size * 1.4,
+        spaceBefore=12,
+        spaceAfter=6,
+        textColor=heading_color,
+        alignment=align,
+        wordWrap=wrap,
+    )
+    h3_style = ParagraphStyle(
+        "KazmaH3",
+        fontName=bold_font,
+        fontSize=heading_size - 1,
+        leading=(heading_size - 1) * 1.4,
         spaceBefore=10,
+        spaceAfter=4,
+        textColor=colors.HexColor("#334155"),
+        alignment=align,
+        wordWrap=wrap,
     )
     body_style = ParagraphStyle(
         "KazmaBody",
         fontName=font,
         fontSize=body_size,
-        leading=body_size * 1.5,
-        wordWrap="RTL",
+        leading=body_size * 1.65,
+        textColor=body_color,
+        alignment=body_align,
+        wordWrap=wrap,
+        spaceAfter=4,
     )
+    bullet_style = ParagraphStyle(
+        "KazmaBullet",
+        parent=body_style,
+        leftIndent=14 if not rtl else 0,
+        rightIndent=14 if rtl else 0,
+        bulletIndent=0,
+        alignment=align if rtl else TA_LEFT,
+        spaceAfter=3,
+    )
+    number_style = ParagraphStyle(
+        "KazmaNumber",
+        parent=bullet_style,
+    )
+    quote_style = ParagraphStyle(
+        "KazmaQuote",
+        parent=body_style,
+        textColor=colors.HexColor("#475569"),
+        leftIndent=12,
+        rightIndent=12,
+        borderColor=colors.HexColor("#94a3b8"),
+        borderWidth=0,
+        backColor=colors.HexColor("#f8fafc"),
+        spaceBefore=4,
+        spaceAfter=8,
+    )
+    code_style = ParagraphStyle(
+        "KazmaCode",
+        fontName=font,
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#0f172a"),
+        backColor=colors.HexColor("#f1f5f9"),
+        alignment=TA_LEFT,
+        wordWrap="CJK",
+        leftIndent=6,
+        rightIndent=6,
+        spaceBefore=4,
+        spaceAfter=8,
+    )
+    rich_styles = {
+        "body": body_style,
+        "h1": h1_style,
+        "h2": h2_style,
+        "h3": h3_style,
+        "bullet": bullet_style,
+        "number": number_style,
+        "quote": quote_style,
+        "code": code_style,
+    }
+
     header = str(payload.get("header", ""))
     footer = str(payload.get("footer", ""))
     page_numbers = bool(payload.get("page_numbers", True))
@@ -247,34 +385,82 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
     def decorate(canvas: Any, document: Any) -> None:
         canvas.saveState()
         canvas.setFont(font, 8)
+        canvas.setFillColor(colors.HexColor("#64748b"))
+        # Accent line under header
+        canvas.setStrokeColor(colors.HexColor("#e2e8f0"))
+        canvas.setLineWidth(0.6)
+        canvas.line(
+            document.leftMargin,
+            A4[1] - 30,
+            A4[0] - document.rightMargin,
+            A4[1] - 30,
+        )
         if header:
-            canvas.drawString(document.leftMargin, A4[1] - 24, header)
+            hdr = shape_for_pdf(header) if shape_ar else header
+            if rtl:
+                canvas.drawRightString(A4[0] - document.rightMargin, A4[1] - 22, hdr)
+            else:
+                canvas.drawString(document.leftMargin, A4[1] - 22, hdr)
         if footer:
-            canvas.drawString(document.leftMargin, 20, footer)
+            ftr = shape_for_pdf(footer) if shape_ar else footer
+            if rtl:
+                canvas.drawRightString(A4[0] - document.rightMargin, 28, ftr)
+            else:
+                canvas.drawString(document.leftMargin, 28, ftr)
         if page_numbers:
-            canvas.drawRightString(A4[0] - document.rightMargin, 20, str(document.page))
+            page_label = str(document.page)
+            if rtl:
+                page_label = shape_for_pdf(f"صفحة {document.page}")
+            canvas.drawCentredString(A4[0] / 2, 18, page_label)
         canvas.restoreState()
 
-    story: list[Any] = [
-        Paragraph(html.escape(str(payload.get("title", "Document"))), title_style)
-    ]
-    sections = _sections(payload.get("sections"))
+    title_raw = str(payload.get("title", "Document"))
+    title_html = inline_markdown_to_reportlab(title_raw, shape_arabic=shape_ar)
+    story: list[Any] = [Paragraph(title_html, title_style), Spacer(1, 10)]
+
     if payload.get("toc"):
-        story.append(Paragraph("Contents", heading_style))
-        story.extend(
-            Paragraph(f"{index}. {html.escape(item['heading'])}", body_style)
-            for index, item in enumerate(sections, 1)
-            if item["heading"]
+        toc_label = "المحتويات" if rtl else "Contents"
+        story.append(
+            Paragraph(
+                inline_markdown_to_reportlab(toc_label, shape_arabic=shape_ar),
+                h2_style,
+            )
         )
+        for index, item in enumerate(sections, 1):
+            if item["heading"]:
+                line = f"{index}. {item['heading']}"
+                story.append(
+                    Paragraph(
+                        inline_markdown_to_reportlab(line, shape_arabic=shape_ar),
+                        body_style,
+                    )
+                )
         story.append(PageBreak())
+
     for item in sections:
         if item["heading"]:
-            story.append(Paragraph(html.escape(item["heading"]), heading_style))
-        for paragraph in item["body"].split("\n\n"):
-            if paragraph.strip():
-                story.extend(
-                    (Paragraph(html.escape(paragraph).replace("\n", "<br/>"), body_style), Spacer(1, 6))
+            story.append(
+                Paragraph(
+                    inline_markdown_to_reportlab(
+                        item["heading"].lstrip("#").strip(),
+                        shape_arabic=shape_ar,
+                    ),
+                    h1_style,
                 )
+            )
+        body = item.get("body") or ""
+        if body.strip():
+            story.extend(
+                pdf_flowables_from_body(
+                    body,
+                    styles=rich_styles,
+                    shape_arabic=shape_ar,
+                    Spacer=Spacer,
+                    Paragraph=Paragraph,
+                    colors=colors,
+                )
+            )
+
     tables = payload.get("tables")
     if isinstance(tables, list):
         for value in tables:
@@ -284,12 +470,21 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
             headers = value.get("headers")
             rows = value.get("rows")
             if heading:
-                story.append(Paragraph(html.escape(heading), heading_style))
+                story.append(
+                    Paragraph(
+                        inline_markdown_to_reportlab(heading, shape_arabic=shape_ar),
+                        h2_style,
+                    )
+                )
             if isinstance(headers, list) and isinstance(rows, list) and headers:
+                def _cell(val: object) -> str:
+                    s = str(val)
+                    return shape_for_pdf(s) if shape_ar else s
+
                 data = [
-                    [str(cell) for cell in headers],
+                    [_cell(cell) for cell in headers],
                     *(
-                        [str(cell) for cell in row]
+                        [_cell(cell) for cell in row]
                         for row in rows
                         if isinstance(row, list)
                     ),
@@ -299,58 +494,158 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                     TableStyle(
                         (
                             ("FONTNAME", (0, 0), (-1, -1), font),
-                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#334155")),
+                            ("FONTNAME", (0, 0), (-1, 0), bold_font),
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
                             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                            ("TEXTCOLOR", (0, 1), (-1, -1), body_color),
                             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
                             ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                            ("ALIGN", (0, 0), (-1, -1), "RIGHT" if rtl else "LEFT"),
+                            ("TOPPADDING", (0, 0), (-1, -1), 6),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
                         )
                     )
                 )
-                story.extend((table, Spacer(1, 8)))
+                story.extend((table, Spacer(1, 10)))
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
-        story.append(Paragraph("References", heading_style))
-        story.extend(
-            Paragraph(f"{index}. {html.escape(str(item))}", body_style)
-            for index, item in enumerate(citations, 1)
+        ref_label = "المراجع" if rtl else "References"
+        story.append(
+            Paragraph(
+                inline_markdown_to_reportlab(ref_label, shape_arabic=shape_ar),
+                h2_style,
+            )
         )
+        for index, item in enumerate(citations, 1):
+            line = f"{index}. {item}"
+            story.append(
+                Paragraph(
+                    inline_markdown_to_reportlab(str(line), shape_arabic=shape_ar),
+                    body_style,
+                )
+            )
     if payload.get("images"):
         warnings.append(
             "Images were omitted because generation accepts no unapproved filesystem resources"
         )
-    SimpleDocTemplate(str(output), pagesize=A4).build(
-        story, onFirstPage=decorate, onLaterPages=decorate
-    )
+    if shape_ar:
+        try:
+            import arabic_reshaper  # noqa: F401
+            from bidi.algorithm import get_display  # noqa: F401
+        except ImportError:
+            warnings.append(
+                "arabic_reshaper/python-bidi not installed — Arabic letters may appear "
+                "disconnected or reversed in PDF"
+            )
+
+    SimpleDocTemplate(
+        str(output),
+        pagesize=A4,
+        leftMargin=54,
+        rightMargin=54,
+        topMargin=56,
+        bottomMargin=50,
+    ).build(story, onFirstPage=decorate, onLaterPages=decorate)
 
 
 def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
+
+    from kazma_core.documents.rich_render import (
+        docx_set_rtl_paragraph,
+        docx_write_rich_body,
+        is_arabic_dominant,
+    )
 
     document = Document()
-    document.add_heading(str(payload.get("title", "Document")), 0)
+    sections = _sections(payload.get("sections"))
+    sample_parts = [str(payload.get("title", ""))]
+    for item in sections:
+        sample_parts.append(item.get("heading", ""))
+        sample_parts.append((item.get("body") or "")[:1500])
+    sample = "\n".join(sample_parts)
+    rtl = is_arabic_dominant(sample)
+    lang = str(payload.get("lang") or payload.get("language") or "").strip().lower()
+    if lang in ("ar", "arabic", "rtl"):
+        rtl = True
+    elif lang in ("en", "english", "ltr"):
+        rtl = False
+    if payload.get("rtl") is True:
+        rtl = True
+    if payload.get("rtl") is False:
+        rtl = False
+
+    # Normal style: justify + optional RTL
+    try:
+        normal = document.styles["Normal"]
+        normal.font.name = "Arial"
+        normal.font.size = Pt(11)
+        if rtl:
+            normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    except Exception:
+        pass
+
+    title = document.add_heading(str(payload.get("title", "Document")), 0)
+    if rtl:
+        docx_set_rtl_paragraph(title, justify=False)
+    else:
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    try:
+        if title.runs:
+            title.runs[0].font.color.rgb = RGBColor(0x0F, 0x17, 0x2A)
+    except Exception:
+        pass
+
     header = str(payload.get("header", ""))
     footer = str(payload.get("footer", ""))
     for section in document.sections:
         if header:
             section.header.paragraphs[0].text = header
+            if rtl:
+                docx_set_rtl_paragraph(section.header.paragraphs[0], justify=False)
         if footer:
             section.footer.paragraphs[0].text = footer
+            if rtl:
+                docx_set_rtl_paragraph(section.footer.paragraphs[0], justify=False)
+
     if payload.get("toc"):
-        document.add_heading("Contents", 1)
-        for index, item in enumerate(_sections(payload.get("sections")), 1):
+        toc = document.add_heading("المحتويات" if rtl else "Contents", 1)
+        if rtl:
+            docx_set_rtl_paragraph(toc, justify=False)
+        for index, item in enumerate(sections, 1):
             if item["heading"]:
-                document.add_paragraph(f"{index}. {item['heading']}")
-    for item in _sections(payload.get("sections")):
+                p = document.add_paragraph(f"{index}. {item['heading']}")
+                if rtl:
+                    docx_set_rtl_paragraph(p, justify=False)
+
+    for item in sections:
         if item["heading"]:
-            document.add_heading(item["heading"].lstrip("#").strip(), 1)
-        for paragraph in item["body"].split("\n\n"):
-            if paragraph.strip():
-                document.add_paragraph(paragraph.strip())
+            h = document.add_heading(item["heading"].lstrip("#").strip(), 1)
+            if rtl:
+                docx_set_rtl_paragraph(h, justify=False)
+            try:
+                if h.runs:
+                    h.runs[0].font.color.rgb = RGBColor(0x1E, 0x3A, 0x5F)
+            except Exception:
+                pass
+        body = item.get("body") or ""
+        if body.strip():
+            docx_write_rich_body(document, body, rtl=rtl)
+
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
-        document.add_heading("References", 1)
+        ref = document.add_heading("المراجع" if rtl else "References", 1)
+        if rtl:
+            docx_set_rtl_paragraph(ref, justify=False)
         for value in citations:
-            document.add_paragraph(str(value), style="List Number")
+            p = document.add_paragraph(str(value), style="List Number")
+            if rtl:
+                docx_set_rtl_paragraph(p, justify=False)
     document.save(output)
 
 

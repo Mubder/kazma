@@ -82,6 +82,44 @@ def test_format_status_message() -> None:
     disable_long_task(tid)
 
 
+def test_mission_mode_hard_wall_not_soft_40() -> None:
+    """Mission must raise max_iterations + recursion past Research budget."""
+    from kazma_core.agent.long_task import (
+        is_mission_mode,
+        mission_hard_rounds,
+        mission_recursion_limit,
+    )
+
+    tid = "test-thread-mission-1"
+    disable_long_task(tid)
+    st = enable_long_task(tid, actor="tester", mode="mission")
+    assert st["active"] is True
+    assert st["mode"] == "mission"
+    assert is_mission_mode(tid) is True
+    # Real wall — not Research soft 40
+    assert st["max_iterations"] >= mission_hard_rounds()
+    assert st["max_iterations"] >= 100  # must beat budget clamp
+    assert st["recursion_limit"] >= 500
+    assert st["recursion_limit"] >= mission_recursion_limit() // 2
+    budgets = resolve_turn_budgets(tid)
+    assert budgets["mode"] == "mission"
+    assert budgets["max_iterations"] == st["max_iterations"]
+    assert budgets["recursion_limit"] == st["recursion_limit"]
+    msg = format_status_message(tid)
+    assert "MISSION" in msg or "mission" in msg.lower()
+    disable_long_task(tid)
+    assert is_mission_mode(tid) is False
+
+
+def test_mission_preset_alias() -> None:
+    tid = "test-thread-mission-alias"
+    disable_long_task(tid)
+    st = enable_long_task(tid, actor="t", preset="mission")
+    assert st["mode"] == "mission"
+    assert st["max_iterations"] >= 100
+    disable_long_task(tid)
+
+
 def test_continue_protocol_store_and_consume() -> None:
     from kazma_core.agent.long_task import (
         consume_continue_context,

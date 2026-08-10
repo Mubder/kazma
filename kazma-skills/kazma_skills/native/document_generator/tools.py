@@ -73,16 +73,32 @@ async def generate_pdf(
     sections: list[dict[str, str]] | None = None,
     tables: list[dict[str, Any]] | None = None,
     images: list[dict[str, str]] | None = None,
+    lang: str | None = None,
+    rtl: bool | None = None,
 ) -> str:
-    """Generate a verified PDF through the isolated renderer worker."""
+    """Generate a verified, styled PDF through the isolated renderer worker.
 
-    payload = {
+    Section bodies support lightweight markdown for real formatting:
+      - ``#`` / ``##`` / ``###`` headings
+      - ``-`` / ``*`` bullets and ``1.`` numbered lists
+      - ``**bold**``, ``*italic*``, ``code``, links
+      - blank-line paragraphs (justified); blockquotes with ``>``
+
+    Arabic is auto-detected (or set ``lang="ar"`` / ``rtl=True``). PDF path
+    applies arabic-reshaper + python-bidi so letters join and order correctly.
+    """
+
+    payload: dict[str, Any] = {
         "title": title,
         "sections": _sections(sections),
         "tables": tables or [],
         "images": [{} for _ in images or []],
         "page_numbers": True,
     }
+    if lang:
+        payload["lang"] = lang
+    if rtl is not None:
+        payload["rtl"] = bool(rtl)
     result = await DocumentService().generate(
         "pdf",
         payload,
@@ -93,12 +109,30 @@ async def generate_pdf(
     return _output(result, "PDF")
 
 
-async def generate_docx(title: str, sections: list[dict[str, str]]) -> str:
-    """Generate a verified DOCX through the isolated renderer worker."""
+async def generate_docx(
+    title: str,
+    sections: list[dict[str, str]] | None = None,
+    lang: str | None = None,
+    rtl: bool | None = None,
+) -> str:
+    """Generate a verified DOCX with heading/list styles and RTL when Arabic.
 
+    Body markdown is the same subset as ``generate_pdf`` (headings, lists,
+    bold/italic). Word performs its own Arabic shaping — we set ``w:bidi`` +
+    justify so layout is correct without pre-shaping.
+    """
+
+    payload: dict[str, Any] = {
+        "title": title,
+        "sections": _sections(sections),
+    }
+    if lang:
+        payload["lang"] = lang
+    if rtl is not None:
+        payload["rtl"] = bool(rtl)
     result = await DocumentService().generate(
         "docx",
-        {"title": title, "sections": _sections(sections)},
+        payload,
         output_name=title,
         export_dir=DOC_DIR,
         **_scope(),

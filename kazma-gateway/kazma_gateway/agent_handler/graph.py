@@ -680,12 +680,14 @@ def create_graph_handler(
             logger.info("[agent-handler] /yolo cmd=%s thread=%s", cmd, thread_id)
             return
 
-        # ── /long: Long-task capacity mode (NOT HITL bypass) ───────
-        # Raises max_iterations + recursion_limit together. Orthogonal to /yolo.
+        # ── /long + /mission: capacity mode (NOT HITL bypass) ──────
+        # Budget /long raises soft ceilings (still PARTIAL at limit).
+        # /long mission = real run-until-done hard wall (default ~500 rounds).
         if msg.text:
             _lt_raw = msg.text.strip().lower()
             _lt_parts = _lt_raw.split()
-            if _lt_parts and _lt_parts[0] in ("/long", "long"):
+            _lt_cmd = _lt_parts[0] if _lt_parts else ""
+            if _lt_cmd in ("/long", "long", "/mission", "mission"):
                 from kazma_core.agent.long_task import (
                     disable_long_task,
                     enable_long_task,
@@ -693,15 +695,52 @@ def create_graph_handler(
                 )
 
                 actor = msg.sender_id or "gateway"
-                sub = _lt_parts[1] if len(_lt_parts) > 1 else "status"
+                # /mission [on|off|status] → mission mode shortcuts
+                if _lt_cmd in ("/mission", "mission"):
+                    sub = _lt_parts[1] if len(_lt_parts) > 1 else "on"
+                    if sub in ("status", "?", "info"):
+                        sub = "status"
+                    elif sub in ("off", "disable", "0"):
+                        sub = "off"
+                    else:
+                        sub = "mission"
+                else:
+                    sub = _lt_parts[1] if len(_lt_parts) > 1 else "status"
+
                 if sub in ("status", "?", "info"):
                     reply_msg = format_status_message(thread_id)
                 elif sub in ("off", "disable", "0"):
                     disable_long_task(thread_id, actor=actor)
                     reply_msg = (
-                        "📋 Long-task mode **OFF**. Chat baselines restored "
+                        "📋 Long-task / mission mode **OFF**. Chat baselines restored "
                         "(Settings → Max tool rounds).\n"
-                        "HITL unchanged. Re-enable: `/long on`"
+                        "HITL unchanged. Re-enable: `/long on` or `/long mission`"
+                    )
+                elif sub in (
+                    "mission",
+                    "unlimited",
+                    "unbounded",
+                    "full",
+                    "auto",
+                ):
+                    st = enable_long_task(
+                        thread_id, actor=actor, mode="mission"
+                    )
+                    rem = st.get("remaining_seconds")
+                    ttl_note = (
+                        f"Auto-expires in ~{rem // 60}m."
+                        if rem is not None
+                        else "No auto-expiry."
+                    )
+                    reply_msg = (
+                        "🚀 **MISSION mode ON** — run until done "
+                        f"(hard wall **{st.get('mission_hard_rounds', st.get('max_iterations'))}** "
+                        f"tool rounds · ~**{st.get('recursion_limit')}** graph steps).\n"
+                        f"{ttl_note}\n"
+                        "Not literally infinite (cost / process / hard wall). "
+                        "Far past soft Research/40 PARTIAL stops.\n"
+                        "HITL still on — use `/yolo` for danger-tool auto-approve.\n"
+                        "Disable: `/long off`"
                     )
                 elif sub in ("on", "enable", "1", "research", "deep", "chat"):
                     preset = "research" if sub in ("on", "enable", "1") else sub
@@ -713,11 +752,13 @@ def create_graph_handler(
                         else "No auto-expiry."
                     )
                     reply_msg = (
-                        f"🧠 **Long-task ON** ({st.get('preset', preset)}).\n"
-                        f"Budgets: **{st.get('max_iterations')}** tool rounds · "
-                        f"**~{st.get('recursion_limit')}** graph steps.\n"
+                        f"🧠 **Long-task BUDGET ON** ({st.get('preset', preset)}).\n"
+                        f"Soft ceiling: **{st.get('max_iterations')}** tool rounds · "
+                        f"**~{st.get('recursion_limit')}** graph steps "
+                        f"(may still PARTIAL — then **Proceed** or switch to mission).\n"
                         f"{ttl_note}\n"
-                        "Does **not** skip HITL — use `/yolo` for danger-tool auto-approve.\n"
+                        "For real long runs: `/long mission`\n"
+                        "Does **not** skip HITL — use `/yolo`.\n"
                         "Disable: `/long off`"
                     )
                 elif sub.isdigit():
@@ -725,14 +766,17 @@ def create_graph_handler(
                         thread_id, actor=actor, max_iterations=int(sub)
                     )
                     reply_msg = (
-                        f"🧠 **Long-task ON** (custom {st.get('max_iterations')} rounds · "
+                        f"🧠 **Long-task BUDGET ON** (custom {st.get('max_iterations')} rounds · "
                         f"~{st.get('recursion_limit')} steps).\n"
+                        "For run-until-done: `/long mission`\n"
                         "Disable: `/long off`"
                     )
                 else:
                     reply_msg = (
-                        "Usage: `/long` · `/long on` · `/long deep` · "
-                        "`/long research` · `/long 50` · `/long off`"
+                        "Usage:\n"
+                        "  `/long` · `/long on` · `/long deep` · `/long research` · `/long 50`\n"
+                        "  `/long mission` or `/mission on` — real long run (hard wall ~500)\n"
+                        "  `/long off`"
                     )
 
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1384,13 +1428,23 @@ def create_graph_handler(
                         )
                     long_hint = ""
                     try:
-                        from kazma_core.agent.long_task import is_long_task_active
+                        from kazma_core.agent.long_task import (
+                            is_long_task_active,
+                            is_mission_mode,
+                        )
 
                         if not is_long_task_active(thread_id):
                             long_hint = (
-                                "\n\n💡 Tip: enable `/long on` for Research budgets "
-                                "(more tool rounds + graph steps), then continue with "
+                                "\n\n💡 Tip: `/long mission` for a real long run "
+                                "(~500 tool rounds hard wall), or `/long on` for a "
+                                "soft Research budget — then continue with "
                                 "*only remaining steps*."
+                            )
+                        elif not is_mission_mode(thread_id):
+                            long_hint = (
+                                "\n\n💡 Budget mode hit a soft wall. "
+                                "Reply **Proceed**, or enable `/long mission` "
+                                "for run-until-done (hard wall ~500 rounds)."
                             )
                     except Exception:
                         pass
