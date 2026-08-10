@@ -1157,7 +1157,7 @@ def trim_messages_deterministic(
             if m.get("role") == "system"
         ):
             normalized.insert(0, {"role": "system", "content": working_memory_block})
-        return sanitize_message_list(normalized)
+        return _drop_orphan_tool_messages(normalized)
 
     # Partition
     system_msgs = [m for m in normalized if m.get("role") == "system"]
