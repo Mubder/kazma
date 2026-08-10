@@ -291,10 +291,56 @@ class TestSessionManagerUnit:
 
     def test_list_all_returns_all(self):
         mgr = SessionManager()
-        mgr.get_or_create("a")
-        mgr.get_or_create("b")
-        mgr.get_or_create("c")
+        for sid in ("a", "b", "c"):
+            s = mgr.get_or_create(sid)
+            s.add_message("user", f"hi {sid}")
+            mgr.put(s)
         assert len(mgr.list_all()) == 3
+
+    def test_get_or_create_durable_false_skips_db_until_put(self):
+        """WS connect must not pollute the store with empty durable shells."""
+        mgr = SessionManager()
+        shell = mgr.get_or_create("mem-only", durable=False)
+        assert shell.session_id == "mem-only"
+        # Memory-visible, but list hides empty shells by default.
+        assert mgr.get("mem-only") is shell
+        assert mgr.list_all() == []
+        assert [s.session_id for s in mgr.list_all(include_empty=True, prune_empty=False)] == [
+            "mem-only"
+        ]
+        # First real message makes it durable + listed.
+        shell.add_message("user", "first real prompt")
+        mgr.put(shell)
+        listed = mgr.list_all()
+        assert len(listed) == 1
+        assert listed[0].session_id == "mem-only"
+        assert len(listed[0].messages) == 1
+
+    def test_list_all_hides_and_prunes_empty_web_shells(self):
+        mgr = SessionManager()
+        empty = mgr.get_or_create("empty-shell")
+        mgr.put(empty)
+        # put() stamps updated_at=now; age the in-memory row so prune fires.
+        empty.updated_at = "2000-01-01T00:00:00+00:00"
+        empty.created_at = empty.updated_at
+
+        filled = mgr.get_or_create("filled")
+        filled.add_message("user", "keep me")
+        mgr.put(filled)
+
+        # Default list: hide empty, and GC aged empty shells.
+        listed = mgr.list_all()
+        assert [s.session_id for s in listed] == ["filled"]
+        assert mgr.get("empty-shell") is None  # pruned
+
+    def test_gateway_empty_sessions_are_not_pruned(self):
+        mgr = SessionManager()
+        gw = mgr.get_or_create("gw-telegram-telegram_1-abc")
+        gw.updated_at = "2000-01-01T00:00:00+00:00"
+        gw.created_at = gw.updated_at
+        mgr.put(gw)
+        listed = mgr.list_all(include_empty=True, prune_empty=True)
+        assert any(s.session_id == gw.session_id for s in listed)
 
     def test_get_and_list_do_not_cross_tenant_boundaries(self):
         mgr = SessionManager()
@@ -356,10 +402,10 @@ class TestSessionManagerUnit:
         mgr = SessionManager()
         mgr.get_or_create("a")
         mgr.get_or_create("b")
-        assert len(mgr.list_all()) == 2
+        assert len(mgr.list_all(include_empty=True, prune_empty=False)) == 2
 
         mgr.clear()
-        assert len(mgr.list_all()) == 0
+        assert len(mgr.list_all(include_empty=True, prune_empty=False)) == 0
 
     def test_chat_session_to_summary(self):
         session = ChatSession(session_id="sum-test")

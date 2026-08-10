@@ -47,6 +47,10 @@ MAX_SESSIONS = 10_000
 # Maximum messages per session to prevent unbounded memory growth.
 MAX_MESSAGES_PER_SESSION = 200
 
+# Empty non-gateway web shells older than this are deleted on list (connect
+# used to create durable 0-msg rows; GC cleans the backlog + stragglers).
+EMPTY_WEB_SESSION_GC_SECONDS = 10 * 60
+
 
 @dataclass
 class ChatSession:
@@ -512,12 +516,22 @@ class SessionManager:
                 return loaded
             return None
 
-    def get_or_create(self, session_id: str | None = None) -> ChatSession:
+    def get_or_create(
+        self,
+        session_id: str | None = None,
+        *,
+        durable: bool = True,
+    ) -> ChatSession:
         """Get an existing session or create a new one.
 
         If ``session_id`` is ``None`` a fresh UUID is generated.  If a
         session with the given ID already exists (memory **or DB**) it is
         returned as-is — never invent an empty row over existing history.
+
+        *durable* (default True): write the new empty shell to the DB.
+        Pass ``durable=False`` for WS connect / UI bind so we do not pollute
+        the sidebar with "Web Session · 0 msgs" until the first real message
+        (which calls :meth:`put` and persists).
         """
         with self._lock:
             tenant_id = get_current_tenant_id() or "default"
@@ -530,7 +544,8 @@ class SessionManager:
             key = f"{tenant_id}:{sid}"
             session = ChatSession(session_id=sid, tenant_id=tenant_id)
             self._sessions[key] = session
-            self._upsert_db(session)
+            if durable:
+                self._upsert_db(session)
             self._evict_if_needed(tenant_id)
             return session
 
@@ -725,12 +740,108 @@ class SessionManager:
         except Exception as exc:
             logger.debug("[SessionManager] _hydrate_from_checkpoints_db skipped: %s", exc)
 
-    def list_all(self, include_archived: bool = False) -> list[ChatSession]:
+    def prune_empty_web_sessions(
+        self,
+        *,
+        max_age_seconds: float = EMPTY_WEB_SESSION_GC_SECONDS,
+    ) -> int:
+        """Delete empty non-gateway web shells older than *max_age_seconds*.
+
+        Returns the number of sessions removed. Safe to call from the list
+        endpoint — never touches gateway (``gw-*``) sessions or any session
+        that has messages / a custom title / pin.
+        """
+        now = datetime.now(UTC)
+        removed = 0
+        # Snapshot ids under lock, delete outside the iteration to reuse delete().
+        to_delete: list[str] = []
+        with self._lock:
+            tenant_id = get_current_tenant_id() or "default"
+            for key, sess in list(self._sessions.items()):
+                if not key.startswith(f"{tenant_id}:"):
+                    continue
+                if not self._is_empty_web_shell(sess):
+                    continue
+                age = self._session_age_seconds(sess, now=now)
+                if age is None or age < max_age_seconds:
+                    continue
+                to_delete.append(sess.session_id)
+        for sid in to_delete:
+            try:
+                self.delete(sid)
+                removed += 1
+            except Exception:
+                logger.debug(
+                    "[SessionManager] prune_empty_web_sessions failed for %s",
+                    sid,
+                    exc_info=True,
+                )
+        if removed:
+            logger.info(
+                "[SessionManager] Pruned %d empty web session shell(s)",
+                removed,
+            )
+        return removed
+
+    @staticmethod
+    def _is_empty_web_shell(sess: ChatSession) -> bool:
+        """True for unpinned, untitled, message-less non-gateway web rows."""
+        sid = sess.session_id or ""
+        if sid.startswith("gw-"):
+            return False
+        if sess.messages:
+            return False
+        if sess.pinned:
+            return False
+        # Keep user-renamed shells even if empty.
+        title = (sess.title or "").strip()
+        if title and title.lower() not in ("web session", "web", "new chat"):
+            return False
+        return True
+
+    @staticmethod
+    def _session_age_seconds(
+        sess: ChatSession,
+        *,
+        now: datetime | None = None,
+    ) -> float | None:
+        raw = sess.updated_at or sess.created_at or ""
+        if not raw:
+            return None
+        try:
+            ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            ref = now or datetime.now(UTC)
+            return max(0.0, (ref - ts).total_seconds())
+        except Exception:
+            return None
+
+    def list_all(
+        self,
+        include_archived: bool = False,
+        *,
+        include_empty: bool = False,
+        prune_empty: bool = True,
+    ) -> list[ChatSession]:
         """Return sessions for the current tenant, newest-first.
 
         Archived sessions are excluded by default (they clutter the sidebar).
         Pass ``include_archived=True`` to get everything (for the archive view).
+
+        Empty non-gateway web shells are hidden by default (``include_empty``)
+        and aged ones are garbage-collected when ``prune_empty`` is True so
+        the sidebar does not accumulate "Web Session · 0 msgs" forever.
         """
+        if prune_empty:
+            try:
+                self.prune_empty_web_sessions()
+            except Exception:
+                logger.debug(
+                    "[SessionManager] prune_empty_web_sessions raised",
+                    exc_info=True,
+                )
+
         with self._lock:
             tenant_id = get_current_tenant_id() or "default"
             sessions: list[ChatSession] = []
@@ -739,11 +850,14 @@ class SessionManager:
             for key, sess in self._sessions.items():
                 if sess.session_id in seen_sids:
                     continue
-                if key.startswith(f"{tenant_id}:") and (
-                    include_archived or not sess.archived
-                ):
-                    sessions.append(sess)
-                    seen_sids.add(sess.session_id)
+                if not key.startswith(f"{tenant_id}:"):
+                    continue
+                if not include_archived and sess.archived:
+                    continue
+                if not include_empty and self._is_empty_web_shell(sess):
+                    continue
+                sessions.append(sess)
+                seen_sids.add(sess.session_id)
 
             # Sort by updated_at descending (newest activity first).
             # Fall back to created_at for old sessions without updated_at.

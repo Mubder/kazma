@@ -56,3 +56,26 @@ def test_ws_chat_endpoint_ping_pong():
         websocket.send_json({"action": "ping"})
         data = websocket.receive_json()
         assert data == {"type": "pong"}
+
+
+def test_ws_connect_does_not_create_empty_listed_session():
+    """Bare WS connect must not leave a 'Web Session · 0 msgs' sidebar row."""
+    from kazma_ui.session_manager import get_session_manager, reset_session_manager
+
+    reset_session_manager()
+    app = FastAPI()
+    router = create_ws_chat_router()
+    app.include_router(router)
+
+    client = TestClient(app)
+    sid = "ws-empty-shell-test"
+    with client.websocket_connect(f"/ws/chat/{sid}") as websocket:
+        websocket.send_json({"action": "ping"})
+        assert websocket.receive_json() == {"type": "pong"}
+
+    mgr = get_session_manager()
+    # Hidden from the default sidebar list even if a memory shell exists.
+    assert all(s.session_id != sid for s in mgr.list_all())
+    shell = mgr.get(sid)
+    if shell is not None:
+        assert shell.messages == []

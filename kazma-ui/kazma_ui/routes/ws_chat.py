@@ -229,16 +229,33 @@ def create_ws_chat_router(
                 return a.cost_breaker
         return None
 
-    def _get_session_and_thread(session_id: str) -> tuple[Any, str]:
+    def _get_session_and_thread(
+        session_id: str,
+        *,
+        durable: bool = False,
+    ) -> tuple[Any, str]:
+        """Resolve session + thread for this socket.
+
+        *durable=False* (WS connect default): create an in-memory shell only —
+        do **not** write an empty "Web Session · 0 msgs" row to the DB. The
+        first accepted ``send_prompt`` calls ``put()`` and makes it durable.
+        Gateway threads (``gw-*``) still force thread_id alignment and persist
+        when needed.
+        """
         store = get_session_manager()
-        session = store.get_or_create(session_id)
+        session = store.get(session_id)
+        if session is None:
+            session = store.get_or_create(session_id, durable=durable)
         if session_id.startswith("gw-"):
             if session.thread_id != session_id:
                 session.thread_id = session_id
                 store.put(session)
         elif not session.thread_id:
             session.thread_id = str(uuid.uuid4())
-            store.put(session)
+            # Only durable-write when the session already has content (or the
+            # caller asked for durable). Empty shells stay memory-only.
+            if durable or session.messages:
+                store.put(session)
         return session, session.thread_id
 
     async def _scan_and_emit_hitl_interrupt(
@@ -874,6 +891,43 @@ def create_ws_chat_router(
                         await _ws_research()
                         continue
 
+                    # Client-side correlation id for prompt_ack (durable UI).
+                    client_msg_id = str(
+                        payload.get("client_msg_id") or uuid.uuid4()
+                    ).strip() or str(uuid.uuid4())
+
+                    async def _send_prompt_ack(
+                        *,
+                        accepted: bool,
+                        reason: str = "",
+                        message: str = "",
+                    ) -> None:
+                        """Tell the browser the prompt was (or was not) durable."""
+                        data: dict[str, Any] = {
+                            "client_msg_id": client_msg_id,
+                            "accepted": accepted,
+                            "session_id": session_id,
+                            "message_count": len(getattr(session, "messages", []) or []),
+                        }
+                        if reason:
+                            data["reason"] = reason
+                        if message:
+                            data["message"] = message
+                        try:
+                            await websocket.send_json(
+                                TelemetryEvent(
+                                    type="prompt_ack",
+                                    data=data,
+                                    thread_id=thread_id,
+                                ).to_dict()
+                            )
+                        except Exception:
+                            logger.debug(
+                                "[WS-Chat] prompt_ack send failed session=%s",
+                                session_id[:12],
+                                exc_info=True,
+                            )
+
                     # ── Cross-transport duplicate-turn guard ─────────────
                     # If a DETACHED turn (previous connection that refreshed/
                     # switched tabs, or an SSE pump) is still running on this
@@ -915,13 +969,19 @@ def create_ws_chat_router(
                                 "[WS-Chat] Rejecting prompt for thread=%s (turn still running)",
                                 thread_id[:12],
                             )
+                            busy_msg = (
+                                "⏳ Your previous message is still being "
+                                "processed. It will appear here shortly — no need to resend."
+                            )
+                            await _send_prompt_ack(
+                                accepted=False,
+                                reason="turn_busy",
+                                message=busy_msg,
+                            )
                             await websocket.send_json(
                                 TelemetryEvent(
                                     type="graph_error",
-                                    data={
-                                        "message": "⏳ Your previous message is still being "
-                                        "processed. It will appear here shortly — no need to resend."
-                                    },
+                                    data={"message": busy_msg},
                                     thread_id=thread_id,
                                 ).to_dict()
                             )
@@ -930,18 +990,107 @@ def create_ws_chat_router(
                             )
                             continue
 
-                    # Record user message in SessionStore (only once the turn is
-                    # accepted — a rejected prompt leaves no dangling bubble).
+                    # Durability: persist the user message BEFORE the graph
+                    # starts (and before any long setup). Tab switch / refresh
+                    # must still show the prompt even if the LLM never replies.
+                    # client_msg_id dedup: reconnect resends must not double-insert.
                     try:
-                        session.add_message("user", text)
-                        get_session_manager().put(session)
+                        store = get_session_manager()
+                        live = store.get(session_id) or session
+                        already = False
+                        for m in live.messages or []:
+                            if (
+                                m.get("role") == "user"
+                                and m.get("client_msg_id")
+                                and m.get("client_msg_id") == client_msg_id
+                            ):
+                                already = True
+                                break
+                        if already:
+                            session = live
+                            await _send_prompt_ack(
+                                accepted=True,
+                                reason="duplicate",
+                            )
+                            # Turn already running from the first accept — do not
+                            # start a second graph invocation.
+                            _alive = get_active_turn(thread_id)
+                            if _alive is not None and not _alive.done():
+                                logger.info(
+                                    "[WS-Chat] Duplicate prompt_ack (turn running) "
+                                    "session=%s client_msg_id=%s",
+                                    session_id[:12],
+                                    client_msg_id[:12],
+                                )
+                                continue
+                            # Stuck pending bubble with no live task → fall
+                            # through and re-run the graph without re-inserting
+                            # the user message.
+                            last = live.messages[-1] if live.messages else None
+                            if not (
+                                last
+                                and last.get("role") == "assistant"
+                                and last.get("pending")
+                            ):
+                                logger.info(
+                                    "[WS-Chat] Duplicate prompt_ack (turn finished) "
+                                    "session=%s client_msg_id=%s",
+                                    session_id[:12],
+                                    client_msg_id[:12],
+                                )
+                                continue
+                            logger.info(
+                                "[WS-Chat] Replaying stuck turn session=%s "
+                                "client_msg_id=%s",
+                                session_id[:12],
+                                client_msg_id[:12],
+                            )
+                        else:
+                            live.add_message(
+                                "user",
+                                text,
+                                client_msg_id=client_msg_id,
+                            )
+                            if not live.thread_id:
+                                live.thread_id = thread_id
+                            # First message makes the session durable.
+                            store.put(live)
+                            session = live
+                            # "Turn in progress" marker for reload / poller.
+                            _ensure_pending_assistant_bubble(session_id)
+                            # ACK after durable write so the client stops retrying.
+                            await _send_prompt_ack(accepted=True)
+                            logger.info(
+                                "[WS-Chat] Accepted prompt session=%s thread=%s "
+                                "client_msg_id=%s chars=%d",
+                                session_id[:12],
+                                thread_id[:12],
+                                client_msg_id[:12],
+                                len(text),
+                            )
                     except Exception as exc:
-                        logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
-
-                    # "Turn in progress" marker: a reload shows a processing
-                    # indicator instead of a blank gap, and the poller watches
-                    # until the final persist pops pending.
-                    _ensure_pending_assistant_bubble(session_id)
+                        logger.warning(
+                            "[WS-Chat] Failed writing user msg to SessionStore: %s",
+                            exc,
+                        )
+                        await _send_prompt_ack(
+                            accepted=False,
+                            reason="persist_failed",
+                            message="Could not save your message. Please try again.",
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="graph_error",
+                                data={
+                                    "message": "Could not save your message. Please try again."
+                                },
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            EventBridge.create_idle_event(thread_id).to_dict()
+                        )
+                        continue
 
                     from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.agent.state import initial_supervisor_state

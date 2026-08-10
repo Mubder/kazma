@@ -111,6 +111,17 @@ document.addEventListener('alpine:init', () => {
     _turnActive: false,
     /** True when we close the socket on purpose (session switch / reconnect). */
     _intentionalClose: false,
+    /**
+     * Outbound frames waiting for an OPEN socket (or re-send after drop
+     * before prompt_ack). Each entry: { payload, expectAck, clientMsgId, attempts }.
+     */
+    _outboundQueue: [],
+    /** client_msg_id → { timer, attempts } for unacked send_prompt frames. */
+    _pendingAcks: {},
+    /** Max time to wait for server prompt_ack before surfacing an error. */
+    _ackTimeoutMs: 20000,
+    /** Max resend attempts for an unacked send_prompt across reconnects. */
+    _maxSendAttempts: 5,
 
     // ── UI bridge helpers ────────────────────────────────────
     _chat() {
@@ -199,6 +210,8 @@ document.addEventListener('alpine:init', () => {
 
       // Switching sessions must never inherit a stuck turn from the previous one.
       if (this.sessionId && this.sessionId !== sessionId) {
+        this._failAllPendingAcks(null);
+        this._outboundQueue = [];
         this._resetTurnState();
         const chat = this._chat();
         if (chat && typeof chat.endTurn === 'function') chat.endTurn();
@@ -241,6 +254,8 @@ document.addEventListener('alpine:init', () => {
           this._reconnectTimer = null;
         }
         console.log(`[AgentStore] Connected to telemetry bus: ${sessionId}`);
+        // Flush any prompts that were typed while reconnecting / socket down.
+        this._flushOutboundQueue();
       };
 
       this._socket.onmessage = (evt) => {
@@ -264,19 +279,31 @@ document.addEventListener('alpine:init', () => {
         this._intentionalClose = false;
         console.warn(`[AgentStore] Telemetry socket closed for session ${sessionId} (code=${code}, reason=${reason || 'none'})`);
 
-        // Only catch-up-poll on unexpected drops mid-turn — not intentional
-        // close/reconnect (loadSession/connect), which caused a 2s blink loop.
+        const hasUnacked =
+          (this._outboundQueue && this._outboundQueue.length > 0) ||
+          (this._pendingAcks && Object.keys(this._pendingAcks).length > 0);
+
+        // Unexpected drop mid-turn: if we still have an unacked send_prompt,
+        // keep the UI in "thinking" and re-send after reconnect. Otherwise
+        // unlock and poll SessionStore for a detached turn result.
         if (!intentional && this._turnActive) {
-          this._endTurn();
-          try {
-            if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
-              window.KazmaChat.pollBackgroundTurn(this.sessionId, 0);
-            }
-          } catch (e) { /* ignore */ }
+          if (hasUnacked) {
+            // Re-queue any in-flight unacked prompts so open flushes them.
+            this._requeuePendingAcks();
+            console.warn('[AgentStore] Socket dropped with unacked prompt — will resend on reconnect');
+          } else {
+            this._endTurn();
+            try {
+              if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
+                window.KazmaChat.pollBackgroundTurn(this.sessionId, 0);
+              }
+            } catch (e) { /* ignore */ }
+          }
         }
 
         if (code === 4003) {
           console.warn('[AgentStore] WebSocket connection rejected (4003 Unauthorized). Pausing auto-reconnect.');
+          this._failAllPendingAcks('WebSocket unauthorized (login expired). Refresh and try again.');
           return;
         }
 
@@ -288,6 +315,8 @@ document.addEventListener('alpine:init', () => {
 
     disconnect() {
       this._intentionalClose = true;
+      this._failAllPendingAcks(null); // silent clear on session switch
+      this._outboundQueue = [];
       this._closeSocket();
       this._resetTurnState();
       this.sessionId = null;
@@ -331,10 +360,19 @@ document.addEventListener('alpine:init', () => {
       this.statusMessage = _ti('thinking', 'Kazma is thinking…');
       this.activeNode = 'Supervisor';
 
+      let clientMsgId = '';
+      try {
+        if (window.crypto && crypto.randomUUID) clientMsgId = crypto.randomUUID();
+      } catch (e) { /* ignore */ }
+      if (!clientMsgId) {
+        clientMsgId = 'm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      }
+
       const payload = {
         action: 'send_prompt',
         text: text.trim(),
         model: model || '',
+        client_msg_id: clientMsgId,
       };
 
       // Attachments (binary uploads) carried over the WS bus the same way the
@@ -344,7 +382,7 @@ document.addEventListener('alpine:init', () => {
         payload.attachments = attachments;
       }
 
-      this._sendPayload(payload);
+      this._enqueueSend(payload, { expectAck: true, clientMsgId: clientMsgId });
     },
 
     submitApproval(approved = true, scope = 'once', threadId = null) {
@@ -379,20 +417,210 @@ document.addEventListener('alpine:init', () => {
           : _ti('executing_approved', 'Executing approved action…'))
         : _ti('denying_tool', 'Denying tool…');
 
-      this._sendPayload(payload);
+      this._enqueueSend(payload, { expectAck: false });
     },
 
-    _sendPayload(payload) {
-      if (this._socket && this._socket.readyState === WebSocket.OPEN) {
-        this._socket.send(JSON.stringify(payload));
-      } else {
-        console.warn('[AgentStore] WS not connected, queuing reconnect before send');
-        if (this.sessionId) {
-          this.connect(this.sessionId);
-          setTimeout(() => this._sendPayload(payload), 500);
-        } else {
-          this._endTurn();
+    /**
+     * Queue a frame until the socket is OPEN, then send. For send_prompt,
+     * track prompt_ack so a reconnect can safely resend once.
+     */
+    _enqueueSend(payload, opts) {
+      const options = opts || {};
+      const entry = {
+        payload: payload,
+        expectAck: !!options.expectAck,
+        clientMsgId: options.clientMsgId || (payload && payload.client_msg_id) || '',
+        attempts: 0,
+      };
+      if (!this._outboundQueue) this._outboundQueue = [];
+      this._outboundQueue.push(entry);
+      this._flushOutboundQueue();
+      if (!this._socket || this._socket.readyState !== WebSocket.OPEN) {
+        console.warn('[AgentStore] WS not connected — queued frame, reconnecting');
+        if (this.sessionId) this.connect(this.sessionId);
+        else this._failAllPendingAcks('No active session. Refresh and try again.');
+      }
+    },
+
+    _flushOutboundQueue() {
+      if (!this._outboundQueue || !this._outboundQueue.length) return;
+      if (!this._socket || this._socket.readyState !== WebSocket.OPEN) return;
+
+      const remaining = [];
+      for (let i = 0; i < this._outboundQueue.length; i++) {
+        const entry = this._outboundQueue[i];
+        if (!entry || !entry.payload) continue;
+        entry.attempts = (entry.attempts || 0) + 1;
+        if (entry.attempts > (this._maxSendAttempts || 5)) {
+          if (entry.expectAck && entry.clientMsgId) {
+            this._failAck(
+              entry.clientMsgId,
+              'Could not deliver your message after several retries. Please resend.'
+            );
+          }
+          continue;
         }
+        try {
+          this._socket.send(JSON.stringify(entry.payload));
+          if (entry.expectAck && entry.clientMsgId) {
+            this._armAckTimeout(entry);
+          }
+          // Non-ack frames leave the queue once sent; ack frames leave on prompt_ack.
+          if (!entry.expectAck) {
+            continue;
+          }
+          // Keep a shadow for resend-on-drop until ack arrives (not in outbound queue).
+        } catch (err) {
+          console.warn('[AgentStore] send failed, will retry:', err);
+          remaining.push(entry);
+        }
+      }
+      this._outboundQueue = remaining;
+    },
+
+    _armAckTimeout(entry) {
+      if (!entry || !entry.clientMsgId) return;
+      if (!this._pendingAcks) this._pendingAcks = {};
+      const existing = this._pendingAcks[entry.clientMsgId];
+      if (existing && existing.timer) {
+        try { clearTimeout(existing.timer); } catch (e) { /* ignore */ }
+      }
+      const clientMsgId = entry.clientMsgId;
+      const timer = setTimeout(() => {
+        const pending = this._pendingAcks && this._pendingAcks[clientMsgId];
+        if (!pending) return;
+        // Soft retry once more via reconnect if attempts remain.
+        if ((pending.attempts || 1) < (this._maxSendAttempts || 5)) {
+          console.warn('[AgentStore] prompt_ack timeout — requeueing', clientMsgId);
+          this._requeueAckEntry(pending);
+          if (this.sessionId) this.connect(this.sessionId);
+          return;
+        }
+        this._failAck(
+          clientMsgId,
+          'Server did not acknowledge your message. Please resend.'
+        );
+      }, this._ackTimeoutMs || 20000);
+      this._pendingAcks[clientMsgId] = {
+        payload: entry.payload,
+        clientMsgId: clientMsgId,
+        attempts: entry.attempts || 1,
+        timer: timer,
+      };
+    },
+
+    _clearAck(clientMsgId) {
+      if (!clientMsgId || !this._pendingAcks) return;
+      const pending = this._pendingAcks[clientMsgId];
+      if (pending && pending.timer) {
+        try { clearTimeout(pending.timer); } catch (e) { /* ignore */ }
+      }
+      delete this._pendingAcks[clientMsgId];
+    },
+
+    _requeueAckEntry(pending) {
+      if (!pending || !pending.payload) return;
+      this._clearAck(pending.clientMsgId);
+      if (!this._outboundQueue) this._outboundQueue = [];
+      // Avoid duplicate queue entries for the same client_msg_id.
+      const id = pending.clientMsgId;
+      const already = this._outboundQueue.some(
+        (e) => e && e.clientMsgId === id
+      );
+      if (!already) {
+        this._outboundQueue.push({
+          payload: pending.payload,
+          expectAck: true,
+          clientMsgId: id,
+          attempts: pending.attempts || 1,
+        });
+      }
+    },
+
+    _requeuePendingAcks() {
+      if (!this._pendingAcks) return;
+      const ids = Object.keys(this._pendingAcks);
+      for (let i = 0; i < ids.length; i++) {
+        this._requeueAckEntry(this._pendingAcks[ids[i]]);
+      }
+    },
+
+    _failAck(clientMsgId, message) {
+      this._clearAck(clientMsgId);
+      if (message) {
+        try {
+          const chat = this._chat();
+          if (chat && typeof chat.appendErrorMessage === 'function') {
+            chat.appendErrorMessage(message);
+          }
+        } catch (e) { /* ignore */ }
+      }
+      this._endTurn();
+    },
+
+    _failAllPendingAcks(message) {
+      const ids = this._pendingAcks ? Object.keys(this._pendingAcks) : [];
+      for (let i = 0; i < ids.length; i++) {
+        this._clearAck(ids[i]);
+      }
+      this._outboundQueue = [];
+      if (message) {
+        try {
+          const chat = this._chat();
+          if (chat && typeof chat.appendErrorMessage === 'function') {
+            chat.appendErrorMessage(message);
+          }
+        } catch (e) { /* ignore */ }
+        this._endTurn();
+      }
+    },
+
+    _handlePromptAck(data) {
+      const d = data || {};
+      const clientMsgId = d.client_msg_id || '';
+      if (clientMsgId) this._clearAck(clientMsgId);
+      // Drop matching outbound queue entry if still present.
+      if (this._outboundQueue && clientMsgId) {
+        this._outboundQueue = this._outboundQueue.filter(
+          (e) => !e || e.clientMsgId !== clientMsgId
+        );
+      }
+      if (d.accepted) {
+        // Durable: refresh sidebar so the session appears with the real title.
+        try {
+          if (window.KazmaChat && typeof window.KazmaChat.refreshSessionsSoon === 'function') {
+            window.KazmaChat.refreshSessionsSoon();
+          } else if (window.KazmaChat && typeof window.KazmaChat.refreshSessions === 'function') {
+            window.KazmaChat.refreshSessions();
+          }
+        } catch (e) { /* ignore */ }
+        return;
+      }
+      // Rejected (turn busy / persist failed) — surface and unlock.
+      const msg =
+        d.message ||
+        (d.reason === 'turn_busy'
+          ? 'Previous message is still processing.'
+          : 'Message was not accepted. Please try again.');
+      // turn_busy already gets a graph_error from the server; only paint if needed.
+      if (d.reason === 'persist_failed' || d.reason === 'turn_busy') {
+        // graph_error handler also ends the turn; keep thinking until that arrives,
+        // but if no graph_error follows, unlock after a short grace.
+        const self = this;
+        setTimeout(function () {
+          if (self._turnActive && !self.pendingApproval) {
+            // leave unlock to graph_error/idle; no-op if already idle
+          }
+        }, 50);
+      }
+      if (d.reason === 'persist_failed') {
+        try {
+          const chat = this._chat();
+          if (chat && typeof chat.appendErrorMessage === 'function') {
+            chat.appendErrorMessage(msg);
+          }
+        } catch (e) { /* ignore */ }
+        this._endTurn();
       }
     },
 
@@ -417,6 +645,11 @@ document.addEventListener('alpine:init', () => {
               window.KazmaChat.applyMemoryExplain(data || frame || {});
             }
           } catch (e) { /* ignore */ }
+          break;
+        }
+
+        case 'prompt_ack': {
+          this._handlePromptAck(data);
           break;
         }
 
