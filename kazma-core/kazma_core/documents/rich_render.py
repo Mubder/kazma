@@ -31,6 +31,7 @@ __all__ = [
     "docx_set_paragraph_shading",
     "docx_heading_bar",
     "docx_add_table",
+    "docx_apply_document_rtl",
 ]
 
 _AR_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
@@ -641,10 +642,13 @@ def docx_heading_bar(
     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
     if rtl:
         docx_set_rtl_paragraph(p, justify=False)
+        docx_set_table_rtl(table)
     else:
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     # Spacing after bar
-    document.add_paragraph("")
+    sp = document.add_paragraph("")
+    if rtl:
+        docx_set_rtl_paragraph(sp, justify=False)
     return table
 
 
@@ -667,6 +671,108 @@ def docx_set_rtl_paragraph(paragraph: Any, *, justify: bool = True) -> None:
         p_pr.append(bidi)
     else:
         existing.set(qn("w:val"), "1")
+    # Complex-script right-to-left run property default for Arabic fonts
+    # (paragraph-level bidi alone is not enough for some Word viewers).
+
+
+def docx_set_table_rtl(table: Any) -> None:
+    """Mark a table as RTL-visual so columns read right→left in Word."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        tbl.insert(0, tbl_pr)
+    # Remove existing bidiVisual if any, then set
+    for child in list(tbl_pr):
+        if child.tag == qn("w:bidiVisual"):
+            tbl_pr.remove(child)
+    bidi_vis = OxmlElement("w:bidiVisual")
+    bidi_vis.set(qn("w:val"), "1")
+    tbl_pr.append(bidi_vis)
+
+
+def docx_apply_document_rtl(document: Any) -> None:
+    """Document-level RTL so Word opens as an RTL document (not LTR shell).
+
+    Paragraph ``w:bidi`` alone leaves the page chrome / gutter / table flow LTR
+    in many viewers (Telegram preview, Word status bar still says LTR).
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    # 1) Every section: bidi + rtlGutter
+    for section in document.sections:
+        sect_pr = section._sectPr
+        if sect_pr.find(qn("w:bidi")) is None:
+            sect_pr.append(OxmlElement("w:bidi"))
+        if sect_pr.find(qn("w:rtlGutter")) is None:
+            sect_pr.append(OxmlElement("w:rtlGutter"))
+
+    # 2) themeFontLang bidi → ar-SA
+    settings = document.settings.element
+    tfl = settings.find(qn("w:themeFontLang"))
+    if tfl is None:
+        tfl = OxmlElement("w:themeFontLang")
+        settings.append(tfl)
+    tfl.set(qn("w:bidi"), "ar-SA")
+    if tfl.get(qn("w:val")) is None:
+        tfl.set(qn("w:val"), "ar-SA")
+
+    # 3) All tables visual RTL
+    for table in document.tables:
+        try:
+            docx_set_table_rtl(table)
+        except Exception:
+            logger.debug("[rich_render] table rtl failed", exc_info=True)
+
+    # 4) Every paragraph (incl. empty spacers / headers / footers / cells)
+    def _walk_paragraphs() -> Any:
+        yield from document.paragraphs
+        for section in document.sections:
+            yield from section.header.paragraphs
+            yield from section.footer.paragraphs
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    yield from cell.paragraphs
+
+    for para in _walk_paragraphs():
+        try:
+            # Keep existing justify if already set; force bidi
+            p_pr = para._p.get_or_add_pPr()
+            if p_pr.find(qn("w:bidi")) is None:
+                bidi = OxmlElement("w:bidi")
+                bidi.set(qn("w:val"), "1")
+                p_pr.append(bidi)
+            # Default alignment for empty paras → right
+            if para.alignment is None and not (para.text or "").strip():
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        except Exception:
+            logger.debug("[rich_render] para rtl walk failed", exc_info=True)
+
+    # 5) Normal style default bidi (new paragraphs inherit)
+    try:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+        normal = document.styles["Normal"]
+        normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        # style element bidi
+        style_el = normal.element
+        p_pr = style_el.find(qn("w:pPr"))
+        if p_pr is None:
+            p_pr = OxmlElement("w:pPr")
+            style_el.append(p_pr)
+        if p_pr.find(qn("w:bidi")) is None:
+            bidi = OxmlElement("w:bidi")
+            bidi.set(qn("w:val"), "1")
+            p_pr.append(bidi)
+    except Exception:
+        logger.debug("[rich_render] Normal style rtl failed", exc_info=True)
 
 
 def docx_add_table(
@@ -719,8 +825,12 @@ def docx_add_table(
         for ci in range(ncols):
             val = row[ci] if ci < len(row) else ""
             _fill_cell(table.rows[ri + 1].cells[ci], str(val), header=False)
+    if rtl:
+        docx_set_table_rtl(table)
     # Spacer paragraph after table
-    document.add_paragraph("")
+    sp = document.add_paragraph("")
+    if rtl:
+        docx_set_rtl_paragraph(sp, justify=False)
 
 
 def _docx_add_runs_with_inline_md(paragraph: Any, text: str) -> None:

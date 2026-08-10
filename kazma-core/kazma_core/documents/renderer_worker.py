@@ -608,6 +608,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
 
     from kazma_core.documents.rich_render import (
         docx_add_table,
+        docx_apply_document_rtl,
         docx_force_justify,
         docx_heading_bar,
         docx_set_rtl_paragraph,
@@ -745,6 +746,11 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
                 docx_set_rtl_paragraph(p, justify=False)
             else:
                 docx_force_justify(p)
+
+    # Critical: section + table + theme RTL so Word does not open as LTR shell
+    if rtl:
+        docx_apply_document_rtl(document)
+
     document.save(output)
 
 

@@ -190,6 +190,15 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
                         if p_pr is not None and p_pr.find(qn("w:bidi")) is not None:
                             has_bidi = True
     assert has_bidi
+    # Document must open as RTL (section bidi), not LTR shell with Arabic text
+    sect = doc.sections[0]._sectPr
+    assert sect.find(qn("w:bidi")) is not None
+    assert sect.find(qn("w:rtlGutter")) is not None
+    tfl = doc.settings.element.find(qn("w:themeFontLang"))
+    assert tfl is not None and tfl.get(qn("w:bidi")) == "ar-SA"
+    for table in doc.tables:
+        assert table._tbl.tblPr is not None
+        assert table._tbl.tblPr.find(qn("w:bidiVisual")) is not None
 
 
 def test_markdown_table_and_docx_justify_shading(tmp_path: Path) -> None:
