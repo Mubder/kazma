@@ -1267,15 +1267,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
 - **GitHub OAuth start**: removed from `ALWAYS_OPEN_PREFIXES` — requires auth
   cookie/session; callback remains open.
 
-## Unreleased — OAuth Host harden + /knowledge gate + handoff breaker + docs (2026-07-25)
+## v0.9.3 (2026-08-10)
 
-- **GitHub OAuth**: redirect URI never uses client `Host` / `X-Forwarded-*`.
-  Prod requires `KAZMA_PUBLIC_URL`; dev uses `KAZMA_HOST`/`KAZMA_PORT` only.
-- **Auth shells**: `/knowledge` added to `SENSITIVE_PREFIXES` (admin HTML gate).
-- **Handoff breaker**: source circuit breaker records once in `_handle_handoff`
-  (removed pre-`record_success` in `worker_dispatch` that double-counted).
-- **Docs honesty**: delegation + `kazma-permissions.yaml` marked library-only /
-  not runtime-enforced (aligned with `UNWIRED_INVENTORY.md`).
+### Fix
+
+- **documents**: DOCX→PDF without LibreOffice and honest PDF sniff
 
 ## v0.9.2 (2026-08-10)
 
