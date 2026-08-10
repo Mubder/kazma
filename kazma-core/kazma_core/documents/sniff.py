@@ -58,13 +58,16 @@ _NESTED_ARCHIVE_EXTENSIONS = frozenset(
     {".7z", ".bz2", ".gz", ".rar", ".tar", ".tgz", ".xz", ".zip"}
 )
 _EMBEDDED_MEMBER_PARTS = frozenset({"activex", "embeddings", "oleobjects"})
-# High-risk PDF features only. Do NOT treat mere /OpenAction or /AA as hostile —
-# many legitimate PDFs open to a page or set field actions with /GoTo destinations.
-# The hostile-corpus sample uses /OpenAction + /JavaScript, which still matches.
+# High-risk PDF dictionary names only. Do NOT treat mere /OpenAction or /AA as
+# hostile — many legitimate PDFs open to a page. Do NOT match short `/JS`
+# alone: compressed content streams produce random-byte false positives.
+# Hostile corpus uses /JavaScript which still matches.
 _PDF_ACTIVE_CONTENT_RE = re.compile(
-    rb"/(?:JavaScript|JS|Launch|EmbeddedFile|RichMedia|GoToE)\b",
+    rb"/(?:JavaScript|Launch|EmbeddedFile|RichMedia|GoToE)(?=[\s/\]>)])",
     re.IGNORECASE,
 )
+# Catalog/name-tree only (short form appears only as a PDF name token).
+_PDF_JS_NAME_RE = re.compile(rb"(?:[\s<\[/])/(?:JS)(?=[\s/\]>()])")
 _ARCHIVE_CHUNK_BYTES = 64 * 1024
 
 
@@ -261,19 +264,82 @@ def _stream_contains(path: Path, markers: tuple[bytes, ...]) -> set[bytes]:
     return found
 
 
-def _pdf_has_active_content(path: Path) -> bool:
-    """Scan a PDF for high-risk active/embedded object declarations.
+def _pdf_action_is_dangerous(action: object) -> bool:
+    """True when a PDF action dictionary is JS/Launch-style (not plain GoTo)."""
+    if action is None:
+        return False
+    try:
+        obj = action.get_object() if hasattr(action, "get_object") else action
+        subtype = str(obj.get("/S", "") or "")
+    except Exception:
+        return False
+    return subtype in {"/JavaScript", "/JS", "/Launch", "/RichMedia", "/GoToE"}
 
-    Rejects JavaScript, Launch, EmbeddedFile, RichMedia, and GoToE. Harmless
-    ``/OpenAction`` / ``/AA`` GoTo destinations are allowed so normal office
-    exports can be ingested.
+
+def _pdf_has_active_content_structural(path: Path) -> bool | None:
+    """Use pypdf structure when available. Returns None if pypdf is missing."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return None
+    try:
+        reader = PdfReader(str(path), strict=False)
+    except Exception:
+        return None
+    if getattr(reader, "is_encrypted", False):
+        # Encryption is handled separately via /Encrypt byte marker.
+        return False
+    try:
+        root = reader.trailer.get("/Root", {})
+        if hasattr(root, "get_object"):
+            root = root.get_object()
+    except Exception:
+        return False
+    try:
+        if _pdf_action_is_dangerous(root.get("/OpenAction")):
+            return True
+        if "/JavaScript" in root or "/Launch" in root:
+            return True
+        names = root.get("/Names")
+        if names is not None:
+            names = names.get_object() if hasattr(names, "get_object") else names
+            if any(key in names for key in ("/JavaScript", "/EmbeddedFiles")):
+                return True
+        for page in reader.pages:
+            if _pdf_action_is_dangerous(page.get("/AA")):
+                return True
+            for reference in page.get("/Annots", ()) or ():
+                try:
+                    annotation = reference.get_object()
+                except Exception:
+                    continue
+                if any(
+                    _pdf_action_is_dangerous(annotation.get(key))
+                    for key in ("/A", "/AA")
+                ) or "/JavaScript" in annotation:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def _pdf_has_active_content(path: Path) -> bool:
+    """Detect high-risk PDF active content with low false-positive rate.
+
+    Prefers a structural pypdf pass (catalog / names / annotations). Falls back
+    to a conservative byte scan that avoids short ``/JS`` matches inside
+    compressed streams (a common false positive on real-world PDFs).
     """
+
+    structural = _pdf_has_active_content_structural(path)
+    if structural is not None:
+        return structural
 
     tail = b""
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(_ARCHIVE_CHUNK_BYTES), b""):
             window = tail + chunk
-            if _PDF_ACTIVE_CONTENT_RE.search(window):
+            if _PDF_ACTIVE_CONTENT_RE.search(window) or _PDF_JS_NAME_RE.search(window):
                 return True
             tail = window[-64:]
     return False

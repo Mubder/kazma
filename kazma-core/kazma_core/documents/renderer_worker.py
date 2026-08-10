@@ -488,10 +488,9 @@ def _office_text_to_pdf(
 
 
 def _libreoffice(request: dict[str, Any], source: Path, output: Path) -> None:
-    from kazma_core.documents.binaries import find_soffice
+    from kazma_core.documents.binaries import find_soffice, run_soffice_cli
 
-    executable = shutil.which("soffice") or shutil.which("libreoffice") or find_soffice()
-    if not executable:
+    if not find_soffice():
         raise WorkerError(
             "renderer_unavailable",
             "Healthy headless LibreOffice is unavailable (soffice not found on PATH "
@@ -500,32 +499,40 @@ def _libreoffice(request: dict[str, Any], source: Path, output: Path) -> None:
     profile = output.parent / "lo-profile"
     profile.mkdir()
     target = output.suffix.lstrip(".")
-    result = subprocess.run(
-        [
-            executable,
-            "--headless",
-            "--nologo",
-            "--nodefault",
-            "--nolockcheck",
-            "--norestore",
-            f"-env:UserInstallation={profile.as_uri()}",
-            "--convert-to",
-            target,
-            "--outdir",
-            str(output.parent),
-            str(source),
-        ],
-        cwd=output.parent,
-        env={
-            key: os.environ[key]
-            for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
-            if key in os.environ
-        },
-        capture_output=True,
-        check=False,
-        timeout=int(request.get("library_timeout_seconds", 120)),
-        shell=False,
-    )
+    env = {
+        key: os.environ[key]
+        for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+        if key in os.environ
+    }
+    try:
+        result = run_soffice_cli(
+            (
+                "--headless",
+                "--nologo",
+                "--nodefault",
+                "--nolockcheck",
+                "--norestore",
+                f"-env:UserInstallation={profile.as_uri()}",
+                "--convert-to",
+                target,
+                "--outdir",
+                str(output.parent),
+                str(source),
+            ),
+            timeout=float(request.get("library_timeout_seconds", 120)),
+            cwd=output.parent,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        raise WorkerError(
+            "renderer_unavailable",
+            "Healthy headless LibreOffice is unavailable",
+        ) from exc
+    except Exception as exc:
+        raise WorkerError(
+            "conversion_failed",
+            f"Headless LibreOffice conversion failed ({type(exc).__name__})",
+        ) from exc
     produced = output.parent / f"{source.stem}.{target}"
     if result.returncode or not produced.is_file():
         raise WorkerError("conversion_failed", "Headless LibreOffice conversion failed")

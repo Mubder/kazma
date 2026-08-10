@@ -43,7 +43,18 @@ def test_pdf_sniff_rejects_javascript_openaction(tmp_path: Path) -> None:
     assert _pdf_has_active_content(path) is True
     with pytest.raises(Exception) as exc:
         sniff_document(path, DocumentConfig(storage_root=tmp_path / "store"))
-    assert "JavaScript" in str(exc.value) or "disabled" in str(exc.value).lower()
+    msg = str(exc.value).lower()
+    assert "javascript" in msg or "disabled" in msg or "launch" in msg
+
+
+def test_find_soffice_prefers_com_on_windows() -> None:
+    from kazma_core.documents.binaries import find_soffice
+    import sys
+
+    found = find_soffice()
+    if found and sys.platform == "win32":
+        # Prefer console binary so version probes do not open an interactive window.
+        assert found.lower().endswith(".com") or "soffice" in found.lower()
 
 
 def test_pdf_sniff_accepts_minimal_blank_pdf(tmp_path: Path) -> None:

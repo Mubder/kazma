@@ -503,31 +503,47 @@ function documentsPage() {
     async deleteDocument(documentId, title) {
       if (!documentId || this.acting) return;
       const label = (title || documentId).toString().slice(0, 80);
-      const proceed = await window.kazmaConfirm({
-        title: "Delete / archive document?",
-        message:
-          `Archive "${label}"?\n\n` +
-          "The document leaves your library (soft-delete). Any search index " +
-          "entries are removed. Original bytes stay until garbage collection " +
-          "reclaims unreferenced storage — this cannot be undone from the UI.",
-        confirmText: "Delete / Archive",
-        cancelText: "Cancel",
-        danger: true,
-      });
+      let proceed = false;
+      try {
+        if (typeof window.kazmaConfirm === "function") {
+          proceed = !!(await window.kazmaConfirm({
+            title: "Delete / archive document?",
+            message:
+              `Archive "${label}"?\n\n` +
+              "The document leaves your library (soft-delete). Any search index " +
+              "entries are removed. Original bytes stay until garbage collection " +
+              "reclaims unreferenced storage — this cannot be undone from the UI.",
+            confirmText: "Delete / Archive",
+            cancelText: "Cancel",
+            danger: true,
+          }));
+        } else {
+          proceed = window.confirm(`Archive "${label}"?`);
+        }
+      } catch (e) {
+        proceed = window.confirm(`Archive "${label}"?`);
+      }
       if (!proceed) return;
       this.acting = true;
       try {
-        const r = await fetch(`/api/documents/${documentId}/delete`, {
+        const r = await fetch(`/api/documents/${encodeURIComponent(documentId)}/delete`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ reason: "user_requested" }),
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.ok) {
-          this.toast(j.error || "Delete failed", "error");
+          const msg = j.error || j.message || `Delete failed (HTTP ${r.status})`;
+          this.toast(msg, "error");
+          console.warn("[documents] delete failed", r.status, j);
           return;
         }
         this.toast("Document archived (soft-deleted)", "success");
+        // Optimistically drop from the local list so the UI updates even if
+        // a follow-up list call races.
+        this.documents = (this.documents || []).filter(
+          (d) => d.document_id !== documentId,
+        );
         if (this.selected && this.selected.document_id === documentId) {
           this.selected = null;
           this.versions = [];
@@ -541,7 +557,8 @@ function documentsPage() {
         await this.loadDocuments();
         await this.loadOps();
       } catch (e) {
-        this.toast("Delete failed", "error");
+        this.toast("Delete failed (network)", "error");
+        console.warn("[documents] delete error", e);
       } finally {
         this.acting = false;
       }

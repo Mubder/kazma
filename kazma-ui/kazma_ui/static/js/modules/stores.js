@@ -118,6 +118,7 @@ export function registerStores() {
                 const message = opts.message || '';
                 const confirmText = opts.confirmText || 'Confirm';
                 const cancelText = opts.cancelText || 'Cancel';
+                // Explicit false disables danger styling; default remains true.
                 const danger = opts.danger !== false;
                 const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
                 const escapedMsg = String(message).replace(/[&<>"']/g, function (c) { return entityMap[c]; });
@@ -127,6 +128,9 @@ export function registerStores() {
                     const settle = function (val) {
                         if (settled) return;
                         settled = true;
+                        // Clear onClose so modal.close() after an action button
+                        // does not overwrite settle(true) with settle(false).
+                        self._onClose = null;
                         resolve(val);
                     };
                     self.show({
@@ -135,8 +139,18 @@ export function registerStores() {
                         size: 'sm',
                         onClose: function () { settle(false); },
                         actions: [
-                            { label: cancelText, variant: 'btn-secondary', close: true, handler: function () { settle(false); } },
-                            { label: confirmText, variant: danger ? 'btn-danger' : 'btn-primary', close: true, handler: function () { settle(true); } },
+                            {
+                                label: cancelText,
+                                variant: 'btn-secondary',
+                                close: true,
+                                handler: function () { settle(false); },
+                            },
+                            {
+                                label: confirmText,
+                                variant: danger ? 'btn-danger' : 'btn-primary',
+                                close: true,
+                                handler: function () { settle(true); },
+                            },
                         ],
                     });
                 });

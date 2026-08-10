@@ -956,6 +956,13 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, **data}
         except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[documents_api] delete failed doc=%s actor=%s type=%s err=%s",
+                document_id[:12],
+                actor,
+                type(exc).__name__,
+                exc,
+            )
             return _error_for(exc, "delete", not_found_default=True)
 
     @router.post("/{document_id}/delete")
@@ -1044,6 +1051,8 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
             "invalid_request": 400,
             "not_ready": 409,
             "document_access_denied": 404,
+            "document_delete_failed": 500,
+            "document_platform_disabled": 503,
         }.get(code, 400)
         return JSONResponse(
             status_code=status,
@@ -1057,14 +1066,31 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
         return JSONResponse(
             status_code=409, content={"ok": False, "error": str(exc)}
         )
+    # Surface DocumentAccessError from the repository with a clear message
+    # instead of a generic "Not found" when not_found_default is set.
+    err_name = type(exc).__name__
+    if err_name == "DocumentAccessError":
+        return JSONResponse(
+            status_code=403,
+            content={
+                "ok": False,
+                "error": str(exc) or "Not allowed to delete this document",
+                "code": "document_access_denied",
+            },
+        )
     if not_found_default:
         return JSONResponse(
-            status_code=404, content={"ok": False, "error": "Not found"}
+            status_code=404,
+            content={
+                "ok": False,
+                "error": f"{op} failed: {err_name}",
+                "code": "not_found",
+            },
         )
-    logger.warning("[documents_api] %s failed type=%s", op, type(exc).__name__)
+    logger.warning("[documents_api] %s failed type=%s", op, err_name)
     return JSONResponse(
         status_code=400,
-        content={"ok": False, "error": f"{op} failed ({type(exc).__name__})"},
+        content={"ok": False, "error": f"{op} failed ({err_name})"},
     )
 
 

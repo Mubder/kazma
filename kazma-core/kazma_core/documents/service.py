@@ -31,7 +31,7 @@ from .operations import DocumentOperations, OperationScope
 from .parsers.common import sha256_path
 from .registry import ParserRegistry, get_parser_registry
 from .renderers import RendererRegistry, get_renderer_registry
-from .repository import DocumentRepository
+from .repository import DocumentAccessError, DocumentRepository
 from .sandbox import SandboxRequest, run_isolated_subprocess
 from .sniff import sniff_document
 from .storage import ContentAddressedStorage
@@ -706,11 +706,19 @@ class DocumentService:
                 message="Document repository is unavailable",
                 document_id=document_id,
             )
-        record = self.repository.get_document(
-            tenant_id=tenant_id,
-            document_id=document_id,
-            actor_id=actor_id,
-        )
+        try:
+            record = self.repository.get_document(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                actor_id=actor_id,
+            )
+        except DocumentAccessError:
+            return DocumentResult(
+                ok=False,
+                code="document_access_denied",
+                message="Document is unavailable or you lack permission to delete it",
+                document_id=document_id,
+            )
         if record is None:
             return DocumentResult(
                 ok=False,
@@ -721,37 +729,59 @@ class DocumentService:
         libraries: list[str] = []
         if self.knowledge_adapter is not None:
             adapter = self.knowledge_adapter
-            libraries = list(
-                sorted(
-                    set(
-                        adapter.repository.list_indexed_libraries(
-                            tenant_id=tenant_id,
-                            document_id=record.id,
+            try:
+                libraries = list(
+                    sorted(
+                        set(
+                            adapter.repository.list_indexed_libraries(
+                                tenant_id=tenant_id,
+                                document_id=record.id,
+                            )
                         )
-                    )
-                    | set(
-                        adapter.store.list_document_libraries(
-                            tenant_id=tenant_id,
-                            document_id=str(record.id),
+                        | set(
+                            adapter.store.list_document_libraries(
+                                tenant_id=tenant_id,
+                                document_id=str(record.id),
+                            )
                         )
                     )
                 )
-            )
+            except Exception:
+                libraries = []
             for library_id in libraries:
-                result = adapter.unindex_document(
-                    tenant_id=tenant_id,
-                    actor_id=actor_id,
-                    library_id=library_id,
-                    document_id=record.id,
-                )
-                if not result.ok:
-                    return result
-        self.repository.tombstone_document(
-            tenant_id=tenant_id,
-            document_id=record.id,
-            actor_id=actor_id,
-            reason=reason,
-        )
+                try:
+                    result = adapter.unindex_document(
+                        tenant_id=tenant_id,
+                        actor_id=actor_id,
+                        library_id=library_id,
+                        document_id=record.id,
+                    )
+                    if not result.ok:
+                        # Soft-delete should still proceed; log via message.
+                        libraries = [lid for lid in libraries if lid != library_id]
+                except Exception:
+                    continue
+        try:
+            self.repository.tombstone_document(
+                tenant_id=tenant_id,
+                document_id=record.id,
+                actor_id=actor_id,
+                reason=reason,
+            )
+        except DocumentAccessError:
+            return DocumentResult(
+                ok=False,
+                code="document_access_denied",
+                message="Document is unavailable or you lack permission to delete it",
+                document_id=record.id,
+            )
+        except Exception as exc:
+            return DocumentResult(
+                ok=False,
+                code="document_delete_failed",
+                message=f"Document delete failed ({type(exc).__name__})",
+                document_id=record.id,
+            )
         return DocumentResult(
             ok=True,
             code="document_deleted",

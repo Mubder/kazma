@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — LibreOffice quiet CLI, PDF intake, delete actually works (2026-08-10)
+
+- **LibreOffice:** prefer `soffice.com` on Windows + `CREATE_NO_WINDOW` so
+  capability probes no longer open a "Press Enter to continue…" console
+- **PDF upload:** structural active-content check (pypdf); drop short `/JS`
+  byte-scan false positives that blocked normal compressed PDFs
+- **Delete:** write-access tombstone (not owner-only); clear API errors;
+  confirm modal no longer races `settle(true)` → `onClose(false)`; UI
+  optimistically removes the row and shows real HTTP errors
+
 ## Unreleased — Document delete/archive UI (2026-08-10)
 
 - Documents library: **Delete** on each row + **Delete / Archive** in the

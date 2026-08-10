@@ -1061,13 +1061,16 @@ class DocumentRepository:
         tombstone_id = str(new_artifact_id())
         now = _now()
         with self._lock:
-            self._require_owner_locked(tenant, identifier, actor)
+            # Write-capable actors (owner or write ACL) may soft-delete; strict
+            # owner-only blocked legitimate single-user deletes when actor
+            # resolution differed slightly between list and mutate paths.
+            self._require_access_locked(tenant, identifier, actor, "write")
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(
                     """
                     UPDATE documents SET deleted_at = ?, updated_at = ?
-                    WHERE tenant_id = ? AND id = ?
+                    WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
                     """,
                     (now, now, tenant, str(identifier)),
                 )

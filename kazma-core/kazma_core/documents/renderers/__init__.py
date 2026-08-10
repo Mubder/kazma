@@ -82,19 +82,35 @@ def _probe_binary_version(
     executable: str, modified_ns: int
 ) -> tuple[str | None, str | None]:
     del modified_ns
+    from kazma_core.documents.binaries import run_soffice_cli, windows_no_window_flags
+
+    is_lo = Path(executable).name.lower() in {
+        "soffice",
+        "soffice.exe",
+        "soffice.com",
+        "libreoffice",
+    } or "libreoffice" in executable.lower()
     try:
-        result = subprocess.run(
-            [executable, "--headless", "--version"],
-            capture_output=True,
-            check=False,
-            timeout=5,
-            text=True,
-        )
+        if is_lo:
+            result = run_soffice_cli(
+                ("--headless", "--version", "--nolockcheck", "--nodefault", "--norestore"),
+                timeout=8,
+            )
+        else:
+            result = subprocess.run(
+                [executable, "--version"],
+                capture_output=True,
+                check=False,
+                timeout=5,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                creationflags=windows_no_window_flags(),
+            )
     except (OSError, subprocess.SubprocessError) as exc:
         return None, f"health probe failed ({type(exc).__name__})"
     if result.returncode:
         return None, "headless health probe failed"
-    lines = (result.stdout or result.stderr).strip().splitlines()
+    lines = (result.stdout or result.stderr or "").strip().splitlines()
     return (lines[0][:200] if lines else "present"), None
 
 
@@ -102,12 +118,19 @@ def _binary_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None], str
     versions: dict[str, str | None] = {}
     for name in names:
         executable = shutil.which(name)
-        if not executable and name in {"soffice", "soffice.exe", "libreoffice"}:
+        if not executable and name in {
+            "soffice",
+            "soffice.exe",
+            "soffice.com",
+            "libreoffice",
+        }:
             executable = find_soffice()
+        if not executable and Path(name).is_file():
+            executable = str(Path(name))
         if not executable:
             versions[name] = None
             hint = ""
-            if name in {"soffice", "soffice.exe", "libreoffice"}:
+            if name in {"soffice", "soffice.exe", "soffice.com", "libreoffice"}:
                 hint = (
                     " (install LibreOffice and ensure soffice is on PATH, "
                     "or under Program Files\\LibreOffice on Windows)"

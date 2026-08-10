@@ -1027,11 +1027,12 @@ class PostgresDocumentRepository:
         with self._pool.connection() as conn:
             try:
                 with conn.cursor() as cur:
-                    self._require_access(cur, tenant, identifier, actor, "owner")
+                    # Write access (owner or write ACL) — same as SQLite path.
+                    self._require_access(cur, tenant, identifier, actor, "write")
                     cur.execute(
                         """
                         UPDATE documents SET deleted_at = %s, updated_at = %s
-                        WHERE tenant_id = %s AND id = %s
+                        WHERE tenant_id = %s AND id = %s AND deleted_at IS NULL
                         """,
                         (now, now, tenant, str(identifier)),
                     )

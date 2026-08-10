@@ -97,22 +97,48 @@ def _dependency_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None],
 
 
 def _binary_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None], str | None]:
+    from kazma_core.documents.binaries import (
+        find_soffice,
+        run_soffice_cli,
+        windows_no_window_flags,
+    )
+
     versions: dict[str, str | None] = {}
     for name in names:
-        # Accept absolute/resolved paths (e.g. find_soffice()) as well as PATH names.
-        candidate = Path(name)
-        executable = str(candidate) if candidate.is_file() else shutil.which(name)
-        if not executable:
-            versions[name] = None
-            return versions, f"required system binary {name} was not found"
+        is_lo = Path(name).name.lower() in {
+            "soffice",
+            "soffice.exe",
+            "soffice.com",
+            "libreoffice",
+        } or "libreoffice" in name.lower() or name.lower().endswith("soffice.exe")
         try:
-            probe = subprocess.run(
-                [executable, "--version"],
-                capture_output=True,
-                check=False,
-                timeout=5,
-                text=True,
-            )
+            if is_lo:
+                # Prefer soffice.com + CREATE_NO_WINDOW — never interactive console.
+                executable = find_soffice() or (
+                    str(Path(name)) if Path(name).is_file() else shutil.which(name)
+                )
+                if not executable:
+                    versions[name] = None
+                    return versions, f"required system binary {name} was not found"
+                probe = run_soffice_cli(
+                    ("--headless", "--version", "--nolockcheck", "--nodefault", "--norestore"),
+                    timeout=8,
+                )
+            else:
+                candidate = Path(name)
+                executable = str(candidate) if candidate.is_file() else shutil.which(name)
+                if not executable:
+                    versions[name] = None
+                    return versions, f"required system binary {name} was not found"
+                probe = subprocess.run(
+                    [executable, "--version"],
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                    text=True,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=windows_no_window_flags(),
+                )
         except (OSError, subprocess.SubprocessError) as exc:
             versions[name] = None
             return versions, f"system binary {name} failed its health probe ({type(exc).__name__})"
