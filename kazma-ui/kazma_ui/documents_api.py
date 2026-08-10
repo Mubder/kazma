@@ -35,6 +35,8 @@ Endpoints (all under ``/api/documents``):
   POST   /{document_id}/redact     physically redact terms from a PDF version
   POST   /{document_id}/index      publish current version to a library
   POST   /{document_id}/unindex    remove from a library
+  POST   /{document_id}/delete     soft-delete (tombstone/archive); GC reclaims later
+  DELETE /{document_id}            same as POST …/delete
   POST   /search                   library search (fenced)
   GET    /jobs/{job_id}            job status
   GET    /jobs/{job_id}/events     append-only job event history
@@ -930,14 +932,34 @@ def create_documents_router() -> APIRouter:
                 status_code=500, content={"ok": False, "error": "maintenance failed"}
             )
 
-    @router.post("/{document_id}/delete")
-    async def delete_document(request: Request, document_id: str) -> Any:
+    async def _delete_document_impl(
+        request: Request, document_id: str, *, reason: str = "user_requested"
+    ) -> Any:
+        """Soft-delete (tombstone) a document — unindex + archive metadata.
+
+        Physical blobs are reclaimed later by retention/GC, not immediately.
+        """
         import asyncio
 
         svc = _svc(request)
         if svc is None:
             return _unavailable()
         tenant, actor, _ = _resolve_scope(request)
+        clean_reason = (reason or "user_requested").strip()[:200] or "user_requested"
+        try:
+            data = await asyncio.to_thread(
+                svc.delete_document,
+                tenant_id=tenant,
+                actor_id=actor,
+                document_id=document_id,
+                reason=clean_reason,
+            )
+            return {"ok": True, **data}
+        except Exception as exc:  # noqa: BLE001
+            return _error_for(exc, "delete", not_found_default=True)
+
+    @router.post("/{document_id}/delete")
+    async def delete_document(request: Request, document_id: str) -> Any:
         reason = "user_requested"
         try:
             body = await request.json()
@@ -945,17 +967,15 @@ def create_documents_router() -> APIRouter:
                 reason = str(body["reason"])[:200]
         except Exception:  # noqa: BLE001
             pass
-        try:
-            data = await asyncio.to_thread(
-                svc.delete_document,
-                tenant_id=tenant,
-                actor_id=actor,
-                document_id=document_id,
-                reason=reason,
-            )
-            return {"ok": True, **data}
-        except Exception as exc:  # noqa: BLE001
-            return _error_for(exc, "delete", not_found_default=True)
+        return await _delete_document_impl(request, document_id, reason=reason)
+
+    @router.delete("/{document_id}")
+    async def delete_document_rest(request: Request, document_id: str) -> Any:
+        """REST alias for soft-delete / archive (same as POST …/delete)."""
+        reason = "user_requested"
+        if request.query_params.get("reason"):
+            reason = str(request.query_params.get("reason"))[:200]
+        return await _delete_document_impl(request, document_id, reason=reason)
 
     return router
 

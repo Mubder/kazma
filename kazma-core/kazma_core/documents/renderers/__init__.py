@@ -250,6 +250,20 @@ class RendererRegistry:
     def capabilities(self) -> tuple[RendererCapability, ...]:
         return self._capabilities
 
+    def resolve_all(self, operation: str) -> tuple[RendererCapability, ...]:
+        """Return every engine that claims ``operation`` (ready first)."""
+
+        matches = [
+            capability
+            for capability in self._capabilities
+            if operation in capability.operations
+        ]
+        if not matches:
+            raise ValueError(f"unsupported document operation: {operation}")
+        available = tuple(item for item in matches if item.available)
+        unavailable = tuple(item for item in matches if not item.available)
+        return available + unavailable if available else tuple(matches)
+
     def resolve(self, operation: str) -> RendererCapability:
         """Return the best engine for ``operation``.
 
@@ -259,15 +273,7 @@ class RendererRegistry:
         reason.
         """
 
-        matches = [
-            capability
-            for capability in self._capabilities
-            if operation in capability.operations
-        ]
-        if not matches:
-            raise ValueError(f"unsupported document operation: {operation}")
-        available = [item for item in matches if item.available]
-        return available[0] if available else matches[0]
+        return self.resolve_all(operation)[0]
 
 
 def get_renderer_registry() -> RendererRegistry:

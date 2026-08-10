@@ -14,6 +14,9 @@
   .doc-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .55rem .7rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin-bottom: .4rem; cursor: pointer; }
   .doc-row:hover { background: var(--bg-hover); }
   .doc-row.selected { border-color: var(--accent); }
+  .doc-row-actions { display: flex; align-items: center; gap: .35rem; flex-shrink: 0; }
+  .doc-row .btn-danger { opacity: .85; }
+  .doc-row:hover .btn-danger { opacity: 1; }
   .doc-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-meta { font-size: .72rem; color: var(--text-muted); font-family: var(--font-mono); }
   .state-badge { font-size: .68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
@@ -70,13 +73,22 @@
         <div x-show="documents.length === 0" x-cloak style="color:var(--text-muted);font-size:.8rem;">No documents yet.</div>
         <template x-for="d in documents" :key="d.document_id">
           <div class="doc-row" :class="{ selected: selected && selected.document_id === d.document_id }" @click="openDocument(d.document_id)">
-            <div style="min-width:0;">
+            <div style="min-width:0;flex:1;">
               <div class="doc-title" x-text="d.title"></div>
               <div class="doc-meta" x-text="d.document_id.slice(0,8)"></div>
             </div>
-            <span class="state-badge" :class="stateClass(d.state)" x-text="d.state || 'unknown'"></span>
+            <div class="doc-row-actions">
+              <span class="state-badge" :class="stateClass(d.state)" x-text="d.state || 'unknown'"></span>
+              <button type="button" class="btn btn-sm btn-danger"
+                      title="Delete / archive this document"
+                      :disabled="acting"
+                      @click.stop="deleteDocument(d.document_id, d.title)">Delete</button>
+            </div>
           </div>
         </template>
+        <p style="margin:.55rem 0 0;font-size:.7rem;color:var(--text-muted);">
+          Delete archives the document (soft-delete). Indexed copies are removed; file bytes are reclaimed later by GC.
+        </p>
       </div>
     </div>
 
@@ -97,6 +109,10 @@
           <button class="btn btn-sm" @click="refreshDetail()">Refresh</button>
           <input class="mini-input" style="max-width:120px;" x-model="libraryId" placeholder="library_id">
           <button class="btn btn-sm" @click="indexDoc()" :disabled="currentState !== 'ready'">Index</button>
+          <button type="button" class="btn btn-sm btn-danger"
+                  title="Delete / archive this document"
+                  :disabled="acting || !selected"
+                  @click="deleteDocument(selected.document_id, selected.title)">Delete / Archive</button>
         </div>
 
         {# Document actions — gated by capability health #}

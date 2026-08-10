@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Document delete/archive UI (2026-08-10)
+
+- Documents library: **Delete** on each row + **Delete / Archive** in the
+  detail panel (confirm via `kazmaConfirm`); calls existing soft-delete API
+  (`POST /api/documents/{id}/delete`, also `DELETE /{id}`)
+- Soft-delete works without the knowledge adapter (tombstone still succeeds)
+- Parser binary probe no longer crashes on empty `--version` output (fixed
+  document coordinator boot `list index out of range` on some Windows LO installs)
+
 ## Unreleased — Document convert + PDF intake fixes (Windows) (2026-08-10)
 
 - **DOCX→PDF without LibreOffice:** new `reportlab-office` fallback extracts

@@ -123,6 +123,7 @@ class DocumentService:
         self.knowledge_adapter = knowledge_adapter
         self.renderer_registry = renderer_registry or get_renderer_registry()
         self.mutation_registry = mutation_registry or get_mutation_registry()
+        self.repository = repository
         self.operations = DocumentOperations(
             config=self.config,
             validator=self._parse_isolated,
@@ -692,9 +693,20 @@ class DocumentService:
         document_id: Any,
         reason: str,
     ) -> DocumentResult[dict[str, Any]]:
-        """Unindex every active library before creating the document tombstone."""
-        adapter = self._knowledge()
-        record = adapter.repository.get_document(
+        """Unindex active libraries (when knowledge is wired), then tombstone.
+
+        Soft-delete / archive: the document leaves the library list
+        (``deleted_at`` set). Physical content is reclaimed later by GC.
+        Knowledge adapter is best-effort — tombstone still succeeds without it.
+        """
+        if self.repository is None:
+            return DocumentResult(
+                ok=False,
+                code="repository_unavailable",
+                message="Document repository is unavailable",
+                document_id=document_id,
+            )
+        record = self.repository.get_document(
             tenant_id=tenant_id,
             document_id=document_id,
             actor_id=actor_id,
@@ -706,32 +718,35 @@ class DocumentService:
                 message="Document is unavailable",
                 document_id=document_id,
             )
-        libraries = tuple(
-            sorted(
-                set(
-                    adapter.repository.list_indexed_libraries(
-                        tenant_id=tenant_id,
-                        document_id=record.id,
+        libraries: list[str] = []
+        if self.knowledge_adapter is not None:
+            adapter = self.knowledge_adapter
+            libraries = list(
+                sorted(
+                    set(
+                        adapter.repository.list_indexed_libraries(
+                            tenant_id=tenant_id,
+                            document_id=record.id,
+                        )
                     )
-                )
-                | set(
-                    adapter.store.list_document_libraries(
-                        tenant_id=tenant_id,
-                        document_id=str(record.id),
+                    | set(
+                        adapter.store.list_document_libraries(
+                            tenant_id=tenant_id,
+                            document_id=str(record.id),
+                        )
                     )
                 )
             )
-        )
-        for library_id in libraries:
-            result = adapter.unindex_document(
-                tenant_id=tenant_id,
-                actor_id=actor_id,
-                library_id=library_id,
-                document_id=record.id,
-            )
-            if not result.ok:
-                return result
-        adapter.repository.tombstone_document(
+            for library_id in libraries:
+                result = adapter.unindex_document(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    library_id=library_id,
+                    document_id=record.id,
+                )
+                if not result.ok:
+                    return result
+        self.repository.tombstone_document(
             tenant_id=tenant_id,
             document_id=record.id,
             actor_id=actor_id,
@@ -740,8 +755,10 @@ class DocumentService:
         return DocumentResult(
             ok=True,
             code="document_deleted",
-            message="Document was unindexed and tombstoned",
-            data={"libraries": list(libraries)},
+            message="Document was unindexed and tombstoned"
+            if libraries
+            else "Document was archived (soft-deleted)",
+            data={"libraries": libraries},
             document_id=record.id,
         )
 

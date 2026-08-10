@@ -495,6 +495,57 @@ function documentsPage() {
         this.toast("Index failed", "error");
       }
     },
+
+    /**
+     * Soft-delete (archive) a document. Unindexes + tombstones metadata;
+     * physical content is reclaimed later by garbage collection.
+     */
+    async deleteDocument(documentId, title) {
+      if (!documentId || this.acting) return;
+      const label = (title || documentId).toString().slice(0, 80);
+      const proceed = await window.kazmaConfirm({
+        title: "Delete / archive document?",
+        message:
+          `Archive "${label}"?\n\n` +
+          "The document leaves your library (soft-delete). Any search index " +
+          "entries are removed. Original bytes stay until garbage collection " +
+          "reclaims unreferenced storage — this cannot be undone from the UI.",
+        confirmText: "Delete / Archive",
+        cancelText: "Cancel",
+        danger: true,
+      });
+      if (!proceed) return;
+      this.acting = true;
+      try {
+        const r = await fetch(`/api/documents/${documentId}/delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: "user_requested" }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) {
+          this.toast(j.error || "Delete failed", "error");
+          return;
+        }
+        this.toast("Document archived (soft-deleted)", "success");
+        if (this.selected && this.selected.document_id === documentId) {
+          this.selected = null;
+          this.versions = [];
+          this.jobs = [];
+          this.artifacts = [];
+          this.preview = "";
+          this.pageCount = 0;
+          this.currentState = "";
+          this._stopPoll();
+        }
+        await this.loadDocuments();
+        await this.loadOps();
+      } catch (e) {
+        this.toast("Delete failed", "error");
+      } finally {
+        this.acting = false;
+      }
+    },
   };
 }
 

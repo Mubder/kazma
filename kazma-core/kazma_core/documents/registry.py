@@ -99,7 +99,9 @@ def _dependency_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None],
 def _binary_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None], str | None]:
     versions: dict[str, str | None] = {}
     for name in names:
-        executable = shutil.which(name)
+        # Accept absolute/resolved paths (e.g. find_soffice()) as well as PATH names.
+        candidate = Path(name)
+        executable = str(candidate) if candidate.is_file() else shutil.which(name)
         if not executable:
             versions[name] = None
             return versions, f"required system binary {name} was not found"
@@ -117,7 +119,9 @@ def _binary_versions(names: tuple[str, ...]) -> tuple[dict[str, str | None], str
         if probe.returncode != 0:
             versions[name] = None
             return versions, f"system binary {name} failed its health probe"
-        versions[name] = (probe.stdout or probe.stderr).strip().splitlines()[0][:200]
+        lines = (probe.stdout or probe.stderr or "").strip().splitlines()
+        # Some Windows builds emit empty --version text with exit 0.
+        versions[name] = lines[0][:200] if lines else "present"
     return versions, None
 
 

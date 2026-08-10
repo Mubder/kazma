@@ -186,20 +186,42 @@ class DocumentOperations:
                     "invalid_document_encoding",
                     "Document conversion source must be valid UTF-8 text",
                 )
-        capability = self._capability(self.renderers, operation)
-        if isinstance(capability, DocumentResult):
-            return capability
-        return self._artifact_operation(
-            module="kazma_core.documents.renderer_worker",
-            operation=operation,
-            capability=capability,
-            extension=_EXTENSIONS.get(target, target),
-            payload={},
-            sources=(source,),
-            scope=scope,
-            output_name=output_name or source.stem,
-            export_dir=export_dir,
-            approved_assets=approved_assets,
+        try:
+            candidates = self.renderers.resolve_all(operation)
+        except ValueError:
+            return self._error(
+                "unsupported_document_operation",
+                "The requested document operation is unsupported",
+            )
+        ready = [item for item in candidates if item.available]
+        if not ready:
+            first = candidates[0]
+            reason = first.reason or f"{first.renderer_id} is unavailable"
+            return self._error("document_engine_unavailable", reason)
+
+        last: DocumentResult[Any] | None = None
+        for capability in ready:
+            result = self._artifact_operation(
+                module="kazma_core.documents.renderer_worker",
+                operation=operation,
+                capability=capability,
+                extension=_EXTENSIONS.get(target, target),
+                payload={},
+                sources=(source,),
+                scope=scope,
+                output_name=output_name or source.stem,
+                export_dir=export_dir,
+                approved_assets=approved_assets,
+            )
+            if result.ok:
+                return result
+            last = result
+            # LibreOffice may probe "ready" yet fail at convert time on Windows;
+            # fall through to pure-Python engines (e.g. reportlab-office).
+            if capability.renderer_id != "libreoffice":
+                return result
+        return last or self._error(
+            "document_engine_unavailable", "No document conversion engine succeeded"
         )
 
     def pdf_info(

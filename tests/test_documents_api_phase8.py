@@ -137,6 +137,41 @@ def _upload_ready(client: TestClient, name: str, data: bytes) -> str:
     return body["document_id"]
 
 
+def test_delete_document_removes_from_library(client: TestClient) -> None:
+    """Soft-delete (archive) removes the doc from the default list."""
+    up = client.post(
+        "/api/documents",
+        headers={
+            "X-Document-Filename": "to-delete.txt",
+            "Content-Type": "application/octet-stream",
+        },
+        content=b"Delete me please.\n",
+    )
+    assert up.status_code == 200, up.text
+    doc_id = up.json()["document_id"]
+    job_id = up.json()["job_id"]
+    assert _wait_ready(client, job_id) == "ready"
+
+    listing = client.get("/api/documents")
+    assert any(d["document_id"] == doc_id for d in listing.json()["documents"])
+
+    deleted = client.post(
+        f"/api/documents/{doc_id}/delete",
+        json={"reason": "test_archive"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    body = deleted.json()
+    assert body["ok"] is True
+    assert body["deleted"] is True
+
+    after = client.get("/api/documents")
+    assert not any(d["document_id"] == doc_id for d in after.json()["documents"])
+
+    # REST alias also works (already deleted → 404-style access denial)
+    again = client.delete(f"/api/documents/{doc_id}")
+    assert again.status_code in {404, 400, 422}
+
+
 def test_convert_and_download_flow(client: TestClient) -> None:
     doc_id = _upload_ready(client, "web-note.md", b"# Title\n\nBody paragraph.\n")
     resp = client.post(

@@ -91,3 +91,60 @@ def test_reportlab_office_capability_ready() -> None:
     office = next(c for c in reg.capabilities() if c.renderer_id == "reportlab-office")
     assert office.readiness is RendererReadiness.READY
     assert "convert:docx:pdf" in office.operations
+
+
+@pytest.mark.asyncio
+async def test_delete_document_soft_archives(tmp_path: Path) -> None:
+    """Delete tombstones the doc so it no longer appears in the library list."""
+    import asyncio
+    import io
+
+    from kazma_core.documents.ingestion import DocumentIngestionService
+
+    cfg = DocumentConfig(
+        storage_root=tmp_path / "store",
+        worker_concurrency=1,
+        worker_lease_seconds=5,
+        worker_heartbeat_seconds=1,
+    )
+    svc = DocumentIngestionService(config=cfg)
+    await svc.start_workers()
+    try:
+        result = await asyncio.to_thread(
+            svc.ingest_stream,
+            io.BytesIO(b"Archive me.\n"),
+            filename="archive-me.txt",
+            tenant_id="tenant-a",
+            workspace_id="ws",
+            actor_id="alice",
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 20.0
+        while loop.time() < deadline:
+            status = await asyncio.to_thread(
+                svc.job_status, tenant_id="tenant-a", job_id=result.job_id
+            )
+            if status and status["state"] == "ready":
+                break
+            if status and status["state"] in {"rejected", "dead_letter", "cancelled"}:
+                raise AssertionError(f"ingest ended in {status['state']}")
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("ingest did not become ready")
+
+        listed = svc.list_documents(tenant_id="tenant-a", actor_id="alice")
+        assert any(d["document_id"] == str(result.document_id) for d in listed)
+
+        deleted = svc.delete_document(
+            tenant_id="tenant-a",
+            actor_id="alice",
+            document_id=result.document_id,
+            reason="user_requested",
+        )
+        assert deleted["deleted"] is True
+
+        after = svc.list_documents(tenant_id="tenant-a", actor_id="alice")
+        assert not any(d["document_id"] == str(result.document_id) for d in after)
+    finally:
+        await svc.stop_workers()
+        svc.close()
