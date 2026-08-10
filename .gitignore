@@ -56,6 +56,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Local cert/soak/scratch from scripts (e.g. certify_documents.py)
+session-artifacts/
+
 # Distribution / packaging
 *.tar.gz
 *.whl
