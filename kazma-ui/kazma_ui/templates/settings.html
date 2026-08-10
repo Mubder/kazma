@@ -520,6 +520,26 @@
                 <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
                     {{ t('settings.max_tool_rounds_help') }}
                 </p>
+                <p class="form-help" style="margin-top:4px;font-size:0.75rem;color:var(--text-muted);"
+                   x-show="agent.recursion_limit"
+                   x-text="'Graph step budget (auto): ~' + (agent.recursion_limit || 100) + ' (aligned with tool rounds)'"></p>
+            </div>
+            <div class="form-group" style="margin-top:1rem;">
+                <label>{{ t('settings.long_task_mode') }}</label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;cursor:pointer;">
+                    <input type="checkbox" x-model="agent.long_task_default_enabled">
+                    <span x-text="t('settings.long_task_default_on')"></span>
+                </label>
+                <div style="margin-top:8px;max-width:220px;" x-show="agent.long_task_default_enabled" x-cloak>
+                    <select class="form-select" x-model="agent.long_task_default_preset">
+                        <option value="deep">Deep · 30</option>
+                        <option value="research">Research · 40</option>
+                        <option value="chat">Chat · 15</option>
+                    </select>
+                </div>
+                <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
+                    {{ t('settings.long_task_help') }}
+                </p>
             </div>
             <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_agent') }}'"></button>
         </div>

@@ -48,7 +48,16 @@ function settingsApp() {
         profileName: '',
 
         // ── Agent Tab ──
-        agent: { name: 'kazma', language: 'ar', system_prompt: '', personality: 'default', max_iterations: 15 },
+        agent: {
+            name: 'kazma',
+            language: 'ar',
+            system_prompt: '',
+            personality: 'default',
+            max_iterations: 15,
+            recursion_limit: 100,
+            long_task_default_enabled: false,
+            long_task_default_preset: 'research',
+        },
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },

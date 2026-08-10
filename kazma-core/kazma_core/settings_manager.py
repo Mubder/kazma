@@ -300,6 +300,20 @@ class SettingsManager:
         except (TypeError, ValueError):
             max_iter = 15
         max_iter = max(5, min(100, max_iter))
+        default_on = self._cs.get("agent.long_task.default_enabled") in (
+            True, 1, "1", "true", "yes", "on",
+        )
+        default_preset = str(
+            self._cs.get("agent.long_task.default_preset") or "research"
+        ).lower()
+        if default_preset not in ("chat", "deep", "research"):
+            default_preset = "research"
+        try:
+            from kazma_core.agent.long_task import derive_recursion_limit
+
+            recursion = derive_recursion_limit(max_iter)
+        except Exception:
+            recursion = max(100, max_iter * 5 + 20)
         return {
             "name": self._cs.get("agent.name", "kazma"),
             "language": self._cs.get("agent.language", "ar"),
@@ -307,10 +321,33 @@ class SettingsManager:
             "personality": self._cs.get("agent.personality", "default"),
             # ReAct tool-round ceiling (supervisor loop)
             "max_iterations": max_iter,
+            # Effective graph step budget (derived; shown in UI for honesty)
+            "recursion_limit": recursion,
+            "long_task_default_enabled": default_on,
+            "long_task_default_preset": default_preset,
         }
 
     def save_agent_config(self, data: dict[str, Any]) -> None:
         """Save agent configuration."""
+        # Nested long-task defaults (not agent.* flat keys for every field)
+        if "long_task_default_enabled" in data:
+            en = data.pop("long_task_default_enabled")
+            self._cs.set(
+                "agent.long_task.default_enabled",
+                bool(en) if not isinstance(en, str)
+                else en.strip().lower() in ("1", "true", "yes", "on"),
+                category="agent",
+            )
+        if "long_task_default_preset" in data:
+            preset = str(data.pop("long_task_default_preset") or "research").lower()
+            if preset not in ("chat", "deep", "research"):
+                preset = "research"
+            self._cs.set(
+                "agent.long_task.default_preset", preset, category="agent"
+            )
+        # recursion_limit is derived — never persist a user-forged value as SoT
+        data.pop("recursion_limit", None)
+
         for key, value in data.items():
             if value is None:
                 continue

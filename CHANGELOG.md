@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Unreleased — Long-task mode (/long + aligned budgets) (2026-08-10)
+
+Real capacity switch for deep audits (orthogonal to `/yolo` HITL bypass):
+
+- **`kazma_core.agent.long_task`**: SoT for budgets; `resolve_turn_budgets()`
+  derives LangGraph `recursion_limit` from `max_iterations` so Research 40
+  no longer dies on a hard-coded 100-step wall
+- **Telegram:** `/long` · `/long on` · `/long deep` · `/long research` ·
+  `/long 50` · `/long off` (thread-scoped, TTL like YOLO)
+- **Settings → Agent:** long-task default toggle + preset; shows derived
+  graph step budget
+- **All transports** (gateway, SSE, WS, agent_runner) use derived recursion
+- **GraphRecursionError:** salvage partial assistant/tool findings + tip to
+  enable `/long on`
+
 ## Unreleased — LibreOffice quiet CLI, PDF intake, delete actually works (2026-08-10)
 
 - **LibreOffice:** prefer `soffice.com` on Windows + `CREATE_NO_WINDOW` so

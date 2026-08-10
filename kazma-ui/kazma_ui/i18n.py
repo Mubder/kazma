@@ -901,6 +901,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Research · 40",
         "ar": "بحث · 40",
     },
+    "settings.long_task_mode": {
+        "en": "Long-task mode (default)",
+        "ar": "وضع المهام الطويلة (افتراضي)",
+    },
+    "settings.long_task_default_on": {
+        "en": "Use long-task budgets for all chats (not just after /long on)",
+        "ar": "استخدم ميزانيات المهام الطويلة لكل المحادثات (وليس فقط بعد /long on)",
+    },
+    "settings.long_task_help": {
+        "en": "Raises tool rounds and LangGraph step budget together so long audits finish instead of hitting a hard recursion wall. Does not skip HITL — use /yolo for danger-tool auto-approve. Per-chat: /long on · /long off on Telegram.",
+        "ar": "يرفع جولات الأدوات وخطوات الرسم معًا حتى تكتمل عمليات التدقيق الطويلة بدل الاصطدام بحد التكرار. لا يتجاوز HITL — استخدم /yolo لموافقة الأدوات الخطرة. لكل محادثة: /long on · /long off في تيليجرام.",
+    },
     "settings.personality_templates": {"en": "Personality Templates", "ar": "قوالب الشخصية"},
     "settings.safety_hitl": {"en": "Safety (HITL)", "ar": "الأمان (الموافقة البشرية)"},
     "settings.enable_hitl": {"en": "Enable Human-in-the-Loop", "ar": "تفعيل المشاركة البشرية"},
