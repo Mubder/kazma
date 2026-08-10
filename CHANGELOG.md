@@ -1265,16 +1265,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
 - Discord bus gains `set_reaction` (Telegram-style status feedback API).
 - Shared approval path on all three platform buses.
 
-## Unreleased — UI abort polish + multi-bus fan-out + cache TTL read + OAuth start gate (2026-07-25)
+## v0.10.0 (2026-08-10)
 
-- **Chat Stop**: `abortGeneration` clears the typing indicator (AbortError never
-  fires `onDone`/`onError`); error path toasts when possible.
-- **Swarm bus multi-platform**: `FanOutBusAdapter` wires all configured
-  Telegram/Discord/Slack buses (not exclusive priority). Approvals: first yes
-  wins.
-- **Semantic cache**: TTL filter on **lookup** (not only write eviction).
-- **GitHub OAuth start**: removed from `ALWAYS_OPEN_PREFIXES` — requires auth
-  cookie/session; callback remains open.
+### Feat
+
+- **documents**: add delete/archive controls for uploaded files
 
 ## v0.9.3 (2026-08-10)
 
