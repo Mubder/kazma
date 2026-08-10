@@ -70,29 +70,15 @@ def shape_for_pdf(text: str) -> str:
         import arabic_reshaper
         from bidi.algorithm import get_display
     except ImportError:
-        logger.warning(
-            "[rich_render] arabic_reshaper/python-bidi missing — Arabic PDF may look broken"
-        )
         return text
     try:
         reshaper = arabic_reshaper.ArabicReshaper(
-            configuration={
-                "delete_harakat": False,
-                "support_ligatures": True,
-            }
+            configuration={"delete_harakat": False, "support_ligatures": True}
         )
-        reshaped = reshaper.reshape(text)
         base = "R" if is_arabic_dominant(text) else None
-        return get_display(reshaped, base_dir=base)
+        return get_display(reshaper.reshape(text), base_dir=base)
     except Exception:
-        logger.debug("[rich_render] shape_for_pdf failed", exc_info=True)
-        try:
-            import arabic_reshaper
-            from bidi.algorithm import get_display
-
-            return get_display(arabic_reshaper.reshape(text))
-        except Exception:
-            return text
+        return text
 
 
 def _split_pipe_row(row: str) -> list[str]:
@@ -355,8 +341,27 @@ def inline_markdown_to_reportlab(text: str, *, shape_arabic: bool = True) -> str
     )
 
     def _esc_shape(s: str) -> str:
-        s2 = shape_for_pdf(s) if shape_arabic else s
-        return html.escape(s2)
+        if not shape_arabic or not s.strip():
+            return html.escape(s)
+        import textwrap, arabic_reshaper
+        from bidi.algorithm import get_display
+
+        reshaper = arabic_reshaper.ArabicReshaper(
+            configuration={"delete_harakat": False, "support_ligatures": True}
+        )
+        lines = s.split("\n")
+        out_lines = []
+        for line in lines:
+            if not line.strip():
+                out_lines.append("")
+                continue
+            sublines = textwrap.wrap(line, width=65, break_long_words=False, replace_whitespace=False) if len(line) > 65 else [line]
+            reshaped_sublines = [
+                get_display(reshaper.reshape(html.escape(sub)), base_dir="R" if is_arabic_dominant(sub) else None)
+                for sub in sublines
+            ]
+            out_lines.append("<br/>".join(reshaped_sublines))
+        return "<br/>".join(out_lines)
 
     for m in pattern.finditer(text):
         if m.start() > pos:

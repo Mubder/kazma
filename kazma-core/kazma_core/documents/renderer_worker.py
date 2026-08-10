@@ -167,7 +167,8 @@ def _safe_html(text: str) -> None:
 def _font_paths() -> tuple[Path | None, Path | None]:
     """Prefer fonts with solid Arabic coverage (glyphs + metrics)."""
     candidates = (
-        # Windows — Arial/Tahoma cover Arabic; Traditional Arabic is AR-first
+        # Windows — Calibri first for exact user preference
+        (Path("C:/Windows/Fonts/calibri.ttf"), Path("C:/Windows/Fonts/calibrib.ttf")),
         (Path("C:/Windows/Fonts/arial.ttf"), Path("C:/Windows/Fonts/arialbd.ttf")),
         (Path("C:/Windows/Fonts/tahoma.ttf"), Path("C:/Windows/Fonts/tahomabd.ttf")),
         (Path("C:/Windows/Fonts/trado.ttf"), Path("C:/Windows/Fonts/trado.ttf")),
