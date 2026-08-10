@@ -61,6 +61,10 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Agent **abandons** legit multi-step task mid-flow | `shift` fired on a real continuation | `agent.topic_drift.threshold` too **low** (false shift) | §9 turn focus |
 | `/replay` empty on one channel | `snapshot_recorder` at **all** graph build sites | Capture in supervisor node | §3 Time travel |
 | Session in sidebar only after F5 | WS must refresh/upsert sessions like SSE | SessionManager shared? | §2 Sessions |
+| Telegram: **approval expired after final answer** | Duplicate/late `approve_task` callback after resume | Soft message / debounce in `hitl.py` — work usually already ran | §4 HITL A |
+| **Tool loop / recursion limit** (bilingual stop card) | `recursion_limit` vs `agent.max_iterations` misaligned | `/long on` or Settings long-task; `resolve_turn_budgets()` | §11 Long-task |
+| **Proceed** redoes same work after budget hit | Continue context not stored/consumed | `long_task.continue.{thread}` + inject on next turn | §11 Long-task |
+| Long audit dies with YOLO on | YOLO only skips HITL; still needs capacity | Enable **both** `/long on` and `/yolo` | §4, §11 |
 
 ---
 
@@ -372,11 +376,30 @@ When you **merge** two paths into one, add a test that would have failed under t
 
 ---
 
+## 11. Long-task mode & graph budgets
+
+| Matter | SoT |
+|--------|-----|
+| Per-chat enable | ConfigStore `long_task.{thread_id}` via `/long on` |
+| Baseline tool rounds | `agent.max_iterations` (Settings → Agent) |
+| LangGraph step cap | **Derived** `resolve_turn_budgets()` → `recursion_limit` (not a fixed 100) |
+| Continue after budget | `long_task.continue.{thread_id}` stored on exhaust; injected next turn |
+| Metrics | Prometheus `kazma_long_task_events_total{kind=…}` |
+| HITL vs capacity | `/yolo` = danger bypass; `/long` = budgets only |
+
+**Invariant:** raising Max tool rounds without deriving `recursion_limit` reintroduces `GraphRecursionError` on Research-depth tasks. Always go through `kazma_core.agent.long_task`.
+
+**Verify:** `/long` status; Settings agent response includes `recursion_limit`; log `long_task` + `budget_recursion` events.
+
+---
+
 ## 16. Quick “X is related to Y” index
 
 | If you touch… | Also check… |
 |---------------|-------------|
 | `sse_chat.py` | `ws_chat.py`, `chat.js`, turn end events |
+| `long_task.py` / recursion | gateway, SSE, WS, agent_runner `recursion_limit` sites |
+| HITL stale approve message | `hitl.py` debounce + soft copy; not “nothing executed” after success |
 | `ws_chat.py` | same + YOLO ContextVar thread bind |
 | `graph_builder.py` HITL | all build sites, double-gate ContextVars |
 | `tool_registry.execute` | IDE service, swarm safety, MCP executor |

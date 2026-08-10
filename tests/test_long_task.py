@@ -82,6 +82,32 @@ def test_format_status_message() -> None:
     disable_long_task(tid)
 
 
+def test_continue_protocol_store_and_consume() -> None:
+    from kazma_core.agent.long_task import (
+        consume_continue_context,
+        store_continue_context,
+    )
+
+    tid = "test-continue-thread"
+    assert consume_continue_context(tid) is None
+    store_continue_context(tid, summary="Found A and B in documents.", reason="test")
+    ctx = consume_continue_context(tid)
+    assert ctx is not None
+    assert "Found A and B" in ctx
+    assert "Do **not** re-do" in ctx or "not" in ctx.lower()
+    # Consumed once
+    assert consume_continue_context(tid) is None
+
+
+def test_detect_tool_loop() -> None:
+    from kazma_core.agent.long_task import detect_tool_loop, tool_call_signature
+
+    sig = tool_call_signature("shell_exec", {"command": "ls"})
+    hist = [sig, sig, sig]
+    assert detect_tool_loop(hist) == sig
+    assert detect_tool_loop([sig, sig]) is None
+
+
 def test_baseline_research_settings_raise_recursion(monkeypatch) -> None:
     """Even without /long on, high max_iterations must raise recursion_limit."""
     from kazma_core.config_store import get_config_store

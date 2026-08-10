@@ -199,6 +199,29 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
         user_content = msg.text
     state["messages"] = [{"role": "user", "content": user_content}]
 
+    # Long-task continue protocol: inject salvaged context from a prior
+    # budget-exhausted turn so "Proceed" does not re-do the same work.
+    try:
+        from kazma_core.agent.long_task import consume_continue_context
+
+        cont = consume_continue_context(thread_id)
+        if cont:
+            text_l = (msg.text or "").strip().lower()
+            # Always attach if stored; especially useful for short continues
+            state["messages"] = [
+                {"role": "system", "content": cont},
+                {"role": "user", "content": user_content},
+            ]
+            import logging as _logging
+
+            _logging.getLogger(__name__).info(
+                "[agent-handler] injected long-task continue context thread=%s user=%r",
+                thread_id,
+                text_l[:40],
+            )
+    except Exception:
+        pass
+
     # Defense-in-depth: strip any platform-specific identifiers that might
     # have leaked into the top-level state. ``_PLATFORM_KEYS`` is the
     # authoritative list of keys that must never enter the graph; the state

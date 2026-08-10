@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Unreleased — Long-task quality + HITL stale UX (2026-08-10)
+
+- **HITL:** late/duplicate Approve no longer claims “Nothing was executed”;
+  soft “Already handled” or silent debounce (90s) after successful resume
+- **Continue protocol:** budget exhaust stores partial findings; next turn
+  (e.g. Proceed) injects them so work is not re-done
+- **Heartbeats:** every 5 tool rounds in long/deep mode, Telegram gets a
+  progress line via progress sender
+- **Anti-loop metrics:** stagnation breaks record `tool_loop_break`
+- **Metrics:** `kazma_long_task_events_total{kind=…}`
+- **Docs:** diagnosis-map rows for recursion / expired approval / Proceed
+
 ## Unreleased — Long-task mode (/long + aligned budgets) (2026-08-10)
 
 Real capacity switch for deep audits (orthogonal to `/yolo` HITL bypass):

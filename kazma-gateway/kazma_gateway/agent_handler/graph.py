@@ -1097,6 +1097,36 @@ def create_graph_handler(
             )
 
             # ── Invoke graph ───────────────────────────────────────
+            # Long-task progress heartbeats: supervisor can send mid-turn
+            # status via this sender (ContextVar).
+            _lt_progress_token = None
+            try:
+                from kazma_core.agent.long_task import (
+                    reset_progress_sender,
+                    set_progress_sender,
+                )
+
+                async def _long_progress(text: str) -> None:
+                    try:
+                        pctx = await _store.get(thread_id) or msg.context_metadata
+                        ptext, pctx2 = _prepare_tg_outbound(msg, text, pctx)
+                        await manager.send(
+                            OutboundMessage(
+                                target_id=_build_target_id(msg.platform, pctx2),
+                                text=ptext,
+                                context_metadata=pctx2,
+                            )
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[agent-handler] long-task progress send failed",
+                            exc_info=True,
+                        )
+
+                _lt_progress_token = set_progress_sender(_long_progress)
+            except Exception:
+                _lt_progress_token = None
+
             start = time.monotonic()
             try:
                 result_state = await graph.ainvoke(state, config)
@@ -1365,14 +1395,33 @@ def create_graph_handler(
                     except Exception:
                         pass
                     if partial:
+                        try:
+                            from kazma_core.agent.long_task import (
+                                record_budget_exhausted,
+                                store_continue_context,
+                            )
+
+                            store_continue_context(
+                                thread_id, summary=partial, reason="recursion"
+                            )
+                            record_budget_exhausted("recursion")
+                        except Exception:
+                            pass
                         err_msg = (
                             partial[:3500]
                             + "\n\n---\n"
                             "⚠️ Budget reached (graph recursion limit). "
-                            "Above is salvaged progress — reply with *remaining steps only*."
+                            "Above is salvaged progress — reply with *remaining steps only* "
+                            "(or just **Proceed** — prior findings are remembered)."
                             + long_hint
                         )
                     else:
+                        try:
+                            from kazma_core.agent.long_task import record_budget_exhausted
+
+                            record_budget_exhausted("recursion")
+                        except Exception:
+                            pass
                         err_msg = (
                             "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
                             "⚠️ Turn stopped: tool loop hit the recursion limit "
@@ -1389,6 +1438,14 @@ def create_graph_handler(
                         context_metadata=err_ctx,
                     )
                 )
+            finally:
+                if _lt_progress_token is not None:
+                    try:
+                        from kazma_core.agent.long_task import reset_progress_sender
+
+                        reset_progress_sender(_lt_progress_token)
+                    except Exception:
+                        pass
 
         # ── Lazy TTL eviction ──────────────────────────────────────
         # Opportunistically prune sessions that have been inactive longer than

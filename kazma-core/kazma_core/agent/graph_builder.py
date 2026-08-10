@@ -570,6 +570,24 @@ async def supervisor_node(
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
+    # Long-task progress heartbeat (Telegram/gateway when progress sender set)
+    try:
+        from kazma_core.agent.long_task import maybe_heartbeat
+
+        _recent_tools = [
+            str(t.get("name") or "")
+            for t in (state.get("tool_calls_done") or [])[:6]
+            if isinstance(t, dict)
+        ]
+        await maybe_heartbeat(
+            thread_id=str(state.get("thread_id") or "") or None,
+            iteration=int(iteration or 0),
+            max_iterations=int(state.get("max_iterations") or 15),
+            last_tools=_recent_tools,
+        )
+    except Exception:
+        logger.debug("[Supervisor] long-task heartbeat skipped", exc_info=True)
+
     # ── Reset tool circuit breaker and cost breaker timer on new user turn ──
     # The breaker trips after 2 consecutive empty/failed tool results.
     # Without this reset, the breaker stays tripped permanently across
@@ -1953,6 +1971,12 @@ async def tool_worker_node(
                 "calls: %s) — forcing synthesis with strategy-change hint",
                 sorted(set(stagnant_names)),
             )
+            try:
+                from kazma_core.agent.long_task import record_long_task_event
+
+                record_long_task_event("tool_loop_break")
+            except Exception:
+                pass
             breaker_tripped_now = True
             # Stamp this round's results with the strategy-change message.
             stamped_results: list[ToolResult] = []

@@ -20,19 +20,36 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar, Token
 from typing import Any
 
 __all__ = [
     "PRESETS",
     "clamp_iterations",
+    "consume_continue_context",
     "derive_recursion_limit",
+    "detect_tool_loop",
     "disable_long_task",
     "enable_long_task",
     "format_status_message",
+    "get_progress_sender",
     "is_long_task_active",
     "long_task_status",
+    "maybe_heartbeat",
+    "record_budget_exhausted",
+    "record_long_task_event",
+    "reset_progress_sender",
     "resolve_turn_budgets",
+    "set_progress_sender",
+    "store_continue_context",
+    "tool_call_signature",
 ]
+
+_ProgressSender = Callable[[str], Awaitable[None] | None]
+_progress_sender: ContextVar[_ProgressSender | None] = ContextVar(
+    "kazma_long_task_progress_sender", default=None
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +158,7 @@ def enable_long_task(
         "expires_at": (now + ttl) if ttl > 0 else None,
     }
     get_config_store().set(f"long_task.{thread_id}", payload, category="agent")
+    record_long_task_event("enable")
     logger.info(
         "[long_task] ENABLED thread=%s actor=%s preset=%s max_iter=%s recursion=%s ttl=%s",
         thread_id,
@@ -157,6 +175,7 @@ def disable_long_task(thread_id: str, *, actor: str = "unknown") -> None:
     from kazma_core.config_store import get_config_store
 
     get_config_store().delete(f"long_task.{thread_id}")
+    record_long_task_event("disable")
     logger.info("[long_task] DISABLED thread=%s actor=%s", thread_id, actor)
 
 
@@ -282,3 +301,160 @@ def format_status_message(thread_id: str) -> str:
         "HITL still applies. `/yolo` is separate (danger-tool auto-approve).\n"
         "Disable: `/long off`"
     )
+
+
+# ── Progress sender (gateway sets before ainvoke for heartbeats) ─────────
+
+
+def set_progress_sender(sender: _ProgressSender | None) -> Token:
+    return _progress_sender.set(sender)
+
+
+def reset_progress_sender(token: Token) -> None:
+    _progress_sender.reset(token)
+
+
+def get_progress_sender() -> _ProgressSender | None:
+    return _progress_sender.get()
+
+
+async def maybe_heartbeat(
+    *,
+    thread_id: str | None,
+    iteration: int,
+    max_iterations: int,
+    last_tools: list[str] | None = None,
+) -> None:
+    """Send a short progress note every 5 rounds when long-task is active."""
+    if not thread_id or iteration <= 0 or iteration % 5 != 0:
+        return
+    if not is_long_task_active(thread_id):
+        # Still heartbeat when default long-task or deep budgets
+        budgets = resolve_turn_budgets(thread_id)
+        if budgets["max_iterations"] < 25:
+            return
+    sender = get_progress_sender()
+    if sender is None:
+        return
+    tools = ", ".join((last_tools or [])[:4]) or "tools"
+    text = (
+        f"⏳ Long task progress: round **{iteration}/{max_iterations}** "
+        f"(recent: {tools}). Still working…"
+    )
+    try:
+        result = sender(text)
+        if hasattr(result, "__await__"):
+            await result  # type: ignore[misc]
+        record_long_task_event("heartbeat")
+    except Exception:
+        logger.debug("[long_task] heartbeat send failed", exc_info=True)
+
+
+# ── Continue protocol (partial summary for "Proceed") ────────────────────
+
+
+def store_continue_context(
+    thread_id: str,
+    *,
+    summary: str,
+    reason: str = "budget_exhausted",
+) -> None:
+    """Persist salvaged progress so the next 'Proceed' turn can continue cleanly."""
+    if not thread_id or not (summary or "").strip():
+        return
+    from kazma_core.config_store import get_config_store
+
+    payload = {
+        "summary": summary.strip()[:6000],
+        "reason": reason,
+        "stored_at": time.time(),
+    }
+    get_config_store().set(
+        f"long_task.continue.{thread_id}", payload, category="agent"
+    )
+    record_long_task_event("continue_stored")
+    logger.info(
+        "[long_task] continue context stored thread=%s chars=%d reason=%s",
+        thread_id,
+        len(payload["summary"]),
+        reason,
+    )
+
+
+def consume_continue_context(thread_id: str | None) -> str | None:
+    """Return and clear stored continue context, or None."""
+    if not thread_id:
+        return None
+    from kazma_core.config_store import get_config_store
+
+    cs = get_config_store()
+    key = f"long_task.continue.{thread_id}"
+    raw = cs.get(key)
+    if not isinstance(raw, dict):
+        return None
+    summary = str(raw.get("summary") or "").strip()
+    try:
+        cs.delete(key)
+    except Exception:
+        pass
+    if not summary:
+        return None
+    record_long_task_event("continue_consumed")
+    return (
+        "[LONG-TASK CONTINUE CONTEXT — prior turn hit a budget limit]\n"
+        "You already gathered the following. Do **not** re-do this work. "
+        "Only pursue remaining gaps and produce a final report.\n\n"
+        f"{summary}\n"
+        "[/LONG-TASK CONTINUE CONTEXT]"
+    )
+
+
+# ── Anti-loop detection ──────────────────────────────────────────────────
+
+
+def tool_call_signature(name: str, arguments: Any) -> str:
+    """Stable short signature for a tool invocation."""
+    import hashlib
+    import json
+
+    try:
+        blob = json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
+    except Exception:
+        blob = str(arguments)
+    digest = hashlib.sha256(f"{name}:{blob}".encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"{name}:{digest}"
+
+
+def detect_tool_loop(
+    signatures: list[str],
+    *,
+    window: int = 12,
+    max_repeats: int = 3,
+) -> str | None:
+    """If the same tool+args signature repeats too often, return that signature."""
+    if not signatures:
+        return None
+    recent = signatures[-window:]
+    counts: dict[str, int] = {}
+    for sig in recent:
+        counts[sig] = counts.get(sig, 0) + 1
+        if counts[sig] >= max_repeats:
+            return sig
+    return None
+
+
+# ── Metrics ──────────────────────────────────────────────────────────────
+
+
+def record_long_task_event(kind: str) -> None:
+    """Increment optional Prometheus counter for long-task events."""
+    try:
+        from kazma_core.metrics import record_long_task
+
+        record_long_task(kind)
+    except Exception:
+        pass
+
+
+def record_budget_exhausted(reason: str = "recursion") -> None:
+    record_long_task_event(f"budget_{reason}")

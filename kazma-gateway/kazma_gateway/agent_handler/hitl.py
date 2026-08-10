@@ -13,6 +13,66 @@ logger = logging.getLogger(__name__)
 __all__: list[str] = []
 
 
+async def _stale_approval_message(
+    graph: Any,
+    config: dict[str, Any],
+    thread_id: str,
+    *,
+    action: str,
+    approved: bool,
+) -> str | None:
+    """Human message for a late/duplicate approve, or None to stay silent.
+
+    If we recently completed a resume for this thread, silence the second tap.
+    If the graph already finished with an assistant answer, say so honestly —
+    never claim "Nothing was executed" when work already completed.
+    """
+    import time
+
+    try:
+        from kazma_core.config_store import get_config_store
+
+        last = get_config_store().get(f"hitl.last_resume.{thread_id}")
+        if isinstance(last, dict):
+            at = float(last.get("at") or 0)
+            if at and (time.time() - at) < 90:
+                # Duplicate within 90s of a successful resume — no spam.
+                return None
+    except Exception:
+        pass
+
+    # Graph finished (no next nodes) — likely already approved and completed.
+    try:
+        snapshot = await graph.aget_state(config)
+        next_nodes = getattr(snapshot, "next", None) or ()
+        vals = getattr(snapshot, "values", None) or {}
+        msgs = vals.get("messages") or []
+        has_assistant = any(
+            isinstance(m, dict)
+            and m.get("role") in ("assistant", "ai")
+            and str(m.get("content") or "").strip()
+            and not m.get("tool_calls")
+            for m in msgs[-6:]
+        )
+        if not next_nodes and has_assistant and approved:
+            return (
+                "✅ Already handled — this approval was applied earlier and the "
+                "turn finished. You can ignore this button (or send a new request)."
+            )
+        if not next_nodes and not approved:
+            return (
+                "ℹ️ No pending approval on this chat (already resolved or expired)."
+            )
+    except Exception:
+        logger.debug("[HITL] stale-message state probe failed", exc_info=True)
+
+    return (
+        "⚠️ This approval card is no longer active "
+        "(already resolved, or a newer turn replaced it).\n"
+        "If you still need the action, send your request again."
+    )
+
+
 async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str, Any] | None:
     """Return the hitl_approval interrupt payload if the graph is paused, else None.
 
@@ -204,28 +264,49 @@ async def _handle_hitl_resume(
             # bug. Fail loudly instead.
             pending = await _check_graph_interrupt(graph, resume_config)
             if pending is None:
+                # Stale/duplicate callback after a successful resume is common
+                # (double-tap, Telegram retries). Prefer a calm message — and
+                # suppress spam within a short debounce window.
+                soft = await _stale_approval_message(
+                    graph, resume_config, target_thread, action=action, approved=approved
+                )
                 logger.info(
                     "[HITL] Stale approval ignored: thread=%s action=%s "
-                    "(no pending interrupt)", target_thread, action,
+                    "(no pending interrupt) soft=%s",
+                    target_thread,
+                    action,
+                    soft is not None,
                 )
-                await manager.send(
-                    OutboundMessage(
-                        target_id=_build_target_id(msg.platform, ctx),
-                        text=(
-                            "⚠️ This approval request has expired — a newer "
-                            "message superseded it or it was already resolved. "
-                            "Nothing was executed. Please repeat your request "
-                            "if you still want the action performed."
-                        ),
-                        context_metadata=ctx,
+                if soft:
+                    await manager.send(
+                        OutboundMessage(
+                            target_id=_build_target_id(msg.platform, ctx),
+                            text=soft,
+                            context_metadata=ctx,
+                        )
                     )
-                )
                 return True
 
             logger.info(
                 "[HITL] Resume: thread=%s approved=%s action=%s",
                 target_thread, approved, action,
             )
+            # Mark successful resume so a late second callback stays quiet.
+            try:
+                from kazma_core.config_store import get_config_store
+                import time as _time
+
+                get_config_store().set(
+                    f"hitl.last_resume.{target_thread}",
+                    {
+                        "at": _time.time(),
+                        "action": action,
+                        "approved": approved,
+                    },
+                    category="safety",
+                )
+            except Exception:
+                pass
 
             # ── Task grant: auto-approve all danger tools until next message ──
             # When the user clicks "Approve for task", grant ALL danger tools

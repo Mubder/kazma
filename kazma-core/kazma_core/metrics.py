@@ -10,7 +10,14 @@ import logging
 import time
 from typing import Any
 
-__all__ = ["get_metrics_response", "record_llm_call", "record_memory_op", "record_swarm_dispatch", "record_swarm_handoff"]
+__all__ = [
+    "get_metrics_response",
+    "record_llm_call",
+    "record_long_task",
+    "record_memory_op",
+    "record_swarm_dispatch",
+    "record_swarm_handoff",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,13 @@ if _PROMETHEUS_AVAILABLE:
         ["operation", "layer"],  # operation = search|store|delete
     )
 
+    # Long-task / budget metrics
+    LONG_TASK_EVENTS_TOTAL = Counter(
+        "kazma_long_task_events_total",
+        "Long-task mode and budget events",
+        ["kind"],  # enable|disable|heartbeat|budget_recursion|continue_stored|tool_loop_break|…
+    )
+
     # Latency histograms
     LLM_LATENCY_SECONDS = Histogram(
         "kazma_llm_latency_seconds",
@@ -67,6 +81,7 @@ else:
     SWARM_DISPATCHES_TOTAL = None
     SWARM_HANDOFFS_TOTAL = None
     MEMORY_OPERATIONS_TOTAL = None
+    LONG_TASK_EVENTS_TOTAL = None
     LLM_LATENCY_SECONDS = None
 
 
@@ -113,6 +128,14 @@ def record_swarm_handoff() -> None:
     if not _PROMETHEUS_AVAILABLE:
         return
     SWARM_HANDOFFS_TOTAL.inc()
+
+
+def record_long_task(kind: str) -> None:
+    """Record a long-task / budget event. No-op without prometheus-client."""
+    if not _PROMETHEUS_AVAILABLE or LONG_TASK_EVENTS_TOTAL is None:
+        return
+    label = (kind or "unknown")[:64]
+    LONG_TASK_EVENTS_TOTAL.labels(kind=label).inc()
 
 
 def record_memory_op(operation: str, layer: str = "unknown") -> None:
