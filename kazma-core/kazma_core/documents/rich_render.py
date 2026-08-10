@@ -22,12 +22,14 @@ __all__ = [
     "is_arabic_dominant",
     "shape_for_pdf",
     "parse_rich_blocks",
+    "try_parse_pipe_table_blob",
     "inline_markdown_to_reportlab",
     "pdf_flowables_from_body",
     "docx_write_rich_body",
     "docx_set_rtl_paragraph",
     "docx_force_justify",
     "docx_set_paragraph_shading",
+    "docx_heading_bar",
     "docx_add_table",
 ]
 
@@ -39,13 +41,6 @@ _HR_RE = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
 # GFM-style table row: | a | b |
 _TABLE_ROW_RE = re.compile(r"^\|.+\|$")
 _TABLE_SEP_RE = re.compile(r"^\|[\s:\-|]+\|$")
-_INLINE_MD_RE = re.compile(
-    r"(\*\*[^*]+\*\*|__[^_]+__|"
-    r"(?<!\*)\*(?!\*)([^*]+)\*(?!\*)|"
-    r"(?<!_)_(?!_)([^_]+)_(?!_)|"
-    r"`([^`]+)`|"
-    r"\[([^\]]+)\]\(([^)]+)\))"
-)
 
 
 def arabic_ratio(text: str) -> float:
@@ -66,11 +61,7 @@ def is_arabic_dominant(text: str, *, threshold: float = 0.35) -> bool:
 
 
 def shape_for_pdf(text: str) -> str:
-    """Reshape + BiDi-reorder for ReportLab (LTR drawing engine).
-
-    Safe for mixed AR/EN: ``python-bidi`` handles base direction from content.
-    Returns original text if reshape libraries are missing or text has no Arabic.
-    """
+    """Reshape + BiDi-reorder for ReportLab (LTR drawing engine)."""
     if not text or not _AR_RE.search(text):
         return text
     try:
@@ -82,7 +73,6 @@ def shape_for_pdf(text: str) -> str:
         )
         return text
     try:
-        # configuration: delete_harakat keeps diacritics when present
         reshaper = arabic_reshaper.ArabicReshaper(
             configuration={
                 "delete_harakat": False,
@@ -90,7 +80,6 @@ def shape_for_pdf(text: str) -> str:
             }
         )
         reshaped = reshaper.reshape(text)
-        # base_dir auto from content; explicit 'R' when Arabic-dominant
         base = "R" if is_arabic_dominant(text) else None
         return get_display(reshaped, base_dir=base)
     except Exception:
@@ -102,6 +91,82 @@ def shape_for_pdf(text: str) -> str:
             return get_display(arabic_reshaper.reshape(text))
         except Exception:
             return text
+
+
+def _split_pipe_row(row: str) -> list[str]:
+    inner = row.strip().strip("|")
+    return [c.strip() for c in inner.split("|")]
+
+
+def _is_sep_cell(cell: str) -> bool:
+    c = (cell or "").strip().replace(" ", "")
+    return bool(c) and bool(re.fullmatch(r":?-+:?", c))
+
+
+def try_parse_pipe_table_blob(text: str) -> dict[str, Any] | None:
+    """Parse a GFM table that may be multi-line OR collapsed onto one line.
+
+    LLMs often emit: ``| h1 | h2 | |---|---| | r1 | r2 |`` as a single paragraph.
+    Empty cells between header/sep/rows are row delimiters in collapsed form.
+    """
+    raw = (text or "").strip()
+    if raw.count("|") < 4:
+        return None
+
+    # Multi-line GFM
+    lines = [ln.strip() for ln in raw.replace("\r\n", "\n").split("\n") if ln.strip()]
+    if len(lines) >= 2 and _TABLE_ROW_RE.match(lines[0]) and _TABLE_SEP_RE.match(lines[1]):
+        headers = _split_pipe_row(lines[0])
+        rows = [_split_pipe_row(ln) for ln in lines[2:] if _TABLE_ROW_RE.match(ln)]
+        if headers and rows:
+            return {"type": "table", "headers": headers, "rows": rows}
+
+    cells = [c.strip() for c in raw.strip().strip("|").split("|")]
+    if len(cells) < 3:
+        return None
+    try:
+        first_sep = next(i for i, c in enumerate(cells) if _is_sep_cell(c))
+    except StopIteration:
+        return None
+    last_sep = first_sep
+    while last_sep + 1 < len(cells) and _is_sep_cell(cells[last_sep + 1]):
+        last_sep += 1
+
+    headers = list(cells[:first_sep])
+    while headers and headers[-1] == "":
+        headers.pop()
+    # drop leading empties
+    while headers and headers[0] == "":
+        headers.pop(0)
+    ncols = len(headers)
+    if ncols < 1:
+        return None
+
+    data = cells[last_sep + 1 :]
+    # empty string acts as row break; also pack by ncols
+    rows: list[list[str]] = []
+    cur: list[str] = []
+    for c in data:
+        if c == "":
+            if cur:
+                # pad/truncate to ncols
+                if len(cur) < ncols:
+                    cur = cur + [""] * (ncols - len(cur))
+                rows.append(cur[:ncols])
+                cur = []
+            continue
+        cur.append(c)
+        if len(cur) == ncols:
+            rows.append(cur)
+            cur = []
+    if cur:
+        if len(cur) < ncols:
+            cur = cur + [""] * (ncols - len(cur))
+        rows.append(cur[:ncols])
+    rows = [r for r in rows if any(x.strip() for x in r)]
+    if not rows:
+        return None
+    return {"type": "table", "headers": headers, "rows": rows}
 
 
 def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
@@ -127,10 +192,18 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
 
     def flush_para() -> None:
         nonlocal para_buf
-        text = " ".join(ln.strip() for ln in para_buf if ln.strip()).strip()
+        joined = "\n".join(ln.strip() for ln in para_buf if ln.strip()).strip()
+        # Also try space-joined collapsed tables
+        space_joined = " ".join(ln.strip() for ln in para_buf if ln.strip()).strip()
         para_buf = []
-        if text:
-            blocks.append({"type": "paragraph", "text": text})
+        if not joined:
+            return
+        parsed = try_parse_pipe_table_blob(joined) or try_parse_pipe_table_blob(space_joined)
+        if parsed is not None:
+            blocks.append(parsed)
+            return
+        # Prefer space-joined for normal paragraphs (original behavior)
+        blocks.append({"type": "paragraph", "text": space_joined})
 
     def flush_list() -> None:
         nonlocal list_buf, list_kind
@@ -164,24 +237,33 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
             i += 1
             continue
 
-        # Markdown table: header + separator + rows
-        if (
-            _TABLE_ROW_RE.match(stripped)
-            and i + 1 < len(lines)
-            and _TABLE_SEP_RE.match(lines[i + 1].strip())
+        # Markdown table (multi-line GFM or collapsed one-liner from LLMs)
+        if "|" in stripped and (
+            (i + 1 < len(lines) and _TABLE_SEP_RE.match(lines[i + 1].strip()))
+            or _is_sep_cell(stripped.strip("|").split("|")[0] if False else "")
+            or re.search(r"\|\s*:?-+:?\s*\|", stripped)
         ):
+            # Gather consecutive pipe-ish lines into one blob
             flush_para()
             flush_list()
-            def _split_row(row: str) -> list[str]:
-                inner = row.strip().strip('|')
-                return [c.strip() for c in inner.split('|')]
-            headers = _split_row(stripped)
-            i += 2
-            trows: list[list[str]] = []
-            while i < len(lines) and _TABLE_ROW_RE.match(lines[i].strip()):
-                trows.append(_split_row(lines[i].strip()))
-                i += 1
-            blocks.append({'type': 'table', 'headers': headers, 'rows': trows})
+            blob_lines = [stripped]
+            i += 1
+            while i < len(lines):
+                nxt = lines[i].strip()
+                if not nxt:
+                    break
+                if "|" in nxt or _TABLE_SEP_RE.match(nxt):
+                    blob_lines.append(nxt)
+                    i += 1
+                    continue
+                break
+            blob = "\n".join(blob_lines)
+            parsed = try_parse_pipe_table_blob(blob)
+            if parsed is not None:
+                blocks.append(parsed)
+                continue
+            # Not a table — fall through as paragraph text
+            para_buf.extend(blob_lines)
             continue
 
         hm = _HEADING_RE.match(stripped)
@@ -516,6 +598,56 @@ def docx_set_paragraph_shading(paragraph: Any, fill_hex: str = "1E3A5F") -> None
     shd.set(qn("w:fill"), fill)
 
 
+def docx_heading_bar(
+    document: Any,
+    text: str,
+    *,
+    level: int = 1,
+    rtl: bool = False,
+    fill_hex: str = "1E3A5F",
+) -> Any:
+    """Full-width filled heading bar (single-cell table) — reliable in Word/Telegram viewers.
+
+    Built-in Heading styles often ignore paragraph shading; a table cell fill
+    matches the PDF bar look for both EN and AR.
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    fill = (fill_hex or "1E3A5F").lstrip("#").upper()
+    sizes = {0: 18, 1: 14, 2: 12, 3: 11}
+    size = sizes.get(int(level), 12)
+
+    table = document.add_table(rows=1, cols=1)
+    table.autofit = True
+    cell = table.rows[0].cells[0]
+    # Cell background
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:fill"), fill)
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    tc_pr.append(shd)
+
+    cell.text = ""
+    p = cell.paragraphs[0]
+    run = p.add_run(text or "")
+    run.bold = True
+    run.font.size = Pt(size)
+    run.font.name = "Arial"
+    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    if rtl:
+        docx_set_rtl_paragraph(p, justify=False)
+    else:
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    # Spacing after bar
+    document.add_paragraph("")
+    return table
+
+
 def docx_set_rtl_paragraph(paragraph: Any, *, justify: bool = True) -> None:
     """Mark a python-docx paragraph as RTL and optionally justify."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -641,21 +773,26 @@ def docx_write_rich_body(
         btype = block["type"]
         if btype == "heading":
             level = min(3, max(1, int(block.get("level") or 2)))
-            p = document.add_heading(block.get("text") or "", level=level)
-            # Heading bar fill (dark for H1/H2, light for H3)
-            fill = "1E3A5F" if level <= 2 else "E2E8F0"
-            docx_set_paragraph_shading(p, fill)
-            try:
-                if p.runs:
-                    if level <= 2:
-                        p.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                    else:
-                        p.runs[0].font.color.rgb = RGBColor(0x1E, 0x3A, 0x5F)
-            except Exception:
-                pass
-            if rtl:
-                docx_set_rtl_paragraph(p, justify=False)
+            fill = "1E3A5F" if level <= 2 else "334155"
+            # Prefer table-cell bar (visible in Word / Telegram) over Heading+shd
+            docx_heading_bar(
+                document,
+                block.get("text") or "",
+                level=level,
+                rtl=rtl,
+                fill_hex=fill,
+            )
         elif btype == "paragraph":
+            # May still be a collapsed table the block classifier missed
+            maybe = try_parse_pipe_table_blob(block.get("text") or "")
+            if maybe is not None:
+                docx_add_table(
+                    document,
+                    list(maybe.get("headers") or []),
+                    list(maybe.get("rows") or []),
+                    rtl=rtl,
+                )
+                continue
             p = document.add_paragraph()
             _docx_add_runs_with_inline_md(p, block.get("text") or "")
             if rtl:

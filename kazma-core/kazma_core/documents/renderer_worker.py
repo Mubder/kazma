@@ -604,13 +604,16 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt, RGBColor
 
+    from docx.shared import Cm
+
     from kazma_core.documents.rich_render import (
         docx_add_table,
         docx_force_justify,
-        docx_set_paragraph_shading,
+        docx_heading_bar,
         docx_set_rtl_paragraph,
         docx_write_rich_body,
         is_arabic_dominant,
+        try_parse_pipe_table_blob,
     )
     from kazma_core.documents.style_theme import THEME, localized_chrome
 
@@ -633,9 +636,15 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
         rtl = False
 
     chrome = localized_chrome(rtl=rtl)
-    # Theme fills (no #) for DOCX shading — same EN/AR
     fill_title = str(THEME["accent"]).lstrip("#")
     fill_h = str(THEME["heading_fill"]).lstrip("#")
+
+    # Page setup — closer to PDF margins (not Word's 1.25" default)
+    for section in document.sections:
+        section.top_margin = Cm(1.8)
+        section.bottom_margin = Cm(1.8)
+        section.left_margin = Cm(1.8)
+        section.right_margin = Cm(1.8)
 
     # Normal style: always justify (EN + AR); RTL via bidi on each para
     try:
@@ -648,41 +657,29 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     except Exception:
         pass
 
-    title = document.add_heading(str(payload.get("title", "Document")), 0)
-    docx_set_paragraph_shading(title, fill_title)
-    try:
-        if title.runs:
-            title.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-    except Exception:
-        pass
-    # Same treatment EN/AR: reading-direction align on the title bar
-    if rtl:
-        docx_set_rtl_paragraph(title, justify=False)
-    else:
-        title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    # Title as full-width filled bar (PDF parity — works in Telegram/Word)
+    docx_heading_bar(
+        document,
+        str(payload.get("title", "Document")),
+        level=0,
+        rtl=rtl,
+        fill_hex=fill_title,
+    )
 
     header = str(payload.get("header") or chrome["brand"])
     footer = str(payload.get("footer") or chrome["brand"])
     for section in document.sections:
-        if header:
-            section.header.paragraphs[0].text = header
-            if rtl:
-                docx_set_rtl_paragraph(section.header.paragraphs[0], justify=False)
-        if footer:
-            section.footer.paragraphs[0].text = footer
-            if rtl:
-                docx_set_rtl_paragraph(section.footer.paragraphs[0], justify=False)
+        hp = section.header.paragraphs[0]
+        hp.text = header
+        if rtl:
+            docx_set_rtl_paragraph(hp, justify=False)
+        fp = section.footer.paragraphs[0]
+        fp.text = footer
+        if rtl:
+            docx_set_rtl_paragraph(fp, justify=False)
 
     if payload.get("toc"):
-        toc = document.add_heading(chrome["toc"], 1)
-        docx_set_paragraph_shading(toc, fill_h)
-        try:
-            if toc.runs:
-                toc.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-        except Exception:
-            pass
-        if rtl:
-            docx_set_rtl_paragraph(toc, justify=False)
+        docx_heading_bar(document, chrome["toc"], level=1, rtl=rtl, fill_hex=fill_h)
         for index, item in enumerate(sections, 1):
             if item["heading"]:
                 p = document.add_paragraph(f"{index}. {item['heading']}")
@@ -691,18 +688,26 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
 
     for item in sections:
         if item["heading"]:
-            h = document.add_heading(item["heading"].lstrip("#").strip(), 1)
-            docx_set_paragraph_shading(h, fill_h)
-            try:
-                if h.runs:
-                    h.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-            except Exception:
-                pass
-            if rtl:
-                docx_set_rtl_paragraph(h, justify=False)
+            docx_heading_bar(
+                document,
+                item["heading"].lstrip("#").strip(),
+                level=1,
+                rtl=rtl,
+                fill_hex=fill_h,
+            )
         body = item.get("body") or ""
         if body.strip():
-            docx_write_rich_body(document, body, rtl=rtl)
+            # Whole-body collapsed table only?
+            maybe = try_parse_pipe_table_blob(body)
+            if maybe is not None and body.count("\n") < 2 and body.count("|") > 6:
+                docx_add_table(
+                    document,
+                    list(maybe.get("headers") or []),
+                    list(maybe.get("rows") or []),
+                    rtl=rtl,
+                )
+            else:
+                docx_write_rich_body(document, body, rtl=rtl)
 
     # Structured tables from payload (same as PDF path)
     tables = payload.get("tables")
@@ -714,15 +719,9 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
             headers = value.get("headers")
             rows = value.get("rows")
             if heading:
-                h = document.add_heading(heading, 2)
-                docx_set_paragraph_shading(h, fill_h)
-                try:
-                    if h.runs:
-                        h.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                except Exception:
-                    pass
-                if rtl:
-                    docx_set_rtl_paragraph(h, justify=False)
+                docx_heading_bar(
+                    document, heading, level=2, rtl=rtl, fill_hex=fill_h
+                )
             if isinstance(headers, list) and isinstance(rows, list) and headers:
                 docx_add_table(
                     document,
@@ -737,15 +736,9 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
 
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
-        ref = document.add_heading(chrome["references"], 1)
-        docx_set_paragraph_shading(ref, fill_h)
-        try:
-            if ref.runs:
-                ref.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-        except Exception:
-            pass
-        if rtl:
-            docx_set_rtl_paragraph(ref, justify=False)
+        docx_heading_bar(
+            document, chrome["references"], level=1, rtl=rtl, fill_hex=fill_h
+        )
         for value in citations:
             p = document.add_paragraph(str(value), style="List Number")
             if rtl:

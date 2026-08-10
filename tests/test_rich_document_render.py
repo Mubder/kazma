@@ -163,10 +163,15 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     )
     assert out.is_file()
     doc = Document(str(out))
-    texts = [p.text for p in doc.paragraphs if p.text.strip()]
-    assert any("وثيقة" in t for t in texts)
-    assert any("واحد" in t or "اثنان" in t for t in texts)
-    # At least one paragraph should have bidi flag when RTL
+    # Title/headings live in filled single-cell tables (PDF-parity bars)
+    all_text = " ".join(p.text for p in doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                all_text += " " + cell.text
+    assert "وثيقة" in all_text
+    assert "واحد" in all_text or "اثنان" in all_text
+    assert len(doc.tables) >= 2  # title bar + section/heading bars
     from docx.oxml.ns import qn
 
     has_bidi = False
@@ -175,6 +180,15 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
         if p_pr is not None and p_pr.find(qn("w:bidi")) is not None:
             has_bidi = True
             break
+    # Also check table cell paragraphs (title bar is RTL)
+    if not has_bidi:
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        p_pr = p._p.pPr
+                        if p_pr is not None and p_pr.find(qn("w:bidi")) is not None:
+                            has_bidi = True
     assert has_bidi
 
 
@@ -210,20 +224,37 @@ def test_markdown_table_and_docx_justify_shading(tmp_path: Path) -> None:
     _generate_docx(docx, payload)
     assert pdf.is_file() and pdf.stat().st_size > 500
     doc = Document(str(docx))
-    assert len(doc.tables) >= 2  # markdown + payload
+    # title bar + section bar + markdown table + payload table (+ heading bars)
+    assert len(doc.tables) >= 3
     found_jc = False
-    found_shade = False
+    found_bar_fill = False
     for p in doc.paragraphs:
         if "longer paragraph" in p.text and p._p.pPr is not None:
             jc = p._p.pPr.find(qn("w:jc"))
             if jc is not None and jc.get(qn("w:val")) == "both":
                 found_jc = True
-        if p.style and str(p.style.name).startswith("Heading") and p._p.pPr is not None:
-            shd = p._p.pPr.find(qn("w:shd"))
+    for table in doc.tables:
+        cell = table.rows[0].cells[0]
+        tc_pr = cell._tc.tcPr
+        if tc_pr is not None:
+            shd = tc_pr.find(qn("w:shd"))
             if shd is not None and shd.get(qn("w:fill")):
-                found_shade = True
+                found_bar_fill = True
+                break
     assert found_jc
-    assert found_shade
+    assert found_bar_fill
+
+    # Collapsed one-line table (as shipped in Telegram DOCX) becomes real table
+    collapsed = (
+        "| Feature | Kazma | LangChain | |---|---|---| "
+        "| Multi-agent | Native | Add-on | | HITL | Triple | Manual |"
+    )
+    from kazma_core.documents.rich_render import try_parse_pipe_table_blob
+
+    parsed = try_parse_pipe_table_blob(collapsed)
+    assert parsed is not None
+    assert parsed["headers"][0] == "Feature"
+    assert len(parsed["rows"]) >= 2
 
 
 def test_generate_pdf_english_lists(tmp_path: Path) -> None:
