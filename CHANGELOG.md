@@ -1240,14 +1240,12 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
   `slack_send` — Block Kit builders; graph HITL sends blocks.
 - **HITL handler** builds platform-native approval controls for all three.
 
-## Unreleased — remaining gaps phase 2: shared breakers, tenant MCP/cron, RO shell (2026-07-25)
+## v0.11.0 (2026-08-10)
 
-- **Shared circuit breakers**: ConfigStore dual-write when multi-user/prod
-  (`KAZMA_SHARED_BREAKERS`); wall-clock cooldown for multi-replica.
-- **Tenant MCP ConfigStore keys**: `tenant.<id>.mcp.servers` under isolation.
-- **Cron `tenant_id`**: stamped on schedule; list filtered in multi-user/prod.
-- **Shell mutate off** in multi-user/prod (`mkdir`/`cp`/`mv`/`touch`) unless
-  `KAZMA_SHELL_ALLOW_MUTATE=1` — prefer `file_write` tool.
+### Feat
+
+- **agent**: complete long-task wiring across transports and /long
+- **agent**: long-task mode — /long + aligned recursion budgets
 
 ## v0.10.2 (2026-08-10)
 
