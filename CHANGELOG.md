@@ -1253,27 +1253,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
 - Slack bus `set_reaction` API.
 - Chat session delete surfaces non-OK HTTP status.
 
-## Unreleased — residual hardening: post-HITL, SaaS tenant, multi-replica, parity (2026-07-25)
+## v0.10.1 (2026-08-10)
 
-### Post-HITL host power
-- **Restricted PATH + which-only binaries** in production (`KAZMA_SHELL_STRICT`,
-  default on when `KAZMA_PRODUCTION=1`) via `safety/post_hitl.py`.
-- **Archives off in prod strict** (`tar`/`zip`) unless `KAZMA_SHELL_ALLOW_ARCHIVE=1`.
-- **Git denylist expanded**: reset/rebase/force/remote/submodule blocked.
+### Fix
 
-### Multi-tenant SaaS
-- **X-Tenant-ID ignored** when production *or* multi-user (not only prod).
-- **Opaque sessions forced** when multi-user is enabled.
-- Swarm tasks stamp `metadata.tenant_id` on dispatch.
-
-### Multi-replica
-- **`swarm/shared_approvals.py`**: durable ConfigStore wait for HITL bus
-  approvals; Telegram/Discord/Slack buses resolve across replicas.
-- Ops doc: `docs/docs/ops/multi-replica-and-saas.md`.
-
-### Discord/Slack parity
-- Discord bus gains `set_reaction` (Telegram-style status feedback API).
-- Shared approval path on all three platform buses.
+- **documents**: quiet LibreOffice, PDF sniff, delete confirm race
 
 ## v0.10.0 (2026-08-10)
 
