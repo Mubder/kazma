@@ -196,9 +196,26 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     assert sect.find(qn("w:rtlGutter")) is not None
     tfl = doc.settings.element.find(qn("w:themeFontLang"))
     assert tfl is not None and tfl.get(qn("w:bidi")) == "ar-SA"
+    assert tfl.get(qn("w:val")) == "ar-SA"  # not en-US shell
     for table in doc.tables:
         assert table._tbl.tblPr is not None
         assert table._tbl.tblPr.find(qn("w:bidiVisual")) is not None
+    # Run-level w:rtl is what Word uses for text direction (not only pPr bidi)
+    run_rtl = 0
+    for p in doc.paragraphs:
+        for r in p.runs:
+            r_pr = r._r.rPr
+            if r_pr is not None and r_pr.find(qn("w:rtl")) is not None:
+                run_rtl += 1
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        r_pr = r._r.rPr
+                        if r_pr is not None and r_pr.find(qn("w:rtl")) is not None:
+                            run_rtl += 1
+    assert run_rtl >= 1
 
 
 def test_markdown_table_and_docx_justify_shading(tmp_path: Path) -> None:
