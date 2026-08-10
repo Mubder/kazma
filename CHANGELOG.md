@@ -1242,15 +1242,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
   delegate `_maybe_transcribe_audio` / voice reply to the deep path.
 - **Telegram STT module** re-exports shared helpers for a single voice surface.
 
-## Unreleased — Discord/Slack Telegram-level UX modules (2026-07-25)
+## v0.12.0 (2026-08-10)
 
-- **Shared action vocabulary**: `platform_callbacks` + `platform_keyboards`
-  (HITL / model / personality IDs identical on TG/Discord/Slack).
-- **Discord modules**: `discord_parse`, `discord_callbacks`, `discord_keyboards`,
-  `discord_send` — adapter delegates; graph HITL sends components.
-- **Slack modules**: `slack_parse`, `slack_callbacks`, `slack_blocks`,
-  `slack_send` — Block Kit builders; graph HITL sends blocks.
-- **HITL handler** builds platform-native approval controls for all three.
+### Feat
+
+- **agent**: HITL stale UX, continue protocol, long-task heartbeats
 
 ## v0.11.0 (2026-08-10)
 
