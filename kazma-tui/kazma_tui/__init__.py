@@ -2,4 +2,9 @@
 
 from __future__ import annotations
 
-__version__ = "0.6.1"
+try:
+    from kazma_core.version import get_version as _get_version
+
+    __version__ = _get_version()
+except Exception:  # pragma: no cover - bare install without core
+    __version__ = "0.9.4"

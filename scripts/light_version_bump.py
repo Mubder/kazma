@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
-"""Light product versioning for Kazma (0.x).
+"""Optional **manual** public-base bump (rarely used).
 
-Policy
-------
-* **Auto / default:** only the **patch** digit moves
-  (``0.12.0`` → ``0.12.1`` → ``0.12.2``). The middle digit never auto-jumps.
-* **Commit id in the version string (PEP 440 local):**
-  ``0.12.1+g92c55af`` so each release points at a concrete commit.
-  (``+g…`` is the portable form of “commit code”; four-dot schemes like
-  ``0.12.1.abc`` are not PEP 440 and break packaging tools.)
-* **Minor** (middle digit, e.g. 12 → 13) and **major** require
-  ``--confirm CONFIRM`` — used only from the manual Release workflow.
+CI no longer auto-bumps. Preferred practice (``docs/VERSIONING.md``):
 
-Git tags stay clean: ``v0.12.1`` (no ``+``). Files store the full local
-version including ``+gSHA``.
+* Keep public base fixed in ``pyproject.toml`` (e.g. ``0.9.4``).
+* Runtime always shows ``0.9.4+gSHORTSHA`` via ``kazma_core.version``.
+* Change the base only for a deliberate milestone (hand-edit or this script).
+
+This script still exists for operators who want a CLI to move the base
+digit and optionally tag. It writes the **public base only** (no ``+g…``
+in files — display code adds the SHA).
 
 Usage
 -----
 ::
 
-    python scripts/light_version_bump.py --level patch --write
+    python scripts/light_version_bump.py --level patch --dry-run
+    python scripts/light_version_bump.py --level patch --write --confirm CONFIRM
     python scripts/light_version_bump.py --level minor --confirm CONFIRM --write --tag
-    python scripts/light_version_bump.py --dry-run
 """
 
 from __future__ import annotations
@@ -208,12 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--confirm",
         default="",
-        help='Must be exactly "CONFIRM" for minor or major bumps',
+        help='Must be exactly "CONFIRM" for any --write (digits are manual-only)',
     )
     parser.add_argument(
         "--write",
         action="store_true",
-        help="Write version files (otherwise dry-run only)",
+        help="Write public base to version files (requires --confirm CONFIRM)",
     )
     parser.add_argument(
         "--tag",
@@ -228,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-sha",
         action="store_true",
-        help="Do not append +gSHORTSHA local segment",
+        help="Deprecated no-op: files never store +gSHA (runtime adds it)",
     )
     parser.add_argument(
         "--skip-if-tagged",
@@ -243,10 +239,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     level = args.level
-    if level in ("minor", "major") and args.confirm != "CONFIRM":
+    # Any file write needs CONFIRM — digits are never auto-moved by CI.
+    if args.write and args.confirm != "CONFIRM":
         print(
-            f"error: level={level} requires --confirm CONFIRM "
-            f"(middle/major digits are manual-only)",
+            f"error: --write requires --confirm CONFIRM "
+            f"(public base is manual-only; display SHA is runtime)",
             file=sys.stderr,
         )
         return 2
@@ -258,37 +255,39 @@ def main(argv: list[str] | None = None) -> int:
     current = read_pyproject_version()
     major, minor, patch = parse_base(current)
     nmaj, nmin, npat = bump_triplet(major, minor, patch, level)
-    sha = None if args.no_sha else short_sha(7)
+    # Files store public base only. Runtime (kazma_core.version) adds +gSHA.
     public = format_public(nmaj, nmin, npat)
-    full = format_full(nmaj, nmin, npat, sha)
+    try:
+        display = f"{public}+g{short_sha(7)}"
+    except Exception:
+        display = public
 
     print(f"current : {current}")
     print(f"level   : {level}")
-    print(f"public  : {public}  (tag would be v{public})")
-    print(f"full    : {full}")
+    print(f"public  : {public}  (written to files / tag v{public})")
+    print(f"display : {display}  (runtime only — not written)")
     if level == "minor":
-        print(f"note    : middle digit {minor} → {nmin} (confirmed)")
+        print(f"note    : middle digit {minor} → {nmin}")
     if level == "major":
-        print(f"note    : major {major} → {nmaj} (confirmed)")
+        print(f"note    : major {major} → {nmaj}")
 
     if args.dry_run or not args.write:
         if not args.write:
-            print("(dry-run — pass --write to apply)")
+            print("(dry-run — pass --write --confirm CONFIRM to apply)")
         return 0
 
-    write_version_files(full)
-    prepend_changelog(public, full, level)
-    print(f"wrote   : pyproject.toml + kazma.yaml → {full}")
+    write_version_files(public)
+    prepend_changelog(public, display, level)
+    print(f"wrote   : pyproject.toml + kazma.yaml → {public}")
 
     if args.commit:
         _run(["git", "add", str(PYPROJECT), str(KAZMA_YAML), str(CHANGELOG)])
-        msg = f"chore(release): version {current} → {full} [skip ci]"
+        msg = f"chore(version): base {current} → {public}"
         _run(["git", "commit", "-m", msg])
         print(f"commit  : {msg}")
 
     if args.tag:
         tag = f"v{public}"
-        # Avoid duplicate tags
         existing = _run(["git", "tag", "-l", tag], check=False)
         if existing.strip() == tag:
             print(f"tag     : {tag} already exists — leave as-is")
@@ -300,10 +299,10 @@ def main(argv: list[str] | None = None) -> int:
                     "-a",
                     tag,
                     "-m",
-                    f"Kazma {full}",
+                    f"Kazma {display}",
                 ]
             )
-            print(f"tag     : {tag} ({full})")
+            print(f"tag     : {tag} ({display})")
 
     return 0
 

@@ -51,21 +51,26 @@ def _version_from_pyproject(path: Path) -> str | None:
 
 
 def _get_version() -> str:
-    """Resolve product version from monorepo pyproject (source of truth).
+    """Resolve display version: ``{base}+g{shortsha}`` when possible.
 
-    Prefer the checkout's ``pyproject.toml`` over ``importlib.metadata`` so
-    editable installs that still advertise a stale wheel version (e.g. 0.5.0)
-    don't mislead after a git pull to 0.6.x.
-    Never hardcode a release number in CLI help.
+    SoT is ``kazma_core.version.get_version()`` — public base from root
+    ``pyproject.toml`` (e.g. ``0.9.4``) plus live git short SHA. Never
+    hardcode a release number in CLI help.
     """
-    # 1) Monorepo / project pyproject.toml (walk up from this file + cwd)
+    try:
+        from kazma_core.version import get_version
+
+        return get_version()
+    except Exception as exc:
+        logger.debug("kazma_core.version failed, falling back: %s", exc)
+
+    # Fallback without core: base from pyproject (no SHA)
     here = Path(__file__).resolve()
     candidates = [
         here.parent.parent.parent / "pyproject.toml",  # kazma-cli/kazma_cli → repo root
         here.parent.parent / "pyproject.toml",
         Path.cwd() / "pyproject.toml",
     ]
-    # Also walk parents for nested layouts
     for parent in list(here.parents)[:8]:
         candidates.append(parent / "pyproject.toml")
 
@@ -80,21 +85,20 @@ def _get_version() -> str:
         seen.add(key)
         ver = _version_from_pyproject(pyproject)
         if ver:
-            return ver
+            return ver.split("+", 1)[0]
 
-    # 2) Installed distribution metadata (wheels / non-editable)
     try:
         from importlib.metadata import PackageNotFoundError, version
 
         for dist in ("kazma", "kazma-cli"):
             try:
-                return version(dist)
+                return version(dist).split("+", 1)[0]
             except PackageNotFoundError:
                 continue
     except Exception as exc:
         logger.debug("importlib.metadata version lookup failed: %s", exc)
 
-    return "0.0.0"
+    return "0.9.4"
 
 
 # ---------------------------------------------------------------------------

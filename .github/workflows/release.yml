@@ -1,39 +1,30 @@
-# Manual release — only place the middle digit ("12") or major can move.
+# Manual GitHub Release from the current fixed base + commit SHA.
+# Does NOT bump version digits (that is hand-edit only).
 #
-# * patch  — light (default); no confirmation
-# * minor  — requires typing CONFIRM (e.g. 0.12.x → 0.13.0)
-# * major  — requires typing CONFIRM (deliberate 1.0.0+)
-#
-# Always embeds +gSHORTSHA in pyproject / kazma.yaml (PEP 440 local).
-# See docs/VERSIONING.md.
-
+# Display version is always computed as {base}+g{shortsha}
+# (see docs/VERSIONING.md + kazma_core.version).
 name: Release
 
 on:
   workflow_dispatch:
     inputs:
-      force_level:
-        description: "Bump level. minor/major need confirm=CONFIRM."
+      create_tag:
+        description: "Create annotated git tag v{base} if missing"
         required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-      confirm:
-        description: 'Type CONFIRM to allow minor or major (middle/major digit). Leave empty for patch.'
+        default: true
+        type: boolean
+      notes:
+        description: "Optional release notes (markdown)"
         required: false
         default: ""
         type: string
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   release:
-    name: Light / confirmed release
+    name: Tag + GitHub Release (no version bump)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -48,64 +39,63 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Guard minor/major confirmation
-        env:
-          LEVEL: ${{ github.event.inputs.force_level }}
-          CONFIRM: ${{ github.event.inputs.confirm }}
+      - name: Resolve version
+        id: ver
         run: |
           set -euo pipefail
-          if [[ "$LEVEL" == "minor" || "$LEVEL" == "major" ]]; then
-            if [[ "$CONFIRM" != "CONFIRM" ]]; then
-              echo "::error::level=$LEVEL refused — type confirm=CONFIRM to move the middle/major digit"
-              exit 1
-            fi
-            echo "Confirmed $LEVEL bump"
-          else
-            echo "Patch-level light release (no confirmation required)"
-          fi
-
-      - name: Bump version
-        env:
-          LEVEL: ${{ github.event.inputs.force_level }}
-          CONFIRM: ${{ github.event.inputs.confirm }}
-        run: |
-          set -euo pipefail
-          EXTRA=()
-          if [[ "$LEVEL" == "minor" || "$LEVEL" == "major" ]]; then
-            EXTRA=(--confirm CONFIRM)
-          fi
-          python scripts/light_version_bump.py \
-            --level "$LEVEL" \
-            "${EXTRA[@]}" \
-            --write \
-            --commit \
-            --tag
-
-      - name: Push commit and tags
-        run: |
-          set -euo pipefail
-          git push origin HEAD:main --follow-tags
-
-      - name: Create GitHub Release (best-effort)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          VER=$(python - <<'PY'
+          BASE=$(python - <<'PY'
           import re
           from pathlib import Path
           text = Path("pyproject.toml").read_text(encoding="utf-8")
           m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
-          print(m.group(1) if m else "")
+          print((m.group(1) if m else "0.0.0").split("+", 1)[0])
           PY
           )
-          PUBLIC="${VER%%+*}"
-          TAG="v${PUBLIC}"
-          NOTES="Kazma **${VER}** (public tag ${TAG})"
-          gh release create "$TAG" --title "$TAG" --notes "$NOTES" || \
-            gh release edit "$TAG" --notes "$NOTES" || true
+          SHA=$(git rev-parse --short=7 HEAD)
+          FULL="${BASE}+g${SHA}"
+          TAG="v${BASE}"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "full=${FULL}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved display version: ${FULL} (tag ${TAG})"
+
+      - name: Configure git identity
+        if: ${{ inputs.create_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create annotated tag (if missing)
+        if: ${{ inputs.create_tag }}
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          FULL: ${{ steps.ver.outputs.full }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists — leave as-is"
+          else
+            git tag -a "${TAG}" -m "Kazma ${FULL}"
+            git push origin "refs/tags/${TAG}"
+            echo "Created ${TAG}"
+          fi
+
+      - name: Create / update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          FULL: ${{ steps.ver.outputs.full }}
+          NOTES_IN: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${NOTES_IN}" ]]; then
+            NOTES="${NOTES_IN}"
+          else
+            NOTES="Kazma **${FULL}** (public base tag ${TAG}).
+
+          Display version always embeds the commit id: \`{base}+g{shortsha}\`.
+          Digits are not auto-bumped; change the base in \`pyproject.toml\` by hand when you want a new milestone."
+          fi
+          gh release create "${TAG}" --title "${TAG}" --notes "${NOTES}" || \
+            gh release edit "${TAG}" --notes "${NOTES}" || true

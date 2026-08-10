@@ -1,22 +1,24 @@
 # CHANGELOG
 
+## Unreleased — Fixed base 0.9.4 + live git SHA (2026-08-10)
+
+Stop auto version bumps entirely. Product identity:
+
+- **Public base (files):** `0.9.4` in `pyproject.toml` / `kazma.yaml` / gateway
+- **Display (runtime):** always `0.9.4+gSHORTSHA` via `kazma_core.version.get_version()`
+- **Auto bump workflow disabled** (`.github/workflows/version-bump.yml` no-op)
+- **Release workflow** only tags / publishes notes — never rewrites digits
+- Reset from inflated same-day line `0.10–0.12` back to honest `0.9.4`
+- SoT: `docs/VERSIONING.md`
+
 ## Unreleased — Version + commit id; minor only with CONFIRM (2026-08-10)
 
-- Full version embeds short git SHA: `0.12.1+g92c55af` (PEP 440 local).
-- Auto bump is **patch only**; middle digit never auto-moves.
-- Manual **Release** workflow: minor/major require typing `CONFIRM`.
-- SoT script: `scripts/light_version_bump.py` (replaces Commitizen on CI).
+- *(superseded)* Full version embeds short git SHA; auto patch bumps.
+- Replaced by fixed-base + live SHA policy above.
 
 ## Unreleased — Light 0.x versioning (feat → patch) (2026-08-10)
 
-Stop hard minor jumps on every feature (`0.10 → 0.11 → 0.12`).
-
-- **Policy:** `feat` / `fix` / `perf` / `refactor` → **patch** only
-  (`0.12.0` → `0.12.1` → …). Breaking (`feat!` / `BREAKING CHANGE`) → **minor**.
-- **Commitizen** switched to `cz_customize` with that bump map.
-- **python-semantic-release** `minor_tags = []`, `feat` in `patch_tags`.
-- Docs: `docs/VERSIONING.md` rewritten. No four-part `0.10.1.0011` (use
-  rising patch instead — PEP 440 friendly).
+- *(superseded)* Stop hard minor jumps; later replaced by no auto-bump.
 
 ## Unreleased — Document export: real formatting + Arabic PDF shaping (2026-08-10)
 

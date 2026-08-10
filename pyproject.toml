@@ -1,6 +1,6 @@
 [project]
 name = "kazma"
-version = "0.12.0"
+version = "0.9.4"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
@@ -205,12 +205,10 @@ exclude_commit_patterns = [
     "Merge branch.*",
 ]
 
-# Legacy semantic-release config (manual Release workflow now uses
-# scripts/light_version_bump.py). Kept so `semantic-release version --print`
-# still understands light patch policy if someone runs it locally.
-# Real SoT: docs/VERSIONING.md + scripts/light_version_bump.py
-#   auto: patch only → 0.12.N+gSHA
-#   minor/major: manual + CONFIRM only
+# Version digits are NOT auto-bumped (see docs/VERSIONING.md).
+# Display = pyproject base + live +gSHORTSHA (kazma_core.version).
+# semantic-release / commitizen kept only for optional local habits — CI
+# does not run them for releases.
 [tool.semantic_release.commit_parser_options]
 allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "test", "ci", "chore", "build", "style"]
 minor_tags = []

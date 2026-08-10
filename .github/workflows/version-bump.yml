@@ -1,52 +1,30 @@
-# Light auto versioning on main (see docs/VERSIONING.md).
+# DISABLED — product version is no longer auto-bumped on push.
 #
-# * ONLY patch digit moves: 0.12.0 → 0.12.1 → 0.12.2
-# * Version string embeds commit id: 0.12.1+g92c55af (PEP 440 local)
-# * Middle digit ("12") NEVER changes here — only manual Release + CONFIRM
-name: Auto Bump Version
+# Practice (docs/VERSIONING.md):
+#   * Public base stays fixed in pyproject.toml (e.g. 0.9.4)
+#   * Runtime always shows 0.9.4+gSHORTSHA via kazma_core.version
+#   * Digits change only by deliberate hand edit of the base
+#
+# This workflow file is kept as a no-op stub so old branch protection /
+# badge links do not 404. Safe to delete once nothing references it.
+name: Auto Bump Version (disabled)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    # Manual only — intentionally no push-to-main trigger.
+    inputs:
+      reason:
+        description: "This workflow is disabled. Do not use."
+        required: false
+        default: "disabled"
 
 jobs:
-  bump-version:
+  disabled:
     runs-on: ubuntu-latest
-    # Do not re-enter on the release commit itself
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
-    permissions:
-      contents: write
     steps:
-      - name: Check out repo code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Configure git identity
+      - name: Explain and exit
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Light patch bump + commit id
-        run: |
-          set -euo pipefail
-          python scripts/light_version_bump.py \
-            --level patch \
-            --skip-if-tagged \
-            --write \
-            --commit \
-            --tag
-
-      - name: Push commit and tags
-        run: |
-          set -euo pipefail
-          # May be a no-op if skip-if-tagged
-          git push origin HEAD:main --follow-tags
+          echo "::notice::Auto version bump is disabled."
+          echo "Display version = base from pyproject + live git short SHA"
+          echo "See docs/VERSIONING.md and kazma_core.version.get_version()"
+          exit 0

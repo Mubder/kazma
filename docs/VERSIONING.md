@@ -1,77 +1,83 @@
 # Versioning & Releases
 
-Kazma uses **light 0.x versioning** with an embedded **git commit id**.
+Kazma uses a **fixed public base** plus a **live git commit id**.
 
 ## Format
 
 | Piece | Example | Meaning |
 |-------|---------|---------|
-| Public SemVer | `0.12.1` | What tags use (`v0.12.1`) |
-| Full product version | `0.12.1+g92c55af` | Stored in `pyproject.toml` + `kazma.yaml` |
-| `+g……` | PEP 440 **local** segment | Short git SHA (`g` = git). Portable “commit code”. |
+| Public base (files) | `0.9.4` | Root `pyproject.toml` / `kazma.yaml` / package versions |
+| Display version | `0.9.4+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
+| `+g……` | PEP 440 **local** segment | Short git SHA (`g` = git) |
 
-Why not `0.12.1.abs1234` / four dots? That is **not** PEP 440 and breaks
-packaging / installers. `+g92c55af` is the standard way to attach a commit id.
-
-## What moves automatically
-
-| Digit | Example | Auto on push to `main`? | How to change |
-|-------|---------|-------------------------|---------------|
-| **patch** (last) | `0.12.**1**` | **Yes** — every light release | `version-bump.yml` / Release `patch` |
-| **minor** (middle) | `0.**12**.1` | **Never** | Manual **Release** workflow + type **`CONFIRM`** |
-| **major** (first) | `**0**.12.1` | **Never** | Manual **Release** + **`CONFIRM`** (real 1.0.0) |
-
-This is why we no longer leap `0.6 → 0.10 → 0.11 → 0.12` in one day from
-ordinary `feat:` merges. The middle digit is a **milestone**, not a feature
-counter.
-
-## Bump policy
-
-| Trigger | Result |
-|---------|--------|
-| Push to `main` (feat/fix/…) | `0.12.N` → `0.12.N+1` **+ new `+gSHA`** |
-| Release workflow `patch` | Same light step |
-| Release workflow `minor` + `confirm=CONFIRM` | `0.12.x` → `0.13.0+g…` |
-| Release workflow `major` + `confirm=CONFIRM` | `0.x` → `1.0.0+g…` |
-| Release minor/major **without** `CONFIRM` | **Refused** |
-
-Script SoT: `scripts/light_version_bump.py`  
-Workflows:
-
-- `.github/workflows/version-bump.yml` — auto **patch only**
-- `.github/workflows/release.yml` — manual; minor/major need confirmation
-
-## Commit messages
-
-Still use conventional commits for humans/changelog:
-
-```
-feat(skills): …
-fix(gateway): …
-```
-
-They no longer drive a **minor** jump. Auto release is always **patch**.
+Why not bump `0.9.4` → `0.9.5` on every merge? That turned into
+`0.10 → 0.11 → 0.12` noise in one day. The **SHA** is the accurate
+build identity; the base is a human milestone.
 
 ## Source of truth
 
-| File | Role |
-|------|------|
-| `pyproject.toml` → `project.version` | Full version incl. `+gSHA` |
-| `kazma.yaml` → `agent.version` | Same full string (banner) |
-| Git tag `v0.12.1` | Public immutable marker (no `+`) |
-| `CHANGELOG.md` | Human history |
+| Location | Role |
+|----------|------|
+| Root `pyproject.toml` → `project.version` | **Public base only** (`0.9.4`) |
+| `kazma.yaml` → `agent.version` | Same public base |
+| `kazma_core.version.get_version()` | **Runtime display**: `base+gSHA` |
+| Git tag `v0.9.4` | Optional milestone marker (no `+`) |
 
-## Local dry-run
+```python
+from kazma_core.version import get_version, get_base_version
+
+get_base_version()  # "0.9.4"
+get_version()       # "0.9.4+g4d37b2c"  (when git / CI SHA available)
+```
+
+### SHA resolution order
+
+1. `KAZMA_GIT_SHA` (optional override)
+2. `GITHUB_SHA` (Actions)
+3. `git rev-parse --short=7 HEAD`
+4. No SHA → show base alone (installed wheel without `.git`)
+
+## What is NOT automated
+
+| Former behaviour | Now |
+|------------------|-----|
+| Push to `main` → auto patch bump | **Disabled** (`.github/workflows/version-bump.yml` is a no-op) |
+| `feat:` → minor leap | **Gone** |
+| CI rewrites `pyproject.toml` | **Never** |
+
+## When to change the base (`0.9.4` → `0.9.5` / `0.10.0`)
+
+Only for a deliberate product milestone:
+
+1. Edit **all** base sites to the new public version (no `+g…` in files):
+   - `pyproject.toml`
+   - `kazma.yaml` → `agent.version`
+   - `kazma-gateway/pyproject.toml`
+   - `kazma-tui` falls through to `kazma_core.version` (no hardcode needed)
+2. Commit: `chore(version): base 0.9.4 → 0.9.5`
+3. Optionally run **Actions → Release** to create tag `v0.9.5` + GitHub Release
+
+Do **not** put `+gSHA` into committed version files. Display code adds it.
+
+## Manual Release workflow
+
+`.github/workflows/release.yml` (workflow_dispatch only):
+
+* Resolves `base` from `pyproject.toml` + short SHA from `HEAD`
+* Optionally creates annotated tag `v{base}` if missing
+* Creates/updates a GitHub Release noting the full `base+gSHA`
+* **Does not** edit version files
+
+## Local check
 
 ```bash
-python scripts/light_version_bump.py --dry-run
-python scripts/light_version_bump.py --level patch --write   # local only
-python scripts/light_version_bump.py --level minor --confirm CONFIRM --dry-run
+python -c "from kazma_core.version import get_version; print(get_version())"
+# → 0.9.4+g4d37b2c
 ```
 
 ## What not to do
 
-- Do **not** map `feat` back to minor in Commitizen / semantic-release  
-- Do **not** hand-edit versions for routine releases  
-- Do **not** bump the middle digit without Release + `CONFIRM`  
-- Do **not** set `allow_zero_version = false` (forced a fake 1.0.0 once)  
+- Do **not** re-enable auto bump on push to `main`
+- Do **not** store `0.9.4+g…` in `pyproject.toml` (packaging noise; SHA goes stale)
+- Do **not** map conventional-commit types to SemVer bumps in CI
+- Do **not** set `allow_zero_version = false` (forced a fake 1.0.0 once)

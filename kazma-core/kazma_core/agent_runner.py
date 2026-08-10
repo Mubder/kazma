@@ -56,7 +56,7 @@ class AgentConfig:
     """Configuration loaded from kazma.yaml."""
 
     name: str = "kazma"
-    version: str = "0.5.0"
+    version: str = "0.9.4"
     language: str = "ar"
     rtl: bool = True
     default_model: str = "gpt-4o-mini"
@@ -85,9 +85,18 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
     models_cfg = raw.get("models", {})
     storage_cfg = raw.get("storage", {})
 
+    # Display version is always base+gSHA (kazma_core.version). YAML holds
+    # the public base only; never trust a stale static string for banners/API.
+    try:
+        from kazma_core.version import get_version as _product_version
+
+        _version = _product_version()
+    except Exception:
+        _version = str(agent_cfg.get("version", "0.9.4")).split("+", 1)[0]
+
     return AgentConfig(
         name=agent_cfg.get("name", "kazma"),
-        version=agent_cfg.get("version", "0.6.0"),
+        version=_version,
         # Default to English so cultural Arabic context does not bias every
         # reply when the user has not set agent.language explicitly.
         language=agent_cfg.get("language", "en"),

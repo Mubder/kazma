@@ -1,4 +1,4 @@
-"""Light versioning: patch + commit id; minor needs CONFIRM."""
+"""Manual base bump helper: public digits only; --write needs CONFIRM."""
 
 from __future__ import annotations
 
@@ -21,32 +21,34 @@ def _load():
 
 def test_parse_strips_local_sha() -> None:
     mod = _load()
-    assert mod.parse_base("0.12.1+g92c55af") == (0, 12, 1)
-    assert mod.parse_base("0.12.0") == (0, 12, 0)
+    assert mod.parse_base("0.9.4+g92c55af") == (0, 9, 4)
+    assert mod.parse_base("0.9.4") == (0, 9, 4)
 
 
 def test_format_full_embeds_g_sha() -> None:
     mod = _load()
-    assert mod.format_full(0, 12, 1, "92c55af") == "0.12.1+g92c55af"
-    assert mod.format_full(0, 12, 1, None) == "0.12.1"
+    assert mod.format_full(0, 9, 4, "92c55af") == "0.9.4+g92c55af"
+    assert mod.format_full(0, 9, 4, None) == "0.9.4"
 
 
 def test_bump_triplet_levels() -> None:
     mod = _load()
-    assert mod.bump_triplet(0, 12, 1, "patch") == (0, 12, 2)
-    assert mod.bump_triplet(0, 12, 5, "minor") == (0, 13, 0)
-    assert mod.bump_triplet(0, 12, 5, "major") == (1, 0, 0)
+    assert mod.bump_triplet(0, 9, 4, "patch") == (0, 9, 5)
+    assert mod.bump_triplet(0, 9, 4, "minor") == (0, 10, 0)
+    assert mod.bump_triplet(0, 9, 4, "major") == (1, 0, 0)
 
 
-def test_minor_requires_confirm(capsys: pytest.CaptureFixture[str]) -> None:
+def test_write_requires_confirm(capsys: pytest.CaptureFixture[str]) -> None:
     mod = _load()
-    rc = mod.main(["--level", "minor", "--dry-run"])
+    rc = mod.main(["--level", "patch", "--write"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "CONFIRM" in err
 
 
-def test_patch_dry_run_ok() -> None:
+def test_patch_dry_run_ok(capsys: pytest.CaptureFixture[str]) -> None:
     mod = _load()
     rc = mod.main(["--level", "patch", "--dry-run"])
     assert rc == 0
+    out = capsys.readouterr().out
+    assert "public" in out
