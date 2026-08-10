@@ -1275,72 +1275,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
   shell_exec allowlist). `.py` → `python_exec`; other interpreters return
   a clear error instead of a post-HITL allowlist failure.
 
-## Unreleased — MCP overhaul + KB polish + logging + fonts + i18n (2026-07-25)
+## v0.9.0 (2026-08-10)
 
-### MCP subsystem — full overhaul
-- **Web boot wiring**: `connect_mcp_servers()` was only called on the CLI path,
-  never the web path — filesystem/Playwright MCP stayed dormant on the Web UI
-  (looked "dead"). Now connected at `app.py:_on_startup`.
-- **Add Server Phase 1A**: shlex-style command parsing (quoted args survive),
-  auto-rewrite of install commands (`npm install -g X` → `npx -y X`),
-  validate-before-save (tests connection, shows stderr on failure, doesn't
-  persist broken configs).
-- **Add Server Phase 1B — preset library**: one-click dropdown of 85+ known
-  MCP servers (filesystem, firecrawl, playwright, github, slack, databases,
-  ...) grouped by category. Auto-fills name, transport, command, and env var
-  keys. Sourced from `certified_servers.yaml` + 5 extras.
-- **Persistence**: `add_mcp_server` / `remove_mcp_server` now write back to
-  `kazma.yaml` atomically — servers survive restarts (was in-memory only).
-- **Tool namespacing**: MCP tools namespaced as `mcp__<server>__<tool>` to
-  prevent collisions with built-in tools. This was the root cause of the
-  "agent stopped talking" bug — Playwright MCP's `browser_click` collided
-  with the browser_automation skill's `browser_click`, DeepSeek rejected
-  all 127 tools with `400 Tool names must be unique`, Kazma stripped all
-  tools, and the model emitted raw markup as text.
-- **90s handshake timeout + stderr on failure**: `npx` cold starts that
-  fetch packages on first run no longer get killed mid-handshake. Failed
-  connections now surface the subprocess stderr so you see *why*.
-- **MCP presets endpoint** (`GET /api/mcp/presets`) added to
-  `ALWAYS_OPEN_PATHS` so it works without auth (read-only metadata).
+### Feat
 
-### Knowledge Library — polish
-- **Citation footer**: every KB-derived answer now appends
-  `📚 This data is from Knowledge "<library_id>"`. Applies to both the
-  `knowledge_search` tool path and the auto-inject path.
-- **Archive**: soft `archived` flag on libraries. Active/Archived tabs in
-  the UI. Archived libs stay searchable but hidden from the active list.
-  📦 Archive / ♻️ Restore buttons per library.
-- **Toast text**: post-crawl toast now formats from structured job fields
-  (`Crawl finished: 8/200 pages · 210 chunks`) instead of the raw internal
-  diagnostic string.
-- **Full-tree crawler improvements**: Firecrawl `/v1/map` as first
-  discovery tier (bypasses bot walls), parent-section re-map for leaf
-  pages, canonical URL de-dup, Jina seed-expand fallback, infra-URL
-  filtering, `tree` scope mode (default, cross-prefix doc trees),
-  `.gz` sitemap decompression, per-tier fetch error visibility, slug
-  library IDs, provenance `.md` saves.
-
-### Foundation
-- **Single-folder layout**: all Kazma state (skills, themes, logs) now lives
-  at `<repo>/.kazma/` (was `~/.kazma` — broke portability). One-time
-  migration of legacy `~/.kazma` on first boot. `KAZMA_USER_HOME` override.
-- **Real logging**: `logging_config.setup_logging()` configures a
-  `RotatingFileHandler` → `<repo>/.kazma/kazma.log` (10MB × 5) +
-  stdout handler. `KAZMA_LOG_LEVEL` env (default INFO); debug via env or
-  `kazma serve --debug`. Noisy libs pinned to WARNING. Idempotent.
-  Wired into all 3 entry points (CLI, web, standalone).
-
-### UI / i18n
-- **Arabic font → Rubik**: with Calibri + Cairo fallback. English-in-RTL
-  elements (code, metrics, English spans) scoped to Inter for visual sync.
-- **IDE Arabic**: nav + page title now `بيئة التطوير المتكاملة` (was
-  hardcoded "IDE").
-- **Agent-stopped-talking defense**: exception path in `sse_chat.py` now
-  emits a recoverable notice with thread_id instead of a blank bubble.
-  Client-side Retry button on empty turns.
-- **Language-switch guard**: warns before reloading if a crawl job is
-  in-flight (was silently orphaning the polling timer).
-- **Tests**: 55 KB tests + 20 MCP JS tests, all passing.
+- **documents**: cert recheck, full docs remediation, malware and PG metadata residuals
 
 ## v0.8.0 (2026-08-10)
 
