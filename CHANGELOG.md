@@ -1263,22 +1263,11 @@ Executed `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` end-to-end:
 - **Docs honesty**: delegation + `kazma-permissions.yaml` marked library-only /
   not runtime-enforced (aligned with `UNWIRED_INVENTORY.md`).
 
-## Unreleased — Swarm admission + hop budget + durable KB jobs (2026-07-25)
+## v0.9.2 (2026-08-10)
 
-### Swarm reliability (audit M11 / M12 / M13)
-- **Global admission**: `SwarmEngine.dispatch` rejects new work when
-  `max_concurrent_tasks` (default 10, or `KAZMA_SWARM_MAX_ACTIVE`) is full —
-  returns `admission_denied` instead of unbounded `_active_tasks` growth.
-- **Shared concurrency cache**: broadcast / fan-out / consult use
-  `engine.get_bounded_concurrency` instead of private semaphores per call.
-- **Fallback hop budget**: `_visited` / `_depth` thread through
-  `_dispatch_worker_by_name` and `_execute_fallback_chain` so fallbacks
-  cannot reset cycle guards.
+### Fix
 
-### Knowledge Library jobs
-- **Durable crawl status**: `stores/kb_jobs.py` dual-writes job snapshots to
-  ConfigStore. Web + gateway crawls survive restart; incomplete jobs marked
-  `interrupted` on boot. Status endpoints fall back to durable store.
+- **security**: honest disclosure posture — no bounty, real security.txt
 
 ## v0.9.1 (2026-08-10)
 
