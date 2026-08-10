@@ -23,6 +23,7 @@ NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("traces", "Traces", "5"),
     ("swarm", "Swarm", "6"),
     ("settings", "Settings", "7"),
+    ("documents", "Documents", "8"),
 )
 
 _WIDTH_EXPANDED = 20

@@ -22,6 +22,7 @@ from textual.widgets import Footer, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
 from kazma_tui.dashboard import MetricsDashboard
+from kazma_tui.documents import DocumentsPanel
 from kazma_tui.files import FilesPanel
 from kazma_tui.header import KazmaHeader
 from kazma_tui.memory_panel import MemoryTab
@@ -74,6 +75,7 @@ class KazmaTUI(App[None]):
         Binding("5", "goto_tab('traces')", "Traces", show=False),
         Binding("6", "goto_tab('swarm')", "Swarm", show=False),
         Binding("7", "goto_tab('settings')", "Settings", show=False),
+        Binding("8", "goto_tab('documents')", "Documents", show=False),
         Binding("m", "goto_tab('memory')", "Memory", show=False),
         Binding("bracketleft", "toggle_nav", "Nav", show=True),
         # Help
@@ -116,6 +118,8 @@ class KazmaTUI(App[None]):
                         yield SwarmPanel()
                     with TabPane("Settings", id="settings"):
                         yield SettingsPanel()
+                    with TabPane("Documents", id="documents"):
+                        yield DocumentsPanel()
         yield KazmaStatusBar(id="status-bar")
         yield Footer()
 

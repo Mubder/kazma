@@ -21,6 +21,7 @@ const sidebars = {
         'guide/knowledge-library',
         'guide/recent-features',
         'guide/email-integration',
+        'guide/document-intelligence',
         'guide/api-and-extension-points',
         'guide/swarm-orchestration',
         'guide/memory-and-rag',
@@ -72,6 +73,7 @@ const sidebars = {
         'ops/wsl-fixed-access',
         'ops/portability',
         'ops/migration',
+        'ops/document-processing',
       ],
     },
   ],
@@ -99,6 +101,7 @@ const sidebars = {
     'security/security-policy',
     'security/vulnerability-reporting',
     'security/hardening-guide',
+    'security/document-security',
   ],
 
   contributing: [

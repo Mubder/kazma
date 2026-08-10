@@ -27,6 +27,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Send voice / images / documents | [Voice & media](guide/voice-and-media) |
 | Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
 | Ingest documentation into a knowledge corpus | [Knowledge Library](guide/knowledge-library) |
+| Process documents (parse, OCR, index, generate, redact) | [Document Intelligence](guide/document-intelligence) |
 | Run V2 memory + KB inject the recommended way | [Memory best path](guide/memory-best-path) · [Memory & RAG](guide/memory-and-rag) |
 | Web search / scrape / research | [Web research](guide/web-research) |
 | **New features tour** (research sessions, KB re-index, explain panel, proxy) | [Recent features](guide/recent-features) |
@@ -40,7 +41,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety)
-- [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration)
+- [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Document Intelligence**](guide/document-intelligence) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration)
 - [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
 
@@ -59,7 +60,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 - [Production checklist](ops/production-checklist) · [Smoke matrix](ops/smoke-matrix) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
 - [Postgres & SaaS](ops/postgres-and-saas) · [Disaster recovery](ops/disaster-recovery)
-- [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
+- [Document processing ops](ops/document-processing) · [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
 - [Portability](ops/portability) · [Migration (`kazma migrate`)](ops/migration) · [WSL fixed access](ops/wsl-fixed-access)
 
 ### Skills · Security · Contributing

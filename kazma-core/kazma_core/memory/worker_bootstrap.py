@@ -515,17 +515,37 @@ def register_backup_export_handlers() -> None:
 
 
 async def _handle_native_backup(payload: dict[str, Any]) -> bool:
-    """Run one native ``sqlite3.backup()`` sweep of both memory DBs."""
+    """Run one native ``sqlite3.backup()`` sweep of both memory DBs.
+
+    Also performs a consistent document-store backup (documents.db + the
+    referenced content-addressed tree) so the document platform is covered by
+    the same nightly cadence.
+    """
     try:
         from kazma_core.memory.backup import perform_native_backups
 
         retention = int(payload.get("retention", 10))
         written = perform_native_backups(retention=retention)
         logger.info("[memory_worker] native_backup done: %d file(s)", len(written))
-        return True
     except Exception:
         logger.warning("[memory_worker] native_backup handler failed", exc_info=True)
         return False
+    # Document store backup is independent — a failure here must not fail the
+    # memory backup that already succeeded.
+    try:
+        from kazma_core.documents.backup import perform_document_backup
+
+        report = perform_document_backup(retention=max(1, int(payload.get("retention", 10)) // 2))
+        if report.get("ok"):
+            logger.info(
+                "[memory_worker] document backup done: %s blob(s)",
+                report.get("copied_blobs", report.get("skipped", 0)),
+            )
+        else:
+            logger.warning("[memory_worker] document backup: %s", report.get("error"))
+    except Exception:
+        logger.warning("[memory_worker] document backup failed", exc_info=True)
+    return True
 
 
 async def _handle_nightly_export(payload: dict[str, Any]) -> bool:

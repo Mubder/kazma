@@ -1,6 +1,6 @@
 name: document-processor
-version: 0.2.0
-description: Read, merge, split, inspect, convert, OCR, and redact documents. Generate PowerPoint presentations.
+version: 0.3.0
+description: Read, inspect, convert, mutate, securely redact, and generate verified documents in isolated workers.
 author: Kazma Team
 license: MIT
 
@@ -8,74 +8,75 @@ tools:
   read_document:
     arabic_name: "قراءة مستند"
     description: >
-      Read and extract text from a document file (PDF, DOCX, XLSX, PPTX, CSV, JSON, TXT).
-      Returns the full text content with page/sheet markers. Handles tables in PDFs and spreadsheets.
+      Read runtime-ready PDF, DOCX, XLSX, PPTX, CSV/TSV, JSON, text/Markdown/log,
+      HTML, or RTF with page/sheet/slide/block selectors and deterministic continuation.
+      Legacy DOC/XLS/PPT are available only when a healthy headless LibreOffice is detected.
     category: document
     prompt_chain:
       - "اقرأ المستند المحدد واستخرج النص الكامل"
   pdf_merge:
     arabic_name: "دمج PDF"
     description: >
-      Merge multiple PDF files into a single PDF. Pass a list of file paths.
-      Returns the path of the merged output file.
+      Merge workspace-approved PDFs in an isolated pypdf worker with file,
+      aggregate-size, page, checksum, sniff, and round-trip bounds.
     category: document
     prompt_chain:
       - "ادمج ملفات PDF المتعددة في ملف واحد"
   pdf_split:
     arabic_name: "تقسيم PDF"
     description: >
-      Extract specific pages from a PDF into a new file. Pass start_page and end_page
-      (1-indexed). Returns the path of the extracted output.
+      Extract a validated bounded page range in an isolated pypdf worker.
     category: document
     prompt_chain:
       - "استخرج الصفحات المحددة من ملف PDF"
   pdf_info:
     arabic_name: "معلومات PDF"
     description: >
-      Extract metadata from a PDF: page count, title, author, creation date,
-      page size, and whether it has a text layer (vs scanned/image-only).
+      Inspect PDF metadata, dimensions, and form fields in an isolated pypdf worker.
     category: document
     prompt_chain:
       - "استخرج البيانات الوصفية لملف PDF"
   ocr_document:
     arabic_name: "التعرف الضوئي على الحروف"
     description: >
-      OCR a scanned PDF or image to extract text. Requires the [ocr] extra:
-      pip install 'kazma[ocr]'. Also requires system Tesseract OCR install.
-      Use when read_document returns "no text layer" for a scanned PDF.
+      OCR selected pages of a PDF or PNG/JPEG/TIFF/BMP/WebP image through the
+      isolated DocumentService. Live readiness verifies the Tesseract binary,
+      requested eng/ara language data, Pillow, and a one-page PDF rasterizer;
+      unavailable components return an actionable error instead of a false claim.
     category: document
     prompt_chain:
       - "استخرج النص من المستند الممسوح ضوئياً باستخدام OCR"
   convert_document:
     arabic_name: "تحويل المستندات"
     description: >
-      Convert documents between formats: HTML→PDF, Markdown→PDF, Markdown→HTML,
-      Markdown→DOCX. Requires the [convert] extra: pip install 'kazma[convert]'.
+      Convert runtime-supported formats in an isolated renderer. HTML/Markdown→PDF
+      denies external resources and requires healthy WeasyPrint. Legacy Office
+      conversion requires healthy headless LibreOffice.
     category: document
     prompt_chain:
       - "حول المستند إلى الصيغة المطلوبة"
   pdf_fill_form:
     arabic_name: "تعبئة نموذج PDF"
     description: >
-      Fill AcroForm fields in a PDF. Pass a dict of field names to values.
-      Returns the path of the filled PDF.
+      Fill only known AcroForm fields in an isolated worker after rejecting
+      scripts/actions. Output fields may remain editable and this limitation is reported.
     category: document
     prompt_chain:
       - "املأ حقول النموذج في ملف PDF"
   pdf_redact:
     arabic_name: "تنقيح PDF"
     description: >
-      Redact text from a PDF by covering matched terms with black rectangles.
-      Pass a list of text strings to redact (case-insensitive). Use for PII removal.
+      Secure rasterize-redact-rebuild PDF redaction with text, byte, structure,
+      and rendered-page verification. Requires healthy PyMuPDF and Pillow;
+      otherwise refuses without producing an artifact.
     category: document
     prompt_chain:
       - "تنقيح النصوص الحساسة من ملف PDF"
   generate_pptx:
     arabic_name: "إنشاء PowerPoint"
     description: >
-      Generate a PowerPoint (.pptx) presentation from a title and slide data.
-      Each slide supports heading, body text (as bullets), and layout type.
-      Returns the saved file path.
+      Generate and round-trip validate a PowerPoint artifact in an isolated
+      python-pptx renderer.
     category: document
     prompt_chain:
       - "أنشئ عرضاً تقديمياً من العنوان والشرائح المحددة"

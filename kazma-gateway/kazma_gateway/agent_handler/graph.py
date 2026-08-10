@@ -24,6 +24,7 @@ from .hitl import (
     _handle_hitl_resume,
 )
 from .commands import (
+    _try_documents_command,
     _try_ide_command,
     _try_kb_command,
     _try_model_command,
@@ -787,6 +788,16 @@ def create_graph_handler(
         )
         if kb_handled:
             return  # /kb command handled, skip graph
+
+        # ── Documents slash-command intercept ───────────────────────
+        # /documents list|status|read|search|health surfaces the shared
+        # DocumentIngestionService. Reads are opaque-ID based; no bytes are
+        # parsed on the adapter and platform isolation is preserved.
+        documents_handled = await _try_documents_command(
+            msg, _store, manager, thread_id,
+        )
+        if documents_handled:
+            return  # /documents command handled, skip graph
 
         research_handled = await _try_research_command(
             msg, _store, manager, thread_id,

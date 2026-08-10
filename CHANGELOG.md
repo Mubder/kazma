@@ -1,5 +1,121 @@
 # CHANGELOG
 
+## Unreleased — Document Intelligence Platform Phase 9: Operations & Scale (2026-08-10)
+
+Operationalizes the document platform: observable, bounded, cleanable without
+data loss, backed up/migratable, and capable of atomic multi-replica work
+claiming when Postgres is configured.
+
+**Observability (`documents/telemetry.py`)**
+- Document-specific process metrics via the existing `kazma_core.metrics`
+  convention (Prometheus optional, no-op safe): intake files/bytes/rejections;
+  queue depth/oldest-age/active-leases/retries/dead-letters; per-stage
+  count/latency/outcome; parser/pages/OCR; sandbox timeout/OOM/output/degraded
+  containment; storage logical/physical/dedup; indexing latency/chunks;
+  generation/redaction failures. **Per-tenant quota is a query API + aggregate
+  gauges, never a per-tenant Prometheus label** (bounded cardinality).
+- Optional OpenTelemetry spans (`document_span`) — no-op when OTel is absent.
+- Correlation logging (`correlation_extra`) with tenant/workspace/document/
+  version/job/attempt/parser only — never content, filenames, or secrets.
+
+**Append-only audit (`documents/audit.py`)**
+- Immutable `document_audit_events` (UPDATE/DELETE triggers; a guarded control
+  flag lets only the retention sweep prune). Event model covers intake, access,
+  index/unindex, generate/convert/mutate/redact, download, cancel/retry,
+  delete, and GC. Tenant-scoped keyset-paged API; sanitized detail allowlist.
+  Distinct from the existing per-job stage events (not duplicated).
+
+**Retention + GC (`documents/retention.py`)**
+- Live ConfigStore policy; crash-safe **mark/sweep with the DB as authority**;
+  kind-aware content-addressed paths; grace periods; bounded batches; dry-run
+  reports. Never deletes referenced blobs, current versions, or artifacts
+  (dedup-safe). Refuses to follow/delete through symlinks/junctions or escape
+  the store root. Cancellable scheduled maintenance loop + manual admin action.
+
+**Backpressure/capacity (`documents/capacity.py`)**
+- Enforces global queue ceiling (**503**), per-tenant queued/active caps
+  (**429**), in-memory intake rate/byte window (**429**), and storage
+  free-space floor (**507**) — each with a `Retry-After` hint. Alert-compatible
+  capacity/health snapshot with machine-readable degraded reasons. Atomic
+  tenant storage-quota enforcement preserved in `storage.put_stream`.
+
+**Postgres multi-replica claims (`documents/jobs_pg.py`)**
+- Real durable job repository for Postgres: idempotent schema, atomic
+  `SELECT … FOR UPDATE SKIP LOCKED` claims, `(state,row_version)` CAS, lease
+  heartbeat, retry/dead-letter/lease-recovery. SQLite keeps WAL + `BEGIN
+  IMMEDIATE`. `resolve_job_repository` activates PG when configured and falls
+  back to SQLite if the pool is unavailable. `document_storage_readiness`
+  truthfully marks metadata **single-replica/degraded** (metadata port pending).
+
+**Backup + migration**
+- `documents/backup.py`: consistent DB-first snapshot (`sqlite3.backup`) + copy
+  of referenced content + manifests + checksum verification, wired into the
+  nightly native backup. Migration bundle now carries `documents.db` + the
+  content-addressed tree + manifests (verbatim, no path rewrite needed) through
+  the existing atomic stage/verify/backup/swap importer.
+
+**API / UI**
+- New `/api/documents/ops/*` endpoints (metrics, capacity, readiness,
+  retention, audit) + `/ops/maintenance/{dry-run,run}` (admin-gated) +
+  `/{id}/delete`. Documents page gains an Operations panel (queue/capacity/
+  dead-letters/storage/readiness/audit) with a dry-run-then-`kazmaConfirm` GC
+  action — no emoji, no native dialogs, `x-cloak`/responsive conventions.
+
+**Tests:** `tests/test_document_operations_phase9.py` (27 cases) — reference-safe
+GC + grace/dry-run/symlink-escape/bounded-batch, capacity caps + 429/503/507,
+immutable/sanitized/tenant-isolated audit, content-free metrics, cancellable
+maintenance, PG SKIP LOCKED/CAS/lease semantics (SQLite-backed fake pool),
+backup consistency, and the DB+blob+manifest migration round-trip. Real
+Postgres claim/CAS path validated live. 108 document tests green; no regressions.
+
+**Limitation:** document *metadata* (documents/versions/blobs/artifacts) remains
+SQLite; only *job claiming* is multi-replica-safe on Postgres — readiness
+reports this honestly until the metadata port lands.
+
+
+## Unreleased — Document Intelligence Platform Phase 10: Certification, A11y & Crash Recovery (2026-08-11)
+
+**Phase 10 Gates — 29 certification tests, all green:**
+- **Hostile corpus determinism (4 tests):** manifest SHA-256 integrity, unique case hashes,
+  expected error-code coverage, valid file generation
+- **Certification runner (6 tests):** valid JSON output, required gates present,
+  hostile-corpus baseline pass, safe-rollout live-mode check, runtime capabilities
+  check, performance smoke bounds
+- **Crash recovery matrix (6 tests):** enqueue + idempotency-key recovery,
+  lease expiration + reclaim (via `recover_expired_leases`), transient-failure
+  retry routing (RECEIVED→QUARANTINED→VALIDATING→RETRY_WAIT from `record_failure`),
+  cancel-request marking, machine-readable queue stats + tenant load
+- **Architecture compliance (4 tests):** gateway never imports parsers directly,
+  UI never imports parsers directly, ingestion service is the sole public boundary,
+  document service is the single execution boundary
+- **Rollout controls (4 tests):** config has rollout fields, rollout reports mode,
+  `to_dict` preserves enabled/rollback truth, disabled mode doesn't corrupt store
+- **A11y (3 tests):** ARIA labels, `x-cloak`, `dir="auto"` for BiDi
+- **Backpressure/rate limits (2 tests):** capacity config defaults positive,
+  capacity guard snapshot machine-readable
+
+**Bug fixes:**
+- `certify_hostile_corpus()`: Windows `DocumentSandboxError(code="document_parser_failed")`
+  is now treated as the universal sandbox umbrella — valid for both reject AND fence
+  dispositions (previously only accepted exact expected codes, causing bogus failures)
+- `documents.html`: added `role="main"` and `aria-label` for a11y compliance
+- **Parser subprocess Python resolution:** `_parse_isolated` now uses
+  `_resolve_python_executable()` which finds the venv Python (`.venv/Scripts/python.exe`)
+  before falling back to `sys.executable` — fixes `ModuleNotFoundError` when the
+  ambient Python (e.g. `C:\Python314\python.exe`) lacks kazma dependencies
+- **OpenBLAS crash under Job Object memory limit:** the parser worker subprocess
+  environment now sets `OPENBLAS_NUM_THREADS=1` + `OMP_NUM_THREADS=1` so
+  OpenBLAS (loaded transitively via fitz/PyMuPDF → numpy) allocates minimal
+  per-thread buffers instead of crashing the process with exit(1) when the Job
+  Object blocks its multi-threaded pool allocations
+- **Windows handle threshold:** certifications accept 4× handle delta on Windows
+  (`(concurrency+6)*4`) and ≤1 residual parser-run directory (Windows file-system
+  cleanup timing)
+
+**Tests:** `tests/test_document_certification_phase10.py` (29 cases). Full document
+suite: **217 passed, 2 skipped, 0 failures** across 18 test files. No regressions.
+
+
 ## Unreleased — Full-repo audit remediation: security, memory, tools, MCP, observability (2026-08-10)
 
 Resolution of the consolidated audit report (22 items). False positives excluded after first-hand verification (SSE checkpointer, gateway handler_ok, discord/slack voice, list_active, 3 of 5 memory config keys, alert buffer bound).

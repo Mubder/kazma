@@ -1,0 +1,77 @@
+name: document-platform
+version: 0.1.0
+description: Durable document ingestion, status, paged read, indexing, and search via the shared DocumentIngestionService.
+author: Kazma Team
+license: MIT
+
+tools:
+  document_import:
+    arabic_name: "استيراد مستند"
+    description: >
+      Ingest a workspace-safe local file into the durable document platform
+      (quarantine, validate, parse out-of-process) and return its opaque
+      document_id/job_id and final state. Only files inside the active
+      workspace are accepted; arbitrary server paths are refused.
+    category: document
+    prompt_chain:
+      - "استورد المستند المحدد إلى منصة المستندات"
+  document_status:
+    arabic_name: "حالة المستند"
+    description: >
+      Report the durable processing state for a document_id or job_id,
+      including stage, attempt count, and any safe error diagnostics.
+    category: document
+    prompt_chain:
+      - "اعرض حالة معالجة المستند"
+  document_read:
+    arabic_name: "قراءة مستند معالَج"
+    description: >
+      Read paged, fenced content of an already-processed document by its
+      opaque document_id, with page/offset/max_chars selectors and
+      deterministic continuation.
+    category: document
+    prompt_chain:
+      - "اقرأ محتوى المستند المعالَج"
+  document_index:
+    arabic_name: "فهرسة مستند"
+    description: >
+      Publish a processed document's current immutable version into a
+      Knowledge library for retrieval and citation.
+    category: document
+    prompt_chain:
+      - "افهرس المستند في مكتبة المعرفة"
+  document_search:
+    arabic_name: "بحث في المستندات"
+    description: >
+      Search a Knowledge library and return matching document chunks inside
+      exactly one untrusted-data fence with page/version citations.
+    category: document
+    prompt_chain:
+      - "ابحث في المستندات المفهرسة"
+  document_cancel:
+    arabic_name: "إلغاء مهمة مستند"
+    description: >
+      Request cooperative cancellation of a running or pending document
+      processing job by its opaque job_id.
+    category: document
+    prompt_chain:
+      - "ألغِ مهمة معالجة المستند"
+  document_convert:
+    arabic_name: "تحويل مستند"
+    description: >
+      Convert an already-processed document (by opaque document_id) to another
+      format through the isolated renderer. Only the immutable original bytes
+      are used; no raw file path is accepted. Returns a downloadable
+      artifact_id.
+    category: document
+    prompt_chain:
+      - "حوّل المستند المعالَج إلى صيغة أخرى"
+  document_redact:
+    arabic_name: "تنقيح مستند"
+    description: >
+      Physically redact a list of terms from a processed PDF document by opaque
+      document_id, creating a new independently-verified immutable artifact.
+      Terms are never logged; mixed image/vector PDFs fail closed.
+    category: document
+    prompt_chain:
+      - "نقّح المصطلحات المحددة من المستند"

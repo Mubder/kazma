@@ -379,6 +379,15 @@ def import_bundle(
                 shutil.copytree(sub, dest_sub, dirs_exist_ok=True)
                 _log(f"  restored assets/{sub.name}/")
 
+    # 8b. Restore the document store — documents.db + the content-addressed
+    # tree — into the target's document-store root (resolved AFTER config
+    # import so a custom storage_root is honored). documents.db carries no
+    # embedded paths, so it needs no rewrite.
+    try:
+        _restore_document_store(staging, staged_data, report, _log)
+    except Exception as exc:  # noqa: BLE001 - document restore is optional
+        report.warn(f"document store restore failed: {exc}")
+
     # 9. Notify workspace root change so MCP rebinds (AGENTS.md §10A).
     if report.target_workspace_root:
         try:
@@ -477,6 +486,55 @@ def _find_env_file(data_dir: Path) -> Path | None:
             return c
     # Last resort: create one in the CWD so the key isn't lost.
     return None
+
+
+def _restore_document_store(
+    staging: Path, staged_data: Path, report: Any, _log: Any
+) -> None:
+    """Restore documents.db + the content-addressed tree into the target store.
+
+    Backs up the live documents.db first (WAL-safe), installs the staged
+    snapshot, then copies the staged content tree verbatim into the target's
+    ``document-store`` root. Content is content-addressed (immutable, no
+    embedded paths), so the copy is idempotent and needs no rewrite.
+    """
+    staged_db = staged_data / "documents.db"
+    staged_tree = staging / "document-store"
+    if not staged_db.exists() and not staged_tree.exists():
+        return
+    from kazma_core.documents.config import get_document_config
+    from kazma_core.memory.backup import _backup_one
+
+    target_root = Path(get_document_config().storage_root)
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    if staged_db.exists():
+        # Back up any existing live documents.db before overwriting.
+        live_db = target_root / "documents.db"
+        if live_db.exists():
+            backup_dir = Path(report.backup_path) if report.backup_path else target_root
+            try:
+                _backup_one(live_db, backup_dir / "documents.db")
+            except Exception:  # noqa: BLE001
+                pass
+        for suffix in ("-wal", "-shm", "-journal"):
+            stale = live_db.with_name(live_db.name + suffix)
+            stale.unlink(missing_ok=True)
+        _backup_one(staged_db, live_db)
+        _log("  restored documents.db")
+
+    if staged_tree.exists():
+        count = 0
+        for src in staged_tree.rglob("*"):
+            if not src.is_file():
+                continue
+            rel = src.relative_to(staged_tree)
+            dst = target_root / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if not dst.exists():
+                shutil.copy2(src, dst)
+                count += 1
+        _log(f"  restored {count} document content file(s)")
 
 
 def _merge_workspaces_into_settings(settings_db: str, workspaces_db: str) -> int:

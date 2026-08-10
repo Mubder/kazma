@@ -48,6 +48,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.replay": {"en": "Time Travel", "ar": "سجل التفرعات واللقطات"},
     "nav.research": {"en": "Research", "ar": "الأبحاث"},
     "nav.knowledge": {"en": "Knowledge", "ar": "المكتبة المعرفية"},
+    "nav.documents": {"en": "Documents", "ar": "المستندات"},
     "nav.memory": {"en": "Memory", "ar": "الذاكرة"},
     "memory.title": {"en": "Memory", "ar": "الذاكرة"},
     "memory.intro": {

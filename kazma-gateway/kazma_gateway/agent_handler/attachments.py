@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
 
+from kazma_core.documents.errors import DocumentParseError
+from kazma_core.documents.registry import get_parser_registry
+from kazma_core.documents.service import DocumentService
+
 if TYPE_CHECKING:
     from kazma_gateway.gateway import Attachment
 
@@ -45,35 +49,51 @@ _INLINE_IMAGE_MIMES = frozenset(
 # open them with file_read. Relative to CWD, matching tools/image_gen.py.
 ATTACHMENT_DIR = Path("kazma-data/attachments")
 _MAX_ATTACHMENT_REDIRECTS = 3
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_ATTACHMENT_COUNT = 10
+MAX_TOTAL_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
 
 def _fetch_attachment_url(url: str) -> bytes:
     """Fetch a remote attachment after SSRF-validating every redirect target."""
     import httpx
-
     from kazma_core.security.ssrf import validate_url
 
     current_url = url
-    for _ in range(_MAX_ATTACHMENT_REDIRECTS + 1):
-        validate_url(current_url, block_unresolved=True)
-        response = httpx.get(
-            current_url,
-            timeout=30.0,
-            follow_redirects=False,
-        )
-        if response.status_code not in (301, 302, 303, 307, 308):
-            response.raise_for_status()
-            return response.content
+    with httpx.Client(timeout=30.0, follow_redirects=False) as client:
+        for _ in range(_MAX_ATTACHMENT_REDIRECTS + 1):
+            validate_url(current_url, block_unresolved=True)
+            with client.stream("GET", current_url) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location")
+                    if not location:
+                        raise ValueError("attachment redirect has no location")
+                    current_url = urljoin(current_url, location)
+                    continue
 
-        location = response.headers.get("location")
-        if not location:
-            raise ValueError("attachment redirect has no location")
-        current_url = urljoin(current_url, location)
+                response.raise_for_status()
+                declared = response.headers.get("content-length")
+                if declared:
+                    try:
+                        if int(declared) > MAX_ATTACHMENT_BYTES:
+                            raise ValueError("attachment exceeds remote fetch size limit")
+                    except ValueError as exc:
+                        if "exceeds" in str(exc):
+                            raise
+
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_bytes():
+                    total += len(chunk)
+                    if total > MAX_ATTACHMENT_BYTES:
+                        raise ValueError("attachment exceeds remote fetch size limit")
+                    chunks.append(chunk)
+                return b"".join(chunks)
 
     raise ValueError("attachment URL exceeded redirect limit")
 
 
-def _persist_attachment(attachment: "Attachment") -> str:
+def _persist_attachment(attachment: Attachment) -> str:
     """Persist attachment bytes to disk and return the absolute file path.
 
     Assumes ``attachment.data`` is populated. The filename is uniqueified
@@ -98,87 +118,21 @@ def _try_parse_attachment(path: str, *, max_chars: int = 2000) -> str:
     runs in the graph-builder thread before the LLM call.
     """
     try:
-        p = Path(path)
-        suffix = p.suffix.lower()
-
-        if suffix == ".pdf":
-            try:
-                import pdfplumber
-
-                with pdfplumber.open(p) as pdf:
-                    lines = []
-                    for i, page in enumerate(pdf.pages[:5]):
-                        text = page.extract_text() or ""
-                        if text.strip():
-                            lines.append(text.strip())
-                        if sum(len(l) for l in lines) > max_chars:
-                            break
-                    result = "\n".join(lines)[:max_chars]
-                    return result if result.strip() else "Error: no text layer (scanned PDF)"
-            except ImportError:
-                return "Error: pdfplumber not installed"
-
-        elif suffix == ".docx":
-            try:
-                from docx import Document
-
-                doc = Document(str(p))
-                lines = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
-                return "\n".join(lines)[:max_chars]
-            except ImportError:
-                return "Error: python-docx not installed"
-
-        elif suffix in (".xlsx", ".xls"):
-            try:
-                from openpyxl import load_workbook
-
-                wb = load_workbook(p, read_only=True, data_only=True)
-                lines = []
-                for sheet_name in wb.sheetnames:
-                    ws = wb[sheet_name]
-                    lines.append(f"--- {sheet_name} ---")
-                    for i, row in enumerate(ws.iter_rows(values_only=True)):
-                        if i >= 20:
-                            break
-                        cells = [str(c) if c else "" for c in row]
-                        if any(c.strip() for c in cells):
-                            lines.append(" | ".join(cells))
-                wb.close()
-                return "\n".join(lines)[:max_chars]
-            except ImportError:
-                return "Error: openpyxl not installed"
-
-        elif suffix == ".csv":
-            import csv as _csv
-
-            with open(p, "r", encoding="utf-8", errors="replace", newline="") as f:
-                reader = _csv.reader(f)
-                lines = [", ".join(row) for _, row in zip(range(20), reader)]
-            return "\n".join(lines)[:max_chars]
-
-        elif suffix == ".pptx":
-            try:
-                from pptx import Presentation
-
-                prs = Presentation(str(p))
-                lines = []
-                for i, slide in enumerate(prs.slides[:10]):
-                    lines.append(f"--- Slide {i+1} ---")
-                    for shape in slide.shapes:
-                        if shape.has_text_frame:
-                            for para in shape.text_frame.paragraphs:
-                                if para.text.strip():
-                                    lines.append(para.text.strip())
-                return "\n".join(lines)[:max_chars]
-            except ImportError:
-                return "Error: python-pptx not installed"
-
-        else:
-            return f"Error: unsupported format {suffix}"
-
+        p = Path(path).expanduser().resolve(strict=True)
+        result = DocumentService().read_transient_sync(
+            p,
+            approved_path=p,
+            max_chars=max_chars,
+            fence=False,
+        )
+        return result.as_tool_output()
+    except DocumentParseError as exc:
+        return f"Error: {exc.safe_message}"
     except Exception as exc:
-        logger.debug("[attachments] document parse failed: %s", exc)
-        return f"Error: {exc}"
+        logger.debug(
+            "[attachments] document service failed: %s", type(exc).__name__
+        )
+        return f"Error: document parser failed ({type(exc).__name__})"
 
 
 def _resolve_active_model_vision_capable() -> bool:
@@ -202,7 +156,7 @@ def _resolve_active_model_vision_capable() -> bool:
 
 def build_user_content(
     text: str,
-    attachments: list["Attachment"] | None,
+    attachments: list[Attachment] | None,
     vision_capable: bool | None = None,
 ) -> str | list[dict[str, Any]]:
     """Build the OpenAI ``content`` for a user turn.
@@ -235,7 +189,17 @@ def build_user_content(
     text_parts: list[str] = [text] if text else []
     saw_image = False
 
-    for att in attachments:
+    total_attachment_bytes = 0
+    for index, att in enumerate(attachments):
+        if index >= MAX_ATTACHMENT_COUNT:
+            logger.warning(
+                "[attachments] dropped attachments beyond count limit (%d)",
+                MAX_ATTACHMENT_COUNT,
+            )
+            text_parts.append(
+                f"[Attachment limit reached: only {MAX_ATTACHMENT_COUNT} files are processed per turn]"
+            )
+            break
         data = att.data
         # Fetch on demand if only a URL was provided.
         if data is None and att.url:
@@ -249,6 +213,19 @@ def build_user_content(
                     f"[Attached: {att.filename or att.url} — fetch failed]"
                 )
                 continue
+
+        if data is not None:
+            if total_attachment_bytes + len(data) > MAX_TOTAL_ATTACHMENT_BYTES:
+                logger.warning(
+                    "[attachments] aggregate attachment byte limit exceeded at %s",
+                    att.filename or att.url,
+                )
+                text_parts.append(
+                    f"[Attached: {att.filename or att.url or att.kind} — skipped: "
+                    "aggregate attachment size limit exceeded]"
+                )
+                continue
+            total_attachment_bytes += len(data)
 
         is_inlinable_image = (
             att.kind == "image"
@@ -290,16 +267,21 @@ def build_user_content(
                     from pathlib import Path as _Path
 
                     _suffix = _Path(path).suffix.lower()
-                    _DOC_SUFFIXES = frozenset({
-                        ".pdf", ".docx", ".doc", ".xlsx", ".xls",
-                        ".pptx", ".ppt", ".csv", ".json", ".rtf",
-                    })
-                    if _suffix in _DOC_SUFFIXES:
+                    capability = get_parser_registry().capability_for_extension(_suffix)
+                    if capability is not None and capability.available:
                         excerpt = _try_parse_attachment(path, max_chars=2000)
                         if excerpt and not excerpt.startswith("Error"):
+                            from kazma_core.safety.prompt_fence import (
+                                format_untrusted_block,
+                            )
+
+                            fenced_excerpt = format_untrusted_block(
+                                excerpt,
+                                source="document_attachment",
+                            )
                             text_parts.append(
                                 f"[Attached: {att.filename or path} ({att.mime}) "
-                                f"— parsed contents:\n{excerpt}]"
+                                f"— parsed contents:\n{fenced_excerpt}]"
                             )
                             text_parts.append(
                                 f"[Full document at: {path} — use read_document for complete content]"

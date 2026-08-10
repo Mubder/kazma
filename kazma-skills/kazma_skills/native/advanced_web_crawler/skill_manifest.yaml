@@ -25,7 +25,10 @@ tools:
       - "اقرأ محتويات الصفحة الإلكترونية واستخرج النص الصافي"
   parse_document:
     arabic_name: "تحليل المستندات المحلية"
-    description: "Parse structured text from local files including CSV, JSON, XLS, or PDF."
+    description: >
+      Parse runtime-ready local document formats through the isolated document service.
+      Supports page/sheet/slide/block selectors and deterministic continuation;
+      legacy DOC/XLS/PPT require a healthy headless LibreOffice converter.
     category: "filesystem"
     prompt_chain:
       - "اقرأ وحلل المستند المحلي واستخرج بياناته بشكل منظم"

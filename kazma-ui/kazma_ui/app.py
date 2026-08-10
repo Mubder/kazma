@@ -58,6 +58,8 @@ class KazmaAppBuilder:
         self._checkpointer = None
         self._hitl_state: dict[str, Any] = {}
         self._current_lang = None
+        self._documents = None
+        self._documents_maintenance = None
 
     def build(self) -> FastAPI:
         """Execute all phases of application construction and return the FastAPI instance."""
@@ -1190,6 +1192,19 @@ class KazmaAppBuilder:
             logger.warning("Email API router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "email_api", "error": str(e)})
 
+        # ── Documents API (shared DocumentIngestionService) ──
+        # The router delegates to app.state.documents (wired in _on_startup).
+        # Mounted unconditionally so the /documents page always has an API;
+        # returns 503 until the coordinator is live.
+        try:
+            from kazma_ui.documents_api import create_documents_router
+
+            self.app.include_router(create_documents_router())
+            logger.info("[Documents] API router mounted at /api/documents/*")
+        except Exception as e:
+            logger.warning("[Documents] API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "documents_api", "error": str(e)})
+
         # ── Swarm Panel ──
         from kazma_ui.swarm_panel import create_swarm_router
 
@@ -1410,6 +1425,38 @@ class KazmaAppBuilder:
                 except Exception as ne:  # noqa: BLE001
                     logger.debug("[App] lifecycle 'startup_failed' notification failed: %s", ne)
 
+        # ── Document intelligence platform (durable ingestion) ───────
+        # Instantiate the shared coordinator (repository, CAS storage, job
+        # store, DocumentService, knowledge adapter) and start its bounded
+        # worker pool. Exposed via app.state.documents for the API router.
+        # Restart recovery reclaims expired leases on worker start. Best-
+        # effort: a failure here never blocks boot.
+        try:
+            from kazma_core.documents.ingestion import (
+                create_default_ingestion_service,
+                set_ingestion_service,
+            )
+
+            documents = create_default_ingestion_service()
+            await documents.start_workers()
+            self.app.state.documents = documents
+            self._documents = documents
+            set_ingestion_service(documents)
+            logger.info("[Documents] ingestion coordinator started")
+            # Periodic garbage-collection / retention loop (cancellable,
+            # reads documents.gc.* live from the ConfigStore each run).
+            try:
+                from kazma_core.documents.retention import (
+                    start_document_maintenance_loop,
+                )
+
+                self._documents_maintenance = start_document_maintenance_loop()
+                logger.info("[Documents] retention/GC maintenance loop scheduled")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[Documents] maintenance loop start failed: %s", e)
+        except Exception as e:
+            logger.warning("[Documents] ingestion coordinator start failed: %s", e)
+
         # ── V2 memory worker (durable task queue) ────────────────────
         # Registers the macro_sleep / entity_merge / micro_consolidation
         # handlers and starts draining memory_ops.db. Pending rows
@@ -1514,6 +1561,34 @@ class KazmaAppBuilder:
             await stop_hitl_timeout_watchdog()
         except Exception as e:
             logger.debug("[app] HITL watchdog stop: %s", e)
+
+        # Stop document ingestion workers (drain in-flight stages) before
+        # cron/agent teardown. Jobs are durable — pending rows resume on the
+        # next boot via lease recovery. Best-effort; never blocks shutdown.
+        try:
+            documents = getattr(self, "_documents", None)
+            maintenance = getattr(self, "_documents_maintenance", None)
+            if maintenance is not None:
+                try:
+                    maintenance.cancel()
+                    await maintenance
+                except asyncio.CancelledError:
+                    pass
+                except Exception:  # noqa: BLE001
+                    pass
+                self._documents_maintenance = None
+            if documents is not None:
+                await documents.stop_workers()
+                documents.close()
+                try:
+                    from kazma_core.documents.ingestion import set_ingestion_service
+
+                    set_ingestion_service(None)
+                except Exception:  # noqa: BLE001
+                    pass
+                logger.info("[Documents] ingestion coordinator stopped")
+        except Exception as e:
+            logger.warning("[Documents] ingestion coordinator stop failed: %s", e)
 
         # 1) Stop cron first so no new jobs fire (audit C3)
         try:

@@ -184,6 +184,16 @@ def export_bundle(
                 _log(f"Copying assets/{sub}/…")
                 shutil.copytree(src, staging / "assets" / sub, dirs_exist_ok=True)
 
+    # 6b. Document store — documents.db (consistent snapshot) + the immutable
+    #     content-addressed tree (quarantine/originals/artifacts/manifests).
+    #     The tree is content-addressed (no embedded paths), so it is copied
+    #     verbatim and restored to the target's document-store root on import.
+    _log("Exporting document store…")
+    try:
+        _export_document_store(staging, manifest, _log)
+    except Exception as exc:  # noqa: BLE001 - document store is optional
+        logger.warning("[migrate:export] document store export failed: %s", exc)
+
     # 7. meta.env — vault key (so vault.db decrypts) + public url.
     meta = {
         "KAZMA_VAULT_KEY": (os.environ.get("KAZMA_VAULT_KEY") or "").strip(),
@@ -306,6 +316,74 @@ def _detect_active_workspace_root() -> str:
         return (active or {}).get("root_path", "") or ""
     except Exception:
         return ""
+
+
+def _export_document_store(
+    staging: Path, manifest: Manifest, _log: Callable[[str], None]
+) -> None:
+    """Copy documents.db (consistent snapshot) + the content tree into the bundle.
+
+    documents.db is snapshotted FIRST (read lock → point-in-time), then the
+    referenced content-addressed files are copied — every blob a snapshot row
+    references already exists on disk (files precede rows), so the pair is
+    consistent. The tree carries no embedded paths, so it needs no rewrite.
+    """
+    from kazma_core.documents.config import get_document_config
+
+    root = Path(get_document_config().storage_root)
+    db_src = root / "documents.db"
+    if not db_src.exists():
+        _log("  (no documents.db — skipping document store)")
+        return
+
+    dest_root = staging / "document-store"
+    dest_root.mkdir(parents=True, exist_ok=True)
+    # 1) Consistent DB snapshot into the bundle's data/ dir.
+    db_dest = staging / "data" / "documents.db"
+    if _safe_copy(db_src, db_dest):
+        manifest.table_counts["documents.db"] = _count_tables(db_src)
+
+    # 2) Copy referenced content + manifests verbatim (hashed by the manifest
+    #    pass, so integrity is verified on import).
+    try:
+        from kazma_core.documents.backup import _blob_rel_path, _read_references
+
+        refs, versions = _read_references(db_dest if db_dest.exists() else db_src)
+        blob_count = 0
+        missing_blobs: list[str] = []
+        for sha, kind in refs:
+            rel = _blob_rel_path(kind, sha)
+            src = root / rel
+            if not src.is_file():
+                missing_blobs.append(str(rel).replace("\\", "/"))
+                continue
+            dst = dest_root / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            blob_count += 1
+        if missing_blobs:
+            sample = ", ".join(missing_blobs[:3])
+            raise RuntimeError(
+                "document store is incomplete; referenced blob(s) are missing: "
+                f"{sample}"
+            )
+        manifest_count = 0
+        for doc_id, ver_id in versions:
+            src = root / "manifests" / doc_id / f"{ver_id}.json"
+            if not src.is_file():
+                continue
+            dst = dest_root / "manifests" / doc_id / f"{ver_id}.json"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            manifest_count += 1
+        manifest.table_counts["_document_store"] = {
+            "blobs": blob_count,
+            "manifests": manifest_count,
+        }
+        _log(f"  document store: {blob_count} blob(s), {manifest_count} manifest(s)")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[migrate:export] document content copy failed: %s", exc)
+        raise
 
 
 def _dump_postgres_shared_state(

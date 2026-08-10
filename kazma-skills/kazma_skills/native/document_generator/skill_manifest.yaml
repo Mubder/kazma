@@ -1,6 +1,6 @@
 name: document-generator
-version: 0.1.0
-description: Generate PDF, DOCX, XLSX, and Markdown documents from structured content.
+version: 0.2.0
+description: Generate verified PDF, DOCX, XLSX, and Markdown artifacts in isolated workers.
 author: Kazma Team
 license: MIT
 
@@ -8,8 +8,8 @@ tools:
   generate_pdf:
     arabic_name: "إنشاء PDF"
     description: >
-      Generate a PDF document from a title and a list of sections
-      (heading + body text). Returns the saved file path.
+      Generate and round-trip validate a PDF artifact in an isolated renderer.
+      Live readiness requires reportlab and reports Unicode font fallback warnings.
     category: document
     prompt_chain:
       - "أنشئ مستند PDF من العنوان والأقسام المحددة"
@@ -17,24 +17,23 @@ tools:
   generate_docx:
     arabic_name: "إنشاء DOCX"
     description: >
-      Generate a Word .docx document from a title and a list of sections
-      (heading + body text). Returns the saved file path.
+      Generate and round-trip validate a Word document in an isolated renderer.
+      Live readiness requires python-docx.
     category: document
     prompt_chain:
       - "أنشئ مستند Word من العنوان والأقسام المحددة"
   generate_xlsx:
     arabic_name: "إنشاء XLSX"
     description: >
-      Generate an Excel .xlsx workbook from a list of sheets, each with a
-      list of row-lists (the first row is the header). Returns the file path.
+      Generate and round-trip validate an Excel workbook in an isolated renderer.
+      Live readiness requires openpyxl.
     category: document
     prompt_chain:
       - "أنشئ ملف Excel من الأوراق والصفوف المحددة"
   generate_markdown_doc:
     arabic_name: "إنشاء ملف Markdown"
     description: >
-      Generate a Markdown (.md) document from a title and a list of
-      sections (heading + body). Returns the saved file path.
+      Generate an atomic UTF-8 Markdown artifact with Unicode preservation.
     category: document
     prompt_chain:
       - "أنشئ ملف Markdown من العنوان والأقسام"

@@ -1228,6 +1228,261 @@ async def _try_kb_command(
     return True
 
 
+async def _try_documents_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/documents`` commands across all chat platforms.
+
+    Surfaces the shared ``DocumentIngestionService`` (the single durable
+    document platform). Reads are opaque-ID based; no bytes are parsed on the
+    platform adapter and platform isolation (§2) is preserved — no chat/user
+    IDs enter graph state.
+
+    Subcommands::
+
+        /documents                     — help + recent documents
+        /documents list                — list documents (id, title, state)
+        /documents status <id>         — durable job state for a document/job id
+        /documents read <id>           — paged fenced content of a ready document
+        /documents search <lib> <q>    — search an indexed library
+        /documents health              — capability + worker readiness
+
+    Returns ``True`` if handled (so the caller skips the graph), else ``False``.
+    """
+    text = (msg.text or "").strip()
+    low = text.lower()
+    if not (low == "/documents" or low.startswith("/documents ") or low == "/docs" or low.startswith("/docs ")):
+        return False
+
+    parts = text.split(None, 1)
+    body = parts[1].strip() if len(parts) > 1 else ""
+    tokens = body.split()
+    sub = tokens[0].lower() if tokens else ""
+
+    tenant = "default"
+    try:
+        from kazma_core.tenant_context import get_current_tenant_id
+
+        tenant = (get_current_tenant_id() or "default").strip() or "default"
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    try:
+        from kazma_core.documents.ingestion import get_ingestion_service
+
+        svc = get_ingestion_service()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[AgentHandler] Document platform unavailable: %s", exc)
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "⚠️ Document platform is unavailable in this deployment.",
+        )
+        return True
+
+    if sub in ("", "help"):
+        docs = svc.list_documents(tenant_id=tenant, actor_id="agent")
+        lines = [
+            "📄 **Kazma Documents**",
+            "",
+            "`/documents list` — list documents",
+            "`/documents status <id>` — job state for a document/job",
+            "`/documents read <id>` — read a ready document",
+            "`/documents convert <id> <format>` — convert to pdf/html/docx/markdown",
+            "`/documents pdf-info <id>` — structural report for a PDF",
+            "`/documents redact <id> <term[,term...]>` — redact a PDF (new artifact)",
+            "`/documents search <library> <query>` — search an indexed library",
+            "`/documents health` — capability readiness",
+            "",
+            "Upload from the Web UI **Documents** page; every platform sees the "
+            "same opaque `document_id`.",
+        ]
+        if docs:
+            lines.append("")
+            lines.append("**Recent:**")
+            for d in docs[:8]:
+                lines.append(f"• `{d['document_id'][:8]}` — {d['title']} ({d.get('state') or 'unknown'})")
+        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        return True
+
+    if sub == "list":
+        docs = svc.list_documents(tenant_id=tenant, actor_id="agent")
+        if not docs:
+            await _send_model_reply(msg, store, manager, thread_id, "No documents yet.")
+            return True
+        lines = ["📄 **Documents**", ""]
+        for d in docs:
+            lines.append(f"• `{d['document_id']}` — {d['title']} ({d.get('state') or 'unknown'})")
+        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        return True
+
+    if sub == "status":
+        ident = tokens[1] if len(tokens) > 1 else ""
+        if not ident:
+            await _send_model_reply(msg, store, manager, thread_id, "Usage: `/documents status <id>`")
+            return True
+        try:
+            status = svc.job_status(tenant_id=tenant, job_id=ident)
+            if status is None:
+                jobs = svc.jobs_for_document(tenant_id=tenant, document_id=ident)
+                status = jobs[0] if jobs else None
+            if status is None:
+                await _send_model_reply(msg, store, manager, thread_id, "⚠️ Not found.")
+                return True
+            reply = (
+                f"📄 Job `{status['job_id'][:8]}`\n"
+                f"state: **{status['state']}** (stage: {status['stage']})\n"
+                f"attempt: {status['attempt']}/{status['max_attempts']}"
+            )
+            if status.get("error_code"):
+                reply += f"\nerror: {status['error_code']}"
+            await _send_model_reply(msg, store, manager, thread_id, reply)
+        except Exception as exc:  # noqa: BLE001
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {type(exc).__name__}")
+        return True
+
+    if sub == "read":
+        ident = tokens[1] if len(tokens) > 1 else ""
+        if not ident:
+            await _send_model_reply(msg, store, manager, thread_id, "Usage: `/documents read <id>`")
+            return True
+        try:
+            data = svc.get_content(
+                tenant_id=tenant, actor_id="agent", document_id=ident, max_chars=3000
+            )
+            await _send_model_reply(msg, store, manager, thread_id, data["text"] or "(empty)")
+        except Exception as exc:  # noqa: BLE001
+            from kazma_core.documents.ingestion import DocumentIngestionError
+
+            reason = exc.safe_message if isinstance(exc, DocumentIngestionError) else type(exc).__name__
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {reason}")
+        return True
+
+    if sub in ("convert", "pdf-info", "pdfinfo", "redact"):
+        workspace = "default"
+        try:
+            from kazma_core.stores import get_workspace_store
+
+            active = get_workspace_store().get_active_workspace()
+            if active and active.get("id"):
+                workspace = str(active["id"]).strip() or "default"
+        except Exception:  # pragma: no cover - defensive
+            pass
+        from kazma_core.documents.ingestion import DocumentIngestionError
+
+        ident = tokens[1] if len(tokens) > 1 else ""
+        try:
+            if sub == "convert":
+                fmt = tokens[2] if len(tokens) > 2 else ""
+                if not ident or not fmt:
+                    await _send_model_reply(
+                        msg, store, manager, thread_id,
+                        "Usage: `/documents convert <id> <format>`",
+                    )
+                    return True
+                data = await svc.convert_document(
+                    tenant_id=tenant, actor_id="agent", workspace_id=workspace,
+                    document_id=ident, target_format=fmt,
+                )
+                out = data.get("manifest", {}).get("output", {})
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    (
+                        f"📄 Converted → `{data.get('artifact_id')}`\n"
+                        f"format: {out.get('extension')} ({out.get('size')} bytes)\n"
+                        "Download from the Web UI Documents page."
+                    ),
+                )
+            elif sub in ("pdf-info", "pdfinfo"):
+                if not ident:
+                    await _send_model_reply(
+                        msg, store, manager, thread_id, "Usage: `/documents pdf-info <id>`"
+                    )
+                    return True
+                data = await svc.pdf_info_document(
+                    tenant_id=tenant, actor_id="agent", workspace_id=workspace,
+                    document_id=ident,
+                )
+                report = data.get("report", {})
+                pages = report.get("page_count") or report.get("pages")
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"📄 PDF info for `{ident[:8]}`\npages: {pages}\nencrypted: {report.get('encrypted')}",
+                )
+            else:  # redact
+                if len(tokens) < 3:
+                    await _send_model_reply(
+                        msg, store, manager, thread_id,
+                        "Usage: `/documents redact <id> <term[,term...]>`",
+                    )
+                    return True
+                raw_terms = body.split(None, 2)[2]
+                terms = [t.strip() for t in raw_terms.split(",") if t.strip()]
+                data = await svc.redact_document(
+                    tenant_id=tenant, actor_id="agent", workspace_id=workspace,
+                    document_id=ident, terms=terms,
+                )
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    (
+                        f"📄 Redacted → `{data.get('artifact_id')}`\n"
+                        "A new immutable artifact was created; the original is unchanged. "
+                        "Mixed image/vector PDFs fail closed."
+                    ),
+                )
+        except DocumentIngestionError as exc:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc.safe_message}")
+        except Exception as exc:  # noqa: BLE001
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {type(exc).__name__}")
+        return True
+
+    if sub == "search":
+        if len(tokens) < 3:
+            await _send_model_reply(msg, store, manager, thread_id, "Usage: `/documents search <library> <query>`")
+            return True
+        library = tokens[1]
+        query = body.split(None, 2)[2]
+        try:
+            data = await svc.search_library(
+                tenant_id=tenant, library_id=library, query=query, top_k=5
+            )
+            context = data.get("prompt_context") or ""
+            await _send_model_reply(
+                msg, store, manager, thread_id, context or "No matching chunks found."
+            )
+        except Exception as exc:  # noqa: BLE001
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {type(exc).__name__}")
+        return True
+
+    if sub == "health":
+        try:
+            health = svc.health()
+            worker = health.get("worker", {})
+            parsers = health.get("parsers", [])
+            ready = sum(1 for p in parsers if p.get("readiness") == "ready")
+            ocr = health.get("ocr", {}).get("readiness", "unavailable")
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                (
+                    "📄 **Document platform health**\n"
+                    f"worker: {'running' if worker.get('running') else 'stopped'}\n"
+                    f"parsers ready: {ready}/{len(parsers)}\n"
+                    f"OCR: {ocr}"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {type(exc).__name__}")
+        return True
+
+    await _send_model_reply(
+        msg, store, manager, thread_id,
+        f"⚠️ Unknown `/documents` subcommand `{sub}`. Send `/documents` for help.",
+    )
+    return True
+
+
 async def _try_research_command(
     msg: IncomingMessage,
     store: SessionStore,

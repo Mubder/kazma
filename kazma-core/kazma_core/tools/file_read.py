@@ -81,28 +81,34 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         if p.is_dir():
             return _friendly_error(IsADirectoryError(), path)
 
-        # ── Binary document format delegation ───────────────────────
-        # If this is a known document format (PDF, DOCX, XLSX, PPTX, etc.),
-        # delegate to the document_processor skill instead of failing with
-        # "not valid UTF-8". This closes the broken loop where the attachment
-        # handler tells the agent to "use file_read" but file_read rejects
-        # binary files.
+        # ── Runtime-ready document format delegation ─────────────────
         suffix = p.suffix.lower()
-        _DOCUMENT_SUFFIXES = frozenset({
-            ".pdf", ".docx", ".doc", ".xlsx", ".xls",
-            ".pptx", ".ppt", ".rtf",
-        })
-        if suffix in _DOCUMENT_SUFFIXES:
-            try:
-                from kazma_skills.native.document_processor.tools import read_document
+        from kazma_core.documents.registry import get_parser_registry
 
-                parsed = await read_document(str(p))
-                if not parsed.startswith("Error:"):
-                    # Return the parsed content with a header indicating format delegation
-                    return f"[Binary document parsed as {suffix}]\n{parsed}"
-                # If parsing failed, fall through to the friendly error below
-            except ImportError:
-                pass  # document_processor not available — fall through to read_text
+        capability = get_parser_registry().capability_for_extension(suffix)
+        text_suffixes = {".txt", ".md", ".markdown", ".log"}
+        if capability is not None and capability.available and suffix not in text_suffixes:
+            try:
+                from kazma_core.documents.service import DocumentService
+
+                parsed = await DocumentService().read_transient(
+                    p,
+                    approved_path=p,
+                    max_chars=MAX_CHARS,
+                    fence=True,
+                )
+                return parsed.as_tool_output()
+            except Exception as exc:
+                from kazma_core.documents.errors import DocumentParseError
+
+                if isinstance(exc, DocumentParseError):
+                    return f"Error: {exc.safe_message}"
+                return f"Error: Document parser failed safely ({type(exc).__name__})"
+        if capability is not None and not capability.available:
+            return (
+                f"Error: Parser for {suffix} is unavailable: "
+                f"{capability.reason or 'runtime health probe failed'}"
+            )
 
         text = p.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -112,15 +118,6 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     except IsADirectoryError:
         return _friendly_error(IsADirectoryError(), path)
     except UnicodeDecodeError as exc:
-        # If we get here, the document delegation didn't fire or failed.
-        # Give a more helpful error for known binary formats.
-        suffix = p.suffix.lower()
-        if suffix in (".pdf", ".docx", ".xlsx", ".pptx"):
-            return (
-                f"Error: This is a binary {suffix} file. The document parser "
-                f"is not available. Install document support: "
-                f"pip install pdfplumber pypdf python-docx openpyxl python-pptx"
-            )
         return _friendly_error(exc, path)
     except OSError as exc:
         return _friendly_error(exc, path)

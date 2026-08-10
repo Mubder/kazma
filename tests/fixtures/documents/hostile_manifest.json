@@ -1,0 +1,277 @@
+{
+  "cases": [
+    {
+      "byte_size": 523,
+      "category": "archive-bomb",
+      "config_overrides": {},
+      "description": "Highly compressed OOXML content exceeds the expansion-ratio budget.",
+      "disposition": "reject",
+      "expected_codes": [
+        "document_limit_exceeded"
+      ],
+      "filename": "compression-bomb.docx",
+      "id": "ooxml-compression-bomb",
+      "sha256": "8db4ee9b81f743f3367dbcd037cf6d67bfe50424074ee15ae890bce1625773eb",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 575,
+      "category": "nested-archive",
+      "config_overrides": {},
+      "description": "An embedded archive is rejected before an Office parser opens it.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "nested-archive.docx",
+      "id": "ooxml-nested-archive",
+      "sha256": "4ec37e5df6b472cc03a0b715219a4c125a84570c2ea48dfe1e74a6ec49e9cb39",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 819,
+      "category": "archive-member-limit",
+      "config_overrides": {
+        "max_archive_members": 3
+      },
+      "description": "OOXML member count exceeds a deliberately small certification budget.",
+      "disposition": "reject",
+      "expected_codes": [
+        "document_limit_exceeded"
+      ],
+      "filename": "member-flood.docx",
+      "id": "ooxml-member-flood",
+      "sha256": "51c35f77bcafe0383e19c12cbc8249f67cb3d42d0af8526d20bf9980fc87c366",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 431,
+      "category": "xxe",
+      "config_overrides": {},
+      "description": "DOCTYPE and external-entity declarations are rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "entity-expansion.docx",
+      "id": "ooxml-xxe",
+      "sha256": "61ab4f1cb2dfbbb45f83a3b1f82ff744685c64766283125029975856a9dee7ee",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 490,
+      "category": "macro",
+      "config_overrides": {},
+      "description": "A vbaProject payload in an OOXML container is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "macro.docx",
+      "id": "ooxml-macro",
+      "sha256": "83c0ec538f4412b93bd7fc5aa2b7abf270a5854633aee44b4096fb6f9bacf782",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 582,
+      "category": "external-resource",
+      "config_overrides": {},
+      "description": "External OOXML relationships are rejected before parsing/rendering.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "external-relationship.docx",
+      "id": "ooxml-external-relationship",
+      "sha256": "51625b49df3c04af8b287a94bc69c0f7f74c71407748295a07f1cbc69e0ac8c0",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 51,
+      "category": "encryption",
+      "config_overrides": {},
+      "description": "Encrypted PDF declarations are rejected under the default policy.",
+      "disposition": "reject",
+      "expected_codes": [
+        "encrypted_document"
+      ],
+      "filename": "encrypted.pdf",
+      "id": "pdf-encrypted",
+      "sha256": "c46eb13585733883fbe46acad226a9c78d1d66c03afc3a1949223c06ce4f9391",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 26,
+      "category": "polyglot",
+      "config_overrides": {},
+      "description": "A PDF/ZIP polyglot is rejected by content-first sniffing.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "polyglot.pdf",
+      "id": "pdf-zip-polyglot",
+      "sha256": "0e7fe12145d7ad7647b94c835f10c3dfefcbd0ccf212266845975cac0f52ff60",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 89,
+      "category": "active-content",
+      "config_overrides": {},
+      "description": "PDF JavaScript, launch actions, and embedded files are rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsafe_document"
+      ],
+      "filename": "active-content.pdf",
+      "id": "pdf-active-content",
+      "sha256": "9e96ea7c5608affba5d3d6701b599007a18741fa6f2c3e650d9df5ecc1fb66a0",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 53,
+      "category": "corruption",
+      "config_overrides": {},
+      "description": "A truncated/malformed cross-reference table fails closed in isolation.",
+      "disposition": "reject",
+      "expected_codes": [
+        "parser_worker_failure",
+        "document_parse_error"
+      ],
+      "filename": "malformed-xref.pdf",
+      "id": "pdf-malformed-xref",
+      "sha256": "7032879cf6d710af14a30051d138cbb12dabe5f8f65d4739a3a5c6d815fff360",
+      "stage": "parse"
+    },
+    {
+      "byte_size": 529,
+      "category": "page-limit",
+      "config_overrides": {
+        "max_pages": 2
+      },
+      "description": "A valid three-page PDF exceeds a two-page certification budget.",
+      "disposition": "reject",
+      "expected_codes": [
+        "document_limit_exceeded"
+      ],
+      "filename": "page-limit.pdf",
+      "id": "pdf-page-limit",
+      "sha256": "29d1faf6d6dd1ceec0577b4230078ba8f8d770572707b26c1ef5c299465c1da9",
+      "stage": "parse"
+    },
+    {
+      "byte_size": 68,
+      "category": "pixel-limit",
+      "config_overrides": {
+        "max_pixels_per_image": 3
+      },
+      "description": "A valid image exceeds a deliberately small pixel budget.",
+      "disposition": "reject",
+      "expected_codes": [
+        "document_limit_exceeded"
+      ],
+      "filename": "pixel-limit.png",
+      "id": "image-pixel-limit",
+      "sha256": "592b28a13e9ba5741f4af8ee7a20fb0489bcf8900efc51989300a580b7ff207a",
+      "stage": "parse"
+    },
+    {
+      "byte_size": 8,
+      "category": "cell-limit",
+      "config_overrides": {
+        "max_cells": 3
+      },
+      "description": "A table exceeds a deliberately small aggregate-cell budget.",
+      "disposition": "reject",
+      "expected_codes": [
+        "document_limit_exceeded"
+      ],
+      "filename": "cell-limit.csv",
+      "id": "csv-cell-limit",
+      "sha256": "eafde52e304486ad92291694fa17012481621e71d08c45a643e23ed504d061cd",
+      "stage": "parse"
+    },
+    {
+      "byte_size": 49,
+      "category": "mime-mismatch",
+      "config_overrides": {},
+      "description": "HTML bytes with a text extension are rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsupported_document_format"
+      ],
+      "filename": "mismatch.txt",
+      "id": "extension-mismatch",
+      "sha256": "f116d1348136d7511c3240175fabe89838cef9b7f74d2959d0747103edc55731",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 94,
+      "category": "prompt-injection",
+      "config_overrides": {},
+      "description": "Instruction-like text is accepted only as fenced untrusted data.",
+      "disposition": "fenced",
+      "expected_codes": [],
+      "filename": "prompt-injection.txt",
+      "id": "prompt-injection",
+      "sha256": "4de143f5250ae0035f620311920434c465da7aaac9fd9a16da6d75e13929c96d",
+      "stage": "parse"
+    },
+    {
+      "byte_size": 57,
+      "category": "unicode-bidi",
+      "config_overrides": {},
+      "description": "Arabic, English, confusable extensions, and bidi controls remain fenced data.",
+      "disposition": "fenced",
+      "expected_codes": [],
+      "filename": "mixed-bidi.txt",
+      "id": "unicode-bidi-mixed",
+      "sha256": "1e36958d257647702b07bbc8853c25b2d67e9865361ea8ad027950d00aebcb73",
+      "stage": "parse"
+    },
+    {
+      "byte_size": 4,
+      "category": "corruption",
+      "config_overrides": {},
+      "description": "Invalid UTF-8 is rejected without lossy decoding.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsupported_document_format"
+      ],
+      "filename": "invalid-utf8.txt",
+      "id": "invalid-utf8",
+      "sha256": "a2a7ef38f3eaeb042038ca052fc480b6cc00facbd759d89e7e6ba39942f55a55",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 17,
+      "category": "corruption",
+      "config_overrides": {},
+      "description": "A truncated OOXML local header is rejected.",
+      "disposition": "reject",
+      "expected_codes": [
+        "unsupported_document_format"
+      ],
+      "filename": "truncated.docx",
+      "id": "truncated-ooxml",
+      "sha256": "1bcf9c73ec68c78fd29b2194363e4e74d64d3308296f52e48a78bb9a126a0f46",
+      "stage": "sniff"
+    },
+    {
+      "byte_size": 41,
+      "category": "parser-crash",
+      "config_overrides": {},
+      "description": "Certification suppresses the worker result to prove missing output fails closed.",
+      "disposition": "reject",
+      "expected_codes": [
+        "document_parser_failed"
+      ],
+      "filename": "parser-crash.txt",
+      "id": "parser-crash",
+      "sha256": "a7e7dc9f31733f51b4d053dfb598734f2f7ec24443b2b3a251b3a96d59441f47",
+      "stage": "sandbox"
+    }
+  ],
+  "generator": "kazma_core.documents.hostile_corpus",
+  "schema_version": 1
+}

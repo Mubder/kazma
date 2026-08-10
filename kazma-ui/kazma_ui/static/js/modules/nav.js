@@ -29,6 +29,7 @@ export function initSoftNav() {
         '/research',
         '/memory',
         '/knowledge',
+        '/documents',
     ]);
 
     const GLOBAL_LIBS = [

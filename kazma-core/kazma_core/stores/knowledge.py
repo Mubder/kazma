@@ -30,6 +30,7 @@ Concurrency model
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -96,6 +97,12 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
     has_code       INTEGER NOT NULL DEFAULT 0,
     char_count     INTEGER NOT NULL DEFAULT 0,
     content        TEXT NOT NULL,
+    metadata_json  TEXT NOT NULL DEFAULT '{}',
+    document_id    TEXT,
+    version_id     TEXT,
+    source_sha256  TEXT,
+    active         INTEGER NOT NULL DEFAULT 1,
+    tombstoned     INTEGER NOT NULL DEFAULT 0,
     created_at     TEXT NOT NULL,
     FOREIGN KEY (library_id) REFERENCES knowledge_libraries(id) ON DELETE CASCADE
 );
@@ -156,6 +163,7 @@ class KnowledgeStore:
             # EXISTS, so probe PRAGMA table_info and ALTER only when the
             # column is missing. Mirrors the WorkspaceStore pattern.
             self._migrate_library_columns(conn)
+            self._migrate_chunk_columns(conn)
 
     @staticmethod
     def _migrate_library_columns(conn: sqlite3.Connection) -> None:
@@ -174,6 +182,26 @@ class KnowledgeStore:
                 "CREATE INDEX IF NOT EXISTS idx_kl_tenant ON knowledge_libraries(tenant_id)"
             )
             logger.debug("[KnowledgeStore] Migrated column: tenant_id")
+
+    @staticmethod
+    def _migrate_chunk_columns(conn: sqlite3.Connection) -> None:
+        """Add citation/version columns without rebuilding existing KB data."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks)")}
+        additions = {
+            "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+            "document_id": "TEXT",
+            "version_id": "TEXT",
+            "source_sha256": "TEXT",
+            "active": "INTEGER NOT NULL DEFAULT 1",
+            "tombstoned": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, definition in additions.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE knowledge_chunks ADD COLUMN {column} {definition}")
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_kc_document
+               ON knowledge_chunks(library_id, document_id, version_id, active)"""
+        )
 
     # ------------------------------------------------------------------
     # Library CRUD
@@ -342,6 +370,22 @@ class KnowledgeStore:
                 return None
         return lib
 
+    def get_library_for_tenant(
+        self, library_id: str, tenant_id: str
+    ) -> dict[str, Any] | None:
+        """Resolve a library with an explicit, non-fallback tenant boundary."""
+        tenant = str(tenant_id).strip()
+        if not tenant:
+            raise ValueError("tenant_id must not be empty")
+        with self._lock:
+            row = self._get_conn().execute(
+                """SELECT id, name, description, seed_url, auto_inject, archived,
+                          chunk_count, created_at, updated_at, tenant_id
+                   FROM knowledge_libraries WHERE id = ? AND tenant_id = ?""",
+                (library_id, tenant),
+            ).fetchone()
+        return self._library_row_to_dict(row) if row is not None else None
+
     def update_library(
         self,
         library_id: str,
@@ -444,7 +488,9 @@ class KnowledgeStore:
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                "SELECT id FROM knowledge_chunks WHERE library_id = ? AND source_url = ?",
+                """SELECT id FROM knowledge_chunks
+                   WHERE library_id = ? AND source_url = ?
+                     AND active = 1 AND tombstoned = 0""",
                 (library_id, source_url),
             ).fetchall()
         return [r["id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows]
@@ -456,6 +502,7 @@ class KnowledgeStore:
             rows = conn.execute(
                 """SELECT DISTINCT source_url FROM knowledge_chunks
                    WHERE library_id = ? AND source_url != ''
+                     AND active = 1 AND tombstoned = 0
                    ORDER BY source_url""",
                 (library_id,),
             ).fetchall()
@@ -478,6 +525,7 @@ class KnowledgeStore:
             rows = conn.execute(
                 """SELECT content_hash FROM knowledge_chunks
                    WHERE library_id = ? AND source_url = ?
+                     AND active = 1 AND tombstoned = 0
                    ORDER BY chunk_index ASC""",
                 (library_id, source_url),
             ).fetchall()
@@ -489,6 +537,212 @@ class KnowledgeStore:
     # ------------------------------------------------------------------
     # Chunk CRUD
     # ------------------------------------------------------------------
+
+    def publish_document_version(
+        self,
+        *,
+        tenant_id: str,
+        library_id: str,
+        document_id: str,
+        version_id: str,
+        source_sha256: str,
+        chunks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Atomically activate one immutable document version in a library.
+
+        New rows and their FTS copies are built in the same SQLite transaction
+        that deactivates the prior version. A failed write therefore leaves the
+        prior searchable version untouched.
+        """
+        tenant = str(tenant_id).strip()
+        document = str(document_id).strip()
+        version = str(version_id).strip()
+        digest = str(source_sha256).strip()
+        if not all((tenant, library_id, document, version, digest)):
+            raise ValueError("tenant, library, document, version, and source hash are required")
+        source_url = f"document://{document}/{version}"
+        ordered = sorted(chunks, key=lambda item: int(item["chunk_index"]))
+        if not ordered:
+            raise ValueError("at least one document chunk is required")
+        if len({int(item["chunk_index"]) for item in ordered}) != len(ordered):
+            raise ValueError("document chunk indices must be unique")
+        for item in ordered:
+            if (
+                item.get("library_id") != library_id
+                or item.get("source_url") != source_url
+                or item.get("document_id") != document
+                or item.get("version_id") != version
+            ):
+                raise ValueError("document chunk scope does not match publication scope")
+
+        now = _now_iso()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                library = conn.execute(
+                    "SELECT 1 FROM knowledge_libraries WHERE id = ? AND tenant_id = ?",
+                    (library_id, tenant),
+                ).fetchone()
+                if library is None:
+                    raise PermissionError("knowledge library is unavailable in this tenant")
+                existing = conn.execute(
+                    """SELECT id, content_hash FROM knowledge_chunks
+                       WHERE library_id = ? AND document_id = ? AND version_id = ?
+                         AND active = 1 AND tombstoned = 0
+                       ORDER BY chunk_index""",
+                    (library_id, document, version),
+                ).fetchall()
+                wanted = [(str(item["id"]), str(item["content_hash"])) for item in ordered]
+                present = [(row["id"], row["content_hash"]) for row in existing]
+                if present == wanted:
+                    conn.execute("COMMIT")
+                    return {
+                        "published": False,
+                        "new_ids": [item[0] for item in wanted],
+                        "retired_ids": [],
+                    }
+
+                retired = conn.execute(
+                    """SELECT id FROM knowledge_chunks
+                       WHERE library_id = ? AND document_id = ?
+                         AND active = 1 AND tombstoned = 0""",
+                    (library_id, document),
+                ).fetchall()
+                retired_ids = [row["id"] for row in retired]
+                if retired_ids:
+                    conn.executemany(
+                        "DELETE FROM knowledge_chunks_fts WHERE chunk_id = ?",
+                        [(identifier,) for identifier in retired_ids],
+                    )
+                conn.execute(
+                    """UPDATE knowledge_chunks SET active = 0
+                       WHERE library_id = ? AND document_id = ? AND active = 1""",
+                    (library_id, document),
+                )
+                stale = conn.execute(
+                    """SELECT id FROM knowledge_chunks
+                       WHERE library_id = ? AND document_id = ? AND version_id = ?""",
+                    (library_id, document, version),
+                ).fetchall()
+                if stale:
+                    conn.executemany(
+                        "DELETE FROM knowledge_chunks_fts WHERE chunk_id = ?",
+                        [(row["id"],) for row in stale],
+                    )
+                conn.execute(
+                    """DELETE FROM knowledge_chunks
+                       WHERE library_id = ? AND document_id = ? AND version_id = ?""",
+                    (library_id, document, version),
+                )
+
+                for item in ordered:
+                    content = str(item["content"])
+                    metadata = json.dumps(
+                        item.get("metadata") or {},
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    conn.execute(
+                        """INSERT INTO knowledge_chunks
+                           (id, library_id, source_url, document_title, section_header,
+                            chunk_index, content_hash, has_code, char_count, content,
+                            metadata_json, document_id, version_id, source_sha256,
+                            active, tombstoned, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)""",
+                        (
+                            item["id"],
+                            library_id,
+                            source_url,
+                            item.get("document_title", ""),
+                            item.get("section_header", ""),
+                            int(item["chunk_index"]),
+                            item["content_hash"],
+                            1 if item.get("has_code") else 0,
+                            int(item.get("char_count", len(content))),
+                            content,
+                            metadata,
+                            document,
+                            version,
+                            digest,
+                            now,
+                        ),
+                    )
+                    conn.execute(
+                        """INSERT INTO knowledge_chunks_fts
+                           (content, library_id, source_url, chunk_id)
+                           VALUES (?, ?, ?, ?)""",
+                        (content, library_id, source_url, item["id"]),
+                    )
+                count_row = conn.execute(
+                    """SELECT COUNT(*) AS c FROM knowledge_chunks
+                       WHERE library_id = ? AND active = 1 AND tombstoned = 0""",
+                    (library_id,),
+                ).fetchone()
+                conn.execute(
+                    """UPDATE knowledge_libraries
+                       SET chunk_count = ?, updated_at = ? WHERE id = ? AND tenant_id = ?""",
+                    (int(count_row["c"]), now, library_id, tenant),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        return {
+            "published": True,
+            "new_ids": [str(item["id"]) for item in ordered],
+            "retired_ids": retired_ids,
+        }
+
+    def unindex_document(
+        self, *, tenant_id: str, library_id: str, document_id: str
+    ) -> list[str]:
+        """Tombstone all searchable versions of one tenant-owned document."""
+        tenant = str(tenant_id).strip()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                library = conn.execute(
+                    "SELECT 1 FROM knowledge_libraries WHERE id = ? AND tenant_id = ?",
+                    (library_id, tenant),
+                ).fetchone()
+                if library is None:
+                    raise PermissionError("knowledge library is unavailable in this tenant")
+                rows = conn.execute(
+                    """SELECT id FROM knowledge_chunks
+                       WHERE library_id = ? AND document_id = ?
+                         AND active = 1 AND tombstoned = 0""",
+                    (library_id, document_id),
+                ).fetchall()
+                identifiers = [row["id"] for row in rows]
+                if identifiers:
+                    conn.executemany(
+                        "DELETE FROM knowledge_chunks_fts WHERE chunk_id = ?",
+                        [(identifier,) for identifier in identifiers],
+                    )
+                conn.execute(
+                    """UPDATE knowledge_chunks SET active = 0, tombstoned = 1
+                       WHERE library_id = ? AND document_id = ?""",
+                    (library_id, document_id),
+                )
+                count_row = conn.execute(
+                    """SELECT COUNT(*) AS c FROM knowledge_chunks
+                       WHERE library_id = ? AND active = 1 AND tombstoned = 0""",
+                    (library_id,),
+                ).fetchone()
+                conn.execute(
+                    """UPDATE knowledge_libraries
+                       SET chunk_count = ?, updated_at = ? WHERE id = ? AND tenant_id = ?""",
+                    (int(count_row["c"]), _now_iso(), library_id, tenant),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        return identifiers
 
     def upsert_chunk(self, chunk: dict[str, Any]) -> bool:
         """Insert a chunk row + FTS5 copy. Dedup: if
@@ -549,8 +803,10 @@ class KnowledgeStore:
                 conn.execute(
                     """INSERT INTO knowledge_chunks
                        (id, library_id, source_url, document_title, section_header,
-                        chunk_index, content_hash, has_code, char_count, content, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        chunk_index, content_hash, has_code, char_count, content,
+                        metadata_json, document_id, version_id, source_sha256,
+                        active, tombstoned, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)""",
                     (
                         chunk_id,
                         library_id,
@@ -562,6 +818,16 @@ class KnowledgeStore:
                         1 if chunk.get("has_code") else 0,
                         int(chunk.get("char_count", len(content))),
                         content,
+                        json.dumps(
+                            chunk.get("metadata") or {},
+                            ensure_ascii=False,
+                            allow_nan=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        chunk.get("document_id"),
+                        chunk.get("version_id"),
+                        (chunk.get("metadata") or {}).get("source_sha256"),
                         now,
                     ),
                 )
@@ -577,21 +843,33 @@ class KnowledgeStore:
         return True
 
     def list_chunks(
-        self, library_id: str, *, limit: int = 100, offset: int = 0
+        self,
+        library_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_inactive: bool = False,
     ) -> list[dict[str, Any]]:
+        active_clause = "" if include_inactive else " AND active = 1 AND tombstoned = 0"
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
                 """SELECT id, library_id, source_url, document_title, section_header,
-                          chunk_index, content_hash, has_code, char_count, content, created_at
-                   FROM knowledge_chunks WHERE library_id = ?
+                          chunk_index, content_hash, has_code, char_count, content,
+                          metadata_json, document_id, version_id, source_sha256,
+                          active, tombstoned, created_at
+                   FROM knowledge_chunks WHERE library_id = ?"""
+                + active_clause
+                + """
                    ORDER BY source_url, chunk_index
                    LIMIT ? OFFSET ?""",
                 (library_id, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [self._chunk_row_to_dict(r) for r in rows]
 
-    def get_chunks_by_ids(self, chunk_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def get_chunks_by_ids(
+        self, chunk_ids: list[str], *, include_inactive: bool = False
+    ) -> dict[str, dict[str, Any]]:
         """Fetch full chunk rows for a set of IDs. Used at retrieval time to
         join RRF-ranked IDs back to full content + provenance."""
         if not chunk_ids:
@@ -602,11 +880,68 @@ class KnowledgeStore:
             conn = self._get_conn()
             rows = conn.execute(
                 f"""SELECT id, library_id, source_url, document_title, section_header,
-                           chunk_index, content_hash, has_code, char_count, content, created_at
-                    FROM knowledge_chunks WHERE id IN ({placeholders})""",
+                           chunk_index, content_hash, has_code, char_count, content,
+                           metadata_json, document_id, version_id, source_sha256,
+                           active, tombstoned, created_at
+                    FROM knowledge_chunks WHERE id IN ({placeholders})
+                    {" " if include_inactive else "AND active = 1 AND tombstoned = 0"}""",
                 tuple(chunk_ids),
             ).fetchall()
         return {r["id"]: self._chunk_row_to_dict(r) for r in rows}
+
+    def get_document_chunks(
+        self,
+        *,
+        tenant_id: str,
+        library_id: str,
+        document_id: str,
+        version_id: str | None = None,
+        include_history: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return citation rows for an explicitly scoped document/version."""
+        if self.get_library_for_tenant(library_id, tenant_id) is None:
+            raise PermissionError("knowledge library is unavailable in this tenant")
+        clauses = ["library_id = ?", "document_id = ?"]
+        params: list[Any] = [library_id, document_id]
+        if version_id is not None:
+            clauses.append("version_id = ?")
+            params.append(version_id)
+        if not include_history:
+            clauses.extend(["active = 1", "tombstoned = 0"])
+        with self._lock:
+            rows = self._get_conn().execute(
+                f"""SELECT id, library_id, source_url, document_title, section_header,
+                           chunk_index, content_hash, has_code, char_count, content,
+                           metadata_json, document_id, version_id, source_sha256,
+                           active, tombstoned, created_at
+                    FROM knowledge_chunks WHERE {' AND '.join(clauses)}
+                    ORDER BY version_id, chunk_index""",
+                params,
+            ).fetchall()
+        return [self._chunk_row_to_dict(row) for row in rows]
+
+    def list_document_libraries(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+    ) -> tuple[str, ...]:
+        """List tenant-owned libraries with active chunks for a document."""
+        tenant = str(tenant_id).strip()
+        document = str(document_id).strip()
+        if not tenant or not document:
+            raise ValueError("tenant_id and document_id are required")
+        with self._lock:
+            rows = self._get_conn().execute(
+                """SELECT DISTINCT c.library_id
+                   FROM knowledge_chunks c
+                   JOIN knowledge_libraries l ON l.id = c.library_id
+                   WHERE l.tenant_id = ? AND c.document_id = ?
+                     AND c.active = 1 AND c.tombstoned = 0
+                   ORDER BY c.library_id""",
+                (tenant, document),
+            ).fetchall()
+        return tuple(row["library_id"] for row in rows)
 
     def existing_hashes(self, library_id: str) -> dict[str, str]:
         """Map ``content_hash -> chunk_id`` for all chunks in a library.
@@ -617,7 +952,8 @@ class KnowledgeStore:
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                "SELECT content_hash, id FROM knowledge_chunks WHERE library_id = ?",
+                """SELECT content_hash, id FROM knowledge_chunks
+                   WHERE library_id = ? AND active = 1 AND tombstoned = 0""",
                 (library_id,),
             ).fetchall()
         return {r["content_hash"]: r["id"] for r in rows}
@@ -648,7 +984,8 @@ class KnowledgeStore:
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM knowledge_chunks WHERE library_id = ?",
+                """SELECT COUNT(*) AS c FROM knowledge_chunks
+                   WHERE library_id = ? AND active = 1 AND tombstoned = 0""",
                 (library_id,),
             ).fetchone()
         return int(row["c"]) if row else 0
@@ -656,7 +993,12 @@ class KnowledgeStore:
     # ── FTS5 lexical search (BM25) ───────────────────────────────────────
 
     def fts_search(
-        self, query: str, library_id: str, *, limit: int = 20
+        self,
+        query: str,
+        library_id: str,
+        *,
+        limit: int = 20,
+        document_id: str | None = None,
     ) -> list[tuple[str, float]]:
         """Run a BM25 lexical search scoped to one library.
 
@@ -685,15 +1027,31 @@ class KnowledgeStore:
         with self._lock:
             conn = self._get_conn()
             try:
-                rows = conn.execute(
-                    """SELECT chunk_id, bm25(knowledge_chunks_fts) AS score
-                       FROM knowledge_chunks_fts
-                       WHERE knowledge_chunks_fts MATCH ?
-                         AND library_id = ?
-                       ORDER BY score
-                       LIMIT ?""",
-                    (match_expr, library_id, int(limit)),
-                ).fetchall()
+                if document_id is None:
+                    rows = conn.execute(
+                        """SELECT chunk_id, bm25(knowledge_chunks_fts) AS score
+                           FROM knowledge_chunks_fts
+                           WHERE knowledge_chunks_fts MATCH ?
+                             AND library_id = ?
+                           ORDER BY score
+                           LIMIT ?""",
+                        (match_expr, library_id, int(limit)),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """SELECT knowledge_chunks_fts.chunk_id,
+                                  bm25(knowledge_chunks_fts) AS score
+                           FROM knowledge_chunks_fts
+                           JOIN knowledge_chunks AS c
+                             ON c.id = knowledge_chunks_fts.chunk_id
+                           WHERE knowledge_chunks_fts MATCH ?
+                             AND knowledge_chunks_fts.library_id = ?
+                             AND c.document_id = ?
+                             AND c.active = 1 AND c.tombstoned = 0
+                           ORDER BY score
+                           LIMIT ?""",
+                        (match_expr, library_id, document_id, int(limit)),
+                    ).fetchall()
             except sqlite3.OperationalError as exc:
                 # FTS5 syntax errors (odd punctuation) → return empty rather
                 # than surfacing a 500 to the agent. Semantic search still runs.
@@ -728,6 +1086,12 @@ class KnowledgeStore:
 
     @staticmethod
     def _chunk_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        keys = set(row.keys())
+        metadata = (
+            json.loads(row["metadata_json"])
+            if "metadata_json" in keys and row["metadata_json"]
+            else {}
+        )
         return {
             "id": row["id"],
             "library_id": row["library_id"],
@@ -739,6 +1103,12 @@ class KnowledgeStore:
             "has_code": bool(row["has_code"]),
             "char_count": int(row["char_count"]),
             "content": row["content"],
+            "metadata": metadata,
+            "document_id": row["document_id"] if "document_id" in keys else None,
+            "version_id": row["version_id"] if "version_id" in keys else None,
+            "source_sha256": row["source_sha256"] if "source_sha256" in keys else None,
+            "active": bool(row["active"]) if "active" in keys else True,
+            "tombstoned": bool(row["tombstoned"]) if "tombstoned" in keys else False,
             "created_at": row["created_at"],
         }
 

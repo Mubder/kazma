@@ -2750,6 +2750,17 @@ def register_direct_routes(self: Any) -> None:
             },
         )
 
+    @self.app.get("/documents", response_class=HTMLResponse)
+    async def documents_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "documents.html",
+            {
+                "config": self.agent.config,
+                "active_page": "documents",
+            },
+        )
+
     @self.app.post("/api/gateway/refresh-adapters")
     async def refresh_gateway_adapters() -> dict[str, Any]:
         if self.gateway is None:

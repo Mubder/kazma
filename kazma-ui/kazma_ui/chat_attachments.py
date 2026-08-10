@@ -15,6 +15,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from kazma_gateway.agent_handler.attachments import (
+    MAX_ATTACHMENT_COUNT,
+    MAX_TOTAL_ATTACHMENT_BYTES,
+)
 from kazma_gateway.gateway import Attachment
 
 logger = logging.getLogger(__name__)
@@ -83,12 +87,20 @@ def attachments_from_client_payload(raw_attachments: Any) -> list[Attachment]:
         return []
 
     attachments: list[Attachment] = []
-    for raw in raw_attachments:
+    total_bytes = 0
+    for raw in raw_attachments[:MAX_ATTACHMENT_COUNT]:
         if not isinstance(raw, dict):
             continue
         data = _decode_supplied_data(raw.get("data"))
         if data is None:
             data = _load_uploaded_attachment(raw.get("id"))
+        if data is not None:
+            if total_bytes + len(data) > MAX_TOTAL_ATTACHMENT_BYTES:
+                logger.warning(
+                    "[chat-attachments] ignored attachment exceeding aggregate byte limit"
+                )
+                continue
+            total_bytes += len(data)
         if raw.get("path"):
             logger.warning("[chat-attachments] ignored client-supplied attachment path")
         url = raw.get("url")
@@ -100,5 +112,10 @@ def attachments_from_client_payload(raw_attachments: Any) -> list[Attachment]:
                 data=data,
                 url=url if isinstance(url, str) else None,
             )
+        )
+    if len(raw_attachments) > MAX_ATTACHMENT_COUNT:
+        logger.warning(
+            "[chat-attachments] ignored %d attachment(s) beyond count limit",
+            len(raw_attachments) - MAX_ATTACHMENT_COUNT,
         )
     return attachments

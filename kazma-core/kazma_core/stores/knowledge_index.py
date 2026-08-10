@@ -33,16 +33,15 @@ ChromaDB is unavailable.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.memory.vector_store_global import VectorStore
 from kazma_core.paths import vector_memory_path
 from kazma_core.stores.knowledge import KnowledgeStore, get_knowledge_store
-from kazma_core.memory.vector_store_global import VectorStore
 
 __all__ = [
     "KnowledgeHit",
@@ -74,6 +73,10 @@ class KnowledgeHit:
     section_header: str
     chunk_index: int
     has_code: bool
+    metadata: dict[str, Any] = field(default_factory=dict)
+    document_id: str | None = None
+    version_id: str | None = None
+    citation_label: str = ""
 
 
 class KnowledgeIndex:
@@ -283,6 +286,76 @@ class KnowledgeIndex:
         )
         return (new_count, skipped)
 
+    def publish_document_version(
+        self,
+        *,
+        tenant_id: str,
+        library_id: str,
+        document_id: str,
+        version_id: str,
+        source_sha256: str,
+        chunks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Publish through the existing SQLite/FTS/vector retrieval stack."""
+        result = self._store.publish_document_version(
+            tenant_id=tenant_id,
+            library_id=library_id,
+            document_id=document_id,
+            version_id=version_id,
+            source_sha256=source_sha256,
+            chunks=chunks,
+        )
+        vector = self._vector_store_for(library_id)
+        if vector.available:
+            for identifier in result["retired_ids"]:
+                try:
+                    vector.delete(identifier)
+                except Exception as exc:
+                    logger.debug("[KnowledgeIndex] vector retire failed: %s", exc)
+            if result["published"]:
+                for chunk in chunks:
+                    try:
+                        metadata = chunk.get("metadata") or {}
+                        vector.index(
+                            doc_id=chunk["id"],
+                            text=chunk["content"],
+                            metadata={
+                                "library_id": library_id,
+                                "source_url": chunk["source_url"],
+                                "document_id": document_id,
+                                "version_id": version_id,
+                                "page_start": int(metadata.get("page_start", 0)),
+                                "page_end": int(metadata.get("page_end", 0)),
+                                "citation_label": str(metadata.get("citation_label", "")),
+                                "content_hash": chunk["content_hash"],
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[KnowledgeIndex] document vector index failed for %s: %s",
+                            chunk.get("id"),
+                            exc,
+                        )
+        return result
+
+    def unindex_document(
+        self, *, tenant_id: str, library_id: str, document_id: str
+    ) -> int:
+        """Tombstone one document and remove its physical vector entries."""
+        identifiers = self._store.unindex_document(
+            tenant_id=tenant_id,
+            library_id=library_id,
+            document_id=document_id,
+        )
+        vector = self._vector_store_for(library_id)
+        if vector.available:
+            for identifier in identifiers:
+                try:
+                    vector.delete(identifier)
+                except Exception as exc:
+                    logger.debug("[KnowledgeIndex] vector unindex failed: %s", exc)
+        return len(identifiers)
+
     def prune_sources_not_in(
         self,
         library_id: str,
@@ -366,6 +439,7 @@ class KnowledgeIndex:
         library_id: str,
         *,
         top_k: int = 5,
+        tenant_id: str | None = None,
     ) -> list[KnowledgeHit]:
         """Semantic + lexical search scoped to one library, RRF-blended.
 
@@ -379,6 +453,13 @@ class KnowledgeIndex:
         """
         if not query or not query.strip():
             return []
+        library = (
+            self._store.get_library_for_tenant(library_id, tenant_id)
+            if tenant_id is not None
+            else self._store.get_library(library_id)
+        )
+        if library is None:
+            return []
         limit = max(1, int(top_k or 5))
 
         semantic, lexical = self._raw_layers(library_id, query, limit)
@@ -391,8 +472,38 @@ class KnowledgeIndex:
         )
         return self._hydrate(blended)
 
+    async def search_document(
+        self,
+        query: str,
+        *,
+        tenant_id: str,
+        library_id: str,
+        document_id: str,
+        top_k: int = 5,
+    ) -> list[KnowledgeHit]:
+        """Hybrid-search only the active version of one explicitly scoped document."""
+        if self._store.get_library_for_tenant(library_id, tenant_id) is None:
+            return []
+        limit = max(1, int(top_k or 5))
+        semantic, lexical = self._raw_layers(
+            library_id, query, limit, document_id=document_id
+        )
+        blended = self._rrf_blend(
+            {"semantic": semantic, "lexical": lexical}, top_n=limit
+        )
+        return [
+            hit
+            for hit in self._hydrate(blended)
+            if hit.document_id == document_id
+        ]
+
     def _raw_layers(
-        self, library_id: str, query: str, limit: int
+        self,
+        library_id: str,
+        query: str,
+        limit: int,
+        *,
+        document_id: str | None = None,
     ) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
         """Collect the raw per-layer (semantic, lexical) results for one library.
 
@@ -407,12 +518,23 @@ class KnowledgeIndex:
                 raw = vs.query(
                     query,
                     limit=limit * 4,
-                    where={"library_id": library_id},
+                    where=(
+                        {
+                            "$and": [
+                                {"library_id": library_id},
+                                {"document_id": document_id},
+                            ]
+                        }
+                        if document_id is not None
+                        else {"library_id": library_id}
+                    ),
                 )
                 semantic = [(doc_id, score) for doc_id, score in raw]
             except Exception as exc:
                 logger.warning("[KnowledgeIndex] semantic query failed: %s", exc)
-        lexical = self._store.fts_search(query, library_id, limit=limit * 4)
+        lexical = self._store.fts_search(
+            query, library_id, limit=limit * 4, document_id=document_id
+        )
         return semantic, lexical
 
     def _hydrate(self, blended: list[tuple[str, float]]) -> list[KnowledgeHit]:
@@ -438,6 +560,13 @@ class KnowledgeIndex:
                     section_header=row["section_header"],
                     chunk_index=int(row["chunk_index"]),
                     has_code=bool(row["has_code"]),
+                    metadata=dict(row.get("metadata") or {}),
+                    document_id=row.get("document_id"),
+                    version_id=row.get("version_id"),
+                    citation_label=str(
+                        (row.get("metadata") or {}).get("citation_label")
+                        or row["section_header"]
+                    ),
                 )
             )
         return hits
@@ -700,7 +829,7 @@ async def get_knowledge_auto_inject_block(user_message: str) -> str:
         elif cited_libs:
             lib_footer = (
                 "📚 This data is from Knowledge libraries: "
-                + ", ".join(f'"{l}"' for l in cited_libs)
+                + ", ".join(f'"{library}"' for library in cited_libs)
                 + "."
             )
         else:
