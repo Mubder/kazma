@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Light 0.x versioning (feat → patch) (2026-08-10)
+
+Stop hard minor jumps on every feature (`0.10 → 0.11 → 0.12`).
+
+- **Policy:** `feat` / `fix` / `perf` / `refactor` → **patch** only
+  (`0.12.0` → `0.12.1` → …). Breaking (`feat!` / `BREAKING CHANGE`) → **minor**.
+- **Commitizen** switched to `cz_customize` with that bump map.
+- **python-semantic-release** `minor_tags = []`, `feat` in `patch_tags`.
+- Docs: `docs/VERSIONING.md` rewritten. No four-part `0.10.1.0011` (use
+  rising patch instead — PEP 440 friendly).
+
 ## Unreleased — Document export: real formatting + Arabic PDF shaping (2026-08-10)
 
 Root cause of “plain PDFs / flipped Arabic letters”:

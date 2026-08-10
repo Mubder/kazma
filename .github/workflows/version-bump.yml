@@ -1,3 +1,5 @@
+# Light 0.x bumps on every push to main (see docs/VERSIONING.md).
+# feat/fix → PATCH (0.12.0 → 0.12.1). Not MINOR (no more 0.10 → 0.11 → 0.12).
 name: Auto Bump Version
 
 on:
@@ -23,8 +25,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run Commitizen Bump
+      - name: Run Commitizen Bump (light patch policy)
         uses: commitizen-tools/commitizen-action@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: main
+          # Config lives in pyproject.toml [tool.commitizen] / [tool.commitizen.customize]
+          # feat → PATCH, breaking → MINOR under major_version_zero

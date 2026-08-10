@@ -205,26 +205,42 @@ exclude_commit_patterns = [
     "Merge branch.*",
 ]
 
+# Light 0.x policy: feat is NOT a minor jump.
+# 0.12.0 → 0.12.1 → 0.12.2 (not 0.13.0 every feature).
+# Minor only via manual Release workflow force_level=minor.
+# Major stays empty until deliberate 1.0.0.
 [tool.semantic_release.commit_parser_options]
 allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "test", "ci", "chore", "build", "style"]
-minor_tags = ["feat"]
-patch_tags = ["fix", "perf", "refactor"]
+minor_tags = []
+patch_tags = ["feat", "fix", "perf", "refactor"]
 major_tags = []
 
 [tool.semantic_release.remote]
 type = "github"
 token = { env = "GH_TOKEN" }
 
+# Commitizen (auto bump on main): same light policy as semantic-release.
+# cz_customize so feat → PATCH (cz_conventional_commits maps feat → MINOR).
 [tool.commitizen]
-name = "cz_conventional_commits"
+name = "cz_customize"
 tag_format = "v$version"
 version_scheme = "semver"
 version_provider = "pep621"
 version_files = [
     "pyproject.toml:version",
-    "kazma.yaml:agent.version"
+    "kazma.yaml:agent.version",
 ]
 update_changelog_on_bump = true
 major_version_zero = true
 bump_message = "chore(release): version $current_version → $new_version [skip ci]"
+
+[tool.commitizen.customize]
+# Conventional-commit prefix → SemVer level under 0.x (light bumps).
+# BREAKING / feat! → MINOR (biggest auto step while major stays 0).
+# feat / fix / perf / refactor → PATCH only.
+message_template = "{{change_type}}{% if scope %}({{scope}}){% endif %}: {{message}}"
+schema_pattern = "(?s)(build|ci|docs|feat|fix|perf|refactor|style|test|chore|revert|break)(\\([\\w\\-\\.]+\\))?(!)?:\\s.+"
+bump_pattern = "^(break|BREAKING CHANGE|feat|fix|perf|refactor)(\\([\\w\\-\\.]+\\))?(!)?"
+bump_map = {"break" = "MINOR", "BREAKING CHANGE" = "MINOR", "feat" = "PATCH", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
+change_type_order = ["BREAKING CHANGE", "feat", "fix", "perf", "refactor", "docs", "chore"]
 
