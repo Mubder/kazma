@@ -260,14 +260,37 @@ async def _stream_langgraph_events(
             # and detects chained HITL interrupts from the checkpoint.
             from langgraph.types import Command as _Command
 
+            # Initialize BEFORE the if/else so the HITL resume path doesn't hit
+            # UnboundLocalError at the post-stream `if stream_error:` checks
+            # (the resume branch previously never bound this name).
+            stream_error: str | None = None
+
             _is_resume = isinstance(input_state, _Command)
 
             if _is_resume:
+                # Guard against double-resume race (e.g. user double-clicks
+                # YOLO / Approve ~2s apart): if a turn is already running on
+                # this thread, reject the second resume so two graphs don't
+                # race on the same checkpoint and corrupt the delivery path.
+                if is_turn_running(thread_id):
+                    logger.warning(
+                        "[SSE] Rejecting duplicate resume — turn already "
+                        "running for thread=%s", thread_id,
+                    )
+                    yield _sse_frame("error", {
+                        "content": "This conversation is already processing. "
+                                   "Please wait for the current turn to finish."
+                    })
+                    return
                 logger.debug(
                     "[SSE] HITL resume path — using ainvoke() for thread=%s",
                     thread_id,
                 )
-                await graph.ainvoke(input_state, config)
+                register_turn(thread_id, asyncio.current_task())
+                try:
+                    await graph.ainvoke(input_state, config)
+                finally:
+                    unregister_turn(thread_id)
             else:
                 # Wrap astream_events with a keepalive generator so long LLM
                 # processing (e.g. DeepSeek 30-40s on 150K-token contexts)
