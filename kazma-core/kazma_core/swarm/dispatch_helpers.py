@@ -70,10 +70,17 @@ def build_handoff_context(
 
     context_text = "\n\n".join(sections)
 
+    # Forward the original dispatch metadata (Phase 5: so a commitment scope-token
+    # and workspace_id survive A→B handoffs). Only the blackboard path can carry
+    # metadata; the plain-str path has none by design.
+    meta = None
+    if isinstance(original_context, SwarmDispatchContext):
+        meta = dict(original_context.metadata or {})
     if blackboard is not None:
         return SwarmDispatchContext(
             context_text,
             blackboard=blackboard,
+            metadata=meta,
         )
     return context_text
 

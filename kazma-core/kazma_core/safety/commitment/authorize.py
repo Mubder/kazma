@@ -131,6 +131,28 @@ def authorize_effect(
             profile=profile, audit=audit,
         )
 
+    # Phase 5 swarm scope-token (§3.11): a worker mutator outside its inherited
+    # scope is denied — the privilege-escalation guard. Only active when a
+    # worker scope is bound (current_scope() is None for the main agent) AND
+    # agent.commitment.swarm_scope_enforce is on (default off — safe rollout).
+    from .scope import current_scope, is_act_within_scope
+    _scope = current_scope()
+    if _scope is not None:
+        try:
+            from .config import get_commitment_config
+            if bool(get_commitment_config().get("swarm_scope_enforce")):
+                _ok, _why = is_act_within_scope(
+                    profile.act, profile.semantic_tier, _scope)
+                if not _ok:
+                    logger.warning("[commitment] DENY %s — worker scope: %s", tool_name, _why)
+                    audit["scope_denied"] = _why
+                    return EffectDecision(
+                        decision="deny", reason=f"worker scope: {_why}",
+                        profile=profile, audit=audit,
+                    )
+        except Exception:
+            logger.debug("[commitment] swarm scope check skipped", exc_info=True)
+
     # Phase 2: act-specific resolution. Remind is the reference impl (§3.7);
     # resolve_remind was measured at 0 false-allow on held-out goldens (G2).
     if (profile.act == "remind"

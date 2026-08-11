@@ -147,9 +147,14 @@ async def dispatch_worker(
     captured_handoff: dict[str, Any] = {}
 
     # Phase 3: extract per-task workspace_id so we can scope the dispatch.
+    # Phase 5: also extract the commitment scope-token (§3.11 swarm privilege cap).
     _ws_id = None
+    _scope_token = None
     if isinstance(context, SwarmDispatchContext):
         _ws_id = context.metadata.get("workspace_id")
+        from kazma_core.safety.commitment.scope import ScopeToken
+
+        _scope_token = ScopeToken.from_metadata(context.metadata.get("commitment_scope"))
 
     try:
         async def _attempt() -> dict[str, Any]:
@@ -159,13 +164,13 @@ async def dispatch_worker(
                 engine._autoscaler.record_activity(worker.name)
 
             async def _do_dispatch():
-                """Run the worker dispatch, honoring any per-task workspace scope."""
-                if _ws_id:
-                    from kazma_core.ide.workspace_scope import workspace_scope
+                """Run the worker dispatch, honoring per-task workspace + commitment scope."""
+                from kazma_core.ide.workspace_scope import workspace_scope
+                from kazma_core.safety.commitment.scope import swarm_scope
 
-                    async with workspace_scope(_ws_id):
-                        return await worker.dispatch(prompt, context=context)
-                return await worker.dispatch(prompt, context=context)
+                # Both managers no-op when their token is None, so always wrap.
+                async with workspace_scope(_ws_id), swarm_scope(_scope_token):
+                    return await worker.dispatch(prompt, context=context)
 
             try:
                 raw_result = await timeout_guard.execute(
