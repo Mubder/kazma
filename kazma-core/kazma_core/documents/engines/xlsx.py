@@ -142,26 +142,52 @@ class XlsxEngine:
 
     @staticmethod
     def _add_chart(sheet: Any, spec: dict[str, Any], *, last_data_row: int) -> None:
-        """Add a bar/line/pie chart over the sheet's data.
+        """Add a chart (bar/line/area/pie/doughnut/scatter) over the sheet's data.
 
         Layout assumption: row 1 = branded title, row 2 = header, rows 3+ = data.
-        Defaults plot column 2 (values, header = series name) against column 1
-        (categories); override with ``category_col`` / ``value_col`` (1-based).
+
+        - ``type``: bar (vertical columns) | line | area | pie | doughnut | scatter.
+        - ``category_col`` (default 1): the labels column.
+        - ``value_col`` (default 2): a single column OR a list of columns for a
+          multi-series chart (each header names its series).
+        - ``title`` / ``x_axis`` / ``y_axis``: optional titles.
         """
-        from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+        from openpyxl.chart import (AreaChart, BarChart, DoughnutChart, LineChart,
+                                    PieChart, Reference, ScatterChart, Series)
+        from openpyxl.chart.marker import Marker
 
         kind = str(spec.get("type", "bar")).lower()
-        cls = {"bar": BarChart, "line": LineChart, "pie": PieChart}.get(kind, BarChart)
+        is_scatter = kind == "scatter"
+        cls = {
+            "bar": BarChart, "line": LineChart, "area": AreaChart,
+            "pie": PieChart, "doughnut": DoughnutChart, "scatter": ScatterChart,
+        }.get(kind, BarChart)
         chart = cls()
-        chart.title = spec.get("title") or ""
+        chart.title = spec.get("title") or None
+        if hasattr(chart, "x_axis"):
+            chart.x_axis.title = spec.get("x_axis") or None
+            chart.y_axis.title = spec.get("y_axis") or None
+            chart.x_axis.majorGridlines = None  # cleaner look
+
         cat_col = int(spec.get("category_col", 1) or 1)
-        val_col = int(spec.get("value_col", 2) or 2)
-        # Values: include header row (2) so titles_from_data names the series.
-        data = Reference(sheet, min_col=val_col, min_row=2, max_row=last_data_row)
-        chart.add_data(data, titles_from_data=True)
-        if last_data_row >= 3 and cat_col <= sheet.max_column:
-            cats = Reference(sheet, min_col=cat_col, min_row=3, max_row=last_data_row)
-            chart.set_categories(cats)
+        raw_vcols = spec.get("value_col", 2)
+        vcols = raw_vcols if isinstance(raw_vcols, list) else [int(raw_vcols or 2)]
+
+        if is_scatter:
+            # Scatter: x = category col, y = each value col (one Series each).
+            x_ref = Reference(sheet, min_col=cat_col, min_row=3, max_row=last_data_row)
+            for vc in vcols:
+                y_ref = Reference(sheet, min_col=int(vc), min_row=3, max_row=last_data_row)
+                series = Series(y_ref, x_ref)
+                series.marker = Marker(symbol="circle", size=5)
+                chart.series.append(series)
+        else:
+            for vc in vcols:
+                data = Reference(sheet, min_col=int(vc), min_row=2, max_row=last_data_row)
+                chart.add_data(data, titles_from_data=True)
+            if kind not in {"pie", "doughnut"} and last_data_row >= 3 and cat_col <= sheet.max_column:
+                cats = Reference(sheet, min_col=cat_col, min_row=3, max_row=last_data_row)
+                chart.set_categories(cats)
         sheet.add_chart(chart, f"A{last_data_row + 2}")
 
     @staticmethod

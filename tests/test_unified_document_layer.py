@@ -413,3 +413,28 @@ def test_xlsx_formulas_and_charts(tmp_path: Path) -> None:
     )
     # Chart added.
     assert len(ws._charts) >= 1, "chart not added to sheet"
+
+
+def test_xlsx_chart_types_and_multiseries(tmp_path: Path) -> None:
+    """Batch 3: bar/line/area/pie/doughnut/scatter chart types render, and a
+    multi-series chart (value_col as a list) plots one series per column."""
+    from openpyxl import load_workbook
+
+    from kazma_core.documents.renderer_worker import _generate_xlsx
+
+    rows = [["Month", "Sales", "Cost"], ["Jan", 100, 60], ["Feb", 200, 120], ["Mar", 150, 90]]
+    for kind, vcol in [("bar", [2, 3]), ("line", [2, 3]), ("area", [2, 3]),
+                       ("pie", [2, 3]), ("doughnut", [2, 3]), ("scatter", 2)]:
+        xlsx = tmp_path / f"{kind}.xlsx"
+        _generate_xlsx(xlsx, {"title": "T", "lang": "en",
+                              "sheets": [{"name": "S", "rows": rows,
+                                          "chart": {"type": kind, "value_col": vcol}}]})
+        ws = load_workbook(xlsx)["S"]
+        assert len(ws._charts) == 1, f"{kind}: chart not added"
+    # Multi-series bar: value_col [2,3] → 2 series.
+    multi = tmp_path / "multi.xlsx"
+    _generate_xlsx(multi, {"title": "T", "lang": "en",
+                           "sheets": [{"name": "S", "rows": rows,
+                                       "chart": {"type": "bar", "value_col": [2, 3]}}]})
+    ws = load_workbook(multi)["S"]
+    assert len(ws._charts[0].series) == 2, "multi-series chart did not plot 2 series"
