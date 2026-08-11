@@ -336,52 +336,56 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
 
 
 def _generate_xlsx(output: Path, payload: dict[str, Any]) -> None:
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
+    """Generate XLSX via the unified document layer.
 
-    workbook = Workbook()
-    workbook.remove(workbook.active)
-    sheets = payload.get("sheets")
-    if not isinstance(sheets, list):
-        sheets = []
-    for index, value in enumerate(sheets, 1):
-        if not isinstance(value, dict):
-            continue
-        name = str(value.get("name", f"Sheet{index}"))[:31]
-        sheet = workbook.create_sheet(name or f"Sheet{index}")
-        rows = value.get("rows")
-        if not isinstance(rows, list):
-            continue
-        for row in rows:
-            if isinstance(row, list):
-                sheet.append([item if item is not None else "" for item in row])
-        for cell in sheet[1] if sheet.max_row else ():
-            cell.font = Font(bold=True)
-    if not workbook.sheetnames:
-        workbook.create_sheet("Sheet")
-    workbook.save(output)
+    Spreadsheets keep their own sheets/rows payload but pull theme + direction
+    (RTL sheet view) from a :class:`DocProfile`, so an Arabic workbook matches
+    the Arabic DOCX/PDF/HTML in design.
+    """
+    from kazma_core.documents.engines.xlsx import XlsxEngine
+    from kazma_core.documents.profile import DocProfile
+
+    sheets = payload.get("sheets") if isinstance(payload.get("sheets"), list) else []
+    sample_parts = [str(payload.get("title", ""))]
+    for s in sheets:
+        if isinstance(s, dict):
+            sample_parts.append(str(s.get("name", "")))
+            for row in (s.get("rows") or [])[:6]:
+                if isinstance(row, list):
+                    sample_parts.append(" ".join(str(c) for c in row))
+    profile = DocProfile.for_content(
+        "\n".join(sample_parts),
+        language=payload.get("lang") or payload.get("language"),
+        rtl=payload.get("rtl"),
+    )
+    XlsxEngine(profile).render(payload, output)
 
 
 def _generate_pptx(output: Path, payload: dict[str, Any]) -> None:
-    from pptx import Presentation
+    """Generate PPTX via the unified document layer.
 
-    presentation = Presentation()
-    slide = presentation.slides.add_slide(presentation.slide_layouts[0])
-    slide.shapes.title.text = str(payload.get("title", "Presentation"))
-    for value in payload.get("slides", []) if isinstance(payload.get("slides"), list) else []:
-        if not isinstance(value, dict):
-            continue
-        slide = presentation.slides.add_slide(presentation.slide_layouts[1])
-        slide.shapes.title.text = str(value.get("heading", ""))
-        frame = slide.placeholders[1].text_frame
-        bullets = value.get("bullets")
-        lines = bullets if isinstance(bullets, list) else str(value.get("body", "")).splitlines()
-        for index, line in enumerate(lines):
-            if index == 0:
-                frame.text = str(line)
-            else:
-                frame.add_paragraph().text = str(line)
-    presentation.save(output)
+    Slides keep their own slides/bullets payload but pull theme + direction
+    (RTL paragraphs) from a :class:`DocProfile`, so an Arabic deck matches the
+    Arabic DOCX/PDF/HTML/XLSX in design.
+    """
+    from kazma_core.documents.engines.pptx import PptxEngine
+    from kazma_core.documents.profile import DocProfile
+
+    slides = payload.get("slides") if isinstance(payload.get("slides"), list) else []
+    sample_parts = [str(payload.get("title", "")), str(payload.get("subtitle", ""))]
+    for s in slides:
+        if isinstance(s, dict):
+            sample_parts.append(str(s.get("heading", "")))
+            sample_parts.append(str(s.get("body", "")))
+            bullets = s.get("bullets")
+            if isinstance(bullets, list):
+                sample_parts.extend(str(b) for b in bullets)
+    profile = DocProfile.for_content(
+        "\n".join(sample_parts),
+        language=payload.get("lang") or payload.get("language"),
+        rtl=payload.get("rtl"),
+    )
+    PptxEngine(profile).render(payload, output)
 
 
 def _weasy_pdf(output: Path, source: str, assets: Path) -> None:

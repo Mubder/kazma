@@ -179,3 +179,64 @@ def test_convert_markdown_html_is_direction_aware() -> None:
     en_html = _markdown_html("# Title\n\nPlain English markdown document body.")
     assert 'dir="rtl"' in ar_html and 'lang="ar"' in ar_html
     assert 'dir="ltr"' in en_html and 'lang="en"' in en_html
+
+
+def test_xlsx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
+    """Stage 4: XLSX consumes the DocProfile — Arabic sheet view is right-to-left
+    and header cells carry the shared theme fill; English is LTR. Both themed."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_xlsx
+
+    rows = [["الميزة", "القيمة"], ["المعالجة", "سريعة"], ["اللغة", "عربية"]]
+    ar = tmp_path / "ar.xlsx"
+    en = tmp_path / "en.xlsx"
+    _generate_xlsx(ar, {"title": "تقرير", "lang": "ar",
+                        "sheets": [{"name": "البيانات", "rows": rows}]})
+    _generate_xlsx(en, {"title": "Report", "lang": "en",
+                        "sheets": [{"name": "Data", "rows": [["Feature", "Value"], ["Speed", "Fast"]]}]})
+
+    def sheet_xml(p: Path) -> str:
+        return zipfile.ZipFile(p).read("xl/worksheets/sheet1.xml").decode()
+
+    def styles_xml(p: Path) -> str:
+        return zipfile.ZipFile(p).read("xl/styles.xml").decode()
+
+    # RTL sheet view for Arabic (rightToLeft="1"), not active for English.
+    # openpyxl serializes rightToLeft="0" when False, so check the value.
+    assert 'rightToLeft="1"' in sheet_xml(ar), "AR xlsx missing active rightToLeft sheet view"
+    assert 'rightToLeft="1"' not in sheet_xml(en), "EN xlsx unexpectedly right-to-left"
+
+    # Shared theme fill present in both (header band colour).
+    assert "1e3a5f" in styles_xml(ar).lower()
+    assert "1e3a5f" in styles_xml(en).lower()
+
+
+def test_pptx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
+    """Stage 4: PPTX consumes the DocProfile — Arabic paragraphs carry rtl=1 and
+    the title slide uses the shared accent/heading colour; English has no rtl."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_pptx
+
+    ar = tmp_path / "ar.pptx"
+    en = tmp_path / "en.pptx"
+    _generate_pptx(ar, {"title": "منظومة كاظمة", "lang": "ar",
+                        "slides": [{"heading": "المقدمة", "bullets": ["نقطة أولى", "نقطة ثانية"]}]})
+    _generate_pptx(en, {"title": "Kazma", "slides": [{"heading": "Intro", "bullets": ["one", "two"]}]})
+
+    def slide_xml(p: Path, n: int) -> str:
+        return zipfile.ZipFile(p).read(f"ppt/slides/slide{n}.xml").decode()
+
+    # Arabic content slide paragraphs are rtl=1 AND right-aligned (algn="r").
+    # rtl alone does not right-align (inherits left from the layout); the
+    # DrawingML alignment attr is "algn" (NOT "al" — that's silently ignored),
+    # so algn="r" is required for Arabic to render right-aligned.
+    ar_slide2 = slide_xml(ar, 2)
+    assert 'rtl="1"' in ar_slide2, "AR pptx missing rtl paragraphs"
+    assert 'algn="r"' in ar_slide2, "AR pptx missing right alignment (algn=r) on content"
+    assert 'rtl="1"' not in slide_xml(en, 2), "EN pptx unexpectedly rtl"
+
+    # Shared accent/heading colour on the title slide for both.
+    assert ("1e3a5f" in slide_xml(ar, 1).lower() or "0f172a" in slide_xml(ar, 1).lower())
+    assert ("1e3a5f" in slide_xml(en, 1).lower() or "0f172a" in slide_xml(en, 1).lower())
