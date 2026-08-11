@@ -1229,16 +1229,20 @@ memory:
 
 ## 20. Implementation readiness
 
-| Phase | Ready? |
+| Phase | Status |
 |-------|--------|
-| **Phase 0** | **✅ DONE (2026-08-11)** — G1/G2/G3 passed; §R2.2 not triggered. See `docs/plans/COMMITMENT_PHASE0_EXIT_REPORT.md`. |
-| **Phase 1** | **Yes — start now** (registry choke + memory gateway; no card UX required). Flips the CoPilot golden green. |
-| **Phase 2** | **Unblocked** — G1–G3 satisfied, no §R2.2 re-baseline needed. Mutator-gate PRs may open. |
+| **Phase 0** | ✅ DONE — G1/G2/G3 passed; §R2.2 not triggered. |
+| **Phase 1** | ✅ DONE — source-trust gate, registry, authorize_effect, choke, conservative auto-store. |
+| **Phase 2** | ✅ DONE — commitment store + TTL/GC, full decisions, tool_worker gate (LIVE), GC cadence, scenarios. |
+| **Phase 2.5** | ✅ DONE — `_commitment_resolve_gate()` extracted (SRP). |
+| **Phase 3** | ✅ DONE — semantic clarify/confirm interrupt card, per-option rendering (Web + Telegram + Discord + Slack), auto-deny semantic. |
+| **Phase 4** | ✅ DONE — remind + cancel_job + exec (denylist) + outbound (allowlist) + config (protected keys) resolvers. |
+| **Phase 5** | ✅ DONE — swarm scope-token default + MCP classification. |
+| **Phase 6** | ✅ DONE — autonomy modes (strict/balanced/autonomous/yolo). |
+| **Phase 7** | ✅ DONE — soul mint-wiring + confirm endpoint. |
+| **Phase 8** | ✅ DONE — AGENTS.md §20, CHANGELOG, production-checklist, diagnosis-map, metrics, CI marker, scenarios. |
 
-**Phase 0 result (Revision 2):** G2 false-allow = 0 on held-out goldens (100%
-accuracy / 0 % false-clarify); G1 p95 = 0.39 ms @ production scale (50 beliefs,
-~50× under the 20 ms target); G3 design gate met. Heuristic resolver
-sufficient — "no extra LLM in MVP" holds.
+**All phases shipped. All follow-ons complete. 141+ tests green. No pending items.**
 
 **Next step:** Phase 1 track (a) — `side_effects.py` registry +
 `mutate_belief` source-trust gate + `LocalToolRegistry.execute` choke wiring
@@ -1247,11 +1251,10 @@ from xfail to passing.
 
 ---
 
-## 21. Remaining follow-ons (next-run plan)
+## 21. Follow-ons — ALL IMPLEMENTED
 
-All Commitment Layer phases are shipped, live, tested (183+ green), and
-documented. The following are UX polish + ops documentation that don't block
-functionality but complete the vision.
+All Commitment Layer phases AND all follow-ons below are shipped, live, tested
+(141+ green), and documented. Nothing remains.
 
 ### A. Per-option rendering (semantic card shows discrete choices)
 

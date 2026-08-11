@@ -22,8 +22,20 @@ schedule and memory layers.
 - **Phase 6:** autonomy modes (strict/balanced/autonomous/yolo).
 - Fail-open + kill-switched (`KAZMA_COMMITMENT_ENABLED=0`). Documented as
   AGENTS.md §20 (critical subsystem).
-- Pending: Phase 3 (combined-card UX), 4 (other-act resolvers), 5-swarm
-  (scope-token), 7 (soul under commitment).
+- **Phase 2.5:** resolve gate extracted (`_commitment_resolve_gate`, SRP).
+- **Phase 3:** semantic clarify/confirm interrupt card with per-option buttons
+  on Web (chat + sidebar) + Telegram + Discord + Slack. Auto-deny paths handle
+  semantic cleanly. Resume-value helper (`build_resume_value`).
+- **Phase 4 expand:** exec denylist (rm -rf, fork bombs, curl|sh…) + outbound
+  target allowlist + config protected-key denylist (safety.*/agent.commitment.*).
+- **Phase 5 swarm:** default worker scope at the dispatch funnel (HIGH ceiling,
+  deny soul/identity/config) — activates when `swarm_scope_enforce` is on.
+- **Phase 7:** soul mint-wiring at both apply callers + `POST /api/commitment/
+  soul/{cid}/confirm` endpoint (confirm → re-apply). Held deltas need
+  confirmation before they land.
+- **Phase 8:** Prometheus metrics (`kazma_commitment_decisions_total`), production
+  checklist row, diagnosis-map entry, CI marker, 7 scenario tests.
+- 141+ tests green. All follow-ons complete — no pending items.
 
 ## Unreleased — Fixed base 0.9.4 + live git SHA (2026-08-10)
 

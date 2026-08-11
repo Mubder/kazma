@@ -659,13 +659,17 @@ fail-open throughout.
 **B. The decision mapping (§3.4). `authorize_effect` returns one of:**
 - `allow` (+ optional `rewritten_args`): for the remind act, the gate anchors
   the relative phrase to a memory event and **rewrites the tool args to the
-  memory-correct fire_at** — whatever the model put in `timing`, the resolved
-  ISO date wins. This is the schedule-path fix.
-- `clarify` / `deny`: held with a clear error the model turns into a user
-  question (Phase 3 will swap the error for a real card on the HITL bus).
-- Audit-only: read tools, and acts without a resolver yet (memory corruption
-  is gated at `mutate_belief`; `cancel_job`/`exec`/`fs`/`outbound` resolvers
-  are Phase 4).
+  memory-correct fire_at**. For exec, the denylist blocks catastrophes before
+  the HITL card. For config, protected keys are denied. For outbound, the
+  target allowlist is checked.
+- `clarify` / `confirm`: a real interrupt card fires on the unified HITL bus
+  (kind=semantic_clarify/confirm) with discrete options. Per-option buttons
+  render on Web (chat.js + sidebar), Telegram, Discord, and Slack. Resume
+  applies the chosen `slots_patch`. The existing Approve/Deny buttons map to
+  best-option / cancel via `build_resume_value`.
+- `deny`: blocked with a clear error; no card.
+- Audit-only: read tools, `mutate_fs` (containment in `IdeService.resolve`),
+  `delegate` (HMAC trust at skill-load).
 
 **C. Invariants — removing any reintroduces the incident class:**
 - **Source-trust gate** (`_mutate_functional`): a `user_explicit` functional
@@ -673,45 +677,64 @@ fail-open throughout.
   source. Kill-switch: `cfg.v2.functional_supersede_requires_user_assert`.
 - **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
   let the original (possibly wrong) `timing` reach the scheduler for remind.
-- **Fail-open + kill-switch**: any layer error leaves `pending` unchanged — the
-  gate is defense, not a hard dependency. `KAZMA_COMMITMENT_ENABLED=0` (or
-  ConfigStore `agent.commitment.enabled=false`) disables the whole layer live.
-- **Conservative auto-store** (`belief_extractor._apply_beliefs_to_v2`): low-
-  confidence inferred beliefs are dropped post-turn (keeps the graph clean);
-  `user_explicit` stores are never throttled. Mode: `memory.auto_store_beliefs`
-  (off|conservative|aggressive, default conservative) / `KAZMA_AUTO_STORE_BELIEFS`.
-- **No late approve**: `store.update_status` refuses to revive an expired
-  commitment to committed/ready (§3.9 rule 2).
-- **GC cadence**: `worker_bootstrap._start_commitment_gc_scheduler` runs
-  `run_gc_cycle` every 15 min (sweep_expired + pending-cap + tiered retention).
-  If a new scheduler is added, register it in `start_memory_worker` (§15B).
+- **Exec denylist**: catastrophic commands (`rm -rf /`, fork bombs, `curl|sh`,
+  `dd of=/dev/`, `mkfs`, shutdown, `chmod 777 /`) are denied BEFORE the HITL
+  card. Safe commands pass through (HITL still applies).
+- **Config protected keys**: `safety.*`, `agent.commitment.*`,
+  `notifications.lifecycle.*` cannot be mutated by the agent (self-protection).
+- **Outbound allowlist**: when `agent.commitment.outbound_allowed_targets` is
+  configured, unknown targets → clarify with the allowlist.
+- **Swarm scope default** (`worker_dispatch._do_dispatch`): when
+  `swarm_scope_enforce` is on, dispatched workers are capped at semantic_tier
+  HIGH (deny exec/outbound/config/identity CRITICAL) + denied_acts=
+  {soul_delta, identity, config_change}. Default OFF — opt-in.
+- **Soul confirm gate** (`apply_agent_mutation`/`_auto_apply`): when
+  `soul_requires_confirm` is on, soul deltas are held until confirmed via
+  `POST /api/commitment/soul/{cid}/confirm`. Mint-wired at both apply callers.
+  Default OFF.
+- **Fail-open + kill-switch**: `KAZMA_COMMITMENT_ENABLED=0` disables the whole
+  layer. Every enforcement layer has its own default-OFF flag.
+- **Conservative auto-store**, **No late approve**, **GC cadence** — as before.
 
 **D. Components (`kazma_core/safety/commitment/`).**
-- `side_effects.py` — the single SoT registry: tool → `ToolEffectProfile`
-  (effect + security_tier + semantic_tier + act). Parity-tested against
-  `CANONICAL_DANGER_TOOLS`/`TOOL_TIERS`. Unregistered mutators fail-closed
-  (tokenized: `widget` ≠ `get`). MCP tools (`mcp__*`) route through
-  `classify_mcp_tool_effect`. New mutator tools MUST get a profile here or they
-  classify fail-closed.
-- `authorize.py` — `authorize_effect` (the policy gate) + `EffectDecision`.
-- `relative_time.py` — `resolve_remind` (EN+AR relative-time parse, anchor to
-  event vs `request_at`, ambiguity surfacing). G2-measured (0 false-allow).
-- `store.py` — `Commitment` + ops-SQLite tables + TTL/GC (§3.9). On
-  `memory_ops.db` (NOT a new file). `run_gc_cycle` is the scheduler entry.
-- `constraints.py` — `is_commitment_enabled` (kill-switch) +
-  `load_constraint_beliefs` (the §3.6 machine-readable constraint appendix).
-- `config.py` — `get_commitment_config` (live reader: env → ConfigStore →
-  defaults; the ONE config source for the layer).
+- `side_effects.py` — the single SoT registry: tool → `ToolEffectProfile`.
+  Parity-tested. Unregistered mutators fail-closed (tokenized). MCP tools
+  (`mcp__*`) route through `classify_mcp_tool_effect`.
+- `authorize.py` — `authorize_effect` (the policy gate) + `EffectDecision` +
+  the act resolvers: `_resolve_remind_act`, `_resolve_cancel_job_act`,
+  `_resolve_exec_act` (denylist+cwd), `_resolve_send_outbound_act` (allowlist),
+  `_resolve_config_change_act` (protected keys).
+- `relative_time.py` — `resolve_remind` (EN+AR). G2-measured (0 false-allow).
+- `store.py` — `Commitment` + ops-SQLite tables + TTL/GC + tiered retention +
+  `list_pending_soul()` (the confirm queue).
+- `constraints.py` — `is_commitment_enabled` + `load_constraint_beliefs` +
+  `cron_pending_jobs` (for the cancel_job resolver).
+- `config.py` — `get_commitment_config` (the ONE config reader).
+- `scope.py` — `ScopeToken` + `swarm_scope` (ContextVar) +
+  `default_worker_scope()` + `is_act_within_scope()` (the privilege guard).
+- `resume.py` — `build_resume_value()` + `is_semantic_kind()` (maps
+  Approve/Deny → option/cancel for semantic interrupts on every platform).
+- `_commitment_resolve_gate()` in `graph_builder.py` — the extracted gate
+  (Phase 2.5 SRP). Called from `tool_worker_node`.
+- **Operator API**: `kazma_ui/commitment_api.py` —
+  `GET /api/commitment/soul/pending`, `POST .../{cid}/confirm`, `POST .../{cid}/reject`.
+- **Metrics**: `kazma_ui/metrics.py` exposes
+  `kazma_commitment_decisions_total{decision=...}` + `kazma_commitment_pending`.
 
-**E. Modes** (`agent.commitment.mode`, env `KAZMA_COMMITMENT_MODE`):
-`strict` (wider clarify window) | `balanced` (default) | `autonomous`
-(allow-with-candidate on ambiguity) | `yolo` (semantic bypass, audit-only).
-Modes modulate the ambiguous band only — a clean memory-anchored resolution is
-allow+rewrite in every mode.
+**E. Modes + kill-switches.**
+- Modes (`agent.commitment.mode` / `KAZMA_COMMITMENT_MODE`): strict |
+  balanced (default) | autonomous | yolo.
+- Kill-switches (all default OFF / layer default ON):
+  `KAZMA_COMMITMENT_ENABLED` (layer, default on),
+  `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` (default off),
+  `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` (default off),
+  `KAZMA_AUTO_STORE_BELIEFS` (default conservative).
 
-**Tests:** `tests/test_commitment_*.py` (corpus/G1/G2, store+GC, authorize,
-tool_worker gate, scenarios, modes, config, side_effects) + the CoPilot golden.
-Run: `python -m pytest tests/test_commitment_*.py tests/test_side_effects.py`.
+**Tests:** 15+ test files (`tests/test_commitment_*.py` +
+`tests/test_side_effects.py`) — corpus/G1/G2, store+GC, authorize, clarify-card
+interrupt+resume, tool_worker gate, scenarios (7), act resolvers, modes, scope,
+soul, cancel_job, config. Run:
+`python -m pytest tests/test_commitment_*.py tests/test_side_effects.py -m "not slow"`.
 
 ## UI Conventions (Web)
 
