@@ -1244,3 +1244,71 @@ sufficient — "no extra LLM in MVP" holds.
 `mutate_belief` source-trust gate + `LocalToolRegistry.execute` choke wiring
 (audit-only). This is also what flips `test_commitment_copilot_incident.py`
 from xfail to passing.
+
+---
+
+## 21. Remaining follow-ons (next-run plan)
+
+All Commitment Layer phases are shipped, live, tested (183+ green), and
+documented. The following are UX polish + ops documentation that don't block
+functionality but complete the vision.
+
+### A. Per-option rendering (semantic card shows discrete choices)
+
+Today the generic Approve/Deny buttons work on every platform (Approve = best
+option, Deny = cancel via `build_resume_value`). The per-option buttons
+("Use memory date" / "Use from-now" / "Cancel") need rendering:
+
+**Web UI:**
+- `kazma-ui/kazma_ui/static/js/chat.js` ~L2246 (`renderHitlCard`): add a branch
+  at the top — when `data.kind` starts with `"semantic_"`, render one button per
+  `data.items[0].options`; each calls a new `submitClarifyChoice(optionId)` that
+  POSTs `{action:"approve", choices:{[tool_call_id]: optionId}}`. Keep existing
+  Approve/Deny for `kind=security`.
+- `kazma-ui/kazma_ui/static/js/hitl_approval.js` ~L66 (`renderApprovals`): same
+  branch when `item.kind` is semantic.
+- `kazma-ui/kazma_ui/static/js/stores/agentStore.js` ~L388 (`submitApproval`):
+  add a `choices` param to the WS payload.
+- `kazma-ui/kazma_ui/routes_direct.py` ~L3069: read `body.get("choices")` when
+  kind is semantic and pass the specific option_id to `build_resume_value`
+  (extend it to accept an explicit `option_id` override).
+
+**Gateway (Telegram/Discord/Slack):**
+- `kazma-gateway/kazma_gateway/adapters/telegram_keyboards.py`: add
+  `build_semantic_keyboard(request_id, options)` — one button per option.
+- `kazma-gateway/kazma_gateway/adapters/platform_keyboards.py`: same for
+  Discord components + Slack blocks.
+- `kazma-gateway/kazma_gateway/adapters/platform_callbacks.py`: parse
+  `hitl:opt:{option_id}:{request_id}` → synthetic `/hitl opt {thread} {opt}`.
+- `kazma-gateway/kazma_gateway/agent_handler/hitl.py`:
+  `_handle_hitl_resume` parse `/hitl opt <thread> <option_id>`;
+  `_build_approval_prompt` branch on `payload["kind"]` to render the question +
+  option keyboard.
+
+### B. Auto-deny paths handle semantic kind cleanly
+
+Today `hitl_timeout.py` and `hitl_supersede.py` send the security
+`{approved: false}` shape for semantic interrupts. The tc is still blocked
+(safe) but with an "unresolved" error instead of a clean "cancelled." Fix:
+
+- `kazma-ui/kazma_ui/hitl_timeout.py` ~L52: before building `resume_value`,
+  read the pending interrupt's kind (from `aget_state → tasks → interrupts`).
+  If semantic → `build_resume_value(payload, approved=False)` which returns
+  `{tcid: "cancel"}`.
+- `kazma-core/kazma_core/agent/hitl_supersede.py` ~L77, L85: same — for each
+  pending interrupt, check kind and use `build_resume_value` instead of the
+  hardcoded `{"approved": False}`.
+
+### C. Doc + ops finish
+
+- `docs/docs/ops/production-checklist.md`: add a "Commitment Layer" row —
+  kill-switch (`KAZMA_COMMITMENT_ENABLED`), GC cadence (15min),
+  `swarm_scope_enforce` / `soul_requires_confirm` flags default OFF,
+  `/metrics` endpoint.
+- `docs/docs/ops/diagnosis-map.md`: add "Wrong reminder date / memory
+  overwrite" → commitment gate + source-trust gate + conservative auto-store.
+- `tests/test_commitment_scenarios.py`: add the remaining §8.3 scenarios
+  (coupled-batch hold, ordered multi-act parent/child, post-turn-extract
+  no-supersede, GC retention edge cases, swarm-scope deny with default token).
+- CI: add a pytest marker `commitment` so the corpus + gate tests run as a
+  named group; note in AGENTS.md §20.
