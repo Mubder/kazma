@@ -300,6 +300,46 @@ def test_docx_toc_field_and_page_numbers(tmp_path: Path) -> None:
     assert "PAGE" in fxml and 'fldCharType="begin"' in fxml, "footer missing PAGE field"
 
 
+def test_docx_update_fields_and_core_properties(tmp_path: Path) -> None:
+    """Tier A: DOCX sets updateFields (TOC/page# auto-populate on open) and
+    writes title/author/subject into the file's core properties."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    docx = tmp_path / "t.docx"
+    _generate_docx(docx, {
+        "title": "Quarterly Report", "author": "Alice", "subject": "Finance",
+        "keywords": "q3, 2026", "lang": "en", "toc": True,
+        "sections": [{"heading": "Overview", "body": "body"}],
+    })
+    z = zipfile.ZipFile(docx)
+    settings = z.read("word/settings.xml").decode()
+    assert "updateFields" in settings, "DOCX missing updateFields (fields won't auto-update on open)"
+    core = z.read("docProps/core.xml").decode()
+    assert "Quarterly Report" in core and "Alice" in core and "Finance" in core, (
+        "DOCX core properties not populated"
+    )
+
+
+def test_office_core_properties_xlsx_pptx(tmp_path: Path) -> None:
+    """Tier A: XLSX and PPTX populate title/author/subject core properties."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_pptx, _generate_xlsx
+
+    xlsx = tmp_path / "t.xlsx"
+    pptx = tmp_path / "t.pptx"
+    _generate_xlsx(xlsx, {"title": "Sales Data", "author": "Bob", "subject": "Q3",
+                          "lang": "en", "sheets": [{"name": "S", "rows": [["a", "b"]]}]})
+    _generate_pptx(pptx, {"title": "Deck", "author": "Carol", "subject": "Subj",
+                          "slides": [{"heading": "S", "bullets": ["x"]}]})
+    x_core = zipfile.ZipFile(xlsx).read("docProps/core.xml").decode()
+    p_core = zipfile.ZipFile(pptx).read("docProps/core.xml").decode()
+    assert "Sales Data" in x_core and "Bob" in x_core and "Q3" in x_core
+    assert "Deck" in p_core and "Carol" in p_core and "Subj" in p_core
+
+
 def test_xlsx_formulas_and_charts(tmp_path: Path) -> None:
     """XLSX: cells starting with '=' are written as formulas; a ``chart`` spec
     adds a bar/line/pie chart over the sheet's data."""

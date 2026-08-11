@@ -162,6 +162,10 @@ def _build_model_and_profile(
     model.footer = str(payload.get("footer") or profile.chrome["brand"])
     model.page_numbers = bool(payload.get("page_numbers", True))
     model.images_present = bool(payload.get("images"))
+    # Document metadata → file core properties.
+    model.author = str(payload.get("author") or "Kazma")
+    model.subject = str(payload.get("subject") or "")
+    model.keywords = str(payload.get("keywords") or "")
 
     # Title (+ optional subtitle).
     model.add(TitleBlock(text=str(payload.get("title", "Document")),

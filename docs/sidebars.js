@@ -23,6 +23,7 @@ const sidebars = {
         'guide/email-integration',
         'guide/document-intelligence',
         'guide/document-phases',
+        'guide/document-rendering',
         'guide/api-and-extension-points',
         'guide/swarm-orchestration',
         'guide/memory-and-rag',

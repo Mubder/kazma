@@ -64,6 +64,17 @@ class XlsxEngine:
         workbook = Workbook()
         workbook.remove(workbook.active)
 
+        # File core properties (title/author/subject).
+        try:
+            workbook.properties.title = str(payload.get("title") or "Workbook")
+            workbook.properties.creator = str(payload.get("author") or "Kazma")
+            if payload.get("subject"):
+                workbook.properties.subject = str(payload.get("subject"))
+            if payload.get("keywords"):
+                workbook.properties.keywords = str(payload.get("keywords"))
+        except Exception:
+            logger.debug("[xlsx] core properties failed", exc_info=True)
+
         sheets = payload.get("sheets") if isinstance(payload.get("sheets"), list) else []
         for index, value in enumerate(sheets, 1):
             if not isinstance(value, dict):

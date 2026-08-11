@@ -67,6 +67,18 @@ class PptxEngine:
         slide_h = presentation.slide_height
         blank = presentation.slide_layouts[6]
 
+        # File core properties (title/author/subject).
+        try:
+            cp = presentation.core_properties
+            cp.title = str(payload.get("title") or "Presentation")
+            cp.author = str(payload.get("author") or "Kazma")
+            if payload.get("subject"):
+                cp.subject = str(payload.get("subject"))
+            if payload.get("keywords"):
+                cp.keywords = str(payload.get("keywords"))
+        except Exception:
+            logger.debug("[pptx] core properties failed", exc_info=True)
+
         # ── Title slide ─────────────────────────────────────────────────── #
         title_slide = presentation.slides.add_slide(blank)
         band = title_slide.shapes.add_shape(

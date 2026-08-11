@@ -67,6 +67,20 @@ class DocxEngine:
         document = Document()
         self._apply_foundation(document)
 
+        # updateFields: tell Word/LibreOffice to update fields (TOC, PAGE) on
+        # open, so the TOC populates with entries + page numbers and the footer
+        # shows the real page number without a manual "update field" step.
+        try:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            settings = document.settings.element
+            if settings.find(qn("w:updateFields")) is None:
+                uf = OxmlElement("w:updateFields")
+                uf.set(qn("w:val"), "true")
+                settings.append(uf)
+        except Exception:
+            logger.debug("[docx] updateFields setting failed", exc_info=True)
+
         # Page setup (matches the PDF margins, not Word's 1.25" default).
         # Page size comes from the shared theme so DOCX and PDF share one
         # geometry (default.docx ships US Letter; we normalise to the theme's
@@ -95,6 +109,9 @@ class DocxEngine:
         # Header / footer chrome.
         self._write_header_footer(document, model)
 
+        # File core properties (title/author/subject/keywords) from the model.
+        self._set_core_properties(document, model)
+
         # Body blocks.
         for block in model.blocks:
             try:
@@ -103,6 +120,24 @@ class DocxEngine:
                 logger.debug("[docx] block render failed: %r", block, exc_info=True)
 
         document.save(str(output))
+
+    def _set_core_properties(self, document: Any, model: ContentModel) -> None:
+        """Populate the file's core properties (shown in Explorer/Finder/search)."""
+        try:
+            title = ""
+            for b in model.blocks:
+                if isinstance(b, TitleBlock) and b.level == 0:
+                    title = b.text
+                    break
+            cp = document.core_properties
+            cp.title = title or "Document"
+            cp.author = model.author or "Kazma"
+            if model.subject:
+                cp.subject = model.subject
+            if model.keywords:
+                cp.keywords = model.keywords
+        except Exception:
+            logger.debug("[docx] core properties failed", exc_info=True)
 
     # ================================================================== #
     # foundation — applied ONCE, up front

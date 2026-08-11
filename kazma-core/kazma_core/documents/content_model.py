@@ -105,6 +105,11 @@ class ContentModel:
     # True when the source payload requested images that generation must omit
     # (engines warn rather than render unapproved filesystem resources).
     images_present: bool = False
+    # Document metadata → file core properties (title/author/subject/keywords),
+    # shown in Explorer/Finder/search. Title comes from the first TitleBlock.
+    author: str = ""
+    subject: str = ""
+    keywords: str = ""
 
     def add(self, block: Block) -> "ContentModel":
         self.blocks.append(block)
