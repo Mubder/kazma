@@ -531,6 +531,85 @@ def _editable_spec(extras: list[str]) -> str:
     return "."
 
 
+def _site_packages_dir() -> Path | None:
+    """site-packages for the active interpreter (venv-aware)."""
+    try:
+        import site
+
+        paths = list(site.getsitepackages())
+        if hasattr(site, "getusersitepackages"):
+            paths.append(site.getusersitepackages())
+        for raw in paths:
+            path = Path(raw)
+            if path.is_dir():
+                return path
+    except Exception:
+        pass
+    # Fallback: typical venv layout next to the executable
+    candidate = Path(sys.prefix) / "Lib" / "site-packages"
+    return candidate if candidate.is_dir() else None
+
+
+def _cleanup_broken_distributions() -> None:
+    """Remove pip/uv partial-uninstall leftovers (``~azma*`` dist-info).
+
+    A failed mid-install can leave ``~azma-*.dist-info`` and no importable
+    ``kazma_cli``, which surfaces as ``ModuleNotFoundError`` on ``kazma serve``.
+    """
+    site_packages = _site_packages_dir()
+    if site_packages is None:
+        return
+    removed = 0
+    for entry in site_packages.iterdir():
+        name = entry.name
+        # pip renames in-progress uninstalls with a leading ~
+        if entry.is_dir() and name.startswith("~") and "azma" in name.lower():
+            try:
+                import shutil
+
+                shutil.rmtree(entry, ignore_errors=True)
+                removed += 1
+                logger.info("Removed broken distribution leftover: %s", entry)
+            except Exception:
+                logger.debug("Could not remove %s", entry, exc_info=True)
+    if removed:
+        console.print(
+            f"[yellow]Cleaned {removed} broken package leftover(s) "
+            f"in site-packages (~azma*).[/yellow]"
+        )
+
+
+def _verify_cli_importable() -> bool:
+    """True when ``kazma_cli`` (and core) import in a clean subprocess."""
+    probe = (
+        "import importlib.util, sys\n"
+        "missing = [m for m in ('kazma_cli', 'kazma_core') "
+        "if importlib.util.find_spec(m) is None]\n"
+        "sys.exit(1 if missing else 0)\n"
+    )
+    try:
+        result = _run_cmd(
+            [sys.executable, "-c", probe],
+            cwd=str(Path.cwd()),
+            timeout=30.0,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _print_reinstall_recovery(spec: str) -> None:
+    console.print(
+        "[red]Package reinstall did not leave a working CLI "
+        "(kazma_cli missing).[/red]\n"
+        "Git code may already be updated; repair the venv with:\n"
+        f"  [cyan]uv pip install --python .venv\\Scripts\\python.exe -e \"{spec}\"[/cyan]\n"
+        "  or: [cyan]python -m pip install -e \"" + spec + "\"[/cyan]\n"
+        "  Avoid bare [red]uv sync[/red] — it can remove the editable install.\n"
+        "Then verify: [cyan]python -c \"import kazma_cli; print('ok')\"[/cyan]"
+    )
+
+
 def _reinstall_local(cwd: str) -> bool:
     """Reinstall editable package without wiping optional extras.
 
@@ -539,9 +618,11 @@ def _reinstall_local(cwd: str) -> bool:
     That made ``kazma update`` destroy VectorMemory. We now:
 
     1. Detect + persist active extras
-    2. Prefer **additive** ``uv pip install -e ".[extras]"``
-    3. Fall back to ``uv sync --inexact --extra …`` (never bare ``uv sync``)
-    4. Fall back to ``python -m pip install -e ".[extras]"``
+    2. Clean broken ``~azma*`` dist leftovers
+    3. Prefer **additive** ``uv pip install -e ".[extras]"``
+    4. Fall back to ``uv sync --inexact --extra …`` (never bare ``uv sync``)
+    5. Fall back to ``python -m pip install -e ".[extras]"``
+    6. **Verify** ``kazma_cli`` imports — never report success if the CLI is broken
     """
     extras = detect_active_extras(cwd)
     # Repair path: packages were wiped but memory status/data still exists
@@ -570,6 +651,8 @@ def _reinstall_local(cwd: str) -> bool:
         else _INSTALL_TIMEOUT
     )
 
+    _cleanup_broken_distributions()
+
     # 1) Additive uv pip install (does NOT prune other packages)
     uv_pip_cmd = [
         "uv", "pip", "install", "--python", sys.executable, "-e", spec,
@@ -593,11 +676,19 @@ def _reinstall_local(cwd: str) -> bool:
             result = _run_cmd(cmd, cwd=cwd, timeout=timeout)
             if result.returncode == 0:
                 console.print(f"[green]{label} completed.[/green]")
-                if extras:
-                    persist_extras(extras)
-                return True
-            err = (result.stderr or result.stdout or "").strip()
-            console.print(f"[yellow]{label} failed:[/yellow] {err[:400]}")
+                if _verify_cli_importable():
+                    if extras:
+                        persist_extras(extras)
+                    console.print("[green]CLI import check passed (kazma_cli).[/green]")
+                    return True
+                console.print(
+                    f"[yellow]{label} exited 0 but kazma_cli is not importable "
+                    "— trying next method…[/yellow]"
+                )
+                _cleanup_broken_distributions()
+            else:
+                err = (result.stderr or result.stdout or "").strip()
+                console.print(f"[yellow]{label} failed:[/yellow] {err[:400]}")
         except FileNotFoundError:
             console.print(f"[dim]{cmd[0]} not on PATH — trying next method.[/dim]")
         except subprocess.TimeoutExpired:
@@ -613,25 +704,20 @@ def _reinstall_local(cwd: str) -> bool:
             cwd=cwd,
             timeout=timeout,
         )
-        if result.returncode == 0:
+        if result.returncode == 0 and _verify_cli_importable():
             console.print("[green]pip install -e completed.[/green]")
             if extras:
                 persist_extras(extras)
             return True
         err = (result.stderr or result.stdout or "").strip()
-        console.print(f"[yellow]pip install -e failed:[/yellow] {err[:400]}")
+        console.print(f"[yellow]pip install -e failed or CLI still broken:[/yellow] {err[:400]}")
     except Exception as exc:
         console.print(f"[yellow]pip reinstall skipped:[/yellow] {exc}")
 
-    console.print(
-        "[yellow]Code was pulled successfully, but package reinstall did not run.[/yellow]\n"
-        "  Restart the server: [cyan]kazma serve[/cyan]\n"
-        "  To restore memory/RAG deps: [cyan]uv pip install -e \".[rag]\"[/cyan]\n"
-        "  To restore everything optional: [cyan]uv pip install -e \".[all]\"[/cyan]\n"
-        "  Avoid bare [red]uv sync[/red] — it removes extras."
-    )
-    # git pull already succeeded — do not fail the whole update
-    return True
+    _print_reinstall_recovery(spec)
+    # Code may be on origin/main, but the venv is broken — fail the update
+    # so operators do not run ``kazma serve`` into ModuleNotFoundError.
+    return False
 
 
 def _reinstall_via_subprocess(cwd: str) -> bool:
