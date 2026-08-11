@@ -33,6 +33,8 @@ __all__ = [
     "docx_add_table",
     "docx_apply_document_rtl",
     "docx_set_run_rtl",
+    "docx_set_table_rtl",
+    "docx_set_numbering_rtl",
 ]
 
 _AR_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
@@ -846,6 +848,40 @@ def docx_set_table_rtl(table: Any) -> None:
     tbl_pr.append(bidi_vis)
 
 
+def docx_set_numbering_rtl(document: Any) -> None:
+    """Set RTL justification for all list numbering levels so list numbers
+    appear on the right side in Arabic documents (regression: list numbers
+    stayed left-aligned LTR even when document is RTL)."""
+    from docx.oxml.ns import qn
+
+    try:
+        numbering_part = document.part.numbering_part
+    except Exception:
+        return
+    if numbering_part is None:
+        return
+    numbering_elm = numbering_part._element
+    ns = qn
+
+    # Find all w:lvl elements (level definitions for numbering)
+    for lvl in numbering_elm.iterdescendants(tag=ns("w:lvl")):
+        # Change level justification from left to right
+        lvl_jc = lvl.find(ns("w:lvlJc"))
+        if lvl_jc is not None and lvl_jc.get(ns("w:val")) == "left":
+            lvl_jc.set(ns("w:val"), "right")
+        # Also change indentation from left to right
+        p_pr = lvl.find(ns("w:pPr"))
+        if p_pr is not None:
+            ind = p_pr.find(ns("w:ind"))
+            if ind is not None:
+                left_val = ind.get(ns("w:left"))
+                if left_val is not None:
+                    # Move left indent to right
+                    ind.set(ns("w:right"), left_val)
+                    # Remove left attribute
+                    del ind.attrib[ns("w:left")]
+
+
 def docx_apply_document_rtl(document: Any) -> None:
     """Document-level RTL so Word opens as an RTL document (not LTR shell).
 
@@ -885,6 +921,12 @@ def docx_apply_document_rtl(document: Any) -> None:
             docx_set_table_rtl(table)
         except Exception:
             logger.debug("[rich_render] table rtl failed", exc_info=True)
+
+    # 3b) All list numbering RTL so numbers appear on the right
+    try:
+        docx_set_numbering_rtl(document)
+    except Exception:
+        logger.debug("[rich_render] numbering rtl failed", exc_info=True)
 
     # 4) Every paragraph + every run (spacers, headers, footers, cells)
     def _walk_paragraphs() -> Any:

@@ -541,3 +541,41 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     assert int(THEME["h3_size"] * 2) in sz       # h3    -> 25
     # Body paragraph size on the Normal style (styles.xml) synced too
     assert ('w:val="%d"' % int(THEME["body_size"] * 2)) in styles, "EN DOCX body size not synced"
+
+
+def test_docx_numbering_rtl(tmp_path: Path) -> None:
+    """DOCX list numbering must be RTL for Arabic documents (regression: list
+    numbers stayed left-aligned LTR even when document is RTL, causing citations
+    and TOC entries to have numbers on the wrong side)."""
+    import zipfile
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    ar_pl = {
+        "title": "الملخص التنفيذي",
+        "subtitle": "تقرير استراتيجي",
+        "lang": "ar",
+        "rtl": True,
+        "toc": True,
+        "citations": ["مصدر أول: تقرير", "مصدر ثان: تحليل"],
+        "sections": [{"heading": "الملخص", "body": "تقرير شامل."}],
+    }
+    _generate_docx(tmp_path / "ar.docx", ar_pl)
+
+    # Extract numbering.xml and verify RTL settings
+    ar_docx = zipfile.ZipFile(tmp_path / "ar.docx")
+    numbering_xml = ar_docx.read("word/numbering.xml").decode("utf-8")
+
+    # List numbering must be right-justified (not left)
+    assert 'w:lvlJc w:val="right"' in numbering_xml, (
+        "AR DOCX numbering not RTL: lvlJc should be 'right', not 'left'"
+    )
+    assert 'w:lvlJc w:val="left"' not in numbering_xml, (
+        "AR DOCX numbering still has LTR lvlJc"
+    )
+    # Indentation should use w:right, not w:left
+    assert 'w:right=' in numbering_xml, (
+        "AR DOCX numbering should use right indentation"
+    )
+    assert 'w:left=' not in numbering_xml, (
+        "AR DOCX numbering should not have left indentation"
+    )
