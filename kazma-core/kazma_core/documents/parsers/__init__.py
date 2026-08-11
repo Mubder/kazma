@@ -25,19 +25,38 @@ _LIMITS = (
 
 
 def _pdf_health() -> tuple[ParserReadiness, str | None]:
+    """PDF readiness: PyMuPDF/pdfplumber/pypdfium2 = full; pypdf-only = text degraded."""
+
+    # PyMuPDF is preferred for logical-order Arabic + layout/tables.
+    for module in ("fitz", "pymupdf"):
+        try:
+            importlib.import_module(module)
+            return ParserReadiness.READY, None
+        except Exception:
+            continue
     try:
         importlib.import_module("pdfplumber")
         return ParserReadiness.READY, None
     except Exception:
-        for module in ("pypdf", "PyPDF2"):
-            try:
-                importlib.import_module(module)
-                return (
-                    ParserReadiness.DEGRADED,
-                    "pdfplumber unavailable; text-only PDF fallback is active",
-                )
-            except Exception:
-                continue
+        pass
+    # Optional PDFium peer (multi-engine bake-off) still counts as ready text.
+    try:
+        importlib.import_module("pypdfium2")
+        return (
+            ParserReadiness.READY,
+            None,
+        )
+    except Exception:
+        pass
+    for module in ("pypdf", "PyPDF2"):
+        try:
+            importlib.import_module(module)
+            return (
+                ParserReadiness.DEGRADED,
+                "PyMuPDF/pdfplumber unavailable; text-only PDF fallback is active",
+            )
+        except Exception:
+            continue
     return ParserReadiness.UNAVAILABLE, "No healthy PDF parser dependency is installed"
 
 

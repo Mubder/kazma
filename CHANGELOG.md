@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Unreleased — Arabic PDF ingestion: multi-engine + layout + OCR routing (2026-08-12)
+
+Industry-grade Arabic (and general) PDF text extraction on the document platform:
+
+- **PyMuPDF primary** text/tables extractor (logical-order Arabic); multi-engine
+  bake-off with optional **pypdfium2** (PDFium), then pdfplumber, then pypdf.
+  Best extract wins via `score_document_extraction` (presentation-form / CID
+  penalties + engine rank). Metadata: `extractor`, `extraction_score`,
+  `extractors_tried`.
+- **Layout-aware reading order** (`parsers/pdf_layout.py`): multi-column /
+  legal pages use PyMuPDF `dict` geometry (columns top→bottom, LTR or RTL);
+  single-column keeps plain `get_text("text")` for continuous Arabic.
+- **Fuzzy RTL round-trip verifier** (token-set coverage + structural net);
+  removed stale “all extractors reverse Arabic” comment.
+- **OCR Tier-3** stays on the isolated `apply_ocr` path: empty/scanned pages,
+  high presentation-form / CID layers → Tesseract; auto language order
+  **`ara+eng`** (eng+ara misreads pure Arabic). Bad native layers replaced when
+  OCR confidence is acceptable.
+- Tests: Arabic logical order, English tables, multi-engine pick, scanned
+  Arabic OCR, layout reading order, quality/OCR routing.
+- Deps: `pypdfium2` added to `[document-platform]` (optional at runtime if
+  absent). System: Tesseract + `ara` traineddata for scans.
+
 ## Unreleased — Commitment Layer (Phases 0–2 + 5/6 partial): resolve-before-act (2026-08-11)
 
 A policy gate between the LLM and durable mutations (plan:

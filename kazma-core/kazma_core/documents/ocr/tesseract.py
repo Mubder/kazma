@@ -47,16 +47,21 @@ def select_language(
         )
         has_latin = any("LATIN" in unicodedata.name(char, "") for char in native_text)
         configured_set = set(configured)
-        if has_arabic and has_latin and {"eng", "ara"} <= configured_set:
-            selected = ("eng", "ara")
+        # Prefer ara *before* eng when both are configured. Tesseract's eng+ara
+        # often misreads pure-Arabic pages as Latin gibberish; ara+eng keeps
+        # Arabic readable while still OCR'ing English accurately.
+        dual = tuple(item for item in ("ara", "eng") if item in configured_set)
+        # Empty native text (scanned PDF / image-only): dual when available.
+        if not native_text.strip():
+            selected = dual if dual else configured
+        elif has_arabic and has_latin and {"eng", "ara"} <= configured_set:
+            selected = dual
         elif has_arabic and "ara" in configured_set:
             selected = ("ara",)
         elif has_latin and "eng" in configured_set:
             selected = ("eng",)
         else:
-            selected = tuple(item for item in ("eng", "ara") if item in configured_set)
-            if not selected:
-                selected = configured
+            selected = dual if dual else configured
     missing = [item for item in selected if item not in installed_set]
     if missing:
         raise DocumentOcrUnavailableError(

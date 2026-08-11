@@ -266,18 +266,19 @@ def test_ooxml_rejects_falsified_central_directory_size(
 def test_degraded_pdf_capability_does_not_advertise_tables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """pypdf-only installs are degraded (text only); tables require PyMuPDF/pdfplumber."""
     from kazma_core.documents import parsers
 
     real_import = parsers.importlib.import_module
 
-    def import_without_pdfplumber(name: str):
-        if name == "pdfplumber":
+    def import_text_only_pdf_stack(name: str):
+        if name in {"pdfplumber", "fitz", "pymupdf"}:
             raise ImportError
         if name == "pypdf":
             return object()
         return real_import(name)
 
-    monkeypatch.setattr(parsers.importlib, "import_module", import_without_pdfplumber)
+    monkeypatch.setattr(parsers.importlib, "import_module", import_text_only_pdf_stack)
     pdf_plugin = next(
         plugin for plugin in parsers.builtin_plugins() if plugin.parser_id == "pdf"
     )
@@ -569,3 +570,431 @@ def test_native_skill_loading_has_no_document_import_cycle() -> None:
         "kazma_gateway.agent_handler.attachments",
     ):
         assert importlib.import_module(module)
+
+
+def _generate_pdf_via_engine(path: Path, *, title: str, rtl: bool, table: bool = False) -> None:
+    """Build a small PDF through Kazma's PdfEngine (reportlab / DOCX route)."""
+    from kazma_core.documents.content_model import (
+        BodyBlock,
+        ContentModel,
+        HeadingBlock,
+        TableBlock,
+        TitleBlock,
+    )
+    from kazma_core.documents.engines.pdf import PdfEngine
+    from kazma_core.documents.profile import DocProfile
+
+    profile = DocProfile.for_content(title, rtl=rtl)
+    model = ContentModel()
+    model.add(TitleBlock(text=title))
+    if rtl:
+        model.add(HeadingBlock(text="مقدمة", level=1))
+        model.add(BodyBlock(text="هذا نص تجريبي للتحقق من الاستخراج"))
+    else:
+        model.add(HeadingBlock(text="Introduction", level=1))
+        model.add(BodyBlock(text="Regression body for PDF text extraction."))
+    if table:
+        if rtl:
+            model.add(
+                TableBlock(
+                    headers=["الاسم", "القيمة"],
+                    rows=[["لغة", "عربي"], ["PDF", "تلقائي"]],
+                )
+            )
+        else:
+            model.add(
+                TableBlock(
+                    headers=["Name", "Value"],
+                    rows=[["Lang", "EN"], ["Mode", "Auto"], ["Format", "PDF"]],
+                )
+            )
+    PdfEngine(profile).render(model, path)
+    assert path.is_file() and path.stat().st_size > 0
+
+
+def test_pdf_parser_arabic_logical_order_pymupdf(
+    tmp_path: Path, document_config: DocumentConfig
+) -> None:
+    """PyMuPDF primary must extract Arabic in logical order (not visual reverse)."""
+    pytest.importorskip("fitz")
+    pytest.importorskip("reportlab")
+
+    path = tmp_path / "arabic-demo.pdf"
+    title = "منظومة كاظمة للذكاء الاصطناعي"
+    _generate_pdf_via_engine(path, title=title, rtl=True)
+
+    from kazma_core.documents.parsers.pdf import PdfParser
+
+    ir = PdfParser().parse(
+        path, _context(path, document_config, "pdf", "application/pdf")
+    )
+    joined = "\n".join(block.text for page in ir.pages for block in page.blocks)
+
+    # Logical-order tokens that define the product title.
+    for token in ("منظومة", "كاظمة"):
+        assert token in joined, f"missing logical token {token!r} in {joined!r}"
+
+    # Classic pdfplumber visual reverse of the title — must not dominate.
+    reversed_blob = "ةموظنم"
+    assert reversed_blob not in joined, (
+        f"extracted text looks visually reversed: {joined!r}"
+    )
+
+    assert ir.metadata.get("extractor") == "pymupdf"
+    assert any(
+        page.metadata.get("extractor") == "pymupdf" for page in ir.pages
+    )
+
+
+def test_pdf_parser_english_tables_preserved(
+    tmp_path: Path, document_config: DocumentConfig
+) -> None:
+    """Tier-1 swap must still emit TABLE blocks for electronic English PDFs."""
+    pytest.importorskip("fitz")
+    pytest.importorskip("reportlab")
+
+    path = tmp_path / "english-table.pdf"
+    _generate_pdf_via_engine(
+        path, title="Kazma Document Tables", rtl=False, table=True
+    )
+
+    from kazma_core.documents.models import BlockType
+    from kazma_core.documents.parsers.pdf import PdfParser
+
+    ir = PdfParser().parse(
+        path, _context(path, document_config, "pdf", "application/pdf")
+    )
+    joined = "\n".join(block.text for page in ir.pages for block in page.blocks)
+    assert "Kazma" in joined or "Document" in joined
+    assert ir.metadata.get("extractor") == "pymupdf"
+
+    table_blocks = [
+        block
+        for page in ir.pages
+        for block in page.blocks
+        if block.block_type is BlockType.TABLE
+    ]
+    # Prefer structured TABLE blocks; fall back to pipe/row text if find_tables
+    # misses a drawn table (reportlab layouts vary).
+    if table_blocks:
+        table_text = "\n".join(block.text for block in table_blocks)
+        assert "Name" in table_text or "Lang" in table_text or "EN" in table_text
+        assert "|" in table_text or "\n" in table_text
+    else:
+        assert "Name" in joined or "Lang" in joined or "Auto" in joined
+
+
+def test_pdf_parser_falls_back_when_pymupdf_fails(
+    tmp_path: Path,
+    document_config: DocumentConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hard failure in PyMuPDF should fall through to pdfplumber, not abort."""
+    pytest.importorskip("pdfplumber")
+    from pypdf import PdfWriter
+
+    path = tmp_path / "blank.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    from kazma_core.documents.parsers import pdf as pdf_mod
+
+    def boom(*_a, **_k):
+        raise RuntimeError("simulated pymupdf failure")
+
+    monkeypatch.setattr(pdf_mod.PdfParser, "_parse_pymupdf", staticmethod(boom))
+    ir = pdf_mod.PdfParser().parse(
+        path, _context(path, document_config, "pdf", "application/pdf")
+    )
+    assert ir.metadata.get("extractor") in {"pdfplumber", "pypdf", "PyPDF2"}
+    assert ir.pages
+    assert ir.metadata.get("extractors_tried")
+
+
+def test_pdf_layout_reading_order_multi_column() -> None:
+    """Multi-column blocks read left column fully, then right (LTR)."""
+    from kazma_core.documents.parsers.pdf_layout import reading_order_text
+
+    # Page width 600: left col x~50-250, right col x~320-550, full-width title.
+    blocks = [
+        {"x0": 40, "y0": 20, "x1": 560, "y1": 50, "cx": 300, "cy": 35, "text": "TITLE"},
+        {"x0": 50, "y0": 80, "x1": 250, "y1": 100, "cx": 150, "cy": 90, "text": "L1"},
+        {"x0": 50, "y0": 110, "x1": 250, "y1": 130, "cx": 150, "cy": 120, "text": "L2"},
+        {"x0": 320, "y0": 80, "x1": 550, "y1": 100, "cx": 435, "cy": 90, "text": "R1"},
+        {"x0": 320, "y0": 110, "x1": 550, "y1": 130, "cx": 435, "cy": 120, "text": "R2"},
+    ]
+    text, meta = reading_order_text(blocks, page_width=600.0, rtl=False)
+    assert meta["column_count"] == 2
+    assert meta["layout"] == "multi_column"
+    # Title first, then left column top→bottom, then right.
+    assert text.splitlines() == ["TITLE", "L1", "L2", "R1", "R2"]
+
+    # RTL: right column before left.
+    text_rtl, meta_rtl = reading_order_text(blocks, page_width=600.0, rtl=True)
+    assert meta_rtl["rtl_columns"] is True
+    assert text_rtl.splitlines() == ["TITLE", "R1", "R2", "L1", "L2"]
+
+
+def test_pdf_optional_pypdfium2_engine_participates_when_installed(
+    tmp_path: Path, document_config: DocumentConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pypdfium2 is optional; when present it can win the multi-engine score."""
+    pytest.importorskip("pypdfium2")
+    from pypdf import PdfWriter
+
+    path = tmp_path / "plain.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    from kazma_core.documents.models import (
+        BlockType,
+        DocumentBlock,
+        DocumentIR,
+        DocumentPage,
+        Provenance,
+        new_document_id,
+        new_version_id,
+    )
+    from kazma_core.documents.parsers import pdf as pdf_mod
+
+    weak = DocumentIR(
+        document_id=new_document_id(),
+        version_id=new_version_id(),
+        pages=(
+            DocumentPage(
+                1,
+                (
+                    DocumentBlock(
+                        block_id="p1-b1",
+                        block_type=BlockType.TEXT,
+                        text="\uFE8D\uFE8E\uFE8F\uFE90" * 16,
+                    ),
+                ),
+                metadata={"extractor": "pymupdf"},
+            ),
+        ),
+        provenance=Provenance(source=str(path), parser="pdf"),
+        metadata={"extractor": "pymupdf"},
+    )
+    strong = DocumentIR(
+        document_id=new_document_id(),
+        version_id=new_version_id(),
+        pages=(
+            DocumentPage(
+                1,
+                (
+                    DocumentBlock(
+                        block_id="p1-b1",
+                        block_type=BlockType.TEXT,
+                        text="PDFium extracted logical Arabic منظومة كاظمة content " * 3,
+                    ),
+                ),
+                metadata={"extractor": "pypdfium2"},
+            ),
+        ),
+        provenance=Provenance(source=str(path), parser="pdf"),
+        metadata={"extractor": "pypdfium2"},
+    )
+
+    monkeypatch.setattr(
+        pdf_mod.PdfParser, "_parse_pymupdf", staticmethod(lambda *_a, **_k: weak)
+    )
+    monkeypatch.setattr(
+        pdf_mod.PdfParser, "_parse_pypdfium2", staticmethod(lambda *_a, **_k: strong)
+    )
+    monkeypatch.setattr(
+        pdf_mod.PdfParser,
+        "_parse_pdfplumber",
+        staticmethod(lambda *_a, **_k: (_ for _ in ()).throw(ImportError("skip"))),
+    )
+    monkeypatch.setattr(
+        pdf_mod.PdfParser,
+        "_parse_pypdf",
+        staticmethod(lambda *_a, **_k: (_ for _ in ()).throw(ImportError("skip"))),
+    )
+
+    ir = pdf_mod.PdfParser().parse(
+        path, _context(path, document_config, "pdf", "application/pdf")
+    )
+    assert ir.metadata.get("extractor") == "pypdfium2"
+    assert "منظومة" in ir.pages[0].blocks[0].text
+    tried = ir.metadata.get("extractors_tried") or []
+    assert any(str(item).startswith("pypdfium2:") for item in tried)
+
+
+def test_pdf_multi_engine_keeps_higher_scoring_extract(
+    tmp_path: Path,
+    document_config: DocumentConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the primary extract is weak, a stronger secondary engine wins."""
+    from kazma_core.documents.models import (
+        BlockType,
+        DocumentBlock,
+        DocumentIR,
+        DocumentPage,
+        Provenance,
+        new_document_id,
+        new_version_id,
+    )
+    from kazma_core.documents.parsers import pdf as pdf_mod
+
+    path = tmp_path / "scored.pdf"
+    path.write_bytes(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")
+
+    weak = DocumentIR(
+        document_id=new_document_id(),
+        version_id=new_version_id(),
+        pages=(
+            DocumentPage(
+                1,
+                (
+                    DocumentBlock(
+                        block_id="p1-b1",
+                        block_type=BlockType.TEXT,
+                        text="\uFE8D\uFE8E\uFE8F\uFE90" * 20,
+                    ),
+                ),
+                metadata={"extractor": "pymupdf"},
+            ),
+        ),
+        provenance=Provenance(source=str(path), parser="pdf"),
+        metadata={"extractor": "pymupdf"},
+    )
+    strong = DocumentIR(
+        document_id=new_document_id(),
+        version_id=new_version_id(),
+        pages=(
+            DocumentPage(
+                1,
+                (
+                    DocumentBlock(
+                        block_id="p1-b1",
+                        block_type=BlockType.TEXT,
+                        text="منظومة كاظمة للذكاء الاصطناعي " * 4,
+                    ),
+                ),
+                metadata={"extractor": "pdfplumber"},
+            ),
+        ),
+        provenance=Provenance(source=str(path), parser="pdf"),
+        metadata={"extractor": "pdfplumber"},
+    )
+
+    monkeypatch.setattr(
+        pdf_mod.PdfParser, "_parse_pymupdf", staticmethod(lambda *_a, **_k: weak)
+    )
+    monkeypatch.setattr(
+        pdf_mod.PdfParser, "_parse_pdfplumber", staticmethod(lambda *_a, **_k: strong)
+    )
+    monkeypatch.setattr(
+        pdf_mod.PdfParser,
+        "_parse_pypdf",
+        staticmethod(lambda *_a, **_k: (_ for _ in ()).throw(ImportError("skip"))),
+    )
+
+    ir = pdf_mod.PdfParser().parse(
+        path, _context(path, document_config, "pdf", "application/pdf")
+    )
+    assert ir.metadata.get("extractor") == "pdfplumber"
+    assert "منظومة" in ir.pages[0].blocks[0].text
+    assert any(item.startswith("pymupdf:") for item in ir.metadata.get("extractors_tried", []))
+    assert any(item.startswith("pdfplumber:") for item in ir.metadata.get("extractors_tried", []))
+
+
+def test_scanned_pdf_routes_to_ocr_and_extracts_arabic(
+    tmp_path: Path, document_config: DocumentConfig
+) -> None:
+    """Tier-3: image-only PDF → quality needs_ocr → apply_ocr (existing OCR service).
+
+    Draws *shaped* Arabic onto a raster page (no text layer). Routing is always
+    asserted; content recovery requires Tesseract + ``ara``.
+    """
+    fitz = pytest.importorskip("fitz")
+    Image = pytest.importorskip("PIL.Image")
+    ImageDraw = pytest.importorskip("PIL.ImageDraw")
+    ImageFont = pytest.importorskip("PIL.ImageFont")
+
+    from kazma_core.documents.ocr import apply_ocr, get_ocr_health
+    from kazma_core.documents.ocr.base import OcrReadiness
+    from kazma_core.documents.parsers.pdf import PdfParser
+    from kazma_core.documents.quality import assess_document_quality
+
+    # Shape for visual rendering so Tesseract sees joined glyphs (PIL does not).
+    phrase = "منظومة كاظمة"
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+
+        draw_text = get_display(arabic_reshaper.reshape(phrase))
+    except Exception:
+        draw_text = phrase
+
+    img = Image.new("RGB", (900, 240), "white")
+    draw = ImageDraw.Draw(img)
+    font = None
+    for candidate in (
+        Path(r"C:\Windows\Fonts\tradbdo.ttf"),
+        Path(r"C:\Windows\Fonts\arial.ttf"),
+        Path(r"C:\Windows\Fonts\tahoma.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ):
+        if candidate.is_file():
+            try:
+                font = ImageFont.truetype(str(candidate), 56)
+                break
+            except OSError:
+                continue
+    if font is None:
+        font = ImageFont.load_default()
+    draw.text((40, 60), draw_text, fill="black", font=font)
+    image_path = tmp_path / "scan.png"
+    img.save(image_path)
+
+    pdf_path = tmp_path / "scanned-ar.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=240)
+    page.insert_image(page.rect, filename=str(image_path))
+    doc.save(pdf_path)
+    doc.close()
+
+    ir = PdfParser().parse(
+        pdf_path, _context(pdf_path, document_config, "pdf", "application/pdf")
+    )
+    qualities = assess_document_quality(ir, min_text_chars=40)
+    assert qualities[0].needs_ocr is True
+    assert "no_native_text" in qualities[0].reasons or "image_or_scanned_page" in qualities[
+        0
+    ].reasons
+
+    health = get_ocr_health(("eng", "ara"))
+    if health.readiness is OcrReadiness.UNAVAILABLE or "ara" not in (
+        health.languages or ()
+    ):
+        pytest.skip("Tesseract + ara not available for end-to-end OCR assert")
+
+    ocr_config = replace(
+        document_config,
+        ocr_enabled=True,
+        ocr_languages=("eng", "ara"),
+        ocr_dpi=200,
+    )
+    ir = replace(
+        ir,
+        metadata={**dict(ir.metadata), "source_mime": "application/pdf"},
+    )
+    result = apply_ocr(pdf_path, ir, ocr_config, work_dir=tmp_path)
+    joined = "\n".join(block.text for page in result.pages for block in page.blocks)
+    # Real OCR on synthetic glyphs is imperfect; require Arabic script recovery
+    # (not Latin gibberish from eng-first language order).
+    has_arabic = any("\u0600" <= ch <= "\u06FF" for ch in joined)
+    assert has_arabic and joined.strip(), (
+        f"OCR did not recover Arabic script from scanned PDF: {joined!r}; "
+        f"meta={result.metadata.get('ocr')!r} warnings={result.metadata.get('warnings')!r}"
+    )
+    assert result.metadata.get("ocr", {}).get("status") == "completed"

@@ -94,17 +94,50 @@ Every parse/OCR/mutation job runs in a **host subprocess** (`python -I`):
 - Crashes, timed-out jobs, and missing output all fail closed — no
   partial/broken data escapes the sandbox.
 
+### PDF text extraction (Arabic + multi-engine)
+
+Electronic (text-layer) PDFs are **not** OCR’d by default. The parser runs a
+**scored multi-engine bake-off** and keeps the best IR:
+
+| Order | Engine | Role |
+|---|---|---|
+| 1 | **PyMuPDF** | Primary — logical-order Arabic, tables, multi-column layout |
+| 2 | **pypdfium2** (optional) | PDFium peer in the score bake-off |
+| 3 | **pdfplumber** | Strong tables; Arabic may reverse if used alone |
+| 4 | **pypdf** | Text-only last resort |
+
+- **Scoring:** `score_document_extraction` prefers clean Unicode, penalises
+  Arabic presentation forms and `(cid:N)` dumps, and applies a small rank
+  bonus (PyMuPDF > pypdfium2 > pdfplumber). Strong scores short-circuit.
+- **Layout:** multi-column / legal pages use PyMuPDF `dict` geometry
+  (`parsers/pdf_layout.py`) — columns top→bottom, LTR or RTL when
+  Arabic-dominant. Single-column keeps plain text (better continuous Arabic).
+- **Metadata:** `extractor`, `extraction_score`, `extractors_tried`, per-page
+  `layout.method` / `column_count`.
+- **Round-trip generate→parse:** RTL titles use fuzzy token coverage (glyph
+  noise tolerant), not “any 20 characters”.
+
+Install: `pip install -e ".[document-platform]"` (includes `pymupdf` +
+`pypdfium2`). Without PyMuPDF, Arabic electronic PDFs may reverse under
+pdfplumber alone.
+
 ### Multilingual OCR
 
 - **Per-page quality routing:** Pages with high text density can skip OCR
-  (native text preserved); image-heavy / text-poor pages route to Tesseract.
+  (native text preserved); image-heavy / text-poor pages, high presentation-form
+  / CID-mangled layers, and empty text layers route to Tesseract.
 - **Language selection:** Configurable language pack list (default includes
-  English + Arabic packs when installed).
+  English + Arabic when installed). Auto order is **`ara+eng`** when both are
+  configured — `eng+ara` often misreads pure-Arabic scans as Latin gibberish.
 - **Deterministic merging:** Native and OCR text are merged with
   **similarity-based** rules (`SequenceMatcher` thresholds + confidence), not
-  pure geometric coordinate fusion. OCR blocks may still carry TSV pixel
-  coordinates for downstream use.
+  pure geometric coordinate fusion. Known-bad native layers (presentation forms /
+  CID) are **replaced** when OCR confidence is acceptable. OCR blocks may still
+  carry TSV pixel coordinates for downstream use.
 - **Fallback:** Large pages rasterized at configurable DPI (200 default).
+  OCR stays in the isolated worker (`apply_ocr`) — the PDF parser never shells
+  out to Tesseract directly.
+
 
 ### Knowledge indexing
 
@@ -308,7 +341,7 @@ Check: `GET /api/documents/ops/readiness` → `jobs_multi_replica`, `metadata_mu
 # Simple PDF/DOCX/XLSX generators only (legacy skill)
 pip install -e ".[document]"
 
-# Full platform engines (OCR helpers, WeasyPrint, PyMuPDF redaction/raster)
+# Full platform engines (OCR helpers, WeasyPrint, PyMuPDF, pypdfium2 bake-off)
 pip install -e ".[document-platform]"
 
 # Everything
@@ -319,9 +352,9 @@ pip install -e ".[all]"
 
 | Package | Purpose |
 |---|---|
-| **Tesseract** + language packs (`eng`, `ara`, …) | OCR |
+| **Tesseract** + language packs (`eng`, `ara`, …) | OCR (scanned / bad text layer; `ara` required for Arabic scans) |
 | **ClamAV** (`clamscan` / `clamdscan` on PATH) | Malware scan on intake |
-| **LibreOffice** | Some format conversions |
+| **LibreOffice** | Some format conversions; high-quality Arabic PDF *generation* route |
 | OS fonts | WeasyPrint HTML→PDF |
 
 ### First operator walkthrough

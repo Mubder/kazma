@@ -41,6 +41,16 @@ def _normalize_similarity(text: str) -> str:
     return re.sub(r"\W+", "", text, flags=re.UNICODE).casefold()
 
 
+# Native layers that are known-bad for Arabic/CID dumps — prefer OCR when
+# confidence is acceptable rather than keeping visual-order garbage.
+_REPLACEABLE_NATIVE_REASONS = frozenset(
+    {
+        "high_presentation_forms",
+        "cid_mangled_text",
+    }
+)
+
+
 def merge_page_content(
     page: DocumentPage,
     ocr_blocks: tuple[DocumentBlock, ...],
@@ -56,6 +66,17 @@ def merge_page_content(
     ocr_text = "\n".join(block.text for block in ocr_blocks if block.text)
     if not native_text.strip():
         return ocr_blocks
+
+    # Tier-3 path for electronic PDFs with a usable text layer that is still
+    # wrong for RTL (presentation forms / cid placeholders). OCR is slower but
+    # Tesseract returns logical-order Arabic when ``ara`` is installed.
+    if (
+        _REPLACEABLE_NATIVE_REASONS.intersection(quality.reasons)
+        and (ocr_confidence or 0.0) >= 0.55
+        and ocr_text.strip()
+    ):
+        return ocr_blocks
+
     native_normalized = _normalize_similarity(native_text)
     ocr_normalized = _normalize_similarity(ocr_text)
     similarity = SequenceMatcher(None, native_normalized, ocr_normalized).ratio()

@@ -692,14 +692,14 @@ class DocumentOperations:
         if normalize(probe) in normalize(text):
             return  # exact sentinel match — content survived the round trip
 
-        # PDF text extraction returns presentation-form, visually-reversed,
-        # cid-mangled text for shaped/RTL scripts (Arabic), so the logical-order
-        # probe cannot substring-match EVEN for a correctly-generated file
-        # (verified: pdfplumber/pypdf/pymupdf all return glyph-reversed output
-        # that NFKC + bidi-reversal can't recover). For such probes, fall back to
-        # a structural integrity check: a correct file still yields substantial
-        # extracted text, while a genuinely empty/corrupt one extracts to ~nothing.
+        # Arabic / RTL: PyMuPDF returns correct logical order with occasional
+        # glyph noise (e.g. االصطنا vs الاصطناعي), so prefer fuzzy token-set
+        # coverage over exact substring. pdfplumber may still reverse order;
+        # structural text volume is a last-resort safety net only.
         if DocumentOperations._probe_is_rtl(probe):
+            coverage = DocumentOperations._rtl_token_coverage(probe, text)
+            if coverage >= 0.5:
+                return
             non_ws = sum(1 for ch in text if not ch.isspace())
             if non_ws >= 20:
                 return
@@ -710,12 +710,32 @@ class DocumentOperations:
 
     @staticmethod
     def _probe_is_rtl(value: str) -> bool:
-        """True if the probe contains Arabic/RTL script (extraction-unreliable)."""
+        """True if the probe contains Arabic/RTL script."""
         return any(
             ("\u0600" <= c <= "\u06FF") or ("\u0750" <= c <= "\u077F")
             or ("\uFB50" <= c <= "\uFDFF") or ("\uFE70" <= c <= "\uFEFF")
             for c in value
         )
+
+    @staticmethod
+    def _token_set(value: str) -> set[str]:
+        """Unicode word tokens (length ≥ 2) for fuzzy content checks."""
+        import re
+
+        return {
+            match.group(0).casefold()
+            for match in re.finditer(r"\w{2,}", value, flags=re.UNICODE)
+        }
+
+    @staticmethod
+    def _rtl_token_coverage(probe: str, text: str) -> float:
+        """Fraction of probe tokens present in extracted text (handles glyph noise)."""
+        probe_tokens = DocumentOperations._token_set(probe)
+        if not probe_tokens:
+            return 0.0
+        text_tokens = DocumentOperations._token_set(text)
+        return len(probe_tokens & text_tokens) / len(probe_tokens)
+
 
     @staticmethod
     def _export_atomic(

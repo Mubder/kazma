@@ -95,23 +95,77 @@ def test_quality_routes_healthy_scanned_and_mixed_pages() -> None:
     assert "image_or_scanned_page" in qualities[1].reasons
 
 
+def test_quality_routes_presentation_forms_and_cid_to_ocr() -> None:
+    """Bad Arabic visual-layer dumps must request OCR (not pass as healthy)."""
+    from kazma_core.documents.quality import presentation_form_ratio, score_extracted_text
+
+    # Arabic Presentation Forms-B (isolated shapes) — visual dump signal.
+    shaped = ("\uFE8D\uFE8E\uFE8F\uFE90" * 12) + " " + ("\uFE91\uFE92" * 8)
+    assert presentation_form_ratio(shaped) >= 0.12
+    page = DocumentPage(1, (_block(1, shaped),), width=612, height=792)
+    quality = assess_page_quality(page, min_text_chars=40)
+    assert quality.needs_ocr is True
+    assert "high_presentation_forms" in quality.reasons
+
+    cid_page = DocumentPage(
+        1,
+        (_block(1, " ".join(f"(cid:{i})" for i in range(20))),),
+        width=612,
+        height=792,
+    )
+    cid_q = assess_page_quality(cid_page, min_text_chars=40)
+    assert cid_q.needs_ocr is True
+    assert "cid_mangled_text" in cid_q.reasons
+
+    logical = "منظومة كاظمة للذكاء الاصطناعي " * 2
+    assert score_extracted_text(logical, extractor="pymupdf") > score_extracted_text(
+        shaped, extractor="pdfplumber"
+    )
+
+
+def test_merge_prefers_ocr_over_presentation_form_native() -> None:
+    shaped = ("\uFE8D\uFE8E\uFE8F\uFE90" * 12) + " " + ("\uFE91\uFE92" * 8)
+    page = DocumentPage(1, (_block(1, shaped),), width=612, height=792)
+    quality = assess_page_quality(page, min_text_chars=40)
+    ocr = (
+        DocumentBlock(
+            block_id="ocr-1",
+            block_type=BlockType.TEXT,
+            text="منظومة كاظمة",
+            confidence=0.9,
+            metadata={"ocr": True},
+        ),
+    )
+    merged = merge_page_content(page, ocr, quality=quality, ocr_confidence=0.9)
+    assert len(merged) == 1
+    assert merged[0].text == "منظومة كاظمة"
+
+
 def test_language_selection_override_auto_and_missing() -> None:
     installed = ("eng", "ara", "osd")
     assert select_language(
         "eng+ara", configured=("eng", "ara"), installed=installed
     ) == "eng+ara"
+    # Auto mixed / empty: ara before eng (eng+ara misreads pure Arabic).
     assert select_language(
         "auto",
         configured=("eng", "ara"),
         installed=installed,
         native_text="Hello مرحبا",
-    ) == "eng+ara"
+    ) == "ara+eng"
     assert select_language(
         None,
         configured=("eng", "ara"),
         installed=installed,
         native_text="مرحبا",
     ) == "ara"
+    # Scanned / empty native text: ara+eng so Arabic scans are covered.
+    assert select_language(
+        None,
+        configured=("eng", "ara"),
+        installed=installed,
+        native_text="",
+    ) == "ara+eng"
     with pytest.raises(DocumentOcrUnavailableError, match="missing"):
         select_language("ara", configured=("eng",), installed=("eng",))
 

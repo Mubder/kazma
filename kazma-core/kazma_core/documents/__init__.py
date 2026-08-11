@@ -67,7 +67,14 @@ from .models import (
 from .mutation import get_mutation_registry
 from .ocr import OcrHealth, OcrReadiness, get_ocr_health
 from .operations import OperationScope
-from .quality import PageQuality, assess_document_quality, assess_page_quality
+from .quality import (
+    PageQuality,
+    assess_document_quality,
+    assess_page_quality,
+    presentation_form_ratio,
+    score_document_extraction,
+    score_extracted_text,
+)
 from .registry import (
     ParserCapability,
     ParserPlugin,
@@ -172,6 +179,9 @@ __all__ = [
     "get_renderer_registry",
     "assess_document_quality",
     "assess_page_quality",
+    "presentation_form_ratio",
+    "score_document_extraction",
+    "score_extracted_text",
     "chunk_document_ir",
     "document_jobs_backend",
     "document_storage_readiness",

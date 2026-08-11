@@ -108,6 +108,8 @@ convert = [
 document-platform = [
     "kazma[document,ocr,convert]",
     "pymupdf>=1.24.0",
+    # Optional PDFium peer in the multi-engine PDF bake-off (safe if unused).
+    "pypdfium2>=4.30.0",
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [

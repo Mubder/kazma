@@ -303,11 +303,14 @@ def test_docx_toc_field_and_page_numbers(tmp_path: Path) -> None:
 
 
 def test_roundtrip_verifier_is_rtl_aware() -> None:
-    """The round-trip content verifier must not block Arabic PDFs: PDF text
-    extraction returns presentation-form, reversed, cid-mangled text for shaped
-    scripts, so the logical probe can't substring-match. For RTL probes it falls
-    back to a structural check (substantial extracted text = content present),
-    while still failing genuinely empty/corrupt output and LTR mismatches."""
+    """RTL round-trip: fuzzy token coverage (PyMuPDF glyph noise) then structural net.
+
+    PyMuPDF returns logical-order Arabic with occasional glyph drops
+    (االصطنا vs الاصطناعي). Exact substring can fail; token-set coverage must
+    pass. Fully reversed pdfplumber output still passes the structural safety
+    net so generation is not blocked if a fallback extractor is used. Empty /
+    near-empty and LTR mismatches still fail.
+    """
     from types import SimpleNamespace
 
     from kazma_core.documents.operations import DocumentOperations
@@ -316,7 +319,9 @@ def test_roundtrip_verifier_is_rtl_aware() -> None:
         return SimpleNamespace(pages=[SimpleNamespace(blocks=[SimpleNamespace(text=text)])])
 
     ar_title = "منظومة كاظمة للذكاء الاصطناعي"
-    # Mangled-but-substantial Arabic extraction (what pdfplumber really returns).
+    # Near-correct PyMuPDF extract (logical order, minor glyph noise).
+    pymupdf_ish = "منظومة كاظمة للذكاء االصطنا\nمقدمة\nنص عربي"
+    # Fully reversed pdfplumber-style extract (safety-net path).
     mangled = "عيانطصلاا ءاكذلل ةمظاك ةموظنم\n(cid:1)\nالمقدمة\nنص عربي" * 3
 
     def passes(payload: dict, text: str) -> bool:
@@ -326,7 +331,9 @@ def test_roundtrip_verifier_is_rtl_aware() -> None:
         except Exception:
             return False
 
-    assert passes({"title": ar_title}, mangled), "Arabic PDF with real mangled extract must pass"
+    assert passes({"title": ar_title}, pymupdf_ish), "logical-order + glyph noise must pass via tokens"
+    assert DocumentOperations._rtl_token_coverage(ar_title, pymupdf_ish) >= 0.5
+    assert passes({"title": ar_title}, mangled), "reversed extract still passes structural net"
     assert passes({"title": "Kazma Report"}, "Kazma Report\nbody"), "EN exact match must pass"
     assert not passes({"title": "Kazma Report"}, "totally different"), "EN mismatch must fail"
     assert not passes({"title": ar_title}, "   \n   "), "Arabic empty/corrupt must fail"
