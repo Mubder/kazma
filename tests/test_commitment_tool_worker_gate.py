@@ -85,8 +85,10 @@ async def test_gate_rewrites_wrong_date_to_memory_anchored_date(isolated_dbs):
 
 @pytest.mark.anyio
 async def test_gate_blocks_ambiguous_remind(tmp_path, monkeypatch):
-    """Ambiguous remind (relative + nearby memory event) is HELD, not executed —
-    the model gets a clear error it turns into a user question."""
+    """Ambiguous remind engages the clarify INTERRUPT (Phase 3 card). Outside a
+    graph the interrupt signal propagates (no runner to catch it) — proving the
+    gate HOLDS the tc for the card rather than executing it. The full pause +
+    resume is covered by test_commitment_clarify_card (real graph)."""
     state_db = tmp_path / "state.db"
     ops_db = tmp_path / "ops.db"
     monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(state_db))
@@ -104,11 +106,11 @@ async def test_gate_blocks_ambiguous_remind(tmp_path, monkeypatch):
 
     exe = _RecExecutor()
     state = _state("remind me in 2 days", "schedule_task", {"timing": "2d", "prompt": "x"})
-    result = await tool_worker_node(state, tool_executor=exe, tracer=_NoopTracer(), hitl_config=None)
-    assert not exe.calls, "ambiguous remind must NOT execute"
-    # the blocked result is surfaced as an error tool result
-    done = result.get("tool_calls_done", [])
-    assert any(d.get("is_error") and "Commitment gate" in str(d.get("content", "")) for d in done)
+    # interrupt() raises outside a graph — that's the pause signal a real graph
+    # runner catches. The point: the tc was held (not executed) for the card.
+    with pytest.raises(Exception):
+        await tool_worker_node(state, tool_executor=exe, tracer=_NoopTracer(), hitl_config=None)
+    assert not exe.calls, "ambiguous remind must be held for the card, not executed"
     p.close(); o.close()
 
 

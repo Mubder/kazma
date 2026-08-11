@@ -67,6 +67,10 @@ class EffectDecision:
     commitment_id: str | None = None
     rewritten_args: dict[str, Any] | None = None
     clarify_question: str | None = None
+    # Phase 3: when decision is clarify/confirm, the options shown on the
+    # unified HITL card. Each option carries a slots_patch applied on resume
+    # (plan §4.3). An empty list → free-text clarify (no discrete choices).
+    options: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _args_digest(args: dict[str, Any] | None) -> str:
@@ -190,6 +194,29 @@ def authorize_effect(
     )
 
 
+def _build_remind_clarify_options(res) -> list[dict[str, Any]]:
+    """Build the discrete options for a remind clarify card (plan §4.3).
+
+    Each option carries a ``slots_patch`` (a partial args dict) the tool_worker
+    applies on resume. For remind the slot is ``timing`` (ISO fire_at). The
+    resolver computed both candidate fire_ats; the card offers both + cancel.
+    """
+    opts: list[dict[str, Any]] = []
+    fa = getattr(res, "option_fire_ats", {}) or {}
+    ma = fa.get("memory_anchor")
+    fn = fa.get("from_now")
+    if ma is not None:
+        opts.append({"id": "memory_anchor",
+                     "label": f"Use the memory-anchored date ({ma.date()})",
+                     "slots_patch": {"timing": ma.isoformat()}})
+    if fn is not None:
+        opts.append({"id": "from_now",
+                     "label": f"Use the from-now date ({fn.date()})",
+                     "slots_patch": {"timing": fn.isoformat()}})
+    opts.append({"id": "cancel", "label": "Cancel", "slots_patch": None})
+    return opts
+
+
 def _resolve_remind_act(
     profile: ToolEffectProfile,
     tool_name: str,
@@ -284,6 +311,7 @@ def _resolve_remind_act(
         return EffectDecision(
             decision="clarify", reason=res.reason, profile=profile, audit=audit,
             commitment_id=cid, clarify_question=res.reason,
+            options=_build_remind_clarify_options(res),
         )
 
     # deny (rare for remind — e.g. unsatisfiable)

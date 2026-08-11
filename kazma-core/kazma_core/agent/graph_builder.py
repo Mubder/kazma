@@ -2072,6 +2072,8 @@ async def tool_worker_node(
     # CORRECT date. Kill-switch: KAZMA_COMMITMENT_ENABLED / agent.commitment
     # .enabled (default on). Fail-open: any import/layer error skips the gate.
     semantic_blocked: list[ToolResult] = []
+    # Phase 3: clarify/confirm decisions held for the unified HITL card.
+    semantic_hold: list[tuple[PendingToolCall, Any]] = []
     try:
         from datetime import datetime as _dt, timezone as _tz
         from kazma_core.safety.commitment import authorize_effect as _authz
@@ -2109,20 +2111,76 @@ async def tool_worker_node(
                         if _dec.rewritten_args:
                             _tc["arguments"] = _dec.rewritten_args  # rewrite in place
                         _kept.append(_tc)
-                    else:  # clarify / confirm / deny → block with a clear reason
-                        _q = _dec.clarify_question or _dec.reason or "needs clarification"
+                    elif _dec.decision in ("clarify", "confirm"):
+                        # Phase 3: hold for the unified HITL card (below), not a
+                        # synth error. The card offers the resolver's options;
+                        # resume applies the chosen slots_patch.
+                        semantic_hold.append((_tc, _dec))
+                    else:  # deny → final, no card
+                        _q = _dec.reason or "denied by commitment gate"
                         semantic_blocked.append(ToolResult(
                             tool_call_id=str(_tc.get("id") or ""),
                             name=_tc["name"],
-                            content=(f"⏸ Commitment gate held this action: {_q} "
-                                     "Confirm the exact intent with the user, then retry."),
+                            content=f"⏸ Commitment gate denied this action: {_q}",
                             is_error=True, duration_ms=0,
                         ))
                 pending = _kept
         except Exception:
-            # Fail-open: any unexpected gate error leaves pending unchanged so
+            # Fail-open: any unexpected GATE error leaves pending unchanged so
             # tool execution never breaks. The gate is defense, not a hard dep.
             logger.debug("[ToolWorker] commitment gate skipped — fail-open", exc_info=True)
+
+    # Phase 3 — semantic clarify/confirm interrupt card (plan §4.3). OUTSIDE
+    # the gate's fail-open try so a non-graph context (direct node call / tests)
+    # falls back to a synth-error clarify instead of letting the tc execute. In
+    # a real graph, interrupt() pauses; on resume the chosen option's slots_patch
+    # is applied. The security HITL axis is separate (a tool that's also danger
+    # still goes through it after this).
+    if semantic_hold:
+        _items = [{
+            "tool_call_id": str(_tc.get("id") or ""),
+            "tool": _tc["name"],
+            "commitment_id": _dec.commitment_id,
+            "question": _dec.clarify_question or _dec.reason or "needs clarification",
+            "options": list(_dec.options) if _dec.options else [],
+        } for _tc, _dec in semantic_hold]
+        _sem_kind = ("semantic_confirm" if all(d.decision == "confirm" for _, d in semantic_hold)
+                     else "semantic_clarify")
+        _sem_payload = {
+            "type": "hitl_approval", "kind": _sem_kind, "items": _items,
+            "message": (_items[0]["question"] if len(_items) == 1
+                        else f"{len(_items)} actions need clarification"),
+        }
+        # interrupt() signals a pause by raising GraphInterrupt, which the graph
+        # runner catches to suspend the node. Do NOT wrap it in a broad try/except
+        # — that would swallow the pause signal (the bug that originally prevented
+        # the card from firing). On resume (Command(resume=...)) the node re-runs
+        # and interrupt() returns the user's choice. The node always runs inside a
+        # graph in production, so GraphInterrupt always has a runner to catch it.
+        _sem_choice = interrupt(_sem_payload)
+        _choice_map = (_sem_choice if isinstance(_sem_choice, dict)
+                       else {str(semantic_hold[0][0].get("id") or ""): _sem_choice})
+        for _tc, _dec in semantic_hold:
+            _tcid = str(_tc.get("id") or "")
+            _opt_id = _choice_map.get(_tcid) if isinstance(_choice_map, dict) else _sem_choice
+            _opt = next((o for o in (_dec.options or []) if o.get("id") == _opt_id), None)
+            _patch = (_opt or {}).get("slots_patch")
+            if _opt_id == "cancel":
+                semantic_blocked.append(ToolResult(
+                    tool_call_id=_tcid, name=_tc["name"],
+                    content="Commitment clarify cancelled by user.",
+                    is_error=True, duration_ms=0,
+                ))
+            elif _patch is not None:
+                _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
+                pending.append(_tc)  # patched → proceeds to HITL split + execute
+            else:
+                semantic_blocked.append(ToolResult(
+                    tool_call_id=_tcid, name=_tc["name"],
+                    content=(f"⏸ Commitment clarify unresolved for {_tc['name']}. "
+                             "Confirm the exact intent with the user, then retry."),
+                    is_error=True, duration_ms=0,
+                ))
 
     try:
         # ── HITL: separate safe and danger tools ──────────────────────

@@ -302,6 +302,9 @@ class RemindResolution:
     # candidate is retained so the autonomous mode can allow-with-best-guess
     # instead of forcing a question (plan §9 Phase 6).
     candidate_fire_at: datetime | None = None
+    # Phase 3: the concrete fire_at options for the clarify card. "memory_anchor"
+    # = event_at − lead; "from_now" = request_at + lead. The card offers both.
+    option_fire_ats: dict[str, datetime] = field(default_factory=dict)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -558,13 +561,19 @@ def resolve_remind(
 
     # Case 2: event mentioned + relative time but no before/after cue → ambiguous
     if matched and not before_cue:
-        pred = matched[0][0]
+        pred, _ev_at, _alias = matched[0]
         res.decision = "clarify"
         res.reason = (
             f"event {pred!r} mentioned with a relative time but no "
             "'before/after' cue — ask whether fire is before/after the event"
         )
         res.anchor = pred
+        # Phase 3: concrete fire_at options for the clarify card.
+        if _ev_at is not None and expr.lead is not None:
+            res.option_fire_ats = {
+                "memory_anchor": _ev_at - expr.lead,
+                "from_now": request_at + expr.lead,
+            }
         return res
 
     # Case 3: relative from now, no event mentioned
@@ -586,6 +595,11 @@ def resolve_remind(
                 res.anchor = "request_at"
                 res.fire_at = None
                 res.candidate_fire_at = fire_at  # retained for autonomous mode
+                # Phase 3: concrete fire_at options for the clarify card.
+                res.option_fire_ats = {
+                    "memory_anchor": event_at - expr.lead,
+                    "from_now": fire_at,
+                }
                 return res
             res.fire_at = fire_at
             res.anchor = "request_at"
