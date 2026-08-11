@@ -156,6 +156,15 @@ async def dispatch_worker(
 
         _scope_token = ScopeToken.from_metadata(context.metadata.get("commitment_scope"))
 
+    # Phase 5 (§3.11): no explicit scope → assign the default worker scope when
+    # enforcement is on (capped at HIGH; denies soul/identity/config). This makes
+    # the scope-token enforcement go live the moment the operator enables
+    # swarm_scope_enforce, without any per-dispatch wiring.
+    if _scope_token is None:
+        from kazma_core.safety.commitment.scope import default_worker_scope
+
+        _scope_token = default_worker_scope(_ws_id)
+
     try:
         async def _attempt() -> dict[str, Any]:
             worker.mark_dispatched(prompt)

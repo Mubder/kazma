@@ -31,6 +31,7 @@ __all__ = [
     "swarm_scope",
     "current_scope",
     "is_act_within_scope",
+    "default_worker_scope",
     "SEMANTIC_TIER_RANK",
 ]
 
@@ -115,6 +116,32 @@ async def swarm_scope(token: "ScopeToken | None") -> AsyncIterator[None]:
 def current_scope() -> ScopeToken | None:
     """The active worker scope, or None (main agent / no scope set)."""
     return _swarm_scope_ctx.get()
+
+
+def default_worker_scope(workspace_id: str | None = None) -> ScopeToken | None:
+    """The default scope assigned to a dispatched worker when enforcement is on
+    and no explicit scope was provided.
+
+    Returns None when ``agent.commitment.swarm_scope_enforce`` is OFF (the
+    default — safe rollout). When ON, returns a token capped at semantic_tier
+    HIGH (allows coding/fs/research; denies exec/outbound/config/identity
+    CRITICAL) and explicitly denying the critical-retention acts a spawned worker
+    must never self-perform (soul_delta/identity/config_change). Callers
+    (``worker_dispatch._do_dispatch``) use this so enforcement goes live the
+    moment the flag flips, without per-dispatch wiring.
+    """
+    try:
+        from .config import get_commitment_config
+
+        if not bool(get_commitment_config().get("swarm_scope_enforce")):
+            return None
+    except Exception:
+        return None
+    return ScopeToken(
+        max_semantic_tier=SemanticTier.HIGH,
+        denied_acts=frozenset({"soul_delta", "identity", "config_change"}),
+        workspace_id=workspace_id,
+    )
 
 
 def is_act_within_scope(act: str | None, semantic_tier: SemanticTier,

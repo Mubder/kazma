@@ -108,3 +108,40 @@ async def test_swarm_scope_contextvar_binds_and_resets():
     async with swarm_scope(token):
         assert current_scope() is token
     assert current_scope() is None  # reset after exit
+
+
+# ── default_worker_scope (Phase 5 activation, §3.11) ───────────────────────
+
+def test_default_worker_scope_off(monkeypatch):
+    """Flag OFF (default) → no scope assigned → workers unrestricted."""
+    monkeypatch.setenv("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE", "0")
+    from kazma_core.safety.commitment.scope import default_worker_scope
+    assert default_worker_scope("ws1") is None
+
+
+def test_default_worker_scope_on(monkeypatch):
+    """Flag ON → default HIGH ceiling + deny soul/identity/config."""
+    monkeypatch.setenv("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE", "1")
+    from kazma_core.safety.commitment.scope import default_worker_scope
+    s = default_worker_scope("ws1")
+    assert s is not None
+    assert s.max_semantic_tier == SemanticTier.HIGH
+    assert "soul_delta" in s.denied_acts
+    assert "identity" in s.denied_acts
+    assert "config_change" in s.denied_acts
+    assert s.workspace_id == "ws1"
+
+
+@pytest.mark.anyio
+async def test_default_scope_actually_denies_critical(monkeypatch):
+    """End-to-end: the default scope (bound via swarm_scope) denies a CRITICAL
+    act (shell_exec) and allows a HIGH act (file_write)."""
+    monkeypatch.setenv("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE", "1")
+    from kazma_core.safety.commitment.scope import default_worker_scope, swarm_scope
+
+    token = default_worker_scope()
+    async with swarm_scope(token):
+        d_crit = authorize_effect("shell_exec", {"command": "x"})
+        d_hi = authorize_effect("file_write", {"path": "/x"})
+    assert d_crit.decision == "deny"
+    assert d_hi.decision == "allow"
