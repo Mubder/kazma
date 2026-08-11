@@ -352,6 +352,16 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         parent=body_style,
         alignment=(TA_RIGHT if rtl else TA_JUSTIFY),
     )
+    # Citations/references footer: pin to start-of-reading-direction edge so RTL
+    # Arabic citations align to the column right (x1 ~ 535), matching the DOCX
+    # path (docx_set_rtl_paragraph) instead of body_style's TA_JUSTIFY left-pin.
+    cite_style = ParagraphStyle(
+        "KazmaCite",
+        parent=body_style,
+        alignment=(TA_RIGHT if rtl else TA_LEFT),
+        spaceBefore=0,
+        spaceAfter=4,
+    )
     # Lists: same indent both sides so EN/AR feel symmetric
     bullet_style = ParagraphStyle(
         "KazmaBullet",
@@ -397,6 +407,7 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         "number": number_style,
         "quote": quote_style,
         "code": code_style,
+        "cite": cite_style,
         "heading_fill": heading_fill,
     }
 
@@ -465,6 +476,16 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         _bar(title_html, title_style, fill=accent),
         Spacer(1, 14),
     ]
+    # Optional subtitle: smaller direction-aligned sub-heading (mirrors DOCX).
+    subtitle = payload.get("subtitle")
+    if subtitle:
+        story.append(
+            Paragraph(
+                inline_markdown_to_reportlab(str(subtitle), shape_arabic=shape_ar),
+                h3_style,
+            )
+        )
+        story.append(Spacer(1, 10))
 
     if payload.get("toc"):
         story.append(
@@ -583,7 +604,7 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
             story.append(
                 Paragraph(
                     inline_markdown_to_reportlab(str(line), shape_arabic=shape_ar),
-                    body_style,
+                    cite_style,
                 )
             )
     if payload.get("images"):
@@ -678,6 +699,15 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
         rtl=rtl,
         fill_hex=fill_title,
     )
+    # Optional subtitle: lighter heading bar (mirrors PDF).
+    if payload.get("subtitle"):
+        docx_heading_bar(
+            document,
+            str(payload["subtitle"]),
+            level=2,
+            rtl=rtl,
+            fill_hex=fill_h,
+        )
 
     header = str(payload.get("header") or chrome["brand"])
     footer = str(payload.get("footer") or chrome["brand"])

@@ -398,3 +398,62 @@ def test_generate_pdf_arabic_body_rtl_bbox(tmp_path: Path) -> None:
         f"Arabic body should span the page width (>=400pt); widest line = {max_line_width:.1f}"
     )
 
+
+
+def test_subtitle_and_ar_citations_rtl(tmp_path: Path) -> None:
+    """subtitle renders in both languages; AR citations right-align to the
+    column right edge (x1 ~ 535); EN body fills the column (TA_JUSTIFY 'LTR'
+    wrap). Regression-locks the cite_style fix that replaced body_style's
+    left-pinned TA_JUSTIFY for Arabic reference lines."""
+    import pymupdf
+    from kazma_core.documents.renderer_worker import _generate_pdf
+
+    ar_body = "تقرير شامل يوضح قدرات معالجة المستندات في منظومة كاظمة."
+    en_body = ("Executive summary covering the document-processing capabilities of "
+            "the Kazma agent framework, with native bilingual support for Arabic and "
+            "English plus advanced analytics driving smart recommendations across the platform.")
+
+    def lines(pdf):
+        doc = pymupdf.open(str(pdf))
+        out = []
+        for page in doc:
+            for block in page.get_text("dict").get("blocks", []):
+                for ln in block.get("lines", []):
+                    spans = ln.get("spans", [])
+                    if spans and 8.0 <= spans[0]["size"] <= 13.0:
+                        text = "".join(s.get("text", "") for s in spans)
+                        if len(text.strip()) > 2:
+                            bb = ln["bbox"]
+                            out.append((round(bb[1], 1), round(bb[0], 1), round(bb[2], 1), text))
+        return out
+
+    _generate_pdf(
+        tmp_path / "ar.pdf",
+        {
+            "title": "T", "subtitle": "Kazma", "lang": "ar", "rtl": True,
+            "citations": ["مصدر أول: تقرير داخلي غير مراجع", "مصدر ثان: بيانات داخلية"],
+            "sections": [{"heading": "الملخص", "body": ar_body}],
+        },
+        [],
+    )
+    _generate_pdf(
+        tmp_path / "en.pdf",
+        {
+            "title": "T", "subtitle": "Under title", "lang": "en",
+            "citations": ["First source: internal report"],
+            "sections": [{"heading": "Summary", "body": en_body}],
+        },
+        [],
+    )
+
+    ar = lines(tmp_path / "ar.pdf")
+    en = lines(tmp_path / "en.pdf")
+    assert any("Kazma" in t for _, _, _, t in ar), "AR subtitle missing"
+    assert any("Under title" in t for _, _, _, t in en), "EN subtitle missing"
+    # AR citations must be right-aligned (x1 ~ 535) and appear AFTER the short
+    # body; the old body_style TA_JUSTIFY bug pinned them left (x0 ~ 60).
+    after = [(y, x0, x1, t) for y, x0, x1, t in ar if y > 150.0 and x1 >= 528.0]
+    assert after, "AR citations not right-aligned after body: " + repr(after)
+    # EN body must justify to the full column (x1 ~ 535), not ragged-right.
+    en_wide = [x1 for _, x0, x1, t in en if x1 >= 528.0 and "Under title" not in t]
+    assert en_wide, "EN body did not fill the column"
