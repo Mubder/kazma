@@ -266,15 +266,16 @@ def test_ooxml_rejects_falsified_central_directory_size(
 def test_degraded_pdf_capability_does_not_advertise_tables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """pypdf-only installs are degraded (text only); tables require PyMuPDF/pdfplumber."""
+    """Text-only stacks (pypdf / pypdfium2) are degraded — tables need PyMuPDF/pdfplumber."""
     from kazma_core.documents import parsers
 
     real_import = parsers.importlib.import_module
 
     def import_text_only_pdf_stack(name: str):
+        # Full engines missing; text-only peers still importable.
         if name in {"pdfplumber", "fitz", "pymupdf"}:
             raise ImportError
-        if name == "pypdf":
+        if name in {"pypdf", "pypdfium2"}:
             return object()
         return real_import(name)
 
@@ -287,6 +288,8 @@ def test_degraded_pdf_capability_does_not_advertise_tables(
     assert capability.readiness is ParserReadiness.DEGRADED
     assert capability.features == ("pages", "text")
     assert "tables" not in capability.features
+    assert capability.reason is not None
+    assert "text-only" in capability.reason.lower()
 
 
 def test_encrypted_pdf_rejected_before_parser(
@@ -689,7 +692,11 @@ def test_pdf_parser_falls_back_when_pymupdf_fails(
     document_config: DocumentConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hard failure in PyMuPDF should fall through to pdfplumber, not abort."""
+    """Hard failure in PyMuPDF should fall through to another engine, not abort.
+
+    Optional pypdfium2 (text-only peer) may win the bake-off when present —
+    that is intentional multi-engine scoring, not a regression.
+    """
     pytest.importorskip("pdfplumber")
     from pypdf import PdfWriter
 
@@ -708,9 +715,16 @@ def test_pdf_parser_falls_back_when_pymupdf_fails(
     ir = pdf_mod.PdfParser().parse(
         path, _context(path, document_config, "pdf", "application/pdf")
     )
-    assert ir.metadata.get("extractor") in {"pdfplumber", "pypdf", "PyPDF2"}
+    assert ir.metadata.get("extractor") in {
+        "pypdfium2",
+        "pdfplumber",
+        "pypdf",
+        "PyPDF2",
+    }
     assert ir.pages
     assert ir.metadata.get("extractors_tried")
+    # pymupdf should appear as a failed/skipped attempt or be absent from winner
+    assert ir.metadata.get("extractor") != "pymupdf"
 
 
 def test_pdf_layout_reading_order_multi_column() -> None:

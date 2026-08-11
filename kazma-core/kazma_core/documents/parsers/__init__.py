@@ -25,9 +25,15 @@ _LIMITS = (
 
 
 def _pdf_health() -> tuple[ParserReadiness, str | None]:
-    """PDF readiness: PyMuPDF/pdfplumber/pypdfium2 = full; pypdf-only = text degraded."""
+    """PDF readiness: PyMuPDF or pdfplumber = full; text-only engines = degraded.
 
-    # PyMuPDF is preferred for logical-order Arabic + layout/tables.
+    pypdfium2 participates in the multi-engine *bake-off* when installed, but it
+    is text-only (no tables). Advertising READY + ``tables`` without PyMuPDF or
+    pdfplumber would over-promise capability — keep it DEGRADED like pypdf.
+    """
+
+    # Full readiness requires an engine that can deliver declared features
+    # (pages + text + tables): PyMuPDF or pdfplumber.
     for module in ("fitz", "pymupdf"):
         try:
             importlib.import_module(module)
@@ -39,21 +45,19 @@ def _pdf_health() -> tuple[ParserReadiness, str | None]:
         return ParserReadiness.READY, None
     except Exception:
         pass
-    # Optional PDFium peer (multi-engine bake-off) still counts as ready text.
-    try:
-        importlib.import_module("pypdfium2")
-        return (
-            ParserReadiness.READY,
-            None,
-        )
-    except Exception:
-        pass
-    for module in ("pypdf", "PyPDF2"):
+    # Text-only peers: still parse PDFs, but capability.features drops to
+    # degraded_features ("pages", "text") — no tables advertised.
+    for module, label in (
+        ("pypdfium2", "pypdfium2"),
+        ("pypdf", "pypdf"),
+        ("PyPDF2", "PyPDF2"),
+    ):
         try:
             importlib.import_module(module)
             return (
                 ParserReadiness.DEGRADED,
-                "PyMuPDF/pdfplumber unavailable; text-only PDF fallback is active",
+                f"PyMuPDF/pdfplumber unavailable; text-only PDF via {label} "
+                "(tables not advertised)",
             )
         except Exception:
             continue

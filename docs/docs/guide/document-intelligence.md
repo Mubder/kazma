@@ -102,7 +102,7 @@ Electronic (text-layer) PDFs are **not** OCR’d by default. The parser runs a
 | Order | Engine | Role |
 |---|---|---|
 | 1 | **PyMuPDF** | Primary — logical-order Arabic, tables, multi-column layout |
-| 2 | **pypdfium2** (optional) | PDFium peer in the score bake-off |
+| 2 | **pypdfium2** (optional) | PDFium peer in the score bake-off (text-only; capability is DEGRADED without PyMuPDF/pdfplumber so tables are not advertised) |
 | 3 | **pdfplumber** | Strong tables; Arabic may reverse if used alone |
 | 4 | **pypdf** | Text-only last resort |
 
