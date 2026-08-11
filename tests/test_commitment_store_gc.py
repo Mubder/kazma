@@ -16,9 +16,11 @@ from kazma_core.safety.commitment.store import (
     abort_pending_for_thread,
     create_commitment,
     delete_retained,
+    enforce_all_pending_caps,
     enforce_pending_cap,
     get_commitment,
     list_by_thread,
+    run_gc_cycle,
     sweep_expired,
     update_status,
 )
@@ -157,3 +159,38 @@ def test_list_by_thread_filters_status(ops_db):
     assert len(list_by_thread("t1")) == 2
     assert len(list_by_thread("t1", status="needs_confirm")) == 1
     assert len(list_by_thread("t2")) == 1
+
+
+# ── run_gc_cycle (the scheduler's entry point, §3.9) ───────────────────────
+
+def test_run_gc_cycle_runs_all_three_passes(ops_db):
+    """run_gc_cycle (called every 15min by the memory worker) does sweep +
+    pending-cap + retention in one pass and returns a summary."""
+    import sqlite3
+    from kazma_core.paths import memory_ops_db
+
+    # one pending commitment, aged past its TTL so this cycle sweeps it
+    exp = create_commitment(_cmt(status="needs_confirm"))
+    with sqlite3.connect(memory_ops_db()) as conn:
+        conn.execute("UPDATE commitments SET expires_at=? WHERE commitment_id=?",
+                     (time.time() - 10, exp))
+        conn.commit()
+    # an over-cap thread
+    for _ in range(PENDING_CAP_PER_THREAD + 1):
+        create_commitment(_cmt(thread_id="cap_thread", status="needs_confirm"))
+    summary = run_gc_cycle(ephemeral_days=30, critical_days=365)
+    assert summary["expired"] >= 1
+    assert summary["pending_capped"] >= 1
+    assert summary["retention_deleted"] >= 0
+    assert get_commitment(exp).status == "expired"
+
+
+def test_enforce_all_pending_caps_sweeps_every_thread(ops_db):
+    """The per-thread cap is enforced across ALL threads with pending state."""
+    for _ in range(PENDING_CAP_PER_THREAD + 2):
+        create_commitment(_cmt(thread_id="tA", status="needs_confirm"))
+        create_commitment(_cmt(thread_id="tB", status="needs_confirm"))
+    aborted = enforce_all_pending_caps()
+    assert aborted >= 4  # 2 over-cap per thread × 2 threads
+    assert len(list_by_thread("tA", status="needs_confirm")) == PENDING_CAP_PER_THREAD
+    assert len(list_by_thread("tB", status="needs_confirm")) == PENDING_CAP_PER_THREAD

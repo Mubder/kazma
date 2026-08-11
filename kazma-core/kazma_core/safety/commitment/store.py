@@ -37,8 +37,10 @@ __all__ = [
     "list_by_thread",
     "sweep_expired",
     "enforce_pending_cap",
+    "enforce_all_pending_caps",
     "abort_pending_for_thread",
     "delete_retained",
+    "run_gc_cycle",
 ]
 
 # ── statuses / policy decisions ────────────────────────────────────────────
@@ -402,6 +404,41 @@ def abort_pending_for_thread(thread_id: str, *, reason: str = "superseded_by_new
             aborted += 1
         conn.commit()
     return aborted
+
+
+def enforce_all_pending_caps(cap: int | None = None) -> int:
+    """§3.9 rule 6 across ALL threads: scan distinct threads with pending
+    commitments and enforce the cap on each. Used by the periodic GC cycle so
+    the cap stays bounded even when many threads accumulate pending state.
+    """
+    ensure_commitment_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT thread_id FROM commitments WHERE status IN "
+            "('draft','needs_clarify','needs_confirm','ready')",
+        ).fetchall()
+    total = 0
+    for r in rows:
+        total += enforce_pending_cap(r["thread_id"], cap=cap)
+    return total
+
+
+def run_gc_cycle(*, ephemeral_days: int | None = None,
+                 critical_days: int | None = None,
+                 cap: int | None = None) -> dict[str, int]:
+    """One full GC pass — what the memory-worker scheduler calls periodically.
+
+    Runs sweep_expired (rule 1) + enforce_all_pending_caps (rule 6) +
+    delete_retained (rules 3+4). Returns a summary for metrics/observability.
+    All three are idempotent + best-effort, so this is safe to call on any
+    cadence (default every 15 min, matching the shortest TTL).
+    """
+    return {
+        "expired": sweep_expired(),
+        "pending_capped": enforce_all_pending_caps(cap=cap),
+        "retention_deleted": delete_retained(ephemeral_days=ephemeral_days,
+                                             critical_days=critical_days),
+    }
 
 
 def delete_retained(now: float | None = None, *,
