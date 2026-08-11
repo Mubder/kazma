@@ -457,3 +457,42 @@ def test_subtitle_and_ar_citations_rtl(tmp_path: Path) -> None:
     # EN body must justify to the full column (x1 ~ 535), not ragged-right.
     en_wide = [x1 for _, x0, x1, t in en if x1 >= 528.0 and "Under title" not in t]
     assert en_wide, "EN body did not fill the column"
+
+
+def test_toc_items_align_per_language(tmp_path: Path) -> None:
+    """TOC numbered entries must follow reading direction: AR entries right-align
+    to the column edge (x1 ~ 535), EN entries left-align (x0 ~ 60). Regression
+    for the AR TOC item previously pinned to x0=60 by body_style(TA_JUSTIFY)."""
+    import pymupdf
+    from kazma_core.documents.renderer_worker import _generate_pdf
+
+    ar_body = "تقرير شامل يوضح قدرات معالجة المستندات في منظومة كاظمة."
+    en_body = "Executive summary covering document-processing capabilities of the platform."
+
+    def toc_entries(pdf: Path) -> list[tuple] :
+        doc = pymupdf.open(str(pdf))
+        out = []
+        for pi, page in enumerate(doc):
+            for b in page.get_text("dict").get("blocks", []):
+                for ln in b.get("lines", []):
+                    sp = ln.get("spans", [])
+                    if sp and 8.0 <= sp[0]["size"] <= 13.0:
+                        txt = "".join(s.get("text", "") for s in sp)
+                        if len(txt.strip()) > 2:
+                            bb = ln["bbox"]
+                            out.append((pi + 1, round(bb[1], 1), round(bb[0], 1), round(bb[2], 1), txt))
+        return out
+
+    _generate_pdf(tmp_path / "ar.pdf",
+        {"title": "T", "lang": "ar", "rtl": True, "toc": True,
+         "sections": [{"heading": "الملخص", "body": ar_body}]}, [])
+    _generate_pdf(tmp_path / "en.pdf",
+        {"title": "T", "lang": "en", "toc": True,
+         "sections": [{"heading": "Summary", "body": en_body}]}, [])
+
+    ar = toc_entries(tmp_path / "ar.pdf")
+    en = toc_entries(tmp_path / "en.pdf")
+    ar_toc = [x1 for pg, y, x0, x1, t in ar if pg == 1 and 150.0 <= y <= 320.0 and x1 >= 528.0]
+    assert ar_toc, "AR TOC entry not right-aligned to column edge"
+    en_toc = [x0 for pg, y, x0, x1, t in en if pg == 1 and 150.0 <= y <= 320.0 and x0 <= 70.0]
+    assert en_toc, "EN TOC entry not left-aligned"

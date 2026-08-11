@@ -501,7 +501,7 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                 story.append(
                     Paragraph(
                         inline_markdown_to_reportlab(line, shape_arabic=shape_ar),
-                        body_style,
+                        cite_style,
                     )
                 )
         story.append(PageBreak())
