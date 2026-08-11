@@ -29,6 +29,7 @@ _DEFAULTS: dict[str, Any] = {
     "high_confidence": 0.85,
     "enforce_unknown_mutators": False,
     "swarm_scope_enforce": False,
+    "soul_requires_confirm": False,
     "false_clarify_budget": 0.15,
     "ttl": {  # seconds; None = no expiry (terminal)
         "draft": 3600.0,
@@ -72,6 +73,9 @@ def get_commitment_config() -> dict[str, Any]:
     env_sse = _env_bool("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE")
     if env_sse is not None:
         cfg["swarm_scope_enforce"] = env_sse
+    env_src = _env_bool("KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM")
+    if env_src is not None:
+        cfg["soul_requires_confirm"] = env_src
 
     # ── ConfigStore (Settings UI / programmatic) ───────────────────────────
     try:
@@ -96,6 +100,9 @@ def get_commitment_config() -> dict[str, Any]:
         sse = cs.get("agent.commitment.swarm_scope_enforce")
         if sse is not None:
             cfg["swarm_scope_enforce"] = bool(sse)
+        src = cs.get("agent.commitment.soul_requires_confirm")
+        if src is not None:
+            cfg["soul_requires_confirm"] = bool(src)
         cap = cs.get("agent.commitment.pending_cap_per_thread")
         if cap is not None:
             try:

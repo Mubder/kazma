@@ -302,7 +302,8 @@ Output ONLY the delta text, no preamble."""
 
     # ── Apply mutation ──────────────────────────────────────────────────
 
-    async def apply_mutation(self, worker_name: str, delta: str) -> bool:
+    async def apply_mutation(self, worker_name: str, delta: str,
+                             *, commitment_id: str | None = None) -> bool:
         """Auto-apply the Soul delta to the worker's system prompt.
 
         Deltas are applied immediately, subject to the ``_cap_evolution_prompt``
@@ -318,12 +319,13 @@ Output ONLY the delta text, no preamble."""
         if not delta or not self_improvement_enabled():
             return False
         try:
-            return await self._auto_apply(worker_name, delta)
+            return await self._auto_apply(worker_name, delta, commitment_id=commitment_id)
         except Exception as exc:
             logger.warning("[SelfImprovement] Auto-apply failed for %s: %s", worker_name, exc)
             return False
 
-    async def _auto_apply(self, worker_name: str, delta: str) -> bool:
+    async def _auto_apply(self, worker_name: str, delta: str,
+                          *, commitment_id: str | None = None) -> bool:
         """Apply the delta to the worker's system prompt with safety caps."""
         # Defense-in-depth injection guard (audit C1): the creation-time check
         # in _analyze_* already rejects injected deltas, but re-check here in
@@ -334,6 +336,15 @@ Output ONLY the delta text, no preamble."""
             logger.warning(
                 "[SelfImprovement] Delta for '%s' REJECTED at apply (injection marker) — dropped",
                 worker_name,
+            )
+            return False
+        # Commitment Layer Phase 7 (§R2.5): when soul_requires_confirm is ON and
+        # a commitment_id was provided, the worker delta applies only once that
+        # commitment is 'committed'. Same gate as apply_agent_mutation.
+        if commitment_id and _soul_requires_confirm() and not _soul_commitment_confirmed(commitment_id):
+            logger.info(
+                "[SelfImprovement] worker '%s' soul delta held — commitment %s not confirmed",
+                worker_name, commitment_id,
             )
             return False
 
@@ -605,8 +616,80 @@ def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
         return block
 
 
-def apply_agent_mutation(agent_id: str, delta: str) -> bool:
-    """Cap and persist a Soul delta for the main (or named) agent."""
+def _soul_requires_confirm() -> bool:
+    """Commitment Layer Phase 7 flag (live): must a soul delta be confirmed
+    before it applies? Default OFF — safe rollout (mirrors swarm_scope_enforce)."""
+    try:
+        from kazma_core.safety.commitment.config import get_commitment_config
+
+        return bool(get_commitment_config().get("soul_requires_confirm"))
+    except Exception:
+        return False
+
+
+def _soul_commitment_confirmed(commitment_id: str) -> bool:
+    """True iff the soul commitment is in the 'committed' (confirmed) state.
+
+    Fail-closed: an unreadable/unknown commitment is treated as NOT confirmed
+    (the delta is held). Safe because the whole gate is behind
+    soul_requires_confirm (default off).
+    """
+    try:
+        from kazma_core.safety.commitment.store import get_commitment
+
+        c = get_commitment(commitment_id)
+        return c is not None and c.status == "committed"
+    except Exception:
+        return False
+
+
+def confirm_soul_delta(commitment_id: str) -> bool:
+    """Flip a soul commitment to 'committed' (the HITL approve path calls this).
+
+    Returns True if flipped. The caller then re-applies the delta so it lands
+    (apply is event-driven; a confirm that only flips status would leave the
+    delta unapplied — §R2.5 design note).
+    """
+    try:
+        from kazma_core.safety.commitment.store import update_status
+
+        c = update_status(commitment_id, "committed", event_type="soul_confirmed")
+        return c is not None
+    except Exception:
+        logger.debug("[SelfImprovement] confirm_soul_delta %s failed", commitment_id, exc_info=True)
+        return False
+
+
+def mint_soul_commitment(delta: str, *, agent_id: str | None = None,
+                         worker_name: str | None = None, thread_id: str | None = None) -> str | None:
+    """Mint a needs_confirm commitment for a soul delta (Phase 7).
+
+    Returns the commitment_id, or None if minting is off/failed. Called at the
+    apply-site callers when soul_requires_confirm is ON so the delta can later
+    be confirmed + re-applied. act='soul_delta' (critical retention tier).
+    """
+    if not _soul_requires_confirm():
+        return None
+    try:
+        from kazma_core.safety.commitment.store import Commitment, create_commitment
+
+        c = Commitment(
+            thread_id=thread_id or "", act="soul_delta",
+            goal_text=(delta or "")[:200], tool_name="self_improvement",
+            args_digest="", tenant_id="default",
+            slots={"delta": (delta or "")[:500],
+                   "agent_id": agent_id, "worker_name": worker_name},
+        )
+        c.status = "needs_confirm"
+        c.policy_decision = "confirm"
+        return create_commitment(c)
+    except Exception:
+        logger.debug("[SelfImprovement] mint_soul_commitment failed", exc_info=True)
+        return None
+
+
+def apply_agent_mutation(agent_id: str, delta: str, *, commitment_id: str | None = None) -> bool:
+    """Cap and persist a Soul delta for the main (or named) agent)."""
     if not delta or not self_improvement_enabled():
         return False
     # Defense-in-depth injection guard (audit C1): the creation-time check in
@@ -618,6 +701,17 @@ def apply_agent_mutation(agent_id: str, delta: str) -> bool:
         logger.warning(
             "[SelfImprovement] Agent '%s' delta REJECTED at apply (injection marker) — dropped",
             agent_id,
+        )
+        return False
+    # Commitment Layer Phase 7 (§R2.5): behavior mutation is a critical act.
+    # When soul_requires_confirm is ON and a commitment_id was provided, the
+    # delta applies ONLY once that commitment is 'committed' (confirmed via the
+    # HITL bus). An unconfirmed delta is skipped — it stays pending until the
+    # confirm handler re-applies. Gated OFF by default (safe rollout).
+    if commitment_id and _soul_requires_confirm() and not _soul_commitment_confirmed(commitment_id):
+        logger.info(
+            "[SelfImprovement] agent '%s' soul delta held — commitment %s not confirmed",
+            agent_id, commitment_id,
         )
         return False
     import time as _time
