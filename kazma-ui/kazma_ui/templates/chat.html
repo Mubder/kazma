@@ -108,15 +108,18 @@
     </div>
 
     <!-- Chat Input Area -->
-    <div class="chat-input-area">
-      <div class="input-wrapper">
-        <button id="attach-btn" class="btn-icon" title="{{ t('chat.attach_file') }}" style="padding:4px;">
+    <div class="chat-input-area" id="chat-input-area">
+      {# Pending attachments shown above the composer (not as placeholder text) #}
+      <div id="chat-attachments" class="chat-attachments" hidden aria-live="polite"></div>
+      <div class="input-wrapper" id="chat-drop-zone">
+        <button id="attach-btn" class="btn-icon" title="{{ t('chat.attach_file') }}" style="padding:4px;" type="button">
           <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
           </svg>
         </button>
-        <input type="file" id="file-input" style="display:none;" accept=".txt,.py,.js,.ts,.json,.yaml,.yml,.md,.csv,.log,.html,.css,.sh,.bash,.toml,.ini,.cfg,.env,.xml">
-        <button id="voice-btn" class="btn-icon" title="Record voice (Hold to record)" style="padding:4px;display:none;" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="KazmaVoice.startRecording()" ontouchend="KazmaVoice.stopRecording()">
+        {# No accept= filter — any file type (docx, pdf, images, …) is selectable without switching to "All Files" #}
+        <input type="file" id="file-input" style="display:none;" multiple>
+        <button id="voice-btn" class="btn-icon" title="Record voice (Hold to record)" style="padding:4px;display:none;" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="KazmaVoice.startRecording()" ontouchend="KazmaVoice.stopRecording()">
           <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
             <path d="M19 10v2a7 7 0 01-14 0v-2"/>
@@ -127,7 +130,7 @@
             <circle cx="12" cy="12" r="10"/>
           </svg>
         </button>
-        <button id="voice-live-btn" class="btn-icon" title="Toggle Live Voice Mode (Streaming)" style="padding:4px;display:none;" onclick="KazmaVoice.toggleLiveVoice()">
+        <button id="voice-live-btn" class="btn-icon" title="Toggle Live Voice Mode (Streaming)" style="padding:4px;display:none;" type="button" onclick="KazmaVoice.toggleLiveVoice()">
           <svg id="live-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
           </svg>
@@ -136,14 +139,17 @@
           id="chat-input"
           class="chat-input"
           rows="1"
+          dir="auto"
           placeholder="{{ t('chat.placeholder') }}"
+          spellcheck="true"
         ></textarea>
-        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter / Ctrl+Enter)">
+        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter / Ctrl+Enter)" type="button">
           <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
         </button>
       </div>
+      <div class="chat-drop-hint" id="chat-drop-hint" hidden aria-hidden="true">{{ t('chat.drop_files') }}</div>
       <div class="input-footer">
         <span id="session-cost" class="cost-badge">$0.0000</span>
         <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
@@ -180,6 +186,10 @@
     plan_progress: {{ t('chat.plan_progress') | tojson }},
     thinking_queue: {{ t('chat.thinking_queue') | tojson }},
     type_message: {{ t('chat.type_message') | tojson }},
+    drop_files: {{ t('chat.drop_files') | tojson }},
+    remove_attachment: {{ t('chat.remove_attachment') | tojson }},
+    uploading: {{ t('chat.uploading') | tojson }},
+    attached: {{ t('chat.attached') | tojson }},
     stop_generation: {{ t('chat.stop_generation') | tojson }},
     yolo_running: {{ t('chat.yolo_running') | tojson }},
     tokens: {{ t('chat.tokens') | tojson }},

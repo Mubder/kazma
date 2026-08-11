@@ -86,19 +86,26 @@
     if (inputEl) {
       inputEl.addEventListener('keydown', onInputKeydown);
       inputEl.addEventListener('input', onInputResize);
+      // Ensure dir=auto is set even if the template cache is stale
+      if (!inputEl.getAttribute('dir')) inputEl.setAttribute('dir', 'auto');
+      syncInputBidi();
     }
     if (sendBtn) sendBtn.addEventListener('click', function() {
       if (_isGenerating) { abortGeneration(); } else { sendMessage(); }
     });
 
     // Make the entire input box focus the text field (no dead zones).
-    var inputWrapper = document.querySelector('.input-wrapper');
+    var inputWrapper = document.querySelector('.input-wrapper') || $('chat-drop-zone');
     if (inputWrapper && inputEl) {
       inputWrapper.addEventListener('click', function (e) {
         if (e.target.closest('button')) return; // let buttons do their job
+        if (e.target.closest('.chat-attach-chip')) return;
         inputEl.focus();
       });
     }
+
+    // Drag-and-drop attachments onto the composer
+    setupChatDropZone();
 
     // Model selector
     if (modelSelectorEl) {
@@ -127,12 +134,23 @@
       });
     }
 
-    // File upload
+    // File upload (any type; multi-select + drag-drop)
     var fileInput = $('file-input');
     var attachBtn = $('attach-btn');
     if (attachBtn && fileInput) {
       attachBtn.addEventListener('click', function() { fileInput.click(); });
       fileInput.addEventListener('change', onFileSelected);
+    }
+    // Attachment chip remove (delegation)
+    var attachStrip = $('chat-attachments');
+    if (attachStrip) {
+      attachStrip.addEventListener('click', function(e) {
+        var btn = e.target.closest('[data-remove-attach]');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        removePendingAttachment(btn.getAttribute('data-remove-attach'));
+      });
     }
 
     // Session list click delegation
@@ -342,6 +360,38 @@
       showSlashMenu(v.toLowerCase());
     } else {
       hideSlashMenu();
+    }
+    // Per-content bidi: Arabic in an English UI needs rtl base + Arabic font
+    syncInputBidi();
+  }
+
+  /**
+   * Keep the composer base direction in sync with typed content.
+   * English UI (html dir=ltr) still must render Arabic input RTL so caret,
+   * alignment, and mixed Latin/Arabic order are correct.
+   */
+  function syncInputBidi() {
+    if (!inputEl) return;
+    var v = inputEl.value || '';
+    var hasAr = window.KazmaBidi
+      ? KazmaBidi.hasArabic(v)
+      : /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(v);
+    if (!v) {
+      inputEl.setAttribute('dir', 'auto');
+      inputEl.classList.remove('ar-input');
+      return;
+    }
+    if (hasAr) {
+      var arDom = window.KazmaBidi
+        ? KazmaBidi.isArabicDominant(v)
+        : true;
+      // First strong char Arabic → rtl; mixed but Arabic present → auto
+      // (browser picks from first strong). Dominant Arabic forces rtl.
+      inputEl.setAttribute('dir', arDom ? 'rtl' : 'auto');
+      inputEl.classList.add('ar-input');
+    } else {
+      inputEl.setAttribute('dir', 'ltr');
+      inputEl.classList.remove('ar-input');
     }
   }
 
@@ -585,21 +635,103 @@
 
   // ── File handling ─────────────────────────────────────
   // Pending attachments accumulated for the next send. Text files stay
-  // client-side (inlined); binary files (images, PDFs, etc.) are uploaded
-  // to /api/chat/upload and referenced by the returned descriptor.
+  // client-side (inlined); binary files (images, PDFs, docs, etc.) are
+  // uploaded to /api/chat/upload and referenced by the returned descriptor.
+  // Chips render ABOVE the composer — never buried in the placeholder.
   var pendingText = '';
   var pendingTextName = '';
   var pendingUploads = []; // [{id, kind, mime, filename}]
+  var _attachChipSeq = 0; // local ids for in-flight upload chips
 
   function _isTextFile(file) {
-    var allowedTypes = ['text/plain', 'text/markdown', 'text/html', 'application/json', 'text/csv', 'text/x-python', 'text/javascript'];
-    var allowedExts = ['.txt', '.md', '.markdown', '.json', '.csv', '.py', '.js', '.ts', '.yaml', '.yml', '.xml', '.html', '.css', '.sh', '.sql'];
+    var allowedTypes = [
+      'text/plain', 'text/markdown', 'text/html', 'application/json',
+      'text/csv', 'text/x-python', 'text/javascript', 'application/javascript',
+      'text/css', 'text/xml', 'application/xml', 'text/yaml', 'application/x-yaml'
+    ];
+    var allowedExts = [
+      '.txt', '.md', '.markdown', '.json', '.csv', '.py', '.js', '.ts',
+      '.yaml', '.yml', '.xml', '.html', '.css', '.sh', '.sql', '.log',
+      '.toml', '.ini', '.cfg', '.env', '.bash'
+    ];
     var ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
     return allowedTypes.indexOf(file.type) !== -1 || allowedExts.indexOf(ext) !== -1;
   }
 
-  function onFileSelected(e) {
-    var file = e.target.files[0];
+  function _defaultPlaceholder() {
+    return ti('type_message', ti('placeholder', 'Type your message\u2026 (Enter to send)'));
+  }
+
+  function renderPendingAttachments() {
+    var strip = $('chat-attachments');
+    if (!strip) return;
+    var chips = [];
+    if (pendingTextName) {
+      chips.push({
+        key: 'text',
+        name: pendingTextName,
+        kind: 'text',
+        uploading: false
+      });
+    }
+    pendingUploads.forEach(function(u) {
+      chips.push({
+        key: 'up:' + (u.id || u._localId || u.filename),
+        name: u.filename || u.id || 'file',
+        kind: u.kind || 'file',
+        uploading: !!u._uploading
+      });
+    });
+    if (!chips.length) {
+      strip.innerHTML = '';
+      strip.hidden = true;
+      return;
+    }
+    strip.hidden = false;
+    var removeLabel = ti('remove_attachment', 'Remove attachment');
+    strip.innerHTML = chips.map(function(c) {
+      var icon = c.uploading ? '\u23F3' : '\uD83D\uDCCE';
+      var status = c.uploading
+        ? ' <span class="chat-attach-status">' + escapeHtml(ti('uploading', 'Uploading\u2026')) + '</span>'
+        : '';
+      return (
+        '<div class="chat-attach-chip' + (c.uploading ? ' is-uploading' : '') + '" data-attach-key="' + escapeHtml(c.key) + '" title="' + escapeHtml(c.name) + '">' +
+          '<span class="chat-attach-icon" aria-hidden="true">' + icon + '</span>' +
+          '<span class="chat-attach-name" dir="auto">' + escapeHtml(c.name) + '</span>' +
+          status +
+          (c.uploading ? '' :
+            '<button type="button" class="chat-attach-remove" data-remove-attach="' + escapeHtml(c.key) + '" title="' + escapeHtml(removeLabel) + '" aria-label="' + escapeHtml(removeLabel) + '">&times;</button>') +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function removePendingAttachment(key) {
+    if (!key) return;
+    if (key === 'text') {
+      pendingText = '';
+      pendingTextName = '';
+    } else if (key.indexOf('up:') === 0) {
+      var id = key.slice(3);
+      pendingUploads = pendingUploads.filter(function(u) {
+        return String(u.id || u._localId || u.filename) !== id;
+      });
+    }
+    renderPendingAttachments();
+    if (inputEl && !pendingTextName && !pendingUploads.length) {
+      inputEl.placeholder = _defaultPlaceholder();
+    }
+  }
+
+  function clearPendingAttachments() {
+    pendingText = '';
+    pendingTextName = '';
+    pendingUploads = [];
+    renderPendingAttachments();
+    if (inputEl) inputEl.placeholder = _defaultPlaceholder();
+  }
+
+  function attachFile(file) {
     if (!file) return;
     // Text files ≤ 1MB are still inlined client-side (cheap, no upload).
     if (_isTextFile(file) && file.size <= 1048576) {
@@ -607,33 +739,155 @@
       reader.onload = function(evt) {
         pendingText = evt.target.result;
         pendingTextName = file.name;
-        KS.toast('Attached: ' + file.name + ' (' + KS.formatTokens(file.size) + ' bytes)', 'info', 2500);
-        inputEl.placeholder = '\uD83D\uDCCE ' + file.name + ' attached. Type a message\u2026';
+        KS.toast((ti('attached', 'Attached') + ': ' + file.name), 'info', 2500);
+        renderPendingAttachments();
+      };
+      reader.onerror = function() {
+        KS.toast('Failed to read ' + file.name, 'error', 3000);
       };
       reader.readAsText(file);
-      e.target.value = '';
       return;
     }
     // Everything else (images, PDFs, docs, large text) is uploaded.
     if (file.size > 20 * 1024 * 1024) {
-      KS.toast('File too large (max 20MB)', 'error', 3000);
-      e.target.value = '';
+      KS.toast('File too large (max 20MB): ' + file.name, 'error', 3000);
       return;
     }
-    KS.toast('Uploading ' + file.name + '\u2026', 'info', 2000);
+    var localId = 'local-' + (++_attachChipSeq);
+    var placeholder = {
+      id: '',
+      _localId: localId,
+      kind: (file.type || '').indexOf('image/') === 0 ? 'image' : 'file',
+      mime: file.type || 'application/octet-stream',
+      filename: file.name,
+      _uploading: true
+    };
+    pendingUploads.push(placeholder);
+    renderPendingAttachments();
     var fd = new FormData();
     fd.append('file', file);
     fetch('/api/chat/upload', { method: 'POST', body: fd })
-      .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('Upload failed (' + r.status + ')')); })
+      .then(function(r) {
+        if (!r.ok) {
+          return r.json().catch(function() { return {}; }).then(function(body) {
+            var detail = (body && body.detail) || ('Upload failed (' + r.status + ')');
+            throw new Error(typeof detail === 'string' ? detail : 'Upload failed (' + r.status + ')');
+          });
+        }
+        return r.json();
+      })
       .then(function(desc) {
-        pendingUploads.push(desc);
-        KS.toast('Attached: ' + (desc.filename || file.name), 'info', 2500);
-        inputEl.placeholder = '\uD83D\uDCCE ' + (desc.filename || file.name) + ' attached. Type a message\u2026';
+        // Replace the in-flight chip with the server descriptor
+        var idx = -1;
+        for (var i = 0; i < pendingUploads.length; i++) {
+          if (pendingUploads[i]._localId === localId) { idx = i; break; }
+        }
+        if (idx >= 0) {
+          pendingUploads[idx] = {
+            id: desc.id,
+            kind: desc.kind || placeholder.kind,
+            mime: desc.mime || placeholder.mime,
+            filename: desc.filename || file.name
+          };
+        } else {
+          pendingUploads.push(desc);
+        }
+        KS.toast((ti('attached', 'Attached') + ': ' + (desc.filename || file.name)), 'info', 2500);
+        renderPendingAttachments();
       })
       .catch(function(err) {
-        KS.toast('Upload failed: ' + err.message, 'error', 3500);
+        pendingUploads = pendingUploads.filter(function(u) {
+          return u._localId !== localId;
+        });
+        renderPendingAttachments();
+        KS.toast('Upload failed: ' + (err && err.message ? err.message : err), 'error', 3500);
       });
+  }
+
+  function attachFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    for (var i = 0; i < fileList.length; i++) {
+      attachFile(fileList[i]);
+    }
+  }
+
+  function onFileSelected(e) {
+    var files = e.target.files;
+    if (!files || !files.length) return;
+    attachFiles(files);
     e.target.value = '';
+  }
+
+  function setupChatDropZone() {
+    var zone = $('chat-input-area') || document.querySelector('.chat-input-area');
+    if (!zone) return;
+    var hint = $('chat-drop-hint');
+    var dragDepth = 0;
+
+    function hasFiles(e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      if (dt.types && typeof dt.types.indexOf === 'function') {
+        return dt.types.indexOf('Files') !== -1;
+      }
+      if (dt.types) {
+        for (var i = 0; i < dt.types.length; i++) {
+          if (dt.types[i] === 'Files') return true;
+        }
+      }
+      return !!(dt.files && dt.files.length);
+    }
+
+    function setDrag(active) {
+      zone.classList.toggle('is-dragover', !!active);
+      if (hint) {
+        hint.hidden = !active;
+        hint.setAttribute('aria-hidden', active ? 'false' : 'true');
+      }
+    }
+
+    zone.addEventListener('dragenter', function(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      setDrag(true);
+    });
+    zone.addEventListener('dragover', function(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDrag(true);
+    });
+    zone.addEventListener('dragleave', function(e) {
+      if (!hasFiles(e) && dragDepth === 0) return;
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDrag(false);
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dragDepth = 0;
+      setDrag(false);
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) attachFiles(files);
+    });
+    // Prevent the browser from navigating away if a file is dropped outside
+    // the zone but still on the chat page (common accidental drops).
+    var chatMain = document.querySelector('.chat-main');
+    if (chatMain && chatMain !== zone) {
+      chatMain.addEventListener('dragover', function(e) {
+        if (hasFiles(e)) e.preventDefault();
+      });
+      chatMain.addEventListener('drop', function(e) {
+        if (!hasFiles(e)) return;
+        // If drop landed outside the composer, still attach (UX-friendly)
+        if (!zone.contains(e.target)) {
+          e.preventDefault();
+          var files2 = e.dataTransfer && e.dataTransfer.files;
+          if (files2 && files2.length) attachFiles(files2);
+        }
+      });
+    }
   }
 
   // ── Model selector ───────────────────────────────────
@@ -805,7 +1059,15 @@
   function sendMessage() {
     var text = (inputEl.value || '').trim();
     var hasTextAtt = !!pendingText;
-    var hasUploads = pendingUploads.length > 0;
+    // Ignore in-flight uploads (no server id yet). Block send while any
+    // upload is still running so we don't discard the in-flight file.
+    var readyUploads = pendingUploads.filter(function(u) { return u && u.id && !u._uploading; });
+    var hasUploads = readyUploads.length > 0;
+    var stillUploading = pendingUploads.some(function(u) { return u && u._uploading; });
+    if (stillUploading) {
+      KS.toast(ti('uploading', 'Uploading\u2026'), 'info', 2000);
+      return;
+    }
     if (!text && !hasTextAtt && !hasUploads) return;
 
     // Track for the empty-turn Retry button (agent-stopped-talking layer 4).
@@ -861,16 +1123,17 @@
     // Build message content. Text attachments are inlined; binary uploads
     // are referenced as attachments and rendered in the transcript by name.
     var content = text;
-    var displayAttachName = pendingTextName || (pendingUploads[0] && pendingUploads[0].filename) || '';
+    var displayAttachName = pendingTextName || (readyUploads[0] && readyUploads[0].filename) || '';
     if (pendingText) {
       content = text
         ? text + '\n\n[Attached file: ' + pendingTextName + ']\n```\n' + pendingText.slice(0, 8000) + '\n```'
         : '[Attached file: ' + pendingTextName + ']\n```\n' + pendingText.slice(0, 8000) + '\n```';
     } else if (hasUploads && !text) {
-      content = '[' + (pendingUploads[0].kind || 'file') + ']';
+      content = '[' + (readyUploads[0].kind || 'file') + ']';
     }
     // Build the attachments payload for the server (binary uploads only).
-    var attachmentsPayload = pendingUploads.map(function(u) {
+    // Drop in-flight placeholders so the server never sees empty ids.
+    var attachmentsPayload = readyUploads.map(function(u) {
       return { id: u.id, kind: u.kind, mime: u.mime, filename: u.filename };
     });
 
@@ -884,13 +1147,12 @@
     tokenAccum = '';
     disableInput(); // → beginTurn → progress panel on new assistant bubble
 
-    // Reset attachment state
-    pendingText = '';
-    pendingTextName = '';
-    pendingUploads = [];
+    // Reset attachment state (chips above the box, not placeholder text)
+    clearPendingAttachments();
     inputEl.value = '';
     inputEl.style.height = 'auto';
-    inputEl.placeholder = ti('type_message', 'Type your message\u2026 (Enter to send)');
+    inputEl.placeholder = _defaultPlaceholder();
+    syncInputBidi();
 
     // Show typing indicator (tracked so abortGeneration can clear it)
     activeTypingEl = typingEl;
@@ -1894,6 +2156,13 @@
           modelBit +
         '</div>' +
       '</div>';
+
+    // Bidi for user + assistant bubbles: English UI must still render Arabic
+    // RTL (dir=auto alone is not enough for mixed/dominant Arabic blocks).
+    var msgTextEl = wrapper.querySelector('.message-text');
+    if (msgTextEl && window.KazmaBidi) {
+      try { KazmaBidi.apply(msgTextEl, content || ''); } catch (e) { /* ignore */ }
+    }
 
     // Restore the persisted CoT workbench (activity log) for assistant
     // messages when returning to a session after refresh / tab switch.

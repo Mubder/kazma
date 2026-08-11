@@ -344,6 +344,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "chat.send": {"en": "Send", "ar": "إرسال"},
     "chat.attach_file": {"en": "Attach file", "ar": "إرفاق ملف"},
+    "chat.drop_files": {
+        "en": "Drop files to attach",
+        "ar": "أفلت الملفات للإرفاق",
+    },
+    "chat.remove_attachment": {
+        "en": "Remove attachment",
+        "ar": "إزالة المرفق",
+    },
+    "chat.uploading": {"en": "Uploading…", "ar": "جارٍ الرفع…"},
+    "chat.attached": {"en": "Attached", "ar": "مرفق"},
     "chat.tokens": {"en": "tokens", "ar": "رمز"},
     "ws.tools_completed": {"en": "Completed: {tools}", "ar": "تم التنفيذ: {tools}"},
     "ws.task_processing": {"en": "Task processing completed.", "ar": "اكتملت معالجة المهمة."},

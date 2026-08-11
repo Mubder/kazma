@@ -1504,12 +1504,21 @@ tbody tr:last-child td {
   direction: rtl;
   text-align: start;
   unicode-bidi: isolate;
+  /* English UI still inherits Inter + OpenType features from body; those
+     break Arabic joining. Switch face + clear features for Arabic blocks. */
+  font-family: var(--font-arabic);
+  font-feature-settings: normal;
+  letter-spacing: normal;
 }
 .en-dominant,
 [dir="ltr"].bidi-content,
 [dir="ltr"].message-text {
   direction: ltr;
   text-align: start;
+}
+/* Mixed content on LTR page that still contains Arabic (dir=auto) */
+.message-text[dir="auto"]:not(.en-dominant) {
+  unicode-bidi: plaintext;
 }
 /* Isolate inline Latin/Arabic spans so numbers and brand names keep order */
 .bidi-isolate {
@@ -1726,9 +1735,99 @@ tbody tr:last-child td {
 }
 
 .chat-input-area {
+  position: relative;
   padding: var(--sp-4) var(--sp-6);
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
+}
+/* Pending attachments — chips ABOVE the composer, never in the placeholder */
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 0;
+}
+.chat-attachments[hidden] {
+  display: none !important;
+}
+.chat-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px 4px 10px;
+  background: var(--bg-elevated, var(--bg-surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+.chat-attach-chip.is-uploading {
+  opacity: 0.75;
+  border-style: dashed;
+}
+.chat-attach-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+.chat-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.chat-attach-status {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+.chat-attach-remove {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.chat-attach-remove:hover {
+  background: color-mix(in srgb, var(--error, #ef4444) 18%, transparent);
+  color: var(--error, #ef4444);
+}
+/* Drag-and-drop overlay on the composer */
+.chat-input-area.is-dragover .input-wrapper {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow, color-mix(in srgb, var(--accent) 35%, transparent));
+  background: color-mix(in srgb, var(--accent) 8%, var(--tint, var(--bg-surface)));
+}
+.chat-drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg, 12px);
+  margin: var(--sp-3) var(--sp-4);
+}
+.chat-drop-hint[hidden] {
+  display: none !important;
 }
 .input-wrapper {
   display: flex;
@@ -1738,6 +1837,7 @@ tbody tr:last-child td {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--sp-2) var(--sp-3);
+  transition: border-color var(--transition-fast, 150ms ease), box-shadow var(--transition-fast, 150ms ease), background var(--transition-fast, 150ms ease);
 }
 .input-wrapper:focus-within {
   border-color: var(--accent);
@@ -1759,6 +1859,25 @@ tbody tr:last-child td {
   max-height: 200px;
   min-height: 48px;
   align-self: stretch;
+  /* Per-content bidi: browser uses first strong character when dir=auto */
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+/* Arabic typed into English UI: Arabic-capable face + no Inter OT features
+   that break Arabic joining. dir=rtl / .ar-input set by syncInputBidi(). */
+.chat-input.ar-input,
+.chat-input[dir="rtl"],
+.chat-input[dir="auto"].ar-input {
+  font-family: var(--font-arabic);
+  font-feature-settings: normal;
+  letter-spacing: normal;
+}
+/* Arabic-dominant bubbles on an English (LTR) page: keep text RTL aligned */
+.message-user .message-text.ar-dominant,
+.message-assistant .message-text.ar-dominant,
+.message-user .message-text[dir="rtl"],
+.message-assistant .message-text[dir="rtl"] {
+  text-align: start;
 }
 .send-btn {
   width: 36px;
