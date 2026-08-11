@@ -773,9 +773,37 @@ def docx_set_run_rtl(run: Any) -> None:
 
     Paragraph ``w:bidi`` without per-run ``w:rtl`` often still paints as LTR
     in Word / Telegram / WPS.
+    
+    For mixed-script documents, only set w:rtl on runs containing RTL
+    script (Arabic) text. Latin-only runs are left neutral for Word's
+    BiDi algorithm to handle correctly.
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    
+    # Check if run contains RTL script (Arabic/RLM etc.)
+    try:
+        run_text = run.text or ""
+        # Check for Arabic script range U+0600-U+06FF, U+0750-U+077F, U+08A0-U+08FF
+        # Also check for RTL marks U+200F (RLM)
+        RTL_RANGE_1 = (0x0600, 0x06FF)
+        RTL_RANGE_2 = (0x0750, 0x077F)
+        RTL_RANGE_3 = (0x08A0, 0x08FF)
+        RTL_MARK = 0x200F
+        has_rtl_chars = any(
+            (RTL_RANGE_1[0] <= ord(c) <= RTL_RANGE_1[1]) or
+            (RTL_RANGE_2[0] <= ord(c) <= RTL_RANGE_2[1]) or
+            (RTL_RANGE_3[0] <= ord(c) <= RTL_RANGE_3[1]) or
+            ord(c) == RTL_MARK
+            for c in run_text
+        )
+    except Exception:
+        has_rtl_chars = False
+    
+    # For runs without RTL characters, skip RTL marking
+    # Word will handle BiDi automatically via paragraph w:bidi
+    if not has_rtl_chars:
+        return
 
     r_pr = run._r.get_or_add_rPr()
     if r_pr.find(qn("w:rtl")) is None:
