@@ -211,6 +211,10 @@ def test_xlsx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
     assert "1e3a5f" in styles_xml(ar).lower()
     assert "1e3a5f" in styles_xml(en).lower()
 
+    # Branded title row (row 1) merged across columns — the heading-bar motif
+    # for spreadsheets, matching DOCX/PDF/HTML/PPTX.
+    assert "mergeCell" in sheet_xml(ar), "XLSX missing merged branded title row"
+
 
 def test_pptx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
     """Stage 4: PPTX consumes the DocProfile — Arabic paragraphs carry rtl=1 and
@@ -236,6 +240,17 @@ def test_pptx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
     assert 'rtl="1"' in ar_slide2, "AR pptx missing rtl paragraphs"
     assert 'algn="r"' in ar_slide2, "AR pptx missing right alignment (algn=r) on content"
     assert 'rtl="1"' not in slide_xml(en, 2), "EN pptx unexpectedly rtl"
+
+    # 16:9 widescreen layout (modern default), not the legacy 4:3. Check by
+    # ratio (cx/cy ≈ 1.78) — robust to python-pptx's exact EMU rounding.
+    pres_xml = zipfile.ZipFile(ar).read("ppt/presentation.xml").decode()
+    import re as _re
+    m = _re.search(r'<p:sldSz\s+cx="(\d+)"\s+cy="(\d+)"', pres_xml)
+    assert m, "PPTX presentation.xml missing sldSz"
+    cx, cy = int(m.group(1)), int(m.group(2))
+    assert cy == 6858000 and cx / cy > 1.6, (
+        f"PPTX is not 16:9 (cx={cx}, cy={cy}, ratio={cx/cy:.2f})"
+    )
 
     # Shared accent/heading colour on the title slide for both.
     assert ("1e3a5f" in slide_xml(ar, 1).lower() or "0f172a" in slide_xml(ar, 1).lower())
