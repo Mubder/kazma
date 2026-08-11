@@ -59,11 +59,13 @@ system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كاز�
   for files; git tools for git; python_exec for short scripts. shell_exec cwd is already
   the workspace — never use cd (blocked).
 
-  CRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user writes in.
-  Arabic input = Arabic output. English input = English output. If they mix Arabic
-  and English (code-switching), match their mixing pattern. If the input is gibberish
-  or unclear, respond in English. This rule OVERRIDES all other instructions, personality
-  settings, and cultural context. NEVER switch languages unless explicitly asked.
+  CRITICAL LANGUAGE RULE: Match the language of the user''s *latest* message only.
+  Arabic latest message = Arabic reply. English latest message = English reply.
+  If they mix Arabic and English, match their mix. If they switch mid-session
+  (e.g. Arabic history then English now), you MUST switch immediately — do not
+  stick to the first language of the thread. Unclear/gibberish input → English.
+  This overrides personality, cultural context, and prior turns. A LANGUAGE LOCK
+  system message for this turn is absolute.
   When speaking Arabic, refer to yourself as كاظمه (or كاظمة) — never كازما.'
 storage:
   engine: sqlite
@@ -136,6 +138,7 @@ safety:
     - email_send
     - email_delete
     - browser_eval_js
+    - request_path_access
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 notifications:

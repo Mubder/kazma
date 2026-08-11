@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — Path grants + mid-session language switch (2026-08-12)
+
+- **Path grants:** Outside-workspace access is still deny-by-default, but can be
+  opened with permission. SoT: `workspace/path_policy.py` + `path_grants.py`.
+  - Session grants via HITL tool `request_path_access` (danger tier).
+  - Durable extra roots: ConfigStore `workspace.extra_roots` +
+    `GET/PUT /api/workspace/extra-roots`.
+  - Wired through `file_read` / `file_write` / file list-search-delete-append /
+    shell path checks / IdeService.resolve. Denial messages tell the agent how
+    to request a grant (smooth UX).
+- **Language lock:** Match the *latest* user message only; HISTORY OVERRIDE so
+  Arabic-first sessions can flip to English mid-thread. Graph replaces any
+  prior LANGUAGE LOCK each turn (fixes sticky first-language checkpoint bug).
+
 ## Unreleased — Primary `kazma update` without footguns (2026-08-12)
 
 Operator upgrade path is now intentional and fail-closed:

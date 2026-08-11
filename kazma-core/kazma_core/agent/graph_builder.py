@@ -1290,17 +1290,24 @@ async def supervisor_node(
                     exc_info=True,
                 )
 
-    # Per-turn language lock (again at graph level so Telegram/Discord paths
-    # get it even when SSE already injected one — duplicate is harmless).
+    # Per-turn language lock (graph level so Telegram/Discord/Web share one path).
+    # Always replace any prior LANGUAGE LOCK messages so a session that started
+    # in Arabic does not keep an old lock (or skip injecting English) after the
+    # user flips language mid-thread.
     if iteration == 0 and last_user_content:
         try:
             from kazma_core.language_lock import language_lock_message
 
             lock = language_lock_message(last_user_content)
-            if lock and not any(
-                m.get("role") == "system" and "LANGUAGE LOCK" in str(m.get("content", ""))
-                for m in messages
-            ):
+            if lock:
+                messages = [
+                    m
+                    for m in messages
+                    if not (
+                        m.get("role") == "system"
+                        and "LANGUAGE LOCK" in str(m.get("content", ""))
+                    )
+                ]
                 # Place just before the last user message so it is the nearest
                 # instruction to the model.
                 insert_at = len(messages)

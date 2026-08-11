@@ -65,6 +65,32 @@ does **not** create a second durable store.
 
 ## Core features
 
+### Extra folders (path grants)
+
+Outside-workspace paths are **denied by default**. To open a folder with permission:
+
+1. **Chat (smooth):** when a file tool fails, the agent calls `request_path_access`
+   (HITL approval card). On approve, a **session grant** is created for that
+   folder and the agent retries the tool.
+2. **Settings / API:** durable list `workspace.extra_roots` via
+   `GET/PUT /api/workspace/extra-roots` (`path`, `mode`: `read`|`write`, `label`).
+
+Session grants TTL ~1 hour; durable roots persist until removed. Read grants
+do not allow writes. See `kazma_core.workspace.path_policy`.
+
+### Extra folders (path grants)
+
+Outside-workspace paths are **denied by default**. To open a folder with permission:
+
+1. **Chat (smooth):** when a file tool fails, the agent calls `request_path_access`
+   (HITL approval card). On approve, a **session grant** is created for that
+   folder and the agent retries the tool.
+2. **Settings / API:** durable list `workspace.extra_roots` via
+   `GET/PUT /api/workspace/extra-roots` (`path`, `mode`: `read`|`write`, `label`).
+
+Session grants TTL ~1 hour; durable roots persist until removed. Read grants
+do not allow writes. Policy SoT: `kazma_core.workspace.path_policy`.
+
 ### Secure intake
 
 - **Document platform limits (defaults):** 50 MiB per file, 10 files per request

@@ -17,6 +17,7 @@ from kazma_core.workspace.binding import (
     configure_workspace,
     resolve_active_root,
 )
+from kazma_core.workspace.path_policy import check_path_access, denied_message
 
 __all__ = ["configure_workspace", "file_write"]
 
@@ -87,21 +88,12 @@ async def file_write(path: str, content: str) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
-    workspace = _get_workspace()
     p = Path(path).expanduser().resolve()
 
-    # ── Safety check ──────────────────────────────────────────────
-    within = _is_within_workspace(p, workspace)
-
-    if not within:
-        # Path is outside workspace — block unless explicitly allowed
-        if not _allow_absolute_paths():
-            return "Safety: writes outside workspace are not allowed."
-
-    # Block obvious ../.. escape attempts regardless
-    raw = Path(path)
-    if ".." in raw.parts and not within and not _allow_absolute_paths():
-        return "Safety: writes outside workspace are not allowed."
+    # ── Safety check (workspace + path grants + allow_absolute) ───
+    access = check_path_access(p, "write")
+    if not access.allowed:
+        return denied_message(path, "write", result=access)
 
     try:
         p.parent.mkdir(parents=True, exist_ok=True)

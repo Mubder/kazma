@@ -93,6 +93,9 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "file_read": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "file_search": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "file_list": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # Path grants expand the FS allowlist (HITL danger).
+    "request_path_access": (EffectKind.CONFIG, SemanticTier.CRITICAL, "config_change",
+                            ("path", "mode")),
     # exec
     "shell_exec": (EffectKind.EXEC, SemanticTier.CRITICAL, "exec", ("command",)),
     "code_exec": (EffectKind.EXEC, SemanticTier.CRITICAL, "exec", ("command",)),

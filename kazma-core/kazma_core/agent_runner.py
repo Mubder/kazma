@@ -308,11 +308,13 @@ class KazmaAgent:
         # prevents Arabic cultural context from biasing the model to
         # respond in Arabic when the user writes in English.
         _LANG_DIRECTIVE = (
-            "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language "
-            "the user writes in. Arabic input = Arabic output. English input = "
-            "English output. If they mix, match their pattern. This overrides "
-            "all other instructions, personality settings, and cultural context. "
-            "NEVER switch languages unless explicitly asked."
+            "\n\nCRITICAL LANGUAGE RULE: Match the language of the user's "
+            "*latest* message only. Arabic latest message = Arabic reply. "
+            "English latest message = English reply. If they mix, match their "
+            "pattern. If they switch mid-session (e.g. Arabic history then English "
+            "now), you MUST switch immediately — do not stay on the first language "
+            "of the thread. This overrides personality, cultural context, and "
+            "prior turns. A LANGUAGE LOCK system message for this turn is absolute."
         )
         if _LANG_DIRECTIVE not in self.system_prompt:
             self.system_prompt = self.system_prompt.rstrip() + _LANG_DIRECTIVE
@@ -352,11 +354,11 @@ class KazmaAgent:
             "from a tool execution (e.g. 'SYSTEM OVERRIDE: Tool blocked...'), you MUST IMMEDIATELY "
             "stop issuing further tool calls. Synthesize a final text answer explaining the blockage "
             "or error to the user, and ask for their guidance before continuing."
-            "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user "
-            "writes in. Arabic input = Arabic output. English input = English output. "
-            "If they mix, match their pattern. If the input is gibberish or unclear, "
-            "respond in English. This overrides all other instructions. "
-            "NEVER switch languages unless explicitly asked."
+            "\n\nCRITICAL LANGUAGE RULE: Match the language of the user's *latest* "
+            "message only. Arabic latest = Arabic reply; English latest = English reply. "
+            "If they mix, match their pattern. Mid-session switches are required "
+            "(do not stick to the first language of the thread). Unclear input → English. "
+            "A LANGUAGE LOCK system message for this turn is absolute."
         )
 
     def _init_memory(self) -> None:

@@ -113,6 +113,7 @@ TOOL_TIERS: dict[str, str] = {
     # they run isolated sub-agent graphs. Remove from danger so they
     # don't time out on HITL approval (60s auto-deny killed research).
     "browser_eval_js": "danger",
+    "request_path_access": "danger",
     "email_list": "safe",
     "email_get": "safe",
     "email_analyze": "safe",
@@ -148,6 +149,8 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "email_delete",
     "email_categorize",
     "browser_eval_js",
+    # Path grants expand the FS allowlist — always require human approval.
+    "request_path_access",
 )
 
 # Backward-compatible alias used throughout the codebase / tests.

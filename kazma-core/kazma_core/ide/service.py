@@ -144,7 +144,7 @@ class IdeService:
         if os.path.isabs(rel):
             # Absolute inputs are NOT blindly trusted; we resolve them and
             # let the containment check below decide whether they fall inside
-            # the workspace root.
+            # the workspace root or a path grant.
             target = Path(rel).resolve()
         else:
             target = (ws_root / norm).resolve()
@@ -154,9 +154,22 @@ class IdeService:
         root_norm = os.path.normpath(str(ws_root))
         target_norm = os.path.normpath(str(target))
         if target_norm != root_norm and not target_norm.startswith(root_norm + os.path.sep):
+            # Path grants / durable extra roots / allow_absolute (shared policy)
+            try:
+                from kazma_core.workspace.path_policy import check_path_access
+
+                # resolve() is used for both read and write IDE ops — require
+                # at least read; write tools still re-check write mode.
+                access = check_path_access(target, "read")
+                if access.allowed:
+                    return target
+            except Exception:
+                pass
             raise ValueError(
                 f"Path '{rel_path}' is outside the workspace root "
-                f"({ws_root}); access denied."
+                f"({ws_root}); access denied. "
+                "Use request_path_access to request a grant, or add an Extra "
+                "folder in Settings → Workspace."
             )
         # Return the original (non-realpath) resolved path for display.
         return target

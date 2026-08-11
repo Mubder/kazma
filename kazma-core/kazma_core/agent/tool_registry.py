@@ -183,7 +183,7 @@ def _is_under_agent_skill_dir(resolved_p: Path) -> bool:
 
 
 def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
-    """Return a safety error string if *p* is outside the workspace.
+    """Return a safety error string if *p* is outside workspace/grants.
 
     Returns ``None`` when the path is allowed.  Denies by default when
     the workspace module cannot be imported (fail-closed) so a broken
@@ -191,30 +191,24 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
 
     Read-like ops (``reads``, ``listings``, ``searches``) may also access
     Agent Skills directories so skill resources load on demand.
-    
-    O2 fix: Removed temp directory fallbacks (/tmp, system temp) that
-    weakened path isolation. All paths must be under the workspace root
-    (or skill directories for reads) — no exceptions.
+
+    External paths may be allowed via durable extra roots or session path
+    grants (see ``workspace.path_policy`` / ``request_path_access``).
     """
     try:
-        from kazma_core.tools.file_write import _get_workspace
-        from kazma_core.workspace.binding import allow_absolute_paths
+        from kazma_core.workspace.path_policy import check_path_access, denied_message
     except (ImportError, OSError):
         return f"Safety: workspace module unavailable — {op} denied. Path: {path}"
 
-    workspace = _get_workspace().resolve()
     resolved_p = p.expanduser().resolve()
-    if not allow_absolute_paths():
-        try:
-            resolved_p.relative_to(workspace)
-        except ValueError:
-            # Allow skill resource reads outside workspace
-            if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(
-                resolved_p
-            ):
-                return None
-            return f"Safety: {op} outside workspace are not allowed. Path: {path}"
-    return None
+    # Writes/deletions need write mode; listings/searches/reads need read.
+    mode = "write" if op in ("writes", "deletions", "write") else "read"
+    access = check_path_access(resolved_p, mode)
+    if access.allowed:
+        return None
+    if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(resolved_p):
+        return None
+    return denied_message(path, mode, result=access)  # type: ignore[arg-type]
 
 # ══════════════════════════════════════════════════════════════════════════
 # Schema generation from type hints
@@ -865,6 +859,92 @@ class LocalToolRegistry:
             if not entries:
                 return f"No files matching '{pattern}' in {path}"
             return "\n".join(entries[:200])  # cap at 200 entries
+
+        @self.register(
+            description=(
+                "Request permission to read or write a path OUTSIDE the active "
+                "workspace. Requires human approval (HITL). On approve, grants "
+                "session access to that folder (or parent of a file) so "
+                "file_read/file_list/file_search (and write tools if mode=write) "
+                "can use it. Prefer durable Extra folders in Settings for "
+                "permanent access. Args: path (required), mode='read'|'write', "
+                "scope='session' (default) or 'durable' (adds to Settings "
+                "extra roots — write mode needs write grant)."
+            ),
+            category="filesystem",
+        )
+        async def request_path_access(
+            path: str,
+            mode: str = "read",
+            scope: str = "session",
+            label: str = "",
+        ) -> str:
+            """HITL-gated path grant for external folders/files."""
+            from kazma_core.safety.hitl import get_current_thread_id
+            from kazma_core.workspace.path_grants import (
+                grant_session_path,
+                list_durable_roots,
+                set_durable_roots,
+            )
+            from kazma_core.workspace.path_policy import check_path_access
+
+            if not path or not str(path).strip():
+                return "Error: path is required."
+            mode_n = "write" if str(mode).lower() in ("write", "rw", "readwrite") else "read"
+            scope_n = "durable" if str(scope).lower() in ("durable", "permanent", "always") else "session"
+
+            # Already allowed?
+            existing = check_path_access(path, mode_n)
+            if existing.allowed and existing.via != "absolute":
+                return (
+                    f"Already allowed via {existing.via}: {existing.grant_path or existing.resolved} "
+                    f"(mode ≥ {mode_n}). Retry your file tool."
+                )
+
+            if scope_n == "durable":
+                roots = [g.to_dict() for g in list_durable_roots()]
+                try:
+                    resolved = str(Path(path).expanduser().resolve())
+                except OSError as exc:
+                    return f"Error: invalid path: {exc}"
+                p = Path(resolved)
+                root = resolved if p.is_dir() or not p.suffix else str(p.parent)
+                # Upsert
+                roots = [r for r in roots if r.get("path") != root]
+                roots.append(
+                    {
+                        "path": root,
+                        "mode": mode_n,
+                        "label": label or Path(root).name,
+                    }
+                )
+                set_durable_roots(roots)
+                return (
+                    f"Durable extra root granted: {root} (mode={mode_n}). "
+                    "Retry file_read / file_list / file_write as needed."
+                )
+
+            tid = get_current_thread_id()
+            if not tid:
+                return (
+                    "Error: no active chat thread for a session grant. "
+                    "Use scope='durable' or open this from a chat turn."
+                )
+            try:
+                grant = grant_session_path(
+                    tid,
+                    path,
+                    mode=mode_n,
+                    label=label,
+                    actor="hitl",
+                )
+            except ValueError as exc:
+                return f"Error: {exc}"
+            return (
+                f"Session path grant active: {grant.path} (mode={grant.mode}, "
+                f"id={grant.grant_id}). Retry the file tool now. "
+                "Grant expires in ~1 hour or when the process clears safety keys."
+            )
 
         @self.register(
             description=(

@@ -58,12 +58,13 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
-    workspace = _get_workspace()
     p = Path(path).expanduser().resolve()
 
-    # ── Safety check (mirrors file_write) ─────────────────────────
-    within = _is_within_workspace(p, workspace)
-    if not within and not _fw._ALLOW_ABSOLUTE:
+    # ── Safety check (workspace + path grants + allow_absolute) ───
+    from kazma_core.workspace.path_policy import check_path_access, denied_message
+
+    access = check_path_access(p, "read")
+    if not access.allowed:
         # Allow Agent Skills resource reads (SKILL.md scripts/references)
         skill_ok = False
         try:
@@ -73,7 +74,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         except Exception:
             skill_ok = False
         if not skill_ok:
-            return "Safety: reads outside workspace are not allowed."
+            return denied_message(path, "read", result=access)
 
     try:
         if not p.exists():

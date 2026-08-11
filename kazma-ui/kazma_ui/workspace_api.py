@@ -157,6 +157,36 @@ def create_workspace_router() -> APIRouter:
 
 
     # ------------------------------------------------------------------
+    # Extra folders (durable path grants outside the active workspace)
+    # ------------------------------------------------------------------
+
+    @router.get("/extra-roots")
+    async def get_extra_roots() -> dict[str, Any]:
+        """List durable extra roots the agent may access outside the workspace."""
+        try:
+            from kazma_core.workspace.path_grants import list_durable_roots
+
+            roots = [g.to_dict() for g in list_durable_roots()]
+        except Exception as exc:
+            logger.debug("[workspace_api] extra-roots list failed: %s", exc)
+            roots = []
+        return {"extra_roots": roots}
+
+    @router.put("/extra-roots")
+    async def put_extra_roots(body: dict[str, Any]) -> dict[str, Any]:
+        """Replace durable extra roots.
+
+        Body: ``{"extra_roots": [{"path": "C:\\\\docs", "mode": "read", "label": "Docs"}]}``
+        """
+        from kazma_core.workspace.path_grants import set_durable_roots
+
+        raw = body.get("extra_roots") if isinstance(body, dict) else None
+        if not isinstance(raw, list):
+            return {"ok": False, "error": "extra_roots must be a list", "extra_roots": []}
+        roots = set_durable_roots(raw)
+        return {"ok": True, "extra_roots": [g.to_dict() for g in roots]}
+
+    # ------------------------------------------------------------------
     # GET /api/workspace/recent — recently modified files
     # ------------------------------------------------------------------
 

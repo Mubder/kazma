@@ -159,9 +159,8 @@ class ShellTool(BaseTool):
         # Check if any arguments are paths and validate they're within workspace
         try:
             from pathlib import Path as _Path
-            from kazma_core.tools.file_write import _get_workspace, _is_within_workspace, _ALLOW_ABSOLUTE
-            
-            workspace = _get_workspace()
+            from kazma_core.workspace.path_policy import check_path_access, denied_message
+
             for arg in args[1:]:  # Skip the command itself
                 # Skip flags (start with -)
                 if arg.startswith("-"):
@@ -170,11 +169,13 @@ class ShellTool(BaseTool):
                 p = _Path(arg).expanduser()
                 if p.is_absolute() or "/" in arg or "\\" in arg or arg.startswith("."):
                     resolved = p.resolve()
-                    if not _is_within_workspace(resolved, workspace) and not _ALLOW_ABSOLUTE:
+                    # Shell can mutate → require write-level grant for external paths
+                    access = check_path_access(resolved, "write")
+                    if not access.allowed:
                         return ToolResult(
                             tool_name=self.name,
                             success=False,
-                            output=f"Safety: path '{arg}' is outside workspace and not allowed.",
+                            output=denied_message(arg, "write", result=access),
                             exit_code=-1,
                             permission=self.permission,
                         )
