@@ -243,15 +243,19 @@ def generate_pdf_html_document(
     """Stage 2: full HTML document ready for WeasyPrint / Playwright.
 
     EN and AR share the same CSS theme; only ``dir`` / brand strings change.
+    Direction comes from the unified :class:`DocProfile` (full Unicode Arabic
+    detection + lang/rtl overrides) so this chat-export path agrees with the
+    DOCX/PDF/HTML document engines — no parallel ad-hoc RTL heuristic.
     """
-    sample = f"{title}\n{markdown_content}"
-    if rtl is None:
-        ar = sum(1 for c in sample if "\u0600" <= c <= "\u06ff")
-        rtl = ar > 20 or (lang or "").lower() in ("ar", "arabic", "rtl")
-    chrome = localized_chrome(rtl=bool(rtl))
+    from kazma_core.documents.profile import DocProfile
+
+    profile = DocProfile.for_content(
+        f"{title}\n{markdown_content}", language=lang, rtl=rtl,
+    )
+    chrome = profile.chrome
     compiled_body = prepare_markdown_for_pdf(markdown_content)
     safe_title = html_lib.escape(title)
-    css = _css(rtl=bool(rtl), brand=chrome["brand"].replace('"', ""))
+    css = _css(rtl=profile.rtl, brand=chrome["brand"].replace('"', ""))
 
     return f"""<!DOCTYPE html>
 <html lang="{chrome["lang"]}" dir="{chrome["dir"]}">
