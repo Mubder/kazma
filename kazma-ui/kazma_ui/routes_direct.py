@@ -3278,6 +3278,15 @@ def register_direct_routes(self: Any) -> None:
     except Exception as _exc:
         logger.warning("[routes_direct] Visual pipeline router failed to mount: %s", _exc)
 
+    # Commitment Layer — soul-delta confirm queue (Phase 7)
+    try:
+        from kazma_ui.commitment_api import create_commitment_router
+
+        self.app.include_router(create_commitment_router())
+        logger.info("[routes_direct] Commitment soul-confirm router mounted at /api/commitment")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Commitment router failed to mount: %s", _exc)
+
     # Config Migration UI (extracted to routes_migrate)
     try:
         from kazma_ui.routes_migrate import register_migrate_routes

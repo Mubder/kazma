@@ -310,6 +310,18 @@ def update_status(
     return get_commitment(commitment_id)
 
 
+def list_pending_soul(tenant_id: str = "default") -> list[Commitment]:
+    """All needs_confirm soul_delta commitments (the confirm-card queue)."""
+    ensure_commitment_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM commitments WHERE act='soul_delta' "
+            "AND status='needs_confirm' AND tenant_id=? ORDER BY created_at DESC",
+            (tenant_id,),
+        ).fetchall()
+    return [_row_to_commitment(r) for r in rows]
+
+
 def list_by_thread(thread_id: str, *, status: str | None = None,
                    tenant_id: str = "default") -> list[Commitment]:
     ensure_commitment_schema()

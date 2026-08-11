@@ -154,6 +154,7 @@ async def _run_self_improvement(
     try:
         from kazma_core.skills.self_improvement import (
             get_self_improvement,
+            mint_soul_commitment,
             self_improvement_enabled,
         )
 
@@ -194,7 +195,9 @@ async def _run_self_improvement(
                 status=task_status,
             )
             if analysis.get("action") == "mutate":
-                await si.apply_mutation(res.worker, analysis["delta"])
+                _delta = analysis["delta"]
+                _cid = mint_soul_commitment(_delta, worker_name=res.worker)
+                await si.apply_mutation(res.worker, _delta, commitment_id=_cid)
     except Exception as exc:
         logger.warning("[SwarmPatterns] Self-improvement hook failed: %s", exc)
 

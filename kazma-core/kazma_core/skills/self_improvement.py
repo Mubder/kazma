@@ -792,7 +792,11 @@ async def analyze_and_apply_chat_turn(
     if analysis.get("action") != "mutate":
         return analysis
     delta = analysis.get("delta") or ""
-    ok = apply_agent_mutation(agent_id, delta)
+    # Phase 7: mint a needs_confirm commitment so the delta is held until
+    # confirmed via the HITL bus (when soul_requires_confirm is on). No-op
+    # (returns None) when the flag is off → apply_agent_mutation ignores it.
+    cid = mint_soul_commitment(delta, agent_id=agent_id)
+    ok = apply_agent_mutation(agent_id, delta, commitment_id=cid)
     analysis["applied"] = ok
     analysis["agent_id"] = agent_id
     return analysis
