@@ -25,6 +25,7 @@ __all__ = [
     "TOCBlock",
     "CitationBlock",
     "SpacerBlock",
+    "ImageBlock",
     "ContentModel",
 ]
 
@@ -92,6 +93,20 @@ class SpacerBlock(Block):
     """An empty paragraph spacer."""
 
     text: str = ""
+
+
+@dataclass
+class ImageBlock(Block):
+    """An approved-asset image referenced by filename.
+
+    The engine resolves ``name`` against the validated assets directory and
+    embeds the bytes. Unapproved / missing images are skipped (never embedded)
+    — only files present in the sha256-validated ``assets/`` dir are reachable.
+    """
+
+    name: str = ""
+    caption: str = ""
+    width_in: float = 5.0  # display width in inches (engines scale to fit)
 
 
 @dataclass

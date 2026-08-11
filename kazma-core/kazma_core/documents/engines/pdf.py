@@ -30,6 +30,7 @@ from kazma_core.documents.content_model import (
     CitationBlock,
     ContentModel,
     HeadingBlock,
+    ImageBlock,
     TableBlock,
     TitleBlock,
     TOCBlock,
@@ -76,7 +77,8 @@ class PdfEngine:
     # ------------------------------------------------------------------ #
     # public entry
     # ------------------------------------------------------------------ #
-    def render(self, model: ContentModel, output: Path | str) -> None:
+    def render(self, model: ContentModel, output: Path | str, *,
+               assets_dir: Any = None) -> None:
         """Render the model to PDF.
 
         For RTL (Arabic) content, prefer the **DOCX → LibreOffice → PDF** route:
@@ -89,11 +91,12 @@ class PdfEngine:
         unavailable or the conversion fails.
         """
         output = Path(output)
-        if self.profile.rtl and self._render_via_docx(model, output):
+        if self.profile.rtl and self._render_via_docx(model, output, assets_dir):
             return
-        self._render_reportlab(model, output)
+        self._render_reportlab(model, output, assets_dir)
 
-    def _render_via_docx(self, model: ContentModel, output: Path) -> bool:
+    def _render_via_docx(self, model: ContentModel, output: Path,
+                         assets_dir: Any = None) -> bool:
         """DOCX → LibreOffice → PDF. Returns True on success, False to fall back."""
         import tempfile
 
@@ -110,7 +113,7 @@ class PdfEngine:
             with tempfile.TemporaryDirectory(prefix="kazma_pdf_docx_") as tmp:
                 tmp_dir = Path(tmp)
                 docx_path = tmp_dir / (output.stem + ".docx")
-                DocxEngine(self.profile).render(model, docx_path)
+                DocxEngine(self.profile).render(model, docx_path, assets_dir=assets_dir)
                 run_soffice_cli(
                     ("--headless", "--nologo", "--norestore",
                      f"-env:UserInstallation={tmp_dir.as_uri()}",
@@ -135,7 +138,9 @@ class PdfEngine:
     # ================================================================== #
     # reportlab path (LTR, and RTL fallback when LibreOffice is absent)
     # ================================================================== #
-    def _render_reportlab(self, model: ContentModel, output: Path | str) -> None:
+    def _render_reportlab(self, model: ContentModel, output: Path | str,
+                          assets_dir: Any = None) -> None:
+        self._assets_dir = assets_dir
         from reportlab.lib import colors
         # Page size from the shared theme (single source) — keeps the reportlab
         # PDF geometry identical to the DOCX / DOCX-route PDF. ``A4`` stays a
@@ -215,9 +220,11 @@ class PdfEngine:
                     "arabic_reshaper/python-bidi not installed — Arabic letters may appear "
                     "disconnected or reversed in PDF"
                 )
-        if model.images_present:
+        # Images are embedded only from the validated assets dir; warn when the
+        # payload requested images but none can be embedded (no approved assets).
+        if model.images_present and not getattr(self, "_assets_dir", None):
             self.warnings.append(
-                "Images were omitted because generation accepts no unapproved filesystem resources"
+                "Images were omitted because no approved render assets were provided"
             )
 
         def decorate(canvas: Any, document: Any) -> None:
@@ -441,6 +448,31 @@ class PdfEngine:
                     inline_markdown_to_reportlab(f"{index}. {item}", shape_arabic=self.shape_ar),
                     styles["cite"],
                 ))
+        elif isinstance(block, ImageBlock):
+            self._add_image(block, story, Spacer)
+
+    def _add_image(self, block: ImageBlock, story: list[Any], Spacer: Any) -> None:
+        """Embed an approved-asset image as a reportlab Image flowable (LTR path;
+        the DOCX-route handles images via LibreOffice for RTL)."""
+        from pathlib import Path
+
+        if not getattr(self, "_assets_dir", None) or not block.name:
+            return
+        candidate = Path(str(self._assets_dir)) / Path(str(block.name)).name
+        if not candidate.is_file():
+            logger.debug("[pdf] image not in approved assets, skipped: %s", block.name)
+            return
+        try:
+            from reportlab.lib.utils import ImageReader
+            from reportlab.platypus import Image
+
+            iw, ih = ImageReader(str(candidate)).getSize()  # px
+            target_w = block.width_in * 72.0  # in → pt
+            img = Image(str(candidate), width=target_w, height=target_w * ih / iw)
+            story.append(img)
+            story.append(Spacer(1, 8))
+        except Exception:
+            logger.debug("[pdf] image embed failed: %s", block.name, exc_info=True)
 
     def _add_table(
         self, block: TableBlock, story: list[Any], Table: Any, TableStyle: Any,

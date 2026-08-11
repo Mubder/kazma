@@ -31,6 +31,7 @@ from kazma_core.documents.content_model import (
     CitationBlock,
     ContentModel,
     HeadingBlock,
+    ImageBlock,
     SpacerBlock,
     TableBlock,
     TitleBlock,
@@ -59,11 +60,13 @@ class DocxEngine:
     # ------------------------------------------------------------------ #
     # public entry
     # ------------------------------------------------------------------ #
-    def render(self, model: ContentModel, output: Path | str) -> None:
+    def render(self, model: ContentModel, output: Path | str, *,
+               assets_dir: Any = None) -> None:
         from docx import Document
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.shared import Cm, Pt
 
+        self._assets_dir = assets_dir
         document = Document()
         self._apply_foundation(document)
 
@@ -349,9 +352,50 @@ class DocxEngine:
             self._write_toc(document, block.entries)
         elif isinstance(block, CitationBlock):
             self._write_citations(document, block.items)
+        elif isinstance(block, ImageBlock):
+            self._render_image(document, block)
         elif isinstance(block, SpacerBlock):
             p = document.add_paragraph(block.text or "")
             self._set_paragraph(p, "start")
+
+    def _render_image(self, document: Any, block: ImageBlock) -> None:
+        """Embed an approved-asset image (validated by the worker's _verify_assets).
+
+        Only files present in the sha256-checked assets dir are reachable; a
+        referenced-but-missing image is skipped (never embedded).
+        """
+        from docx.shared import Inches, Pt
+
+        path = self._resolve_asset(block.name)
+        if path is None:
+            logger.debug("[docx] image not in approved assets, skipped: %s", block.name)
+            return
+        try:
+            document.add_picture(str(path), width=Inches(block.width_in))
+            if block.caption:
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                from docx.oxml import OxmlElement
+                from docx.oxml.ns import qn
+
+                cap = document.add_paragraph(block.caption)
+                cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for r in cap.runs:
+                    r.font.size = Pt(9)
+                if self.profile.rtl:
+                    p_pr = cap._p.get_or_add_pPr()
+                    if p_pr.find(qn("w:bidi")) is None:
+                        b = OxmlElement("w:bidi")
+                        b.set(qn("w:val"), "1")
+                        p_pr.append(b)
+            document.add_paragraph("")  # spacer
+        except Exception:
+            logger.debug("[docx] image embed failed: %s", block.name, exc_info=True)
+
+    def _resolve_asset(self, name: str) -> Path | None:
+        if not name or not getattr(self, "_assets_dir", None):
+            return None
+        candidate = Path(str(self._assets_dir)) / Path(str(name)).name
+        return candidate if candidate.is_file() else None
 
     # ================================================================== #
     # header / footer

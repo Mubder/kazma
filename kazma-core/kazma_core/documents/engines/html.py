@@ -18,6 +18,7 @@ from __future__ import annotations
 import html as _html_lib
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 from kazma_core.documents.content_model import (
@@ -26,6 +27,7 @@ from kazma_core.documents.content_model import (
     CitationBlock,
     ContentModel,
     HeadingBlock,
+    ImageBlock,
     TableBlock,
     TitleBlock,
     TOCBlock,
@@ -54,11 +56,13 @@ class HtmlEngine:
     def __init__(self, profile: DocProfile) -> None:
         self.profile = profile
         self.theme = profile.theme
+        self._assets_dir: Any = None
 
     # ------------------------------------------------------------------ #
     # public entry
     # ------------------------------------------------------------------ #
-    def render(self, model: ContentModel) -> str:
+    def render(self, model: ContentModel, *, assets_dir: Any = None) -> str:
+        self._assets_dir = assets_dir
         title = self._first_title(model)
         body_parts: list[str] = []
         for block in model.blocks:
@@ -214,7 +218,44 @@ class HtmlEngine:
             items = "".join(f"<li>{self._isolate(esc(c))}</li>" for c in block.items)
             head = f'    <h2>{esc(self.profile.chrome["references"])}</h2>\n'
             return head + f"    <ol>\n{items}    </ol>"
+        if isinstance(block, ImageBlock):
+            return self._image_html(block)
         return ""
+
+    def _image_html(self, block: ImageBlock) -> str:
+        """Embed an approved-asset image as a base64 data-URI (no external refs).
+
+        Only files in the validated assets dir are reachable; missing images are
+        skipped. A caption, if any, becomes a <figcaption>.
+        """
+        import base64
+
+        path = self._resolve_asset(block.name)
+        if path is None:
+            logger.debug("[html] image not in approved assets, skipped: %s", block.name)
+            return ""
+        try:
+            data = Path(path).read_bytes()
+        except Exception:
+            logger.debug("[html] image read failed: %s", block.name, exc_info=True)
+            return ""
+        ext = Path(path).suffix.lstrip(".").lower()
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "image/png")
+        b64 = base64.b64encode(data).decode("ascii")
+        from html import escape as esc
+        cap = f"\n      <figcaption>{esc(block.caption)}</figcaption>" if block.caption else ""
+        return (
+            f'    <figure class="image"><img src="data:{mime};base64,{b64}" '
+            f'alt="{esc(block.caption or block.name)}" style="width:{block.width_in}in;max-width:100%">{cap}\n'
+            f"    </figure>"
+        )
+
+    def _resolve_asset(self, name: str) -> Any:
+        if not name or not self._assets_dir:
+            return None
+        candidate = Path(str(self._assets_dir)) / Path(str(name)).name
+        return candidate if candidate.is_file() else None
 
     def _table_html(self, headers: list[str], rows: list[list[str]]) -> str:
         from html import escape as esc

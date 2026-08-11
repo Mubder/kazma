@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_shared_builder_drives_both_formats(tmp_path: Path) -> None:
     """One payload → one (model, profile) → both DOCX and PDF engines.
@@ -320,6 +322,53 @@ def test_docx_update_fields_and_core_properties(tmp_path: Path) -> None:
     assert "Quarterly Report" in core and "Alice" in core and "Finance" in core, (
         "DOCX core properties not populated"
     )
+
+
+def test_image_embedding_approved_only(tmp_path: Path) -> None:
+    """Batch 2: an approved-asset image is embedded; a missing/unapproved one is
+    silently skipped — the security property (only sha256-validated assets reach
+    the document) holds across DOCX/HTML/MD."""
+    import zipfile
+
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image as PILImage
+    from kazma_core.documents.renderer_worker import _generate_docx, _generate_html, _markdown
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    buf = io.BytesIO()
+    PILImage.new("RGB", (120, 80), (30, 58, 95)).save(buf, "PNG")
+    (assets / "logo.png").write_bytes(buf.getvalue())
+
+    payload = {
+        "title": "Report", "lang": "en",
+        "sections": [{"heading": "Intro", "body": "text"}],
+        "images": [
+            {"name": "logo.png", "caption": "approved", "width_in": 2.0},
+            {"name": "notapproved.png", "caption": "should be skipped"},
+        ],
+    }
+
+    # DOCX: approved image embedded; unapproved absent.
+    docx = tmp_path / "out.docx"
+    _generate_docx(docx, payload, assets_dir=assets)
+    media = [n for n in zipfile.ZipFile(docx).namelist() if n.startswith("word/media/")]
+    assert media, "approved image not embedded in DOCX"
+    assert len(media) == 1, f"unapproved image leaked into DOCX: {media}"
+
+    # HTML: approved image as a data-URI; unapproved not referenced.
+    html = tmp_path / "out.html"
+    _generate_html(html, payload, assets_dir=assets)
+    h = html.read_text(encoding="utf-8")
+    assert "data:image/png;base64," in h, "approved image not embedded in HTML"
+    assert "notapproved.png" not in h, "unapproved image leaked into HTML"
+
+    # Markdown: references both by name (MD can't embed binaries), but that's a
+    # text reference, not an embed — acceptable.
+    md = _markdown(payload)
+    assert "![approved](logo.png)" in md
 
 
 def test_office_core_properties_xlsx_pptx(tmp_path: Path) -> None:

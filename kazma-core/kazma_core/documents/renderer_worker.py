@@ -136,6 +136,7 @@ def _build_model_and_profile(
         CitationBlock,
         ContentModel,
         HeadingBlock,
+        ImageBlock,
         TableBlock,
         TitleBlock,
         TOCBlock,
@@ -204,6 +205,21 @@ def _build_model_and_profile(
                     heading=(str(value.get("heading", "")) or None),
                 ))
 
+    # Images (approved-asset references; engines embed only validated files).
+    images = payload.get("images")
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, dict) and img.get("name"):
+                try:
+                    width = float(img.get("width_in", img.get("width", 5.0)) or 5.0)
+                except (TypeError, ValueError):
+                    width = 5.0
+                model.add(ImageBlock(
+                    name=str(img["name"]),
+                    caption=str(img.get("caption", "")),
+                    width_in=max(1.0, min(7.0, width)),
+                ))
+
     # Citations / references.
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
@@ -244,6 +260,14 @@ def _markdown(payload: dict[str, Any]) -> str:
             lines.extend((f"## {section['heading'].lstrip('#').strip()}", ""))
         if section["body"]:
             lines.extend((section["body"], ""))
+    images = payload.get("images")
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, dict) and img.get("name"):
+                alt = str(img.get("caption") or img["name"])
+                lines.append(f'![{alt}]({img["name"]})')
+        if any(isinstance(i, dict) and i.get("name") for i in images):
+            lines.append("")
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
         lines.extend((f"## {chrome['references']}", ""))
@@ -266,12 +290,14 @@ def _markdown_html(text: str) -> str:
     return HtmlEngine(profile).render_markdown(text)
 
 
-def _generate_html(output: Path, payload: dict[str, Any]) -> None:
+def _generate_html(output: Path, payload: dict[str, Any], *,
+                   assets_dir: Path | None = None) -> None:
     """Generate HTML via the unified document layer (ContentModel + DocProfile)."""
     from kazma_core.documents.engines.html import HtmlEngine
 
     model, profile = _build_model_and_profile(payload)
-    output.write_text(HtmlEngine(profile).render(model), encoding="utf-8")
+    html = HtmlEngine(profile).render(model, assets_dir=assets_dir)
+    output.write_text(html, encoding="utf-8")
 
 
 def _safe_html(text: str) -> None:
@@ -316,7 +342,8 @@ def _font_paths() -> tuple[Path | None, Path | None]:
     return next(((regular, bold) for regular, bold in candidates if regular.is_file()), (None, None))
 
 
-def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) -> None:
+def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str],
+                  *, assets_dir: Path | None = None) -> None:
     """Generate a PDF via the unified document layer.
 
     Builds a format-agnostic :class:`ContentModel` + :class:`DocProfile` (shared
@@ -328,15 +355,16 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
     from kazma_core.documents.engines.pdf import PdfEngine
 
     model, profile = _build_model_and_profile(payload)
-    PdfEngine(profile, warnings).render(model, output)
+    PdfEngine(profile, warnings).render(model, output, assets_dir=assets_dir)
 
 
-def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
+def _generate_docx(output: Path, payload: dict[str, Any], *,
+                   assets_dir: Path | None = None) -> None:
     """Generate a DOCX via the unified document layer (shared model + profile)."""
     from kazma_core.documents.engines.docx import DocxEngine
 
     model, profile = _build_model_and_profile(payload)
-    DocxEngine(profile).render(model, output)
+    DocxEngine(profile).render(model, output, assets_dir=assets_dir)
 
 
 def _generate_xlsx(output: Path, payload: dict[str, Any]) -> None:
@@ -539,6 +567,13 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
     if template not in (None, "default", "report", "compact"):
         raise WorkerError("unsupported_template", "Requested document template is unavailable")
     renderer = str(request.get("renderer", ""))
+    # Approved render assets live next to the output under assets/ (validated by
+    # _verify_assets, sha256-matched). Engines embed images from here by name.
+    assets_dir: Path | None = None
+    if request.get("approved_assets"):
+        _candidate = output.parent / "assets"
+        if _candidate.is_dir():
+            assets_dir = _candidate
     source: Path | None = None
     if request.get("source_path") is not None:
         source = Path(str(request["source_path"])).resolve(strict=True)
@@ -549,11 +584,11 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
         if target == "markdown":
             output.write_text(_markdown(payload), encoding="utf-8")
         elif target == "html":
-            _generate_html(output, payload)
+            _generate_html(output, payload, assets_dir=assets_dir)
         elif target == "pdf":
-            _generate_pdf(output, payload, warnings)
+            _generate_pdf(output, payload, warnings, assets_dir=assets_dir)
         elif target == "docx":
-            _generate_docx(output, payload)
+            _generate_docx(output, payload, assets_dir=assets_dir)
         elif target == "xlsx":
             _generate_xlsx(output, payload)
         elif target == "pptx":

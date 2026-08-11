@@ -133,6 +133,7 @@ class DocumentOperations:
         export_dir: str | Path | None,
         template: str | None = None,
         template_version: str | None = None,
+        approved_assets: Sequence[Path] = (),
     ) -> DocumentResult[DocumentArtifact]:
         target = target_format.lower().lstrip(".")
         operation = f"generate:{target}"
@@ -155,6 +156,7 @@ class DocumentOperations:
             export_dir=export_dir,
             template=template,
             template_version=template_version,
+            approved_assets=approved_assets,
         )
 
     def convert(
