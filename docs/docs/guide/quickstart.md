@@ -13,7 +13,7 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.6.1+)
 | Requirement | Detail |
 |---|---|
 | **Python** | `>=3.11, &lt;3.14` (declared in `pyproject.toml`). |
-| **Git** | For cloning / `kazma update` (git install path). |
+| **Git** | For cloning / operator upgrades via [`kazma update`](../ops/kazma-update) (git install path). |
 | **An LLM provider key** | At least one of: OpenAI, Anthropic, Google (ADC), DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21 — or a local server (Ollama / LM Studio). Azure OpenAI and AWS Bedrock are also supported natively. |
 | **Node.js** (optional) | Only if you want to build/serve the Docusaurus docs site (`docs/`). Not required to run Kazma itself. |
 
@@ -71,7 +71,7 @@ Optional extras (only install the ones you need):
 | `[document]` | `reportlab`, `python-docx`, `openpyxl`, `pypdf`, … | Legacy **document-generator** skill (simple PDF/DOCX/XLSX files) |
 | `[ocr]` | `pytesseract`, `pdf2image`, `pillow` | OCR helpers for Document Intelligence (needs system Tesseract) |
 | `[convert]` | `weasyprint` | HTML→PDF style conversion engines |
-| `[document-platform]` | `document` + `ocr` + `convert` + `pymupdf` | **Full Document Intelligence** engines (redaction/raster/render) |
+| `[document-platform]` | `document` + `ocr` + `convert` + `pymupdf` + `pypdfium2` | **Full Document Intelligence** engines (parse bake-off, redaction/raster/render) |
 | `[database]` | `psycopg[binary]>=3.1.0`, `pymysql>=1.1.0`, `pymongo>=4.7.0` | Postgres/MySQL/Mongo in the database-client skill |
 | `[postgres]` | `psycopg[binary,pool]>=3.1.0`, `langgraph-checkpoint-postgres>=2.0.0` | Multi-replica SaaS shared state (also document jobs/metadata when configured) |
 | `[all]` | meta — installs every extra above | Convenience |

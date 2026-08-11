@@ -13,7 +13,28 @@ Operational surface for the
 [Document security](../security/document-security.md) ·
 [Phase map](../guide/document-phases.md) ·
 [Production checklist](./production-checklist.md) ·
-[Smoke matrix](./smoke-matrix.md)
+[Smoke matrix](./smoke-matrix.md) ·
+[Document Intelligence product guide](../guide/document-intelligence.md)
+
+---
+
+## PDF parse / OCR readiness (operators)
+
+Electronic PDFs use a **scored multi-engine bake-off** (PyMuPDF primary →
+optional pypdfium2 → pdfplumber → pypdf). Scanned / empty / presentation-form
+layers route through isolated **Tesseract** OCR (`ara+eng` auto order). Full
+product detail: [Document Intelligence → PDF text extraction](../guide/document-intelligence.md#pdf-text-extraction-arabic--multi-engine).
+
+| Check | Healthy signal |
+|---|---|
+| `GET /api/documents/ops/readiness` (or Settings → Documents) | PDF parser **ready** when PyMuPDF or pdfplumber is installed |
+| pypdfium2 / pypdf only | Parser **degraded** (text only — tables not advertised) |
+| Arabic electronic PDF | Logical-order tokens; IR metadata `extractor` / `extraction_score` |
+| Arabic scan | Tesseract + `ara` traineddata on PATH; OCR may still be imperfect |
+| After `kazma update` | CLI imports (`kazma serve` works); see [Kazma Update](./kazma-update) |
+
+Deploy deps: `pip install -e ".[document-platform]"` (pymupdf + pypdfium2) and
+system **Tesseract** with `eng` + `ara` packs when OCR is required.
 
 ---
 

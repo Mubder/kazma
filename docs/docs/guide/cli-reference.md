@@ -191,14 +191,30 @@ kazma swarm pipeline --workers researcher,refiner,builder,validator "Build a CLI
 
 ## 7. `kazma update`
 
-Self-update (`update.py`). Flags: `--check`/`-c` (dry run), `--force`/`-f`, `--yes`/`-y`, `--help`/`-h`. Auto-detects install type via `pip show` ("Editable project location"):
+**Primary operator upgrade path** (`kazma_cli/update.py`). Prefer this over a
+manual `git pull` on production/git installs. Full guide:
+[Kazma Update](../ops/kazma-update).
 
-- **pip install** → queries PyPI (`https://pypi.org/pypi/kazma/json`) and runs `pip install --upgrade kazma`.
-- **git install** → `git fetch`, checks `git log HEAD..origin/main`, then `git pull origin main` + `pip install -e .`.
+| Flag | Purpose |
+|------|---------|
+| `--check` / `-c` | Dry-run: show available update |
+| `--force` / `-f` | Force sync even if already latest |
+| `--yes` / `-y` | Skip confirmation |
+| `--reinstall` / `-r` | Packages/extras only (repair wiped venv) |
+| `--sync-main` | Checkout `main` first (feature-branch safety) |
+| `--accept-discard-local-commits` | Allow hard-reset when local commits are ahead of `origin/main` |
+
+Auto-detects install type:
+
+- **pip install** → PyPI upgrade path.
+- **git / monorepo** → preflight (main-only) → named stash → hard-reset
+  `origin/main` → restore stash → reinstall extras → postflight (HEAD +
+  `kazma_cli` import). Never hard-resets a feature branch in place.
 
 ```bash
-kazma update --check     # dry-run: show available update
+kazma update --check     # dry-run
 kazma update --yes       # apply without prompting
+kazma update --reinstall -y   # repair packages after a broken reinstall
 ```
 
 ---

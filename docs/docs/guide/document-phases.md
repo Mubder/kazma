@@ -32,7 +32,9 @@ modules and phase-named tests so operators and contributors share one timeline.
 | 0–2 | Foundation | Models, config, CAS storage, repository, sandbox, job queue | `test_documents_models`, `config`, `storage`, `repository`, `document_sandbox`, `document_jobs` |
 | 3 | Sniff / intake policy | Hostile MIME/OOXML/PDF rejection before parse | Hostile corpus + processor security |
 | 4 | Parsers | Format parsers behind isolated worker | `test_document_parsers_phase4` |
+| 4+ | PDF Arabic / multi-engine | PyMuPDF primary + pypdfium2 bake-off + layout reading order + fuzzy RTL verifier (post-phase product hardening) | `test_document_parsers_phase4` (Arabic/layout/multi-engine), `test_unified_document_layer` (RTL verifier) |
 | 5 | OCR | Multilingual quality-routed OCR | `test_document_ocr_phase5` |
+| 5+ | OCR Arabic scans | `ara+eng` language order; replace presentation-form/CID native layers | `test_document_ocr_phase5`, scanned PDF tests in parsers phase4 |
 | 6 | Knowledge | Structural chunking → library index | `test_document_knowledge_phase6` |
 | 7 | Generate / convert / redact | Isolated render + verified redaction | `test_document_generation_phase7` |
 | 8 | Surfaces | Ingestion coordinator, Web API, tools, gateway, TUI | `test_document_ingestion_phase8`, `*_api_phase8`, `*_actions_phase8`, `*_platform_tools_phase8` |

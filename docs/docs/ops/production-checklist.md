@@ -53,10 +53,18 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] Nightly document backup path known (`kazma-data/backups/document-store-*` or equivalent)
 - [ ] Migration plan includes `documents.db` + content tree ([Migration](./migration))
 - [ ] Optional engines understood (fitz / WeasyPrint / LibreOffice may be CONDITIONAL)
+- [ ] PDF Arabic / electronic text: `pip install -e ".[document-platform]"` (PyMuPDF + pypdfium2); parser readiness should be **ready**, not text-only degraded
+- [ ] Scanned Arabic PDFs: system Tesseract + `ara` (and `eng`) traineddata on PATH
 - [ ] Malware: install ClamAV (`clamscan`/`clamdscan` on PATH); consider `documents.security.malware_scan=on` + fail-closed; check readiness `malware.available`
 - [ ] Cert smoke: `python scripts/certify_documents.py` exits non-FAIL; record report if promoting canary
 
 Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document processing](./document-processing).
+
+## Upgrades (git install)
+
+- [ ] Operators use **`kazma update`** (not ad-hoc `git pull`) — see [Kazma Update](./kazma-update)
+- [ ] After update: `kazma --version` / HEAD matches `origin/main`; `import kazma_cli` works; `kazma serve` starts
+- [ ] Optional extras still present (rag / document-platform); use `kazma update --reinstall -y` if wiped
 
 ## Smoke
 
