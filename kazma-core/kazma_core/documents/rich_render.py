@@ -759,8 +759,11 @@ def docx_heading_bar(
     if rtl:
         docx_set_rtl_paragraph(p, justify=False)  # also stamps run w:rtl
         docx_set_table_rtl(table)
+        # Also set table cell to right-align for RTL
+        cell.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     else:
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        cell.alignment = WD_ALIGN_PARAGRAPH.LEFT
     # Spacing after bar
     sp = document.add_paragraph("")
     if rtl:
