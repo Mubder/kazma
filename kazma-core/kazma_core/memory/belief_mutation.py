@@ -351,7 +351,7 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now,
+                    mem_class=mem_class, now=now, cfg=cfg,
                 )
             elif ptype == "state":
                 result = _mutate_state(
@@ -359,7 +359,7 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now,
+                    mem_class=mem_class, now=now, cfg=cfg,
                 )
             else:
                 result = _mutate_set(
@@ -367,7 +367,7 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now,
+                    mem_class=mem_class, now=now, cfg=cfg,
                 )
         # Phase 0 instrumentation (Commitment Layer): surface every functional
         # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
@@ -549,7 +549,7 @@ def _mutate_functional(
         pass  # already in a transaction
     # Find the currently-active belief for this (subject, predicate)
     existing = conn.execute(
-        """SELECT id, object FROM beliefs
+        """SELECT id, object, extraction_method FROM beliefs
            WHERE subject=? AND predicate=? AND tenant_id=?
              AND valid_until IS NULL AND invalidated_at IS NULL
            LIMIT 1""",
@@ -560,9 +560,40 @@ def _mutate_functional(
     if existing:
         superseded_id = existing["id"] if isinstance(existing, sqlite3.Row) else existing[0]
         old_obj = existing["object"] if isinstance(existing, sqlite3.Row) else existing[1]
+        existing_method = (
+            existing["extraction_method"]
+            if isinstance(existing, sqlite3.Row) else existing[2]
+        )
         # If the new object equals the existing one, this is a no-op
         if old_obj == obj:
             return {"action": "noop", "belief_id": superseded_id, "superseded_id": None}
+        # Commitment Layer Phase 1 — source-trust gate (plan §3.6 rule 2):
+        # a user_explicit (gold-standard) functional belief may NOT be
+        # superseded by a lower-trust source (llm_inferred / system_tool).
+        # This is the memory-corruption half of the CoPilot incident — the
+        # post-turn extractor (llm_inferred) invented a date and overwrote a
+        # user-asserted copilot_next_reset. Fail-closed: drop the inferred
+        # overwrite; the user fact stands. Kill-switch:
+        # cfg.v2.functional_supersede_requires_user_assert (default True).
+        gate_cfg = ((kw.get("cfg") or {}).get("v2") or {})
+        if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
+                and existing_method == "user_explicit"
+                and kw["extraction_method"] != "user_explicit"):
+            logger.info(
+                "[belief_mutate] blocked_supersede predicate=%s subject=%s "
+                "existing_source=user_explicit incoming_source=%s — user fact stands",
+                pred, sub, kw["extraction_method"],
+            )
+            _write_audit(
+                ops_conn, tenant_id=tenant_id, event_type="blocked_supersede",
+                target_id=superseded_id, actor="source_trust_gate",
+                reason=(f"lower-trust ({kw['extraction_method']}) cannot "
+                        f"supersede user_explicit {pred}"),
+                state_before={"id": superseded_id, "object": old_obj},
+                state_after={"id": superseded_id, "object": old_obj, "blocked": True},
+            )
+            return {"action": "noop", "belief_id": superseded_id,
+                    "superseded_id": None, "blocked": "lower_trust_source"}
         state_before = {"id": superseded_id, "object": old_obj}
         from kazma_core.memory.hygiene import beliefs_write
 
