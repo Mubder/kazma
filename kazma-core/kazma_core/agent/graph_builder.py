@@ -1818,6 +1818,24 @@ async def supervisor_node(
     }
 
 
+def _last_user_text(state: SupervisorState) -> str:
+    """Most recent user message text (the commitment gate anchors relative
+    phrases to it). Returns '' if none — the gate then degrades to audit-only."""
+    msgs = state.get("messages") or []
+    for m in reversed(msgs):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, str):
+            return c
+        if isinstance(c, list):  # multimodal parts
+            return " ".join(
+                str(p.get("text", "")) for p in c
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+    return ""
+
+
 async def tool_worker_node(
     state: SupervisorState,
     *,
@@ -2042,6 +2060,69 @@ async def tool_worker_node(
         _delivery = _gw.get("delivery_target") if isinstance(_gw, dict) else None
         if _delivery:
             _delivery_token = set_current_delivery_target(str(_delivery))
+
+    # ── Commitment Layer Phase 2 semantic gate (plan §3.2 / §4.1) ────────
+    # Runs BEFORE the security HITL split so it can (a) rewrite tool args to
+    # the memory-anchored correct value (the CoPilot schedule fix — whatever
+    # the model put in 'timing', the resolved ISO date wins) and (b) block
+    # ambiguous/unsatisfiable acts with a clear error the model turns into a
+    # targeted user question (Phase 3 swaps this error for a clarify card on
+    # the unified HITL bus). schedule_task is BOTH danger (security HITL) and
+    # semantic (remind); the rewrite lands first so the user approves the
+    # CORRECT date. Kill-switch: KAZMA_COMMITMENT_ENABLED / agent.commitment
+    # .enabled (default on). Fail-open: any import/layer error skips the gate.
+    semantic_blocked: list[ToolResult] = []
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        from kazma_core.safety.commitment import authorize_effect as _authz
+        from kazma_core.safety.commitment.constraints import (
+            is_commitment_enabled as _cmt_on,
+            load_constraint_beliefs as _load_beliefs,
+        )
+        from kazma_core.safety.side_effects import requires_semantic_check as _needs_sem
+    except Exception:
+        _cmt_on = None  # type: ignore[assignment]
+        _authz = None; _load_beliefs = None; _needs_sem = None  # type: ignore[assignment]
+    if _cmt_on and _cmt_on() and _needs_sem and _authz:
+        try:
+            _sem = [_tc for _tc in pending if _needs_sem(_tc["name"])]
+            if _sem:  # only do the (cheap) belief read when a semantic tool is present
+                _tenant = state.get("tenant_id") or "default"
+                _req_at = _dt.now(_tz.utc)
+                _beliefs = _load_beliefs(_tenant) if _load_beliefs else []
+                _user_text = _last_user_text(state)
+                _kept: list[PendingToolCall] = [_tc for _tc in pending if not _needs_sem(_tc["name"])]
+                for _tc in _sem:
+                    try:
+                        _dec = _authz(
+                            _tc["name"], _tc.get("arguments") or {},
+                            user_text=_user_text, request_at=_req_at, memory_beliefs=_beliefs,
+                            thread_id=state.get("thread_id"), tenant_id=_tenant,
+                            context={"source": "graph"},
+                        )
+                    except Exception:
+                        logger.debug("[ToolWorker] commitment gate errored for %s — fail-open",
+                                     _tc["name"], exc_info=True)
+                        _kept.append(_tc)
+                        continue
+                    if _dec.decision == "allow":
+                        if _dec.rewritten_args:
+                            _tc["arguments"] = _dec.rewritten_args  # rewrite in place
+                        _kept.append(_tc)
+                    else:  # clarify / confirm / deny → block with a clear reason
+                        _q = _dec.clarify_question or _dec.reason or "needs clarification"
+                        semantic_blocked.append(ToolResult(
+                            tool_call_id=str(_tc.get("id") or ""),
+                            name=_tc["name"],
+                            content=(f"⏸ Commitment gate held this action: {_q} "
+                                     "Confirm the exact intent with the user, then retry."),
+                            is_error=True, duration_ms=0,
+                        ))
+                pending = _kept
+        except Exception:
+            # Fail-open: any unexpected gate error leaves pending unchanged so
+            # tool execution never breaks. The gate is defense, not a hard dep.
+            logger.debug("[ToolWorker] commitment gate skipped — fail-open", exc_info=True)
 
     try:
         # ── HITL: separate safe and danger tools ──────────────────────
@@ -2272,7 +2353,7 @@ async def tool_worker_node(
                     approved_ids = {str(x) for x in raw_ids}
 
         # ── Execute safe tools in parallel ────────────────────────────
-        results: list[ToolResult] = list(constraint_blocked_results)
+        results: list[ToolResult] = list(constraint_blocked_results) + list(semantic_blocked)
         if safe_tools:
             results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
 
