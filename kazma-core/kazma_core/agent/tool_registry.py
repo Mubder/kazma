@@ -470,6 +470,25 @@ class LocalToolRegistry:
                 "is_error": True,
             }
 
+        # Commitment Layer Phase 1 (plan §R2.6): authorize_effect audit choke.
+        # Audit-only here in Phase 1 (enforce_unknown_mutators=False) — extends
+        # observability to the IDE/swarm registry path (the §13 "IDE/registry
+        # free-fire" residual). The memory-corruption half is already blocked
+        # at mutate_belief; the schedule/fs/outbound semantic gate + live
+        # enforcement arrive in Phase 2 via this same call point. The try/except
+        # keeps the audit choke from ever breaking tool execution.
+        try:
+            from kazma_core.safety.commitment import authorize_effect as _authorize
+
+            _dec = _authorize(
+                tool_name, arguments, enforce_unknown_mutators=False,
+                context={"source": "registry"},
+            )
+            if _dec.decision == "deny":
+                return {"content": f"[commitment] blocked: {_dec.reason}", "is_error": True}
+        except Exception:
+            logger.debug("[ToolRegistry] authorize_effect choke skipped", exc_info=True)
+
         # ── Retryable exception types (network/timeout only) ──────
         retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, asyncio.TimeoutError)
         try:

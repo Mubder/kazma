@@ -229,6 +229,29 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception as exc:
         logger.error("ConfigStore overrides read failed in get_hitl_config — using yaml defaults: %s", exc)
 
+    # Phase 0 instrumentation (Commitment Layer §5.1): surface drift between
+    # the effective require_approval_for list and CANONICAL_DANGER_TOOLS once
+    # per process. The YAML list ships as a subset of CANONICAL and operators
+    # may further narrow it via Settings — this makes that drift visible so
+    # danger tools missing from the effective list (which would silently skip
+    # approval) are caught at boot. One-shot diagnostic; not a gate.
+    try:
+        if not getattr(get_hitl_config, "_drift_warned", False):
+            _canonical = set(CANONICAL_DANGER_TOOLS)
+            _effective = set(require_approval_for or [])
+            _canonical_only = _canonical - _effective
+            _effective_only = _effective - _canonical
+            if _canonical_only or _effective_only:
+                logger.warning(
+                    "[Safety] HITL/CANONICAL drift — canonical_only (danger "
+                    "tools NOT requiring approval under the effective list)=%s; "
+                    "effective_only (configured, not in canonical)=%s",
+                    sorted(_canonical_only), sorted(_effective_only),
+                )
+            get_hitl_config._drift_warned = True
+    except Exception:
+        logger.debug("[Safety] HITL/CANONICAL drift check failed", exc_info=True)
+
     return {
         "enabled": enabled,
         "require_approval_for": require_approval_for,

@@ -317,6 +317,7 @@ def start_memory_worker() -> None:
         _start_macro_sleep_scheduler()
         _start_backup_export_scheduler()
         _start_reconsolidation_scheduler()
+        _start_commitment_gc_scheduler()
     except Exception:
         logger.warning("[memory_worker] could not start worker", exc_info=True)
 
@@ -329,6 +330,9 @@ _BACKUP_EXPORT_INTERVAL_HOURS = 24
 # Global reconsolidation: once per day, offset from backup so they don't
 # contend for the same disk I/O window.
 _RECONSOLIDATION_INTERVAL_HOURS = 24
+# Commitment TTL/GC cadence (plan §3.9): every 15 min, matching the shortest
+# pending TTL (ready=15m) so orphans get swept promptly. Lightweight + idempotent.
+_COMMITMENT_GC_INTERVAL_MINUTES = 15
 
 
 def _distinct_tenants() -> list[str]:
@@ -451,6 +455,49 @@ def _start_backup_export_scheduler() -> None:
         )
     except Exception:
         logger.debug("[memory_worker] could not start backup/export scheduler", exc_info=True)
+
+
+def _start_commitment_gc_scheduler() -> None:
+    """Run the commitment TTL/GC cycle every ~15 min (plan §3.9).
+
+    ``run_gc_cycle`` does sweep_expired (rule 1) + enforce_all_pending_caps
+    (rule 6) + delete_retained (rules 3+4). All three are lightweight SQL
+    passes on the ops DB and idempotent, so this runs inline (no durable-queue
+    overhead, unlike the heavy backup/export path). Without this scheduler,
+    expired pending commitments would accumulate forever even though the sweep
+    logic exists — the same "scheduler existed but nothing called it" gap that
+    once left backups inert (AGENTS.md §15B). Failures are logged and the
+    cadence continues.
+    """
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("[memory_worker] no loop — commitment GC scheduler deferred")
+        return
+
+    async def _loop() -> None:
+        await asyncio.sleep(90)  # first sweep shortly after boot
+        while True:
+            try:
+                from kazma_core.safety.commitment.store import run_gc_cycle
+
+                summary = run_gc_cycle()
+                if any(summary.values()):
+                    logger.info("[memory_worker] commitment GC: %s", summary)
+            except Exception:
+                logger.debug("[memory_worker] commitment GC cycle failed", exc_info=True)
+            await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
+
+    try:
+        loop.create_task(_loop())
+        logger.info(
+            "[memory_worker] commitment GC scheduler started (every %dm)",
+            _COMMITMENT_GC_INTERVAL_MINUTES,
+        )
+    except Exception:
+        logger.debug("[memory_worker] could not start commitment GC scheduler", exc_info=True)
 
 
 def _start_reconsolidation_scheduler() -> None:

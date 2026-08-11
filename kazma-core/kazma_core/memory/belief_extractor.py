@@ -30,7 +30,43 @@ __all__ = [
     "extract_beliefs_heuristic",
     "is_filler_turn",
     "extract_and_apply_beliefs",
+    "get_auto_store_mode",
 ]
+
+# ── Conservative auto-store mode (Commitment Layer §6.2) ───────────────────
+# Post-turn extraction may write EPISODES freely (what happened), but BELIEFS
+# are throttled: in "conservative" mode (default) low-confidence inferred
+# beliefs are dropped to keep the belief graph clean — including dates the
+# assistant invented in dialogue (the extractor must not treat assistant
+# claims as user fact). The functional-supersede-of-user-fact case is already
+# handled by the mutate_belief source-trust gate. Live kill-switch:
+# KAZMA_AUTO_STORE_BELIEFS env (plan §2.3 #10).
+
+_CONSERVATIVE_CONF_THRESHOLD = 0.7
+
+
+def get_auto_store_mode(cfg: dict[str, Any] | None = None) -> str:
+    """Resolve the post-turn belief auto-store mode.
+
+    Returns one of ``"off" | "conservative" | "aggressive"``:
+      * ``off``         — post-turn extraction writes no beliefs (episodes only).
+      * ``conservative`` (default) — only high-confidence inferred beliefs are
+        stored; user_explicit stores always pass.
+      * ``aggressive``  — legacy behavior (store every extracted belief).
+    """
+    import os
+
+    env = (os.environ.get("KAZMA_AUTO_STORE_BELIEFS") or "").strip().lower()
+    if env in ("off", "conservative", "aggressive"):
+        return env
+    try:
+        m = str(((cfg or {}).get("memory") or {}).get(
+            "auto_store_beliefs", "conservative")).strip().lower()
+        if m in ("off", "conservative", "aggressive"):
+            return m
+    except Exception:
+        pass
+    return "conservative"
 
 # ── Extraction prompt ────────────────────────────────────────────────────
 
@@ -408,6 +444,23 @@ def _apply_beliefs_to_v2(
         if clean is None:
             stats["rejected"] += 1
             continue
+        # Commitment Layer §6.2 — conservative auto-store: throttle low-
+        # confidence INFERRED beliefs so post-turn extraction doesn't pollute
+        # the belief graph with noise (incl. dates the assistant invented in
+        # dialogue). User_explicit stores are NEVER throttled; the functional-
+        # supersede-of-user-fact case is the mutate_belief source-trust gate.
+        _method = extraction_method or "llm_inferred"
+        if _method != "user_explicit":
+            _mode = get_auto_store_mode(cfg)
+            if _mode == "off":
+                stats["rejected"] += 1
+                stats["skipped_auto_store_off"] = stats.get("skipped_auto_store_off", 0) + 1
+                continue
+            if (_mode == "conservative"
+                    and float(clean.get("confidence", 0.0)) < _CONSERVATIVE_CONF_THRESHOLD):
+                stats["rejected"] += 1
+                stats["skipped_low_confidence"] = stats.get("skipped_low_confidence", 0) + 1
+                continue
         # Resolve entities through the 3-tier cascade (Tier-2 vector active).
         try:
             obj_vec = _embed(clean["object"]) if clean["object"] and clean["object"] != "user" else None
