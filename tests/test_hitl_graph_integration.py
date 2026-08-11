@@ -256,7 +256,7 @@ class TestHitlGraphInterrupt:
         initial_state: HitlState = {
             "messages": [{"role": "user", "content": "run a command"}],
             "tool_calls_pending": [
-                {"id": "tc1", "name": "shell_exec", "arguments": {"command": "rm -rf /"}}
+                {"id": "tc1", "name": "shell_exec", "arguments": {"command": "echo hello"}}
             ],
         }
 

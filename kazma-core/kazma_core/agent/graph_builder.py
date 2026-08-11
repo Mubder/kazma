@@ -2379,6 +2379,7 @@ async def tool_worker_node(
 
             approval_input = {
                 "type": "hitl_approval",
+                "kind": "security",  # self-describing (§4.3): every payload carries kind
                 "tool": primary_tool,
                 "args": primary_args,
                 "tools": tools_payload,

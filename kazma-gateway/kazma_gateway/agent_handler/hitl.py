@@ -326,8 +326,18 @@ async def _handle_hitl_resume(
                 except Exception as exc:
                     logger.warning("[HITL] Task grant failed: %s — continuing with single approve", exc)
 
+            # Phase 3/§4.3: semantic interrupts need {tcid: option_id}; security
+            # needs {approved: bool}. The existing approve/deny buttons map to
+            # "best option" / "cancel" for semantic via build_resume_value.
+            from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
+
+            if is_semantic_kind(pending):
+                _resume_val = build_resume_value(pending, approved)
+            else:
+                _resume_val = {"approved": approved, "reason": action,
+                               "scope": "task" if is_task_grant else "once"}
             result_state = await graph.ainvoke(
-                Command(resume={"approved": approved, "reason": action, "scope": "task" if is_task_grant else "once"}),
+                Command(resume=_resume_val),
                 resume_config,
             )
 

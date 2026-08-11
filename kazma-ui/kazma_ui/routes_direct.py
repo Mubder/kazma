@@ -3066,13 +3066,34 @@ def register_direct_routes(self: Any) -> None:
                 except Exception:
                     logger.exception("[HITL] failed to apply tool grant")
 
-            resume_value: dict[str, Any] = {
-                "approved": approved,
-                "reason": body.get("reason", ""),
-                "scope": scope,
-            }
-            if isinstance(body.get("approved_ids"), list):
-                resume_value["approved_ids"] = body["approved_ids"]
+            # Phase 3/§4.3: read the pending interrupt payload to determine kind.
+            # Semantic interrupts need a {tcid: option_id} resume; security needs
+            # {approved: bool}. The existing Approve/Deny buttons map to "best
+            # option" / "cancel" for semantic via build_resume_value.
+            _intr_payload = None
+            try:
+                for _task in (pre.tasks if pre else []):
+                    for _intr in (_task.interrupts or []):
+                        if isinstance(_intr.value, dict) and _intr.value.get("type") == "hitl_approval":
+                            _intr_payload = _intr.value
+                            break
+                    if _intr_payload:
+                        break
+            except Exception:
+                pass
+
+            from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
+
+            if is_semantic_kind(_intr_payload):
+                resume_value = build_resume_value(_intr_payload, approved)
+            else:
+                resume_value: dict[str, Any] = {
+                    "approved": approved,
+                    "reason": body.get("reason", ""),
+                    "scope": scope,
+                }
+                if isinstance(body.get("approved_ids"), list):
+                    resume_value["approved_ids"] = body["approved_ids"]
 
             from fastapi.responses import StreamingResponse
             from typing import AsyncGenerator
