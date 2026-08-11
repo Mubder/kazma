@@ -51,6 +51,8 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "tool_name": str(tool) if tool is not None else "unknown",
                 "arguments": value.get("args") or value.get("arguments") or {},
                 "message": "" if msg is None else str(msg),
+                "kind": value.get("kind", "security"),
+                "items": value.get("items") or [],
             }
         # Fallback: some interrupt payloads may not carry the type tag but
         # still have tool/args keys
@@ -63,6 +65,8 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "tool_name": str(tool) if tool is not None else "unknown",
                 "arguments": value.get("args") or value.get("arguments") or {},
                 "message": "" if msg is None else str(msg),
+                "kind": value.get("kind", "security"),
+                "items": value.get("items") or [],
             }
     return None
 

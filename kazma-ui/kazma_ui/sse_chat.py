@@ -610,9 +610,11 @@ async def _stream_langgraph_events(
                                     "approval_required",
                                     {
                                         "thread_id": thread_id,
+                                        "kind": payload.get("kind", "security"),
                                         "tool": payload.get("tool", ""),
                                         "args": payload.get("args", {}),
                                         "tools": payload.get("tools") or [],
+                                        "items": payload.get("items") or [],
                                         "message": payload.get("message", ""),
                                     },
                                 )
