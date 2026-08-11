@@ -728,9 +728,11 @@ def docx_heading_bar(
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
+    from kazma_core.documents.style_theme import THEME
 
     fill = (fill_hex or "1E3A5F").lstrip("#").upper()
-    sizes = {0: 18, 1: 14, 2: 12, 3: 11}
+    sizes = {0: float(THEME["title_size"]), 1: float(THEME["h1_size"]),
+             2: float(THEME["h2_size"]), 3: float(THEME["h3_size"])}
     size = sizes.get(int(level), 12)
 
     table = document.add_table(rows=1, cols=1)
@@ -750,7 +752,7 @@ def docx_heading_bar(
     run = p.add_run(text or "")
     run.bold = True
     run.font.size = Pt(size)
-    run.font.name = "Arial"
+    run.font.name = "Calibri"
     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
     if rtl:
         docx_set_rtl_paragraph(p, justify=False)  # also stamps run w:rtl
@@ -783,9 +785,9 @@ def docx_set_run_rtl(run: Any) -> None:
         r_pr.insert(0, r_fonts)
     # Prefer Arial (has Arabic glyphs on Windows); cs = complex script
     for attr, val in (
-        ("w:ascii", "Arial"),
-        ("w:hAnsi", "Arial"),
-        ("w:cs", "Arial"),
+        ("w:ascii", "Calibri"),
+        ("w:hAnsi", "Calibri"),
+        ("w:cs", "Calibri"),
     ):
         if not r_fonts.get(qn(attr)):
             r_fonts.set(qn(attr), val)
@@ -982,7 +984,7 @@ def docx_add_table(
         p = cell.paragraphs[0]
         run = p.add_run(text)
         run.font.size = Pt(10)
-        run.font.name = "Arial"
+        run.font.name = "Calibri"
         if header:
             run.bold = True
             run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)

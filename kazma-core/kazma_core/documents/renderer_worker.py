@@ -683,7 +683,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     # Normal style: always justify (EN + AR); RTL via bidi on each para
     try:
         normal = document.styles["Normal"]
-        normal.font.name = "Arial"
+        normal.font.name = "Calibri"
         normal.font.size = Pt(float(THEME["body_size"]))
         normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         normal.paragraph_format.space_after = Pt(8)
@@ -704,7 +704,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
         docx_heading_bar(
             document,
             str(payload["subtitle"]),
-            level=2,
+            level=3,
             rtl=rtl,
             fill_hex=fill_h,
         )
@@ -722,7 +722,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
             docx_set_rtl_paragraph(fp, justify=False)
 
     if payload.get("toc"):
-        docx_heading_bar(document, chrome["toc"], level=1, rtl=rtl, fill_hex=fill_h)
+        docx_heading_bar(document, chrome["toc"], level=2, rtl=rtl, fill_hex=fill_h)
         for index, item in enumerate(sections, 1):
             if item["heading"]:
                 p = document.add_paragraph(f"{index}. {item['heading']}")
@@ -780,7 +780,7 @@ def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
         docx_heading_bar(
-            document, chrome["references"], level=1, rtl=rtl, fill_hex=fill_h
+            document, chrome["references"], level=2, rtl=rtl, fill_hex=fill_h
         )
         for value in citations:
             p = document.add_paragraph(str(value), style="List Number")

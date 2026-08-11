@@ -496,3 +496,48 @@ def test_toc_items_align_per_language(tmp_path: Path) -> None:
     assert ar_toc, "AR TOC entry not right-aligned to column edge"
     en_toc = [x0 for pg, y, x0, x1, t in en if pg == 1 and 150.0 <= y <= 320.0 and x0 <= 70.0]
     assert en_toc, "EN TOC entry not left-aligned"
+
+def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
+    """DOCX must mirror the PDF/THEME styling: Calibri (not Arial) on every run,
+    heading point sizes synced to THEME, and Arabic runs carry w:rtl + the
+    paragraph w:bidi so Word opens RTL (regression: 'AR is LTR + no font set'
+    and 'EN bigger font size not synced')."""
+    import zipfile
+    import re
+    from kazma_core.documents.renderer_worker import _generate_docx
+    from kazma_core.documents.style_theme import THEME
+
+    ar_body = "تقرير شامل يوضح قدرات معالالجة في منصومة كاظمة."
+    ar_pl = {
+        "title": "الملخص التنفيذي", "subtitle": "تقرير استراتيجي",
+        "lang": "ar", "rtl": True, "toc": True, "citations": ["مصدر أول: تقرير"],
+        "sections": [{"heading": "الملخص", "body": ar_body}],
+    }
+    en_pl = {
+        "title": "Executive Summary", "subtitle": "Strategic Report",
+        "lang": "en", "rtl": False, "toc": True, "citations": ["First source"],
+        "sections": [{"heading": "Summary", "body": "Executive summary of the platform."}],
+    }
+    _generate_docx(tmp_path / "ar.docx", ar_pl)
+    _generate_docx(tmp_path / "en.docx", en_pl)
+
+    ar_xml = zipfile.ZipFile(tmp_path / "ar.docx").read("word/document.xml").decode("utf-8")
+    en_xml = zipfile.ZipFile(tmp_path / "en.docx").read("word/document.xml").decode("utf-8")
+    styles = zipfile.ZipFile(tmp_path / "en.docx").read("word/styles.xml").decode("utf-8")
+
+    # No Arial leakage in either document
+    assert 'w:ascii="Arial"' not in ar_xml, "Arial leaked into AR DOCX run font"
+    assert 'w:ascii="Arial"' not in en_xml, "Arial leaked into EN DOCX run font"
+    assert 'w:ascii="Calibri"' in en_xml, "EN DOCX missing Calibri run font"
+    # AR complex-script runs use Calibri cs + rtl + paragraph bidi
+    assert 'w:cs="Calibri"' in ar_xml, "AR DOCX runs missing Calibri complex-script font"
+    assert "w:rtl" in ar_xml, "AR DOCX runs missing w:rtl"
+    assert "w:bidi" in ar_xml, "AR DOCX paragraphs missing w:bidi"
+    # EN heading sizes (half-points) synced to THEME
+    sz = {int(x) for x in re.findall(r'w:sz w:val="(\d+)"', en_xml)}
+    assert int(THEME["title_size"] * 2) in sz   # title -> 40
+    assert int(THEME["h1_size"] * 2) in sz       # h1    -> 32
+    assert int(THEME["h2_size"] * 2) in sz       # h2    -> 28
+    assert int(THEME["h3_size"] * 2) in sz       # h3    -> 25
+    # Body paragraph size on the Normal style (styles.xml) synced too
+    assert ('w:val="%d"' % int(THEME["body_size"] * 2)) in styles, "EN DOCX body size not synced"
