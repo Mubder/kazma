@@ -300,7 +300,9 @@ class DocxEngine:
         if isinstance(block, TitleBlock):
             self._heading_bar(document, block.text, level=block.level, fill_hex=block.fill)
         elif isinstance(block, HeadingBlock):
-            self._heading_bar(document, block.text, level=block.level, fill_hex=block.fill)
+            # Section headings are TOC-indexable (carry w:outlineLvl).
+            self._heading_bar(document, block.text, level=block.level,
+                              fill_hex=block.fill, indexable=True)
         elif isinstance(block, BodyBlock):
             self._write_rich_body(document, block.text)
         elif isinstance(block, TableBlock):
@@ -320,21 +322,85 @@ class DocxEngine:
     # header / footer
     # ================================================================== #
     def _write_header_footer(self, document: Any, model: ContentModel) -> None:
+        from docx.shared import Pt
+
         for section in document.sections:
+            # Header: brand chrome.
             hp = section.header.paragraphs[0]
             hp.text = model.header or ""
             if (model.header or "").strip():
                 self._set_paragraph(hp, "start")
+                for r in hp.runs:
+                    r.font.size = Pt(8)
+            # Footer: brand + an auto-updating PAGE field (page numbers).
             fp = section.footer.paragraphs[0]
-            fp.text = model.footer or ""
-            if (model.footer or "").strip():
+            fp.text = ""
+            brand = model.footer or self.profile.chrome["brand"]
+            brand_run = fp.add_run(brand)
+            brand_run.font.size = Pt(8)
+            if model.page_numbers:
+                sep = fp.add_run("    —    ")
+                sep.font.size = Pt(8)
+                self._append_field(fp, "PAGE", "1")  # updated by Word/LibreOffice
+            if (fp.text or "").strip() or model.page_numbers:
                 self._set_paragraph(fp, "start")
+
+    @staticmethod
+    def _append_field(paragraph: Any, instr: str, cache_text: str | list[str] = "") -> None:
+        """Append a complex field (begin/instr/separate/result/end) to a paragraph.
+
+        Used for the PAGE field (footer page numbers) and the TOC field. The
+        ``cache_text`` is the pre-update display (Word/LibreOffice recompute the
+        real value on open / update). A list renders as multiple lines (runs
+        joined by ``<w:br/>``) so the TOC cache looks like a real list.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        def _fldchar(t: str) -> Any:
+            r = OxmlElement("w:r")
+            fc = OxmlElement("w:fldChar")
+            fc.set(qn("w:fldCharType"), t)
+            r.append(fc)
+            return r
+
+        def _instr(text: str) -> Any:
+            r = OxmlElement("w:r")
+            it = OxmlElement("w:instrText")
+            it.set(qn("xml:space"), "preserve")
+            it.text = f" {text} "
+            r.append(it)
+            return r
+
+        def _text(text: str) -> Any:
+            r = OxmlElement("w:r")
+            t = OxmlElement("w:t")
+            t.set(qn("xml:space"), "preserve")
+            t.text = text
+            r.append(t)
+            return r
+
+        def _br() -> Any:
+            r = OxmlElement("w:r")
+            r.append(OxmlElement("w:br"))
+            return r
+
+        paragraph._p.append(_fldchar("begin"))
+        paragraph._p.append(_instr(instr))
+        paragraph._p.append(_fldchar("separate"))
+        if cache_text:
+            lines = cache_text if isinstance(cache_text, list) else [cache_text]
+            for i, ln in enumerate(lines):
+                if i > 0:
+                    paragraph._p.append(_br())
+                paragraph._p.append(_text(ln))
+        paragraph._p.append(_fldchar("end"))
 
     # ================================================================== #
     # heading bar (full-width filled single-cell table)
     # ================================================================== #
     def _heading_bar(self, document: Any, text: str, *, level: int = 1,
-                     fill_hex: str | None = None) -> None:
+                     fill_hex: str | None = None, indexable: bool = False) -> None:
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
@@ -373,6 +439,15 @@ class DocxEngine:
         # Title/section bars are start-aligned: reading-start edge.
         # Under RTL the profile maps "start" → w:jc="start" → physical RIGHT.
         self._set_paragraph(p, "start")
+        # Outline level on section headings (indexable) so a TOC field can index
+        # them. outlineLvl is appended AFTER jc (schema order: ... jc, ...,
+        # outlineLvl ...). Only content headings are indexable — NOT the title,
+        # TOC, references, or table heading bars (they must not self-list).
+        if indexable and level >= 1:
+            p_pr = p._p.get_or_add_pPr()
+            outline = OxmlElement("w:outlineLvl")
+            outline.set(qn("w:val"), str(min(level, 3) - 1))  # 1->0, 2->1, 3->2
+            p_pr.append(outline)
         if self.profile.rtl:
             self._mark_table_rtl(table)
 
@@ -384,13 +459,24 @@ class DocxEngine:
     # table of contents
     # ================================================================== #
     def _write_toc(self, document: Any, entries: list[str]) -> None:
+        """Insert a real Word TOC field (auto-updated by Word/LibreOffice).
+
+        Section heading bars carry ``w:outlineLvl`` (see :meth:`_heading_bar`),
+        so the TOC field's ``\\o "1-3"`` switch indexes them and regenerates the
+        table — with page numbers — when the field is updated (Word: right-click
+        → Update Field; LibreOffice updates on open / PDF export). The entries
+        are pre-populated as the field's cached result so the TOC is never empty
+        before the first update.
+        """
         self._heading_bar(document, self.profile.chrome["toc"], level=2,
                           fill_hex=self.theme["heading_fill"].lstrip("#"))
-        for index, entry in enumerate(entries, 1):
-            if not entry:
-                continue
-            p = document.add_paragraph(f"{index}. {entry}")
-            self._set_paragraph(p, "start")
+        clean = [e for e in entries if e]
+        if not clean:
+            return
+        cache = [f"{i}. {e}" for i, e in enumerate(clean, 1)]
+        p = document.add_paragraph()
+        self._append_field(p, 'TOC \\o "1-3" \\h \\z \\u', cache_text=cache)
+        self._set_paragraph(p, "start")
 
     # ================================================================== #
     # citations (numbered references)
@@ -481,7 +567,7 @@ class DocxEngine:
                 level = min(3, max(1, int(block.get("level") or 2)))
                 fill = "1E3A5F" if level <= 2 else "334155"
                 self._heading_bar(document, block.get("text") or "",
-                                  level=level, fill_hex=fill)
+                                  level=level, fill_hex=fill, indexable=True)
             elif btype == "paragraph":
                 # A collapsed table the block classifier missed?
                 maybe2 = try_parse_pipe_table_blob(block.get("text") or "")

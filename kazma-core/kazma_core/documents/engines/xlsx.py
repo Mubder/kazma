@@ -120,9 +120,38 @@ class XlsxEngine:
             sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
             sheet.print_title_rows = "1:2"
 
+            # Optional chart (bar/line/pie) plotted over the sheet's data.
+            chart_spec = value.get("chart")
+            if isinstance(chart_spec, dict) and len(rows) >= 2:
+                self._add_chart(sheet, chart_spec, last_data_row=len(rows) + 1)
+
         if not workbook.sheetnames:
             workbook.create_sheet("Sheet")
         workbook.save(str(output))
+
+    @staticmethod
+    def _add_chart(sheet: Any, spec: dict[str, Any], *, last_data_row: int) -> None:
+        """Add a bar/line/pie chart over the sheet's data.
+
+        Layout assumption: row 1 = branded title, row 2 = header, rows 3+ = data.
+        Defaults plot column 2 (values, header = series name) against column 1
+        (categories); override with ``category_col`` / ``value_col`` (1-based).
+        """
+        from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+
+        kind = str(spec.get("type", "bar")).lower()
+        cls = {"bar": BarChart, "line": LineChart, "pie": PieChart}.get(kind, BarChart)
+        chart = cls()
+        chart.title = spec.get("title") or ""
+        cat_col = int(spec.get("category_col", 1) or 1)
+        val_col = int(spec.get("value_col", 2) or 2)
+        # Values: include header row (2) so titles_from_data names the series.
+        data = Reference(sheet, min_col=val_col, min_row=2, max_row=last_data_row)
+        chart.add_data(data, titles_from_data=True)
+        if last_data_row >= 3 and cat_col <= sheet.max_column:
+            cats = Reference(sheet, min_col=cat_col, min_row=3, max_row=last_data_row)
+            chart.set_categories(cats)
+        sheet.add_chart(chart, f"A{last_data_row + 2}")
 
     @staticmethod
     def _cell(item: Any) -> Any:

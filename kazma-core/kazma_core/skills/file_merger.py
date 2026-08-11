@@ -85,13 +85,10 @@ def merge_html_parts_and_export_pdf(
         HTML(filename=str(output_html_path)).write_pdf(str(output_pdf_path))
         pdf_status = "success"
     except Exception as e:
-        logger.warning("WeasyPrint fallback triggered or unavailable: %s", e)
-        # Fall back to exporter engine if WeasyPrint isn't installed
-        try:
-            from kazma_core.skills.exporter import prepare_markdown_for_pdf
-            pdf_status = f"html_saved_pdf_failed: {str(e)}"
-        except Exception as ex:
-            pdf_status = f"html_saved_pdf_failed: {str(e)} / {str(ex)}"
+        # WeasyPrint unavailable or conversion failed. The merged HTML has
+        # already been saved to output_html_path; the caller still has that.
+        logger.warning("WeasyPrint PDF step unavailable/failed: %s", e)
+        pdf_status = f"html_saved_pdf_failed: {e}"
 
     return {
         "status": "completed",

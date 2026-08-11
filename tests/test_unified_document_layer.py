@@ -255,3 +255,72 @@ def test_pptx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
     # Shared accent/heading colour on the title slide for both.
     assert ("1e3a5f" in slide_xml(ar, 1).lower() or "0f172a" in slide_xml(ar, 1).lower())
     assert ("1e3a5f" in slide_xml(en, 1).lower() or "0f172a" in slide_xml(en, 1).lower())
+
+
+def test_pptx_speaker_notes_attached(tmp_path: Path) -> None:
+    """PPTX speaker notes: a slide with a ``notes`` field gets a notes slide."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_pptx
+
+    pptx = tmp_path / "deck.pptx"
+    _generate_pptx(pptx, {
+        "title": "Deck", "notes": "title notes",
+        "slides": [{"heading": "Intro", "bullets": ["a"], "notes": "intro speaker notes"}],
+    })
+    names = zipfile.ZipFile(pptx).namelist()
+    notes_xml = [n for n in names if "notesSlide" in n and n.endswith(".xml")]
+    assert notes_xml, "PPTX missing notes slide"
+    blob = "".join(zipfile.ZipFile(pptx).read(n).decode() for n in notes_xml)
+    assert "intro speaker notes" in blob, "slide notes text not attached"
+
+
+def test_docx_toc_field_and_page_numbers(tmp_path: Path) -> None:
+    """DOCX emits a real TOC field (+ outline levels on section headings) and a
+    PAGE field in the footer when ``page_numbers`` is set."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    docx = tmp_path / "t.docx"
+    _generate_docx(docx, {
+        "title": "Report", "lang": "en", "toc": True, "page_numbers": True,
+        "sections": [{"heading": "Intro", "body": "body"}, {"heading": "End", "body": "body"}],
+    })
+    z = zipfile.ZipFile(docx)
+    doc_xml = z.read("word/document.xml").decode()
+    # TOC field instruction present.
+    assert "TOC" in doc_xml and 'fldCharType="begin"' in doc_xml, "missing TOC field"
+    # Section headings carry outline levels (indexable by the TOC field); the
+    # TOC/References bars do NOT (so they don't self-list).
+    assert doc_xml.count("<w:outlineLvl") == 2, "outline levels not on exactly the section headings"
+    # Footer carries a PAGE field.
+    footer = [n for n in z.namelist() if n.startswith("word/footer") and n.endswith(".xml")][0]
+    fxml = z.read(footer).decode()
+    assert "PAGE" in fxml and 'fldCharType="begin"' in fxml, "footer missing PAGE field"
+
+
+def test_xlsx_formulas_and_charts(tmp_path: Path) -> None:
+    """XLSX: cells starting with '=' are written as formulas; a ``chart`` spec
+    adds a bar/line/pie chart over the sheet's data."""
+    from openpyxl import load_workbook
+
+    from kazma_core.documents.renderer_worker import _generate_xlsx
+
+    xlsx = tmp_path / "t.xlsx"
+    _generate_xlsx(xlsx, {
+        "title": "Sales", "lang": "en",
+        "sheets": [{
+            "name": "Q",
+            "rows": [["Month", "Sales", "Total"], ["Jan", 100, "=B3*2"], ["Feb", 200, "=B4*2"]],
+            "chart": {"type": "bar", "title": "Sales by Month"},
+        }],
+    })
+    wb = load_workbook(xlsx)
+    ws = wb["Q"]
+    # Formula cell preserved as a formula (data_type 'f'), not stringized.
+    assert ws["C3"].value == "=B3*2" and ws["C3"].data_type == "f", (
+        f"formula cell stringized: {ws['C3'].value!r} ({ws['C3'].data_type})"
+    )
+    # Chart added.
+    assert len(ws._charts) >= 1, "chart not added to sheet"

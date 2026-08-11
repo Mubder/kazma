@@ -16,7 +16,7 @@ try:
 except ImportError:
     markdown = None  # type: ignore
 
-from kazma_core.documents.style_theme import THEME, localized_chrome
+from kazma_core.documents.style_theme import THEME
 
 logger = logging.getLogger(__name__)
 

@@ -84,6 +84,8 @@ class PptxEngine:
             )
             self._shape_text(sub, str(subtitle), color_hex=colors["muted"],
                              size=20, align="ctr")
+        # Optional speaker notes on the title slide.
+        self._set_notes(title_slide, payload.get("notes"))
 
         # ── Content slides ─────────────────────────────────────────────── #
         slides = payload.get("slides") if isinstance(payload.get("slides"), list) else []
@@ -122,8 +124,24 @@ class PptxEngine:
                 footer, f'{chrome["brand"]}    ·    {page_num}',
                 color_hex=colors["muted"], size=10, align=None,
             )
+            # Optional speaker notes for this slide.
+            self._set_notes(slide, value.get("notes"))
 
         presentation.save(str(output))
+
+    @staticmethod
+    def _set_notes(slide: Any, notes: Any) -> None:
+        """Attach speaker notes to a slide (creates the notes slide if needed).
+
+        ``notes`` may be a string or a list of bullet strings.
+        """
+        if not notes:
+            return
+        lines = notes if isinstance(notes, list) else [str(notes)]
+        tf = slide.notes_slide.notes_text_frame
+        tf.text = lines[0]
+        for line in lines[1:]:
+            tf.add_paragraph().text = str(line)
 
     # ================================================================== #
     # shape helpers

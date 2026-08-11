@@ -109,3 +109,6 @@ kubernetes/*secrets*.yaml
 
 # Research / smoke scratch (not production)
 research/kb/
+
+# Generated document demos (regenerable artifacts, not source)
+demo_documents/
