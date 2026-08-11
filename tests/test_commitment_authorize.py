@@ -54,4 +54,4 @@ def test_audit_carries_profile_and_context():
     assert d.audit["source"] == "graph"
     assert d.audit["thread_id"] == "t1"
     assert d.audit["effect"] == "schedule"
-    assert d.audit["args_keys"] == ["timing"]
+    assert d.audit["args_digest"]  # 12-char digest of the args
