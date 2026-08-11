@@ -142,6 +142,18 @@ def _build_approval_prompt(
                 markup = build_semantic_keyboard(thread_id, options)
             except Exception:
                 pass
+        elif plat == "discord":
+            try:
+                from kazma_gateway.adapters.platform_keyboards import discord_semantic_components
+                markup = discord_semantic_components(thread_id, options)
+            except Exception:
+                pass
+        elif plat == "slack":
+            try:
+                from kazma_gateway.adapters.platform_keyboards import slack_semantic_blocks
+                markup = slack_semantic_blocks(thread_id, question, options)
+            except Exception:
+                pass
         return {"text": text, "markup": markup, "platform": plat}
     text = (
         f"⚠️ Approval required\n"

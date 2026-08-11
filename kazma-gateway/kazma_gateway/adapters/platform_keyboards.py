@@ -224,3 +224,38 @@ def slack_model_blocks(provider_name: str, models: list[str]) -> list[dict[str, 
     for i in range(0, len(elements), 5):
         blocks.append({"type": "actions", "elements": elements[i : i + 5]})
     return blocks
+
+
+def discord_semantic_components(request_id: str, options: list[dict]) -> list[dict[str, Any]]:
+    """Semantic clarify/confirm option buttons for Discord (one per option)."""
+    buttons = []
+    for opt in (options or []):
+        oid = opt.get("id", "")
+        label = (opt.get("label", oid) or "")[:80]
+        buttons.append({
+            "type": 2, "style": 4 if oid == "cancel" else 3,
+            "label": label, "custom_id": f"hitl:opt:{oid}:{request_id}",
+        })
+    rows = [{"type": 1, "components": buttons[i:i + 5]} for i in range(0, len(buttons), 5)]
+    return rows or discord_approval_components(request_id)
+
+
+def slack_semantic_blocks(request_id: str, text: str, options: list[dict]) -> list[dict[str, Any]]:
+    """Semantic clarify/confirm option buttons for Slack (one per option)."""
+    elements = []
+    for opt in (options or []):
+        oid = opt.get("id", "")
+        label = (opt.get("label", oid) or "")[:75]
+        elements.append({
+            "type": "button",
+            "text": {"type": "plain_text", "text": label},
+            "style": "danger" if oid == "cancel" else "primary",
+            "value": f"hitl:opt:{oid}:{request_id}",
+            "action_id": f"hitl_opt_{oid}_{request_id}"[:255],
+        })
+    if not elements:
+        return slack_approval_blocks(request_id, text)
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"❓ *{text}*"}},
+        {"type": "actions", "block_id": f"hitl_actions_{request_id}", "elements": elements},
+    ]

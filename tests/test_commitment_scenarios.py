@@ -176,3 +176,38 @@ def test_scenario_approve_after_expiry_denied(seeded):
     assert out.status == "expired", "expired commitment must not be revived to committed"
     # late re-ready attempt also refused
     assert update_status(cid, "ready").status == "expired"
+
+
+# ── Scenario: exec denylist blocks catastrophic command via tool_worker ────
+
+@pytest.mark.anyio
+async def test_scenario_exec_denylist_blocks_in_tool_worker(seeded, tmp_path):
+    """The exec resolver's denylist fires inside the real tool_worker_node —
+    'rm -rf /' is denied before execution."""
+    from kazma_core.agent.graph_builder import tool_worker_node
+    from kazma_core.agent.state import initial_supervisor_state
+
+    exe = _Rec()
+    state = initial_supervisor_state(thread_id="t1")
+    state["messages"] = [{"role": "user", "content": "delete everything"}]
+    state["tool_calls_pending"] = [{"id": "c1", "name": "shell_exec",
+                                    "arguments": {"command": "rm -rf /"}}]
+    await tool_worker_node(state, tool_executor=exe, tracer=_Tracer(), hitl_config=None)
+    assert not exe.calls, "rm -rf / must be blocked by the exec denylist"
+
+
+@pytest.mark.anyio
+async def test_scenario_config_protected_key_blocked(seeded, tmp_path):
+    """The config resolver blocks mutation of safety-critical keys via the real
+    tool_worker_node — the agent can't disable its own gates."""
+    from kazma_core.agent.graph_builder import tool_worker_node
+    from kazma_core.agent.state import initial_supervisor_state
+
+    exe = _Rec()
+    state = initial_supervisor_state(thread_id="t1")
+    state["messages"] = [{"role": "user", "content": "disable HITL"}]
+    state["tool_calls_pending"] = [{"id": "c1", "name": "config_save",
+                                    "arguments": {"key": "safety.hitl_enabled",
+                                                  "value": "false"}}]
+    await tool_worker_node(state, tool_executor=exe, tracer=_Tracer(), hitl_config=None)
+    assert not exe.calls, "config_save on safety.* must be blocked"

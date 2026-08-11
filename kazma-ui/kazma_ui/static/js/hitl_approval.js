@@ -87,6 +87,28 @@
       message = escapeHtml(message);
       var argsStr = escapeHtml(JSON.stringify(item.arguments || item.args || {}, null, 2));
       var icon = safeIcon('wrench');
+      // Phase 3: semantic clarify/confirm → render per-option buttons
+      var _kind = item.kind || 'security';
+      if (_kind.indexOf('semantic_') === 0) {
+        var _si = (item.items && item.items[0]) || {};
+        var _sq = escapeHtml(_si.question || message || 'Needs clarification');
+        var _so = (_si.options || []);
+        var _st = escapeHtml(_si.tool_call_id || '');
+        var _ob = _so.map(function(o) {
+          var c = o.id === 'cancel' ? 'btn-danger' : 'btn-primary';
+          return '<button class="btn btn-sm ' + c + ' hitl-sem-opt-btn" data-thread-id="' + threadId +
+                 '" data-tcid="' + _st + '" data-opt="' + escapeHtml(o.id) + '">' +
+                 escapeHtml(o.label || o.id) + '</button>';
+        }).join(' ');
+        return (
+          '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
+          '  <div class="hitl-approval-header"><span class="hitl-tool-name">❓ Clarification</span>' +
+            (threadId ? '<span class="hitl-thread-id">' + threadId + '</span>' : '') + '</div>' +
+          '  <div class="hitl-approval-message" dir="auto">' + _sq + '</div>' +
+          '  <div class="hitl-approval-actions">' + _ob + '</div>' +
+          '</div>'
+        );
+      }
 
       return (
         '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
@@ -131,7 +153,26 @@
     });
     list.querySelectorAll('.hitl-deny-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        submitApproval(btn.getAttribute('data-thread-id'), false, btn, 'once', '');
+        submitApproval(btn.getAttribute('data-thread_id'), false, btn, 'once', '');
+      });
+    });
+    // Phase 3: wire semantic per-option buttons
+    list.querySelectorAll('.hitl-sem-opt-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tid = btn.getAttribute('data-thread-id');
+        var tcid = btn.getAttribute('data-tcid');
+        var optId = btn.getAttribute('data-opt');
+        var card = btn.closest('.hitl-approval-card');
+        if (card) card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+        var act = card ? card.querySelector('.hitl-approval-actions') : null;
+        if (act) act.innerHTML = '<span>Resolving…</span>';
+        var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once', choices: {} };
+        payload.choices[tcid] = optId;
+        fetch('/api/approve/' + tid, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).then(function() { refreshPending(); })
+          .catch(function() { if (act) act.innerHTML = '<span class="text-danger">Failed</span>'; });
       });
     });
   }

@@ -153,6 +153,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "slow: Slow tests",
+    "commitment: Commitment Layer tests (gate, resolvers, store, scope, soul)",
 ]
 
 [tool.coverage.run]
