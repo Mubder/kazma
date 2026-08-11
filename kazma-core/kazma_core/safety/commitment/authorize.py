@@ -143,6 +143,16 @@ def authorize_effect(
             tenant_id=tenant_id, cfg=cfg, source=ctx.get("source", "unknown"),
         )
 
+    # Phase 4: cancel_job resolver — verify the job_id is a real pending job on
+    # this thread (catches hallucinated / wrong-thread / already-terminal ids).
+    # Only the graph path supplies thread_id; the registry choke stays audit-only.
+    if profile.act == "cancel_job" and thread_id:
+        return _resolve_cancel_job_act(
+            profile, tool_name, args or {}, audit=audit,
+            thread_id=thread_id, tenant_id=tenant_id, cfg=cfg,
+            source=ctx.get("source", "unknown"),
+        )
+
     # Everything else: audit-only allow (memory corruption is gated at
     # mutate_belief; other acts' resolvers arrive in Phase 4).
     logger.info(
@@ -262,4 +272,79 @@ def _resolve_remind_act(
     return EffectDecision(
         decision="deny", reason=res.reason or "remind unresolved", profile=profile,
         audit=audit, commitment_id=cid,
+    )
+
+
+def _resolve_cancel_job_act(
+    profile: ToolEffectProfile,
+    tool_name: str,
+    args: dict[str, Any],
+    *,
+    audit: dict[str, Any],
+    thread_id: str | None,
+    tenant_id: str,
+    cfg: dict[str, Any] | None,
+    source: str,
+) -> EffectDecision:
+    """Resolve a cancel_scheduled call (plan §3.5).
+
+    ``cancel_scheduled`` takes a ``job_id``. The resolver verifies that job_id
+    refers to a REAL, PENDING job on this thread before allowing — this catches
+    hallucinated / wrong-thread / already-terminal job_ids (the model often
+    invents ids it never listed). When the target doesn't match, it clarifies
+    WITH THE ACTUAL pending list so the user/model can pick the right one,
+    instead of confidently "canceling" something that doesn't cancel.
+    """
+    from .config import get_commitment_config
+    from .constraints import cron_pending_jobs
+    from .store import Commitment, create_commitment
+
+    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
+        get_commitment_config().get("mode", "balanced"))
+    if mode == "yolo":
+        logger.info("[commitment] yolo — semantic bypass for %s source=%s", tool_name, source)
+        return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
+
+    job_id = (args or {}).get("job_id")
+    pending = cron_pending_jobs(thread_id=thread_id, tenant_id=tenant_id)
+
+    if pending is None:
+        # Couldn't verify (no scheduler / DB read failed). Fail OPEN — don't
+        # block every cancel when verification is unavailable; the gate is
+        # defense, not a hard dependency.
+        logger.info("[commitment] cancel_job %s — verification unavailable, audit-only", job_id)
+        return EffectDecision("allow", "cancel_job: verification unavailable (audit-only)",
+                              profile, audit)
+
+    commitment = Commitment(
+        thread_id=thread_id or "", act="cancel_job", tool_name=tool_name,
+        goal_text=f"cancel {job_id}", args_digest=_args_digest(args),
+        request_at=time.time(), tenant_id=tenant_id,
+        slots={"job_id": job_id}, confidence=1.0,
+    )
+
+    if job_id and any(j["job_id"] == job_id for j in pending):
+        commitment.status = "ready"
+        commitment.policy_decision = "allow"
+        cid = create_commitment(commitment, cfg=cfg)
+        logger.info("[commitment] allow cancel_job %s cid=%s source=%s", job_id, cid, source)
+        return EffectDecision(
+            decision="allow",
+            reason=f"cancel_job: {job_id} is a pending job on this thread",
+            profile=profile, audit=audit, commitment_id=cid,
+        )
+
+    # not found / not pending / wrong thread / hallucinated → clarify with list
+    commitment.status = "needs_clarify"
+    commitment.policy_decision = "clarify"
+    commitment.confidence = 0.3
+    cid = create_commitment(commitment, cfg=cfg)
+    listing = "; ".join(f"{j['job_id']} ({(j['prompt'] or '')[:40]})" for j in pending[:5]
+                        ) or "(no pending jobs)"
+    q = (f"job_id {job_id!r} is not a pending job on this thread. "
+         f"Current pending jobs: {listing}. Provide the correct job_id.")
+    logger.info("[commitment] clarify cancel_job %s cid=%s — not pending/matched", job_id, cid)
+    return EffectDecision(
+        decision="clarify", reason=q, profile=profile, audit=audit,
+        commitment_id=cid, clarify_question=q,
     )

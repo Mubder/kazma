@@ -16,7 +16,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["is_commitment_enabled", "load_constraint_beliefs"]
+__all__ = ["is_commitment_enabled", "load_constraint_beliefs", "cron_pending_jobs"]
 
 
 def is_commitment_enabled() -> bool:
@@ -57,3 +57,54 @@ def load_constraint_beliefs(tenant_id: str = "default", *, limit: int = 50) -> l
     except Exception:
         logger.debug("[commitment] load_constraint_beliefs failed — degrading to []", exc_info=True)
         return []
+
+
+def cron_pending_jobs(
+    thread_id: str | None = None, tenant_id: str = "default",
+) -> list[dict[str, str]] | None:
+    """Sync read of PENDING cron jobs for the cancel_job resolver (plan §3.5).
+
+    The cron store API is async-only and the resolver runs in the sync
+    ``authorize_effect``; this mirrors ``load_constraint_beliefs``' direct-sqlite
+    pattern. Only ``status='pending'`` jobs are cancellable
+    (``SQLiteCronStore.cancel`` updates ``WHERE status='pending'``), so that's
+    what we return — counting ``running`` would false-match jobs that can't be
+    cancelled.
+
+    Returns ``[{"job_id": ..., "prompt": ...}, ...]`` for pending jobs on the
+    given thread; **``[]`` means "checked, none"; ``None`` means "couldn't
+    check"** (no scheduler / DB error) so the resolver can degrade to audit-only
+    rather than over-blocking every cancel when verification is unavailable.
+    """
+    try:
+        from kazma_core.cron.scheduler import get_cron_scheduler
+        from kazma_core.paths import data_dir
+
+        sched = get_cron_scheduler()
+        if sched is None:
+            return None  # can't verify → caller degrades to audit-only
+        # Resolve the exact DB file the store writes (privately held on the
+        # store). Fall back to data_dir/cron.db (matches the common case).
+        db_path = getattr(getattr(sched, "_store", None), "_db_path", None)
+        if not db_path:
+            db_path = str(data_dir() / "cron.db")
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        try:
+            if thread_id:
+                rows = conn.execute(
+                    "SELECT job_id, prompt FROM cron_jobs "
+                    "WHERE status='pending' AND thread_id=? AND tenant_id=?",
+                    (thread_id, tenant_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT job_id, prompt FROM cron_jobs "
+                    "WHERE status='pending' AND tenant_id=?",
+                    (tenant_id,),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [{"job_id": r[0], "prompt": r[1] or ""} for r in rows]
+    except Exception:
+        logger.debug("[commitment] cron_pending_jobs failed — degrading to None", exc_info=True)
+        return None
