@@ -81,6 +81,99 @@ def shape_for_pdf(text: str) -> str:
         return text
 
 
+# Safety margin (in points) subtracted from the column width when wrapping
+# Arabic body lines so the paragraph flows at the full page/column width
+# (right-aligned lines ending at x1 ~ 535). A shaped visual line is slightly
+# wider than its logical measurement (Arabic final-form glyphs widen, plus the
+# body region has a ~6pt right gutter below the nominal col_width), so without
+# this margin ReportLab wordWrap="CJK" would re-split an overflowing line
+# mid-word. The margin absorbs both effects: every wrapped line is a
+# whole-word, right-aligned (x1 ~ 535) column-wrapped line with NO chopped
+# words. Only consulted when a paragraph actually overflows one line.
+_ARABIC_BODY_LINE_SAFETY_PT = 20.0
+
+
+def shape_arabic_wrapped(
+    text: str,
+    col_width: float,
+    font_name: str,
+    font_size: float,
+) -> str:
+    """Shape an Arabic paragraph into right-aligned, column-wrapped visual lines.
+
+    Unlike :func:`shape_for_pdf` (which shapes the *whole* paragraph as one
+    visual string and lets ReportLab re-wrap it left-to-right — the v9 bug that
+    scrambled RTL line order and collapsed the body to narrow left-aligned
+    lines), this packs the *logical* words greedily to the real column width
+    (measured with ``pdfmetrics.stringWidth`` in the body font), shapes each
+    resulting line independently via :func:`shape_for_pdf`, and joins them with
+    ``<br/>``.
+
+    Visual lines stay in logical (reading) order, so the paragraph start lands
+    on the **top** line and every line is right-aligned, ending at the column's
+    right edge (x1 ~ 535). A small safety margin keeps each shaped line
+    from slightly overflowing the body region (which would make ReportLab
+    re-split it mid-word). The result is HTML-escaped per line with raw
+    ``<br/>`` separators (so ReportLab's ``<br/>`` is preserved and HTML
+    entities never corrupt the bidi/joining stream).
+
+    Non-Arabic input is returned escaped as-is (no shaping).
+    """
+    if not text:
+        return ""
+    if not _AR_RE.search(text):
+        return html.escape(text)
+
+    try:
+        from reportlab.pdfbase import pdfmetrics as _pm
+
+        def _width(s: str) -> float:
+            return _pm.stringWidth(s, font_name, font_size)
+    except Exception:  # pragma: no cover - reportlab is required for PDF output
+        return html.escape(shape_for_pdf(text))
+
+    v = shape_for_pdf(text)
+    try:
+        full = float(col_width)
+    except (TypeError, ValueError):
+        full = 0.0
+    if full <= 0:
+        return html.escape(v)
+    # Fast path: the whole visual paragraph already fits on a single line.
+    try:
+        if _width(v) <= full:
+            return html.escape(v)
+    except Exception:
+        return html.escape(v)
+
+    # Greedy logical-word packing to the page-width column (minus a safety
+    # margin). We never reverse the visual line list: lines are emitted in
+    # logical order so the paragraph reads top-to-bottom beginning-first.
+    wrap = max(0.0, full - _ARABIC_BODY_LINE_SAFETY_PT)
+    words = text.split()
+    if not words:
+        return html.escape(v)
+    lines: list[str] = []
+    cur: list[str] = []
+    for wd in words:
+        if not cur:
+            cur = [wd]
+            continue
+        candidate = " ".join(cur + [wd])
+        try:
+            if _width(shape_for_pdf(candidate)) > wrap:
+                lines.append(shape_for_pdf(" ".join(cur)))
+                cur = [wd]
+            else:
+                cur.append(wd)
+        except Exception:
+            # Fall back to appending the word if measurement fails.
+            cur.append(wd)
+    if cur:
+        lines.append(shape_for_pdf(" ".join(cur)))
+    return "<br/>".join(html.escape(ln) for ln in lines)
+
+
 def _split_pipe_row(row: str) -> list[str]:
     inner = row.strip().strip("|")
     return [c.strip() for c in inner.split("|")]
@@ -319,7 +412,14 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
     return blocks
 
 
-def inline_markdown_to_reportlab(text: str, *, shape_arabic: bool = True) -> str:
+def inline_markdown_to_reportlab(
+    text: str,
+    *,
+    shape_arabic: bool = True,
+    col_width: float | None = None,
+    font_name: str | None = None,
+    font_size: float | None = None,
+) -> str:
     """Convert a subset of inline markdown to ReportLab ``<para>`` mini-HTML.
 
     ReportLab Paragraph supports ``<b>``, ``<i>``, ``<u>``, ``<font>``,
@@ -341,27 +441,24 @@ def inline_markdown_to_reportlab(text: str, *, shape_arabic: bool = True) -> str
     )
 
     def _esc_shape(s: str) -> str:
-        if not shape_arabic or not s.strip():
-            return html.escape(s)
-        import textwrap, arabic_reshaper
-        from bidi.algorithm import get_display
+        """Shape text for ReportLab's visual engine, then HTML-escape.
 
-        reshaper = arabic_reshaper.ArabicReshaper(
-            configuration={"delete_harakat": False, "support_ligatures": True}
-        )
-        lines = s.split("\n")
-        out_lines = []
-        for line in lines:
-            if not line.strip():
-                out_lines.append("")
-                continue
-            sublines = textwrap.wrap(line, width=65, break_long_words=False, replace_whitespace=False) if len(line) > 65 else [line]
-            reshaped_sublines = [
-                get_display(reshaper.reshape(html.escape(sub)), base_dir="R" if is_arabic_dominant(sub) else None)
-                for sub in sublines
-            ]
-            out_lines.append("<br/>".join(reshaped_sublines))
-        return "<br/>".join(out_lines)
+        For body paragraphs (``col_width`` + font + size supplied) Arabic
+        segments are packed into right-aligned, column-wrapped visual lines via
+        :func:`shape_arabic_wrapped` so RTL reading order is preserved
+        top-to-bottom and lines end at the column right edge (v4 layout).
+        Short / non-body text (titles, TOC, citations, bullets) keeps the
+        whole-segment :func:`shape_for_pdf` path — those fit one line, so
+        ReportLab wraps them itself.
+        """
+        if col_width is not None and font_name is not None and font_size is not None:
+            # shape_arabic_wrapped already returns per-line HTML-escaped output
+            # with raw <br/> separators, so we must NOT escape again here.
+            if shape_arabic:
+                return shape_arabic_wrapped(s, col_width, font_name, font_size)
+            return html.escape(s)
+        s2 = shape_for_pdf(s) if shape_arabic else s
+        return html.escape(s2)
 
     for m in pattern.finditer(text):
         if m.start() > pos:
@@ -401,6 +498,8 @@ def pdf_flowables_from_body(
     TableStyle: Any = None,
     font_name: str = "Helvetica",
     bold_font_name: str = "Helvetica-Bold",
+    col_width: float | None = None,
+    font_size: float | None = None,
 ) -> list[Any]:
     """Build ReportLab flowables from a rich body string."""
     if Paragraph is None or Spacer is None:
@@ -521,9 +620,16 @@ def pdf_flowables_from_body(
             _heading_bar(text_html, st, level)
         elif btype == "paragraph":
             text_html = inline_markdown_to_reportlab(
-                block["text"], shape_arabic=shape_arabic
+                block["text"],
+                shape_arabic=shape_arabic,
+                col_width=col_width,
+                font_name=font_name,
+                font_size=font_size,
             )
-            flow.append(Paragraph(text_html, body_style))
+            # body_para is TA_RIGHT for Arabic (ragged-right, v4 layout) and
+            # TA_JUSTIFY for English (full-column justified). Falls back to
+            # body_style for callers that did not register a body_para style.
+            flow.append(Paragraph(text_html, styles.get("body_para", body_style)))
             flow.append(Spacer(1, 8))
         elif btype == "quote":
             text_html = inline_markdown_to_reportlab(
