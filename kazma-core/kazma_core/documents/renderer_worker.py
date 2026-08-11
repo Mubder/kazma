@@ -117,10 +117,118 @@ def _sections(value: object) -> list[dict[str, str]]:
     return result
 
 
+def _build_model_and_profile(
+    payload: dict[str, Any],
+) -> tuple["ContentModel", "DocProfile"]:
+    """Build a format-agnostic ContentModel + DocProfile from a render payload.
+
+    This is the single payload→content translation shared by EVERY format
+    engine (DOCX, PDF, …). Both generators call it, so a generated DOCX and a
+    generated PDF are projections of the *same* model under the *same* profile
+    — one design, regardless of extension.
+
+    Direction is auto-detected from the title + section sample (honouring
+    explicit ``lang`` / ``rtl`` overrides). Blocks are added in document order;
+    engines interpret each block type in their format-native way.
+    """
+    from kazma_core.documents.content_model import (
+        BodyBlock,
+        CitationBlock,
+        ContentModel,
+        HeadingBlock,
+        TableBlock,
+        TitleBlock,
+        TOCBlock,
+    )
+    from kazma_core.documents.profile import DocProfile
+
+    sections = _sections(payload.get("sections"))
+    sample_parts = [str(payload.get("title", ""))]
+    for item in sections:
+        sample_parts.append(item.get("heading", ""))
+        sample_parts.append((item.get("body") or "")[:1500])
+    sample = "\n".join(sample_parts)
+    profile = DocProfile.for_content(
+        sample,
+        language=payload.get("lang") or payload.get("language"),
+        rtl=payload.get("rtl"),
+    )
+
+    fill_title = str(profile.theme["accent"]).lstrip("#")
+    fill_h = str(profile.theme["heading_fill"]).lstrip("#")
+
+    model = ContentModel()
+    model.header = str(payload.get("header") or profile.chrome["brand"])
+    model.footer = str(payload.get("footer") or profile.chrome["brand"])
+    model.page_numbers = bool(payload.get("page_numbers", True))
+    model.images_present = bool(payload.get("images"))
+
+    # Title (+ optional subtitle).
+    model.add(TitleBlock(text=str(payload.get("title", "Document")),
+                         level=0, fill=fill_title))
+    if payload.get("subtitle"):
+        model.add(TitleBlock(text=str(payload["subtitle"]), level=3, fill=fill_h))
+
+    # Optional table of contents.
+    if payload.get("toc"):
+        model.add(TOCBlock(
+            entries=[it["heading"] for it in sections if it.get("heading")]
+        ))
+
+    # Sections: heading bar + rich Markdown body.
+    for item in sections:
+        if item.get("heading"):
+            model.add(HeadingBlock(text=item["heading"].lstrip("#").strip(),
+                                   level=1, fill=fill_h))
+        body = item.get("body") or ""
+        if body.strip():
+            model.add(BodyBlock(text=body))
+
+    # Structured tables (engine emits the optional heading bar).
+    tables = payload.get("tables")
+    if isinstance(tables, list):
+        for value in tables:
+            if not isinstance(value, dict):
+                continue
+            headers = value.get("headers")
+            rows = value.get("rows")
+            if isinstance(headers, list) and isinstance(rows, list) and headers:
+                model.add(TableBlock(
+                    headers=[str(c) for c in headers],
+                    rows=[[str(c) for c in row]
+                          for row in rows if isinstance(row, list)],
+                    heading=(str(value.get("heading", "")) or None),
+                ))
+
+    # Citations / references.
+    citations = payload.get("citations")
+    if isinstance(citations, list) and citations:
+        model.add(CitationBlock(items=[str(c) for c in citations]))
+
+    return model, profile
+
+
 def _markdown(payload: dict[str, Any]) -> str:
+    """Build a Markdown document from a payload.
+
+    The Contents / References labels come from the localized chrome via a
+    :class:`DocProfile` (auto-detected direction), so an Arabic payload gets
+    ``## المحتويات`` / ``## المراجع`` matching the DOCX/PDF/HTML output.
+    """
+    from kazma_core.documents.profile import DocProfile
+
+    sample_parts = [str(payload.get("title", ""))]
+    for section in _sections(payload.get("sections")):
+        sample_parts.append(section.get("heading", ""))
+    chrome = DocProfile.for_content(
+        "\n".join(sample_parts),
+        language=payload.get("lang") or payload.get("language"),
+        rtl=payload.get("rtl"),
+    ).chrome
+
     lines = [f"# {payload.get('title', 'Document')}", ""]
     if payload.get("toc"):
-        lines.extend(("## Contents", ""))
+        lines.extend((f"## {chrome['toc']}", ""))
         for section in _sections(payload.get("sections")):
             heading = section["heading"].lstrip("#").strip()
             if heading:
@@ -134,24 +242,32 @@ def _markdown(payload: dict[str, Any]) -> str:
             lines.extend((section["body"], ""))
     citations = payload.get("citations")
     if isinstance(citations, list) and citations:
-        lines.extend(("## References", ""))
+        lines.extend((f"## {chrome['references']}", ""))
         lines.extend(f"{index}. {item}" for index, item in enumerate(citations, 1))
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _markdown_html(text: str) -> str:
-    try:
-        import markdown
+    """Themed, direction-aware HTML wrap of a Markdown string.
 
-        body = markdown.markdown(text, extensions=["tables", "fenced_code", "toc"])
-    except ImportError:
-        body = "<pre>" + html.escape(text) + "</pre>"
-    return (
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<style>body{font-family:sans-serif;unicode-bidi:plaintext}"
-        "[dir=rtl]{direction:rtl} table{border-collapse:collapse}</style></head>"
-        f"<body>{body}</body></html>"
-    )
+    Direction + theme + chrome come from a :class:`DocProfile` built from the
+    text, so the convert paths (``convert:markdown:html``, WeasyPrint PDF) share
+    one design with the generate paths. Used for raw-Markdown sources that have
+    no generation payload.
+    """
+    from kazma_core.documents.engines.html import HtmlEngine
+    from kazma_core.documents.profile import DocProfile
+
+    profile = DocProfile.for_content(text)
+    return HtmlEngine(profile).render_markdown(text)
+
+
+def _generate_html(output: Path, payload: dict[str, Any]) -> None:
+    """Generate HTML via the unified document layer (ContentModel + DocProfile)."""
+    from kazma_core.documents.engines.html import HtmlEngine
+
+    model, profile = _build_model_and_profile(payload)
+    output.write_text(HtmlEngine(profile).render(model), encoding="utf-8")
 
 
 def _safe_html(text: str) -> None:
@@ -197,603 +313,26 @@ def _font_paths() -> tuple[Path | None, Path | None]:
 
 
 def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) -> None:
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.platypus import (
-        PageBreak,
-        Paragraph,
-        SimpleDocTemplate,
-        Spacer,
-        Table,
-        TableStyle,
-    )
+    """Generate a PDF via the unified document layer.
 
-    from kazma_core.documents.rich_render import (
-        inline_markdown_to_reportlab,
-        is_arabic_dominant,
-        pdf_flowables_from_body,
-        shape_for_pdf,
-    )
+    Builds a format-agnostic :class:`ContentModel` + :class:`DocProfile` (shared
+    with the DOCX path) and hands them to :class:`PdfEngine`, which owns all
+    ReportLab emission + Arabic shaping + direction semantics. Direction and
+    alignment come from the profile policy, so the PDF shares one design
+    language with the DOCX output.
+    """
+    from kazma_core.documents.engines.pdf import PdfEngine
 
-    regular, bold = _font_paths()
-    font = "Helvetica"
-    bold_font = "Helvetica-Bold"
-    if regular:
-        pdfmetrics.registerFont(TTFont("KazmaUnicode", str(regular)))
-        font = "KazmaUnicode"
-        if bold and bold.is_file():
-            pdfmetrics.registerFont(TTFont("KazmaUnicodeBold", str(bold)))
-            bold_font = "KazmaUnicodeBold"
-        else:
-            bold_font = font
-    else:
-        warnings.append("Unicode font unavailable; PDF uses a limited deterministic fallback")
-    style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
-
-    def size(name: str, default: float, low: float, high: float) -> float:
-        try:
-            return min(high, max(low, float(style.get(name, default))))
-        except (TypeError, ValueError):
-            warnings.append(f"Invalid {name} style token; deterministic default applied")
-            return default
-
-    # Detect document language from title + section text
-    sections = _sections(payload.get("sections"))
-    sample_parts = [str(payload.get("title", ""))]
-    for item in sections:
-        sample_parts.append(item.get("heading", ""))
-        sample_parts.append((item.get("body") or "")[:1500])
-    sample = "\n".join(sample_parts)
-    rtl = is_arabic_dominant(sample)
-    # Explicit payload override: lang=ar|en or rtl=true
-    lang = str(payload.get("lang") or payload.get("language") or "").strip().lower()
-    if lang in ("ar", "arabic", "rtl"):
-        rtl = True
-    elif lang in ("en", "english", "ltr"):
-        rtl = False
-    if payload.get("rtl") is True:
-        rtl = True
-    if payload.get("rtl") is False:
-        rtl = False
-
-    # ── Unified theme (EN == AR visual design; only dir/shape differ) ──
-    from kazma_core.documents.style_theme import (
-        THEME,
-        localized_chrome,
-        theme_colors_reportlab,
-    )
-
-    chrome = localized_chrome(rtl=rtl)
-    th = theme_colors_reportlab()
-    # Justified body in both languages. After shape_for_pdf() (reshape+get_display),
-    # ReportLab must draw the *visual* string LTR — do NOT set wordWrap="RTL".
-    shape_ar = rtl or is_arabic_dominant(sample)
-    wrap = "LTR" if not rtl else "CJK"
-    # Headings: same edge alignment for both — start-of-reading-direction
-    align = TA_RIGHT if rtl else TA_LEFT
-    body_align = TA_JUSTIFY
-
-    title_size = size("title_font_size", float(THEME["title_size"]), 10, 36)
-    heading_size = size("heading_font_size", float(THEME["h2_size"]), 8, 28)
-    body_size = size("body_font_size", float(THEME["body_size"]), 6, 18)
-    accent = th["accent"]
-    if style.get("accent_color"):
-        try:
-            accent = colors.HexColor(str(style["accent_color"]))
-        except Exception:
-            pass
-    heading_fill = th["heading_fill"]
-    body_color = th["body"]
-
-    # On-bar heading text is always white (same EN/AR)
-    title_style = ParagraphStyle(
-        "KazmaTitle",
-        fontName=bold_font,
-        fontSize=title_size,
-        leading=title_size * 1.35,
-        textColor=th["heading_text"],
-        alignment=align,
-        wordWrap=wrap,
-        spaceBefore=0,
-        spaceAfter=0,
-    )
-    h1_bar = ParagraphStyle(
-        "KazmaH1Bar",
-        fontName=bold_font,
-        fontSize=float(THEME["h1_size"]),
-        leading=float(THEME["h1_size"]) * 1.35,
-        textColor=th["heading_text"],
-        alignment=align,
-        wordWrap=wrap,
-        spaceBefore=0,
-        spaceAfter=0,
-    )
-    h2_bar = ParagraphStyle(
-        "KazmaH2Bar",
-        fontName=bold_font,
-        fontSize=heading_size,
-        leading=heading_size * 1.35,
-        textColor=th["heading_text"],
-        alignment=align,
-        wordWrap=wrap,
-        spaceBefore=0,
-        spaceAfter=0,
-    )
-    h3_style = ParagraphStyle(
-        "KazmaH3",
-        fontName=bold_font,
-        fontSize=float(THEME["h3_size"]),
-        leading=float(THEME["h3_size"]) * 1.4,
-        spaceBefore=10,
-        spaceAfter=4,
-        textColor=th["heading"],
-        alignment=align,
-        wordWrap=wrap,
-    )
-    body_style = ParagraphStyle(
-        "KazmaBody",
-        fontName=font,
-        fontSize=body_size,
-        leading=body_size * float(THEME["line_height"]),
-        textColor=body_color,
-        alignment=body_align,
-        wordWrap=wrap,
-        spaceAfter=8,
-        firstLineIndent=0,
-    )
-    # Body paragraphs: ragged-right RTL for Arabic (v4 layout), full-column
-    # justified for English. body_style (TA_JUSTIFY) stays parent/fallback.
-    body_para_style = ParagraphStyle(
-        "KazmaBodyPara",
-        parent=body_style,
-        alignment=(TA_RIGHT if rtl else TA_JUSTIFY),
-    )
-    # Citations/references footer: pin to start-of-reading-direction edge so RTL
-    # Arabic citations align to the column right (x1 ~ 535), matching the DOCX
-    # path (docx_set_rtl_paragraph) instead of body_style's TA_JUSTIFY left-pin.
-    cite_style = ParagraphStyle(
-        "KazmaCite",
-        parent=body_style,
-        alignment=(TA_RIGHT if rtl else TA_LEFT),
-        spaceBefore=0,
-        spaceAfter=4,
-    )
-    # Lists: same indent both sides so EN/AR feel symmetric
-    bullet_style = ParagraphStyle(
-        "KazmaBullet",
-        parent=body_style,
-        leftIndent=16,
-        rightIndent=16,
-        bulletIndent=0,
-        alignment=align,
-        spaceAfter=4,
-    )
-    number_style = ParagraphStyle("KazmaNumber", parent=bullet_style)
-    quote_style = ParagraphStyle(
-        "KazmaQuote",
-        parent=body_style,
-        textColor=th["quote"],
-        leftIndent=12,
-        rightIndent=12,
-        backColor=th["bg_alt"],
-        spaceBefore=4,
-        spaceAfter=8,
-    )
-    code_style = ParagraphStyle(
-        "KazmaCode",
-        fontName=font,
-        fontSize=8.5,
-        leading=11,
-        textColor=th["accent"],
-        backColor=th["code_bg"],
-        alignment=TA_LEFT,
-        wordWrap="CJK",
-        leftIndent=6,
-        rightIndent=6,
-        spaceBefore=4,
-        spaceAfter=8,
-    )
-    rich_styles = {
-        "body": body_style,
-        "body_para": body_para_style,
-        "h1": h1_bar,
-        "h2": h2_bar,
-        "h3": h3_style,
-        "bullet": bullet_style,
-        "number": number_style,
-        "quote": quote_style,
-        "code": code_style,
-        "cite": cite_style,
-        "heading_fill": heading_fill,
-    }
-
-    def _bar(text_html: str, para_style: Any, *, fill: Any | None = None) -> Any:
-        """Full-width filled heading bar — identical chrome for EN and AR."""
-        para = Paragraph(text_html, para_style)
-        fill_c = fill if fill is not None else heading_fill
-        tbl = Table([[para]], colWidths=["*"])
-        tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), fill_c),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ]
-            )
-        )
-        return tbl
-
-    header = str(payload.get("header") or chrome["brand"])
-    footer = str(payload.get("footer") or chrome["brand"])
-    page_numbers = bool(payload.get("page_numbers", True))
-
-    def decorate(canvas: Any, document: Any) -> None:
-        canvas.saveState()
-        canvas.setFont(font, 8)
-        canvas.setFillColor(th["muted"])
-        canvas.setStrokeColor(th["border"])
-        canvas.setLineWidth(0.8)
-        # Top brand rule
-        canvas.line(
-            document.leftMargin,
-            A4[1] - 30,
-            A4[0] - document.rightMargin,
-            A4[1] - 30,
-        )
-        # Bottom rule
-        canvas.line(
-            document.leftMargin,
-            36,
-            A4[0] - document.rightMargin,
-            36,
-        )
-        hdr = shape_for_pdf(header) if shape_ar else header
-        ftr = shape_for_pdf(footer) if shape_ar else footer
-        if rtl:
-            canvas.drawRightString(A4[0] - document.rightMargin, A4[1] - 22, hdr)
-            canvas.drawRightString(A4[0] - document.rightMargin, 22, ftr)
-        else:
-            canvas.drawString(document.leftMargin, A4[1] - 22, hdr)
-            canvas.drawString(document.leftMargin, 22, ftr)
-        if page_numbers:
-            label = chrome["page_fmt"].format(n=document.page)
-            if shape_ar:
-                label = shape_for_pdf(label)
-            canvas.drawCentredString(A4[0] / 2, 22, label)
-        canvas.restoreState()
-
-    title_raw = str(payload.get("title", "Document"))
-    title_html = inline_markdown_to_reportlab(title_raw, shape_arabic=shape_ar)
-    # Title bar uses accent (darker) — same card treatment EN/AR
-    story: list[Any] = [
-        _bar(title_html, title_style, fill=accent),
-        Spacer(1, 14),
-    ]
-    # Optional subtitle: smaller direction-aligned sub-heading (mirrors DOCX).
-    subtitle = payload.get("subtitle")
-    if subtitle:
-        story.append(
-            Paragraph(
-                inline_markdown_to_reportlab(str(subtitle), shape_arabic=shape_ar),
-                h3_style,
-            )
-        )
-        story.append(Spacer(1, 10))
-
-    if payload.get("toc"):
-        story.append(
-            _bar(
-                inline_markdown_to_reportlab(chrome["toc"], shape_arabic=shape_ar),
-                h2_bar,
-            )
-        )
-        story.append(Spacer(1, 6))
-        for index, item in enumerate(sections, 1):
-            if item["heading"]:
-                line = f"{index}. {item['heading']}"
-                story.append(
-                    Paragraph(
-                        inline_markdown_to_reportlab(line, shape_arabic=shape_ar),
-                        cite_style,
-                    )
-                )
-        story.append(PageBreak())
-
-    for item in sections:
-        if item["heading"]:
-            story.append(
-                _bar(
-                    inline_markdown_to_reportlab(
-                        item["heading"].lstrip("#").strip(),
-                        shape_arabic=shape_ar,
-                    ),
-                    h1_bar,
-                )
-            )
-            story.append(Spacer(1, 8))
-        body = item.get("body") or ""
-        if body.strip():
-            col_width = float(A4[0]) - 2 * float(THEME.get("page_margin", 54))
-            story.extend(
-                pdf_flowables_from_body(
-                    body,
-                    styles=rich_styles,
-                    shape_arabic=shape_ar,
-                    Spacer=Spacer,
-                    Paragraph=Paragraph,
-                    colors=colors,
-                    Table=Table,
-                    TableStyle=TableStyle,
-                    font_name=font,
-                    bold_font_name=bold_font,
-                    col_width=col_width,
-                    font_size=body_size,
-                )
-            )
-
-    tables = payload.get("tables")
-    if isinstance(tables, list):
-        for value in tables:
-            if not isinstance(value, dict):
-                continue
-            heading = str(value.get("heading", ""))
-            headers = value.get("headers")
-            rows = value.get("rows")
-            if heading:
-                story.append(
-                    _bar(
-                        inline_markdown_to_reportlab(heading, shape_arabic=shape_ar),
-                        h2_bar,
-                    )
-                )
-                story.append(Spacer(1, 6))
-            if isinstance(headers, list) and isinstance(rows, list) and headers:
-                def _cell(val: object) -> str:
-                    s = str(val)
-                    return shape_for_pdf(s) if shape_ar else s
-
-                data = [
-                    [_cell(cell) for cell in headers],
-                    *(
-                        [_cell(cell) for cell in row]
-                        for row in rows
-                        if isinstance(row, list)
-                    ),
-                ]
-                table = Table(data, repeatRows=1)
-                table.setStyle(
-                    TableStyle(
-                        (
-                            ("FONTNAME", (0, 0), (-1, -1), font),
-                            ("FONTNAME", (0, 0), (-1, 0), bold_font),
-                            ("BACKGROUND", (0, 0), (-1, 0), th["table_header_bg"]),
-                            ("TEXTCOLOR", (0, 0), (-1, 0), th["table_header_fg"]),
-                            ("BACKGROUND", (0, 1), (-1, -1), th["table_row_bg"]),
-                            ("TEXTCOLOR", (0, 1), (-1, -1), body_color),
-                            ("GRID", (0, 0), (-1, -1), 0.5, th["table_grid"]),
-                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                            ("ALIGN", (0, 0), (-1, -1), "RIGHT" if rtl else "LEFT"),
-                            ("TOPPADDING", (0, 0), (-1, -1), 6),
-                            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                        )
-                    )
-                )
-                story.extend((table, Spacer(1, 10)))
-    citations = payload.get("citations")
-    if isinstance(citations, list) and citations:
-        story.append(
-            _bar(
-                inline_markdown_to_reportlab(
-                    chrome["references"], shape_arabic=shape_ar
-                ),
-                h2_bar,
-            )
-        )
-        story.append(Spacer(1, 6))
-        for index, item in enumerate(citations, 1):
-            line = f"{index}. {item}"
-            story.append(
-                Paragraph(
-                    inline_markdown_to_reportlab(str(line), shape_arabic=shape_ar),
-                    cite_style,
-                )
-            )
-    if payload.get("images"):
-        warnings.append(
-            "Images were omitted because generation accepts no unapproved filesystem resources"
-        )
-    if shape_ar:
-        try:
-            import arabic_reshaper  # noqa: F401
-            from bidi.algorithm import get_display  # noqa: F401
-        except ImportError:
-            warnings.append(
-                "arabic_reshaper/python-bidi not installed — Arabic letters may appear "
-                "disconnected or reversed in PDF"
-            )
-
-    margin = float(THEME.get("page_margin", 54))
-    SimpleDocTemplate(
-        str(output),
-        pagesize=A4,
-        leftMargin=margin,
-        rightMargin=margin,
-        topMargin=margin + 4,
-        bottomMargin=margin,
-    ).build(story, onFirstPage=decorate, onLaterPages=decorate)
+    model, profile = _build_model_and_profile(payload)
+    PdfEngine(profile, warnings).render(model, output)
 
 
 def _generate_docx(output: Path, payload: dict[str, Any]) -> None:
-    from docx import Document
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt, RGBColor
+    """Generate a DOCX via the unified document layer (shared model + profile)."""
+    from kazma_core.documents.engines.docx import DocxEngine
 
-    from docx.shared import Cm
-
-    from kazma_core.documents.rich_render import (
-        docx_add_table,
-        docx_apply_document_rtl,
-        docx_force_justify,
-        docx_heading_bar,
-        docx_set_rtl_paragraph,
-        docx_write_rich_body,
-        is_arabic_dominant,
-        try_parse_pipe_table_blob,
-    )
-    from kazma_core.documents.style_theme import THEME, localized_chrome
-
-    document = Document()
-    sections = _sections(payload.get("sections"))
-    sample_parts = [str(payload.get("title", ""))]
-    for item in sections:
-        sample_parts.append(item.get("heading", ""))
-        sample_parts.append((item.get("body") or "")[:1500])
-    sample = "\n".join(sample_parts)
-    rtl = is_arabic_dominant(sample)
-    lang = str(payload.get("lang") or payload.get("language") or "").strip().lower()
-    if lang in ("ar", "arabic", "rtl"):
-        rtl = True
-    elif lang in ("en", "english", "ltr"):
-        rtl = False
-    if payload.get("rtl") is True:
-        rtl = True
-    if payload.get("rtl") is False:
-        rtl = False
-
-    chrome = localized_chrome(rtl=rtl)
-    fill_title = str(THEME["accent"]).lstrip("#")
-    fill_h = str(THEME["heading_fill"]).lstrip("#")
-
-    # Page setup — closer to PDF margins (not Word's 1.25" default)
-    for section in document.sections:
-        section.top_margin = Cm(1.8)
-        section.bottom_margin = Cm(1.8)
-        section.left_margin = Cm(1.8)
-        section.right_margin = Cm(1.8)
-
-    # Normal style: always justify (EN + AR); RTL via bidi on each para
-    try:
-        normal = document.styles["Normal"]
-        normal.font.name = "Calibri"
-        normal.font.size = Pt(float(THEME["body_size"]))
-        normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        normal.paragraph_format.space_after = Pt(8)
-        normal.paragraph_format.line_spacing = float(THEME["line_height"])
-    except Exception:
-        pass
-
-    # Title as full-width filled bar (PDF parity — works in Telegram/Word)
-    docx_heading_bar(
-        document,
-        str(payload.get("title", "Document")),
-        level=0,
-        rtl=rtl,
-        fill_hex=fill_title,
-    )
-    # Optional subtitle: lighter heading bar (mirrors PDF).
-    if payload.get("subtitle"):
-        docx_heading_bar(
-            document,
-            str(payload["subtitle"]),
-            level=3,
-            rtl=rtl,
-            fill_hex=fill_h,
-        )
-
-    header = str(payload.get("header") or chrome["brand"])
-    footer = str(payload.get("footer") or chrome["brand"])
-    for section in document.sections:
-        hp = section.header.paragraphs[0]
-        hp.text = header
-        if rtl:
-            docx_set_rtl_paragraph(hp, justify=False)
-        fp = section.footer.paragraphs[0]
-        fp.text = footer
-        if rtl:
-            docx_set_rtl_paragraph(fp, justify=False)
-
-    if payload.get("toc"):
-        docx_heading_bar(document, chrome["toc"], level=2, rtl=rtl, fill_hex=fill_h)
-        for index, item in enumerate(sections, 1):
-            if item["heading"]:
-                p = document.add_paragraph(f"{index}. {item['heading']}")
-                if rtl:
-                    docx_set_rtl_paragraph(p, justify=False)
-
-    for item in sections:
-        if item["heading"]:
-            docx_heading_bar(
-                document,
-                item["heading"].lstrip("#").strip(),
-                level=1,
-                rtl=rtl,
-                fill_hex=fill_h,
-            )
-        body = item.get("body") or ""
-        if body.strip():
-            # Whole-body collapsed table only?
-            maybe = try_parse_pipe_table_blob(body)
-            if maybe is not None and body.count("\n") < 2 and body.count("|") > 6:
-                docx_add_table(
-                    document,
-                    list(maybe.get("headers") or []),
-                    list(maybe.get("rows") or []),
-                    rtl=rtl,
-                )
-            else:
-                docx_write_rich_body(document, body, rtl=rtl)
-
-    # Structured tables from payload (same as PDF path)
-    tables = payload.get("tables")
-    if isinstance(tables, list):
-        for value in tables:
-            if not isinstance(value, dict):
-                continue
-            heading = str(value.get("heading", ""))
-            headers = value.get("headers")
-            rows = value.get("rows")
-            if heading:
-                docx_heading_bar(
-                    document, heading, level=2, rtl=rtl, fill_hex=fill_h
-                )
-            if isinstance(headers, list) and isinstance(rows, list) and headers:
-                docx_add_table(
-                    document,
-                    [str(c) for c in headers],
-                    [
-                        [str(c) for c in row]
-                        for row in rows
-                        if isinstance(row, list)
-                    ],
-                    rtl=rtl,
-                )
-
-    citations = payload.get("citations")
-    if isinstance(citations, list) and citations:
-        docx_heading_bar(
-            document, chrome["references"], level=2, rtl=rtl, fill_hex=fill_h
-        )
-        for value in citations:
-            p = document.add_paragraph(str(value), style="List Number")
-            if rtl:
-                docx_set_rtl_paragraph(p, justify=False)
-            else:
-                docx_force_justify(p)
-
-    # Critical: section + table + theme RTL so Word does not open as LTR shell
-    if rtl:
-        docx_apply_document_rtl(document)
-
-    document.save(output)
+    model, profile = _build_model_and_profile(payload)
+    DocxEngine(profile).render(model, output)
 
 
 def _generate_xlsx(output: Path, payload: dict[str, Any]) -> None:
@@ -1002,7 +541,7 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
         if target == "markdown":
             output.write_text(_markdown(payload), encoding="utf-8")
         elif target == "html":
-            output.write_text(_markdown_html(_markdown(payload)), encoding="utf-8")
+            _generate_html(output, payload)
         elif target == "pdf":
             _generate_pdf(output, payload, warnings)
         elif target == "docx":

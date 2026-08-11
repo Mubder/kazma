@@ -1,0 +1,555 @@
+"""DOCX engine for the unified document layer.
+
+Consumes a :class:`~kazma_core.documents.content_model.ContentModel` under a
+:class:`~kazma_core.documents.profile.DocProfile` and writes a ``.docx`` whose
+direction + alignment are *correct by construction*.
+
+The Word BiDi alignment rule — that under ``w:bidi`` the reading-start edge is
+the *physical right* and must be encoded as ``w:jc="start"`` (never
+``"right"``) — is applied in exactly one place: :meth:`DocxEngine._set_paragraph`.
+Every block (title bar, heading, body, list, TOC, citation, table cell,
+header/footer) asks for an *intent* (``start`` / ``justify`` / ``end``) and the
+profile maps it to the right ``w:jc`` value. There is no schema-invalid
+``tcPr/w:jc`` anywhere, and no call site picks a raw ``RIGHT``.
+
+This module owns all DOCX OOXML emission. Markdown parsing is reused from
+:mod:`kazma_core.documents.rich_render` (format-agnostic). The old per-element
+post-pass walk (``docx_apply_document_rtl``) is gone: the RTL foundation is
+applied once up front and each block sets its own direction as it is created.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+from typing import Any, Literal
+
+from kazma_core.documents.content_model import (
+    BodyBlock,
+    Block,
+    CitationBlock,
+    ContentModel,
+    HeadingBlock,
+    SpacerBlock,
+    TableBlock,
+    TitleBlock,
+    TOCBlock,
+)
+from kazma_core.documents.profile import DocProfile
+from kazma_core.documents.rich_render import parse_rich_blocks, try_parse_pipe_table_blob
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["DocxEngine"]
+
+_Intent = Literal["start", "justify", "end"]
+
+
+class DocxEngine:
+    """Render a :class:`ContentModel` to ``.docx`` under a :class:`DocProfile`.
+
+    Instantiate per document: ``DocxEngine(profile).render(model, output)``.
+    """
+
+    def __init__(self, profile: DocProfile) -> None:
+        self.profile = profile
+        self.theme = profile.theme
+
+    # ------------------------------------------------------------------ #
+    # public entry
+    # ------------------------------------------------------------------ #
+    def render(self, model: ContentModel, output: Path | str) -> None:
+        from docx import Document
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Cm, Pt
+
+        document = Document()
+        self._apply_foundation(document)
+
+        # Page setup (matches the PDF margins, not Word's 1.25" default).
+        # Page size comes from the shared theme so DOCX and PDF share one
+        # geometry (default.docx ships US Letter; we normalise to the theme's
+        # A4 so the DOCX-route PDF matches the reportlab PDF exactly).
+        from docx.shared import Mm
+        page_mm = self.theme.get("page_size_mm", (210.0, 297.0))
+        for section in document.sections:
+            section.page_width = Mm(float(page_mm[0]))
+            section.page_height = Mm(float(page_mm[1]))
+            section.top_margin = Cm(1.8)
+            section.bottom_margin = Cm(1.8)
+            section.left_margin = Cm(1.8)
+            section.right_margin = Cm(1.8)
+
+        # Normal style: Calibri body, justified, theme spacing.
+        try:
+            normal = document.styles["Normal"]
+            normal.font.name = "Calibri"
+            normal.font.size = Pt(float(self.theme["body_size"]))
+            normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            normal.paragraph_format.space_after = Pt(8)
+            normal.paragraph_format.line_spacing = float(self.theme["line_height"])
+        except Exception:
+            logger.debug("[docx] Normal style setup failed", exc_info=True)
+
+        # Header / footer chrome.
+        self._write_header_footer(document, model)
+
+        # Body blocks.
+        for block in model.blocks:
+            try:
+                self._render_block(document, block)
+            except Exception:
+                logger.debug("[docx] block render failed: %r", block, exc_info=True)
+
+        document.save(str(output))
+
+    # ================================================================== #
+    # foundation — applied ONCE, up front
+    # ================================================================== #
+    def _apply_foundation(self, document: Any) -> None:
+        """Set section/settings/Normal-style defaults so the doc opens RTL.
+
+        Per-paragraph ``w:bidi``/``w:jc`` and per-run ``w:rtl`` are still set
+        by each block as it is created (belt-and-suspenders, and necessary
+        because not every consumer honors style inheritance reliably). But the
+        document-level chrome (section direction, theme language, numbering)
+        must come from here.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        if not self.profile.rtl:
+            return  # default.docx is already a correct LTR foundation
+
+        # 1) Section: bidi + rtlGutter (explicit val=1 — empty bools are
+        #    ignored by some consumers).
+        for section in document.sections:
+            sect_pr = section._sectPr
+            for tag in ("w:bidi", "w:rtlGutter"):
+                el = sect_pr.find(qn(tag))
+                if el is None:
+                    el = OxmlElement(tag)
+                    sect_pr.append(el)
+                el.set(qn("w:val"), "1")
+
+        # 2) settings.xml: document language is Arabic (not an en-US shell).
+        settings = document.settings.element
+        tfl = settings.find(qn("w:themeFontLang"))
+        if tfl is None:
+            tfl = OxmlElement("w:themeFontLang")
+            settings.append(tfl)
+        tfl.set(qn("w:val"), "ar-SA")
+        tfl.set(qn("w:bidi"), "ar-SA")
+        tfl.set(qn("w:eastAsia"), "ar-SA")
+
+        # 3) Normal style: paragraph bidi + Arabic lang. We deliberately do
+        #    NOT put w:rtl on the style's rPr — that would force RTL on Latin
+        #    runs too. Per-run w:rtl is applied selectively by _mark_run.
+        try:
+            normal = document.styles["Normal"].element
+            p_pr = normal.find(qn("w:pPr"))
+            if p_pr is None:
+                p_pr = OxmlElement("w:pPr")
+                normal.append(p_pr)
+            if p_pr.find(qn("w:bidi")) is None:
+                bidi = OxmlElement("w:bidi")
+                bidi.set(qn("w:val"), "1")
+                p_pr.append(bidi)
+            r_pr = normal.find(qn("w:rPr"))
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                normal.append(r_pr)
+            lang = r_pr.find(qn("w:lang"))
+            if lang is None:
+                lang = OxmlElement("w:lang")
+                r_pr.append(lang)
+            lang.set(qn("w:bidi"), "ar-SA")
+        except Exception:
+            logger.debug("[docx] Normal style RTL foundation failed", exc_info=True)
+
+        # 4) List numbering: RTL levels so List Number items show numbers on
+        #    the reading-start (right) side.
+        self._ensure_numbering_rtl(document)
+
+    def _ensure_numbering_rtl(self, document: Any) -> None:
+        """Flip every numbering level to RTL (lvlJc right + right-side indent).
+
+        Only affects paragraphs that actually use the List Number style; the
+        TOC is plain numbered text and is handled separately.
+        """
+        from docx.oxml.ns import qn
+
+        try:
+            numbering_part = document.part.numbering_part
+        except Exception:
+            return
+        if numbering_part is None:
+            return
+        elm = numbering_part._element
+        for lvl in elm.iterdescendants(tag=qn("w:lvl")):
+            lvl_jc = lvl.find(qn("w:lvlJc"))
+            if lvl_jc is not None and lvl_jc.get(qn("w:val")) == "left":
+                lvl_jc.set(qn("w:val"), "right")
+            p_pr = lvl.find(qn("w:pPr"))
+            if p_pr is not None:
+                ind = p_pr.find(qn("w:ind"))
+                if ind is not None:
+                    left_val = ind.get(qn("w:left"))
+                    if left_val is not None:
+                        ind.set(qn("w:right"), left_val)
+                        if qn("w:left") in ind.attrib:
+                            del ind.attrib[qn("w:left")]
+
+    # ================================================================== #
+    # paragraph + run direction — the alignment policy application point
+    # ================================================================== #
+    def _set_paragraph(self, p: Any, intent: _Intent) -> None:
+        """Set paragraph direction + alignment from an *intent*.
+
+        This is the single place that maps intent → ``w:jc``. Under RTL it also
+        stamps ``w:bidi`` and selectively marks Arabic runs. No call site may
+        set ``w:jc`` or paragraph alignment directly.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        p_pr = p._p.get_or_add_pPr()
+        if self.profile.rtl:
+            bidi = p_pr.find(qn("w:bidi"))
+            if bidi is None:
+                bidi = OxmlElement("w:bidi")
+                p_pr.append(bidi)
+            bidi.set(qn("w:val"), "1")
+        jc_val = self.profile.docx_jc(intent)
+        jc = p_pr.find(qn("w:jc"))
+        if jc is None:
+            jc = OxmlElement("w:jc")
+            p_pr.append(jc)
+        jc.set(qn("w:val"), jc_val)
+        if self.profile.rtl:
+            for run in p.runs:
+                self._mark_run(run)
+
+    def _mark_run(self, run: Any) -> None:
+        """Mark a run as RTL complex-script — only if it contains Arabic.
+
+        Latin runs are left neutral so Word's BiDi algorithm handles them
+        naturally (no forced-reversal of embedded English/numbers).
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        if not self.profile.run_is_rtl(run.text or ""):
+            return
+        r_pr = run._r.get_or_add_rPr()
+        if r_pr.find(qn("w:rtl")) is None:
+            r_pr.append(OxmlElement("w:rtl"))
+        r_fonts = r_pr.find(qn("w:rFonts"))
+        if r_fonts is None:
+            r_fonts = OxmlElement("w:rFonts")
+            r_pr.insert(0, r_fonts)
+        for attr, val in (("w:ascii", "Calibri"), ("w:hAnsi", "Calibri"), ("w:cs", "Calibri")):
+            if not r_fonts.get(qn(attr)):
+                r_fonts.set(qn(attr), val)
+        lang = r_pr.find(qn("w:lang"))
+        if lang is None:
+            lang = OxmlElement("w:lang")
+            r_pr.append(lang)
+        lang.set(qn("w:bidi"), "ar-SA")
+        lang.set(qn("w:val"), "ar-SA")
+        # Mirror the Latin size/bold/italic to their complex-script (Cs)
+        # variants. python-docx only writes w:sz/w:b/w:i; Arabic is a complex
+        # script, so Word/LibreOffice size and weight it via w:szCs/w:bCs/w:iCs.
+        # Without these the run silently falls back to the default size and
+        # loses true bold — the heading-bar "junk letters" symptom (bold white
+        # Arabic rendered tiny / faux-bold / distorted). Insert immediately
+        # after the Latin sibling to stay in CT_RPr schema order.
+        sz = r_pr.find(qn("w:sz"))
+        if sz is not None and r_pr.find(qn("w:szCs")) is None:
+            szcs = OxmlElement("w:szCs")
+            szcs.set(qn("w:val"), sz.get(qn("w:val")))
+            sz.addnext(szcs)
+        b = r_pr.find(qn("w:b"))
+        if b is not None and r_pr.find(qn("w:bCs")) is None:
+            b.addnext(OxmlElement("w:bCs"))
+        i = r_pr.find(qn("w:i"))
+        if i is not None and r_pr.find(qn("w:iCs")) is None:
+            i.addnext(OxmlElement("w:iCs"))
+
+    def _mark_table_rtl(self, table: Any) -> None:
+        """``w:bidiVisual`` on a table so columns read right→left."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        tbl_pr = table._tbl.tblPr
+        if tbl_pr is None:
+            tbl_pr = OxmlElement("w:tblPr")
+            table._tbl.insert(0, tbl_pr)
+        for child in list(tbl_pr):
+            if child.tag == qn("w:bidiVisual"):
+                tbl_pr.remove(child)
+        bidi_vis = OxmlElement("w:bidiVisual")
+        bidi_vis.set(qn("w:val"), "1")
+        tbl_pr.append(bidi_vis)
+
+    # ================================================================== #
+    # block dispatch
+    # ================================================================== #
+    def _render_block(self, document: Any, block: Block) -> None:
+        if isinstance(block, TitleBlock):
+            self._heading_bar(document, block.text, level=block.level, fill_hex=block.fill)
+        elif isinstance(block, HeadingBlock):
+            self._heading_bar(document, block.text, level=block.level, fill_hex=block.fill)
+        elif isinstance(block, BodyBlock):
+            self._write_rich_body(document, block.text)
+        elif isinstance(block, TableBlock):
+            if block.heading:
+                self._heading_bar(document, block.heading, level=block.heading_level,
+                                  fill_hex=self.theme["heading_fill"].lstrip("#"))
+            self._add_table(document, block.headers, block.rows)
+        elif isinstance(block, TOCBlock):
+            self._write_toc(document, block.entries)
+        elif isinstance(block, CitationBlock):
+            self._write_citations(document, block.items)
+        elif isinstance(block, SpacerBlock):
+            p = document.add_paragraph(block.text or "")
+            self._set_paragraph(p, "start")
+
+    # ================================================================== #
+    # header / footer
+    # ================================================================== #
+    def _write_header_footer(self, document: Any, model: ContentModel) -> None:
+        for section in document.sections:
+            hp = section.header.paragraphs[0]
+            hp.text = model.header or ""
+            if (model.header or "").strip():
+                self._set_paragraph(hp, "start")
+            fp = section.footer.paragraphs[0]
+            fp.text = model.footer or ""
+            if (model.footer or "").strip():
+                self._set_paragraph(fp, "start")
+
+    # ================================================================== #
+    # heading bar (full-width filled single-cell table)
+    # ================================================================== #
+    def _heading_bar(self, document: Any, text: str, *, level: int = 1,
+                     fill_hex: str | None = None) -> None:
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Pt, RGBColor
+
+        fill = (fill_hex or self.theme["heading_fill"]).lstrip("#").upper()
+        sizes = {
+            0: float(self.theme["title_size"]),
+            1: float(self.theme["h1_size"]),
+            2: float(self.theme["h2_size"]),
+            3: float(self.theme["h3_size"]),
+        }
+        size = sizes.get(int(level), 12.0)
+
+        table = document.add_table(rows=1, cols=1)
+        table.autofit = True
+        cell = table.rows[0].cells[0]
+
+        # Cell background fill (tcPr/shd is the correct, schema-valid element).
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:fill"), fill)
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        tc_pr.append(shd)
+        # NOTE: no w:jc under tcPr — that is schema-invalid (CT_TcPr has no
+        # w:jc child) and Word ignores it. Cell text alignment comes from the
+        # paragraph's w:jc inside the cell, set below via _set_paragraph.
+
+        p = cell.paragraphs[0]
+        run = p.add_run(text or "")
+        run.bold = True
+        run.font.size = Pt(size)
+        run.font.name = "Calibri"
+        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+        # Title/section bars are start-aligned: reading-start edge.
+        # Under RTL the profile maps "start" → w:jc="start" → physical RIGHT.
+        self._set_paragraph(p, "start")
+        if self.profile.rtl:
+            self._mark_table_rtl(table)
+
+        # Spacer paragraph after the bar.
+        sp = document.add_paragraph("")
+        self._set_paragraph(sp, "start")
+
+    # ================================================================== #
+    # table of contents
+    # ================================================================== #
+    def _write_toc(self, document: Any, entries: list[str]) -> None:
+        self._heading_bar(document, self.profile.chrome["toc"], level=2,
+                          fill_hex=self.theme["heading_fill"].lstrip("#"))
+        for index, entry in enumerate(entries, 1):
+            if not entry:
+                continue
+            p = document.add_paragraph(f"{index}. {entry}")
+            self._set_paragraph(p, "start")
+
+    # ================================================================== #
+    # citations (numbered references)
+    # ================================================================== #
+    def _write_citations(self, document: Any, items: list[str]) -> None:
+        self._heading_bar(document, self.profile.chrome["references"], level=2,
+                          fill_hex=self.theme["heading_fill"].lstrip("#"))
+        for item in items:
+            try:
+                p = document.add_paragraph(str(item), style="List Number")
+            except KeyError:
+                p = document.add_paragraph(str(item))
+            self._set_paragraph(p, "start")
+
+    # ================================================================== #
+    # structured table
+    # ================================================================== #
+    def _add_table(self, document: Any, headers: list[str], rows: list[list[str]]) -> None:
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Pt, RGBColor
+
+        if not headers:
+            return
+        ncols = len(headers)
+        table = document.add_table(rows=1 + len(rows), cols=ncols)
+        try:
+            table.style = "Table Grid"
+        except KeyError:
+            pass
+
+        def _shade(cell: Any, fill: str) -> None:
+            tc_pr = cell._tc.get_or_add_tcPr()
+            shd = OxmlElement("w:shd")
+            shd.set(qn("w:fill"), fill)
+            shd.set(qn("w:val"), "clear")
+            tc_pr.append(shd)
+
+        def _fill(cell: Any, text: str, *, header: bool) -> None:
+            p = cell.paragraphs[0]
+            run = p.add_run(str(text))
+            run.font.size = Pt(10)
+            run.font.name = "Calibri"
+            if header:
+                run.bold = True
+                run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                _shade(cell, "1E3A5F")
+            else:
+                _shade(cell, "F8FAFC")
+            self._set_paragraph(p, "start")
+
+        for ci, h in enumerate(headers):
+            _fill(table.rows[0].cells[ci], str(h), header=True)
+        for ri, row in enumerate(rows):
+            for ci in range(ncols):
+                val = row[ci] if ci < len(row) else ""
+                _fill(table.rows[ri + 1].cells[ci], val, header=False)
+
+        if self.profile.rtl:
+            self._mark_table_rtl(table)
+
+        # Spacer paragraph after the table.
+        sp = document.add_paragraph("")
+        self._set_paragraph(sp, "start")
+
+    # ================================================================== #
+    # rich Markdown body
+    # ================================================================== #
+    def _write_rich_body(self, document: Any, body: str) -> None:
+        """Render Markdown body to DOCX blocks with correct direction."""
+        from docx.shared import Pt, RGBColor
+
+        # Whole-body collapsed one-line table? → structured table.
+        maybe = try_parse_pipe_table_blob(body)
+        if maybe is not None and body.count("\n") < 2 and body.count("|") > 6:
+            self._add_table(document, list(maybe.get("headers") or []),
+                            list(maybe.get("rows") or []))
+            return
+
+        blocks = parse_rich_blocks(body)
+        if not blocks and body.strip():
+            blocks = [{"type": "paragraph", "text": p.strip()}
+                      for p in body.split("\n\n") if p.strip()]
+
+        for block in blocks:
+            btype = block["type"]
+            if btype == "heading":
+                level = min(3, max(1, int(block.get("level") or 2)))
+                fill = "1E3A5F" if level <= 2 else "334155"
+                self._heading_bar(document, block.get("text") or "",
+                                  level=level, fill_hex=fill)
+            elif btype == "paragraph":
+                # A collapsed table the block classifier missed?
+                maybe2 = try_parse_pipe_table_blob(block.get("text") or "")
+                if maybe2 is not None:
+                    self._add_table(document, list(maybe2.get("headers") or []),
+                                    list(maybe2.get("rows") or []))
+                    continue
+                p = document.add_paragraph()
+                self._add_inline_md_runs(p, block.get("text") or "")
+                self._set_paragraph(p, "justify")
+            elif btype == "quote":
+                p = document.add_paragraph()
+                run = p.add_run(block.get("text") or "")
+                run.italic = True
+                run.font.color.rgb = RGBColor(0x47, 0x55, 0x69)
+                self._set_paragraph(p, "justify")
+                p.paragraph_format.left_indent = Pt(18)
+            elif btype == "code":
+                # Code blocks are always LTR source; isolate them.
+                p = document.add_paragraph()
+                run = p.add_run(block.get("text") or "")
+                run.font.name = "Consolas"
+                run.font.size = Pt(9)
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            elif btype == "list":
+                style = "List Number" if block.get("ordered") else "List Bullet"
+                for item in block.get("items") or []:
+                    try:
+                        p = document.add_paragraph(style=style)
+                    except KeyError:
+                        p = document.add_paragraph()
+                    if p.runs:
+                        p.runs[0].text = ""
+                    self._add_inline_md_runs(p, item.get("text") or "")
+                    self._set_paragraph(p, "start")
+            elif btype == "table":
+                self._add_table(document, list(block.get("headers") or []),
+                                list(block.get("rows") or []))
+            elif btype == "hr":
+                p = document.add_paragraph("─" * 40)
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    @staticmethod
+    def _add_inline_md_runs(paragraph: Any, text: str) -> None:
+        """Add bold/italic/code/plain runs for inline Markdown (no shaping)."""
+        pattern = re.compile(
+            r"\*\*(.+?)\*\*|__(.+?)__|"
+            r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|"
+            r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)|"
+            r"`([^`]+)`"
+        )
+        pos = 0
+        for m in pattern.finditer(text):
+            if m.start() > pos:
+                paragraph.add_run(text[pos:m.start()])
+            if m.group(1) is not None or m.group(2) is not None:
+                run = paragraph.add_run(m.group(1) if m.group(1) is not None else m.group(2))
+                run.bold = True
+            elif m.group(3) is not None or m.group(4) is not None:
+                run = paragraph.add_run(m.group(3) if m.group(3) is not None else m.group(4))
+                run.italic = True
+            elif m.group(5) is not None:
+                run = paragraph.add_run(m.group(5))
+                run.font.name = "Consolas"
+            pos = m.end()
+        if pos < len(text):
+            paragraph.add_run(text[pos:])
+        if not text:
+            paragraph.add_run("")

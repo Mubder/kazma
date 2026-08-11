@@ -37,6 +37,10 @@ THEME: dict[str, Any] = {
     "body_size": 11,
     "line_height": 1.65,
     "page_margin": 54,  # points ≈ 19mm
+    # Page size (width, height) in millimetres — single source for every engine
+    # so DOCX, DOCX-route PDF, and reportlab PDF all share one page geometry.
+    # A4 (the international + Arab-world standard). Both engines read this.
+    "page_size_mm": (210.0, 297.0),
 }
 
 
