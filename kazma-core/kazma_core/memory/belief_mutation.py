@@ -369,6 +369,26 @@ def mutate_belief(
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now,
                 )
+        # Phase 0 instrumentation (Commitment Layer): surface every functional
+        # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
+        # observable. The signal of interest is a supersede whose incoming
+        # source is NOT a direct user assertion (extraction_method !=
+        # "user_explicit") — that is the CoPilot-class memory-corruption path.
+        # A numeric counter / metric framework wraps this log line later.
+        if result.get("action") == "supersede":
+            try:
+                from kazma_core.memory.current_facts import (
+                    is_functional_current_predicate,
+                )
+
+                if is_functional_current_predicate(pred):
+                    logger.info(
+                        "[belief_mutate] functional_supersede predicate=%s "
+                        "source=%s trust=%.2f subject=%s",
+                        pred, extraction_method, trust, sub,
+                    )
+            except Exception:
+                pass
         # Best-effort dual-write to shared state / graph backends (P2-2/P2-3)
         if result.get("action") not in ("noop", None) and result.get("belief_id"):
             try:

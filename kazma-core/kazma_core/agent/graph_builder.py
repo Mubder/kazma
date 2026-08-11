@@ -2117,6 +2117,22 @@ async def tool_worker_node(
             # hangs. Config: ConfigStore agent.tool_timeout_seconds or
             # KAZMA_TOOL_TIMEOUT_SECONDS (default 120s; <=0 disables).
             _tool_timeout = _resolve_tool_timeout()
+            # Phase 0 instrumentation (Commitment Layer): log every tool
+            # execution with its side-effect tier + an args digest so mutator
+            # traffic is observable before authorize_effect lands (Phase 1/2).
+            # Interim tier detection reuses the existing TOOL_TIERS taxonomy
+            # (safety.hitl.get_tool_tier); the unified side_effects.py registry
+            # (plan §5) replaces this lookup in Phase 1.
+            try:
+                from kazma_core.safety.hitl import get_tool_tier
+
+                _tier = get_tool_tier(tc["name"])
+            except Exception:
+                _tier = "unknown"
+            logger.info(
+                "[ToolWorker] exec name=%s tier=%s args=%s",
+                tc["name"], _tier, _summarize_args_for_hitl(_args),
+            )
             try:
                 if _tool_timeout and _tool_timeout > 0:
                     result = await asyncio.wait_for(
