@@ -19,6 +19,7 @@ from .relative_time import (
     detect_conflicts,
     normalize_digits,
 )
+from .authorize import EffectDecision, authorize_effect
 
 __all__ = [
     "TimeExpression",
@@ -27,4 +28,6 @@ __all__ = [
     "resolve_remind",
     "detect_conflicts",
     "normalize_digits",
+    "EffectDecision",
+    "authorize_effect",
 ]
