@@ -231,14 +231,19 @@
         .then(function(data) {
           if (!data || !chatSessionId) return;
           if (data.generating) {
-            // Server is still generating — show indicator and start polling
-            if (!activeStream) {
-              _showGeneratingIndicator();
-              _pollBackgroundTurn(chatSessionId, 0);
+            // Server is still generating. Abort any stale stream handle —
+            // backgrounded tabs throttle the fetch reader without erroring,
+            // leaving a zombie activeStream that blocks the poller. Clear it
+            // so the background poller can take over and recover the response.
+            if (activeStream) {
+              try { activeStream.abort(); } catch (e) { /* already dead */ }
+              activeStream = null;
             }
-          } else if (activeStream && lastActivityTs) {
-            // Stream was active but server says done — the fetch reader died.
-            // Reload to pick up the persisted result.
+            _showGeneratingIndicator();
+            _pollBackgroundTurn(chatSessionId, 0);
+          } else if (activeStream || lastActivityTs) {
+            // Turn finished while we were disconnected (stale stream or missed
+            // done event) — reload to pick up the persisted result.
             activeStream = null;
             loadSession(chatSessionId);
           }
@@ -465,6 +470,10 @@
       }
       // Do NOT finalizeProgress(true) — that paints false "Done".
       // Catch up from SessionStore when the detached turn finishes.
+      if (activeStream) {
+        try { activeStream.abort(); } catch (e) { /* already dead */ }
+        activeStream = null;
+      }
       if (chatSessionId) {
         _pollBackgroundTurn(chatSessionId, 0);
       }
@@ -1608,10 +1617,11 @@
           '<div class="agent-plan-bar" aria-hidden="true"><div class="agent-plan-bar-fill"></div></div>' +
           '<ol class="agent-plan-list"></ol>' +
         '</div>' +
-        '<div class="agent-memory-explain" hidden>' +
-          '<div class="agent-memory-explain-head">' +
+        '<div class="agent-memory-explain is-collapsed" hidden>' +
+          '<div class="agent-memory-explain-head" role="button" tabindex="0" title="Collapse/expand memory">' +
             '<div class="agent-memory-explain-label">' + escapeHtml(ti('memory_context', 'Memory context')) + '</div>' +
             '<div class="agent-memory-explain-meta"></div>' +
+            '<span class="agent-memory-chevron" aria-hidden="true">\u25B8</span>' +
           '</div>' +
           '<div class="agent-memory-explain-body"></div>' +
         '</div>' +
@@ -1631,6 +1641,21 @@
       header.addEventListener('click', toggle);
       header.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      });
+    }
+    // Memory sub-panel: independently collapsible (starts collapsed to save space).
+    var memHead = panel.querySelector('.agent-memory-explain-head');
+    if (memHead) {
+      function toggleMem() {
+        var mem = panel.querySelector('.agent-memory-explain');
+        if (!mem) return;
+        mem.classList.toggle('is-collapsed');
+        var chev = mem.querySelector('.agent-memory-chevron');
+        if (chev) chev.textContent = mem.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
+      }
+      memHead.addEventListener('click', toggleMem);
+      memHead.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMem(); }
       });
     }
     _progressEl = panel;

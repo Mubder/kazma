@@ -2027,12 +2027,25 @@ tbody tr:last-child td {
   background: color-mix(in srgb, #a78bfa 7%, transparent);
   border-bottom: 1px solid var(--border-subtle);
 }
+.agent-memory-explain.is-collapsed .agent-memory-explain-body {
+  display: none;
+}
+.agent-memory-explain.is-collapsed .agent-memory-explain-head {
+  margin-bottom: 0;
+}
 .agent-memory-explain-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.agent-memory-chevron {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 .agent-memory-explain-label {
   font-size: 0.68rem;
