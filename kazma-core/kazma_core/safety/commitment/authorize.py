@@ -32,7 +32,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from kazma_core.safety.side_effects import (
@@ -173,12 +173,42 @@ def _resolve_remind_act(
     cfg: dict[str, Any] | None,
     source: str,
 ) -> EffectDecision:
-    """Resolve a remind tool call: anchor to memory, compute fire_at, decide."""
-    # Lazy imports (store → paths; relative_time is standalone).
+    """Resolve a remind tool call: anchor to memory, compute fire_at, decide.
+
+    Mode-aware (plan §9 Phase 6):
+      * yolo        — semantic bypass (audit-only allow; security HITL still
+                      applies separately).
+      * strict      — widen the relevance window so more turns clarify.
+      * autonomous  — a clarify with a from-now candidate is allowed with the
+                      candidate (less friction; the incident-class overwrite is
+                      still blocked at the memory gate).
+      * balanced    — resolve_remind's decision stands (default).
+    """
+    # Lazy imports (store → paths; relative_time is standalone; config → ConfigStore).
+    from .config import get_commitment_config
     from .relative_time import resolve_remind as _resolve
     from .store import Commitment, create_commitment
 
-    res = _resolve(user_text, request_at=request_at, memory_beliefs=memory_beliefs)
+    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
+        get_commitment_config().get("mode", "balanced"))
+
+    if mode == "yolo":
+        logger.info("[commitment] yolo mode — semantic bypass for %s source=%s",
+                    tool_name, source)
+        return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
+
+    # strict widens the relevance window (more clarifies); others use default.
+    window = timedelta(days=30) if mode == "strict" else None
+    res = _resolve(user_text, request_at=request_at, memory_beliefs=memory_beliefs,
+                   relevance_window=window)
+
+    # autonomous: a nearby-event clarify with a from-now candidate → allow it.
+    if (mode == "autonomous" and res.decision == "clarify"
+            and res.candidate_fire_at is not None):
+        res.decision = "allow"
+        res.fire_at = res.candidate_fire_at
+        res.reason = (f"autonomous mode — allowed with from-now candidate "
+                      f"{res.fire_at.date()} (memory gate still guards overwrites)")
 
     req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
     commitment = Commitment(

@@ -298,6 +298,10 @@ class RemindResolution:
     overwrite_belief: bool = False   # always False from this resolver
     time_expressions: list[TimeExpression] = field(default_factory=list)
     matched_events: list[str] = field(default_factory=list)
+    # When decision == "clarify" due to a nearby-event ambiguity, the from-now
+    # candidate is retained so the autonomous mode can allow-with-best-guess
+    # instead of forcing a question (plan §9 Phase 6).
+    candidate_fire_at: datetime | None = None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -493,6 +497,7 @@ def resolve_remind(
     request_at: datetime,
     memory_beliefs: list[dict[str, Any]] | None = None,
     lang_hint: str = "auto",
+    relevance_window: timedelta | None = None,
 ) -> RemindResolution:
     """Resolve a remind intent to a fire_at or a clarify/deny.
 
@@ -568,7 +573,8 @@ def resolve_remind(
         if expr.kind in ("relative_from_now", "calendar") and expr.lead is not None:
             fire_at = request_at + expr.lead
             # check for a *relevant* unmentioned nearby event → ambiguous
-            nearby = _nearby_unmentioned_event(fire_at, memory_beliefs, _RELEVANCE_WINDOW)
+            window = relevance_window if relevance_window is not None else _RELEVANCE_WINDOW
+            nearby = _nearby_unmentioned_event(fire_at, memory_beliefs, window)
             if nearby:
                 pred, event_at = nearby
                 res.decision = "clarify"
@@ -579,6 +585,7 @@ def resolve_remind(
                 )
                 res.anchor = "request_at"
                 res.fire_at = None
+                res.candidate_fire_at = fire_at  # retained for autonomous mode
                 return res
             res.fire_at = fire_at
             res.anchor = "request_at"
