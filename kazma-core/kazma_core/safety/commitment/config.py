@@ -31,6 +31,7 @@ _DEFAULTS: dict[str, Any] = {
     "swarm_scope_enforce": False,
     "soul_requires_confirm": False,
     "false_clarify_budget": 0.15,
+    "outbound_allowed_targets": [],  # empty = permissive (HITL handles); populate to enforce an allowlist
     "ttl": {  # seconds; None = no expiry (terminal)
         "draft": 3600.0,
         "needs_clarify": 86400.0,
@@ -103,6 +104,12 @@ def get_commitment_config() -> dict[str, Any]:
         src = cs.get("agent.commitment.soul_requires_confirm")
         if src is not None:
             cfg["soul_requires_confirm"] = bool(src)
+        oat = cs.get("agent.commitment.outbound_allowed_targets")
+        if oat is not None:
+            if isinstance(oat, str):
+                cfg["outbound_allowed_targets"] = [t.strip() for t in oat.split(",") if t.strip()]
+            elif isinstance(oat, (list, tuple)):
+                cfg["outbound_allowed_targets"] = list(oat)
         cap = cs.get("agent.commitment.pending_cap_per_thread")
         if cap is not None:
             try:

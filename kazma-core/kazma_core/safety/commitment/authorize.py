@@ -179,6 +179,26 @@ def authorize_effect(
             source=ctx.get("source", "unknown"),
         )
 
+    # Phase 4 expand: exec / send_outbound / config_change semantic resolvers.
+    # These add a denylist/allowlist/protected-key check BEFORE the security HITL
+    # card (the gate runs first, then the HITL split). mutate_fs (containment in
+    # IdeService.resolve) and delegate (HMAC trust at skill-load) stay audit-only.
+    if profile.act == "exec" and args is not None:
+        return _resolve_exec_act(
+            profile, tool_name, args, audit=audit,
+            thread_id=thread_id, tenant_id=tenant_id, cfg=cfg,
+            source=ctx.get("source", "unknown"))
+    if profile.act == "send_outbound" and args is not None:
+        return _resolve_send_outbound_act(
+            profile, tool_name, args, audit=audit,
+            thread_id=thread_id, tenant_id=tenant_id, cfg=cfg,
+            source=ctx.get("source", "unknown"))
+    if profile.act == "config_change" and args is not None:
+        return _resolve_config_change_act(
+            profile, tool_name, args, audit=audit,
+            thread_id=thread_id, tenant_id=tenant_id, cfg=cfg,
+            source=ctx.get("source", "unknown"))
+
     # Everything else: audit-only allow (memory corruption is gated at
     # mutate_belief; other acts' resolvers arrive in Phase 4).
     logger.info(
@@ -398,3 +418,118 @@ def _resolve_cancel_job_act(
         decision="clarify", reason=q, profile=profile, audit=audit,
         commitment_id=cid, clarify_question=q,
     )
+
+
+# ── Phase 4 expand: exec / send_outbound / config_change resolvers ─────────
+
+import re as _re  # noqa: E402
+
+# Catastrophic command patterns (irreversible / system-wide). These DENY before
+# the security HITL card even shows — the model should never execute these.
+_EXEC_DENYLIST = [
+    _re.compile(r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/(?!\w)", _re.IGNORECASE),  # rm -rf /
+    _re.compile(r":\s*\(\)\s*\{.*:.*\|.*&.*\}", _re.IGNORECASE),  # fork bomb
+    _re.compile(r"(curl|wget).*\|\s*(sh|bash|zsh)", _re.IGNORECASE),  # remote pipe to shell
+    _re.compile(r"dd\s+.*of=/dev/", _re.IGNORECASE),  # dd to device
+    _re.compile(r"mkfs", _re.IGNORECASE),  # format filesystem
+    _re.compile(r">\s*/dev/(sd|nvme|hd|disk)", _re.IGNORECASE),  # redirect to raw disk
+    _re.compile(r"\b(shutdown|reboot|halt|poweroff|init\s+0)\b", _re.IGNORECASE),
+    _re.compile(r"chmod\s+(-R\s+)?[0-7]{3,4}\s+/(?!\w)", _re.IGNORECASE),  # chmod 777 /
+]
+
+# Protected config keys — mutating these could DISABLE the safety layer itself.
+# (A self-protection measure: the agent can't turn off its own gates via config.)
+_CONFIG_PROTECTED_PREFIXES = (
+    "safety.", "agent.commitment.", "notifications.lifecycle.",
+)
+
+
+def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):
+    """exec resolver (denylist + cwd pin, plan §5 / WS5)."""
+    from .store import Commitment, create_commitment
+
+    command = str(args.get("command", ""))
+    # 1. Denylist: catastrophic commands → deny (before the HITL card).
+    for pat in _EXEC_DENYLIST:
+        if pat.search(command):
+            c = Commitment(thread_id=thread_id or "", act="exec", tool_name=tool_name,
+                           goal_text=command[:200], args_digest=_args_digest(args),
+                           request_at=time.time(), tenant_id=tenant_id,
+                           slots={"command": command[:500]}, confidence=0.0)
+            c.status = "aborted"; c.policy_decision = "deny"
+            cid = create_commitment(c, cfg=cfg)
+            logger.warning("[commitment] DENY exec — catastrophic pattern matched: %s", command[:80])
+            return EffectDecision("deny", f"exec denylist: catastrophic pattern in command",
+                                  profile, audit, commitment_id=cid)
+    # 2. cwd pin: if a cwd is provided, verify it's within the workspace root.
+    cwd = args.get("cwd")
+    if cwd:
+        try:
+            from kazma_core.ide.workspace_scope import resolve_workspace_root
+            root = resolve_workspace_root()
+            if root:
+                from pathlib import Path
+                p = Path(cwd).resolve()
+                if not str(p).startswith(str(root)):
+                    c = Commitment(thread_id=thread_id or "", act="exec", tool_name=tool_name,
+                                   goal_text=command[:200], args_digest=_args_digest(args),
+                                   request_at=time.time(), tenant_id=tenant_id,
+                                   slots={"command": command[:500], "cwd": str(cwd)},
+                                   confidence=0.3)
+                    c.status = "needs_clarify"; c.policy_decision = "clarify"
+                    cid = create_commitment(c, cfg=cfg)
+                    q = f"cwd {cwd!r} is outside the workspace root. Run in-workspace?"
+                    return EffectDecision("clarify", q, profile, audit, commitment_id=cid,
+                                          clarify_question=q)
+        except Exception:
+            pass  # fail-open if workspace resolution fails
+    # 3. Safe command → allow (the HITL security card still applies separately).
+    return EffectDecision("allow", "exec: no denylist match (HITL still applies)",
+                          profile, audit)
+
+
+def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):
+    """send_outbound resolver (target allowlist, plan §5 / WS5)."""
+    from .store import Commitment, create_commitment
+    from .config import get_commitment_config
+
+    target = str(args.get("to") or args.get("target") or args.get("recipient") or "")
+    allowlist = (get_commitment_config().get("outbound_allowed_targets") or [])
+    # If no allowlist configured → allow (audit; the HITL security card still applies).
+    if not allowlist:
+        return EffectDecision("allow", "outbound: no target allowlist configured (HITL applies)",
+                              profile, audit)
+    if target and target in allowlist:
+        return EffectDecision("allow", f"outbound: target {target!r} is allowlisted", profile, audit)
+    # Unknown target → clarify (with the allowlist so the user picks a valid one).
+    c = Commitment(thread_id=thread_id or "", act="send_outbound", tool_name=tool_name,
+                   goal_text=f"send to {target[:100]}", args_digest=_args_digest(args),
+                   request_at=time.time(), tenant_id=tenant_id,
+                   slots={"target": target[:500]}, confidence=0.3)
+    c.status = "needs_clarify"; c.policy_decision = "clarify"
+    cid = create_commitment(c, cfg=cfg)
+    q = (f"target {target!r} is not in the approved allowlist "
+         f"({', '.join(allowlist[:5])}). Confirm the target before sending.")
+    return EffectDecision("clarify", q, profile, audit, commitment_id=cid, clarify_question=q)
+
+
+def _resolve_config_change_act(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):
+    """config_change resolver (protected-key denylist, plan §5 / WS5).
+
+    Self-protection: the agent cannot mutate config keys that would disable its
+    own safety layer (safety.*, agent.commitment.*, lifecycle notifications).
+    """
+    from .store import Commitment, create_commitment
+
+    key = str(args.get("key") or "")
+    if key and any(key.startswith(p) for p in _CONFIG_PROTECTED_PREFIXES):
+        c = Commitment(thread_id=thread_id or "", act="config_change", tool_name=tool_name,
+                       goal_text=f"config {key}", args_digest=_args_digest(args),
+                       request_at=time.time(), tenant_id=tenant_id,
+                       slots={"key": key[:500]}, confidence=0.0)
+        c.status = "aborted"; c.policy_decision = "deny"
+        cid = create_commitment(c, cfg=cfg)
+        logger.warning("[commitment] DENY config — protected key %s", key)
+        return EffectDecision("deny", f"config: key {key!r} is protected (safety-critical)",
+                              profile, audit, commitment_id=cid)
+    return EffectDecision("allow", "config: key is not protected", profile, audit)
