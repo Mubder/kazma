@@ -1,18 +1,20 @@
-"""Update CLI command — check for and install Kazma CLI updates.
+"""Update CLI command — primary operator upgrade path for Kazma.
 
 Detects whether the package was installed via pip or as an editable
 git install, then checks for updates accordingly:
 
-* **pip install**: queries PyPI (``https://pypi.org/pypi/kazma/json``) for
-  the latest version and runs ``pip install --upgrade kazma``.
-* **git / editable install**: runs ``git fetch`` then checks
-  ``git log HEAD..origin/main`` for commits behind, and updates with
-  ``git pull origin main`` followed by ``pip install -e .``.
+* **pip install**: queries PyPI for the latest version and upgrades via pip.
+* **git / editable install** (preferred monorepo path): ``git fetch``, then
+  hard-reset **main** to ``origin/main`` (after named stash of local edits),
+  reinstall extras in a fresh process, and postflight-verify HEAD + CLI.
 
 Flags:
     --check / -c   Only check for updates, don't install (dry run)
     --force / -f   Force update even if already latest
     --yes   / -y   Skip confirmation prompt
+    --reinstall / -r   Packages only
+    --sync-main    Checkout main before updating (feature-branch safety)
+    --accept-discard-local-commits   Allow reset when local commits are ahead
 """
 
 from __future__ import annotations
@@ -84,7 +86,14 @@ _UPDATE_BOOL_FLAGS = {
     "--yes", "-y",
     "--help", "-h",
     "--reinstall", "-r",
+    "--sync-main",
+    "--accept-discard-local-commits",
 }
+
+# Operator tracking branches that may hard-reset to origin/main.
+_TRACKING_BRANCHES = frozenset({"main", "master"})
+_UPDATE_REMOTE_REF = "origin/main"
+_STASH_MSG_PREFIX = "kazma-update-"
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +321,7 @@ def check_git_behind() -> tuple[int, list[str]]:
     # Count commits behind
     try:
         result = _run_cmd(
-            ["git", "log", "HEAD..origin/main", "--oneline"],
+            ["git", "log", f"HEAD..{_UPDATE_REMOTE_REF}", "--oneline"],
             cwd=cwd,
         )
         if result.returncode != 0:
@@ -810,7 +819,7 @@ def _commits_ahead_of_origin(cwd: str) -> int:
     """How many local commits are not on origin/main (0 = safe to reset)."""
     try:
         result = _run_cmd(
-            ["git", "rev-list", "--count", "origin/main..HEAD"],
+            ["git", "rev-list", "--count", f"{_UPDATE_REMOTE_REF}..HEAD"],
             cwd=cwd,
         )
         if result.returncode == 0 and result.stdout.strip().isdigit():
@@ -820,11 +829,183 @@ def _commits_ahead_of_origin(cwd: str) -> int:
     return 0
 
 
-def _stash_local_changes(cwd: str) -> bool:
-    """Stash tracked + untracked local edits. Returns True if a stash was created."""
+def _current_branch(cwd: str) -> str:
+    """Return current branch name, or empty if detached/unknown."""
+    try:
+        result = _run_cmd(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=cwd,
+        )
+        if result.returncode == 0:
+            name = (result.stdout or "").strip()
+            if name and name != "HEAD":
+                return name
+    except Exception:
+        pass
+    return ""
+
+
+def _git_index_locked(cwd: str) -> bool:
+    return (Path(cwd) / ".git" / "index.lock").is_file()
+
+
+def _update_state_path(cwd: str) -> Path:
+    """Persist mid-update state under kazma-data (survives hard reset of tracked files)."""
+    try:
+        from kazma_core.paths import data_dir
+
+        root = data_dir()
+    except Exception:
+        root = Path(cwd) / "kazma-data"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "update-state.json"
+
+
+def _write_update_state(cwd: str, **fields: object) -> None:
+    path = _update_state_path(cwd)
+    payload: dict[str, object] = {}
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                payload.update(raw)
+        except Exception:
+            payload = {}
+    payload.update(fields)
+    import time
+
+    payload["updated_at"] = time.time()
+    try:
+        path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.debug("Could not write update state", exc_info=True)
+
+
+def _read_update_state(cwd: str) -> dict[str, object]:
+    path = _update_state_path(cwd)
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _clear_update_state(cwd: str) -> None:
+    path = _update_state_path(cwd)
+    try:
+        if path.is_file():
+            path.unlink()
+    except Exception:
+        logger.debug("Could not clear update state", exc_info=True)
+
+
+def _preflight_git(
+    cwd: str,
+    *,
+    sync_main: bool = False,
+    accept_discard_local_commits: bool = False,
+) -> tuple[bool, str]:
+    """Validate that a hard-reset update is safe. Returns (ok, branch_name)."""
+
+    try:
+        ver = _run_cmd(["git", "--version"], cwd=cwd)
+        if ver.returncode != 0:
+            console.print("[red]git is not working correctly.[/red]")
+            return False, ""
+    except FileNotFoundError:
+        console.print("[red]git not found. Is Git installed and on PATH?[/red]")
+        return False, ""
+
+    if _git_index_locked(cwd):
+        console.print(
+            "[red]Git index is locked (.git/index.lock).[/red]\n"
+            "Another git process may be running. If none is, remove the lock:\n"
+            "  [cyan]Remove-Item .git\\index.lock[/cyan]   (PowerShell)\n"
+            "  [cyan]rm -f .git/index.lock[/cyan]         (bash)"
+        )
+        return False, ""
+
+    branch = _current_branch(cwd)
+    if not branch:
+        console.print(
+            "[red]Detached HEAD — refuse automatic update.[/red]\n"
+            "Checkout a branch first:\n"
+            "  [cyan]git checkout main[/cyan]\n"
+            "  [cyan]kazma update[/cyan]"
+        )
+        return False, ""
+
+    if branch not in _TRACKING_BRANCHES:
+        if sync_main:
+            console.print(
+                f"[yellow]On branch [bold]{branch}[/bold] — "
+                "switching to main for the operator update path…[/yellow]"
+            )
+            co = _run_cmd(["git", "checkout", "main"], cwd=cwd)
+            if co.returncode != 0:
+                co = _run_cmd(["git", "checkout", "master"], cwd=cwd)
+            if co.returncode != 0:
+                console.print(
+                    f"[red]Could not checkout main/master:[/red]\n"
+                    f"{(co.stderr or co.stdout or '').strip()}\n"
+                    "Create/fetch main first, then re-run "
+                    "[cyan]kazma update --sync-main[/cyan]."
+                )
+                return False, ""
+            branch = _current_branch(cwd)
+            if branch not in _TRACKING_BRANCHES:
+                console.print(
+                    f"[red]Still not on main after checkout (now {branch!r}).[/red]"
+                )
+                return False, branch
+            console.print(f"[green]Now on [bold]{branch}[/bold].[/green]")
+        else:
+            console.print(
+                f"[red]Refusing to hard-reset branch [bold]{branch}[/bold].[/red]\n"
+                "[bold]kazma update[/bold] is the operator path for [cyan]main[/cyan] only.\n"
+                "Options:\n"
+                "  1) Switch and update:  [cyan]git checkout main[/cyan] then "
+                "[cyan]kazma update[/cyan]\n"
+                "  2) Auto-switch:       [cyan]kazma update --sync-main[/cyan]\n"
+                "  3) Keep developing on this branch with normal git "
+                "(do not use hard reset)."
+            )
+            return False, branch
+
+    ahead = _commits_ahead_of_origin(cwd)
+    if ahead > 0 and not accept_discard_local_commits:
+        console.print(
+            f"[red]You have {ahead} local commit(s) not on {_UPDATE_REMOTE_REF}.[/red]\n"
+            "Hard-reset would discard them. Options:\n"
+            "  • Push / move them to a branch first\n"
+            "  • Or re-run with [cyan]kazma update --accept-discard-local-commits[/cyan]\n"
+            "    (explicitly discards those commits when syncing to origin/main)"
+        )
+        return False, branch
+
+    if ahead > 0 and accept_discard_local_commits:
+        console.print(
+            f"[yellow]Will discard {ahead} local commit(s) not on "
+            f"{_UPDATE_REMOTE_REF} (--accept-discard-local-commits).[/yellow]"
+        )
+
+    return True, branch
+
+
+def _stash_local_changes(cwd: str) -> str | None:
+    """Stash tracked + untracked local edits.
+
+    Returns the unique stash message (for later restore-by-ref), or None if
+    nothing was stashed / stash failed.
+    """
     status = _git_status_porcelain(cwd)
     if not status:
-        return False
+        return None
 
     console.print("[yellow]Local changes detected (would block a normal pull):[/yellow]")
     for line in status.splitlines()[:20]:
@@ -832,11 +1013,15 @@ def _stash_local_changes(cwd: str) -> bool:
     if status.count("\n") >= 20:
         console.print("  [dim]…[/dim]")
 
-    msg = "kazma-update-auto"
+    import time
+    import uuid
+
+    msg = f"{_STASH_MSG_PREFIX}{int(time.time())}-{uuid.uuid4().hex[:8]}"
     console.print(
         "[cyan]Stashing local changes so update can run without merge conflicts…[/cyan]"
     )
-    # Include untracked so new local files don't block either
+    # Include untracked so new local files don't block either.
+    # Do NOT use -a (all): ignored files (secrets, .env) stay put.
     result = _run_cmd(
         ["git", "stash", "push", "-u", "-m", msg],
         cwd=cwd,
@@ -849,30 +1034,62 @@ def _stash_local_changes(cwd: str) -> bool:
         console.print(
             "Fix manually:\n"
             "  [cyan]git stash push -u -m 'my-local'[/cyan]\n"
-            "  [cyan]git pull origin main[/cyan]\n"
+            "  [cyan]kazma update[/cyan]\n"
             "  [cyan]git stash pop[/cyan]"
         )
-        return False
+        return None
 
-    # Confirm stash was created (stash push is no-op if nothing to stash)
     if "No local changes to save" in (result.stdout or ""):
-        return False
-    console.print("[green]Stashed local changes.[/green]")
-    return True
+        return None
+    console.print(f"[green]Stashed local changes[/green] [dim]({msg})[/dim]")
+    return msg
 
 
-def _restore_stash(cwd: str) -> None:
-    """Pop the latest stash; keep it if conflicts so nothing is lost."""
-    console.print("[cyan]Restoring your local changes (git stash pop)…[/cyan]")
-    result = _run_cmd(["git", "stash", "pop"], cwd=cwd)
+def _find_stash_ref(cwd: str, message: str) -> str | None:
+    """Return ``stash@{n}`` whose message contains *message*, else None."""
+    result = _run_cmd(["git", "stash", "list"], cwd=cwd)
+    if result.returncode != 0:
+        return None
+    for line in (result.stdout or "").splitlines():
+        if message in line and line.startswith("stash@{"):
+            ref = line.split(":", 1)[0].strip()
+            if ref:
+                return ref
+    return None
+
+
+def _restore_stash(cwd: str, stash_message: str | None = None) -> bool:
+    """Apply the named update stash (or latest kazma-update if message missing).
+
+    On conflict the stash entry is kept. Returns True if restore fully OK.
+    """
+    console.print("[cyan]Restoring your local changes…[/cyan]")
+    ref: str | None = None
+    if stash_message:
+        ref = _find_stash_ref(cwd, stash_message)
+        if ref is None:
+            console.print(
+                f"[yellow]Could not find stash message {stash_message!r}.[/yellow]\n"
+                "  List: [cyan]git stash list[/cyan]"
+            )
+            listing = _run_cmd(["git", "stash", "list"], cwd=cwd)
+            first = (listing.stdout or "").splitlines()[:1]
+            if first and _STASH_MSG_PREFIX in first[0]:
+                ref = first[0].split(":", 1)[0].strip()
+            else:
+                return False
+
+    cmd = ["git", "stash", "pop"]
+    if ref:
+        cmd.append(ref)
+    result = _run_cmd(cmd, cwd=cwd)
     out = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
     if result.returncode == 0:
         console.print("[green]Local changes restored on top of the update.[/green]")
         if out:
             console.print(f"[dim]{out[:500]}[/dim]")
-        return
+        return True
 
-    # Conflicts or other failure — stash entry remains if pop failed mid-way
     console.print(
         "[yellow]Could not auto-apply all local changes (likely a conflict).[/yellow]\n"
         "Your edits are still safe in the git stash.\n"
@@ -881,17 +1098,81 @@ def _restore_stash(cwd: str) -> None:
         "  Drop:   [cyan]git stash drop[/cyan]  (only after you copied what you need)\n"
         f"[dim]{out[:600]}[/dim]"
     )
+    return False
 
 
-def do_git_update() -> bool:
-    """Update kazma from git: stash → sync to origin/main → restore → reinstall.
+def _heads_match_origin_main(cwd: str) -> bool:
+    head = get_git_commit("HEAD")
+    remote = get_git_commit(_UPDATE_REMOTE_REF)
+    return bool(head and remote and head != "unknown" and head == remote)
 
-    Designed so operators never hit interactive merge/edit-file prompts:
 
-    1. Stash local dirty files (e.g. ``kazma.yaml`` runtime tweaks)
-    2. ``git fetch`` + fast-forward (or hard reset if no unique local commits)
-    3. ``git stash pop`` to put local config back
-    4. Best-effort package reinstall (uv/pip)
+def _fresh_version_report(cwd: str) -> tuple[str, str]:
+    """Return (version, short_HEAD) from a clean subprocess (no stale imports)."""
+    head = get_git_commit("HEAD")
+    probe = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"root = Path({cwd!r})\n"
+        "sys.path.insert(0, str(root / 'kazma-cli'))\n"
+        "sys.path.insert(0, str(root))\n"
+        "ver = 'unknown'\n"
+        "try:\n"
+        "    from kazma_cli.banner import _get_version\n"
+        "    ver = _get_version() or ver\n"
+        "except Exception:\n"
+        "    try:\n"
+        "        from importlib.metadata import version\n"
+        "        ver = version('kazma')\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "print(ver)\n"
+    )
+    try:
+        result = _run_cmd([sys.executable, "-c", probe], cwd=cwd, timeout=30.0)
+        if result.returncode == 0 and (result.stdout or "").strip():
+            return (result.stdout.strip(), head)
+    except Exception:
+        pass
+    return (get_current_version(), head)
+
+
+def _postflight_ok(cwd: str) -> bool:
+    """True when HEAD matches origin/main and CLI imports."""
+    ok = True
+    if not _heads_match_origin_main(cwd):
+        console.print(
+            f"[yellow]Postflight: HEAD ({get_git_commit('HEAD')}) "
+            f"≠ {_UPDATE_REMOTE_REF} ({get_git_commit(_UPDATE_REMOTE_REF)}).[/yellow]"
+        )
+        ok = False
+    else:
+        console.print(
+            f"[green]Postflight: HEAD matches {_UPDATE_REMOTE_REF} "
+            f"({get_git_commit('HEAD')}).[/green]"
+        )
+    if not _verify_cli_importable():
+        console.print(
+            "[red]Postflight: kazma_cli / kazma_core not importable in this venv.[/red]"
+        )
+        ok = False
+    else:
+        console.print("[green]Postflight: CLI import OK.[/green]")
+    return ok
+
+
+def do_git_update(
+    *,
+    sync_main: bool = False,
+    accept_discard_local_commits: bool = False,
+) -> bool:
+    """Primary operator update: preflight → stash → reset main → restore → reinstall.
+
+    Safety rules:
+    * Only hard-resets main/master (use ``--sync-main`` to checkout main first).
+    * Local commits ahead of origin require ``--accept-discard-local-commits``.
+    * Named stash so restore does not pop the wrong entry.
+    * Reinstall must leave ``kazma_cli`` importable or the update fails.
     """
     git_root = _find_git_root()
     if git_root is None:
@@ -899,79 +1180,120 @@ def do_git_update() -> bool:
         return False
 
     cwd = str(git_root)
-    stashed = False
+    stash_msg: str | None = None
+    from_commit = get_git_commit("HEAD")
 
     try:
-        # ── 1. Stash local edits so pull never aborts ─────────────
-        if _git_status_porcelain(cwd):
-            stashed = _stash_local_changes(cwd)
-            # If still dirty after failed stash, abort
-            if _git_status_porcelain(cwd) and not stashed:
-                console.print("[red]Working tree still dirty — cannot update safely.[/red]")
-                return False
+        ok, branch = _preflight_git(
+            cwd,
+            sync_main=sync_main,
+            accept_discard_local_commits=accept_discard_local_commits,
+        )
+        if not ok:
+            return False
 
-        # ── 2. Fetch + land on origin/main (no merge commits) ─────
+        _write_update_state(
+            cwd,
+            phase="preflight_ok",
+            branch=branch,
+            from_commit=from_commit,
+            target=_UPDATE_REMOTE_REF,
+        )
+
+        if _git_status_porcelain(cwd):
+            stash_msg = _stash_local_changes(cwd)
+            if _git_status_porcelain(cwd) and stash_msg is None:
+                console.print(
+                    "[red]Working tree still dirty — cannot update safely.[/red]"
+                )
+                return False
+            if stash_msg:
+                _write_update_state(cwd, phase="stashed", stash_message=stash_msg)
+
         console.print("[cyan]Fetching origin…[/cyan]")
         fetch = _run_cmd(["git", "fetch", "origin"], cwd=cwd)
         if fetch.returncode != 0:
             console.print(
-                f"[red]git fetch failed:[/red]\n{(fetch.stderr or fetch.stdout or '').strip()}"
+                f"[red]git fetch failed:[/red]\n"
+                f"{(fetch.stderr or fetch.stdout or '').strip()}"
             )
-            if stashed:
-                _restore_stash(cwd)
+            if stash_msg:
+                _restore_stash(cwd, stash_msg)
             return False
 
         ahead = _commits_ahead_of_origin(cwd)
-        if ahead > 0:
+        if ahead > 0 and not accept_discard_local_commits:
             console.print(
-                f"[yellow]You have {ahead} local commit(s) not on origin/main.[/yellow]\n"
-                "Trying rebase onto origin/main (no merge commit)…"
+                f"[red]After fetch: {ahead} local commit(s) not on "
+                f"{_UPDATE_REMOTE_REF}.[/red]\n"
+                "Re-run with [cyan]--accept-discard-local-commits[/cyan] to discard them."
             )
-            result = _run_cmd(
-                ["git", "pull", "--rebase", "origin", "main"],
-                cwd=cwd,
-            )
-            if result.returncode != 0:
-                console.print(
-                    f"[red]git pull --rebase failed:[/red]\n"
-                    f"{(result.stderr or result.stdout or '').strip()}\n"
-                    "Resolve manually, then re-run [cyan]kazma update[/cyan]."
-                )
-                if stashed:
-                    _restore_stash(cwd)
-                return False
-            console.print("[green]Rebased onto origin/main.[/green]")
-        else:
-            # Clean tracking branch: hard reset is the no-merge path
-            console.print("[cyan]Updating to origin/main (fast-forward / reset)…[/cyan]")
-            result = _run_cmd(["git", "reset", "--hard", "origin/main"], cwd=cwd)
-            if result.returncode != 0:
-                console.print(
-                    f"[red]git reset --hard origin/main failed:[/red]\n"
-                    f"{(result.stderr or result.stdout or '').strip()}"
-                )
-                if stashed:
-                    _restore_stash(cwd)
-                return False
-            console.print("[green]Now at origin/main.[/green]")
+            if stash_msg:
+                _restore_stash(cwd, stash_msg)
+            return False
 
-        # ── 3. Restore local config edits ─────────────────────────
-        if stashed:
-            _restore_stash(cwd)
+        console.print(
+            f"[cyan]Updating to {_UPDATE_REMOTE_REF} "
+            "(hard reset — no merge commits)…[/cyan]"
+        )
+        _write_update_state(cwd, phase="resetting")
+        result = _run_cmd(
+            ["git", "reset", "--hard", _UPDATE_REMOTE_REF],
+            cwd=cwd,
+        )
+        if result.returncode != 0:
+            console.print(
+                f"[red]git reset --hard {_UPDATE_REMOTE_REF} failed:[/red]\n"
+                f"{(result.stderr or result.stdout or '').strip()}"
+            )
+            if stash_msg:
+                _restore_stash(cwd, stash_msg)
+            return False
+        console.print(
+            f"[green]Now at {_UPDATE_REMOTE_REF}[/green] "
+            f"[dim]({get_git_commit('HEAD')})[/dim]"
+        )
+        _write_update_state(
+            cwd,
+            phase="reset_ok",
+            to_commit=get_git_commit("HEAD"),
+        )
+
+        if stash_msg:
+            _write_update_state(cwd, phase="restoring_stash")
+            _restore_stash(cwd, stash_msg)
 
     except FileNotFoundError:
         console.print("[red]git not found. Is Git installed and on PATH?[/red]")
         return False
     except subprocess.TimeoutExpired:
         console.print("[red]git update timed out.[/red]")
+        if stash_msg:
+            _restore_stash(cwd, stash_msg)
         return False
     except Exception as exc:
         console.print(f"[red]git update error:[/red] {exc}")
+        if stash_msg:
+            _restore_stash(cwd, stash_msg)
         return False
 
-    # Always reinstall via a *new* Python process so we run the update.py
-    # that was just pulled — not the pre-pull function still in memory.
-    return _reinstall_via_subprocess(cwd)
+    _write_update_state(cwd, phase="reinstalling")
+    if not _reinstall_via_subprocess(cwd):
+        _write_update_state(cwd, phase="reinstall_failed")
+        console.print(
+            "[red]Code is on origin/main but package reinstall failed.[/red]\n"
+            "Repair: [cyan]kazma update --reinstall -y[/cyan]"
+        )
+        return False
+
+    _write_update_state(cwd, phase="postflight")
+    if not _postflight_ok(cwd):
+        _write_update_state(cwd, phase="postflight_failed")
+        return False
+
+    _write_update_state(cwd, phase="done")
+    _clear_update_state(cwd)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -980,7 +1302,7 @@ def do_git_update() -> bool:
 
 def print_help() -> None:
     """Print the update subcommand help text."""
-    console.print("Kazma Update — check for and install CLI updates")
+    console.print("Kazma Update — [bold]primary[/bold] operator upgrade path")
     console.print()
     console.print("Usage: kazma update [options]")
     console.print()
@@ -988,19 +1310,38 @@ def print_help() -> None:
     console.print("  --check, -c       Only check for updates, don't install (dry run)")
     console.print("  --force, -f       Force git sync even if already latest")
     console.print("  --reinstall, -r   Only reinstall packages/extras (no git pull)")
+    console.print("  --sync-main       If on a feature branch, checkout main first")
+    console.print("  --accept-discard-local-commits")
+    console.print(
+        "                    Allow hard-reset when local commits are ahead of origin/main"
+    )
     console.print("  --yes, -y         Skip confirmation prompt")
     console.print("  --help, -h        Show this help message")
     console.print()
-    console.print("Notes:")
-    console.print("  Optional extras (rag/tui/…) are preserved across updates.")
-    console.print("  If VectorMemory packages were wiped, run:")
-    console.print('    [cyan]kazma update --reinstall -y[/cyan]')
-    console.print('    or  [cyan]uv pip install -e ".[rag]"[/cyan]')
+    console.print("[bold]Operator installs (git / main):[/bold]")
+    console.print("  • Preferred command: [cyan]kazma update[/cyan] (not manual git pull)")
+    console.print("  • Only hard-resets [cyan]main[/cyan]/[cyan]master[/cyan] to origin/main")
+    console.print(
+        "  • Local edits auto-stashed (tracked + untracked), then restored by name"
+    )
+    console.print(
+        "  • Reinstall preserves optional extras; verifies [cyan]kazma_cli[/cyan] imports"
+    )
+    console.print("  • Ignored files (.env, secrets) are never stashed away")
     console.print()
-    console.print("Git installs (monorepo):")
-    console.print("  • Local edits (e.g. kazma.yaml) are [bold]auto-stashed[/bold], then restored")
-    console.print("  • Uses reset/ff to origin/main — [bold]no merge commit prompts[/bold]")
-    console.print("  • Reinstall prefers [cyan]uv[/cyan] when pip is missing")
+    console.print("[bold]Developer clones:[/bold]")
+    console.print(
+        "  • Feature branches: use git, or [cyan]kazma update --sync-main[/cyan]"
+    )
+    console.print(
+        "  • Local commits on main: move them, or pass --accept-discard-local-commits"
+    )
+    console.print()
+    console.print("Repair wiped packages: [cyan]kazma update --reinstall -y[/cyan]")
+    console.print(
+        '  or  [cyan]uv pip install -e ".[rag]"[/cyan]  '
+        "(avoid bare [red]uv sync[/red])"
+    )
 
 
 def _confirm(prompt: str) -> bool:
@@ -1047,7 +1388,14 @@ def _run_pip_check_and_update(
     # If a monorepo is present, prefer git update even when pip-installed
     if _find_git_root() is not None:
         console.print("[dim]Local git repo detected — using git update path.[/dim]")
-        _run_git_check_and_update(current_version, check_only, force, skip_confirm)
+        _run_git_check_and_update(
+            current_version,
+            check_only,
+            force,
+            skip_confirm,
+            sync_main=False,
+            accept_discard_local_commits=False,
+        )
         return
 
     latest = get_latest_pypi_version()
@@ -1095,12 +1443,18 @@ def _run_pip_check_and_update(
 
 
 def _run_git_check_and_update(
-    current_version: str, check_only: bool, force: bool, skip_confirm: bool
+    current_version: str,
+    check_only: bool,
+    force: bool,
+    skip_confirm: bool,
+    *,
+    sync_main: bool = False,
+    accept_discard_local_commits: bool = False,
 ) -> None:
-    """Check git for updates and optionally pull + reinstall."""
+    """Check git for updates and optionally sync main + reinstall."""
     commits_behind, log_lines = check_git_behind()
     current_commit = get_git_commit("HEAD")
-    remote_commit = get_git_commit("origin/main")
+    remote_commit = get_git_commit(_UPDATE_REMOTE_REF)
 
     console.print(f"  Current HEAD: [cyan]{current_commit}[/cyan]")
     console.print(f"  Remote main:  [cyan]{remote_commit}[/cyan]")
@@ -1120,9 +1474,8 @@ def _run_git_check_and_update(
         console.print()
         console.print(
             f"[green]Update available![/green] "
-            f"{commits_behind} commit(s) behind origin/main"
+            f"{commits_behind} commit(s) behind {_UPDATE_REMOTE_REF}"
         )
-        # Show changelog summary (last few git log entries)
         if log_lines:
             console.print()
             console.print("[bold]Recent changes:[/bold]")
@@ -1134,7 +1487,6 @@ def _run_git_check_and_update(
     else:
         console.print()
         console.print("[green]Already up to date.[/green]")
-        # Repair wiped extras even when git is current (post bare-uv-sync damage)
         if needs_extras_repair(cwd):
             console.print()
             console.print(
@@ -1158,17 +1510,24 @@ def _run_git_check_and_update(
         return
 
     if not skip_confirm:
-        if not _confirm(f"Pull {commits_behind} commit(s) and reinstall? [y/N] "):
+        if not _confirm(
+            f"Sync to {_UPDATE_REMOTE_REF} ({commits_behind} commit(s)) and reinstall? [y/N] "
+        ):
             console.print("Update cancelled.")
             return
 
-    if do_git_update():
-        new_version = get_current_version()
-        new_commit = get_git_commit("HEAD")
+    if do_git_update(
+        sync_main=sync_main,
+        accept_discard_local_commits=accept_discard_local_commits,
+    ):
+        new_version, new_commit = _fresh_version_report(cwd)
         console.print()
         console.print("[green]Update complete![/green]")
         console.print(f"  Version: v{new_version}")
         console.print(f"  HEAD:    {new_commit}")
+        if new_commit != "unknown" and new_commit not in new_version:
+            # Soft note when version embedding lags HEAD (rare)
+            console.print(f"  [dim]Tip: open a new shell if `kazma --version` still looks stale.[/dim]")
     else:
         sys.exit(1)
 
@@ -1189,6 +1548,8 @@ def run(args: list[str]) -> None:
     force = "--force" in flags or "-f" in flags
     skip_confirm = "--yes" in flags or "-y" in flags
     reinstall_only = "--reinstall" in flags or "-r" in flags
+    sync_main = "--sync-main" in flags
+    accept_discard_local_commits = "--accept-discard-local-commits" in flags
 
     install_type = detect_install_type()
     current_version = get_current_version()
@@ -1229,6 +1590,13 @@ def run(args: list[str]) -> None:
         return
 
     if install_type == "git":
-        _run_git_check_and_update(current_version, check_only, force, skip_confirm)
+        _run_git_check_and_update(
+            current_version,
+            check_only,
+            force,
+            skip_confirm,
+            sync_main=sync_main,
+            accept_discard_local_commits=accept_discard_local_commits,
+        )
     else:
         _run_pip_check_and_update(current_version, check_only, force, skip_confirm)

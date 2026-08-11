@@ -18,7 +18,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Install and send a first message | [Quickstart](guide/quickstart) |
 | Understand the engine | [Architecture](guide/architecture) |
 | Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
-| Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) · [Smoke matrix](ops/smoke-matrix) |
+| Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) · [Kazma Update](ops/kazma-update) · [Smoke matrix](ops/smoke-matrix) |
 | Move Kazma to a new machine | [Migration](ops/migration) · [Portability](ops/portability) · [Disaster recovery](ops/disaster-recovery) |
 | Get server status alerts in chat | [Lifecycle notifications](guide/deployment#10-lifecycle-status-notifications) |
 | Debug multi-path bugs ("X related to Y") | [Diagnosis map](ops/diagnosis-map) · [System map](reference/system-map) |
@@ -58,7 +58,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 ### Ops (production)
 
-- [Production checklist](ops/production-checklist) · [Smoke matrix](ops/smoke-matrix) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
+- [Production checklist](ops/production-checklist) · [Kazma Update](ops/kazma-update) · [Smoke matrix](ops/smoke-matrix) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
 - [Postgres & SaaS](ops/postgres-and-saas) · [Disaster recovery](ops/disaster-recovery)
 - [Document processing ops](ops/document-processing) · [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
 - [Portability](ops/portability) · [Migration (`kazma migrate`)](ops/migration) · [WSL fixed access](ops/wsl-fixed-access)

@@ -137,3 +137,88 @@ def test_reinstall_via_subprocess_invokes_child(tmp_path):
     assert calls
     assert calls[0][0] == sys.executable or "python" in calls[0][0].lower() or calls[0][0].endswith("python.exe")
     assert "-c" in calls[0]
+
+
+def test_preflight_refuses_feature_branch(tmp_path):
+    def fake_run(cmd, cwd=None, timeout=None):
+        r = MagicMock()
+        r.returncode = 0
+        r.stderr = ""
+        if cmd[:2] == ["git", "--version"]:
+            r.stdout = "git version 2.0"
+        elif cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            r.stdout = "feat/something\n"
+        elif cmd[:2] == ["git", "rev-list"]:
+            r.stdout = "0\n"
+        else:
+            r.stdout = ""
+        return r
+
+    with patch.object(upd, "_run_cmd", side_effect=fake_run):
+        with patch.object(upd, "_git_index_locked", return_value=False):
+            ok, branch = upd._preflight_git(str(tmp_path), sync_main=False)
+    assert ok is False
+    assert branch == "feat/something"
+
+
+def test_preflight_allows_main_when_not_ahead(tmp_path):
+    def fake_run(cmd, cwd=None, timeout=None):
+        r = MagicMock()
+        r.returncode = 0
+        r.stderr = ""
+        if cmd[:2] == ["git", "--version"]:
+            r.stdout = "git version 2.0"
+        elif cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            r.stdout = "main\n"
+        elif cmd[:2] == ["git", "rev-list"]:
+            r.stdout = "0\n"
+        else:
+            r.stdout = ""
+        return r
+
+    with patch.object(upd, "_run_cmd", side_effect=fake_run):
+        with patch.object(upd, "_git_index_locked", return_value=False):
+            ok, branch = upd._preflight_git(str(tmp_path))
+    assert ok is True
+    assert branch == "main"
+
+
+def test_preflight_blocks_local_commits_without_flag(tmp_path):
+    def fake_run(cmd, cwd=None, timeout=None):
+        r = MagicMock()
+        r.returncode = 0
+        r.stderr = ""
+        if cmd[:2] == ["git", "--version"]:
+            r.stdout = "git version 2.0"
+        elif cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            r.stdout = "main\n"
+        elif cmd[:2] == ["git", "rev-list"]:
+            r.stdout = "2\n"
+        else:
+            r.stdout = ""
+        return r
+
+    with patch.object(upd, "_run_cmd", side_effect=fake_run):
+        with patch.object(upd, "_git_index_locked", return_value=False):
+            ok, _ = upd._preflight_git(str(tmp_path), accept_discard_local_commits=False)
+            ok2, _ = upd._preflight_git(str(tmp_path), accept_discard_local_commits=True)
+    assert ok is False
+    assert ok2 is True
+
+
+def test_find_stash_ref_by_message(tmp_path):
+    listing = (
+        "stash@{0}: On main: kazma-update-123-abcd\n"
+        "stash@{1}: On main: other-work\n"
+    )
+
+    def fake_run(cmd, cwd=None, timeout=None):
+        r = MagicMock()
+        r.returncode = 0
+        r.stderr = ""
+        r.stdout = listing if cmd[:3] == ["git", "stash", "list"] else ""
+        return r
+
+    with patch.object(upd, "_run_cmd", side_effect=fake_run):
+        assert upd._find_stash_ref(str(tmp_path), "kazma-update-123-abcd") == "stash@{0}"
+        assert upd._find_stash_ref(str(tmp_path), "missing") is None

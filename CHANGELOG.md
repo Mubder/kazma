@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — Primary `kazma update` without footguns (2026-08-12)
+
+Operator upgrade path is now intentional and fail-closed:
+
+- **Preflight:** git present, no `index.lock`, branch must be `main`/`master`
+  (or `--sync-main` to checkout main first); local commits ahead of
+  `origin/main` require `--accept-discard-local-commits`.
+- **Named stash** (`kazma-update-<ts>-…`) for tracked + untracked files;
+  restore-by-ref (does not pop an unrelated stash). Ignored files never
+  stashed.
+- **Hard reset** only on tracking branches to `origin/main` (no merge
+  commits / no feature-branch wipe).
+- **Reinstall** preserves extras; cleans `~azma*` leftovers; **requires**
+  `kazma_cli`/`kazma_core` import or update fails.
+- **Postflight:** HEAD matches origin/main + CLI import; **fresh version**
+  report via subprocess; state file `kazma-data/update-state.json`.
+- Docs: `docs/docs/ops/kazma-update.md`.
+
 ## Unreleased — Arabic PDF ingestion: multi-engine + layout + OCR routing (2026-08-12)
 
 Industry-grade Arabic (and general) PDF text extraction on the document platform:
