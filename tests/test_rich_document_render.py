@@ -310,3 +310,91 @@ def test_generate_pdf_english_lists(tmp_path: Path) -> None:
         warnings,
     )
     assert out.is_file() and out.stat().st_size > 500
+
+
+
+def test_generate_pdf_arabic_body_rtl_bbox(tmp_path: Path) -> None:
+    import unicodedata
+    """Regression: a long Arabic body paragraph must flow at the page/column
+    width — right-aligned lines ending at the column right edge (x1 ~ 535) with
+    the paragraph START on the top line and NO word cut mid-glyph.
+
+    This guards against the v9 regression where whole-string shaping +
+    ``textwrap.wrap(width=65)`` + ``TA_JUSTIFY`` collapsed the Arabic body to
+    narrow full-width lines pinned at x0 = 60 with x1 as short as ~88/289/330
+    (width ~ 240) and/or scrambled line order (paragraph start landing on a
+    bottom line). Page-width flow instead yields full-column lines
+    (x1 ~ 535, x0 starting near the left margin).
+    """
+    import pymupdf
+
+    from kazma_core.documents.renderer_worker import _generate_pdf
+
+    # Long, single, space-separated Arabic paragraph (wraps across >= 2 page-width lines).
+    arabic_body = (
+        "تقرير شامل يوضح قدرات معالجة المستندات في منظومة كاظمة، مع دعم كامل "
+        "للغتين العربية والإنجليزية، والربط المعياري مع محركات التقرير."
+    )
+    out = tmp_path / "ar_body.pdf"
+    warnings: list[str] = []
+    _generate_pdf(
+        out,
+        {
+            "title": "التقرير التنفيذ",
+            "lang": "ar",
+            "rtl": True,
+            "toc": False,
+            "sections": [{"heading": "الملخص", "body": arabic_body}],
+        },
+        warnings,
+    )
+    assert out.is_file()
+    # Dependencies present -> no reshape warnings.
+    assert not any("arabic_reshaper" in w for w in warnings)
+
+    doc = pymupdf.open(str(out))
+    # Collect body-paragraph line spans: body font (~11pt) right-aligned to the
+    # column right edge (x1 ~ 535). This excludes title/heading bars (14-20pt)
+    # and the footer brand/page-number (8pt).
+    body_lines: list[tuple[float, float, float, str]] = []
+    for page in doc:
+        for block in page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                lr = line["bbox"]
+                spans = line.get("spans", [])
+                text = "".join(s.get("text", "") for s in spans)
+                size = spans[0]["size"] if spans else 0.0
+                if (10.0 <= size <= 12.0
+                        and 528.0 <= lr[2] <= 542.0
+                        and len(text.strip()) > 2):
+                    body_lines.append((lr[1], lr[0], lr[2], text))
+    # The paragraph must be long enough to exercise multi-line wrapping.
+    assert len(body_lines) >= 2, (
+        f"Arabic body should wrap to >=2 page-width right-aligned lines, got {len(body_lines)}"
+    )
+
+    # Reading order: smallest y first, then left-to-right within a line.
+    body_lines.sort(key=lambda t: (round(t[0], 1), round(t[1], 1)))
+
+    # (1) The TOP body line must begin with the paragraph start ("تقرير").
+    first_y, first_x0, first_x1, first_text = body_lines[0]
+    # pymupdf returns reshaped presentation-form glyphs; NFKC normalizes them
+    # back to logical letters so we can assert on the paragraph-start word.
+    first_text_norm = unicodedata.normalize("NFKC", first_text)
+    assert first_text_norm.startswith("تقرير"), (
+        f"top body line must begin with the paragraph start; got: {first_text[:25]!r}"
+    )
+
+    # (2) Every body line ends at the column right edge (x1 ~ 535) => right-aligned.
+    #     (3) Page-width flow: at least one body line must span most of the column
+    #     (>= 400pt). v9 narrow collapse and the old cap-256 ragged style both only
+    #     produced short lines (width < 300), so this pins full-column page-width
+    #     flow while the x1 guard above still catches the v9 scramble/collapse.
+    max_line_width = 0.0
+    for _, x0, x1, _ in body_lines:
+        assert 528.0 <= x1 <= 542.0, f"body line not right-aligned: x1={x1:.1f}"
+        max_line_width = max(max_line_width, x1 - x0)
+    assert max_line_width >= 400.0, (
+        f"Arabic body should span the page width (>=400pt); widest line = {max_line_width:.1f}"
+    )
+

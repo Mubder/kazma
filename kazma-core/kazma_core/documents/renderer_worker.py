@@ -345,6 +345,13 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
         spaceAfter=8,
         firstLineIndent=0,
     )
+    # Body paragraphs: ragged-right RTL for Arabic (v4 layout), full-column
+    # justified for English. body_style (TA_JUSTIFY) stays parent/fallback.
+    body_para_style = ParagraphStyle(
+        "KazmaBodyPara",
+        parent=body_style,
+        alignment=(TA_RIGHT if rtl else TA_JUSTIFY),
+    )
     # Lists: same indent both sides so EN/AR feel symmetric
     bullet_style = ParagraphStyle(
         "KazmaBullet",
@@ -382,6 +389,7 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
     )
     rich_styles = {
         "body": body_style,
+        "body_para": body_para_style,
         "h1": h1_bar,
         "h2": h2_bar,
         "h3": h3_style,
@@ -491,6 +499,7 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
             story.append(Spacer(1, 8))
         body = item.get("body") or ""
         if body.strip():
+            col_width = float(A4[0]) - 2 * float(THEME.get("page_margin", 54))
             story.extend(
                 pdf_flowables_from_body(
                     body,
@@ -503,6 +512,8 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str]) ->
                     TableStyle=TableStyle,
                     font_name=font,
                     bold_font_name=bold_font,
+                    col_width=col_width,
+                    font_size=body_size,
                 )
             )
 
