@@ -278,6 +278,21 @@ def update_status(
         ).fetchone()
         if row is None:
             return None
+        # §3.9 rule 2 (no late approve): an EXPIRED commitment is dead. Reviving
+        # it to an active/executing state (committed / ready / needs_*) is always
+        # a caller bug — e.g. an approve arriving after the TTL. Refuse it at the
+        # store level so the invariant holds regardless of the resume path.
+        if (row["status"] == "expired"
+                and status in ("committed", "ready", "needs_confirm",
+                               "needs_clarify", "draft")):
+            logger.warning(
+                "[commitment] refused revive of expired %s → %s (no late approve)",
+                commitment_id, status,
+            )
+            _emit_event(conn, commitment_id, "revive_refused",
+                        {"attempted": status, "current": "expired"})
+            conn.commit()
+            return _row_to_commitment(row)
         is_terminal = status in ("committed", "aborted", "expired")
         ttl = None if is_terminal else ttl_for_status(status, cfg)
         expires_at = None if is_terminal else (
