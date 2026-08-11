@@ -340,13 +340,20 @@ def register_tasks_routes(
         dispatched = [name for name in worker_names if engine.get_worker(name) is not None]
         missing = [name for name in worker_names if name not in dispatched]
         if not dispatched:
+            # All named workers were missing. Surface the missing list as a
+            # non-error warning (HTTP 200) so callers can read `missing` without
+            # treating a "no workers matched" dispatch as a hard failure — the
+            # task was understood, it just had no takers (matches the
+            # ("ok","warning") contract other dispatch paths return).
             return JSONResponse(
                 {
-                    "status": "error",
+                    "status": "warning",
                     "message": "None of the specified workers are registered",
                     "missing": missing,
+                    "dispatched": [],
+                    "results": [],
                 },
-                status_code=400,
+                status_code=200,
             )
         results: list[dict[str, Any]] = []
         task_result: Any | None = None

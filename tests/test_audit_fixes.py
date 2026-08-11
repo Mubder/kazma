@@ -84,8 +84,8 @@ class TestSelfImprovementErrorStatus:
         # Stub memory + LLM so the test never touches network or HF
         with (
             patch(
-                "kazma_core.swarm.memory.adapter.get_adapter",
-                return_value=None,
+                "kazma_core.memory.recall.search",
+                side_effect=RuntimeError("no memory"),
             ),
             patch(
                 "kazma_core.model_registry.get_model_registry",
@@ -119,8 +119,8 @@ class TestSelfImprovementErrorStatus:
         si = SelfImprovementSkill(enabled=True)
         with (
             patch(
-                "kazma_core.swarm.memory.adapter.get_adapter",
-                return_value=None,
+                "kazma_core.memory.recall.search",
+                side_effect=RuntimeError("no memory"),
             ),
             patch(
                 "kazma_core.model_registry.get_model_registry",
@@ -131,31 +131,6 @@ class TestSelfImprovementErrorStatus:
                 "core", "ship it", [Stage()], "completed"
             )
         assert result.get("action") == "mutate", result
-
-
-class TestSqliteVecSchema:
-    """Verify the L4 vec0 table uses an auxiliary doc_id column (not an integer PK)."""
-
-    def test_ensure_table_uses_auxiliary_doc_id(self) -> None:
-        from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
-
-        store = SQLiteVectorStore(db_path="kazma-data/test_vec_schema.db")
-        # We can't rely on the vec0 extension being loadable in CI, so
-        # inspect the DDL the code would issue rather than executing it.
-        table = store._table_name("core")
-        # The store builds the table via ensure_table(); reconstruct the
-        # expected DDL to assert it no longer uses ``id INTEGER PRIMARY KEY``
-        # and now carries an auxiliary ``+doc_id TEXT`` column.
-        ddl = (
-            f"CREATE VIRTUAL TABLE IF NOT EXISTS {table}\n"
-            "                USING vec0(\n"
-            "                    embedding FLOAT[384],\n"
-            "                    +doc_id TEXT\n"
-            "                )"
-        )
-        assert "vec0" in ddl
-        assert "+doc_id TEXT" in ddl
-        assert "INTEGER PRIMARY KEY" not in ddl
 
 
 class TestConfigReadAliases:

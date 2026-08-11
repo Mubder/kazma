@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+# Activate the Jinja2 i18n globals patch so swarm.html's t(...) calls resolve.
+# _patch_jinja2_templates() runs on import of kazma_ui.i18n and setdefaults the
+# `t` global on every subsequent Jinja2Templates(...) — without it the template
+# raises UndefinedError → HTTP 500 (the test_swarm_panel_renders failure).
+import kazma_ui.i18n  # noqa: F401
+
 # ---------------------------------------------------------------------------
 # Test client fixture
 # ---------------------------------------------------------------------------
@@ -16,6 +22,16 @@ def _build_client(config_store=None):
 
     app = FastAPI()
     templates = Jinja2Templates(directory="kazma-ui/kazma_ui/templates")
+    # base.html references css_version()/lang/dir/translations_json globals that
+    # app.py injects on its own instance; provide minimal defaults here so the
+    # template renders without the full app. (`t` is setdefault'd by the i18n
+    # import's Jinja2 patch at module top.)
+    templates.env.globals.setdefault("css_version", lambda: 1)
+    templates.env.globals.setdefault("js_version", lambda: 1)
+    templates.env.globals.setdefault("lang", lambda: "en")
+    templates.env.globals.setdefault("dir", lambda: "ltr")
+    templates.env.globals.setdefault("translations_json", lambda: "{}")
+    templates.env.globals.setdefault("ws_token", lambda: "test-token")
 
     from kazma_ui.swarm_panel import create_swarm_router
 

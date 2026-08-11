@@ -44,7 +44,14 @@ LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80%
 Autonomous watchdog (`supervised_invoke()`) tracks node heartbeats, detects stalls, and performs automatic checkpoint rollbacks to clean state with `[KAZMA RECOVERY]` system reflection injection. Features model failover chains with per-provider cooldowns, durable SQLite **LLM Call Ledger** (`kazma-data/llm_calls.db`), orphan task startup recovery, and an automatic HITL approval timeout watchdog.
 
 ### 🐝 Swarm Orchestration & Autoscaler
-Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with a **Dynamic Swarm Autoscaler** that auto-spawns specialist workers from templates (`coder`, `researcher`, `generalist`) with automatic best-model-per-task routing (coding, reasoning, vision).
+Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with a **Dynamic Swarm Autoscaler** that auto-spawns specialist workers from templates (`coder`, `researcher`, `generalist`) with automatic best-model-per-task routing (coding, reasoning, vision). Inspect and drive it live from the **Swarm Panel** in the Web UI (worker registry, active tasks, dispatch, metrics).
+
+```yaml
+swarm:
+  max_workers: 8
+  autoscale: true
+  templates: [coder, researcher, generalist]
+```
 
 ### 🔒 Triple-Wired Safety
 Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Downloaded Agent Skills are **integrity-verified (HMAC-SHA256)** at load, and Soul evolution deltas are injected behind an untrusted-data prompt fence (`<kazma:data untrusted>`).

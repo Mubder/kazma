@@ -154,7 +154,7 @@ class SelfImprovementSkill:
             from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            _tenant = resolve_tenant_id(prefer_context=True)
+            _tenant = resolve_tenant_id("system", prefer_context=True)
             results = search(f"{worker_name} pipeline {task[:100]}", limit=3, tenant_id=_tenant)
             if results:
                 # Recalled content is untrusted (it originates from past
@@ -246,7 +246,7 @@ Output ONLY the delta text, no preamble."""
             from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            _tenant = resolve_tenant_id(prefer_context=True)
+            _tenant = resolve_tenant_id("system", prefer_context=True)
             results = search(f"{worker_name} failure {task[:100]}", limit=3, tenant_id=_tenant)
             if results:
                 # See _analyze_success: recalled content is untrusted and feeds
