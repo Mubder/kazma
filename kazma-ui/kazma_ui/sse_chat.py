@@ -1513,6 +1513,10 @@ def create_sse_chat_router(
 
         from kazma_core.agent.hitl_supersede import cancel_pending_hitl
         from kazma_core.agent.turn_input import build_turn_messages
+        from kazma_core.agent.long_task import consume_long_task_turn
+
+        # Consume a long_task turn-budget at the START of each new user message.
+        consume_long_task_turn(thread_id)
 
         current_graph = _get_graph()
         # If user sent a new message while HITL is waiting, auto-deny so

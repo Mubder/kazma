@@ -28,6 +28,7 @@ __all__ = [
     "PRESETS",
     "clamp_iterations",
     "consume_continue_context",
+    "consume_long_task_turn",
     "derive_recursion_limit",
     "detect_tool_loop",
     "disable_long_task",
@@ -63,7 +64,7 @@ PRESETS: dict[str, int] = {
     "research": 40,
 }
 
-_DEFAULT_TTL_SECONDS = 4 * 3600  # 4 hours, same spirit as YOLO
+_DEFAULT_TTL_SECONDS = 30 * 60  # 30 min — a /long from hours ago must NOT haunt the thread
 _MIN_ITER = 5
 _MAX_ITER = 100  # budget-mode soft ceiling
 _MIN_RECURSION = 50
@@ -226,6 +227,7 @@ def enable_long_task(
         "actor": actor,
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
+        "remaining_turns": 1,  # consumed after the next user message resolves
     }
     get_config_store().set(f"long_task.{thread_id}", payload, category="agent")
     record_long_task_event("enable_mission" if mode_key == "mission" else "enable")
@@ -252,6 +254,40 @@ def disable_long_task(thread_id: str, *, actor: str = "unknown") -> None:
     logger.info("[long_task] DISABLED thread=%s actor=%s", thread_id, actor)
 
 
+def consume_long_task_turn(thread_id: str | None) -> None:
+    """Decrement the long_task turn counter at the START of a new user turn.
+
+    This is the structural fix for stale-budget runaway: a /long applies to
+    the turn it was set for, NOT every subsequent conversation. After the turn
+    resolves, the NEXT user message decrements remaining_turns; when it hits 0,
+    the long_task auto-expires and max_iterations resets to baseline.
+
+    Call this from EVERY entry point (ws_chat, sse_chat, gateway) before
+    initial_supervisor_state resolves the budget.
+    """
+    if not thread_id:
+        return
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        raw = cs.get(f"long_task.{thread_id}")
+        if not raw or not isinstance(raw, dict) or not raw.get("enabled"):
+            return
+        remaining = int(raw.get("remaining_turns", 1))
+        # Don't decrement on the turn that ENABLED it (the enabling turn is
+        # the one that should benefit). Decrement starts on the NEXT turn.
+        if remaining > 0:
+            raw["remaining_turns"] = remaining - 1
+            cs.set(f"long_task.{thread_id}", raw, category="agent")
+            logger.info(
+                "[long_task] turn consumed thread=%s remaining_turns=%d",
+                thread_id, remaining - 1,
+            )
+    except Exception:
+        logger.debug("[long_task] consume_long_task_turn failed", exc_info=True)
+
+
 def is_long_task_active(thread_id: str | None) -> bool:
     if not thread_id:
         return False
@@ -259,7 +295,7 @@ def is_long_task_active(thread_id: str | None) -> bool:
 
 
 def long_task_status(thread_id: str) -> dict[str, Any]:
-    """Structured status; auto-disables on TTL expiry."""
+    """Structured status; auto-disables on TTL expiry OR turn-count exhaustion."""
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
@@ -277,7 +313,7 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
         try:
             if time.time() > float(expires):
                 cs.delete(f"long_task.{thread_id}")
-                logger.info("[long_task] EXPIRED thread=%s (auto-disabled)", thread_id)
+                logger.info("[long_task] EXPIRED thread=%s (TTL)", thread_id)
                 return {
                     "active": False,
                     "thread_id": thread_id,
@@ -287,6 +323,26 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
                 }
         except (TypeError, ValueError):
             pass
+
+    # Turn-count guard: a /long applies to the turn it was set for + a small
+    # carry-over, NOT every subsequent conversation on the thread forever.
+    # Default: 1 turn (the long_task is consumed after the next user message
+    # resolves, unless the user re-runs /long).
+    remaining_turns = int(raw.get("remaining_turns", 1))
+    if remaining_turns <= 0:
+        cs.delete(f"long_task.{thread_id}")
+        logger.info(
+            "[long_task] EXPIRED thread=%s (turn-count exhausted — reset to baseline)",
+            thread_id,
+        )
+        return {
+            "active": False,
+            "thread_id": thread_id,
+            "expired": True,
+            "expire_reason": "turn_count",
+            "max_iterations": _baseline_iterations(),
+            "recursion_limit": derive_recursion_limit(_baseline_iterations()),
+        }
 
     remaining = None
     if expires is not None:

@@ -1094,8 +1094,14 @@ def create_ws_chat_router(
 
                     from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.agent.state import initial_supervisor_state
+                    from kazma_core.agent.long_task import consume_long_task_turn
                     from kazma_core.memory.config import resolve_tenant_id
                     from kazma_core.ide.env_context import build_env_context
+
+                    # Consume a long_task turn-budget at the START of each new
+                    # user message — so a /long from a previous task doesn't
+                    # haunt this thread with max_iterations=100 forever.
+                    consume_long_task_turn(thread_id)
 
                     env_block = build_env_context()
                     sys_msgs = [{"role": "system", "content": env_block}] if env_block else None
@@ -1209,6 +1215,17 @@ def create_ws_chat_router(
                             turn_started_at = time.monotonic()
                             last_progress_at = {"t": time.monotonic()}
 
+                            # Turn timeout (audit M14, same budget as agent_runner).
+                            # Without this, a runaway tool loop on the WS path can
+                            # spin for 20+ minutes with no kill switch.
+                            import os as _os_turn_to
+                            _raw_turn_to = (_os_turn_to.environ.get("KAZMA_TURN_TIMEOUT_SECONDS") or "600").strip()
+                            try:
+                                _turn_timeout_s = float(_raw_turn_to)
+                            except (TypeError, ValueError):
+                                _turn_timeout_s = 600.0
+                            _turn_timed_out = False
+
                             # Industry-grade long-horizon heartbeat: every 15s
                             # with no events, emit status so the UI idle-watchdog
                             # stays armed and the user sees "still working".
@@ -1240,6 +1257,16 @@ def create_ws_chat_router(
                             heartbeat_task = asyncio.create_task(_long_turn_heartbeat())
                             try:
                                 async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
+                                    # Turn timeout check — break the stream if the
+                                    # wall-clock budget is exceeded (runaway tool loop).
+                                    if _turn_timeout_s > 0 and (time.monotonic() - turn_started_at) > _turn_timeout_s:
+                                        _turn_timed_out = True
+                                        logger.warning(
+                                            "[WS-Chat] Turn timed out after %.0fs thread=%s "
+                                            "— breaking stream (KAZMA_TURN_TIMEOUT_SECONDS)",
+                                            _turn_timeout_s, thread_id,
+                                        )
+                                        break
                                     last_progress_at["t"] = time.monotonic()
                                     _record_ws_activity(activity_log, ev, thought_recorded=thought_recorded)
                                     if ev.type == "llm_delta":
@@ -1290,6 +1317,26 @@ def create_ws_chat_router(
                                 heartbeat_task.cancel()
                                 with contextlib.suppress(asyncio.CancelledError, Exception):
                                     await heartbeat_task
+
+                            # Turn-timeout notification: if the stream was broken
+                            # by the wall-clock budget, tell the user (don't leave
+                            # them staring at a dead "thinking…" indicator).
+                            if _turn_timed_out and not is_lost():
+                                await send(
+                                    TelemetryEvent(
+                                        type="status_update",
+                                        data={
+                                            "status": "error",
+                                            "message": (
+                                                f"⚠️ Turn timed out after {int(_turn_timeout_s)}s. "
+                                                "The agent was stuck in a long tool loop. "
+                                                "Try a shorter request or raise "
+                                                "KAZMA_TURN_TIMEOUT_SECONDS."
+                                            ),
+                                        },
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
 
                             # Always backfill from checkpoint at end (custom LLM
                             # has no on_chat_model_stream). Emit progressive

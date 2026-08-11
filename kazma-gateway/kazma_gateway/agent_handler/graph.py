@@ -997,6 +997,10 @@ def create_graph_handler(
             # shared helper matches the Web SSE path.
             try:
                 from kazma_core.agent.turn_input import build_turn_messages
+                from kazma_core.agent.long_task import consume_long_task_turn
+
+                # Consume long_task turn-budget at the start of each new message.
+                consume_long_task_turn(_thread_id)
 
                 user_text = ""
                 for m in reversed(list(state.get("messages") or [])):
