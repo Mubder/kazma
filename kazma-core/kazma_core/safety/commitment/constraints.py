@@ -20,26 +20,14 @@ __all__ = ["is_commitment_enabled", "load_constraint_beliefs"]
 
 
 def is_commitment_enabled() -> bool:
-    """Kill-switch (plan §2.3 #10). Reads live so operators can disable without
-    a redeploy. Default ON — the gate's value is preventing the incident class.
-
-    Precedence: ``KAZMA_COMMITMENT_ENABLED`` env → ConfigStore
-    ``agent.commitment.enabled`` → default True.
-    """
-    env = (os.environ.get("KAZMA_COMMITMENT_ENABLED") or "").strip().lower()
-    if env in ("0", "false", "off", "no"):
-        return False
-    if env in ("1", "true", "on", "yes"):
-        return True
+    """Kill-switch (plan §2.3 #10). Delegates to get_commitment_config() so
+    there is ONE config reader for the layer. Default ON."""
     try:
-        from kazma_core.config_store import get_config_store
+        from kazma_core.safety.commitment.config import get_commitment_config
 
-        v = get_config_store().get("agent.commitment.enabled")
-        if v is not None:
-            return bool(v)
+        return bool(get_commitment_config()["enabled"])
     except Exception:
-        pass
-    return True
+        return True
 
 
 def load_constraint_beliefs(tenant_id: str = "default", *, limit: int = 50) -> list[dict[str, Any]]:
