@@ -634,6 +634,82 @@ deletes). Audit works on both backends.
 Keep CLI gates and pytest groups honest (architecture/a11y/crash matrix are
 pytest; CLI has NOT RUN placeholders for soak/Postgres/external review).
 
+### 20. Commitment Layer (`kazma-core/kazma_core/safety/commitment/`)
+
+A policy gate between the LLM and durable mutations. Kazma resolves intent
+against memory BEFORE acting — the CoPilot incident class (model invents a
+date, schedules it, overwrites the user's real belief) is blocked at both the
+schedule layer and the memory layer. Full plan + Phase-0 exit report:
+`docs/plans/INTELLIGENT_AGENT_COMMITMENT_LAYER.md`,
+`docs/plans/COMMITMENT_PHASE0_EXIT_REPORT.md`. Phases 0–2 + 5(partial) + 6 are
+shipped; Phase 3 (combined-card UX), 4 (other-act resolvers), 5-swarm
+(scope-token), 7 (soul) are pending.
+
+**A. Three choke points — all mutator paths go through `authorize_effect`.**
+- `agent/graph_builder.py:tool_worker_node` — the single-agent chat path; the
+  gate runs BEFORE the security HITL split so it can rewrite args first.
+- `agent/tool_registry.py:LocalToolRegistry.execute` — the IDE/swarm path
+  (audit-only; full decisions are graph-side).
+- `memory/belief_mutation.py:_mutate_functional` — the memory corruption half
+  is gated here (source-trust), independent of the policy gate.
+
+**B. The decision mapping (§3.4). `authorize_effect` returns one of:**
+- `allow` (+ optional `rewritten_args`): for the remind act, the gate anchors
+  the relative phrase to a memory event and **rewrites the tool args to the
+  memory-correct fire_at** — whatever the model put in `timing`, the resolved
+  ISO date wins. This is the schedule-path fix.
+- `clarify` / `deny`: held with a clear error the model turns into a user
+  question (Phase 3 will swap the error for a real card on the HITL bus).
+- Audit-only: read tools, and acts without a resolver yet (memory corruption
+  is gated at `mutate_belief`; `cancel_job`/`exec`/`fs`/`outbound` resolvers
+  are Phase 4).
+
+**C. Invariants — removing any reintroduces the incident class:**
+- **Source-trust gate** (`_mutate_functional`): a `user_explicit` functional
+  belief may NOT be superseded by a lower-trust (`llm_inferred`/`system_tool`)
+  source. Kill-switch: `cfg.v2.functional_supersede_requires_user_assert`.
+- **Rewrite-on-allow**: the gate's fire_at wins over the model's args — do not
+  let the original (possibly wrong) `timing` reach the scheduler for remind.
+- **Fail-open + kill-switch**: any layer error leaves `pending` unchanged — the
+  gate is defense, not a hard dependency. `KAZMA_COMMITMENT_ENABLED=0` (or
+  ConfigStore `agent.commitment.enabled=false`) disables the whole layer live.
+- **Conservative auto-store** (`belief_extractor._apply_beliefs_to_v2`): low-
+  confidence inferred beliefs are dropped post-turn (keeps the graph clean);
+  `user_explicit` stores are never throttled. Mode: `memory.auto_store_beliefs`
+  (off|conservative|aggressive, default conservative) / `KAZMA_AUTO_STORE_BELIEFS`.
+- **No late approve**: `store.update_status` refuses to revive an expired
+  commitment to committed/ready (§3.9 rule 2).
+- **GC cadence**: `worker_bootstrap._start_commitment_gc_scheduler` runs
+  `run_gc_cycle` every 15 min (sweep_expired + pending-cap + tiered retention).
+  If a new scheduler is added, register it in `start_memory_worker` (§15B).
+
+**D. Components (`kazma_core/safety/commitment/`).**
+- `side_effects.py` — the single SoT registry: tool → `ToolEffectProfile`
+  (effect + security_tier + semantic_tier + act). Parity-tested against
+  `CANONICAL_DANGER_TOOLS`/`TOOL_TIERS`. Unregistered mutators fail-closed
+  (tokenized: `widget` ≠ `get`). MCP tools (`mcp__*`) route through
+  `classify_mcp_tool_effect`. New mutator tools MUST get a profile here or they
+  classify fail-closed.
+- `authorize.py` — `authorize_effect` (the policy gate) + `EffectDecision`.
+- `relative_time.py` — `resolve_remind` (EN+AR relative-time parse, anchor to
+  event vs `request_at`, ambiguity surfacing). G2-measured (0 false-allow).
+- `store.py` — `Commitment` + ops-SQLite tables + TTL/GC (§3.9). On
+  `memory_ops.db` (NOT a new file). `run_gc_cycle` is the scheduler entry.
+- `constraints.py` — `is_commitment_enabled` (kill-switch) +
+  `load_constraint_beliefs` (the §3.6 machine-readable constraint appendix).
+- `config.py` — `get_commitment_config` (live reader: env → ConfigStore →
+  defaults; the ONE config source for the layer).
+
+**E. Modes** (`agent.commitment.mode`, env `KAZMA_COMMITMENT_MODE`):
+`strict` (wider clarify window) | `balanced` (default) | `autonomous`
+(allow-with-candidate on ambiguity) | `yolo` (semantic bypass, audit-only).
+Modes modulate the ambiguous band only — a clean memory-anchored resolution is
+allow+rewrite in every mode.
+
+**Tests:** `tests/test_commitment_*.py` (corpus/G1/G2, store+GC, authorize,
+tool_worker gate, scenarios, modes, config, side_effects) + the CoPilot golden.
+Run: `python -m pytest tests/test_commitment_*.py tests/test_side_effects.py`.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

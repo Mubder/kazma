@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Unreleased — Commitment Layer (Phases 0–2 + 5/6 partial): resolve-before-act (2026-08-11)
+
+A policy gate between the LLM and durable mutations (plan:
+`docs/plans/INTELLIGENT_AGENT_COMMITMENT_LAYER.md`). Kazma now resolves intent
+against memory BEFORE acting — the CoPilot incident class (model invents a
+date, schedules it, overwrites the user's real belief) is blocked at both the
+schedule and memory layers.
+
+- **Phase 0:** candidate EN+AR relative-time resolver + 500-case corpus;
+  G1 (0.39ms p95) + G2 (0 false-allow on held-out goldens) gates passed;
+  mutator/belief-supersede/HITL-drift instrumentation.
+- **Phase 1:** `mutate_belief` source-trust gate; `side_effects` registry
+  (single SoT, fail-closed unknowns); `authorize_effect`;
+  `LocalToolRegistry.execute` choke; conservative post-turn auto-store.
+- **Phase 2:** commitment store + TTL/GC (§3.9 ship-blocker); full
+  `authorize_effect` decisions (allow/clarify/deny/**rewrite**); gate wired
+  into `tool_worker_node` (LIVE); GC sweeper cadence (every 15min); §8.3
+  scenario suite; no-late-approve guard.
+- **Phase 5 (partial):** MCP tools classified into the registry.
+- **Phase 6:** autonomy modes (strict/balanced/autonomous/yolo).
+- Fail-open + kill-switched (`KAZMA_COMMITMENT_ENABLED=0`). Documented as
+  AGENTS.md §20 (critical subsystem).
+- Pending: Phase 3 (combined-card UX), 4 (other-act resolvers), 5-swarm
+  (scope-token), 7 (soul under commitment).
+
 ## Unreleased — Fixed base 0.9.4 + live git SHA (2026-08-10)
 
 Stop auto version bumps entirely. Product identity:
