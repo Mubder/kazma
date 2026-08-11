@@ -45,6 +45,22 @@ def build_approval_keyboard(request_id: str) -> dict[str, Any]:
     }
 
 
+def build_semantic_keyboard(request_id: str, options: list[dict]) -> dict[str, Any]:
+    """Build an inline keyboard for a semantic clarify/confirm card.
+
+    One button per option (callback: ``hitl:opt:{option_id}:{request_id}``).
+    """
+    rows = []
+    for opt in (options or []):
+        oid = opt.get("id", "")
+        label = opt.get("label", oid)[:60]
+        rows.append([{
+            "text": label,
+            "callback_data": f"hitl:opt:{oid}:{request_id}",
+        }])
+    return {"inline_keyboard": rows} if rows else build_approval_keyboard(request_id)
+
+
 def build_personality_keyboard(personalities: list[str]) -> dict[str, Any]:
     """Build an inline keyboard for personality selection (top 3)."""
     return {

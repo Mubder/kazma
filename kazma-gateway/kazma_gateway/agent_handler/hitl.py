@@ -126,6 +126,23 @@ def _build_approval_prompt(
     args_str = str(args)
     if len(args_str) > 300:
         args_str = args_str[:300] + "…"
+    # Phase 3: semantic clarify/confirm → render question + per-option keyboard
+    kind = payload.get("kind", "security")
+    if kind in ("semantic_clarify", "semantic_confirm"):
+        items = payload.get("items") or []
+        question = ((items[0].get("question") if items else "")
+                    or payload.get("message", "")) or "Needs clarification"
+        options = (items[0].get("options") if items else []) or []
+        text = f"❓ {question}\n\nChoose an option below."
+        markup = None
+        plat = (platform or "telegram").lower()
+        if plat == "telegram":
+            try:
+                from kazma_gateway.adapters.telegram_keyboards import build_semantic_keyboard
+                markup = build_semantic_keyboard(thread_id, options)
+            except Exception:
+                pass
+        return {"text": text, "markup": markup, "platform": plat}
     text = (
         f"⚠️ Approval required\n"
         f"Tool: {tool}\n"
@@ -200,9 +217,15 @@ async def _handle_hitl_resume(
     action = parts[1].lower()
     approved = action in ("approve", "yes", "y", "allow", "approve_task")
     is_task_grant = action == "approve_task"
-    # The target thread_id defaults to the current sender's thread but can
-    # be overridden by the third argument (for cross-thread approvals).
-    target_thread = parts[2] if len(parts) >= 3 else thread_id
+    # Phase 3: semantic option — /hitl opt <thread> <option_id>
+    semantic_option = None
+    if action == "opt" and len(parts) >= 4:
+        semantic_option = parts[3]
+        target_thread = parts[2]
+    else:
+        # The target thread_id defaults to the current sender's thread but can
+        # be overridden by the third argument (for cross-thread approvals).
+        target_thread = parts[2] if len(parts) >= 3 else thread_id
     resume_config = {"configurable": {"thread_id": target_thread, "checkpoint_ns": ""}}
 
     ctx = await store.get(thread_id)
@@ -331,7 +354,12 @@ async def _handle_hitl_resume(
             # "best option" / "cancel" for semantic via build_resume_value.
             from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
 
-            if is_semantic_kind(pending):
+            if semantic_option is not None and pending:
+                # Per-option button: {tcid: option_id}
+                _items = (pending or {}).get("items", [])
+                _tcid = _items[0].get("tool_call_id", "") if _items else ""
+                _resume_val = {_tcid: semantic_option}
+            elif is_semantic_kind(pending):
                 _resume_val = build_resume_value(pending, approved)
             else:
                 _resume_val = {"approved": approved, "reason": action,

@@ -77,3 +77,11 @@ Also run document rows in the [Smoke matrix](./smoke-matrix).
 - [OIDC](oidc-setup)  
 - [Document processing](document-processing)  
 - [Environment variables](../reference/environment-variables)  
+
+## Commitment Layer
+
+- [ ] **Kill-switch verified**: `KAZMA_COMMITMENT_ENABLED=0` disables the gate (fail-open)
+- [ ] **GC cadence running**: `_start_commitment_gc_scheduler` every 15 min (check logs for `commitment GC:` summary)
+- [ ] **Flags default OFF**: `swarm_scope_enforce`, `soul_requires_confirm`, `enforce_unknown_mutators` — operators opt in via ConfigStore / env
+- [ ] **Metrics endpoint**: `GET /metrics` shows `kazma_commitment_decisions_total{decision=...}` + `kazma_commitment_pending`
+- [ ] **Soul confirm queue**: `GET /api/commitment/soul/pending` lists held deltas; `POST /api/commitment/soul/{cid}/confirm` approves

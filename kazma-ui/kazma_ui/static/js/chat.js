@@ -2244,6 +2244,52 @@
     var content = currentMsgEl.querySelector('.message-content');
     if (!content) return;
 
+    // Phase 3: semantic clarify/confirm → render per-option buttons instead of
+    // the generic Approve/Deny. The data carries kind + items[0].options from
+    // the commitment gate's resolver.
+    if (data.kind && data.kind.indexOf('semantic_') === 0) {
+      var _semItem = (data.items && data.items[0]) || {};
+      var _semQ = _semItem.question || data.message || 'Needs clarification';
+      var _semOpts = _semItem.options || [];
+      var _semTcid = _semItem.tool_call_id || '';
+      var _semCard = document.createElement('div');
+      _semCard.className = 'hitl-approval-card';
+      _semCard.innerHTML =
+        '<div class="hitl-approval-header">\u2754 Clarification Needed</div>' +
+        '<div class="hitl-approval-body">' +
+          '<p class="hitl-message">' + escapeHtml(truncateStr(_semQ, 500)) + '</p>' +
+        '</div>' +
+        '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
+          _semOpts.map(function(opt) {
+            var cls = opt.id === 'cancel' ? 'btn-danger' : 'btn-primary';
+            return '<button class="btn btn-sm ' + cls + ' hitl-sem-opt" data-opt="' +
+                   escapeHtml(opt.id) + '">' + escapeHtml(opt.label || opt.id) + '</button>';
+          }).join('') +
+        '</div>';
+      content.appendChild(_semCard);
+      scrollToBottom();
+      _semCard.querySelectorAll('.hitl-sem-opt').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var optId = this.getAttribute('data-opt');
+          _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+          var act = _semCard.querySelector('.hitl-approval-actions');
+          if (act) act.innerHTML = '<span class="hitl-status">Resolving\u2026</span>';
+          tokenAccum = '';
+          beginTurn();
+          var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once',
+                          session_id: chatSessionId || '', choices: {} };
+          payload.choices[_semTcid] = optId;
+          fetch('/api/approve/' + (data.thread_id || targetThreadId), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }).catch(function() {
+            if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
+          });
+        });
+      });
+      return; // Don't render the security card
+    }
+
     var textEl = content.querySelector('.message-text');
     if (textEl && !textEl.innerHTML.trim()) {
       textEl.innerHTML = KS.markdown ? KS.markdown('_Action required: The agent paused to ask for permission to run a tool._') : '<em>Action required: The agent paused to ask for permission to run a tool.</em>';

@@ -434,3 +434,16 @@ Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document
 ---
 
 *Keep this document shorter than a full module dump — point at files, state invariants, and relationships. Full catalogs stay in `ARCHITECTURE_AND_SYSTEM_MAP.md`.*
+
+## Wrong reminder date / memory overwrite
+
+**Symptom**: agent schedules a reminder for the wrong date, or overwrites a user-asserted memory belief with an invented date.
+
+**Root cause**: the model treated a relative phrase ("in 2 days") as an absolute event date instead of anchoring to a memory event; the post-turn extractor wrote the invented date as an inferred belief.
+
+**Fix layers** (all in place):
+1. **Commitment gate** (`safety/commitment/authorize.py`): `resolve_remind` anchors relative phrases to memory events and rewrites the tool args to the correct `fire_at` before execution.
+2. **Source-trust gate** (`memory/belief_mutation.py:_mutate_functional`): a `user_explicit` functional belief cannot be superseded by a lower-trust (`llm_inferred`) source.
+3. **Conservative auto-store** (`memory/belief_extractor._apply_beliefs_to_v2`): low-confidence inferred beliefs are dropped post-turn.
+
+**Kill-switch**: `KAZMA_COMMITMENT_ENABLED=0` disables the gate. Check the commitment audit: `SELECT * FROM commitments WHERE act='remind' ORDER BY created_at DESC LIMIT 10`.

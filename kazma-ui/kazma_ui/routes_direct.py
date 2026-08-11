@@ -3085,7 +3085,12 @@ def register_direct_routes(self: Any) -> None:
             from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
 
             if is_semantic_kind(_intr_payload):
-                resume_value = build_resume_value(_intr_payload, approved)
+                # Per-option: if the UI sent a specific choice, use it directly.
+                _choices = body.get("choices")
+                if _choices and isinstance(_choices, dict):
+                    resume_value = _choices
+                else:
+                    resume_value = build_resume_value(_intr_payload, approved)
             else:
                 resume_value: dict[str, Any] = {
                     "approved": approved,

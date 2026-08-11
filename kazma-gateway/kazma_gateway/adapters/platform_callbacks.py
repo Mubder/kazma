@@ -40,6 +40,16 @@ def parse_callback_data(data: str) -> CallbackAction:
     if not data:
         return CallbackAction(kind="unknown")
 
+    # Phase 3: semantic option buttons — hitl:opt:{option_id}:{request_id}
+    if data.startswith("hitl:opt:"):
+        parts = data.split(":", 3)
+        if len(parts) == 4:
+            _, _, option_id, request_id = parts
+            return CallbackAction(
+                kind="hitl",
+                text=f"/hitl opt {request_id} {option_id}",
+            )
+
     if data.startswith("hitl:"):
         parts = data.split(":", 2)
         if len(parts) == 3:

@@ -49,15 +49,36 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     from langgraph.types import Command
 
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-    resume_value = {
-        "approved": False,
-        "reason": (
-            f"HITL approval timed out after {int(timeout_s)}s "
-            "(auto-deny-on-timeout)"
-        ),
-        "scope": "once",
-        "timed_out": True,
-    }
+
+    # Phase 3: check if the pending interrupt is semantic (clarify/confirm) —
+    # those need {tcid: "cancel"}, not {approved: false}.
+    _intr_payload = None
+    try:
+        _snap = await graph.aget_state(config)
+        for _task in (getattr(_snap, "tasks", None) or []):
+            for _intr in (getattr(_task, "interrupts", None) or []):
+                _val = getattr(_intr, "value", None)
+                if isinstance(_val, dict) and _val.get("type") == "hitl_approval":
+                    _intr_payload = _val
+                    break
+            if _intr_payload:
+                break
+    except Exception:
+        pass
+    from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
+
+    if is_semantic_kind(_intr_payload):
+        resume_value = build_resume_value(_intr_payload, approved=False)
+    else:
+        resume_value = {
+            "approved": False,
+            "reason": (
+                f"HITL approval timed out after {int(timeout_s)}s "
+                "(auto-deny-on-timeout)"
+            ),
+            "scope": "once",
+            "timed_out": True,
+        }
     logger.warning(
         "[HITL-WD] Approval for thread=%s expired after %.0fs — auto-denying",
         thread_id,
