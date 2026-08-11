@@ -302,6 +302,37 @@ def test_docx_toc_field_and_page_numbers(tmp_path: Path) -> None:
     assert "PAGE" in fxml and 'fldCharType="begin"' in fxml, "footer missing PAGE field"
 
 
+def test_roundtrip_verifier_is_rtl_aware() -> None:
+    """The round-trip content verifier must not block Arabic PDFs: PDF text
+    extraction returns presentation-form, reversed, cid-mangled text for shaped
+    scripts, so the logical probe can't substring-match. For RTL probes it falls
+    back to a structural check (substantial extracted text = content present),
+    while still failing genuinely empty/corrupt output and LTR mismatches."""
+    from types import SimpleNamespace
+
+    from kazma_core.documents.operations import DocumentOperations
+
+    def doc(text: str) -> object:
+        return SimpleNamespace(pages=[SimpleNamespace(blocks=[SimpleNamespace(text=text)])])
+
+    ar_title = "منظومة كاظمة للذكاء الاصطناعي"
+    # Mangled-but-substantial Arabic extraction (what pdfplumber really returns).
+    mangled = "عيانطصلاا ءاكذلل ةمظاك ةموظنم\n(cid:1)\nالمقدمة\nنص عربي" * 3
+
+    def passes(payload: dict, text: str) -> bool:
+        try:
+            DocumentOperations._validate_roundtrip_content("generate:pdf", payload, doc(text))
+            return True
+        except Exception:
+            return False
+
+    assert passes({"title": ar_title}, mangled), "Arabic PDF with real mangled extract must pass"
+    assert passes({"title": "Kazma Report"}, "Kazma Report\nbody"), "EN exact match must pass"
+    assert not passes({"title": "Kazma Report"}, "totally different"), "EN mismatch must fail"
+    assert not passes({"title": ar_title}, "   \n   "), "Arabic empty/corrupt must fail"
+    assert not passes({"title": ar_title}, "abc"), "Arabic near-empty (<20 non-ws) must fail"
+
+
 def test_docx_update_fields_and_core_properties(tmp_path: Path) -> None:
     """Tier A: DOCX sets updateFields (TOC/page# auto-populate on open) and
     writes title/author/subject into the file's core properties."""
