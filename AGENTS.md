@@ -641,9 +641,12 @@ against memory BEFORE acting — the CoPilot incident class (model invents a
 date, schedules it, overwrites the user's real belief) is blocked at both the
 schedule layer and the memory layer. Full plan + Phase-0 exit report:
 `docs/plans/INTELLIGENT_AGENT_COMMITMENT_LAYER.md`,
-`docs/plans/COMMITMENT_PHASE0_EXIT_REPORT.md`. Phases 0–2 + 5(partial) + 6 are
-shipped; Phase 3 (combined-card UX), 4 (other-act resolvers), 5-swarm
-(scope-token), 7 (soul) are pending.
+`docs/plans/COMMITMENT_PHASE0_EXIT_REPORT.md`. **All phases shipped**: 0–2
+(core + gate + store + TTL/GC), 3 (semantic clarify/confirm interrupt card),
+4 (remind + cancel_job + exec/outbound/config resolvers), 5 (swarm scope-token
+default + MCP classification), 6 (autonomy modes), 7 (soul confirm gate), 8
+(docs + metrics). Default-off kill-switches on every enforcement layer;
+fail-open throughout.
 
 **A. Three choke points — all mutator paths go through `authorize_effect`.**
 - `agent/graph_builder.py:tool_worker_node` — the single-agent chat path; the
