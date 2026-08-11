@@ -107,3 +107,43 @@ def test_requires_security_approval_mirrors_canonical():
 
 def test_security_approval_respects_hitl_disabled():
     assert not requires_security_approval("shell_exec", hitl_enabled=False)
+
+
+# ── MCP classification into the registry (Phase 5 partial, §5) ─────────────
+
+from kazma_core.safety.side_effects import classify_mcp_tool_effect  # noqa: E402
+
+
+def test_mcp_write_tool_classified_danger():
+    p = classify_mcp_tool_effect("mcp__fs__write_file")
+    assert p.security_tier == SecurityTier.DANGER
+    assert p.semantic_tier == SemanticTier.CRITICAL
+    assert not p.registered
+
+
+def test_mcp_read_tool_classified_safe():
+    p = classify_mcp_tool_effect("mcp__db__list_tables")
+    assert p.security_tier == SecurityTier.SAFE
+    assert p.semantic_tier == SemanticTier.NONE
+    assert is_read_only("mcp__db__list_tables")
+
+
+def test_mcp_unknown_tool_fails_closed():
+    p = classify_mcp_tool_effect("mcp__svc__frobnicate")
+    assert p.security_tier == SecurityTier.UNSAFE
+    assert p.semantic_tier == SemanticTier.CRITICAL
+
+
+def test_mcp_sensitive_read_forced_danger():
+    """'get_password' has a safe verb but a sensitive-read keyword → danger,
+    not safe (the secret-exfil guard, audit H6)."""
+    p = classify_mcp_tool_effect("mcp__vault__get_password")
+    assert p.security_tier == SecurityTier.DANGER
+
+
+def test_get_effect_profile_routes_mcp_names():
+    """The gate calls get_effect_profile; mcp__ names must route to MCP
+    classification so the gate sees MCP tools' tiers."""
+    assert get_effect_profile("mcp__fs__write_file").security_tier == SecurityTier.DANGER
+    assert requires_security_approval("mcp__fs__write_file", hitl_enabled=True)
+    assert get_effect_profile("mcp__db__list_tables").security_tier == SecurityTier.SAFE

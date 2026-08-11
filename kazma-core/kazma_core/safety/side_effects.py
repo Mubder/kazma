@@ -29,7 +29,7 @@ from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS, TOOL_TIERS
 
 __all__ = [
     "EffectKind", "SecurityTier", "SemanticTier",
-    "ToolEffectProfile", "get_effect_profile",
+    "ToolEffectProfile", "get_effect_profile", "classify_mcp_tool_effect",
     "is_read_only", "requires_semantic_check", "requires_security_approval",
 ]
 
@@ -181,12 +181,40 @@ def _infer_unknown(name: str) -> ToolEffectProfile:
 
 # ── public API ─────────────────────────────────────────────────────────────
 
+def classify_mcp_tool_effect(tool_name: str, description: str = "") -> ToolEffectProfile:
+    """Classify an MCP tool into a :class:`ToolEffectProfile` (plan §5).
+
+    Reuses :func:`kazma_core.mcp.manager.classify_mcp_tool`'s danger/safe
+    name-pattern logic but maps to the registry's security + semantic tiers so
+    the commitment gate sees MCP tools (they were previously on a separate
+    classification path). MCP tools are never in the explicit registry, so they
+    are ``registered=False``; the fail-closed invariant still holds (unknown →
+    critical). The optional *description* is accepted for future schema-based
+    refinement but currently unused.
+    """
+    try:
+        from kazma_core.mcp.manager import classify_mcp_tool
+
+        cls = classify_mcp_tool(tool_name)
+    except Exception:
+        cls = "unknown"
+    name = tool_name or ""
+    if cls == "safe":
+        return ToolEffectProfile(name, EffectKind.READ, SecurityTier.SAFE,
+                                 SemanticTier.NONE, None, (), registered=False)
+    # danger → HITL security applies; unknown → fail-closed unsafe. Both are
+    # semantically critical so the gate resolves them.
+    sec = SecurityTier.DANGER if cls == "danger" else SecurityTier.UNSAFE
+    return ToolEffectProfile(name, EffectKind.NONE, sec, SemanticTier.CRITICAL,
+                             None, (), registered=False)
+
+
 def get_effect_profile(tool_name: str) -> ToolEffectProfile:
     """Return the side-effect profile for *tool_name*.
 
     Explicit profile → used. Known to CANONICAL/TOOL_TIERS but no explicit
-    profile → a danger-tier default (effect inferred). Otherwise → fail-closed
-    inference (§5.2).
+    profile → a danger-tier default. MCP tools (``mcp__server__tool``) →
+    :func:`classify_mcp_tool_effect`. Otherwise → fail-closed inference (§5.2).
     """
     name = tool_name or ""
     prof = _PROF.get(name)
@@ -198,6 +226,9 @@ def get_effect_profile(tool_name: str) -> ToolEffectProfile:
     if name in CANONICAL_DANGER_TOOLS or name in TOOL_TIERS:
         return ToolEffectProfile(name, EffectKind.NONE, _security_tier(name),
                                  SemanticTier.HIGH, None, (), registered=True)
+    # MCP tools → classify via the MCP name-pattern logic (§5)
+    if name.startswith("mcp__"):
+        return classify_mcp_tool_effect(name)
     return _infer_unknown(name)
 
 
