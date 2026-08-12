@@ -289,10 +289,19 @@
         return;
       }
 
-      // Server idle with a durable assistant answer — paint if DOM is stale.
+      // Server idle with a durable assistant answer — SessionStore is SoT.
+      // Paint until the open-turn bubble actually shows it. Never clear
+      // _awaitingReply on a "maybe already painted" guess (that was the
+      // "no response until refresh" regression).
       if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
         if (_domMissingAssistantReply(lastMsg.content)) {
           _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
+        }
+        if (_domMissingAssistantReply(lastMsg.content)) {
+          // Still not on screen — keep nuclear poll + bg poll armed.
+          _awaitingReply = true;
+          _pollBackgroundTurn(sid, (messages && messages.length) || 0);
+          return;
         }
         _awaitingReply = false;
         lastActivityTs = 0;
@@ -321,9 +330,12 @@
   }
 
   /**
-   * Fingerprint of the last successfully painted final assistant text.
-   * Blocks double paint from concurrent paths (WS turn_complete + reconcile
-   * poll + reconnect replay) without depending on markdown vs textContent.
+   * Delivery rule (server → UI):
+   *   SessionStore / turn_complete is source of truth.
+   *   ALWAYS paint into the open-turn assistant bubble.
+   *   Dedupe only when that bubble ALREADY shows the same answer (visible
+   *   text). Never skip paint because of a fingerprint alone — that caused
+   *   "no response until refresh".
    */
   var _lastFinalFingerprint = '';
 
@@ -355,60 +367,69 @@
     if (!messagesEl) return createAssistantMessage();
     var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
     var lastAsstAfterUser = null;
-    var sawUser = false;
     for (var i = 0; i < msgs.length; i++) {
       if (msgs[i].classList.contains('message-user')) {
-        sawUser = true;
         lastAsstAfterUser = null;
       } else if (msgs[i].classList.contains('message-assistant')) {
         lastAsstAfterUser = msgs[i];
       }
     }
     if (lastAsstAfterUser) return lastAsstAfterUser;
-    // No assistant after last user (or empty transcript) — open a new bubble.
     return createAssistantMessage();
   }
 
-  /** True when *textEl* already shows *content* (source or rendered plain). */
-  function _textElHasFinal(textEl, content) {
+  /**
+   * True only when the bubble visibly shows *content* (or near-complete plain).
+   * Empty / CoT-only bubbles always return false so we still paint.
+   */
+  function _bubbleShowsContent(textEl, content) {
     if (!textEl || !content) return false;
     var want = String(content).trim();
     if (!want) return false;
-    if ((textEl.getAttribute('data-final-len') || '') === String(want.length)) {
+    var shown = (textEl.textContent || '').replace(/\s+/g, ' ').trim();
+    // Near-empty never counts as "delivered" (progress panels live outside .message-text).
+    if (!shown || shown.length < 8) return false;
+
+    var wantPlain = _plainFromMarkdown(want);
+    if (!wantPlain) wantPlain = want;
+
+    if (shown === want || shown === wantPlain) return true;
+
+    // data-final-len only counts when there is real visible text too.
+    var stamped = textEl.getAttribute('data-final-len') || '';
+    if (stamped === String(want.length) && shown.length >= Math.min(40, Math.floor(wantPlain.length * 0.5))) {
       return true;
     }
-    var shown = (textEl.textContent || '').replace(/\s+/g, ' ').trim();
-    if (!shown) return false;
-    if (shown === want) return true;
-    var wantPlain = _plainFromMarkdown(want);
-    if (wantPlain && shown === wantPlain) return true;
-    // Substantial prefix match (partial stream already painted)
-    if (shown.length >= 40 && wantPlain && wantPlain.indexOf(shown.slice(0, 60)) === 0) {
-      return shown.length + 30 >= wantPlain.length;
+
+    // Nearly-complete partial of the same answer (stream then final).
+    if (shown.length >= 40 && wantPlain.indexOf(shown.slice(0, Math.min(80, shown.length))) === 0) {
+      return shown.length >= wantPlain.length * 0.9;
     }
-    if (wantPlain && wantPlain.length >= 40 && shown.indexOf(wantPlain.slice(0, 60)) === 0) {
-      return true; // DOM already has full (or longer) plain of this answer
+    if (wantPlain.length >= 40 && shown.indexOf(wantPlain.slice(0, Math.min(80, wantPlain.length))) === 0) {
+      return shown.length >= wantPlain.length * 0.9;
     }
     return false;
+  }
+
+  // Back-compat alias used by soft-apply fallback.
+  function _textElHasFinal(textEl, content) {
+    return _bubbleShowsContent(textEl, content);
   }
 
   /** True when the open-turn assistant bubble does not already show *content*. */
   function _domMissingAssistantReply(content) {
     if (!messagesEl || !content) return true;
-    var fp = _finalFingerprint(content);
-    if (fp && fp === _lastFinalFingerprint) return false;
-    var bubble = null;
     var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
     var lastAsst = null;
     for (var i = 0; i < msgs.length; i++) {
       if (msgs[i].classList.contains('message-user')) lastAsst = null;
       else if (msgs[i].classList.contains('message-assistant')) lastAsst = msgs[i];
     }
-    bubble = lastAsst;
-    if (!bubble) return true;
-    var te = bubble.querySelector('.message-text');
+    if (!lastAsst) return true;
+    var te = lastAsst.querySelector('.message-text');
     if (!te) return true;
-    return !_textElHasFinal(te, content);
+    // Fingerprint alone is NOT enough — DOM must show the text.
+    return !_bubbleShowsContent(te, content);
   }
 
   // Back-compat name used on init / older call sites.
@@ -3361,23 +3382,22 @@
 
   function _softApplyFinalAssistant(content, model) {
     if (!content) return;
-    // Single paint path — applyFinal owns dedupe (fingerprint + open-turn bubble).
+    // Always go through applyFinal — it paints server truth into the open-turn bubble.
     if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
       window.KazmaChat.applyFinalAssistantText(content, model || '', { source: 'soft' });
       return;
     }
-    // Fallback if KazmaChat not exposed yet
     var bubble = _assistantBubbleForOpenTurn();
     var textEl = bubble.querySelector('.message-text');
-    if (textEl && _textElHasFinal(textEl, content)) {
+    if (textEl && _bubbleShowsContent(textEl, content)) {
       scrollToBottom();
       return;
     }
     if (textEl) {
       textEl.innerHTML = (window.KS && KS.markdown) ? KS.markdown(content) : escapeHtml(content);
       textEl.setAttribute('data-final-len', String(String(content).trim().length));
+      _lastFinalFingerprint = _finalFingerprint(content);
     }
-    _lastFinalFingerprint = _finalFingerprint(content);
     scrollToBottom();
   }
 
@@ -3445,20 +3465,28 @@
           lastMsg && lastMsg.role === 'assistant' &&
           (lastMsg.content || '').trim() && !lastMsg.pending
         ) {
-          // Only paint if we were watching a pending/background turn, or the
-          // count grew (new reply). Avoid re-render loops on already-complete chats.
           var grew = originalCount > 0 && messages.length > originalCount;
           var domMiss = _domMissingAssistantReply(lastMsg.content);
-          if (sawPending || grew || attempts <= 2 || domMiss || _awaitingReply) {
+          // Always paint when DOM is missing — server SoT. Also paint on first
+          // ticks / pending / grew so we never rely on a single racey frame.
+          if (domMiss || sawPending || grew || attempts <= 2 || _awaitingReply) {
             _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
+          }
+          // Only stop waiting when the bubble actually shows the answer.
+          if (!_domMissingAssistantReply(lastMsg.content)) {
             _awaitingReply = false;
             try {
               var stDone = window.Alpine && Alpine.store && Alpine.store('agent');
               if (stDone) { stDone._turnActive = false; stDone.isThinking = false; }
             } catch (e2) { /* ignore */ }
             if (_isGenerating) endTurn();
+            _stopBackgroundPoll();
+            return;
           }
-          _stopBackgroundPoll();
+          // Painted attempt failed visibility check — keep polling.
+          _awaitingReply = true;
+          delayMs = Math.min(delayMs + 500, 5000);
+          _schedule(delayMs);
           return;
         }
 
@@ -3765,31 +3793,28 @@
       if (!incoming) return;
       opts = opts || {};
 
-      // Durable final paint — release nuclear delivery wait.
-      // Do NOT call noteTurnActivity here: that re-arms lastActivityTs and
-      // would make the next tab-focus think a reply is still pending.
-      _awaitingReply = false;
-      lastActivityTs = 0;
-
-      var fp = _finalFingerprint(incoming);
-      // Exact same final already delivered (WS + poll + replay race) — no-op.
-      if (fp && fp === _lastFinalFingerprint) {
-        return;
-      }
-
-      // Bind to the open-turn assistant only. Creating a second bubble when
-      // textContent (rendered) failed to match markdown source was the
-      // tab-switch / refresh duplication bug.
+      // Always bind to the open-turn assistant (after last user). Never open a
+      // second bubble for the same turn — that was the refresh/tab duplicate.
       if (!currentMsgEl) {
         currentMsgEl = _assistantBubbleForOpenTurn();
       }
       var textEl = currentMsgEl ? currentMsgEl.querySelector('.message-text') : null;
+      if (!textEl && currentMsgEl) {
+        // Defensive: bubble without .message-text — open a clean one.
+        currentMsgEl = createAssistantMessage();
+        textEl = currentMsgEl.querySelector('.message-text');
+      }
 
-      // Replay / soft-apply when DOM already has this answer — stamp fp, leave.
-      if (textEl && _textElHasFinal(textEl, incoming)) {
+      var fp = _finalFingerprint(incoming);
+
+      // Skip ONLY when this bubble already visibly shows the answer.
+      // Fingerprint-alone no-op was wrong: it blocked paint after a failed
+      // soft path and left users needing a full refresh.
+      if (textEl && _bubbleShowsContent(textEl, incoming)) {
         _lastFinalFingerprint = fp;
         textEl.setAttribute('data-final-len', String(incoming.length));
-        // Leave currentMsgEl closed so the next token starts cleanly.
+        _awaitingReply = false;
+        lastActivityTs = 0;
         if (opts.replay || opts.source === 'soft') {
           currentMsgEl = null;
           tokenAccum = '';
@@ -3797,13 +3822,18 @@
         return;
       }
 
-      // Full final answer — replace accum so we don't double-append after partials
+      // Server truth → DOM. Always.
       tokenAccum = incoming;
       tryIngestPlanFromText(tokenAccum);
       if (textEl) {
-        textEl.innerHTML = KS.markdown(tokenAccum);
+        try {
+          textEl.innerHTML = KS.markdown(tokenAccum);
+        } catch (mdErr) {
+          textEl.textContent = tokenAccum;
+        }
         textEl.setAttribute('data-final-len', String(tokenAccum.length));
       }
+      // Fingerprint only AFTER a real paint attempt.
       _lastFinalFingerprint = fp;
       if (currentMsgEl) {
         try { currentMsgEl.setAttribute('data-final-fp', fp); } catch (e) { /* ignore */ }
@@ -3814,6 +3844,9 @@
           meta.textContent = (meta.textContent ? meta.textContent + ' · ' : '') + model;
         }
       }
+      // Release wait only after paint — server content is on screen (or tried).
+      _awaitingReply = false;
+      lastActivityTs = 0;
       scrollToBottom();
     },
     appendLiveToken: function(content, opts) {
