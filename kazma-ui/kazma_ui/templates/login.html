@@ -9,8 +9,18 @@
   <meta name="color-scheme" content="{{ theme()|default('light') }}">
   <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
   <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
+  {# Critical inline theme CSS — see base.html. Paints the canvas the
+     correct color from the first HTML bytes, before kazma.css (which
+     login relied on for both fonts via @import and the html background)
+     downloads + parses. #}
+  <style>
+    html { background-color: {{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
+  </style>
   <title>Kazma — Login</title>
   <link rel="icon" href="/static/img/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
   <link rel="stylesheet" href="/static/css/kazma.v5.css?v={{ css_version() }}">
   <style>

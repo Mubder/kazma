@@ -49,12 +49,13 @@ After Phase 0 shipped and the user pulled: **chat canvas is much better**. New r
 | 2026-08-12 | `855e6eb8` | Phase 0 canvas (iOS Safari dark-canvas leak) |
 | 2026-08-12 | (prior) | P0 Light contrast + handoff file |
 | 2026-08-12 | `4315ca4a` | **P1** token unification — one Abyss table in kazma.css; v5 stripped to shell polish |
-| 2026-08-12 | `2fef3fc5` | **P2a** mobile `.page-body` dock clearance (longhand padding in Tiers 3/5) |
-| 2026-08-12 | `d8855785` | **P2b** 769–1280px icon-rail dead strip removed (sidebar stays full, toggle-driven) |
-| 2026-08-12 | `3bdd5bf2` | **P2c** phone chrome — opaque header/dock, retire hamburger, visualViewport composer |
-| 2026-08-12 | `cab4f5d1` | **P3** x-show + inline `display:flex` blink purge (Workspace/Memory/Settings/base) |
-| 2026-08-12 | `53be7a83` | **P4** delete orphaned `index.html` (soft-nav + HTMX intentionally kept — see §4) |
-| 2026-08-12 | `facdaa9b` | **Defects sweep** — code themes, Auto theme, AR/EN copy, welcome tile, `--error` |
+| 2026-08-12 | `07b8cdd0` | **P2a** mobile `.page-body` dock clearance (longhand padding in Tiers 3/5) |
+| 2026-08-12 | `8f5ea00c` | **P2b** 769–1280px icon-rail dead strip removed (sidebar stays full, toggle-driven) |
+| 2026-08-12 | `5b1664c5` | **P2c** phone chrome — opaque header/dock, retire hamburger, visualViewport composer |
+| 2026-08-12 | `900919dd` | **P3** x-show + inline `display:flex` blink purge (Workspace/Memory/Settings/base) |
+| 2026-08-12 | `6f6635fa` | **P4** delete orphaned `index.html` (soft-nav + HTMX intentionally kept — see §4) |
+| 2026-08-12 | `e0ab8c80` | **Defects sweep** — code themes, Auto theme, AR/EN copy, welcome tile, `--error` |
+| 2026-08-12 | (this commit) | **Canvas-race fix** — inline critical `<style>` + remove render-blocking `@import` (intermittent iOS gray in Light on iOS Dark) |
 
 **Phase 0 (in `855e6eb8`) — do not re-do as “add html { background }”:**
 
@@ -173,13 +174,14 @@ Live process on **9090 / my.kazma.ai** may be a **different checkout**. After a 
 | 2026-08-12 | Handoff file created | `docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md`. |
 | 2026-08-12 | P0 Light contrast | Composer uses theme ink; Light field elevated; muted text darkened. |
 | 2026-08-12 | P1 token unification (`4315ca4a`) | ONE token table (kazma.css §1/§23); v5 stripped to shell polish; all cyan/indigo/violet literals purged; `--bg-card` defined; `test_has_accent_color` updated. 137 passed. |
-| 2026-08-12 | P2a dock clearance (`2fef3fc5`) | Tiers 3/5 `.page-body` use longhand padding; dock clearance survives. 137 passed. |
-| 2026-08-12 | P2b icon rail (`d8855785`) | 769–1280px auto-rail removed; sidebar full + toggle-driven (no dead strip). 137 passed. |
-| 2026-08-12 | P2c phone chrome (`3bdd5bf2`) | Opaque header/dock; hamburger retire; visualViewport → `--app-ivh` composer. 137 passed. |
-| 2026-08-12 | P3 blink purge (`cab4f5d1`) | All `x-show`+inline `display:` violations moved to CSS classes across Workspace/Memory/Settings/base. 137 passed. |
-| 2026-08-12 | P4 dead code (`53be7a83`) | Orphaned `index.html` deleted; soft-nav + HTMX kept (working). 139 passed. |
-| 2026-08-12 | Defects sweep (`facdaa9b`) | Code themes follow theme; Auto applies; AR/EN copy de-swapped; welcome tile Light; `--error` aliased. `accent_color` + bell panel deferred (features). 137 passed. |
-| 2026-08-12 | Full run complete | P1–P4 + sweep shipped. **Awaiting phone verify.** |
+| 2026-08-12 | P2a dock clearance (`07b8cdd0`) | Tiers 3/5 `.page-body` use longhand padding; dock clearance survives. 137 passed. |
+| 2026-08-12 | P2b icon rail (`8f5ea00c`) | 769–1280px auto-rail removed; sidebar full + toggle-driven (no dead strip). 137 passed. |
+| 2026-08-12 | P2c phone chrome (`5b1664c5`) | Opaque header/dock; hamburger retire; visualViewport → `--app-ivh` composer. 137 passed. |
+| 2026-08-12 | P3 blink purge (`900919dd`) | All `x-show`+inline `display:` violations moved to CSS classes across Workspace/Memory/Settings/base. 137 passed. |
+| 2026-08-12 | P4 dead code (`6f6635fa`) | Orphaned `index.html` deleted; soft-nav + HTMX kept (working). 139 passed. |
+| 2026-08-12 | Defects sweep (`e0ab8c80`) | Code themes follow theme; Auto applies; AR/EN copy de-swapped; welcome tile Light; `--error` aliased. `accent_color` + bell panel deferred (features). 137 passed. |
+| 2026-08-12 | Canvas-race fix | User: "Light theme on iOS Dark shows gray, intermittent — sometimes good." Cause: kazma.css had a render-blocking Google-Fonts `@import` that delayed the external `html { background-color }` + `color-scheme` rules; iOS committed the canvas from the dark system pref before they applied. Fix: inline critical `<style>` (SSR-resolved html bg + color-scheme) in base.html + login.html first bytes; removed the `@import`, moved fonts to `<link>`. 137 passed. |
+| 2026-08-12 | Full run complete | P1–P4 + sweep + canvas-race shipped. **Awaiting phone verify.** |
 
 ---
 

@@ -11,6 +11,18 @@
     <meta name="color-scheme" content="{{ theme()|default('light') }}">
     <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
     <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
+    {# Critical inline theme CSS — in the FIRST HTML bytes so iOS Safari
+       paints a correctly-colored canvas before kazma.css downloads+parses.
+       Per the CSS spec the canvas takes its color from the root element
+       background, so an opaque SSR-resolved html background-color defeats
+       the intermittent "Light theme shows gray on iOS Dark" race: the
+       external rule (html { background-color: var(--bg) }) is delayed
+       behind kazma.css's render-blocking font @import on cold caches, and
+       iOS then commits the canvas from the phone's dark system preference.
+       color-scheme is set too for UA widgets. Keep in sync with login.html. #}
+    <style>
+      html { background-color: {{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
+    </style>
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
     <link rel="shortcut icon" href="/favicon.ico">
@@ -22,7 +34,7 @@
        kazma.css @import waterfall. #}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
     {# DS v5 "Abyss" — token remap + shell polish, loaded last so it wins.
        Rollback = delete this one line. #}

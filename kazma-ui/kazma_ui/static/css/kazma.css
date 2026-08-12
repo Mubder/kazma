@@ -4,9 +4,14 @@
    Secondary: #38bdf8 sky | Font: Inter, system-ui, sans-serif
    The dark/light token tables live in §1 and §23; kazma.v5.css adds
    shell polish on top. See docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md.
-   ═══════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap');
+   Fonts are loaded via <link> in base.html / login.html <head>, NOT via
+   a render-blocking @import here — an @import at the top of this file
+   blocked parsing of the whole stylesheet (incl. the html background +
+   color-scheme rules) behind the font fetch, which caused iOS Safari to
+   intermittently paint the dark system canvas over Kazma Light on cold
+   caches. Do NOT reintroduce an @import at the top of this file.
+   ═══════════════════════════════════════════════════════════════════ */
 
 /* ── 1. CSS Variables — Kazma "ABYSS" palette ──────────────────────
    This is the SINGLE dark token table. kazma.v5.css used to re-define
