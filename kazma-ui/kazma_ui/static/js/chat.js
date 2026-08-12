@@ -231,24 +231,17 @@
         .then(function(data) {
           if (!data || !chatSessionId) return;
           if (data.generating) {
-            // Server is still generating. Abort any stale stream handle —
-            // backgrounded tabs throttle the fetch reader without erroring,
-            // leaving a zombie activeStream that blocks the poller. Clear it
-            // so the background poller can take over and recover the response.
+            // Still generating — abort the stale SSE reader (it's dead from
+            // the background-tab throttle) but DON'T reload or show a
+            // placeholder. The delivery poll (started in beginTurn) is still
+            // running and will reload when the turn finishes. The user sees
+            // exactly what they left (frozen CoT) — no jarring reload.
             if (activeStream) {
               try { activeStream.abort(); } catch (e) { /* already dead */ }
               activeStream = null;
             }
-            // Show typing indicator inline (avoids cross-scope reference).
-            if (typeof typingEl !== 'undefined' && typingEl && typingEl.style.display === 'none') {
-              if (typeof KS !== 'undefined' && KS.showTyping) {
-                KS.showTyping(typingEl, 'Generating response');
-              }
-            }
-            _pollBackgroundTurn(chatSessionId, 0);
           } else if (activeStream || lastActivityTs) {
-            // Turn finished while we were disconnected (stale stream or missed
-            // done event) — reload to pick up the persisted result.
+            // Turn finished while we were away — reload to show the result.
             activeStream = null;
             loadSession(chatSessionId);
           }
