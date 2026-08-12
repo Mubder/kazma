@@ -429,6 +429,42 @@
     }
   }
 
+  // ── Delivery poll: guaranteed response delivery independent of SSE ──
+  // SSE (fetch + ReadableStream) silently stalls when a browser tab is
+  // backgrounded — no error, no recovery, the done event is lost. This poll
+  // is the BACKSTOP: every 3s while a turn is active, check /status. When the
+  // server says "done," reload from /messages. setTimeout is throttled by
+  // background tabs but RESUMES on focus, so the response is delivered within
+  // seconds of returning to the tab — guaranteed.
+  var _deliveryPollTimer = null;
+  function _startDeliveryPoll() {
+    if (_deliveryPollTimer) clearTimeout(_deliveryPollTimer);
+    _deliveryPoll();
+  }
+  function _stopDeliveryPoll() {
+    if (_deliveryPollTimer) { clearTimeout(_deliveryPollTimer); _deliveryPollTimer = null; }
+  }
+  function _deliveryPoll() {
+    _deliveryPollTimer = null;
+    if (!_isGenerating || !chatSessionId) return;
+    fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!_isGenerating || !chatSessionId) return;
+        if (data && !data.generating) {
+          // Turn finished server-side but SSE didn't deliver — reload to get
+          // the persisted response. This is the guaranteed delivery path.
+          console.log('[KazmaChat] Delivery poll: turn finished, reloading');
+          loadSession(chatSessionId);
+        } else {
+          _deliveryPollTimer = setTimeout(_deliveryPoll, 3000);
+        }
+      })
+      .catch(function() {
+        if (_isGenerating) _deliveryPollTimer = setTimeout(_deliveryPoll, 5000);
+      });
+  }
+
   /** Call on every live frame (token/tool/status) so long multi-tool turns stay open. */
   function noteTurnActivity() {
     _lastTurnActivityTs = Date.now();
@@ -485,6 +521,7 @@
     _awaitingApproval = false;
     _lastTurnActivityTs = Date.now();
     _armTurnWatchdog();
+    _startDeliveryPoll(); // guaranteed delivery safety net (independent of SSE)
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
       var oldProg = currentMsgEl.querySelector('.agent-progress');
@@ -510,6 +547,7 @@
 
   function endTurn() {
     _clearTurnTimers();
+    _stopDeliveryPoll();
     _isGenerating = false;
     _awaitingApproval = false;
     finalizeProgress(true);
