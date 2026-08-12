@@ -3547,9 +3547,16 @@ tbody tr:last-child td {
   .swarm-metrics-grid { grid-template-columns: 1fr !important; }
   .two-col-grid { grid-template-columns: 1fr !important; }   /* inline-grid helper */
 
-  /* ── Padding reductions ── */
+  /* ── Padding reductions ──
+     Use longhand, NOT the `padding` shorthand — Tier 2 (≤768px) sets
+     padding-bottom to clear the bottom-nav dock, and a shorthand here
+     would overwrite it, hiding the last row under the tab bar. */
   .page-header { padding: env(safe-area-inset-top, 0px) var(--sp-4) 0; }
-  .page-body { padding: var(--sp-4); }
+  .page-body {
+    padding-top: var(--sp-4);
+    padding-inline: var(--sp-4);
+    /* padding-bottom intentionally inherited from Tier 2 (dock clearance) */
+  }
   .header-left { gap: var(--sp-2); }
   .breadcrumbs { display: none; }
 
@@ -3601,7 +3608,11 @@ tbody tr:last-child td {
 /* ── Tier 5: Small phone ── */
 @media (max-width: 380px) {
   .metrics-grid { grid-template-columns: 1fr; }
-  .page-body { padding: var(--sp-3); }
+  /* Longhand — preserve the Tier 2 dock clearance (see Tier 3 note). */
+  .page-body {
+    padding-top: var(--sp-3);
+    padding-inline: var(--sp-3);
+  }
 }
 
 /* ── 26. New UI Components (Phase 3) ─────────────────────────────── */
