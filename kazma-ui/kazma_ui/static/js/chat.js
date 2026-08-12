@@ -450,21 +450,24 @@
   }
   function _deliveryPoll() {
     _deliveryPollTimer = null;
-    if (!_isGenerating || !chatSessionId) return;
+    if (!_isGenerating || !chatSessionId) {
+      console.log('[KazmaChat] Delivery poll: skipped (_isGenerating=' + _isGenerating + ', sessionId=' + !!chatSessionId + ')');
+      return;
+    }
     fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
         if (!_isGenerating || !chatSessionId) return;
+        console.log('[KazmaChat] Delivery poll: generating=' + (data ? data.generating : 'null'));
         if (data && !data.generating) {
-          // Turn finished server-side but SSE didn't deliver — reload to get
-          // the persisted response. This is the guaranteed delivery path.
-          console.log('[KazmaChat] Delivery poll: turn finished, reloading');
+          console.log('[KazmaChat] Delivery poll: turn DONE — calling loadSession');
           loadSession(chatSessionId);
         } else {
           _deliveryPollTimer = setTimeout(_deliveryPoll, 3000);
         }
       })
-      .catch(function() {
+      .catch(function(err) {
+        console.log('[KazmaChat] Delivery poll: fetch error — ' + err);
         if (_isGenerating) _deliveryPollTimer = setTimeout(_deliveryPoll, 5000);
       });
   }
@@ -526,6 +529,7 @@
     _lastTurnActivityTs = Date.now();
     _armTurnWatchdog();
     _startDeliveryPoll(); // guaranteed delivery safety net (independent of SSE)
+    console.log('[KazmaChat] beginTurn — delivery poll armed (10s delay)');
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
       var oldProg = currentMsgEl.querySelector('.agent-progress');
@@ -550,6 +554,7 @@
   }
 
   function endTurn() {
+    console.log('[KazmaChat] endTurn called — delivery poll STOPPED, _isGenerating=false');
     _clearTurnTimers();
     _stopDeliveryPoll();
     _isGenerating = false;
@@ -1222,6 +1227,7 @@
     // Route over Central WebSocket Telemetry Bus if connected
     const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
     if (agentStore && agentStore.connectionStatus === 'connected') {
+      console.log('[KazmaChat] WS path: sendPrompt via agentStore (delivery poll should still be running from beginTurn)');
       agentStore.sendPrompt(content, selectedModel || '', attachmentsPayload);
       return;
     }
