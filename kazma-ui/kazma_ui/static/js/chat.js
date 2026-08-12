@@ -558,15 +558,18 @@
   }
 
   function endTurn() {
-    console.log('[KazmaChat] endTurn called — delivery poll SURVIVES (independent lifecycle)');
     _clearTurnTimers();
     // NOTE: _stopDeliveryPoll() is intentionally NOT called here.
-    // The WS handler calls endTurn() prematurely (before the turn finishes),
-    // which used to kill the delivery poll. Now the poll runs on its own
-    // session-scoped lifecycle and only stops when /status says done or
-    // loadSession starts a new session.
     _isGenerating = false;
     _awaitingApproval = false;
+    // Clear the WS store's thinking/turnActive status. The WS reconnect
+    // handler (ws_chat.py:580) sends "Reconnected — previous turn still
+    // running…" which sets the store to thinking. Without clearing it here,
+    // that indicator stays visible forever after the turn actually finishes.
+    try {
+      var _store = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
+      if (_store) { _store._turnActive = false; _store.isThinking = false; }
+    } catch (e) { /* store not ready */ }
     finalizeProgress(true);
     if (activeTypingEl && KS.hideTyping) {
       KS.hideTyping(activeTypingEl);
