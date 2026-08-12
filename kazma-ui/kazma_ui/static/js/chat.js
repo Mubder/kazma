@@ -320,20 +320,95 @@
     });
   }
 
-  /** True when the last assistant bubble does not already show *content*. */
+  /**
+   * Fingerprint of the last successfully painted final assistant text.
+   * Blocks double paint from concurrent paths (WS turn_complete + reconcile
+   * poll + reconnect replay) without depending on markdown vs textContent.
+   */
+  var _lastFinalFingerprint = '';
+
+  function _finalFingerprint(content) {
+    var s = String(content || '').trim();
+    if (!s) return '';
+    return s.length + ':' + s.slice(0, 160) + ':' + s.slice(-120);
+  }
+
+  /** Render markdown to plain text for DOM ↔ source comparisons. */
+  function _plainFromMarkdown(md) {
+    var s = String(md || '').trim();
+    if (!s) return '';
+    try {
+      if (KS && KS.markdown) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = KS.markdown(s);
+        return (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+      }
+    } catch (e) { /* fall through */ }
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Assistant bubble for the open turn: the one after the last user message.
+   * NEVER create a second assistant without a new user row (duplicate root cause).
+   */
+  function _assistantBubbleForOpenTurn() {
+    if (!messagesEl) return createAssistantMessage();
+    var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
+    var lastAsstAfterUser = null;
+    var sawUser = false;
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i].classList.contains('message-user')) {
+        sawUser = true;
+        lastAsstAfterUser = null;
+      } else if (msgs[i].classList.contains('message-assistant')) {
+        lastAsstAfterUser = msgs[i];
+      }
+    }
+    if (lastAsstAfterUser) return lastAsstAfterUser;
+    // No assistant after last user (or empty transcript) — open a new bubble.
+    return createAssistantMessage();
+  }
+
+  /** True when *textEl* already shows *content* (source or rendered plain). */
+  function _textElHasFinal(textEl, content) {
+    if (!textEl || !content) return false;
+    var want = String(content).trim();
+    if (!want) return false;
+    if ((textEl.getAttribute('data-final-len') || '') === String(want.length)) {
+      return true;
+    }
+    var shown = (textEl.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!shown) return false;
+    if (shown === want) return true;
+    var wantPlain = _plainFromMarkdown(want);
+    if (wantPlain && shown === wantPlain) return true;
+    // Substantial prefix match (partial stream already painted)
+    if (shown.length >= 40 && wantPlain && wantPlain.indexOf(shown.slice(0, 60)) === 0) {
+      return shown.length + 30 >= wantPlain.length;
+    }
+    if (wantPlain && wantPlain.length >= 40 && shown.indexOf(wantPlain.slice(0, 60)) === 0) {
+      return true; // DOM already has full (or longer) plain of this answer
+    }
+    return false;
+  }
+
+  /** True when the open-turn assistant bubble does not already show *content*. */
   function _domMissingAssistantReply(content) {
     if (!messagesEl || !content) return true;
-    var nodes = messagesEl.querySelectorAll('.message-assistant .message-text');
-    if (!nodes.length) return true;
-    var last = nodes[nodes.length - 1];
-    var shown = (last.textContent || '').trim();
-    var want = String(content).trim();
-    if (!shown) return true;
-    if (shown === want) return false;
-    // Partial stream vs full final — treat as missing if significantly shorter.
-    if (shown.length + 40 < want.length) return true;
-    if (want.indexOf(shown.slice(0, Math.min(60, shown.length))) === 0) return true;
-    return false;
+    var fp = _finalFingerprint(content);
+    if (fp && fp === _lastFinalFingerprint) return false;
+    var bubble = null;
+    var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
+    var lastAsst = null;
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i].classList.contains('message-user')) lastAsst = null;
+      else if (msgs[i].classList.contains('message-assistant')) lastAsst = msgs[i];
+    }
+    bubble = lastAsst;
+    if (!bubble) return true;
+    var te = bubble.querySelector('.message-text');
+    if (!te) return true;
+    return !_textElHasFinal(te, content);
   }
 
   // Back-compat name used on init / older call sites.
@@ -581,6 +656,8 @@
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     lastActivityTs = _lastTurnActivityTs;
+    // New turn — allow a new final fingerprint (do not block the next answer).
+    _lastFinalFingerprint = '';
     _armTurnWatchdog();
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
@@ -3114,6 +3191,7 @@
     // Clear the nuclear delivery flag — we're loading from server, so the
     // response IS being delivered. The setInterval poll will no-op.
     _awaitingReply = false;
+    _lastFinalFingerprint = '';
     // Abort any in-flight turn from the previous session so Stop never sticks.
     if (activeStream) {
       try { activeStream.abort(); } catch (e) {}
@@ -3177,8 +3255,16 @@
           if (!role) return;
           // Collapse identical consecutive assistant rows left by older
           // double-persist bugs (same answer twice after YOLO/refresh).
-          if (role === 'assistant' && content && prevAssistantContent === content.trim()) {
-            return;
+          // Also collapse when source markdown differs only by whitespace /
+          // equivalent rendered plain text.
+          if (role === 'assistant' && content && prevAssistantContent) {
+            var _cTrim = content.trim();
+            if (
+              prevAssistantContent === _cTrim ||
+              _plainFromMarkdown(prevAssistantContent) === _plainFromMarkdown(_cTrim)
+            ) {
+              return;
+            }
           }
           if (role === 'assistant') {
             prevAssistantContent = (content || '').trim() || null;
@@ -3192,10 +3278,16 @@
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
             // Poller is armed once after the loop (only for trailing pending).
           } else {
-            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
+            var painted = appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
               activity: msg.activity,
               model: msg.model || '',
             });
+            // Stamp final markers so WS reconnect replay cannot open a 2nd bubble.
+            if (role === 'assistant' && content && painted) {
+              var pte = painted.querySelector('.message-text');
+              if (pte) pte.setAttribute('data-final-len', String(String(content).trim().length));
+              try { painted.setAttribute('data-final-fp', _finalFingerprint(content)); } catch (e) {}
+            }
           }
         });
 
@@ -3203,6 +3295,22 @@
         // Do NOT poll completed chats — that re-fetched messages every 2s and
         // re-rendered the whole transcript (page blink).
         var lastMsg = messages[messages.length - 1];
+
+        // Seed fingerprint from durable transcript so reconnect turn_complete
+        // (replay:true) is a pure no-op instead of a second bubble.
+        if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
+          _lastFinalFingerprint = _finalFingerprint(lastMsg.content);
+        } else if (messages && messages.length) {
+          for (var _si = messages.length - 1; _si >= 0; _si--) {
+            var _sm = messages[_si];
+            if (_sm && _sm.role === 'assistant' && (_sm.content || '').trim() && !_sm.pending) {
+              _lastFinalFingerprint = _finalFingerprint(_sm.content);
+              break;
+            }
+            if (_sm && _sm.role === 'user') break;
+          }
+        }
+
         if (lastMsg && lastMsg.role === 'assistant' && lastMsg.pending) {
           if ((lastMsg.content || '').trim()) {
             if (typeof typingEl !== 'undefined' && typingEl && typingEl.style.display === 'none') {
@@ -3253,35 +3361,23 @@
 
   function _softApplyFinalAssistant(content, model) {
     if (!content) return;
-    // Prefer existing live helpers — do not wipe the whole transcript.
-    // applyFinalAssistantText reuses the last bubble when possible so a late
-    // poll after endTurn never creates a second copy of the same answer.
+    // Single paint path — applyFinal owns dedupe (fingerprint + open-turn bubble).
     if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-      window.KazmaChat.applyFinalAssistantText(content, model || '');
+      window.KazmaChat.applyFinalAssistantText(content, model || '', { source: 'soft' });
       return;
     }
-    var nodes = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
-    var last = nodes.length ? nodes[nodes.length - 1] : null;
-    if (!last) {
-      appendMessage('assistant', content, null, null, { model: model || '' });
+    // Fallback if KazmaChat not exposed yet
+    var bubble = _assistantBubbleForOpenTurn();
+    var textEl = bubble.querySelector('.message-text');
+    if (textEl && _textElHasFinal(textEl, content)) {
+      scrollToBottom();
       return;
     }
-    var textEl = last.querySelector('.message-text');
     if (textEl) {
-      var already = (textEl.textContent || '').trim();
-      var incoming = String(content).trim();
-      if (already && already === incoming) {
-        scrollToBottom();
-        return; // already painted — avoid visual duplicate
-      }
       textEl.innerHTML = (window.KS && KS.markdown) ? KS.markdown(content) : escapeHtml(content);
+      textEl.setAttribute('data-final-len', String(String(content).trim().length));
     }
-    if (model) {
-      var meta = last.querySelector('.message-meta');
-      if (meta && meta.textContent.indexOf(model) < 0) {
-        meta.textContent = (meta.textContent ? meta.textContent + ' · ' : '') + model;
-      }
-    }
+    _lastFinalFingerprint = _finalFingerprint(content);
     scrollToBottom();
   }
 
@@ -3525,6 +3621,8 @@
     currentMsgEl = null;
     tokenAccum = '';
     lastSentUserText = '';
+    _lastFinalFingerprint = '';
+    _awaitingReply = false;
 
     // Bind WS bus to the NEW session (disconnect old so late frames can't
     // re-arm beginTurn on the fresh chat).
@@ -3659,53 +3757,56 @@
       noteTurnActivity();
       // Keep currentMsgEl so applyFinal paints into the same turn bubble.
     },
-    applyFinalAssistantText: function(content, model) {
+    applyFinalAssistantText: function(content, model, opts) {
       KS.hideTyping(typingEl);
       activeTypingEl = null;
       if (!content) return;
+      var incoming = String(content).trim();
+      if (!incoming) return;
+      opts = opts || {};
+
       // Durable final paint — release nuclear delivery wait.
       // Do NOT call noteTurnActivity here: that re-arms lastActivityTs and
       // would make the next tab-focus think a reply is still pending.
-      if (String(content).trim()) {
-        _awaitingReply = false;
-        lastActivityTs = 0;
+      _awaitingReply = false;
+      lastActivityTs = 0;
+
+      var fp = _finalFingerprint(incoming);
+      // Exact same final already delivered (WS + poll + replay race) — no-op.
+      if (fp && fp === _lastFinalFingerprint) {
+        return;
       }
+
+      // Bind to the open-turn assistant only. Creating a second bubble when
+      // textContent (rendered) failed to match markdown source was the
+      // tab-switch / refresh duplication bug.
       if (!currentMsgEl) {
-        // Prefer reusing the last assistant bubble so soft-apply / late
-        // turn_complete after endTurn never create a duplicate bubble.
-        var nodes = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
-        var last = nodes.length ? nodes[nodes.length - 1] : null;
-        if (last) {
-          var existingText = '';
-          var te = last.querySelector('.message-text');
-          if (te) existingText = (te.textContent || '').trim();
-          var incoming = String(content).trim();
-          // Same answer already painted → reuse (no second bubble).
-          if (existingText && (existingText === incoming || existingText.indexOf(incoming.slice(0, 80)) === 0 || incoming.indexOf(existingText.slice(0, 80)) === 0)) {
-            currentMsgEl = last;
-          } else if (!existingText || last.querySelector('.hitl-approval-card')) {
-            // Empty bubble or HITL-card turn — paint final into it.
-            currentMsgEl = last;
-          } else {
-            currentMsgEl = createAssistantMessage();
-          }
-        } else {
-          currentMsgEl = createAssistantMessage();
-        }
+        currentMsgEl = _assistantBubbleForOpenTurn();
       }
-      // Full final answer — replace accum so we don't double-append after partials
-      tokenAccum = String(content);
-      tryIngestPlanFromText(tokenAccum);
-      var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) {
-        // Skip no-op re-paint of identical markdown (reduces flicker/dups).
-        if ((textEl.getAttribute('data-final-len') || '') === String(tokenAccum.length)
-            && (textEl.textContent || '').trim().length >= Math.min(40, tokenAccum.trim().length)) {
-          /* already showing this final */
-        } else {
-          textEl.innerHTML = KS.markdown(tokenAccum);
-          textEl.setAttribute('data-final-len', String(tokenAccum.length));
+      var textEl = currentMsgEl ? currentMsgEl.querySelector('.message-text') : null;
+
+      // Replay / soft-apply when DOM already has this answer — stamp fp, leave.
+      if (textEl && _textElHasFinal(textEl, incoming)) {
+        _lastFinalFingerprint = fp;
+        textEl.setAttribute('data-final-len', String(incoming.length));
+        // Leave currentMsgEl closed so the next token starts cleanly.
+        if (opts.replay || opts.source === 'soft') {
+          currentMsgEl = null;
+          tokenAccum = '';
         }
+        return;
+      }
+
+      // Full final answer — replace accum so we don't double-append after partials
+      tokenAccum = incoming;
+      tryIngestPlanFromText(tokenAccum);
+      if (textEl) {
+        textEl.innerHTML = KS.markdown(tokenAccum);
+        textEl.setAttribute('data-final-len', String(tokenAccum.length));
+      }
+      _lastFinalFingerprint = fp;
+      if (currentMsgEl) {
+        try { currentMsgEl.setAttribute('data-final-fp', fp); } catch (e) { /* ignore */ }
       }
       if (model && currentMsgEl) {
         var meta = currentMsgEl.querySelector('.message-meta');

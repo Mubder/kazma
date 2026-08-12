@@ -865,9 +865,14 @@ document.addEventListener('alpine:init', () => {
           // Authoritative terminal: REPLACE paint (never append — that doubled
           // post-HITL answers when backfill re-sent the full text).
           const finalText = data.content || frame.content || '';
+          // reconnect catch-up sets replay:true — chat.js must not open a
+          // second bubble when loadSession already painted the same answer.
+          const isReplay = !!(data && data.replay) || !!(frame && frame.replay);
           if (finalText && window.KazmaChat) {
             if (typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-              window.KazmaChat.applyFinalAssistantText(finalText, data.model || '');
+              window.KazmaChat.applyFinalAssistantText(finalText, data.model || '', {
+                replay: isReplay,
+              });
             } else if (typeof window.KazmaChat.appendLiveToken === 'function') {
               window.KazmaChat.appendLiveToken(finalText, { full: true });
             }
