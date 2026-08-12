@@ -1942,7 +1942,8 @@ def _commitment_resolve_gate(
                         semantic_blocked.append(ToolResult(
                             tool_call_id=str(_tc.get("id") or ""),
                             name=_tc["name"],
-                            content=f"Commitment gate denied: {_q}",
+                            content=(f"Commitment gate denied {_tc['name']}: {_q}. "
+                                 "Do not retry; tell the user why and what they can do."),
                             is_error=True, duration_ms=0,
                         ))
                 pending = _kept
@@ -1975,7 +1976,8 @@ def _commitment_resolve_gate(
             if _opt_id == "cancel":
                 semantic_blocked.append(ToolResult(
                     tool_call_id=_tcid, name=_tc["name"],
-                    content="Commitment clarify cancelled by user.",
+                    content=("Commitment clarify cancelled by the user. Stop this "
+                             "scheduling attempt; confirm what the user wants instead."),
                     is_error=True, duration_ms=0,
                 ))
             elif _patch is not None:
@@ -1984,8 +1986,10 @@ def _commitment_resolve_gate(
             else:
                 semantic_blocked.append(ToolResult(
                     tool_call_id=_tcid, name=_tc["name"],
-                    content=(f"Commitment clarify unresolved for {_tc['name']}. "
-                             "Confirm the exact intent with the user, then retry."),
+                    content=(f"Commitment clarify unresolved for {_tc['name']}: "
+                             f"{_dec.clarify_question or 'a specific time is required'}. "
+                             "Ask the user for the exact date/time; do not re-call "
+                             "this tool until they answer."),
                     is_error=True, duration_ms=0,
                 ))
     return pending, semantic_blocked
