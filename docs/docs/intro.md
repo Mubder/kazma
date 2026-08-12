@@ -8,7 +8,7 @@ description: Map of all Kazma documentation — start here
 
 # Kazma documentation
 
-**Single source of truth** for the Kazma agent framework (v0.6.1+).  
+**Single source of truth** for the Kazma agent framework (v0.9+).  
 Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical trees live in [`archive/`](https://github.com/kazma-ai/kazma/tree/main/archive).
 
 ## Start here
@@ -22,7 +22,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Move Kazma to a new machine | [Migration](ops/migration) · [Portability](ops/portability) · [Disaster recovery](ops/disaster-recovery) |
 | Get server status alerts in chat | [Lifecycle notifications](guide/deployment#10-lifecycle-status-notifications) |
 | Debug multi-path bugs ("X related to Y") | [Diagnosis map](ops/diagnosis-map) · [System map](reference/system-map) |
-| Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) |
+| Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) · [Commitment Layer](guide/commitment-layer) |
 | Use built-in skills (browser, calendar, docs, …) | [Native skills](guide/native-skills) |
 | Send voice / images / documents | [Voice & media](guide/voice-and-media) |
 | Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
@@ -40,7 +40,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 - [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
-- [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety)
+- [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety) · [Commitment Layer](guide/commitment-layer)
 - [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Document Intelligence**](guide/document-intelligence) · [Document phases](guide/document-phases) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration)
 - [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)

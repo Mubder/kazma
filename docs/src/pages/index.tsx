@@ -31,28 +31,28 @@ function HomepageHeader() {
 function Features() {
   const features = [
     {
-      title: 'Skill Marketplace & Signatures',
-      description: 'Discover, publish, and manage skills. Features HMAC-SHA256 timing-safe checksum verification against supply-chain injection attacks.'
+      title: 'Commitment / Resolve-before-Act',
+      description: 'A policy gate between the LLM and durable mutations. Intent is resolved against memory before acting — the model cannot invent a date and schedule it over a real belief. Semantic clarify/confirm cards disambiguate on every platform.'
     },
     {
-      title: 'Triple-Wired Safety Gates',
-      description: 'Human-in-the-Loop (HITL) authorization gates for danger tools, integrated over real-time Web SSE, Telegram, Discord, and Slack.'
+      title: 'Triple-Wired HITL Safety',
+      description: 'Three independent human-in-the-loop gates — graph interrupt, swarm bus, and pipeline checkpoints — pause danger tools before execution. Approve/deny from Web SSE, Telegram, Discord, and Slack. Fail-closed by default.'
     },
     {
-      title: 'Corporate Command Console (TUI)',
-      description: 'Vim/Tmux-inspired TUI terminal with scrolling sparkline telemetry, ASCII topology maps, and interactive hitl approval screens.'
+      title: 'Non-Stop & Self-Healing',
+      description: 'A supervisor watchdog tracks node heartbeats, detects stalls, and rolls back to a clean checkpoint with reflection injection. Model failover chains, a durable LLM call ledger, orphan-task recovery, and an HITL approval timeout keep long-horizon tasks running.'
     },
     {
-      title: 'Sandbox-Isolated Web DAGs',
-      description: 'Crash-proof, isolated Mermaid.js visual pipelines rendering. Uses standard SVG attributes to completely eliminate syntax conflicts.'
+      title: 'Document Intelligence',
+      description: 'A secure, durable document platform: streamed intake → content-addressed quarantine → policy sniff → isolated subprocess parse/OCR → durable jobs → optional Knowledge index, plus generate/convert/redact and ops (capacity, GC, audit, cert).'
     },
     {
-      title: 'Arabic RTL Mirroring',
-      description: 'First-class dialect detection, bi-directional text-wrapping, and complete RTL grid mirroring across Web and TUI interfaces.'
+      title: 'V2 Cognitive Memory',
+      description: 'Bi-temporal belief tracking, Local Ego-Graph Personalized PageRank recall, hybrid FTS + vector episode retrieval, and prompt-fenced per-turn context injection. SQLite is the zero-config default; Postgres/Qdrant/Neo4j optional.'
     },
     {
-      title: 'Enterprise Reliability',
-      description: 'SQLite WAL mode and ConfigStore singletons prevent database locking under high-concurrency swarm operations.'
+      title: 'Arabic-Native',
+      description: 'A custom Arabic tokenizer, full RTL UI mirroring, Kuwaiti-dialect support, and the Majlis cultural protocol. Built in Kuwait — first-class multilingual intelligence, not an afterthought.'
     },
   ];
 
@@ -112,14 +112,18 @@ function QuickStart() {
           color: 'var(--ifm-code-color)',
           lineHeight: '1.6'
         }}>
-          <div><span style={{color: 'var(--ifm-color-primary)'}}># Create a new secure Kazma project</span></div>
-          <div>npx -y create-kazma-app@latest ./my-swarm</div>
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Clone and install all extras</span></div>
+          <div>git clone https://github.com/Mubder/kazma.git</div>
+          <div>cd kazma && uv sync --all-extras</div>
           <br />
-          <div><span style={{color: 'var(--ifm-color-primary)'}}># Start the backend uvicorn coordinator</span></div>
-          <div>uv run python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090</div>
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Configure at least one LLM key</span></div>
+          <div>cp .env.example .env   # then set OPENAI_API_KEY=sk-...</div>
           <br />
-          <div><span style={{color: 'var(--ifm-color-primary)'}}># Launch the terminal dash dashboard</span></div>
-          <div>uv run kazma-tui</div>
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Start the Web UI (http://127.0.0.1:9090)</span></div>
+          <div>kazma serve</div>
+          <br />
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Or launch the terminal dashboard</span></div>
+          <div>kazma-tui</div>
         </div>
       </div>
     </section>

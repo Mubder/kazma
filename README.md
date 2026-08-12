@@ -56,8 +56,11 @@ swarm:
 ### 🔒 Triple-Wired Safety
 Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Downloaded Agent Skills are **integrity-verified (HMAC-SHA256)** at load, and Soul evolution deltas are injected behind an untrusted-data prompt fence (`<kazma:data untrusted>`).
 
+### 🧭 Commitment Layer (resolve-before-act)
+A policy gate between the LLM and durable mutations. Before the agent can schedule, send, execute, or change config, Kazma **resolves its intent against memory** — so a model can't invent a date and schedule it over a real belief. Ambiguous acts raise a **semantic clarify/confirm card** with per-option buttons on Web, Telegram, Discord, and Slack. Modes (strict / balanced / autonomous / yolo) and kill-switches for every enforcement layer. Docs: [Commitment Layer](docs/docs/guide/commitment-layer.md).
+
 ### 🌐 Multi-Platform
-Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph supervisor. Platform IDs never enter LangGraph state.
+Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph supervisor. Platform IDs never enter LangGraph state. **Steer any running task** mid-flight with `/steer` (soft), `/steer!` (pause + inject), or `/abort` — no need to wait for the turn to finish.
 
 ### 📜 Arabic-Native
 Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol. Built in Kuwait, for the world.

@@ -2,7 +2,7 @@
 id: skills-mcp-and-tools
 title: Skills, MCP & Tools
 sidebar_label: Skills, MCP & Tools
-description: Kazma Skills, MCP & Tools — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Skills, MCP & Tools — code-audited reference (unified docs, v0.9+)
 ---
 > Skill manifests, cryptographic signing, MCP transports, tool classification, the Hub, and how to extend Kazma with new tools — all source-referenced.
 
@@ -117,7 +117,7 @@ kazma hub validate kazma-skills/manifests/my-skill
 
 ## 4. The Hub (`kazma hub`)
 
-The Hub is a Click-based CLI for the skill registry/marketplace (`kazma_core/hub/cli.py:104`). See [CLI Reference → hub](cli-reference#8-kazma-hub--skill-hub-click-group) for the full subcommand list.
+The Hub is a Click-based CLI for the skill registry/marketplace (`kazma_core/hub/cli.py:104`). See [CLI Reference → hub](cli-reference#9-kazma-hub--skill-hub-click-group) for the full subcommand list.
 
 ### 4.1 Hub API authentication
 

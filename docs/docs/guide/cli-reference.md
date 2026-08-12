@@ -2,7 +2,7 @@
 id: cli-reference
 title: CLI Reference
 sidebar_label: CLI Reference
-description: Kazma CLI Reference — code-audited reference (unified docs, v0.6.1+)
+description: Kazma CLI Reference — code-audited reference (unified docs, v0.9+)
 ---
 > The complete `kazma`, `kazma-tui`, and `kazma-web` command surface, every flag, and working examples — all verified against `kazma-cli/` source.
 

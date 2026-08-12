@@ -2,7 +2,7 @@
 id: troubleshooting-and-workarounds
 title: Troubleshooting
 sidebar_label: Troubleshooting
-description: Kazma Troubleshooting — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Troubleshooting — code-audited reference (unified docs, v0.9+)
 ---
 > Practical fixes for the issues you will actually hit: provider limits, Windows/Docker specifics, SQLite concurrency, Arabic tokenization edge cases, and the known codebase gaps the audit uncovered. Every item is source-referenced.
 >
@@ -704,7 +704,7 @@ Ensure `restore_paused_tasks()` runs on startup (else paused tasks auto-reject o
 
 ---
 
-## 15. Production bind & auth (v0.6.1+)
+## 15. Production bind & auth (v0.9+)
 
 ### 15.0 Browser ERR_CONNECTION_RESET on http://127.0.0.1:9090 (Windows)
 

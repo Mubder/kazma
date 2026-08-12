@@ -2,7 +2,7 @@
 id: security-and-safety
 title: Security & Safety
 sidebar_label: Security & Safety
-description: Kazma Security & Safety — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Security & Safety — code-audited reference (unified docs, v0.9+)
 ---
 > Kazma's safety model in full: the **three independent HITL gates**, the three danger-tool lists, fail-closed behavior everywhere, cryptographic integrity (HMAC skills, Ed25519 delegation), and hardening recommendations. Every claim is source-referenced.
 
@@ -153,6 +153,40 @@ Documented in [Swarm Orchestration → Pipeline checkpoints](swarm-orchestration
 - `approve_checkpoint` (`engine.py:920`) / `reject_checkpoint` (`engine.py:990`).
 - `restore_paused_tasks()` re-arms timeouts after restart.
 - Endpoints: `POST /api/swarm/tasks/\{id\}/approve` / `/reject` (`routes_tasks.py:612, 657`).
+
+---
+
+## Semantic clarify / confirm interrupts (the Commitment Layer)
+
+The **same unified HITL bus** that carries danger-tool approvals (Gates A/B/C
+above) also carries a second *kind* of interrupt: **semantic clarify/confirm
+cards** produced by the [Commitment Layer](./commitment-layer).
+
+These are **not** danger-tool approvals — they fire when the agent's *intent*
+is ambiguous or critical *before* a durable mutation, not because the tool is
+dangerous. Example: the user says *"remind me about the meeting"* and the model
+calls the schedule tool with an ambiguous time. The Commitment gate
+(`authorize_effect`) returns `clarify`, and the graph suspends via `interrupt()`
+with a payload carrying a **question** and a list of **options** (each with a
+`slots_patch`).
+
+| Interrupt kind | When it fires | Payload `kind` |
+|---|---|---|
+| Danger-tool approval | A tool is on the danger list (Gates A/B/C) | `hitl_approval` |
+| **Semantic clarify** | Intent is ambiguous (e.g. relative time + nearby event) | `semantic_clarify` |
+| **Semantic confirm** | A critical act needs explicit OK | `semantic_confirm` |
+
+**Renders on every platform** — Web (chat + sidebar), Telegram, Discord, and
+Slack. Each semantic card renders **one button per option**; the existing
+Approve/Deny buttons map to *best-option* / *cancel* (`build_resume_value` in
+`commitment/resume.py`). On resume, the chosen option's `slots_patch` is applied
+to the tool arguments and the turn continues; `cancel` is terminal.
+
+The full decision mapping (`allow` / `clarify` / `confirm` / `deny` +
+rewrite-on-allow), the act resolvers (remind, exec denylist, config protected
+keys, outbound allowlist), scope tokens, the soul-confirm gate, modes, and
+kill-switches are documented in the dedicated guide:
+**[Commitment Layer (resolve-before-act)](./commitment-layer)**.
 
 ---
 

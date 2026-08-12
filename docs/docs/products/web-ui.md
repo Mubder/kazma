@@ -152,6 +152,28 @@ Coverage matrix: [Recent features → Non-Stop Execution](../guide/recent-featur
   `metadata.archived` flag — no schema migration.
 - Soft-nav SPA may be feature-flagged off — full page loads are the reliable path.
 
+## Theming & design tokens
+
+The Web UI runs on the **"ABYSS" design system** — a single token table per
+theme, defined in `static/css/kazma.css` (§1 dark, §23 light) with shell polish
+in `kazma.v5.css`. The same tokens are mirrored onto the docs site
+(`docs/src/css/custom.css`).
+
+| Aspect | Details |
+|---|---|
+| **Dark palette** | Deep blue-black slate — bg `#0e1626`, panel `#16223a`, text `#eef3fb`. Layered depth (panel → surface → elevated). |
+| **Light palette** | Ice-blue paper — bg `#f0f4fa`, panel `#ffffff`, ink `#0c1526`. Muted text kept dark for P0 contrast. |
+| **Accents** | Royal blue `#3b82f6` (dark) / `#2563eb` (light) + sky `#38bdf8`. Brand gradient `azure → royal → sky`. |
+| **Single token table** | One source of truth per theme — the old v4 cyan palette and the "Abyss" set were **folded into one table** so they no longer fight (design-token unification, P1). |
+| **Server-authoritative theme** | Theme is resolved **server-side**, not just client-side, so your choice **persists across devices and browsers** (a switch on one machine holds on another). |
+| **Real dark canvas** | `<html>` carries `color-scheme: only <theme>` and is painted with the theme background, so iOS Safari can no longer paint its dark system canvas over Kazma Light. |
+| **Mobile chrome** | Opaque header + dock (no see-through), keyboard-aware composer, retired hamburger, and the 769–1280px icon-rail dead strip is gone. |
+| **Forced HTML revalidation** | Templates send cache-busting headers so a stale cached page can't survive a deploy. |
+| **No `x-show` blink** | `x-cloak` is global; any `x-show` panel also carries `x-cloak`, and inline `display:flex` never sits on an `x-show` element (flex lives in a class). |
+
+Tune the system by editing the token tables in `kazma.css`; the docs site follows
+the same values.
+
 ## Related
 
 - [IDE](ide) · [Command Center](command-center-swarm) · [API routes](../reference/api-routes)  

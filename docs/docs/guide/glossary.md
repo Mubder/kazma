@@ -2,7 +2,7 @@
 id: glossary
 title: Glossary
 sidebar_label: Glossary
-description: Kazma Glossary — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Glossary — code-audited reference (unified docs, v0.9+)
 ---
 > Terms used throughout Kazma, with precise meanings grounded in the codebase.
 

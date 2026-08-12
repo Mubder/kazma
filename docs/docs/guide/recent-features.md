@@ -32,6 +32,49 @@ the deep docs when you need detail.
 | Non-Stop & Self-Healing | Supervisor watchdog, model failover chain, call ledger, orphan recovery, HITL timeout | Settings → Agent → Non-Stop Execution |
 | Scraper Hardening | Size caps (5MB default), 5xx retry backoff, robots.txt compliance | `read_url`, `crawl_site`, `KAZMA_FETCH_MAX_BYTES` |
 | Truncation Auto-Retry | Double max_tokens on length truncation + `file_append` chunk tool | `llm_provider`, `LocalToolRegistry` |
+| **Commitment Layer** | Resolve-before-act gate; semantic clarify/confirm cards; exec denylist; modes + kill-switches | [Commitment Layer](./commitment-layer) |
+| **Steer / Abort** | `/steer` (soft), `/steer!` (pause+inject), `/abort` for a running task | [Slash commands](../reference/slash-commands#-running-task-commands) |
+| **Path grants** | Outside-workspace access by permission (session grant or durable `extra_roots`) | [IDE → Path grants](../products/ide#path-grants-outside-workspace-access) |
+| **UI theme overhaul** | ABYSS design tokens, server-authoritative theme, dark-slate palette, mobile chrome | [Web UI → Theming](../products/web-ui#theming--design-tokens) |
+
+---
+
+## 0. Latest shipping (2026-08)
+
+The most recent tranche — beyond the items in the table above:
+
+- **Steer & Abort (`/steer`, `/steer!`, `/abort`)** — out-of-band signals to a
+  *running* task. Soft steer folds text into the next step; hard steer pauses,
+  injects a requirement, and resumes (demoting to soft if the task is
+  finalizing); `/abort` cancels and abandons. See
+  [Running task commands](../reference/slash-commands#-running-task-commands).
+- **Commitment Layer (resolve-before-act)** — a policy gate between the LLM and
+  durable mutations. All phases (0–8) shipped: `authorize_effect`,
+  semantic clarify/confirm interrupt cards with per-option buttons, exec
+  denylist, config protected keys, outbound allowlist, swarm scope tokens,
+  soul-confirm gate, modes (strict/balanced/autonomous/yolo), and kill-switches.
+  Dedicated guide: [Commitment Layer](./commitment-layer).
+- **HITL semantic-resume parity (PR1–PR5)** — a single enforced resume
+  chokepoint, WS/SSE parity for semantic interrupts, the terminal-clarify
+  invariant that kills the clarify loop, args-first memory-checked remind gate,
+  and the semantic clarify option-cards + `/metrics` loop counter.
+- **Path grants** — outside-workspace access is deny-by-default but openable by
+  permission: smooth session grants via the `request_path_access` HITL card, or
+  durable `workspace.extra_roots`. [IDE → Path grants](../products/ide#path-grants-outside-workspace-access).
+- **Primary `kazma update`** — a fail-closed operator upgrade path: preflight,
+  named stash, hard reset to `origin/main`, extras-preserving reinstall, and
+  postflight verification. [Kazma Update](../ops/kazma-update).
+- **Arabic PDF ingestion** — industry-grade extraction: PyMuPDF primary with a
+  multi-engine bake-off (pypdfium2/pdfplumber/pypdf), layout-aware reading
+  order, fuzzy RTL round-trip verifier, and `ara+eng` OCR routing.
+  [Document Intelligence](./document-intelligence).
+- **Document rendering richness** — code/syntax highlighting (PDF+HTML), XLSX
+  charts (multi-series + axis titles), approved-asset image embedding, and a
+  real PDF TOC + clickable HTML TOC. [Document rendering](./document-rendering#7-rich-content-features).
+- **UI theme overhaul (P1–P4)** — unified ABYSS design tokens, server-
+  authoritative theme (persists across devices), dark-slate palette with real
+  layer depth, mobile chrome fixes, and forced HTML revalidation.
+  [Web UI → Theming](../products/web-ui#theming--design-tokens).
 
 ---
 

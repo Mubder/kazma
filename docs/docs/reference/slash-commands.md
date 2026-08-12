@@ -37,6 +37,21 @@ API: [API routes — Documents](./api-routes.md#documents--document-intelligence
 
 ## 🔄 Session Commands
 
+### `/new`
+
+Creates a brand-new session/season. Unlike `/reset` (which clears the current
+thread), `/new` mints a fresh thread so you keep the old conversation reachable
+in the Web UI sidebar while starting clean.
+
+**Usage:**
+```
+/new
+```
+
+**Required permissions:** None.
+
+---
+
 ### `/reset`
 
 Clears the current conversation history. The agent forgets everything and starts fresh.
@@ -57,6 +72,21 @@ Clears the current conversation history. The agent forgets everything and starts
 - Snapshot history is preserved (use `/replay clear` to purge snapshots).
 
 **Required permissions:** None. Available to all users.
+
+---
+
+### `/compact`
+
+Manually triggers context-window compaction. The `ContextAuthority` summarizes
+older messages so the conversation continues without hitting the token ceiling.
+Useful before a long task or when `/context` shows utilization climbing.
+
+**Usage:**
+```
+/compact
+```
+
+**Required permissions:** None.
 
 ---
 
@@ -169,10 +199,74 @@ Branch from a snapshot into a **new thread** — the original stays intact.
 ```
 
 **Dependency:** The `SnapshotRecorder` is wired into all graph-build sites by default (enabled via `time_travel.enabled: true` in `kazma.yaml`). If disabled:
+```
 ⏳ Time travel not yet available.
 ```
 
 **Required permissions:** None.
+
+---
+
+## 🧭 Running Task Commands
+
+Out-of-band signals to a **running** turn. These intercept *before* the
+in-flight turn's lock, so they take effect immediately rather than queuing
+behind it. Available on every platform (Web, Telegram, Discord, Slack).
+
+### `/steer` (soft)
+
+Adds extra context to the running task. The text is folded into the agent's
+**next step** — it does not interrupt the current one.
+
+**Usage:**
+```
+/steer also cover the error-handling path
+```
+
+**Response:**
+```
+🧭 Steer noted — I'll fold it into the next step.
+```
+
+---
+
+### `/steer!` (hard)
+
+Pauses the running task, injects the requirement, then resumes. The graph
+suspends via an interrupt, your text is injected, and the turn continues under
+the new requirement.
+
+**Usage:**
+```
+/steer! stop — use the Postgres backend, not SQLite
+```
+
+**Behavior:**
+- If the task is already **finalizing** (can't pause), `/steer!` automatically
+  **demotes to a soft steer** and tells you so — your input is still applied.
+- If the resume fails, you get a clear `⚠️ Could not resume the task after steering.`
+
+---
+
+### `/abort`
+
+Cancels and **abandons** the running task. The turn is marked `abandoned`,
+`auto_continue` is cleared, and an abort marker is injected so the agent will
+not continue the task unless you ask it to redo it.
+
+**Usage:**
+```
+/abort
+```
+
+**Response:**
+```
+⛔ Task aborted — I won't continue it unless you ask me to redo it.
+```
+
+> `/steer`, `/steer!`, and `/abort` are resolved by the graph handler
+> (`agent_handler/graph.py`), not the gateway slash resolver — they need live
+> access to the running turn's checkpoint state.
 
 ---
 
@@ -266,6 +360,48 @@ Summarization threshold: 4,000 tokens (62% utilized)
 
 ---
 
+### `/config`
+
+An interactive configuration wizard. Show the current config, switch model or
+personality, toggle memory and tools, and export — all without editing YAML.
+
+**Usage:**
+```
+/config                        # show current configuration
+/config show                   # same as above
+/config model <name>           # switch the active model
+/config personality <name>     # switch personality (alias of /personality)
+/config memory on|off          # toggle chat memory
+/config tools list             # show configured tools
+/config tools toggle <name>    # enable/disable a tool
+/config export                 # export config as JSON
+```
+
+**Required permissions:** None.
+
+---
+
+### `/skill`
+
+Manage **Agent Skills** (discoverable, HMAC-signed capability bundles). Skills
+are published to the agentskills.io hub and installed from GitHub.
+
+**Usage:**
+```
+/skill list                    # list installed Agent Skills
+/skill install <owner repo>    # install from GitHub (agentskills.io)
+/skill activate <name>         # arm a skill for this chat
+/skill deactivate              # clear the active skill
+/skill uninstall <name>        # remove an Agent Skill
+```
+
+**Deep dive:** [Skill development](../skill-development/creating-skills) ·
+[Kazma Hub](../kazma-hub/overview).
+
+**Required permissions:** None.
+
+---
+
 ## ℹ️ Info Commands
 
 ### `/help`
@@ -282,19 +418,45 @@ Lists all available commands grouped by category.
 *Available commands:*
 
 🔄 *Session*
-• `/reset` — Clear conversation history
-• `/undo` — Remove last agent response
-• `/edit <text>` — Correct last agent response
+• `/new` — Create a brand new session/season
+• `/reset` — Clear conversation history and starting fresh
+• `/compact` — Manually trigger context window compaction
 • `/replay list` — Show available snapshots
-• `/replay <iteration>` — Replay from iteration
-• `/replay compare <a> <b>` — Compare two runs
+• `/replay <iteration>` — Restore from iteration (rewinds in-place)
+• `/replay compare <a> <b>` — Compare two snapshots
 • `/replay clear` — Clear snapshots for this thread
+• `/fork <iteration>` — Fork from iteration into a new thread
+
+🧭 *Running task*
+• `/steer <text>` — Add context to the running task (applies next step)
+• `/steer! <text>` — Pause the task, inject a requirement, then resume
+• `/abort` — Stop and abandon the running task
 
 🔧 *Tools*
 • `/personality` — Show current personality
 • `/personality list` — List all available personalities
 • `/personality <name>` — Switch personality
 • `/context` — Show context window usage
+• `/skill list` — List installed Agent Skills
+• `/skill install <owner repo>` — Install from GitHub (agentskills.io)
+• `/skill activate <name>` — Arm a skill for this chat
+• `/skill deactivate` — Clear the active skill
+• `/skill uninstall <name>` — Remove an Agent Skill
+
+📄 *Documents*
+• `/documents list` — List processed documents
+• `/documents status <id>` — Durable job state
+• `/documents read <id>` — Read a ready document
+• `/documents search <library> <query>` — Search indexed docs
+
+⚙️ *Config*
+• `/config show` — Display current configuration
+• `/config model <name>` — Switch model
+• `/config personality <name>` — Switch personality
+• `/config memory on|off` — Toggle memory
+• `/config tools list` — Show configured tools
+• `/config tools toggle <name>` — Enable/disable a tool
+• `/config export` — Export config as JSON
 
 ℹ️ *Info*
 • `/help` — Show this list
@@ -437,6 +599,85 @@ All `/ide` commands drive the transport-neutral `IdeService` in
 approval — the same gate as the agent and swarm. See AGENTS.md §7.
 
 **Available on:** Telegram, Discord, Slack, Web (chat), TUI.
+
+---
+
+## `/swarm` — Swarm Dispatch (chat)
+
+**Where handled:** `kazma_gateway/agent_handler/commands.py:_try_swarm_command`
+(intercepted in the gateway; the chat form of the `kazma swarm` CLI). Danger
+dispatches still go through the [swarm bus HITL gate](../guide/security-and-safety).
+
+| Command | Description |
+|---------|-------------|
+| `/swarm` | Show help + worker list |
+| `/swarm status` | Show swarm status |
+| `/swarm list` | List registered workers |
+| `/swarm config` | Show output-routing config |
+| `/swarm config group <chat_id>` | Route swarm output to a Telegram group |
+| `/swarm config clear` | Disable output routing |
+| `/swarm broadcast <task>` | Dispatch to **all** workers |
+| `/swarm pipeline <w1,w2,…> <task>` | Sequential pipeline |
+| `/swarm consult <w1,w2,…> <task>` | Parallel consult |
+| `/swarm fanout <w1,w2,…> <task>` | Parallel fan-out |
+| `/swarm dispatch <worker> <task>` | Dispatch to one named worker |
+| `/swarm <natural-language task>` | Auto-route to the best workers via `CapabilityRouter` |
+
+### Examples
+```
+/swarm status
+/swarm pipeline researcher,builder,validator "Build a CLI tool"
+/swarm summarize today's AI news        # auto-routed
+```
+
+**Deep dive:** [Swarm orchestration](../guide/swarm-orchestration) ·
+[CLI reference](../guide/cli-reference).
+
+---
+
+## `/kb` — Knowledge Library (chat)
+
+**Where handled:** `kazma_gateway/agent_handler/commands.py:_try_kb_command`.
+Ingest documentation sites into searchable RAG corpora from any chat platform.
+
+| Command | Description |
+|---------|-------------|
+| `/kb` | Show help + library list |
+| `/kb list` | List libraries (id, chunks, seed) |
+| `/kb add <id> <url>` | Create-or-use a library, ingest **one** page (sync) |
+| `/kb crawl <id> <url> [N]` | Ingest the **whole** doc tree (background job) |
+| `/kb refresh <id>` | Re-crawl a library from its seed URL (background) |
+| `/kb search <id> <query>` | Direct search (useful without an LLM call) |
+| `/kb status <id>` | Live progress of a running crawl/refresh |
+| `/kb delete <id>` | Delete a library + all its chunks |
+
+### Example
+```
+/kb crawl fastapi https://fastapi.tiangolo.com     # ingest the whole site
+/kb search fastapi "dependency injection"
+/kb status fastapi
+```
+
+**Deep dive:** [Knowledge Library](../guide/knowledge-library).
+
+---
+
+## `/research` — Deep Research (chat)
+
+**Where handled:** `kazma_gateway/agent_handler/commands.py`. Gateway entry
+point to the deep-research pipeline (multi-query search → parallel acquire →
+digest → LLM synthesis → report).
+
+| Command | Description |
+|---------|-------------|
+| `/research deep <topic>` | Run a full deep-research pass (progress pings while running) |
+
+You can also start research from the **Web `/research` panel** or by phrasing a
+request as deep research in normal chat. Disable routing with
+`KAZMA_RESEARCH_ROUTE=0`.
+
+**Deep dive:** [Web research](../guide/web-research) ·
+[Recent features](../guide/recent-features).
 
 ---
 

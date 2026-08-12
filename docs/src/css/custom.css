@@ -1,27 +1,213 @@
-:root {
-  --ifm-color-primary: #2563eb;
-  --ifm-color-primary-dark: #1d4ed8;
-  --ifm-color-primary-darker: #1e40af;
-  --ifm-color-primary-darkest: #1e3a8a;
-  --ifm-color-primary-light: #3b82f6;
-  --ifm-color-primary-lighter: #60a5fa;
-  --ifm-color-primary-lightest: #93c5fd;
-  --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
-}
+/**
+ * Kazma docs theme — mirrors the web-app "ABYSS" design system
+ * (kazma-ui/kazma_ui/static/css/kazma.css §1 + §23).
+ *
+ * BG: #0e1626 (dark) / #f0f4fa (light) · Accent: #3b82f6 royal ·
+ * Secondary: #38bdf8 sky · Font: Inter, system-ui, sans-serif.
+ *
+ * Kazma tokens are defined first, then mapped onto Infima's --ifm-* vars
+ * so every Docusaurus surface (navbar, sidebar, buttons, links, code) picks
+ * up the same palette as the live product UI. Keep this in sync with the
+ * app token tables when the design system changes.
+ */
 
-[data-theme='dark'] {
+/* ── 1. Kazma design tokens — DARK (default) ─────────────────────── */
+:root {
+  /* Backgrounds — deep blue-black slate (Abyss) */
+  --kz-bg: #0e1626;
+  --kz-bg-2: #121b2e;
+  --kz-bg-panel: #16223a;
+  --kz-bg-surface: #1b2945;
+  --kz-bg-elevated: #243456;
+
+  /* Text — cool ice blue-grays */
+  --kz-text-primary: #eef3fb;
+  --kz-text-secondary: #9fb0c9;
+  --kz-text-tertiary: #5d6f8a;
+
+  /* Accent — royal blue */
+  --kz-accent: #3b82f6;
+  --kz-accent-hover: #60a5fa;
+  --kz-accent-light: #93c5fd;
+
+  /* Secondary — sky blue */
+  --kz-secondary: #38bdf8;
+
+  /* Brand gradient — azure → royal → sky */
+  --kz-gradient: linear-gradient(135deg, #60a5fa, #3b82f6, #38bdf8);
+
+  /* Status */
+  --kz-success: #10b981;
+  --kz-warning: #facc15;
+  --kz-danger: #ef4444;
+
+  /* Borders */
+  --kz-border: rgba(255, 255, 255, 0.1);
+  --kz-border-subtle: rgba(255, 255, 255, 0.06);
+
+  /* ── Infima mapping (royal-blue scale, base #60a5fa) ── */
+  --ifm-color-primary-lightest: #dbeafe;
+  --ifm-color-primary-lighter: #bfdbfe;
+  --ifm-color-primary-light: #93c5fd;
   --ifm-color-primary: #60a5fa;
   --ifm-color-primary-dark: #3b82f6;
   --ifm-color-primary-darker: #2563eb;
   --ifm-color-primary-darkest: #1d4ed8;
-  --ifm-color-primary-light: #93c5fd;
-  --ifm-color-primary-lighter: #bfdbfe;
-  --ifm-color-primary-lightest: #dbeafe;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+
+  --ifm-background-color: var(--kz-bg);
+  --ifm-background-surface-color: var(--kz-bg-panel);
+  --ifm-font-color-base: var(--kz-text-primary);
+  --ifm-heading-color: var(--kz-text-primary);
+  --ifm-navbar-link-color: var(--kz-text-secondary);
+  --ifm-navbar-link-hover-color: var(--kz-accent-hover);
+  --ifm-link-color: var(--kz-accent-hover);
+  --ifm-link-hover-color: var(--kz-accent-light);
+  --ifm-blockquote-color: var(--kz-text-secondary);
+  --ifm-code-font-size: 95%;
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular',
+    Consolas, 'Liberation Mono', Menlo, monospace;
+  --ifm-tabs-color-active-border: var(--kz-accent);
+  --ifm-tabs-color-active: var(--kz-accent-hover);
+  --docusaurus-highlighted-code-line-bg: rgba(59, 130, 246, 0.16);
+  --ifm-color-success: var(--kz-success);
+  --ifm-color-warning: var(--kz-warning);
+  --ifm-color-danger: var(--kz-danger);
+  color-scheme: dark;
 }
 
-/* Certification badge styles */
+/* ── 2. Kazma design tokens — LIGHT (ice-blue paper) ────────────── */
+[data-theme='light'] {
+  --kz-bg: #f0f4fa;
+  --kz-bg-2: #e6edf7;
+  --kz-bg-panel: #ffffff;
+  --kz-bg-surface: #ffffff;
+  --kz-bg-elevated: #e6edf7;
+
+  --kz-text-primary: #0c1526;
+  --kz-text-secondary: #334155;
+  --kz-text-tertiary: #475569;
+
+  --kz-accent: #2563eb;
+  --kz-accent-hover: #1d4ed8;
+  --kz-accent-light: #2563eb;
+
+  --kz-secondary: #0284c7;
+
+  --kz-gradient: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
+
+  --kz-success: #059669;
+  --kz-warning: #ca8a04;
+  --kz-danger: #dc2626;
+
+  --kz-border: rgba(12, 21, 38, 0.1);
+  --kz-border-subtle: rgba(12, 21, 38, 0.07);
+
+  /* Infima scale around #2563eb */
+  --ifm-color-primary-lightest: #bfdbfe;
+  --ifm-color-primary-lighter: #93c5fd;
+  --ifm-color-primary-light: #60a5fa;
+  --ifm-color-primary: #2563eb;
+  --ifm-color-primary-dark: #1d4ed8;
+  --ifm-color-primary-darker: #1e40af;
+  --ifm-color-primary-darkest: #1e3a8a;
+
+  --ifm-background-color: var(--kz-bg);
+  --ifm-background-surface-color: var(--kz-bg-panel);
+  --ifm-font-color-base: var(--kz-text-primary);
+  --ifm-heading-color: var(--kz-text-primary);
+  --ifm-navbar-link-color: var(--kz-text-secondary);
+  --ifm-navbar-link-hover-color: var(--kz-accent);
+  --ifm-link-color: var(--kz-accent);
+  --ifm-link-hover-color: var(--kz-accent-hover);
+  --ifm-blockquote-color: var(--kz-text-secondary);
+  --docusaurus-highlighted-code-line-bg: rgba(37, 99, 235, 0.12);
+  --ifm-color-success: var(--kz-success);
+  --ifm-color-warning: var(--kz-warning);
+  --ifm-color-danger: var(--kz-danger);
+  color-scheme: light;
+}
+
+/* ── 3. Chrome — navbar, footer, sidebar ────────────────────────── */
+.navbar {
+  background: var(--kz-bg-2);
+  border-bottom: 1px solid var(--kz-border-subtle);
+  box-shadow: none;
+}
+
+.navbar__logo,
+.navbar__title {
+  color: var(--kz-text-primary);
+}
+
+.footer {
+  background: var(--kz-bg-2);
+  border-top: 1px solid var(--kz-border-subtle);
+}
+
+[data-theme='dark'] .menu__link--active:not(.menu__link--sublist) {
+  color: var(--kz-accent-hover);
+}
+
+/* Cards / admonitions pick up the surface token */
+.card {
+  background: var(--kz-bg-panel);
+  border-color: var(--kz-border-subtle);
+}
+
+/* ── 4. Landing-page hero — brand gradient ──────────────────────── */
+.hero--primary {
+  background-image: var(--kz-gradient);
+  background-color: var(--kz-accent);
+  color: #fff;
+}
+
+.hero__title {
+  background: linear-gradient(110deg, #ffffff, #e0ecff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero__subtitle {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.hero--primary .button--secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.hero--primary .button--secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+/* Primary buttons echo the brand gradient */
+.button--primary {
+  background-image: var(--kz-gradient);
+  background-color: var(--kz-accent);
+  border-color: transparent;
+}
+
+.button--primary:hover {
+  background-color: var(--kz-accent-hover);
+  color: #fff;
+}
+
+/* ── 5. Inline code + code blocks ───────────────────────────────── */
+code {
+  background: var(--kz-bg-elevated);
+  border: 1px solid var(--kz-border-subtle);
+}
+
+[data-theme='dark'] code {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── 6. Certification badge styles ──────────────────────────────── */
 .certification-badge {
   display: inline-flex;
   align-items: center;
@@ -32,35 +218,30 @@
   font-weight: 600;
 }
 
-.certification-badge.basic {
-  background: #dbeafe;
-  color: #1e40af;
-}
+.certification-badge.basic { background: #dbeafe; color: #1e40af; }
+.certification-badge.standard { background: #fef3c7; color: #92400e; }
+.certification-badge.premium { background: #ede9fe; color: #5b21b6; }
 
-.certification-badge.standard {
-  background: #fef3c7;
-  color: #92400e;
-}
+[data-theme='dark'] .certification-badge.basic { background: rgba(59,130,246,0.16); color: #93c5fd; }
+[data-theme='dark'] .certification-badge.standard { background: rgba(250,204,21,0.14); color: #fcd34d; }
+[data-theme='dark'] .certification-badge.premium { background: rgba(139,92,246,0.18); color: #c4b5fd; }
 
-.certification-badge.premium {
-  background: #ede9fe;
-  color: #5b21b6;
-}
-
-/* Skill card */
+/* ── 7. Skill card ──────────────────────────────────────────────── */
 .skill-card {
-  border: 1px solid var(--ifm-color-emphasis-300);
+  border: 1px solid var(--kz-border-subtle);
   border-radius: 8px;
   padding: 1.25rem;
   margin-bottom: 1rem;
-  transition: box-shadow 0.2s;
+  background: var(--kz-bg-panel);
+  transition: box-shadow 0.2s, border-color 0.2s;
 }
 
 .skill-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.18);
+  border-color: var(--kz-accent);
 }
 
-/* Security badge */
+/* ── 8. Security badge ──────────────────────────────────────────── */
 .security-badge {
   display: inline-flex;
   align-items: center;
@@ -76,7 +257,7 @@
 .security-badge.fair { background: #fef3c7; color: #92400e; }
 .security-badge.poor { background: #fee2e2; color: #991b1b; }
 
-[data-theme='dark'] .security-badge.excellent { background: #064e3b; color: #6ee7b7; }
-[data-theme='dark'] .security-badge.good { background: #1e3a8a; color: #93c5fd; }
-[data-theme='dark'] .security-badge.fair { background: #78350f; color: #fcd34d; }
-[data-theme='dark'] .security-badge.poor { background: #7f1d1d; color: #fca5a5; }
+[data-theme='dark'] .security-badge.excellent { background: rgba(16,185,129,0.16); color: #6ee7b7; }
+[data-theme='dark'] .security-badge.good { background: rgba(59,130,246,0.16); color: #93c5fd; }
+[data-theme='dark'] .security-badge.fair { background: rgba(250,204,21,0.14); color: #fcd34d; }
+[data-theme='dark'] .security-badge.poor { background: rgba(239,68,68,0.16); color: #fca5a5; }

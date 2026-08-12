@@ -29,6 +29,7 @@ const sidebars = {
         'guide/memory-and-rag',
         'guide/memory-best-path',
         'guide/security-and-safety',
+        'guide/commitment-layer',
         'guide/arabic-cultural-features',
         'guide/troubleshooting-and-workarounds',
         'guide/development',

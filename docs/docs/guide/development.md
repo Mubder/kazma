@@ -2,7 +2,7 @@
 id: development
 title: Development
 sidebar_label: Development
-description: Kazma Development — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Development — code-audited reference (unified docs, v0.9+)
 ---
 > Repository layout, environment setup, and the test/lint/typecheck commands used across the Kazma monorepo.
 

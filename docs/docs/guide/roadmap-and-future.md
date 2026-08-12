@@ -2,9 +2,9 @@
 id: roadmap-and-future
 title: Roadmap & Future
 sidebar_label: Roadmap & Future
-description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.9+)
 ---
-> An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Anchored to the v0.6.1+ codebase (post production-readiness).
+> An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Anchored to the v0.9+ codebase (post production-readiness).
 
 ---
 
@@ -156,4 +156,4 @@ Other open items:
 
 - This file intentionally resists over-promising. Where README/marketing copy describes a feature that is only partially wired, the status column says 🟡 with the specific reason.
 - The "Suggested next steps" are the audit's opinionated recommendations, prioritized by impact-to-effort ratio. They are not commitments.
-- This file reflects code reality as of v0.6.1+, not marketing futures.
+- This file reflects code reality as of v0.9+, not marketing futures.

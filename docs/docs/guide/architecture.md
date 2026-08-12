@@ -2,7 +2,7 @@
 id: architecture
 title: Architecture
 sidebar_label: Architecture
-description: Kazma Architecture — code-audited reference (unified docs, v0.6.1+)
+description: Kazma Architecture — code-audited reference (unified docs, v0.9+)
 ---
 > A deep, source-referenced breakdown of the Kazma engine: the supervisor brain, the data path from user intent to tool execution, and the subsystems that make it durable, safe, and multilingual.
 
@@ -338,6 +338,28 @@ Durable document ingest/parse/OCR/index/generate lives under
 (`jobs_pg.py`); document **metadata remains SQLite** (single-replica honesty on
 readiness). Full guide: [Document Intelligence](./document-intelligence.md) ·
 [Phase map](./document-phases.md) · [Security](../security/document-security.md).
+
+---
+
+## Safety & resilience (cross-cutting)
+
+Two cross-cutting subsystems sit across the supervisor and the tools:
+
+- **Non-Stop & Self-Healing engine.** `supervised_invoke()` wraps graph
+  execution with node heartbeats and stall detection; on a stall it rolls back
+  to the last durable checkpoint, injects a `[KAZMA RECOVERY]` reflection, and
+  resumes up to N attempts. Exhausted primary models fail over down
+  `agent.nonstop.failover.chain` with per-model cooldowns (without mutating the
+  active profile). A durable **LLM Call Ledger** (`kazma-data/llm_calls.db`)
+  records every call; stranded swarm tasks are requeued on startup; and a
+  watchdog auto-denies stale HITL approvals after
+  `safety.hitl.approval_timeout_seconds`. Details: [Recent features → Non-Stop](./recent-features#4d-non-stop-execution--self-healing-engine-2026-08).
+- **Commitment Layer (resolve-before-act).** A policy gate between the LLM and
+  durable mutations. Before scheduling/sending/executing/config-changing,
+  `authorize_effect` resolves intent against memory and policy; ambiguous acts
+  raise a **semantic clarify/confirm** interrupt card on every platform. It runs
+  in `tool_worker_node` before the HITL split so it can rewrite tool args first.
+  Dedicated guide: [Commitment Layer](./commitment-layer).
 
 ---
 

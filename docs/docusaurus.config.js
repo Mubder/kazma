@@ -16,6 +16,11 @@ const config = {
     defaultLocale: 'en',
     locales: ['en'],
   },
+  // Fonts match the web-app "ABYSS" design system (Inter + JetBrains Mono).
+  // Loaded via <link> in <head>, not a render-blocking @import in custom.css.
+  stylesheets: [
+    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap',
+  ],
   // Mermaid diagrams (architecture, swarm, HITL flows)
   markdown: {
     mermaid: true,
@@ -133,7 +138,7 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} Kazma AI. Unified docs under docs/ (v0.6.1+). Built with Docusaurus.`,
+        copyright: `Copyright © ${new Date().getFullYear()} Kazma AI. Unified docs under docs/ (v0.9+). Built with Docusaurus.`,
       },
       prism: {
         theme: prismThemes.github,

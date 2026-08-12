@@ -130,3 +130,26 @@ python scripts/verify_documents.py
 The regression tests (`tests/test_unified_document_layer.py`,
 `tests/test_docx_rtl_visual.py`) lock the bidi `jc=start` mapping, the
 complex-script `szCs/bCs`, the PPTX `algn`, and the cross-format theme tokens.
+
+---
+
+## 7. Rich-content features
+
+On top of the unified profile/direction layer, the engines ship several
+rich-content capabilities:
+
+| Feature | Where | Notes |
+|---|---|---|
+| **Code/syntax highlighting** | `documents/rich_render.py`, `engines/html.py` | Fenced code blocks get syntax-colored output in both **HTML and PDF** render paths. |
+| **XLSX charts** | `engines/xlsx.py` | `BarChart` / `LineChart` (+ more types) with **multi-series** support and **axis titles** via `add_chart`. |
+| **Image embedding** | `engines/docx.py`, `mutation_worker.py` | **Approved assets** can be embedded inline in DOCX (`add_picture`), HTML, and PDF (`InlineImage`-style) renders. Markdown image references resolve to approved assets. |
+| **Real PDF TOC** | PDF engine | Structural table-of-contents generated from heading outline (not just an outline field). |
+| **Clickable HTML TOC** | HTML engine | The HTML table-of-contents is hyperlinked — entries jump to their sections. |
+
+> **Approved assets only.** Image embedding resolves assets that have passed
+> intake approval; arbitrary inline image bytes are not rendered. This keeps the
+> generate/convert path consistent with the Document Intelligence security model
+> (see [Document security](../security/document-security)).
+
+Verification extends to these features — re-run `scripts/verify_documents.py`
+after touching the engines.

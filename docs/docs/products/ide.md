@@ -32,6 +32,21 @@ Both `file_write._get_workspace()` and `IdeService._resolve_workspace_root()` us
 
 Production may require an explicit workspace root. Path traversal is blocked with `normpath` + containment checks.
 
+### Path grants (outside-workspace access)
+
+Access outside the active workspace is **denied by default**, but can be opened
+with permission. Source of truth: `kazma_core/workspace/path_policy.py` +
+`workspace/path_grants.py`, wired through `IdeService.resolve`, `file_read` /
+`file_write`, file list/search/delete/append, and the shell path checks.
+
+| How | Effect |
+|-----|--------|
+| **Chat (smooth)** | When a file tool fails on an outside-workspace path, the agent calls `request_path_access` (a danger-tier HITL card). On approval a **session grant** (~1h TTL) is created and the tool retries. |
+| **Settings / API** | Durable extra roots via `workspace.extra_roots` + `GET/PUT /api/workspace/extra_roots` (`path`, `mode`: `read` \| `write`, `label`). Persist until removed. |
+
+Read grants never allow writes. Denial messages tell the agent how to request a
+grant, so the loop is smooth rather than a hard failure.
+
 ## Operations
 
 | Action | HITL | Notes |
