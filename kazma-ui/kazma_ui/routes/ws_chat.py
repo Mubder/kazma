@@ -21,11 +21,14 @@ from starlette.websockets import WebSocketState
 
 from kazma_core.tracing.events import EventBridge, TelemetryEvent
 from kazma_ui.active_turns import (
+    bind_live_socket,
     cancel_turn,
     get_active_turn,
+    get_live_socket,
     mark_turn_orphaned,
     reap_stale_turn,
     register_turn,
+    unbind_live_socket,
     unregister_turn,
 )
 from kazma_ui.session_manager import get_session_manager
@@ -62,28 +65,42 @@ def _ws_recursion_limit(thread_id: str | None = None) -> int:
         return 100
 
 
-def _make_ws_sender(websocket: WebSocket) -> tuple[Callable[[dict[str, Any]], Any], Callable[[], bool]]:
-    """Return (send, is_lost) around ``websocket.send_json`` that never raises.
+def _make_ws_sender(
+    websocket: WebSocket,
+    thread_id: str = "",
+) -> tuple[Callable[[dict[str, Any]], Any], Callable[[], bool]]:
+    """Return (send, is_lost) around live WebSocket delivery that never raises.
 
-    After the client disconnects (page refresh / tab switch) every send raises.
-    Previously that exception aborted the ``async for`` over the LangGraph
-    ``astream_events`` generator, which CANCELLED the graph mid-flight — the
-    "agent stops responding / no output after switching tabs" bug.  ``send``
-    records the loss and returns False; callers must keep draining the event
-    stream and let the turn complete + persist instead of dying with the socket.
+    After the client disconnects (page refresh / tab switch) every send used to
+    raise and abort the LangGraph ``astream_events`` generator mid-flight —
+    the classic "agent stops after switching tabs" bug.  ``send`` now:
+
+    1. Prefer the **live** socket for *thread_id* (rebound on reconnect via
+       ``bind_live_socket``) so ``turn_complete`` reaches the new tab.
+    2. Fall back to the socket that started the turn.
+    3. Return False on loss — callers keep draining the graph and persist.
     """
 
+    def _target() -> WebSocket:
+        if thread_id:
+            live = get_live_socket(thread_id)
+            if live is not None:
+                return live  # type: ignore[return-value]
+        return websocket
+
     def is_lost() -> bool:
+        ws = _target()
         try:
-            return websocket.client_state != WebSocketState.CONNECTED
+            return ws.client_state != WebSocketState.CONNECTED
         except Exception:
-            return False
+            return True
 
     async def send(payload: dict[str, Any]) -> bool:
-        if is_lost():
-            return False
+        ws = _target()
         try:
-            await websocket.send_json(payload)
+            if ws.client_state != WebSocketState.CONNECTED:
+                return False
+            await ws.send_json(payload)
             return True
         except Exception:
             return False
@@ -551,6 +568,9 @@ def create_ws_chat_router(
         logger.info("[WS-Chat] Client connected: session_id=%s", session_id)
 
         session, thread_id = _get_session_and_thread(session_id)
+        # Rebind live delivery so an in-flight orphaned turn (previous tab /
+        # socket) resumes streaming + turn_complete on THIS connection.
+        bind_live_socket(thread_id, websocket)
         # LangGraph default recursion_limit is 25 — far too low for multi-tool
         # turns. Derive from long-task / agent.max_iterations (same as gateway).
         config: dict[str, Any] = {
@@ -1189,7 +1209,7 @@ def create_ws_chat_router(
                             set_current_thread_id,
                         )
 
-                        send, is_lost = _make_ws_sender(websocket)
+                        send, is_lost = _make_ws_sender(websocket, thread_id)
                         assistant_content_acc = ""
                         activity_log: list[dict[str, Any]] = []
                         thought_recorded: list[bool] = [False]
@@ -1690,7 +1710,9 @@ def create_ws_chat_router(
                             set_current_thread_id,
                         )
 
-                        send, is_lost = _make_ws_sender(websocket)
+                        send, is_lost = _make_ws_sender(
+                            websocket, target_thread_id or thread_id
+                        )
                         assistant_content_acc = ""
                         activity_log: list[dict[str, Any]] = []
                         thought_recorded: list[bool] = [False]
@@ -2021,11 +2043,29 @@ def create_ws_chat_router(
         except Exception as exc:
             logger.exception("[WS-Chat] WebSocket error: %s", exc)
         finally:
+            # Only unbind if THIS socket is still the live one — a newer
+            # reconnect may already own delivery for this thread.
+            try:
+                unbind_live_socket(thread_id, websocket)
+            except Exception:
+                logger.debug(
+                    "[WS-Chat] unbind_live_socket failed session=%s",
+                    session_id[:12] if session_id else "?",
+                    exc_info=True,
+                )
             # DETACHED: do NOT cancel active_task. The graph keeps running in
-            # the background; the checkpointer + SSE done_callback persist the
-            # result. The client will pick it up on reconnect/reload.
+            # the background; the checkpointer + SessionStore persist the
+            # result. Live rebind (above) + client poll pick it up on reconnect.
             if active_task and not active_task.done():
                 logger.info("[WS-Chat] Detached stream task continues in background for session=%s", session_id)
+                # Stamp orphan only when no replacement socket is live —
+                # otherwise a race (new conn accepted before old finally)
+                # would re-arm the TTL while the user is watching.
+                try:
+                    if get_live_socket(thread_id) is None:
+                        mark_turn_orphaned(thread_id)
+                except Exception:
+                    pass
 
     return router
 

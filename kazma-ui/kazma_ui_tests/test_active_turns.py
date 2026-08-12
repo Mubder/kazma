@@ -18,10 +18,12 @@ def _clean_registry():
     with at._lock:
         at._turns.clear()
         at._orphaned_at.clear()
+        at._live_sockets.clear()
     yield
     with at._lock:
         at._turns.clear()
         at._orphaned_at.clear()
+        at._live_sockets.clear()
 
 
 class TestRegisterAndOrphan:
@@ -159,6 +161,32 @@ class TestCancelTurn:
         replacement.cancel()
         with pytest.raises(asyncio.CancelledError):
             await replacement
+
+
+class TestLiveSocketRebind:
+    """WS tab-switch rebind: delivery follows the newest socket."""
+
+    def test_bind_clears_orphan_and_unbind_is_conditional(self):
+        sock_a = object()
+        sock_b = object()
+        task = object()
+        # Fake done() for mark_turn_orphaned
+        class T:
+            def done(self):
+                return False
+        at.register_turn("t1", T())
+        at.mark_turn_orphaned("t1")
+        assert at.get_orphan_stamp("t1") is not None
+
+        at.bind_live_socket("t1", sock_a)
+        assert at.get_live_socket("t1") is sock_a
+        assert at.get_orphan_stamp("t1") is None
+
+        at.bind_live_socket("t1", sock_b)
+        at.unbind_live_socket("t1", sock_a)  # stale close
+        assert at.get_live_socket("t1") is sock_b
+        at.unbind_live_socket("t1", sock_b)
+        assert at.get_live_socket("t1") is None
 
 
 if __name__ == "__main__":

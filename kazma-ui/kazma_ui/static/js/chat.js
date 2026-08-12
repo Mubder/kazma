@@ -203,58 +203,142 @@
     // Load sessions after models are loaded
     loadSessions();
 
-    // Refresh the sidebar session list when the tab regains focus.
-    // Also check if an active SSE stream stalled while backgrounded.
+    // Refresh the sidebar + reconcile delivery whenever the tab is shown.
+    // Browser throttling freezes timers/streams while hidden; the durable
+    // SessionStore is source of truth when WS/SSE frames were missed.
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
         if (showArchived) loadArchivedSessions(); else loadSessions();
-        // If a stream was active when we left, check if the backend is
-        // still generating or if the fetch reader died. Reconnect if needed.
-        if (activeStream && lastActivityTs) {
-          var stallMs = Date.now() - lastActivityTs;
-          if (stallMs > 5000) {
-            // Stream stalled for >5s while backgrounded — check server status.
-            _checkBackgroundGeneration();
-          }
-        } else if (chatSessionId) {
-          // No active stream but we have a session — check if generating
-          _checkBackgroundGeneration();
+        if (chatSessionId) {
+          _reconcileDelivery('visibility');
         }
       }
     });
+    // Some browsers (esp. mobile) fire pageshow/focus without visibilitychange.
+    window.addEventListener('pageshow', function() {
+      if (chatSessionId && !document.hidden) _reconcileDelivery('pageshow');
+    });
+    window.addEventListener('focus', function() {
+      if (chatSessionId && !document.hidden) _reconcileDelivery('focus');
+    });
+  }
 
-    // Check if a background turn is running (called on load + visibility change)
-    function _checkBackgroundGeneration() {
-      if (!chatSessionId) return;
-      fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
+  /**
+   * Single recovery path after tab hide/show, idle watchdog, or WS drop.
+   * Always consults SessionStore — never trusts client _isGenerating alone.
+   */
+  var _reconcileInFlight = false;
+  var _lastReconcileTs = 0;
+  function _reconcileDelivery(reason) {
+    if (!chatSessionId) return;
+    var now = Date.now();
+    // Debounce burst of visibility+focus+pageshow on the same resume.
+    if (_reconcileInFlight || (now - _lastReconcileTs) < 400) return;
+
+    // Cheap skip: nothing suggests an in-flight/missing reply.
+    var expectReply = !!_awaitingReply || !!_isGenerating;
+    try {
+      var store0 = window.Alpine && Alpine.store && Alpine.store('agent');
+      if (store0 && (store0._turnActive || store0.isThinking)) expectReply = true;
+    } catch (e) { /* ignore */ }
+    // Recent activity (10 min) — covers tab-switch before _awaitingReply was set
+    // on older code paths; cleared when delivery is confirmed.
+    if (!expectReply && lastActivityTs && (now - lastActivityTs) < 10 * 60 * 1000) {
+      expectReply = true;
+    }
+    // Nuclear poll always has _awaitingReply; visibility without pending can skip.
+    if (!expectReply && reason !== 'nuclear-poll' && reason !== 'check') {
+      return;
+    }
+
+    _reconcileInFlight = true;
+    _lastReconcileTs = now;
+    var sid = chatSessionId;
+
+    Promise.all([
+      fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/status')
         .then(function(r) { return r.ok ? r.json() : null; })
-        .then(function(data) {
-          if (!data || !chatSessionId) return;
-          if (data.generating) {
-            // Still generating — abort the stale SSE reader (it's dead from
-            // the background-tab throttle) but DON'T reload or show a
-            // placeholder. The delivery poll (started in beginTurn) is still
-            // running and will reload when the turn finishes. The user sees
-            // exactly what they left (frozen CoT) — no jarring reload.
-            if (activeStream) {
-              try { activeStream.abort(); } catch (e) { /* already dead */ }
-              activeStream = null;
-            }
-          } else if (activeStream || lastActivityTs) {
-            // Turn finished while we were away — reload to show the result.
-            activeStream = null;
-            loadSession(chatSessionId);
-          }
-        })
-        .catch(function() { /* network error — ignore */ });
-    }
+        .catch(function() { return null; }),
+      fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/messages')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .catch(function() { return null; }),
+    ]).then(function(pair) {
+      _reconcileInFlight = false;
+      if (chatSessionId !== sid) return;
+      var status = pair[0] || {};
+      var messages = pair[1];
+      var generating = !!status.generating;
+      var lastMsg = (messages && messages.length) ? messages[messages.length - 1] : null;
 
-    function _showGeneratingIndicator() {
-      // Show typing indicator if not already visible
-      if (typingEl && typingEl.style.display === 'none') {
-        KS.showTyping(typingEl, 'Generating response');
+      if (generating) {
+        // Still running: drop dead SSE handle, keep waiting, arm poller.
+        if (activeStream) {
+          try { activeStream.abort(); } catch (e) { /* already dead */ }
+          activeStream = null;
+        }
+        _awaitingReply = true;
+        if (!_isGenerating) {
+          // UI unlocked but server still working — keep a soft indicator.
+          try {
+            if (typingEl && KS.showTyping) {
+              KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
+            }
+          } catch (e2) { /* ignore */ }
+        }
+        _pollBackgroundTurn(sid, (messages && messages.length) || 0);
+        return;
       }
-    }
+
+      // Server idle with a durable assistant answer — paint if DOM is stale.
+      if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
+        if (_domMissingAssistantReply(lastMsg.content)) {
+          _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
+        }
+        _awaitingReply = false;
+        lastActivityTs = 0;
+        try {
+          var st = window.Alpine && Alpine.store && Alpine.store('agent');
+          if (st) { st._turnActive = false; st.isThinking = false; }
+        } catch (e3) { /* ignore */ }
+        if (_isGenerating) endTurn();
+        else {
+          try { if (typingEl && KS.hideTyping) KS.hideTyping(typingEl); } catch (e4) {}
+        }
+        return;
+      }
+
+      // Idle with pending/empty assistant or trailing user — keep polling briefly.
+      if (expectReply || (lastMsg && lastMsg.role === 'user') || (lastMsg && lastMsg.pending)) {
+        _awaitingReply = true;
+        _pollBackgroundTurn(sid, (messages && messages.length) || 0);
+      } else {
+        _awaitingReply = false;
+        lastActivityTs = 0;
+      }
+    }).catch(function() {
+      _reconcileInFlight = false;
+    });
+  }
+
+  /** True when the last assistant bubble does not already show *content*. */
+  function _domMissingAssistantReply(content) {
+    if (!messagesEl || !content) return true;
+    var nodes = messagesEl.querySelectorAll('.message-assistant .message-text');
+    if (!nodes.length) return true;
+    var last = nodes[nodes.length - 1];
+    var shown = (last.textContent || '').trim();
+    var want = String(content).trim();
+    if (!shown) return true;
+    if (shown === want) return false;
+    // Partial stream vs full final — treat as missing if significantly shorter.
+    if (shown.length + 40 < want.length) return true;
+    if (want.indexOf(shown.slice(0, Math.min(60, shown.length))) === 0) return true;
+    return false;
+  }
+
+  // Back-compat name used on init / older call sites.
+  function _checkBackgroundGeneration() {
+    _reconcileDelivery('check');
   }
 
   // ── Slash commands (discoverable in Web UI) ───────────
@@ -427,25 +511,16 @@
     }
   }
 
-  // ── NUCLEAR DELIVERY: setInterval-based poll, completely independent ──
-  // The WS handler corrupts _isGenerating/endTurn state. Every fix built on
-  // those flags gets undermined. This uses a SEPARATE flag (_awaitingReply)
-  // that is ONLY set in sendMessage() and ONLY cleared in loadSession() —
-  // the WS/SSE lifecycle cannot touch it. The setInterval runs forever and
-  // checks every 3s: is the server done? If yes → reload. Bulletproof.
+  // ── NUCLEAR DELIVERY: setInterval-based poll, independent of WS/SSE ──
+  // _awaitingReply is set on send and cleared only when SessionStore shows a
+  // durable assistant reply (or loadSession). WS premature endTurn cannot
+  // clear it. On each tick: if server idle → soft-apply from messages API
+  // (no full loadSession wipe — that caused blink loops and races).
   var _awaitingReply = false;
   setInterval(function() {
     if (!chatSessionId || !_awaitingReply) return;
-    fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (!data || !chatSessionId || !_awaitingReply) return;
-        if (!data.generating) {
-          _awaitingReply = false;
-          loadSession(chatSessionId);
-        }
-      })
-      .catch(function() {});
+    // Prefer the shared reconciler (status + messages in one shot).
+    _reconcileDelivery('nuclear-poll');
   }, 3000);
 
   /** Call on every live frame (token/tool/status) so long multi-tool turns stay open. */
@@ -503,6 +578,9 @@
     _isGenerating = true;
     _awaitingApproval = false;
     _lastTurnActivityTs = Date.now();
+    // Keep visibility recovery armed even if no token frames arrive before
+    // the user switches tabs (WS can be silent for seconds at turn start).
+    lastActivityTs = _lastTurnActivityTs;
     _armTurnWatchdog();
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
@@ -3233,13 +3311,18 @@
     function poll() {
       _bgPollTimer = null;
       if (chatSessionId !== sessionId) { _stopBackgroundPoll(); return; }
+      // Live SSE stream still owns the pipe — don't fight it.
       if (activeStream) { _stopBackgroundPoll(); return; }
-      // Live WS turn — do not hammer SessionStore; wait for stream frames.
+      // IMPORTANT: do NOT skip SessionStore just because agentStore._turnActive
+      // is true. After a tab-switch reconnect the server may set
+      // "Reconnected — previous turn still running…" which leaves _turnActive
+      // stuck forever while the real turn finished on a dead socket. Always
+      // poll SessionStore; only slow the cadence slightly when WS looks live.
+      var wsLooksLive = false;
       try {
         var store = window.Alpine && Alpine.store && Alpine.store('agent');
         if (store && store.connectionStatus === 'connected' && store._turnActive) {
-          _schedule(Math.min(delayMs, 8000));
-          return;
+          wsLooksLive = true;
         }
       } catch (e) { /* ignore */ }
 
@@ -3269,11 +3352,27 @@
           // Only paint if we were watching a pending/background turn, or the
           // count grew (new reply). Avoid re-render loops on already-complete chats.
           var grew = originalCount > 0 && messages.length > originalCount;
-          if (sawPending || grew || attempts <= 2) {
+          var domMiss = _domMissingAssistantReply(lastMsg.content);
+          if (sawPending || grew || attempts <= 2 || domMiss || _awaitingReply) {
             _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
+            _awaitingReply = false;
+            try {
+              var stDone = window.Alpine && Alpine.store && Alpine.store('agent');
+              if (stDone) { stDone._turnActive = false; stDone.isThinking = false; }
+            } catch (e2) { /* ignore */ }
+            if (_isGenerating) endTurn();
           }
           _stopBackgroundPoll();
           return;
+        }
+
+        // Server idle but WS store still thinks a turn is active — heal it.
+        if (!generating && wsLooksLive && attempts >= 2) {
+          try {
+            var stHeal = window.Alpine && Alpine.store && Alpine.store('agent');
+            if (stHeal) { stHeal._turnActive = false; stHeal.isThinking = false; }
+          } catch (e3) { /* ignore */ }
+          if (_isGenerating) endTurn();
         }
 
         // Message count grew with non-pending assistant earlier in the list
@@ -3564,7 +3663,13 @@
       KS.hideTyping(typingEl);
       activeTypingEl = null;
       if (!content) return;
-      noteTurnActivity();
+      // Durable final paint — release nuclear delivery wait.
+      // Do NOT call noteTurnActivity here: that re-arms lastActivityTs and
+      // would make the next tab-focus think a reply is still pending.
+      if (String(content).trim()) {
+        _awaitingReply = false;
+        lastActivityTs = 0;
+      }
       if (!currentMsgEl) {
         // Prefer reusing the last assistant bubble so soft-apply / late
         // turn_complete after endTurn never create a duplicate bubble.

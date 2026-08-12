@@ -670,6 +670,15 @@ document.addEventListener('alpine:init', () => {
               state: 'running',
             });
             this._syncThinkingBanner();
+            // Reconnect catch-up ("previous turn still running") — arm SessionStore
+            // poll so a turn that finishes on a rebound/dead socket still paints.
+            if (/reconnected|still running/i.test(this.statusMessage || '')) {
+              try {
+                if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
+                  window.KazmaChat.pollBackgroundTurn(this.sessionId, 0);
+                }
+              } catch (e) { /* ignore */ }
+            }
           } else if (statusVal === 'routing_node') {
             this.isThinking = true;
             this._turnActive = true;
