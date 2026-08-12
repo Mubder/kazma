@@ -427,46 +427,26 @@
     }
   }
 
-  // ── Delivery poll: guaranteed response delivery independent of SSE/WS ──
-  // Both SSE (fetch ReadableStream) and WS can silently stall or fire
-  // premature endTurn() calls. This poll is the BACKSTOP: it runs on its
-  // OWN session-scoped lifecycle, independent of _isGenerating/endTurn.
-  // Only the poll itself stops it (when /status says done) or loadSession
-  // (new session load). endTurn() does NOT stop it.
-  var _deliveryPollTimer = null;
-  var _deliveryPollSid = null;
-  function _startDeliveryPoll() {
-    if (_deliveryPollTimer) clearTimeout(_deliveryPollTimer);
-    _deliveryPollSid = chatSessionId;
-    _deliveryPollTimer = setTimeout(_deliveryPoll, 10000);
-    console.log('[KazmaChat] Delivery poll armed for session ' + (_deliveryPollSid || '').slice(0, 8) + ' (10s delay)');
-  }
-  function _stopDeliveryPoll() {
-    if (_deliveryPollTimer) { clearTimeout(_deliveryPollTimer); _deliveryPollTimer = null; }
-    _deliveryPollSid = null;
-  }
-  function _deliveryPoll() {
-    _deliveryPollTimer = null;
-    var sid = _deliveryPollSid;
-    if (!sid || sid !== chatSessionId) return; // stopped or session changed
-    fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/status')
+  // ── NUCLEAR DELIVERY: setInterval-based poll, completely independent ──
+  // The WS handler corrupts _isGenerating/endTurn state. Every fix built on
+  // those flags gets undermined. This uses a SEPARATE flag (_awaitingReply)
+  // that is ONLY set in sendMessage() and ONLY cleared in loadSession() —
+  // the WS/SSE lifecycle cannot touch it. The setInterval runs forever and
+  // checks every 3s: is the server done? If yes → reload. Bulletproof.
+  var _awaitingReply = false;
+  setInterval(function() {
+    if (!chatSessionId || !_awaitingReply) return;
+    fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
-        if (_deliveryPollSid !== sid) return; // stopped
-        if (data && !data.generating) {
-          // Turn finished — ALWAYS reload to get the complete persisted
-          // response. loadSession replaces the entire chat, so there's no
-          // duplication even if the WS handler also delivered partial content.
-          _deliveryPollSid = null;
-          loadSession(sid);
-        } else {
-          _deliveryPollTimer = setTimeout(_deliveryPoll, 3000);
+        if (!data || !chatSessionId || !_awaitingReply) return;
+        if (!data.generating) {
+          _awaitingReply = false;
+          loadSession(chatSessionId);
         }
       })
-      .catch(function(err) {
-        if (_deliveryPollSid === sid) _deliveryPollTimer = setTimeout(_deliveryPoll, 5000);
-      });
-  }
+      .catch(function() {});
+  }, 3000);
 
   /** Call on every live frame (token/tool/status) so long multi-tool turns stay open. */
   function noteTurnActivity() {
@@ -524,8 +504,6 @@
     _awaitingApproval = false;
     _lastTurnActivityTs = Date.now();
     _armTurnWatchdog();
-    _startDeliveryPoll(); // guaranteed delivery safety net (independent of SSE)
-    console.log('[KazmaChat] beginTurn — delivery poll armed (10s delay)');
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
       var oldProg = currentMsgEl.querySelector('.agent-progress');
@@ -551,7 +529,6 @@
 
   function endTurn() {
     _clearTurnTimers();
-    // NOTE: _stopDeliveryPoll() is intentionally NOT called here.
     _isGenerating = false;
     _awaitingApproval = false;
     // Clear the WS store's thinking/turnActive status. The WS reconnect
@@ -1226,6 +1203,11 @@
     // Sidebar: show this season immediately (before the server list round-trip).
     // Critical for WS path which used to skip loadSessions entirely.
     noteSessionActivity(text || content);
+
+    // Arm the nuclear delivery poll — set BEFORE any transport dispatch.
+    // This flag is ONLY cleared in loadSession() (when we re-render from
+    // the server). The WS/SSE/endTurn lifecycle CANNOT touch it.
+    _awaitingReply = true;
 
     // Route over Central WebSocket Telemetry Bus if connected
     const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
@@ -3051,6 +3033,9 @@
   }
 
   function loadSession(sessionId) {
+    // Clear the nuclear delivery flag — we're loading from server, so the
+    // response IS being delivered. The setInterval poll will no-op.
+    _awaitingReply = false;
     // Abort any in-flight turn from the previous session so Stop never sticks.
     if (activeStream) {
       try { activeStream.abort(); } catch (e) {}
