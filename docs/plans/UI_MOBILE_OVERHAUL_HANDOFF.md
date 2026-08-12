@@ -1,6 +1,6 @@
 # Handoff — Kazma Web UI overhaul (mobile + desktop)
 
-**Status date:** 2026-08-12  
+**Status date:** 2026-08-12 (full P1–P4 + defects sweep shipped; awaiting phone verify)
 **Keep this file current.** Update the “Now / Next / Log” sections after every slice so another agent can pick up without rereading the chat.
 
 **Do not** start a React / Vue / Svelte / native rewrite. Stack stays FastAPI + Jinja + Alpine + `kazma.css` / `kazma.v5.css`.
@@ -46,9 +46,15 @@ After Phase 0 shipped and the user pulled: **chat canvas is much better**. New r
 
 | When | Commit / slice | What |
 |------|----------------|------|
-| 2026-08-12 | `855e6eb8` `fix(ui): stop iOS Safari painting its dark canvas over Kazma themes` | Phase 0 canvas |
-| 2026-08-12 | (prior commit) | P0 Light contrast + handoff file |
-| 2026-08-12 | this commit | **P1 token unification** — see §4 |
+| 2026-08-12 | `855e6eb8` | Phase 0 canvas (iOS Safari dark-canvas leak) |
+| 2026-08-12 | (prior) | P0 Light contrast + handoff file |
+| 2026-08-12 | `4315ca4a` | **P1** token unification — one Abyss table in kazma.css; v5 stripped to shell polish |
+| 2026-08-12 | `2fef3fc5` | **P2a** mobile `.page-body` dock clearance (longhand padding in Tiers 3/5) |
+| 2026-08-12 | `d8855785` | **P2b** 769–1280px icon-rail dead strip removed (sidebar stays full, toggle-driven) |
+| 2026-08-12 | `3bdd5bf2` | **P2c** phone chrome — opaque header/dock, retire hamburger, visualViewport composer |
+| 2026-08-12 | `cab4f5d1` | **P3** x-show + inline `display:flex` blink purge (Workspace/Memory/Settings/base) |
+| 2026-08-12 | `53be7a83` | **P4** delete orphaned `index.html` (soft-nav + HTMX intentionally kept — see §4) |
+| 2026-08-12 | `facdaa9b` | **Defects sweep** — code themes, Auto theme, AR/EN copy, welcome tile, `--error` |
 
 **Phase 0 (in `855e6eb8`) — do not re-do as “add html { background }”:**
 
@@ -68,57 +74,55 @@ After Phase 0 shipped and the user pulled: **chat canvas is much better**. New r
 
 ---
 
-## 4. Now (open — start here)
+## 4. Now — full P1–P4 + defects sweep shipped; awaiting phone verify
 
-### P1 — Token unification — **done, shipping with this commit**
+All six planned slices (P1, P2a, P2b, P2c, P3, P4) **plus** the "Other known
+defects" sweep are committed (see §3). Each slice is its own commit so a
+visual regression can be bisected/reverted independently.
 
-**Goal:** fold Abyss into ONE token table; kill the v4 cyan/indigo/violet leftovers.
+**Verify on a real iPhone (required) + desktop after pull + restart:**
+- Both Kazma themes: no cyan/indigo/violet bleed; one blue family everywhere.
+- Phones: last Dashboard/Settings/Workspace rows NOT under the tab bar.
+- 769–1280px (small laptop): full sidebar with labels + visible collapse toggle; no dead strip.
+- Phones: opaque header + dock (no gray bleed under safe-area); composer stays visible when keyboard opens.
+- Light theme: code blocks render light (CodeMirror + highlight.js); welcome logo not a black square.
+- Settings: Auto theme preview applies (resolves OS preference live).
+- AR ↔ EN toggle: confirm dialog shows in the CURRENT language.
+- No first-paint blink on Workspace modals / Settings badges / Memory pagers.
 
-**Shipped:**
+**Known invariants to preserve (do not regress):**
+- ONE token table (kazma.css §1/§23). Do NOT reintroduce a token table in kazma.v5.css or any `#22d3ee`/`#5e6ad2`/`#a78bfa` literal.
+- Do NOT lighten the Light muted-text values (#334155/#475569/#64748b) — P0 contrast fix.
+- Do NOT put `color-scheme: light dark` or remove the `html[data-theme]` single-value rules (Phase-0 iOS canvas).
+- Do NOT re-add inline `display:` on any `x-show`-gated element (AGENTS.md blink rule).
+- Keep `SOFT_NAV_ENABLED` + `HARD_RELOAD_ALWAYS` in nav.js as-is (working fallback).
 
-- `kazma.css §1 :root` (dark) rewritten from v4 cyan (`--accent:#22d3ee`) to Abyss royal (`--accent:#3b82f6`, sky secondary, deep blue-black `--bg:#0e1626`). `--brand`, `--bg-card` aliases added inline.
-- `kazma.css §23` Light + the `@media (prefers-color-scheme: light)` auto-light block folded to Abyss light (`--accent:#2563eb`, ice `--bg:#f0f4fa`). Kept the dark P0 muted-text values in BOTH blocks (do not lighten).
-- `--bg-card` now defined (dark + light) — fixes the `.search-panel` / global-search-chip missing-token defect.
-- All surviving component-rule literals purged and replaced with tokens:
-  `#a78bfa` → `var(--accent-light)`; `rgba(139,92,246,…)` → `rgba(var(--accent-rgb),…)`;
-  `rgba(94,106,210,…)` → `var(--accent-subtle)` / `rgba(var(--accent-rgb),…)`;
-  every `var(--accent, #5e6ad2)` fallback → `var(--accent)` (no indigo escape hatch).
-- Aurora body glow: cyan `rgba(34,211,238,…)` → sky `rgba(56,189,248,…)` (both tones now blue-family).
-- `kazma.v5.css` stripped of its duplicate dark/light/auto-light token tables (they fought kazma.css). v5 now = color-scheme rules (Phase-0 canvas fix, MUST stay) + shell/component polish only. Property-set diff confirmed: nothing v5 defined is lost.
-- `--warning`/`--warning-bg` aligned to yellow (`#facc15`/`rgba(250,204,21,…)`) across both files.
-- Test `test_has_accent_color` updated to assert Abyss royal (`#3b82f6`/`#2563eb`) instead of the purged cyan/indigo. **137 passed.**
-
-**Verify after pull/restart:** iPhone + desktop, both Kazma themes — no cyan/indigo/violet bleed anywhere; badges, active session pill, hint chips, reaction buttons, info toasts, aurora all read blue-family. Token edit surface is now one file (kazma.css §1/§23).
-
-**Do not** reintroduce a token table in kazma.v5.css, reintroduce `#22d3ee`/`#5e6ad2`/`#a78bfa`/`rgba(94,106,210,…)`/`rgba(139,92,246,…)`, or lighten the Light muted-text values (P0 regression).
-
-### Next: P2a — Mobile `.page-body` padding vs dock
-
-See §5. Dashboard/Settings/Workspace last rows sit under the tab bar because `padding: var(--sp-4)` overwrites `padding-bottom: dock`.
+### Deferred (real features, not one-line fixes — picked up separately)
+- **`accent_color`**: stored + edited in Settings but not applied. Deriving the full accent family (hover/subtle/glow/rgb/gradient) from one hex needs a color-math util; a half-implementation (just `--accent`) looks worse than none.
+- **Notification bell panel**: `$store.notifications.items` is always empty; a real panel needs a data source (SSE?) + read state + a rendered drawer. Out of scope for a CSS/bug-overhaul pass.
+- **Soft-nav "finish"**: soft-nav only fires for `/workspace` (every heavy page hard-reloads via `HARD_RELOAD_ALWAYS`). It's working, reliable fallback logic (~280 lines); making it soft-nav the SSE/CodeMirror/Alpine pages is a separate project. Left as-is.
+- **P3 cosmetic polish** (Chat/Dashboard/Settings-tab visual tweaks): the load-bearing P3 work (the `x-show`+inline-display blink purge) shipped; remaining page-by-page cosmetic polish is lower-severity and risk-heavy without a real device.
 
 ---
 
-## 5. Next (after P1 tokens)
+## 5. Next — post-overhaul backlog (the planned queue is empty)
 
-In order from the overhaul plan. Do **not** restyle all 16 pages in one PR.
+The P1–P4 + defects sweep queue from the original plan is **done**. What
+remains is the deferred-feature backlog (§4 "Deferred") and anything a
+phone verify surfaces. Pick up in roughly this order:
 
-| ID | Slice | Notes |
-|----|--------|------|
-| P2a | Mobile `.page-body` padding vs dock | Later `padding: var(--sp-4)` **overwrites** `padding-bottom: dock`. Dashboard/Settings/Workspace last rows sit under the tab bar. |
-| P2b | Laptop 769–1280 icon rail | Sidebar width 60px but `.main-content` still margin 250px → ~190px dead strip. Labels gone; collapse control hidden. **Fix:** keep labels; collapse is a user toggle only. |
-| P2c | Phone chrome | Compact header; delete hamburger (More is the menu); `visualViewport` for keyboard vs composer; opaque header/dock (no `color-mix(..., transparent)` over canvas). |
-| P3 | Page passes | Chat polish → Dashboard → Settings mobile tabs → Workspace `x-show`+`display:flex` → IDE/Swarm/Memory/Documents. |
-| P4 | Dead code | Soft-nav is enabled but almost every page hard-reloads — delete or finish. HTMX global for one MCP delete. Unused `index.html`. |
+| Item | Notes |
+|------|-------|
+| Phone verify of P1–P4 + sweep | The load-bearing gate. Fix anything that regresses before new work. |
+| `accent_color` feature | Color-math util to derive `--accent-*` family from one hex; wire into `saveAppearance`/`previewTheme`. |
+| Notification panel | A real `$store.notifications` data source + a rendered drawer component. |
+| Soft-nav finish (optional) | Make soft-nav handle SSE/CodeMirror/Alpine pages, or delete it and accept hard-reload everywhere. |
+| P3 cosmetic polish | Per-page visual passes (Chat/Dashboard/Settings tabs) once a device is in hand. |
 
-### Other known defects (do not lose)
-
-- Settings **Auto** is a button that does not SSR or apply (`_dynamic_theme` only accepts light\|dark).
-- Notification bell toggles an empty store — no panel.
-- Language-toggle confirm copy is swapped (AR UI gets English strings) in `components.js`.
-- `accent_color` in appearance is stored, not applied to `--accent`.
-- Welcome logo forced onto a black tile in both themes (`kazma.v5.css`).
-- CodeMirror `material-darker` + highlight.js `github-dark` even in Light.
-- `--error` is referenced (`.send-btn.stop-mode`, two `agent-activity` rules) but never defined — all three call sites already carry a `#ef4444` fallback (== `--danger`), so not visibly broken, but worth aliasing `--error: var(--danger)` in a future token pass.
+### Remaining known defects (post-sweep)
+- `accent_color` stored, not applied (see §4 Deferred).
+- Notification bell toggles an empty store — no panel (see §4 Deferred).
+- Soft-nav only fires for `/workspace` (working fallback; see §4 Deferred).
 
 ---
 
@@ -128,14 +132,16 @@ In order from the overhaul plan. Do **not** restyle all 16 pages in one PR.
 |------|------|
 | `kazma-ui/kazma_ui/templates/base.html` | viewport, color-scheme, theme-color, bottom-nav |
 | `kazma-ui/kazma_ui/templates/login.html` | standalone head — must stay in sync with base metas |
-| `kazma-ui/kazma_ui/templates/chat.html` | composer `#chat-input.chat-input` |
-| `kazma-ui/kazma_ui/static/css/kazma.css` | **single token table** (§1 dark, §23 light) + layout + components + 5-tier responsive |
-| `kazma-ui/kazma_ui/static/css/kazma.v5.css` | shell/component polish ONLY (sidebar/header/bottom-nav/dashboard/chat/swarm). color-scheme rules kept (Phase-0 canvas). No token table after P1. |
-| `kazma-ui/kazma_ui/static/js/modules/components.js` | `syncDocumentColorScheme`, theme toggle |
-| `kazma-ui/kazma_ui/static/js/app.js` | exports `window.syncDocumentColorScheme` |
-| `kazma-ui/kazma_ui/static/js/settings.js` | `saveAppearance` / `previewTheme` must call sync |
-| `kazma-ui/kazma_ui/app.py` | `_dynamic_theme()`, `css_version` includes v5 |
-| `tests/test_ui_components.py` | canvas contract tests |
+| `kazma-ui/kazma_ui/templates/chat.html` | composer `#chat-input.chat-input`; highlight.js theme (SSR via `theme()`) |
+| `kazma-ui/kazma_ui/static/css/kazma.css` | **single token table** (§1 dark, §23 light) + layout + components + 5-tier responsive + utility classes (`.ic-row`, `.ws-modal-overlay`, `.mem-pager`, `.spinner-inline`) |
+| `kazma-ui/kazma_ui/static/css/kazma.v5.css` | shell/component polish ONLY. color-scheme rules kept (Phase-0 canvas). NO token table after P1. |
+| `kazma-ui/kazma_ui/static/js/modules/components.js` | `syncDocumentColorScheme`, theme toggle, language-toggle confirm, boot appearance-fetch (resolves `auto`) |
+| `kazma-ui/kazma_ui/static/js/app.js` | exports `window.syncDocumentColorScheme`; `initPhoneViewport` (visualViewport → `--app-ivh`) |
+| `kazma-ui/kazma_ui/static/js/settings.js` | `saveAppearance` / `previewTheme` resolve `auto`; `_resolveAutoTheme` |
+| `kazma-ui/kazma_ui/static/js/ide.js` | CodeMirror theme picks `default`/`material-darker` from `data-theme` |
+| `kazma-ui/kazma_ui/static/js/modules/nav.js` | soft-nav (`SOFT_NAV_ENABLED` + `HARD_RELOAD_ALWAYS`) — kept as-is |
+| `kazma-ui/kazma_ui/app.py` | `_dynamic_theme()` resolves `auto`→dark (concrete for SSR); `css_version` includes v5 |
+| `tests/test_ui_components.py` | canvas contract tests; `test_has_accent_color` asserts Abyss royal |
 
 Live process on **9090 / my.kazma.ai** may be a **different checkout**. After a push the user must pull + restart that process. Workspace repo is `G:\GitHubRepos\kazma`.
 
@@ -165,8 +171,15 @@ Live process on **9090 / my.kazma.ai** may be a **different checkout**. After a 
 |------|----------------|--------|
 | 2026-08-12 | Phase 0 canvas (`855e6eb8`) | User: chat much better. Light text + white-on-white composer still broken. |
 | 2026-08-12 | Handoff file created | `docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md`. |
-| 2026-08-12 | P0 Light contrast | Composer uses theme ink; Light field elevated; muted text darkened. Next after verify: P1 tokens or P2a dock padding. |
-| 2026-08-12 | P1 token unification | ONE token table (kazma.css §1/§23); v5 stripped to shell polish; all cyan/indigo/violet literals purged; `--bg-card` defined; `test_has_accent_color` updated. 137 passed. Next after verify: P2a dock padding. |
+| 2026-08-12 | P0 Light contrast | Composer uses theme ink; Light field elevated; muted text darkened. |
+| 2026-08-12 | P1 token unification (`4315ca4a`) | ONE token table (kazma.css §1/§23); v5 stripped to shell polish; all cyan/indigo/violet literals purged; `--bg-card` defined; `test_has_accent_color` updated. 137 passed. |
+| 2026-08-12 | P2a dock clearance (`2fef3fc5`) | Tiers 3/5 `.page-body` use longhand padding; dock clearance survives. 137 passed. |
+| 2026-08-12 | P2b icon rail (`d8855785`) | 769–1280px auto-rail removed; sidebar full + toggle-driven (no dead strip). 137 passed. |
+| 2026-08-12 | P2c phone chrome (`3bdd5bf2`) | Opaque header/dock; hamburger retire; visualViewport → `--app-ivh` composer. 137 passed. |
+| 2026-08-12 | P3 blink purge (`cab4f5d1`) | All `x-show`+inline `display:` violations moved to CSS classes across Workspace/Memory/Settings/base. 137 passed. |
+| 2026-08-12 | P4 dead code (`53be7a83`) | Orphaned `index.html` deleted; soft-nav + HTMX kept (working). 139 passed. |
+| 2026-08-12 | Defects sweep (`facdaa9b`) | Code themes follow theme; Auto applies; AR/EN copy de-swapped; welcome tile Light; `--error` aliased. `accent_color` + bell panel deferred (features). 137 passed. |
+| 2026-08-12 | Full run complete | P1–P4 + sweep shipped. **Awaiting phone verify.** |
 
 ---
 
@@ -174,9 +187,12 @@ Live process on **9090 / my.kazma.ai** may be a **different checkout**. After a 
 
 ```
 Read docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md end-to-end. Do not rewrite the frontend.
-Start at section 4 (Now) — P1 tokens just shipped; next is P2a (mobile .page-body padding
-vs dock). After each slice: update sections 3, 4, 5, and 8 of the handoff, then wait for
-the user before starting the next ID in section 5.
-Verify Light theme composer + page text on a real phone if you touch color-scheme or tokens.
-Do NOT reintroduce a token table in kazma.v5.css or any #22d3ee / #5e6ad2 / #a78bfa literal.
+The full P1–P4 + defects sweep is shipped (§3); the planned queue is empty. Start at
+§4 (Now) — the priority is PHONE VERIFY of everything in §4's verify checklist. Fix any
+regression before new work. After §4 verifies, the only remaining work is the §4/§5
+Deferred backlog (accent_color feature, notification panel, soft-nav finish, cosmetic
+polish) — each is a real feature, not a one-line fix.
+Verify on a real iPhone if you touch color-scheme, tokens, or the mobile shell.
+Do NOT reintroduce a token table in kazma.v5.css, any #22d3ee / #5e6ad2 / #a78bfa
+literal, inline display: on an x-show element, or lighten the Light muted-text values.
 ```
