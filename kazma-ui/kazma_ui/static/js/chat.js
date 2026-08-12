@@ -3132,7 +3132,11 @@
         // re-rendered the whole transcript (page blink).
         var lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'assistant' && lastMsg.pending) {
-          if ((lastMsg.content || '').trim()) _showGeneratingIndicator();
+          if ((lastMsg.content || '').trim()) {
+            if (typeof typingEl !== 'undefined' && typingEl && typingEl.style.display === 'none') {
+              if (typeof KS !== 'undefined' && KS.showTyping) KS.showTyping(typingEl, 'Generating response');
+            }
+          }
           _pollBackgroundTurn(sessionId, messages.length);
         } else if (lastMsg && lastMsg.role === 'user') {
           // May have a detached turn with no assistant row yet — check status once via poller.
