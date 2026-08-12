@@ -3380,22 +3380,16 @@ tbody tr:last-child td {
    The icon-rail is explicitly scoped to min-width:769px so it never overrides
    the ≤768 RTL drawer behavior. */
 
-/* ── Tier 1: Tablet landscape / small desktop — icon rail ── */
+/* ── Tier 1: Tablet landscape / small desktop ──────────────────────
+   P2b: this tier USED to force an icon rail (.sidebar width:60px while
+   .main-content kept margin:250px → ~190px dead strip, labels gone,
+   collapse control hidden). The auto-rail is removed: the sidebar keeps
+   its full width + labels at 769–1280px, and collapse is a USER toggle
+   only (components.js sidebarCollapsed drives BOTH .sidebar.collapsed
+   and .main-content.sidebar-collapsed, so width and margin stay in sync).
+   Keep the collapse toggle visible here so users can reclaim space. */
 @media (max-width: 1280px) and (min-width: 769px) {
-  .sidebar { width: var(--sidebar-collapsed); }
-  .sidebar-header { justify-content: center; padding: 0; }
-  .sidebar-toggle { display: none; }
-  .sidebar .logo-text,
-  .sidebar .nav-label,
-  .sidebar .nav-kbd,
-  .sidebar .nav-section-title,
-  .sidebar .sidebar-collapsed-hide,
-  .sidebar .sidebar-footer-info { display: none; }
-  .nav-link { justify-content: center; padding: 0; min-height: var(--tap); }
-  .nav-icon { width: 22px; height: 22px; }
-  .sidebar-footer { align-items: center; padding: var(--sp-3) var(--sp-2); }
-  .sidebar-model-selector { display: none; }
-  .sidebar-user { justify-content: center; }
+  .sidebar-toggle { display: inline-flex; }
 }
 
 /* ── Bottom navigation (shown only on Tier 2 phones/tablets) ── */
