@@ -1,72 +1,88 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Kazma Design System v4 — design-b-modern
-   BG: #0a0f14 | Accent: #22d3ee (cyan) | Secondary: #3b82f6 (blue)
-   Font: Inter, system-ui, sans-serif | Grid texture background
+   Kazma Design System — "ABYSS" (token + layout + components)
+   BG: #0e1626 (dark) / #f0f4fa (light) | Accent: #3b82f6 royal
+   Secondary: #38bdf8 sky | Font: Inter, system-ui, sans-serif
+   The dark/light token tables live in §1 and §23; kazma.v5.css adds
+   shell polish on top. See docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md.
    ═══════════════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap');
 
-/* ── 1. CSS Variables — kazma.ai palette ─────────────────────────── */
+/* ── 1. CSS Variables — Kazma "ABYSS" palette ──────────────────────
+   This is the SINGLE dark token table. kazma.v5.css used to re-define
+   every token on top of this block (the two fought, and a v4 cyan set
+   leaked through wherever v5 didn't override). The v4 cyan palette has
+   been folded in here so both files now agree; v5 only carries shell
+   polish on top. Identity: royal #3b82f6 · sky #38bdf8 · deep blue-black.
+   See docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md §5 (P1). */
 :root {
 
-  /* Legacy aliases */
+  /* Legacy aliases (kept — components reference them) */
   --bg-deep: var(--bg);
   --bg-primary: var(--bg);
-  /* Backgrounds — deep charcoal like kazma.ai */
-  --bg: #0a0f14;
-  --bg-2: #0e141b;
-  --bg-panel: #11171f;
-  --bg-surface: #141c25;
-  --bg-elevated: #1a2332;
-  --bg-hover: rgba(34, 211, 238, 0.06);
-  --bg-active: rgba(34, 211, 238, 0.10);
+  /* Backgrounds — deep blue-black slate (Abyss) */
+  --bg: #0e1626;
+  --bg-2: #121b2e;
+  --bg-panel: #16223a;
+  --bg-surface: #1b2945;
+  --bg-elevated: #243456;
+  --bg-hover: rgba(59, 130, 246, 0.10);
+  --bg-active: rgba(59, 130, 246, 0.16);
   --tint: rgba(255, 255, 255, 0.025);
   --tint-strong: rgba(255, 255, 255, 0.05);
 
   /* Grid texture */
-  --grid: rgba(34, 211, 238, 0.03);
+  --grid: rgba(59, 130, 246, 0.04);
 
-  /* Text — cool slate */
-  --text-primary: #e6edf3;
-  --text-secondary: #b1bac4;
-  --text-tertiary: #8b949e;
-  --text-muted: #6e7681;
-  --text-inverse: #0a0f14;
+  /* Text — cool ice blue-grays */
+  --text-primary: #eef3fb;
+  --text-secondary: #9fb0c9;
+  --text-tertiary: #5d6f8a;
+  --text-muted: #4a5b78;
+  --text-inverse: #040815;
 
-  /* Accent — cyan (design-b) */
-  --accent: #22d3ee;
-  --accent-hover: #38dff2;
-  --accent-light: #67e8f9;
-  --accent-subtle: rgba(34, 211, 238, 0.12);
-  --accent-glow: rgba(34, 211, 238, 0.25);
-  --accent-rgb: 34, 211, 238;
-  --gradient-accent: linear-gradient(135deg, #22d3ee 0%, #0891b2 100%);
+  /* Accent — royal blue */
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-light: #93c5fd;
+  --accent-subtle: rgba(59, 130, 246, 0.12);
+  --accent-glow: rgba(59, 130, 246, 0.28);
+  --accent-rgb: 59, 130, 246;
+  --gradient-accent: linear-gradient(135deg, #60a5fa 0%, #3b82f6 55%, #38bdf8 100%);
 
-  /* Secondary — blue (kazma.ai secondary) */
-  --secondary: #3b82f6;
-  --secondary-hover: #60a5fa;
-  --secondary-light: #93c5fd;
-  --secondary-subtle: rgba(59, 130, 246, 0.12);
-  --secondary-glow: rgba(59, 130, 246, 0.20);
+  /* Secondary — sky blue */
+  --secondary: #38bdf8;
+  --secondary-hover: #7dd3fc;
+  --secondary-light: #bae6fd;
+  --secondary-subtle: rgba(56, 189, 248, 0.12);
+  --secondary-glow: rgba(56, 189, 248, 0.20);
 
-  /* Gradient accents — blue → sky → cyan */
-  --gradient-primary: linear-gradient(135deg, #3b82f6, #0ea5e9, #22d3ee);
-  --gradient-header: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 50%, #22d3ee 100%);
+  /* Brand gradient — azure → royal → sky */
+  --gradient-primary: linear-gradient(135deg, #60a5fa, #3b82f6, #38bdf8);
+  --gradient-header: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #38bdf8 100%);
 
-  /* Status */
+  /* Brand alias — var(--brand) with an indigo fallback used to live here;
+     aliasing to accent keeps every page in-family (agents.html etc.) */
+  --brand: var(--accent);
+
+  /* Status — warning yellow (amber family retired with the cyan purge) */
   --success: #10b981;
   --success-subtle: rgba(16, 185, 129, 0.12);
-  --warning: #f59e0b;
-  --warning-subtle: rgba(245, 158, 11, 0.12);
+  --warning: #facc15;
+  --warning-subtle: rgba(250, 204, 21, 0.12);
   --danger: #ef4444;
   --danger-subtle: rgba(239, 68, 68, 0.12);
-  --info: #06b6d4;
-  --info-subtle: rgba(88, 166, 255, 0.12);
+  --info: #38bdf8;
+  --info-subtle: rgba(56, 189, 248, 0.12);
 
   /* Borders */
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Card background alias — referenced by .search-panel / global-search
+     chip; previously undefined (fell through to a hard #1b1e2e). */
+  --bg-card: var(--bg-elevated);
 
   /* Radii */
   --radius-xs: 4px;
@@ -123,7 +139,7 @@
   --radius-card: var(--radius-lg);
 
   /* Semantic colors (supplement — referenced in templates but undefined) */
-  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-bg: rgba(250, 204, 21, 0.12);
   --text-link: var(--accent);
 
   /* Transitions */
@@ -2064,7 +2080,7 @@ tbody tr:last-child td {
 /* Turn memory explain panel (fts5 / dense / ppr / KB chips) */
 .agent-memory-explain {
   padding: 8px 12px;
-  background: color-mix(in srgb, #a78bfa 7%, transparent);
+  background: color-mix(in srgb, var(--accent-light) 7%, transparent);
   border-bottom: 1px solid var(--border-subtle);
 }
 .agent-memory-explain.is-collapsed .agent-memory-explain-body {
@@ -2475,7 +2491,7 @@ tbody tr:last-child td {
 .badge-info { background: var(--info-subtle); color: var(--info); }
 .badge-basic { background: var(--accent-subtle); color: var(--accent-light); }
 .badge-standard { background: var(--warning-subtle); color: var(--warning); }
-.badge-premium { background: rgba(139, 92, 246, 0.12); color: #a78bfa; }
+.badge-premium { background: var(--secondary-subtle); color: var(--secondary); }
 .badge-stdio { background: var(--success-subtle); color: var(--success); }
 .badge-sse { background: var(--accent-subtle); color: var(--accent-light); }
 
@@ -2803,53 +2819,61 @@ tbody tr:last-child td {
   color: var(--text-primary);
 }
 
-/* ── 23. Light Theme ────────────────────────────────────────────── */
+/* ── 23. Light Theme — Abyss light (ice blue paper) ───────────────
+   Folded to match kazma.v5.css so the two files agree (P1 token
+   unification). text-secondary/tertiary/muted are intentionally dark
+   (P0 contrast fix) — do NOT lighten them or Light body text goes pale. */
 [data-theme="light"] {
-  --bg: #f7f9fb;
-  --bg-2: #eef2f6;
-  --bg-deep: #f7f9fb;
+  --bg: #f0f4fa;
+  --bg-2: #e6edf7;
+  --bg-deep: #f0f4fa;
   --bg-primary: #ffffff;
-  --bg-panel: #f6f8fa;
+  --bg-panel: #ffffff;
   --bg-surface: #ffffff;
-  --bg-elevated: #e6e8eb;
-  --bg-hover: rgba(8, 145, 178, 0.06);
-  --bg-active: rgba(8, 145, 178, 0.10);
-  --grid: rgba(15, 23, 42, 0.04);
-  --tint: rgba(15, 23, 42, 0.025);
-  --tint-strong: rgba(15, 23, 42, 0.05);
+  --bg-elevated: #e6edf7;
+  --bg-card: var(--bg-elevated);
+  --bg-hover: rgba(37, 99, 235, 0.06);
+  --bg-active: rgba(37, 99, 235, 0.10);
+  --grid: rgba(12, 21, 38, 0.04);
+  --tint: rgba(12, 21, 38, 0.025);
+  --tint-strong: rgba(12, 21, 38, 0.05);
 
-  --text-primary: #0f1c2e;
+  --text-primary: #0c1526;
   --text-secondary: #334155;
   --text-tertiary: #475569;
   --text-muted: #64748b;
   --text-inverse: #ffffff;
 
-  --accent: #0891b2;
-  --accent-hover: #0e7490;
-  --accent-light: #0891b2;
-  --accent-subtle: rgba(8, 145, 178, 0.10);
-  --accent-glow: rgba(8, 145, 178, 0.22);
-  --accent-rgb: 8, 145, 178;
-  --gradient-accent: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #2563eb;
+  --accent-subtle: rgba(37, 99, 235, 0.10);
+  --accent-glow: rgba(37, 99, 235, 0.22);
+  --accent-rgb: 37, 99, 235;
+  --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
 
-  --secondary: #2563eb;
-  --secondary-hover: #1d4ed8;
-  --secondary-light: #2563eb;
-  --secondary-subtle: rgba(37, 99, 235, 0.10);
-  --secondary-glow: rgba(37, 99, 235, 0.18);
+  --secondary: #0284c7;
+  --secondary-hover: #0369a1;
+  --secondary-light: #0284c7;
+  --secondary-subtle: rgba(2, 132, 199, 0.10);
+  --secondary-glow: rgba(2, 132, 199, 0.18);
+
+  --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
+  --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
 
   --success: #059669;
   --success-subtle: rgba(5, 150, 105, 0.12);
-  --warning: #d97706;
-  --warning-subtle: rgba(217, 119, 6, 0.12);
+  --warning: #ca8a04;
+  --warning-subtle: rgba(202, 138, 4, 0.12);
+  --warning-bg: rgba(202, 138, 4, 0.12);
   --danger: #dc2626;
   --danger-subtle: rgba(220, 38, 38, 0.10);
   --info: #0284c7;
   --info-subtle: rgba(2, 132, 199, 0.10);
 
-  --border-subtle: rgba(15, 23, 42, 0.07);
-  --border: rgba(15, 23, 42, 0.10);
-  --border-strong: rgba(15, 23, 42, 0.16);
+  --border-subtle: rgba(12, 21, 38, 0.07);
+  --border: rgba(12, 21, 38, 0.10);
+  --border-strong: rgba(12, 21, 38, 0.16);
 
   --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
   --shadow: 0 4px 12px rgba(15,23,42,0.08);
@@ -2857,59 +2881,51 @@ tbody tr:last-child td {
   --shadow-xl: 0 16px 48px rgba(15,23,42,0.16);
 }
 
-/* Auto-detect system preference for light theme */
+/* Auto-detect system preference for light theme. Mirrors the block above
+   (same Abyss-light values, same dark muted text — P0 contrast fix applies
+   here too so Auto-light body text stays readable). */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f7f9fb;
-    --bg-2: #eef2f6;
-    --bg-deep: #f7f9fb;
+    --bg: #f0f4fa;
+    --bg-2: #e6edf7;
+    --bg-deep: #f0f4fa;
     --bg-primary: #ffffff;
-    --bg-panel: #f6f8fa;
+    --bg-panel: #ffffff;
     --bg-surface: #ffffff;
-    --bg-elevated: #e6e8eb;
-    --bg-hover: rgba(8, 145, 178, 0.06);
-    --bg-active: rgba(8, 145, 178, 0.10);
-    --grid: rgba(15, 23, 42, 0.04);
-    --tint: rgba(15, 23, 42, 0.025);
-    --tint-strong: rgba(15, 23, 42, 0.05);
-
-    --text-primary: #0f1c2e;
-    --text-secondary: #475569;
-    --text-tertiary: #64748b;
-    --text-muted: #94a3b8;
+    --bg-elevated: #e6edf7;
+    --bg-card: var(--bg-elevated);
+    --bg-hover: rgba(37, 99, 235, 0.06);
+    --bg-active: rgba(37, 99, 235, 0.10);
+    --grid: rgba(12, 21, 38, 0.04);
+    --tint: rgba(12, 21, 38, 0.025);
+    --tint-strong: rgba(12, 21, 38, 0.05);
+    --text-primary: #0c1526;
+    --text-secondary: #334155;
+    --text-tertiary: #475569;
+    --text-muted: #64748b;
     --text-inverse: #ffffff;
-
-    --accent: #0891b2;
-    --accent-hover: #0e7490;
-    --accent-light: #0891b2;
-    --accent-subtle: rgba(8, 145, 178, 0.10);
-    --accent-glow: rgba(8, 145, 178, 0.22);
-    --accent-rgb: 8, 145, 178;
-    --gradient-accent: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
-
-    --secondary: #2563eb;
-    --secondary-hover: #1d4ed8;
-    --secondary-light: #2563eb;
-    --secondary-subtle: rgba(37, 99, 235, 0.10);
-    --secondary-glow: rgba(37, 99, 235, 0.18);
-
-    --success: #059669;
-    --success-subtle: rgba(5, 150, 105, 0.12);
-    --warning: #d97706;
-    --warning-subtle: rgba(217, 119, 6, 0.12);
-    --danger: #dc2626;
-    --danger-subtle: rgba(220, 38, 38, 0.10);
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: #2563eb;
+    --accent-subtle: rgba(37, 99, 235, 0.10);
+    --accent-glow: rgba(37, 99, 235, 0.22);
+    --accent-rgb: 37, 99, 235;
+    --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+    --secondary: #0284c7;
+    --secondary-hover: #0369a1;
+    --secondary-light: #0284c7;
+    --secondary-subtle: rgba(2, 132, 199, 0.10);
+    --secondary-glow: rgba(2, 132, 199, 0.18);
+    --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
+    --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
+    --warning: #ca8a04;
+    --warning-subtle: rgba(202, 138, 4, 0.12);
+    --warning-bg: rgba(202, 138, 4, 0.12);
     --info: #0284c7;
     --info-subtle: rgba(2, 132, 199, 0.10);
-
-    --border-subtle: rgba(15, 23, 42, 0.07);
-    --border: rgba(15, 23, 42, 0.10);
-    --border-strong: rgba(15, 23, 42, 0.16);
-
-    --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
-    --shadow: 0 4px 12px rgba(15,23,42,0.08);
-    --shadow-lg: 0 8px 24px rgba(15,23,42,0.12);
-    --shadow-xl: 0 16px 48px rgba(15,23,42,0.16);
+    --border-subtle: rgba(12, 21, 38, 0.07);
+    --border: rgba(12, 21, 38, 0.10);
+    --border-strong: rgba(12, 21, 38, 0.16);
   }
 }
 
@@ -3715,7 +3731,7 @@ canvas { display: block; border-radius: 4px; }
   font-family: var(--font-sans);
 }
 .hint-chip:hover {
-  background: rgba(94, 106, 210, 0.1);
+  background: var(--accent-subtle);
   border-color: var(--accent);
   color: var(--text-primary);
 }
@@ -3753,11 +3769,11 @@ canvas { display: block; border-radius: 4px; }
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active {
-  background: rgba(94, 106, 210, 0.1);
-  border-left: 3px solid var(--accent, #5e6ad2);
+  background: var(--accent-subtle);
+  border-left: 3px solid var(--accent);
   padding-left: 9px;
 }
-.session-item.pinned .session-title { color: var(--accent, #5e6ad2); }
+.session-item.pinned .session-title { color: var(--accent); }
 .session-info { flex: 1; min-width: 0; overflow: hidden; }
 .session-info .session-title {
   display: block;
@@ -3768,7 +3784,7 @@ canvas { display: block; border-radius: 4px; }
   text-overflow: ellipsis;
 }
 .session-info .session-title mark {
-  background: rgba(94, 106, 210, 0.25);
+  background: rgba(var(--accent-rgb), 0.25);
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
@@ -3791,7 +3807,7 @@ canvas { display: block; border-radius: 4px; }
 .dot-telegram { background: #229ed9; }
 .dot-discord { background: #5865f2; }
 .dot-slack { background: #611f69; }
-.dot-gateway { background: var(--accent, #5e6ad2); }
+.dot-gateway { background: var(--accent); }
 .dot-web { background: var(--text-muted); }
 .session-section-label {
   margin: 12px 10px 4px;
@@ -3871,7 +3887,7 @@ canvas { display: block; border-radius: 4px; }
   cursor: pointer;
   white-space: nowrap;
 }
-.session-menu-item:hover { background: var(--bg-hover); color: var(--accent, #5e6ad2); }
+.session-menu-item:hover { background: var(--bg-hover); color: var(--accent); }
 .session-menu-item.danger:hover { background: var(--danger-subtle); color: var(--danger); }
 .session-empty {
   text-align: center;
@@ -3911,7 +3927,7 @@ canvas { display: block; border-radius: 4px; }
 }
 .msg-action:hover { background: var(--bg-hover); color: var(--text-primary); }
 .msg-action.active { color: var(--accent); }
-.reaction-btn.active { background: rgba(94, 106, 210, 0.2); border-color: rgba(94, 106, 210, 0.3); }
+.reaction-btn.active { background: var(--accent-subtle); border-color: rgba(var(--accent-rgb), 0.3); }
 
 /* Code Blocks */
 .code-block {
@@ -4017,7 +4033,7 @@ canvas { display: block; border-radius: 4px; }
 }
 .toast-success { background: rgba(16, 185, 129, 0.12); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
 .toast-error { background: rgba(248, 81, 73, 0.12); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.3); }
-.toast-info { background: rgba(94, 106, 210, 0.12); color: var(--accent-light); border: 1px solid rgba(94, 106, 210, 0.3); }
+.toast-info { background: var(--accent-subtle); color: var(--accent-light); border: 1px solid rgba(var(--accent-rgb), 0.3); }
 @keyframes slideIn {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -4119,7 +4135,7 @@ canvas { display: block; border-radius: 4px; }
 
 /* ── HITL Approval Panel ───────────────────────────────────────── */
 .hitl-panel.has-pending {
-  border-color: rgba(139, 92, 246, 0.3);
+  border-color: rgba(var(--accent-rgb), 0.3);
 }
 .hitl-approval-card {
   background: var(--bg-surface);
@@ -4383,11 +4399,12 @@ textarea:focus-visible,
    so the responsive tiers above remain authoritative.
    ═══════════════════════════════════════════════════════════════════ */
 
-/* Ambient aurora — soft blue/cyan glow behind everything */
+/* Ambient aurora — soft royal/sky glow behind everything (cyan retired
+   with the v4 token purge; the two tones now both live in the blue family) */
 body {
   background:
     radial-gradient(1100px 620px at 82% -12%, rgba(59,130,246,0.10), transparent 60%),
-    radial-gradient(900px 520px at 0% 0%, rgba(34,211,238,0.07), transparent 55%),
+    radial-gradient(900px 520px at 0% 0%, rgba(56,189,248,0.07), transparent 55%),
     var(--bg);
   background-attachment: fixed;
 }
@@ -5060,8 +5077,8 @@ html.kazma-soft-nav #main-content {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent, #5e6ad2);
-  background: rgba(94, 106, 210, 0.12);
+  color: var(--accent);
+  background: var(--accent-subtle);
   padding: 2px 6px;
   border-radius: 4px;
 }

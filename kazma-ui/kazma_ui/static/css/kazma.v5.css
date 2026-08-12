@@ -1,178 +1,32 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Kazma Design System v5 — "ABYSS"  (token layer + shell polish)
+   Kazma Design System v5 — "ABYSS" shell polish
    ───────────────────────────────────────────────────────────────────
    Loaded AFTER kazma.css. Rollback = remove the one <link> in base.html.
 
-   Phase 1 (this file):
-     • Palette remap — every legacy var re-pointed at the Abyss blues.
-       All v4 components consume these vars, so the whole app re-skins
-       without touching any component rule.
-     • Shell polish — sidebar (badge logo, gradient active rail),
-       header, bottom-nav, and the single-owner mobile nav pattern
-       (bottom tab bar owns the menu; hamburger retired ≤768px).
+   P1 (token unification) folded the dark/light token tables into
+   kazma.css §1 / §23, so this file no longer redefines them — it only
+   carries shell + component polish (sidebar, header, bottom-nav,
+   dashboard, chat, swarm/settings, purple-purge overrides) that sits
+   on top of the single token table.
+
+   The color-scheme rules below are the Phase-0 iOS-canvas fix and MUST
+   stay here: `color-scheme` lives on html[data-theme], NEVER on bare
+   :root, or iOS Safari paints a dark UA canvas over Kazma Light.
 
    Identity: royal blue #3b82f6 · sky #38bdf8 · azure→royal→sky gradient
-   Dark: deep blue-black #04070f · Light: ice blue #f0f4fa
+   Dark: deep blue-black #0e1626 · Light: ice blue #f0f4fa
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ── 1. Dark palette (default) ───────────────────────────────────── */
-/* color-scheme lives on html[data-theme], NEVER on bare :root.
-   :root { color-scheme: dark } made iOS Safari paint a dark UA canvas
-   even when the user had picked Kazma Light. See kazma.css html rules. */
-:root {
-
-  /* Backgrounds — dark slate (lifted off near-black so the app reads as a
-     comfortable dark gray, with visible elevation layers for depth rather
-     than a flat #04070f canvas). */
-  --bg: #0e1626;
-  --bg-deep: #0e1626;
-  --bg-2: #121b2e;
-  --bg-panel: #16223a;
-  --bg-surface: #1b2945;
-  --bg-elevated: #243456;
-  --bg-hover: rgba(59, 130, 246, 0.10);
-  --bg-active: rgba(59, 130, 246, 0.16);
-  --grid: rgba(59, 130, 246, 0.04);
-
-  /* Text — cool ice blue-grays */
-  --text-primary: #eef3fb;
-  --text-secondary: #9fb0c9;
-  --text-tertiary: #5d6f8a;
-  --text-muted: #4a5b78;
-  --text-inverse: #040815;
-
-  /* Accent — royal blue */
-  --accent: #3b82f6;
-  --accent-hover: #60a5fa;
-  --accent-light: #93c5fd;
-  --accent-subtle: rgba(59, 130, 246, 0.12);
-  --accent-glow: rgba(59, 130, 246, 0.28);
-  --accent-rgb: 59, 130, 246;
-  --gradient-accent: linear-gradient(135deg, #60a5fa 0%, #3b82f6 55%, #38bdf8 100%);
-
-  /* Secondary — sky blue */
-  --secondary: #38bdf8;
-  --secondary-hover: #7dd3fc;
-  --secondary-light: #bae6fd;
-  --secondary-subtle: rgba(56, 189, 248, 0.12);
-  --secondary-glow: rgba(56, 189, 248, 0.20);
-
-  /* Brand gradient — azure → royal → sky */
-  --gradient-primary: linear-gradient(135deg, #60a5fa, #3b82f6, #38bdf8);
-  --gradient-header: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #38bdf8 100%);
-
-  /* Brand alias — agents.html references var(--brand) with an indigo
-     fallback; aliasing it to accent keeps every page in-family */
-  --brand: var(--accent);
-
-  /* Status — warning moves to yellow (amber family retired with cyan) */
-  --warning: #facc15;
-  --warning-subtle: rgba(250, 204, 21, 0.12);
-  --warning-bg: rgba(250, 204, 21, 0.12);
-  --info: #38bdf8;
-  --info-subtle: rgba(56, 189, 248, 0.12);
-}
-
-/* ── 2. Light palette — ice blue paper ───────────────────────────── */
-html[data-theme="dark"] { color-scheme: only dark; }
-html[data-theme="light"],
-[data-theme="light"] {
-  color-scheme: only light;
-
-  --bg: #f0f4fa;
-  --bg-2: #e6edf7;
-  --bg-deep: #f0f4fa;
-  --bg-primary: #ffffff;
-  --bg-panel: #ffffff;
-  --bg-surface: #ffffff;
-  --bg-elevated: #e6edf7;
-  --bg-hover: rgba(37, 99, 235, 0.06);
-  --bg-active: rgba(37, 99, 235, 0.10);
-  --grid: rgba(12, 21, 38, 0.04);
-  --tint: rgba(12, 21, 38, 0.025);
-  --tint-strong: rgba(12, 21, 38, 0.05);
-
-  --text-primary: #0c1526;
-  --text-secondary: #334155;
-  --text-tertiary: #475569;
-  --text-muted: #64748b;
-  --text-inverse: #ffffff;
-
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-light: #2563eb;
-  --accent-subtle: rgba(37, 99, 235, 0.10);
-  --accent-glow: rgba(37, 99, 235, 0.22);
-  --accent-rgb: 37, 99, 235;
-  --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
-
-  --secondary: #0284c7;
-  --secondary-hover: #0369a1;
-  --secondary-light: #0284c7;
-  --secondary-subtle: rgba(2, 132, 199, 0.10);
-  --secondary-glow: rgba(2, 132, 199, 0.18);
-
-  --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
-  --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
-
-  --warning: #ca8a04;
-  --warning-subtle: rgba(202, 138, 4, 0.12);
-  --warning-bg: rgba(202, 138, 4, 0.12);
-  --info: #0284c7;
-  --info-subtle: rgba(2, 132, 199, 0.10);
-
-  --border-subtle: rgba(12, 21, 38, 0.07);
-  --border: rgba(12, 21, 38, 0.10);
-  --border-strong: rgba(12, 21, 38, 0.16);
-}
-
-/* System-preference auto-light — mirrors the block above (same values) */
+/* color-scheme — single-value per theme (Phase-0 iOS canvas fix).
+   Mirrors the html[data-theme] rules in kazma.css; kept here too so
+   removing either file does not regress the canvas. */
+html[data-theme="dark"]  { color-scheme: only dark; }
+html[data-theme="light"] { color-scheme: only light; }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: only light;
-    --bg: #f0f4fa;
-    --bg-2: #e6edf7;
-    --bg-deep: #f0f4fa;
-    --bg-primary: #ffffff;
-    --bg-panel: #ffffff;
-    --bg-surface: #ffffff;
-    --bg-elevated: #e6edf7;
-    --bg-hover: rgba(37, 99, 235, 0.06);
-    --bg-active: rgba(37, 99, 235, 0.10);
-    --grid: rgba(12, 21, 38, 0.04);
-    --tint: rgba(12, 21, 38, 0.025);
-    --tint-strong: rgba(12, 21, 38, 0.05);
-    --text-primary: #0c1526;
-    --text-secondary: #334155;
-    --text-tertiary: #475569;
-    --text-muted: #64748b;
-    --text-inverse: #ffffff;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --accent-light: #2563eb;
-    --accent-subtle: rgba(37, 99, 235, 0.10);
-    --accent-glow: rgba(37, 99, 235, 0.22);
-    --accent-rgb: 37, 99, 235;
-    --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
-    --secondary: #0284c7;
-    --secondary-hover: #0369a1;
-    --secondary-light: #0284c7;
-    --secondary-subtle: rgba(2, 132, 199, 0.10);
-    --secondary-glow: rgba(2, 132, 199, 0.18);
-    --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
-    --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
-    --warning: #ca8a04;
-    --warning-subtle: rgba(202, 138, 4, 0.12);
-    --warning-bg: rgba(202, 138, 4, 0.12);
-    --info: #0284c7;
-    --info-subtle: rgba(2, 132, 199, 0.10);
-    --border-subtle: rgba(12, 21, 38, 0.07);
-    --border: rgba(12, 21, 38, 0.10);
-    --border-strong: rgba(12, 21, 38, 0.16);
-  }
+  :root:not([data-theme="dark"]) { color-scheme: only light; }
 }
 
-/* ── 3. Shell — sidebar ──────────────────────────────────────────── */
+/* ── 1. Shell — sidebar ──────────────────────────────────────────── */
 
 /* Brand badge — the logo's dark tile is INTENTIONAL (app-icon look):
    inset padding lets the artwork breathe; accent ring + top inner
@@ -235,7 +89,7 @@ html[data-theme="light"],
   border-color: rgba(var(--accent-rgb), 0.45);
 }
 
-/* ── 4. Shell — header ───────────────────────────────────────────── */
+/* ── 2. Shell — header ───────────────────────────────────────────── */
 .page-header {
   background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
 }
@@ -253,7 +107,7 @@ html[data-theme="light"],
   box-shadow: 0 0 6px var(--secondary-glow);
 }
 
-/* ── 5. Shell — mobile navigation (single-owner pattern) ───────────
+/* ── 3. Shell — mobile navigation (single-owner pattern) ───────────
    The bottom tab bar is the ONLY menu entry on phones: its "More" tab
    opens the drawer. The topbar hamburger is retired ≤768px, and the
    sidebar's collapse button doubles as the in-drawer close button

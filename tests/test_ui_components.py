@@ -288,7 +288,10 @@ class TestCSSDesignSystem:
 
     # Variables
     def test_has_accent_color(self, css):
-        assert any(c in css for c in ("#22d3ee", "#22D3EE", "#6C5CE7", "#6c5ce7")), "No accent color found"
+        # Abyss royal blue (dark) / royal-600 (light). The v4 cyan #22d3ee
+        # and indigo #6C5CE7 were purged in the P1 token unification — see
+        # docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md §5 (P1).
+        assert any(c in css for c in ("#3b82f6", "#3B82F6", "#2563eb", "#2563EB")), "No accent color found"
 
     def test_has_dark_background(self, css):
         assert any(c in css for c in ("#02040a", "#0a0f1a", "var(--bg-primary)")), "Dark background color not found"
