@@ -1632,11 +1632,11 @@ tbody tr:last-child td {
 .message-text blockquote p:last-child,
 .message-text .md-quote p:last-child { margin-bottom: 0; }
 .message-text code {
-  font-family: var(--font-mono); font-size: 0.85em; background: rgba(0,0,0,0.3);
+  font-family: var(--font-mono); font-size: 0.85em; background: var(--bg-2);
   padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border-subtle);
 }
 .message-text pre {
-  margin: var(--sp-3) 0; padding: 14px 16px; background: rgba(0,0,0,0.3);
+  margin: var(--sp-3) 0; padding: 14px 16px; background: var(--bg-2);
   border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; line-height: 1.5;
   text-align: left !important; text-align-last: left !important; direction: ltr !important; unicode-bidi: isolate !important;
 }
@@ -4595,6 +4595,11 @@ body {
   box-shadow: var(--shadow-sm);
 }
 .message-assistant .message-text {
+  /* Explicit color (not inherited): hardens the assistant prose ink against
+     any ancestor override / iOS inheritance quirk. --text-primary is
+     #0c1526 (near-black) in Light / #eef3fb (ice) in Dark — high contrast
+     on the panel bubble in both. */
+  color: var(--text-primary);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 92%, #ffffff 3%), var(--bg-panel));
   border: 1px solid var(--border-subtle);
