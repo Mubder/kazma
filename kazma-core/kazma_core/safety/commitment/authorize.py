@@ -265,7 +265,8 @@ def _resolve_remind_act(
     """
     # Lazy imports (store → paths; relative_time is standalone; config → ConfigStore).
     from .config import get_commitment_config
-    from .relative_time import resolve_remind as _resolve
+    from .relative_time import parse_absolute_timing, resolve_remind as _resolve
+    from .relative_time import validate_timing_against_memory
     from .store import Commitment, create_commitment
 
     mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
@@ -275,6 +276,45 @@ def _resolve_remind_act(
         logger.info("[commitment] yolo mode — semantic bypass for %s source=%s",
                     tool_name, source)
         return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
+
+    # ── PR4 (Class C): structured args first ──────────────────────────
+    # If the model already put an ABSOLUTE ISO time in args.timing, validate it
+    # against memory (CoPilot guard) and allow when consistent — instead of
+    # re-parsing the chat text, which fails on a bare "yes" and caused the
+    # over-clarify loop (incident 2026-08-12). Only relative/absent timing
+    # falls through to chat-text resolution.
+    _timing_arg = str((args or {}).get("timing") or "").strip()
+    if _timing_arg and mode != "strict":
+        _consistency, _matched = validate_timing_against_memory(_timing_arg, memory_beliefs)
+        _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
+        if _abs_dt and _consistency in ("consistent", "no_memory"):
+            _anchor = ("absolute" if _consistency == "no_memory"
+                       else str(_matched.get("predicate") or "absolute") if _matched else "absolute")
+            _rewritten = dict(args)
+            _rewritten["timing"] = _abs_dt.isoformat()
+            req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
+            _c = Commitment(
+                thread_id=thread_id or "", turn_id=turn_id, act="remind",
+                tool_name=tool_name, goal_text=(user_text or "")[:200],
+                args_digest=_args_digest(args), request_at=req_ts, tenant_id=tenant_id,
+                slots={"fire_at": _abs_dt.isoformat(), "anchor": _anchor},
+                conflicts=[], confidence=1.0,
+            )
+            _c.status = "ready"
+            _c.policy_decision = "allow"
+            _cid = create_commitment(_c, cfg=cfg)
+            logger.info(
+                "[commitment] allow+rewrite (args-first) %s fire_at=%s "
+                "consistency=%s anchor=%s cid=%s source=%s",
+                tool_name, _abs_dt.isoformat(), _consistency, _anchor, _cid, source,
+            )
+            return EffectDecision(
+                decision="allow", reason=f"absolute timing ({_consistency})",
+                profile=profile, audit=audit, commitment_id=_cid, rewritten_args=_rewritten,
+            )
+        # _consistency == "conflict" → a belief exists but timing is far from it
+        # (possible CoPilot overwrite): fall through to chat resolver, which
+        # clarifies. "not_absolute" → relative timing: also fall through.
 
     # strict widens the relevance window (more clarifies); others use default.
     window = timedelta(days=30) if mode == "strict" else None

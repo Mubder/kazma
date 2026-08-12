@@ -45,6 +45,8 @@ __all__ = [
     "detect_conflicts",
     "normalize_digits",
     "parse_belief_date",
+    "parse_absolute_timing",
+    "validate_timing_against_memory",
 ]
 
 
@@ -264,6 +266,72 @@ def parse_belief_date(obj: str, *, default_year: int | None = None) -> datetime 
         except ValueError:
             continue
     return None
+
+
+def parse_absolute_timing(timing: str) -> datetime | None:
+    """Parse a schedule_task ``timing`` arg as an ABSOLUTE datetime, or None.
+
+    Accepts ISO 8601 forms (``2026-08-19``, ``2026-08-19T05:17:00+00:00``,
+    trailing ``Z``). Returns ``None`` for relative values (``2d``,
+    ``in 2 days``, ``tomorrow``, ``next week``) so the caller falls back to
+    chat-text resolution. This is stricter than ``parse_belief_date`` on
+    purpose: only a real absolute timestamp counts as "the model already
+    resolved the fire time" (PR4 / Class C — incident 2026-08-12).
+    """
+    raw = normalize_digits((timing or "").strip())
+    if not raw:
+        return None
+    candidates = [raw]
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        candidates.append(raw + "T00:00:00")
+    for cand in candidates:
+        try:
+            return _to_utc(datetime.fromisoformat(cand.replace("Z", "+00:00")))
+        except ValueError:
+            continue
+    return None
+
+
+def validate_timing_against_memory(
+    timing: str,
+    memory_beliefs: list[dict[str, Any]],
+    *,
+    window: timedelta | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Validate an absolute ``timing`` arg against stored beliefs (CoPilot guard).
+
+    Returns ``(consistency, matched_belief)`` where consistency is:
+
+    * ``"not_absolute"`` — timing is relative/absent (caller falls back to chat).
+    * ``"no_memory"``    — timing is absolute but no belief has a parseable date
+      (nothing to contradict → safe to allow).
+    * ``"consistent"``   — timing is within ``window`` (default 2 days) of a
+      belief date → memory-anchored → allow.
+    * ``"conflict"``     — beliefs exist but timing is far from all of them →
+      the model may have invented it → clarify (the CoPilot overwrite class).
+
+    The CoPilot incident class (model invents a date, overwrites the user's real
+    belief) is blocked at ``conflict``; a memory-anchored timing (the
+    ZCode case) is allowed here instead of re-parsing a bare "yes".
+    """
+    abs_dt = parse_absolute_timing(timing)
+    if abs_dt is None:
+        return ("not_absolute", None)
+
+    win = window if window is not None else timedelta(days=2)
+    belief_dates: list[tuple[datetime, dict[str, Any]]] = []
+    for b in memory_beliefs or []:
+        bd = parse_belief_date(str(b.get("object", "")))
+        if bd is not None:
+            belief_dates.append((bd, b))
+
+    if not belief_dates:
+        return ("no_memory", None)
+
+    for bd, b in belief_dates:
+        if abs(abs_dt - bd) <= win:
+            return ("consistent", b)
+    return ("conflict", None)
 
 
 def _to_utc(dt: datetime) -> datetime:
