@@ -181,6 +181,17 @@ html[dir="rtl"] .text-xs {
 
 /* Font size persistence — controlled by Alpine settings.js applyFontSize() */
 
+/* html canvas: paint the themed background so the browser's own dark
+   canvas can never bleed through on devices in dark mode. Without this,
+   <html> is transparent and mobile Safari paints its default #121212
+   canvas behind <body> wherever body doesn't cover (dynamic viewport,
+   overscroll, safe-area gaps) — visible as a flat "gray" even in light
+   theme. var(--bg) tracks the active theme, so this stays correct in
+   both themes and on every device. */
+html {
+  background-color: var(--bg);
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--bg);
