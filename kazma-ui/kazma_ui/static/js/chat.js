@@ -239,7 +239,12 @@
               try { activeStream.abort(); } catch (e) { /* already dead */ }
               activeStream = null;
             }
-            _showGeneratingIndicator();
+            // Show typing indicator inline (avoids cross-scope reference).
+            if (typeof typingEl !== 'undefined' && typingEl && typingEl.style.display === 'none') {
+              if (typeof KS !== 'undefined' && KS.showTyping) {
+                KS.showTyping(typingEl, 'Generating response');
+              }
+            }
             _pollBackgroundTurn(chatSessionId, 0);
           } else if (activeStream || lastActivityTs) {
             // Turn finished while we were disconnected (stale stream or missed
