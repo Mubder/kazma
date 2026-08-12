@@ -427,48 +427,44 @@
     }
   }
 
-  // ── Delivery poll: guaranteed response delivery independent of SSE ──
-  // SSE (fetch + ReadableStream) silently stalls when a browser tab is
-  // backgrounded — no error, no recovery, the done event is lost. This poll
-  // is the BACKSTOP: every 3s while a turn is active, check /status. When the
-  // server says "done," reload from /messages. setTimeout is throttled by
-  // background tabs but RESUMES on focus, so the response is delivered within
-  // seconds of returning to the tab — guaranteed.
+  // ── Delivery poll: guaranteed response delivery independent of SSE/WS ──
+  // Both SSE (fetch ReadableStream) and WS can silently stall or fire
+  // premature endTurn() calls. This poll is the BACKSTOP: it runs on its
+  // OWN session-scoped lifecycle, independent of _isGenerating/endTurn.
+  // Only the poll itself stops it (when /status says done) or loadSession
+  // (new session load). endTurn() does NOT stop it.
   var _deliveryPollTimer = null;
+  var _deliveryPollSid = null;
   function _startDeliveryPoll() {
     if (_deliveryPollTimer) clearTimeout(_deliveryPollTimer);
-    // Delay the first poll — the server needs time to register the turn
-    // (register_thread happens after the graph starts, which can take 1-2s
-    // on slow models). If we poll immediately, /status might return
-    // generating=false (turn not registered yet) and we'd prematurely
-    // reload — killing the just-started SSE stream and causing duplicated
-    // responses. The poll is a BACKSTOP, not a race.
+    _deliveryPollSid = chatSessionId;
     _deliveryPollTimer = setTimeout(_deliveryPoll, 10000);
+    console.log('[KazmaChat] Delivery poll armed for session ' + (_deliveryPollSid || '').slice(0, 8) + ' (10s delay)');
   }
   function _stopDeliveryPoll() {
     if (_deliveryPollTimer) { clearTimeout(_deliveryPollTimer); _deliveryPollTimer = null; }
+    _deliveryPollSid = null;
   }
   function _deliveryPoll() {
     _deliveryPollTimer = null;
-    if (!_isGenerating || !chatSessionId) {
-      console.log('[KazmaChat] Delivery poll: skipped (_isGenerating=' + _isGenerating + ', sessionId=' + !!chatSessionId + ')');
-      return;
-    }
-    fetch('/api/chat/sessions/' + encodeURIComponent(chatSessionId) + '/status')
+    var sid = _deliveryPollSid;
+    if (!sid || sid !== chatSessionId) return; // stopped or session changed
+    fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/status')
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
-        if (!_isGenerating || !chatSessionId) return;
+        if (_deliveryPollSid !== sid) return; // stopped
         console.log('[KazmaChat] Delivery poll: generating=' + (data ? data.generating : 'null'));
         if (data && !data.generating) {
           console.log('[KazmaChat] Delivery poll: turn DONE — calling loadSession');
-          loadSession(chatSessionId);
+          _deliveryPollSid = null;
+          loadSession(sid);
         } else {
           _deliveryPollTimer = setTimeout(_deliveryPoll, 3000);
         }
       })
       .catch(function(err) {
         console.log('[KazmaChat] Delivery poll: fetch error — ' + err);
-        if (_isGenerating) _deliveryPollTimer = setTimeout(_deliveryPoll, 5000);
+        if (_deliveryPollSid === sid) _deliveryPollTimer = setTimeout(_deliveryPoll, 5000);
       });
   }
 
@@ -554,9 +550,13 @@
   }
 
   function endTurn() {
-    console.log('[KazmaChat] endTurn called — delivery poll STOPPED, _isGenerating=false');
+    console.log('[KazmaChat] endTurn called — delivery poll SURVIVES (independent lifecycle)');
     _clearTurnTimers();
-    _stopDeliveryPoll();
+    // NOTE: _stopDeliveryPoll() is intentionally NOT called here.
+    // The WS handler calls endTurn() prematurely (before the turn finishes),
+    // which used to kill the delivery poll. Now the poll runs on its own
+    // session-scoped lifecycle and only stops when /status says done or
+    // loadSession starts a new session.
     _isGenerating = false;
     _awaitingApproval = false;
     finalizeProgress(true);
