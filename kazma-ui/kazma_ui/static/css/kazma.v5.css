@@ -109,9 +109,10 @@ html[data-theme="light"] { color-scheme: only light; }
 
 /* ── 3. Shell — mobile navigation (single-owner pattern) ───────────
    The bottom tab bar is the ONLY menu entry on phones: its "More" tab
-   opens the drawer. The topbar hamburger is retired ≤768px, and the
-   sidebar's collapse button doubles as the in-drawer close button
-   (template: it calls closeMobileNav() on small screens). */
+   opens the drawer. The topbar hamburger is retired (default display:none
+   in kazma.css; the belt-and-braces !important here stays as a guard),
+   and the sidebar's collapse button doubles as the in-drawer close
+   button (template: it calls closeMobileNav() on small screens). */
 @media (max-width: 768px) {
   .hamburger-btn { display: none !important; }
 
@@ -145,9 +146,11 @@ html[data-theme="light"] { color-scheme: only light; }
     box-shadow: 0 0 48px rgba(0, 0, 0, 0.55);
   }
 
-  /* Bottom tab bar — theme-aware blur surface + glowing active tab */
+  /* Bottom tab bar — opaque token surface (P2c: was color-mix 92%
+     transparent; over the iOS canvas that let the dark UA canvas bleed
+     through under the safe-area inset) + glowing active tab. */
   .bottom-nav {
-    background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+    background: var(--bg-panel);
     border-top-color: var(--border-subtle);
   }
   .bottom-nav a { transition: color var(--transition-fast); }
