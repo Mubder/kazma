@@ -133,7 +133,7 @@ class TestRootRoutes:
     def test_root_serves_workspace(self, client: TestClient) -> None:
         resp = client.get("/")
         assert resp.status_code == 200
-        # Root now serves the unified workspace (index.html)
+        # Root serves the dashboard (index.html was deleted in P4 — orphaned)
         assert "Kazma" in resp.text
 
     def test_chat_page(self, client: TestClient) -> None:
