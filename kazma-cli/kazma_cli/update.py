@@ -1161,6 +1161,19 @@ def _postflight_ok(cwd: str) -> bool:
     return ok
 
 
+def _is_server_running(port: int = 9090) -> bool:
+    """Check if the Kazma server is running by probing the port."""
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        result = sock.connect_ex(("127.0.0.1", port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
 def do_git_update(
     *,
     sync_main: bool = False,
@@ -1177,6 +1190,22 @@ def do_git_update(
     git_root = _find_git_root()
     if git_root is None:
         console.print("[red]Could not locate git repository root.[/red]")
+        return False
+
+    # Preflight: the Kazma server holds a lock on kazma.exe on Windows.
+    # If it's running, reinstall will fail with WinError 32 halfway through
+    # (git updated but package not reinstalled — a broken state).
+    if _is_server_running():
+        console.print(
+            "[red]â Kazma server is running (port 9090).[/red]\n"
+            "The server holds a lock on kazma.exe â€” the update cannot reinstall "
+            "while it's running.\n\n"
+            "[yellow]Stop the server first, then re-run kazma update:[/yellow]\n"
+            "  [dim]Get-Process -Name python | Where-Object { (Get-CimInstance "
+            "Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like "
+            "'*uvicorn*kazma*' } | Stop-Process -Force[/dim]\n"
+            "  [dim]kazma update[/dim]"
+        )
         return False
 
     cwd = str(git_root)
