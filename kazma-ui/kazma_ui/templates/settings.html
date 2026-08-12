@@ -1191,7 +1191,7 @@
             <div style="display:flex;gap:12px;margin-bottom:16px">
                 <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')"><span class="ki" data-icon="moon" aria-hidden="true"></span> {{ t('settings.dark') }}</button>
                 <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')"><span class="ki" data-icon="sun" aria-hidden="true"></span> {{ t('settings.light') }}</button>
-                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.auto') }}</button>
+                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'; previewTheme('auto')"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.auto') }}</button>
             </div>
         </div>
 

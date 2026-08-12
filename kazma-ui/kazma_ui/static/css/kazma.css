@@ -84,6 +84,11 @@
      chip; previously undefined (fell through to a hard #1b1e2e). */
   --bg-card: var(--bg-elevated);
 
+  /* Error alias — referenced by .send-btn.stop-mode + agent-activity rules.
+     Aliased to --danger so all three call sites share one status color.
+     (Previously each var(--error, #ef4444) carried its own fallback.) */
+  --error: var(--danger);
+
   /* Radii */
   --radius-xs: 4px;
   --radius-sm: 6px;

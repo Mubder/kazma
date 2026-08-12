@@ -2052,14 +2052,19 @@ function settingsApp() {
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.appearance),
                 });
-                // Apply theme immediately
+                // Apply theme immediately. 'auto' resolves to the OS preference
+                // (same logic as previewTheme) so the live preview matches the
+                // saved state.
                 const root = Alpine.$data(document.querySelector('[x-data]'));
                 if (root) root.fontSize = this.appearance.font_size;
-                if (this.appearance.theme === 'light' || this.appearance.theme === 'dark') {
+                const resolved = this.appearance.theme === 'auto'
+                    ? this._resolveAutoTheme()
+                    : this.appearance.theme;
+                if (resolved === 'light' || resolved === 'dark') {
                     if (window.syncDocumentColorScheme) {
-                        window.syncDocumentColorScheme(this.appearance.theme);
+                        window.syncDocumentColorScheme(resolved);
                     } else {
-                        document.documentElement.setAttribute('data-theme', this.appearance.theme);
+                        document.documentElement.setAttribute('data-theme', resolved);
                     }
                 }
                 showToast('Appearance saved', 'success');
@@ -2070,13 +2075,30 @@ function settingsApp() {
         },
 
         previewTheme(theme) {
-            if (theme === 'light' || theme === 'dark') {
+            // Resolve 'auto' to a concrete light/dark via the OS preference
+            // BEFORE applying — syncDocumentColorScheme only accepts light/dark
+            // (a single explicit color-scheme value is the Phase-0 iOS canvas
+            // fix; passing 'auto' would coerce to 'light' and ignore the OS).
+            const resolved = theme === 'auto' ? this._resolveAutoTheme() : theme;
+            if (resolved === 'light' || resolved === 'dark') {
                 if (window.syncDocumentColorScheme) {
-                    window.syncDocumentColorScheme(theme);
+                    window.syncDocumentColorScheme(resolved);
                 } else {
-                    document.documentElement.setAttribute('data-theme', theme);
+                    document.documentElement.setAttribute('data-theme', resolved);
                 }
             }
+        },
+
+        // Map 'auto' → concrete 'light'/'dark' from the OS color-scheme
+        // preference. Defaults to 'light' when matchMedia is unavailable.
+        _resolveAutoTheme() {
+            try {
+                if (window.matchMedia &&
+                    window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    return 'dark';
+                }
+            } catch (_) { /* matchMedia unavailable */ }
+            return 'light';
         },
 
         applyFontSize(size) {

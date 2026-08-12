@@ -66,8 +66,21 @@ export function kazmaApp() {
                 .then(r => r.json())
                 .then(d => {
                     if (d && d.font_size) this.fontSize = d.font_size;
-                    if (d && (d.theme === 'light' || d.theme === 'dark') && d.theme !== this.theme) {
-                        this.theme = d.theme;
+                    // 'auto' resolves to the OS preference (SSR guessed dark;
+                    // correct it here so an Auto user on a Light OS doesn't
+                    // see a one-frame dark flash stay). light/dark apply as-is.
+                    let resolved = null;
+                    if (d && d.theme === 'auto') {
+                        try {
+                            resolved = (window.matchMedia &&
+                                window.matchMedia('(prefers-color-scheme: dark)').matches)
+                                ? 'dark' : 'light';
+                        } catch (_) { resolved = null; }
+                    } else if (d && (d.theme === 'light' || d.theme === 'dark')) {
+                        resolved = d.theme;
+                    }
+                    if (resolved && resolved !== this.theme) {
+                        this.theme = resolved;
                         this._applyTheme();
                     }
                 })
@@ -132,13 +145,17 @@ export function kazmaApp() {
                 (async () => {
                     let proceed = true;
                     if (window.kazmaConfirm) {
+                        // Dialog shows in the user's CURRENT language (this.lang),
+                        // not the target — they haven't switched yet. The previous
+                        // ternary branches were swapped (AR users got English).
+                        const isAr = this.lang === 'ar';
                         proceed = await window.kazmaConfirm({
-                            title: this.lang === 'ar' ? 'Switch language?' : 'تبديل اللغة؟',
-                            message: this.lang === 'ar'
-                                ? 'Work is in progress (a crawl or generation). Switching the language reloads the page and disconnects the live progress, though the server-side task keeps running. Continue?'
-                                : 'هناك مهمة قيد التشغيل (زحف أو توليد). تبديل اللغة يعيد تحميل الصفحة ويقطع التقدّم المباشر، رغم أن المهمة على الخادم تستمر. متابعة؟',
-                            confirmText: this.lang === 'ar' ? 'Switch anyway' : 'بدّل على أي حال',
-                            cancelText: this.lang === 'ar' ? 'Cancel' : 'إلغاء',
+                            title: isAr ? 'تبديل اللغة؟' : 'Switch language?',
+                            message: isAr
+                                ? 'هناك مهمة قيد التشغيل (زحف أو توليد). تبديل اللغة يعيد تحميل الصفحة ويقطع التقدّم المباشر، رغم أن المهمة على الخادم تستمر. متابعة؟'
+                                : 'Work is in progress (a crawl or generation). Switching the language reloads the page and disconnects the live progress, though the server-side task keeps running. Continue?',
+                            confirmText: isAr ? 'بدّل على أي حال' : 'Switch anyway',
+                            cancelText: isAr ? 'إلغاء' : 'Cancel',
                         });
                     }
                     if (proceed) this._doLanguageSwitch();

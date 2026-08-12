@@ -109,9 +109,15 @@ function ideApp() {
       if (!ta) return;
       if (typeof window.CodeMirror === 'function') {
         try {
+          // Code theme follows the active Kazma theme: dark → material-darker,
+          // light → default (CodeMirror's built-in light theme). The previous
+          // hardcode rendered a dark editor in Kazma Light.
+          var cmTheme = document.documentElement.getAttribute('data-theme') === 'light'
+            ? 'default'
+            : 'material-darker';
           this.cm = window.CodeMirror.fromTextArea(ta, {
             lineNumbers: true,
-            theme: 'material-darker',
+            theme: cmTheme,
             mode: 'text/plain',
             lineWrapping: true,
             indentUnit: 4,

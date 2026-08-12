@@ -477,10 +477,20 @@ class KazmaAppBuilder:
         def _dynamic_theme() -> str:
             # Read via the same SettingsManager path as /api/settings/appearance
             # so SSR and the API always agree (stored choice wins; else default).
+            # 'auto' is resolved to a concrete light/dark here so SSR always
+            # emits a single data-theme value (the Phase-0 iOS canvas fix needs
+            # a concrete color-scheme, never 'auto'). SSR can't read the OS
+            # preference, so 'auto' defaults to dark (the :root canvas default);
+            # the client re-resolves it from matchMedia on boot
+            # (settings.js previewTheme/_resolveAutoTheme) and corrects if needed.
             try:
                 from kazma_core.settings_manager import SettingsManager
                 t = SettingsManager(self.config_store).get_appearance().get("theme")
-                return t if t in ("light", "dark") else "light"
+                if t in ("light", "dark"):
+                    return t
+                if t == "auto":
+                    return "dark"
+                return "light"
             except Exception:
                 return "light"
 
