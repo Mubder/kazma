@@ -19,15 +19,17 @@
 :root {
   color-scheme: dark;
 
-  /* Backgrounds — deep blue-black */
-  --bg: #04070f;
-  --bg-2: #080d1a;
-  --bg-panel: #080d1a;
-  --bg-surface: #0d1526;
-  --bg-elevated: #16233c;
-  --bg-hover: rgba(59, 130, 246, 0.07);
-  --bg-active: rgba(59, 130, 246, 0.12);
-  --grid: rgba(59, 130, 246, 0.035);
+  /* Backgrounds — dark slate (lifted off near-black so the app reads as a
+     comfortable dark gray, with visible elevation layers for depth rather
+     than a flat #04070f canvas). */
+  --bg: #0e1626;
+  --bg-2: #121b2e;
+  --bg-panel: #16223a;
+  --bg-surface: #1b2945;
+  --bg-elevated: #243456;
+  --bg-hover: rgba(59, 130, 246, 0.10);
+  --bg-active: rgba(59, 130, 246, 0.16);
+  --grid: rgba(59, 130, 246, 0.04);
 
   /* Text — cool ice blue-grays */
   --text-primary: #eef3fb;
