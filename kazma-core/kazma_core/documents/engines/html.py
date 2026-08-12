@@ -162,9 +162,10 @@ class HtmlEngine:
       direction: ltr !important; text-align: left !important; unicode-bidi: isolate !important;
     }}
     pre {{
-      background-color: {t["accent"]}; color: #f8fafc;
+      background-color: {t["code_bg"]}; color: {t["body"]};
       padding: 14px 18px; border-radius: 8px; font-size: 9pt; line-height: 1.55;
       white-space: pre-wrap !important; overflow-x: auto;
+      border: 1px solid {t["border"]};
     }}
     p code, td code {{
       background-color: {t["code_bg"]}; color: {t["accent"]};
@@ -177,8 +178,26 @@ class HtmlEngine:
       border-inline-start: 3px solid {t["heading"]}; color: {t["quote"]};
     }}
     a {{ color: #2563eb; text-decoration: none; }}
+    .toc a {{ color: {t["body"]}; }}
+    .toc a:hover {{ text-decoration: underline; }}
     @page {{ size: A4; margin: 18mm 15mm; }}
+    {self._pygments_css()}
 """
+
+    @staticmethod
+    def _pygments_css() -> str:
+        """Pygments token-color CSS for codehilite (light 'friendly' style)."""
+        try:
+            from pygments.formatters import HtmlFormatter
+            return HtmlFormatter(style="friendly").get_style_defs(".codehilite")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _slugify(text: str) -> str:
+        """URL-safe slug from heading text (Unicode-aware, handles Arabic)."""
+        slug = re.sub(r"[^\w\u0600-\u06FF -]", "", (text or "").lower()).strip().replace(" ", "-")
+        return slug or "section"
 
     # ================================================================== #
     # block rendering
@@ -199,13 +218,17 @@ class HtmlEngine:
                 return ""
             return f"    <h3>{esc(block.text)}</h3>"
         if isinstance(block, HeadingBlock):
-            return f'    <h2 style="background:{self.theme["heading_fill"]}">{esc(block.text)}</h2>'
+            slug = self._slugify(block.text)
+            return f'    <h2 id="{slug}" style="background:{self.theme["heading_fill"]}">{esc(block.text)}</h2>'
         if isinstance(block, BodyBlock):
             return self._markdown_to_html(block.text, indent="    ")
         if isinstance(block, TOCBlock):
-            items = "".join(f"<li>{esc(e)}</li>" for e in block.entries if e)
+            items = "".join(
+                f'<li><a href="#{self._slugify(e)}">{esc(e)}</a></li>'
+                for e in block.entries if e
+            )
             head = f'    <h2>{esc(self.profile.chrome["toc"])}</h2>\n'
-            return head + f"    <ol>\n{items}    </ol>" if items else head
+            return head + f'    <ol class="toc">\n{items}    </ol>' if items else head
         if isinstance(block, TableBlock):
             out = []
             if block.heading:
@@ -284,7 +307,7 @@ class HtmlEngine:
             import markdown
             html_body = markdown.markdown(
                 prepared,
-                extensions=["tables", "fenced_code", "sane_lists", "attr_list"],
+                extensions=["tables", "fenced_code", "sane_lists", "attr_list", "codehilite"],
             )
         except ImportError:
             html_body = "<pre>" + _html_lib.escape(prepared) + "</pre>"

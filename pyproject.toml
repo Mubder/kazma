@@ -25,6 +25,7 @@ dependencies = [
     "duckduckgo-search>=6.0",
     "trafilatura>=1.12",
     "markdown>=3.6",
+    "pygments>=2.19",
     "tenacity>=8.0.0",
     "networkx>=3.1",
     "click>=8.1.0",

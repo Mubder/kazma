@@ -476,6 +476,79 @@ def inline_markdown_to_reportlab(
     return "".join(parts) if parts else _esc_shape(text)
 
 
+# ── Pygments code highlighting for reportlab PDF ──────────────────────
+_PYGMENT_COLORS: dict[Any, str] = {}
+
+
+def _init_pygment_colors() -> None:
+    """Build the token-type → hex color map (once, lazily)."""
+    global _PYGMENT_COLORS
+    if _PYGMENT_COLORS:
+        return
+    try:
+        from pygments.token import Token
+    except ImportError:
+        return
+    _PYGMENT_COLORS = {
+        Token.Keyword: "#0f172a",
+        Token.Keyword.Constant: "#0e7490",
+        Token.Keyword.Declaration: "#0e7490",
+        Token.Keyword.Namespace: "#0e7490",
+        Token.Name.Builtin: "#1e3a5f",
+        Token.Name.Function: "#1d4ed8",
+        Token.Name.Class: "#1d4ed8",
+        Token.Name.Decorator: "#b45309",
+        Token.Name.Exception: "#be123c",
+        Token.String: "#15803d",
+        Token.String.Doc: "#64748b",
+        Token.String.Escape: "#b45309",
+        Token.Number: "#b45309",
+        Token.Comment: "#64748b",
+        Token.Comment.Preproc: "#0e7490",
+        Token.Operator: "#be123c",
+        Token.Punctuation: "#475569",
+        Token.Literal: "#15803d",
+        Token.Error: "#be123c",
+    }
+
+
+def _color_for_token(ttype: Any) -> str | None:
+    """Walk the Pygments token hierarchy to find the longest matching color."""
+    _init_pygment_colors()
+    while ttype:
+        color = _PYGMENT_COLORS.get(ttype)
+        if color:
+            return color
+        ttype = getattr(ttype, "parent", None)
+    return None
+
+
+def _highlight_code_pdf(raw: str, lang: str) -> str:
+    """Tokenize code with Pygments → per-token colored reportlab ``<font>`` runs.
+
+    Falls back to plain Courier (the original single-color rendering) if
+    Pygments is unavailable or the language lexer is unknown.
+    """
+    fallback = f'<font face="Courier" size="8">{html.escape(raw).replace(chr(10), "<br/>")}</font>'
+    try:
+        from pygments.lexers import get_lexer_by_name
+    except ImportError:
+        return fallback
+    try:
+        lexer = get_lexer_by_name(lang or "text", stripnl=False)
+    except Exception:
+        return fallback
+    parts: list[str] = []
+    for ttype, text in lexer.get_tokens(raw):
+        escaped = html.escape(text).replace("\n", "<br/>")
+        color = _color_for_token(ttype)
+        if color:
+            parts.append(f'<font face="Courier" size="8" color="{color}">{escaped}</font>')
+        else:
+            parts.append(f'<font face="Courier" size="8">{escaped}</font>')
+    return "".join(parts) if parts else fallback
+
+
 def pdf_flowables_from_body(
     body: str,
     *,
@@ -631,12 +704,7 @@ def pdf_flowables_from_body(
             flow.append(Spacer(1, 8))
         elif btype == "code":
             raw = block.get("text") or ""
-            escaped = html.escape(raw).replace("\n", "<br/>")
-            flow.append(
-                Paragraph(
-                    f'<font face="Courier" size="8">{escaped}</font>', code_style
-                )
-            )
+            flow.append(Paragraph(_highlight_code_pdf(raw, block.get("lang") or ""), code_style))
             flow.append(Spacer(1, 8))
         elif btype == "list":
             ordered = bool(block.get("ordered"))

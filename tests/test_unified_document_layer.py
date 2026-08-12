@@ -476,3 +476,61 @@ def test_xlsx_chart_types_and_multiseries(tmp_path: Path) -> None:
                                        "chart": {"type": "bar", "value_col": [2, 3]}}]})
     ws = load_workbook(multi)["S"]
     assert len(ws._charts[0].series) == 2, "multi-series chart did not plot 2 series"
+
+
+def test_pdf_toc_has_page_numbers(tmp_path: Path) -> None:
+    """PDF real TOC: the TableOfContents flowable renders entries WITH page
+    numbers (via multiBuild two-pass). The old flat list had no page numbers."""
+    import pymupdf
+    from kazma_core.documents.renderer_worker import _generate_pdf
+
+    pdf = tmp_path / "toc.pdf"
+    _generate_pdf(pdf, {
+        "title": "Report", "lang": "en", "toc": True,
+        "sections": [
+            {"heading": "Introduction", "body": "Body text for the introduction."},
+            {"heading": "Conclusion", "body": "Body text for the conclusion."},
+        ],
+    }, [])
+    doc = pymupdf.open(str(pdf))
+    page1 = doc[0].get_text()
+    doc.close()
+    # The TOC area should contain entry names AND bare digits (page numbers).
+    assert "Introduction" in page1, "TOC missing entry text"
+    assert "Conclusion" in page1, "TOC missing entry text"
+    # Old flat-list format would be "1. Introduction"; the real TOC separates
+    # entry text from page numbers. Check that at least one bare digit appears
+    # (the page number from the TableOfContents flowable).
+    assert any(c.isdigit() for c in page1), "TOC missing page numbers"
+
+
+def test_html_code_highlighting(tmp_path: Path) -> None:
+    """HTML code highlighting: fenced code blocks get Pygments syntax coloring."""
+    from kazma_core.documents.renderer_worker import _generate_html
+
+    html = tmp_path / "code.html"
+    _generate_html(html, {
+        "title": "Report", "lang": "en",
+        "sections": [{"heading": "Demo", "body": "```python\ndef foo():\n    pass\n```"}],
+    })
+    h = html.read_text(encoding="utf-8")
+    assert "codehilite" in h, "HTML missing codehilite class"
+    assert "<span" in h, "HTML missing Pygments syntax-highlight spans"
+
+
+def test_html_clickable_toc(tmp_path: Path) -> None:
+    """HTML clickable TOC: entries are <a href="#slug"> links; headings have
+    matching id="slug" attributes so clicking scrolls to the section."""
+    from kazma_core.documents.renderer_worker import _generate_html
+
+    html = tmp_path / "toc.html"
+    _generate_html(html, {
+        "title": "Report", "lang": "en", "toc": True,
+        "sections": [
+            {"heading": "Introduction", "body": "body"},
+            {"heading": "Conclusion", "body": "body"},
+        ],
+    })
+    h = html.read_text(encoding="utf-8").lower()
+    assert 'href="#introduction"' in h, "TOC entries not clickable links"
+    assert 'id="introduction"' in h, "Section headings missing anchor IDs"

@@ -230,11 +230,21 @@ class PdfEngine:
         def decorate(canvas: Any, document: Any) -> None:
             self._decorate(canvas, document, A4, font, th)
 
-        SimpleDocTemplate(
+        # Subclass that registers heading bars into a TableOfContents via
+        # afterFlowable → notify. multiBuild (two-pass) gives the TOC real
+        # page numbers (pass 1 records where headings land, pass 2 renders).
+        class _TocDocTemplate(SimpleDocTemplate):
+            def afterFlowable(self, flowable: Any) -> None:
+                entry = getattr(flowable, "_toc_entry", None)
+                if entry:
+                    level, text = entry
+                    self.notify("TOCEntry", (level - 1, text, self.page))
+
+        _TocDocTemplate(
             str(output), pagesize=A4,
             leftMargin=page_margin, rightMargin=page_margin,
             topMargin=page_margin + 4, bottomMargin=page_margin,
-        ).build(story, onFirstPage=decorate, onLaterPages=decorate)
+        ).multiBuild(story, onFirstPage=decorate, onLaterPages=decorate)
 
     # ================================================================== #
     # font setup
@@ -401,10 +411,12 @@ class PdfEngine:
                 ))
                 story.append(Spacer(1, 10))
         elif isinstance(block, HeadingBlock):
-            story.append(_bar(
+            bar = _bar(
                 inline_markdown_to_reportlab(block.text, shape_arabic=self.shape_ar),
                 styles["h1"] if block.level <= 1 else styles["h2"],
-            ))
+            )
+            bar._toc_entry = (block.level, block.text)  # for afterFlowable → TOC
+            story.append(bar)
             story.append(Spacer(1, 8))
         elif isinstance(block, BodyBlock):
             story.extend(pdf_flowables_from_body(
@@ -420,13 +432,20 @@ class PdfEngine:
                 styles["h2"],
             ))
             story.append(Spacer(1, 6))
-            for index, entry in enumerate(block.entries, 1):
-                if not entry:
-                    continue
-                story.append(Paragraph(
-                    inline_markdown_to_reportlab(f"{index}. {entry}", shape_arabic=self.shape_ar),
-                    styles["cite"],
-                ))
+            # Real TableOfContents flowable — multiBuild populates it with page
+            # numbers + dot leaders from heading bars tagged via _toc_entry.
+            from reportlab.lib.styles import ParagraphStyle as _PS
+            from reportlab.platypus.tableofcontents import TableOfContents as _TOC
+            toc = _TOC()
+            toc.levelStyles = [
+                _PS("TOC1", fontName=font, fontSize=11, leading=16,
+                    leftIndent=20, firstLineIndent=-20, spaceBefore=4),
+                _PS("TOC2", fontName=font, fontSize=10, leading=14,
+                    leftIndent=40, firstLineIndent=-20, spaceBefore=2),
+                _PS("TOC3", fontName=font, fontSize=10, leading=14,
+                    leftIndent=60, firstLineIndent=-20, spaceBefore=2),
+            ]
+            story.append(toc)
             story.append(PageBreak())
         elif isinstance(block, TableBlock):
             if block.heading:
