@@ -455,6 +455,14 @@
         if (_deliveryPollSid !== sid) return; // stopped
         console.log('[KazmaChat] Delivery poll: generating=' + (data ? data.generating : 'null'));
         if (data && !data.generating) {
+          // Check if the response is ALREADY visible (WS/SSE delivered it).
+          // If so, skip the reload — it would cause duplication.
+          var lastMsg = document.querySelector('#chat-messages .message-assistant:last-child .message-text');
+          if (lastMsg && (lastMsg.textContent || '').trim().length > 30) {
+            console.log('[KazmaChat] Delivery poll: response already visible — skipping reload');
+            _deliveryPollSid = null;
+            return;
+          }
           console.log('[KazmaChat] Delivery poll: turn DONE — calling loadSession');
           _deliveryPollSid = null;
           loadSession(sid);
