@@ -101,6 +101,61 @@ def _mcp_raw_tool_name(tool_name: str) -> str:
     return name
 
 
+_FS_PATH_KEYS = ("path", "paths", "directory", "filePath", "filepath",
+                  "source", "destination", "src", "dst", "target", "folder")
+_WRITE_KEYWORDS = ("write", "edit", "delete", "move", "create", "rename",
+                    "mkdir", "remove", "rm", "rmdir", "touch", "copy", "cp")
+
+
+def _gate_mcp_path_access(
+    raw_tool_name: str, arguments: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Gate MCP calls that carry path-like arguments through check_path_access.
+
+    Returns a denial dict (with ``is_error=True``) if any path is outside the
+    workspace and no grant covers it, or ``None`` to allow the call. This closes
+    the hole where MCP ``filesystem`` tools bypassed the path-grant system
+    entirely (their own allowlist was the only gate).
+    """
+    # Collect path-like arguments.
+    paths: list[str] = []
+    for key in _FS_PATH_KEYS:
+        val = arguments.get(key)
+        if val is None:
+            continue
+        items = val if isinstance(val, list) else [val]
+        paths.extend(str(v) for v in items if isinstance(v, (str, int)) and str(v).strip())
+    if not paths:
+        return None  # no path args → not a filesystem op
+
+    name_lower = raw_tool_name.lower()
+    mode = "write" if any(kw in name_lower for kw in _WRITE_KEYWORDS) else "read"
+
+    try:
+        from kazma_core.workspace.path_policy import check_path_access
+        from kazma_core.safety.hitl import get_current_thread_id
+    except ImportError:
+        return None  # safety modules unavailable → fail open (non-security env)
+
+    thread_id = get_current_thread_id() or ""
+    for p in paths:
+        result = check_path_access(p, mode, thread_id=thread_id)
+        if not result.allowed:
+            logger.warning(
+                "[MCP] Path access denied for '%s': %s (%s)",
+                raw_tool_name, p, result.reason,
+            )
+            return {
+                "content": (
+                    f"Access denied: '{p}' is outside the workspace and no "
+                    f"grant covers it ({result.reason})."
+                ),
+                "is_error": True,
+                "outcome": "hard",
+            }
+    return None
+
+
 def classify_mcp_tool(tool_name: str) -> str:
     """Classify an MCP tool by name pattern.
 
@@ -556,6 +611,13 @@ class AsyncMCPManager:
         elif tool_name.startswith("mcp__"):
             # Namespaced for a different server — strip just the last segment.
             raw_tool_name = tool_name.split("__", 2)[-1] if "__" in tool_name else tool_name
+
+        # Gate filesystem path access BEFORE dispatching to the MCP server.
+        # Closes the hole where MCP filesystem tools bypassed the path-grant
+        # system (their own allowlist was the only gate).
+        denial = _gate_mcp_path_access(raw_tool_name, arguments or {})
+        if denial is not None:
+            return denial
 
         start = time.monotonic()
         try:

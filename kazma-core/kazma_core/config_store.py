@@ -1254,7 +1254,14 @@ def get_config_store() -> ConfigStore:
         try:
             _config_store = ConfigStore()
         except Exception as e:
-            logger.error(f"Failed to initialize ConfigStore (SQLite): {e}. Using in-memory fallback.")
+            logger.critical(
+                "ConfigStore (SQLite) initialization FAILED: %s. "
+                "SAFETY-CRITICAL data (path grants, HITL approvals, YOLO state, "
+                "task grants) will NOT persist across restarts — using volatile "
+                "in-memory fallback with 1-hour TTL. Fix: check kazma-data/ "
+                "permissions, disk space, and that settings.db is not locked.",
+                e,
+            )
             _config_store = _InMemoryStore()  # type: ignore[assignment]
     return _config_store
 

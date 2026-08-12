@@ -133,10 +133,24 @@ def resolve_active_root() -> Path:
     # 4. Env
     env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
     if env_ws:
-        return Path(env_ws).expanduser().resolve()
+        root = Path(env_ws).expanduser().resolve()
+        logger.warning(
+            "[SECURITY] resolve_active_root: using KAZMA_WORKSPACE env (%s) — "
+            "no active WorkspaceStore row or process pin; workspace may be "
+            "broader than intended after a restart.",
+            root,
+        )
+        return root
 
     # 5. Default sandbox
-    return default_sandbox_root()
+    root = default_sandbox_root()
+    logger.warning(
+        "[SECURITY] resolve_active_root: using default sandbox (%s) — "
+        "no WorkspaceStore, process pin, or KAZMA_WORKSPACE env; workspace "
+        "may be broader than intended after a restart.",
+        root,
+    )
+    return root
 
 
 def subscribe_root_changed(callback: RootChangedCallback) -> None:
