@@ -470,12 +470,27 @@ class KazmaAppBuilder:
         def _dynamic_dir() -> str:
             return "rtl" if self._current_lang.get() == "ar" else "ltr"
 
+        # SSR the user's stored appearance theme so the very first paint
+        # already matches their choice on every device (no dark flash, and
+        # no dependence on browser localStorage / device preference). The
+        # frontend makes this same value authoritative after JS boot.
+        def _dynamic_theme() -> str:
+            # Read via the same SettingsManager path as /api/settings/appearance
+            # so SSR and the API always agree (stored choice wins; else default).
+            try:
+                from kazma_core.settings_manager import SettingsManager
+                t = SettingsManager(self.config_store).get_appearance().get("theme")
+                return t if t in ("light", "dark") else "light"
+            except Exception:
+                return "light"
+
         # Inject the full translation dict as JSON so Alpine.js expressions
         # can call a client-side t() — server-side t() only covers Jinja2.
         _translations_json = _json.dumps(TRANSLATIONS, ensure_ascii=False)
         self.templates.env.globals["t"] = _dynamic_translate
         self.templates.env.globals["lang"] = _dynamic_lang
         self.templates.env.globals["dir"] = _dynamic_dir
+        self.templates.env.globals["theme"] = _dynamic_theme
         self.templates.env.globals["translations_json"] = _translations_json
 
         # Cache-busting versions for static assets. Derived from file mtimes

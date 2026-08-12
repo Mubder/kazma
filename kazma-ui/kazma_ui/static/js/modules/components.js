@@ -28,19 +28,26 @@ export function kazmaApp() {
             this.$watch('fontSize', (v) => localStorage.setItem('kazma-font-size', v));
 
             // Sync from backend (authoritative — overrides the local cache).
+            // Theme is server-authoritative so a user's choice persists across
+            // every device/browser, not just this browser's localStorage.
             fetch('/api/settings/appearance')
                 .then(r => r.json())
-                .then(d => { if (d && d.font_size) this.fontSize = d.font_size; })
+                .then(d => {
+                    if (d && d.font_size) this.fontSize = d.font_size;
+                    if (d && (d.theme === 'light' || d.theme === 'dark') && d.theme !== this.theme) {
+                        this.theme = d.theme;
+                        this._applyTheme();
+                    }
+                })
                 .catch(() => {});
 
-            // Restore theme from localStorage
-            const saved = localStorage.getItem('kazma-theme');
-            if (saved) {
-                this.theme = saved;
-            } else {
-                // Detect system preference
-                this.theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-            }
+            // Adopt the SSR-rendered theme (base.html renders the server-stored
+            // appearance.theme onto <html data-theme="...">) as the starting
+            // point. It is already correct on the very first paint, so adopting
+            // it avoids any flash; the appearance fetch below reconfirms. The
+            // server value is authoritative — browser localStorage is legacy.
+            const ssrTheme = document.documentElement.getAttribute('data-theme');
+            this.theme = (ssrTheme === 'light' || ssrTheme === 'dark') ? ssrTheme : 'light';
             this._applyTheme();
 
             // Read current language from <html lang="..."> attribute (set server-side)
@@ -65,6 +72,16 @@ export function kazmaApp() {
             this.theme = this.theme === 'dark' ? 'light' : 'dark';
             localStorage.setItem('kazma-theme', this.theme);
             this._applyTheme();
+            // Persist to the account (server) so the choice travels across
+            // every device/browser, not just this one. Fire-and-forget; the
+            // local apply above already gives instant feedback.
+            try {
+                fetch('/api/settings/appearance', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ theme: this.theme }),
+                }).catch(() => {});
+            } catch (_) { /* theme still works locally */ }
         },
 
         toggleLanguage() {

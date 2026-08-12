@@ -43,7 +43,11 @@ DEFAULT_SHORTCUTS: dict[str, str] = {
 # ── Default appearance ────────────────────────────────────────────────
 
 DEFAULT_APPEARANCE: dict[str, Any] = {
-    "theme": "dark",
+    # "light" is the safe default; the frontend makes this server-stored
+    # value authoritative on load so a user's choice persists across
+    # devices/browsers (not just one browser's localStorage). Users who
+    # prefer dark toggle once and it sticks everywhere.
+    "theme": "light",
     "accent_color": "#5e6ad2",
     "font_size": 14,
     "sidebar_position": "left",
