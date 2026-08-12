@@ -453,17 +453,10 @@
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
         if (_deliveryPollSid !== sid) return; // stopped
-        console.log('[KazmaChat] Delivery poll: generating=' + (data ? data.generating : 'null'));
         if (data && !data.generating) {
-          // Check if the response is ALREADY visible (WS/SSE delivered it).
-          // If so, skip the reload — it would cause duplication.
-          var lastMsg = document.querySelector('#chat-messages .message-assistant:last-child .message-text');
-          if (lastMsg && (lastMsg.textContent || '').trim().length > 30) {
-            console.log('[KazmaChat] Delivery poll: response already visible — skipping reload');
-            _deliveryPollSid = null;
-            return;
-          }
-          console.log('[KazmaChat] Delivery poll: turn DONE — calling loadSession');
+          // Turn finished — ALWAYS reload to get the complete persisted
+          // response. loadSession replaces the entire chat, so there's no
+          // duplication even if the WS handler also delivered partial content.
           _deliveryPollSid = null;
           loadSession(sid);
         } else {
@@ -471,7 +464,6 @@
         }
       })
       .catch(function(err) {
-        console.log('[KazmaChat] Delivery poll: fetch error — ' + err);
         if (_deliveryPollSid === sid) _deliveryPollTimer = setTimeout(_deliveryPoll, 5000);
       });
   }
