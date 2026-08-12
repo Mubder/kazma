@@ -2333,9 +2333,9 @@ def create_sse_chat_router(
         # injects it as a first-class message, and continues. Stream the
         # continued turn to the client (same shape as /api/approve).
         logger.info("[SSE] hard steer resuming thread=%s", thread_id[:12])
-        from langgraph.types import Command as _Command
+        from kazma_core.safety.commitment.resume import build_resume_command
 
-        resume_input = _Command(resume={"action": "apply"})
+        resume_input = build_resume_command(action="apply")
         return StreamingResponse(
             _stream_langgraph_events(
                 graph_inst, resume_input, config,

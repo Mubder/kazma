@@ -3066,39 +3066,31 @@ def register_direct_routes(self: Any) -> None:
                 except Exception:
                     logger.exception("[HITL] failed to apply tool grant")
 
-            # Phase 3/§4.3: read the pending interrupt payload to determine kind.
-            # Semantic interrupts need a {tcid: option_id} resume; security needs
-            # {approved: bool}. The existing Approve/Deny buttons map to "best
-            # option" / "cancel" for semantic via build_resume_value.
-            _intr_payload = None
-            try:
-                for _task in (pre.tasks if pre else []):
-                    for _intr in (_task.interrupts or []):
-                        if isinstance(_intr.value, dict) and _intr.value.get("type") == "hitl_approval":
-                            _intr_payload = _intr.value
-                            break
-                    if _intr_payload:
-                        break
-            except Exception:
-                pass
+            # Phase 3/§4.3: build the resume Command via the single chokepoint
+            # (build_resume_command). Semantic interrupts need {tcid: option_id};
+            # security needs {approved: bool}. Routed through one helper so a
+            # transport cannot drift again (cf. WS bug, incident 2026-08-12).
+            from kazma_core.safety.commitment.resume import (
+                build_resume_command,
+                read_pending_interrupt,
+            )
 
-            from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
-
-            if is_semantic_kind(_intr_payload):
-                # Per-option: if the UI sent a specific choice, use it directly.
-                _choices = body.get("choices")
-                if _choices and isinstance(_choices, dict):
-                    resume_value = _choices
-                else:
-                    resume_value = build_resume_value(_intr_payload, approved)
-            else:
-                resume_value: dict[str, Any] = {
-                    "approved": approved,
-                    "reason": body.get("reason", ""),
-                    "scope": scope,
-                }
-                if isinstance(body.get("approved_ids"), list):
-                    resume_value["approved_ids"] = body["approved_ids"]
+            _intr_payload = await read_pending_interrupt(graph_ref, config, snapshot=pre)
+            resume_cmd = build_resume_command(
+                _intr_payload,
+                approved=approved,
+                choices=body.get("choices") if isinstance(body.get("choices"), dict) else None,
+                scope=scope,
+                reason=body.get("reason", ""),
+                approved_ids=body.get("approved_ids") if isinstance(body.get("approved_ids"), list) else None,
+            )
+            if resume_cmd is None:
+                # Stale card (race with the earlier 409 guard): fall back to a
+                # security resume so the stream still completes deterministically.
+                resume_cmd = build_resume_command(
+                    {"type": "hitl_approval", "kind": "security"},
+                    approved=approved, scope=scope, reason=body.get("reason", ""),
+                )
 
             from fastapi.responses import StreamingResponse
             from typing import AsyncGenerator
@@ -3169,7 +3161,7 @@ def register_direct_routes(self: Any) -> None:
                 try:
                     async for frame in _stream_langgraph_events(
                         graph_ref,
-                        Command(resume=resume_value),
+                        resume_cmd,
                         config=config,
                     ):
                         yield frame

@@ -938,12 +938,12 @@ def create_graph_handler(
                 return
 
             # Resume under cmd_lock (free: the paused turn released it).
-            from langgraph.types import Command as _SteerCmd
+            from kazma_core.safety.commitment.resume import build_resume_command
 
             try:
                 async with cmd_lock:
                     _rs = await graph.ainvoke(
-                        _SteerCmd(resume={"action": "apply"}), config,
+                        build_resume_command(action="apply"), config,
                     )
                 _asst = ""
                 for _m in reversed((_rs.get("messages") if isinstance(_rs, dict) else []) or []):

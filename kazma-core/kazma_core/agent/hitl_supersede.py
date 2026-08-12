@@ -73,31 +73,32 @@ async def cancel_pending_hitl(
             (config.get("configurable") or {}).get("thread_id"),
             reason,
         )
-        # Phase 3: semantic interrupts need {tcid: "cancel"} on auto-deny, not
-        # {approved: false}. Read the pending payload each time (the chained loop
-        # may encounter different interrupt types).
-        from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
+        # Phase 3: build the deny resume via the single chokepoint. Read the
+        # pending payload each time (the chained loop may encounter different
+        # interrupt types — semantic needs {tcid:"cancel"}, security needs
+        # {approved:false}).
+        from kazma_core.safety.commitment.resume import (
+            build_resume_command,
+            read_pending_interrupt,
+        )
 
-        async def _deny_resume():
-            try:
-                _snap = await graph.aget_state(config)
-                for _task in (getattr(_snap, "tasks", None) or []):
-                    for _intr in (getattr(_task, "interrupts", None) or []):
-                        _val = getattr(_intr, "value", None)
-                        if isinstance(_val, dict) and _val.get("type") == "hitl_approval":
-                            if is_semantic_kind(_val):
-                                return build_resume_value(_val, approved=False)
-                            break
-            except Exception:
-                pass
-            return {"approved": False, "reason": reason}
+        async def _deny_resume_cmd():
+            _payload = await read_pending_interrupt(graph, config)
+            _cmd = build_resume_command(_payload, approved=False, reason=reason)
+            if _cmd is None:
+                # No semantic payload — security deny.
+                _cmd = build_resume_command(
+                    {"type": "hitl_approval", "kind": "security"},
+                    approved=False, reason=reason,
+                )
+            return _cmd
 
-        await graph.ainvoke(Command(resume=await _deny_resume()), config)
+        await graph.ainvoke(await _deny_resume_cmd(), config)
         # Chained danger tools may re-interrupt — deny those too (cap 5).
         for _ in range(5):
             if not await has_pending_hitl(graph, config):
                 break
-            await graph.ainvoke(Command(resume=await _deny_resume()), config)
+            await graph.ainvoke(await _deny_resume_cmd(), config)
         return True
     except Exception:
         logger.exception("[hitl_supersede] failed to cancel pending HITL")

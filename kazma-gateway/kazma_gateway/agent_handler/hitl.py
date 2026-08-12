@@ -362,22 +362,26 @@ async def _handle_hitl_resume(
                     logger.warning("[HITL] Task grant failed: %s — continuing with single approve", exc)
 
             # Phase 3/§4.3: semantic interrupts need {tcid: option_id}; security
-            # needs {approved: bool}. The existing approve/deny buttons map to
-            # "best option" / "cancel" for semantic via build_resume_value.
-            from kazma_core.safety.commitment.resume import build_resume_value, is_semantic_kind
+            # needs {approved: bool}. Routed through the single chokepoint
+            # (build_resume_command) so transports cannot drift again.
+            from kazma_core.safety.commitment.resume import build_resume_command
 
-            if semantic_option is not None and pending:
-                # Per-option button: {tcid: option_id}
-                _items = (pending or {}).get("items", [])
-                _tcid = _items[0].get("tool_call_id", "") if _items else ""
-                _resume_val = {_tcid: semantic_option}
-            elif is_semantic_kind(pending):
-                _resume_val = build_resume_value(pending, approved)
-            else:
-                _resume_val = {"approved": approved, "reason": action,
-                               "scope": "task" if is_task_grant else "once"}
+            _resume_cmd = build_resume_command(
+                pending,
+                approved=approved,
+                semantic_option=semantic_option,
+                scope="task" if is_task_grant else "once",
+                reason=action,
+            )
+            if _resume_cmd is None:
+                # Stale (pending cleared between the check above and here) —
+                # treat as a security deny so the turn ends deterministically.
+                _resume_cmd = build_resume_command(
+                    {"type": "hitl_approval", "kind": "security"},
+                    approved=approved, scope="task" if is_task_grant else "once", reason=action,
+                )
             result_state = await graph.ainvoke(
-                Command(resume=_resume_val),
+                _resume_cmd,
                 resume_config,
             )
 

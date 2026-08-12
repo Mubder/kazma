@@ -738,11 +738,11 @@ def create_ws_chat_router(
                         ).to_dict())
                         continue
 
-                    from langgraph.types import Command as _StCmd
+                    from kazma_core.safety.commitment.resume import build_resume_command
 
                     register_turn(thread_id, asyncio.current_task())
                     try:
-                        _st_rs = await _st_graph.ainvoke(_StCmd(resume={"action": "apply"}), _st_cfg)
+                        _st_rs = await _st_graph.ainvoke(build_resume_command(action="apply"), _st_cfg)
                     finally:
                         unregister_turn(thread_id)
                     # Surface the resumed assistant text (custom LLM provider
@@ -1790,38 +1790,31 @@ def create_ws_chat_router(
                         except Exception as exc:
                             logger.warning("[WS-Chat] Failed to apply tool grant: %s", exc)
 
-                    # Build resume value by interrupt KIND (parity with HTTP
-                    # routes_direct.py and gateway hitl.py). A semantic clarify
-                    # needs {tool_call_id: option_id}; only security uses
-                    # {approved, scope}. The old hardcoded security shape here
-                    # never resolved a semantic card → infinite loop.
+                    # Build the resume Command via the single chokepoint
+                    # (build_resume_command). Semantic clarify needs
+                    # {tool_call_id: option_id}; security needs {approved, scope}.
+                    # The old hardcoded security shape here never resolved a
+                    # semantic card → infinite loop (incident 2026-08-12).
                     from kazma_core.safety.commitment.resume import (
-                        build_resume_value,
-                        is_semantic_kind,
+                        build_resume_command,
+                        read_pending_interrupt,
                     )
 
-                    _intr_payload = None
-                    try:
-                        for _task in (pre_snap.tasks if pre_snap else []):
-                            for _intr in (_task.interrupts or []):
-                                _val = getattr(_intr, "value", None)
-                                if isinstance(_val, dict) and _val.get("type") == "hitl_approval":
-                                    _intr_payload = _val
-                                    break
-                            if _intr_payload:
-                                break
-                    except Exception:
-                        _intr_payload = None
-
-                    if is_semantic_kind(_intr_payload):
-                        _choices = payload.get("choices")
-                        if _choices and isinstance(_choices, dict):
-                            resume_val = _choices
-                        else:
-                            resume_val = build_resume_value(_intr_payload, approved)
-                    else:
-                        resume_val = {"approved": approved, "scope": scope}
-                    resume_command = Command(resume=resume_val)
+                    _intr_payload = await read_pending_interrupt(
+                        graph_inst, approve_config, snapshot=pre_snap,
+                    )
+                    resume_command = build_resume_command(
+                        _intr_payload, approved=approved,
+                        choices=payload.get("choices") if isinstance(payload.get("choices"), dict) else None,
+                        scope=scope,
+                    )
+                    if resume_command is None:
+                        # Stale card — fall back to a security resume so the
+                        # approve stream completes deterministically.
+                        resume_command = build_resume_command(
+                            {"type": "hitl_approval", "kind": "security"},
+                            approved=approved, scope=scope,
+                        )
 
                     await websocket.send_json(
                         ApprovalEventBridge.create_approval_started_event(
