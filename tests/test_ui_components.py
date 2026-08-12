@@ -390,6 +390,13 @@ class TestCSSDesignSystem:
         assert ".chat-messages" in css
         assert "background-color: var(--bg)" in css
 
+    def test_chat_input_uses_theme_text_color(self, css):
+        """Hardcoded ice (#e6edf3) on the composer is white-on-white in Light."""
+        assert "color: var(--text-primary)" in css
+        # The composer must not pin dark-theme ink.
+        chat_block = css.split(".chat-input {", 1)[-1].split("}", 1)[0]
+        assert "#e6edf3" not in chat_block
+
     # Animations
     def test_has_fade_animation(self, css):
         assert "@keyframes fade-in" in css

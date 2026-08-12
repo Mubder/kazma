@@ -1880,7 +1880,9 @@ tbody tr:last-child td {
   flex: 1;
   background: none;
   border: none;
-  color: #e6edf3;
+  color: var(--text-primary);
+  caret-color: var(--text-primary);
+  -webkit-text-fill-color: var(--text-primary);
   font-size: 15px;
   line-height: 1.5;
   resize: none;
@@ -1895,6 +1897,11 @@ tbody tr:last-child td {
   /* Per-content bidi: browser uses first strong character when dir=auto */
   unicode-bidi: plaintext;
   text-align: start;
+}
+.chat-input::placeholder {
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+  opacity: 1;
 }
 /* Arabic typed into English UI: Arabic-capable face + no Inter OT features
    that break Arabic joining. dir=rtl / .ar-input set by syncInputBidi(). */
@@ -2812,9 +2819,9 @@ tbody tr:last-child td {
   --tint-strong: rgba(15, 23, 42, 0.05);
 
   --text-primary: #0f1c2e;
-  --text-secondary: #475569;
-  --text-tertiary: #64748b;
-  --text-muted: #94a3b8;
+  --text-secondary: #334155;
+  --text-tertiary: #475569;
+  --text-muted: #64748b;
   --text-inverse: #ffffff;
 
   --accent: #0891b2;
@@ -2943,7 +2950,13 @@ tbody tr:last-child td {
   background: var(--bg-panel);
 }
 [data-theme="light"] .input-wrapper {
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+[data-theme="light"] .header-title {
+  background: none;
+  -webkit-text-fill-color: unset;
+  color: var(--text-primary);
 }
 
 /* ── 23b. Dark Mode Dropdown Options ────────────────────────────── */

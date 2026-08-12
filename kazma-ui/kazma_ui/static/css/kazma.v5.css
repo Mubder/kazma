@@ -93,9 +93,9 @@ html[data-theme="light"],
   --tint-strong: rgba(12, 21, 38, 0.05);
 
   --text-primary: #0c1526;
-  --text-secondary: #44546e;
-  --text-tertiary: #5d6f8a;
-  --text-muted: #8b9bb8;
+  --text-secondary: #334155;
+  --text-tertiary: #475569;
+  --text-muted: #64748b;
   --text-inverse: #ffffff;
 
   --accent: #2563eb;
@@ -143,9 +143,9 @@ html[data-theme="light"],
     --tint: rgba(12, 21, 38, 0.025);
     --tint-strong: rgba(12, 21, 38, 0.05);
     --text-primary: #0c1526;
-    --text-secondary: #44546e;
-    --text-tertiary: #5d6f8a;
-    --text-muted: #8b9bb8;
+    --text-secondary: #334155;
+    --text-tertiary: #475569;
+    --text-muted: #64748b;
     --text-inverse: #ffffff;
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
