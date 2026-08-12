@@ -62,7 +62,7 @@
                     <!-- Action Button -->
                     <template x-if="activeAlert && activeAlert.callback_id === 'sentence-transformers'">
         <button type="button" class="btn-icon" @click="installMl()" :disabled="installing" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-            <span x-show="installing" class="spinner-inline animate-spin" style="width:12px; height:12px; border:2px solid #000; border-top-color:transparent; border-radius:50%; display:inline-block;"></span>
+            <span x-show="installing" class="spinner-inline animate-spin" style="width:12px; height:12px; border:2px solid #000; border-top-color:transparent; border-radius:50%;"></span>
             <span x-text="installing ? 'Installing...' : (activeAlert ? activeAlert.button_text : 'Resolve')"></span>
         </button>
                     </template>

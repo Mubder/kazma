@@ -272,7 +272,7 @@
           </tbody>
         </table>
       </div>
-      <div class="mem-pager" x-show="beliefsPage.total > 0" style="display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:0.78rem;color:var(--text-muted);">
+      <div class="mem-pager" x-show="beliefsPage.total > 0">
         <span x-text="rangeText(beliefsPage, beliefs.length)"></span>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
           x-show="hasMore(beliefsPage, beliefs.length)" @click="loadMoreBeliefs()"
@@ -353,7 +353,7 @@
           </tbody>
         </table>
       </div>
-      <div class="mem-pager" x-show="entitiesPage.total > 0" style="display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:0.78rem;color:var(--text-muted);">
+      <div class="mem-pager" x-show="entitiesPage.total > 0">
         <span x-text="rangeText(entitiesPage, entities.length)"></span>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
           x-show="hasMore(entitiesPage, entities.length)" @click="loadMoreEntities()"
@@ -388,7 +388,7 @@
           </tbody>
         </table>
       </div>
-      <div class="mem-pager" x-show="mergesPage.total > 0" style="display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:0.78rem;color:var(--text-muted);">
+      <div class="mem-pager" x-show="mergesPage.total > 0">
         <span x-text="rangeText(mergesPage, merges.length)"></span>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
           x-show="hasMore(mergesPage, merges.length)" @click="loadMoreMerges()"

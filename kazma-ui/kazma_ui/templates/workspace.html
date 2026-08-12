@@ -29,15 +29,14 @@
         </template>
       </select>
       
-      <button class="btn btn-sm btn-secondary ws-action-btn" @click="showCreateModal = true" style="display:flex;align-items:center;justify-content:center;gap:6px;">
+      <button class="btn btn-sm btn-secondary ws-action-btn" @click="showCreateModal = true">
         <span><span x-html="KazmaIcons.plus()"></span></span> {{ t('workspace.create') }}
       </button>
-      <button x-show="ghOAuthConnected || ghHasToken" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
+      <button x-show="ghOAuthConnected || ghHasToken" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" x-cloak>
         <span><span class="ki" data-icon="github" aria-hidden="true"></span></span> {{ t('workspace.switch_repo') }}
       </button>
       <button class="btn btn-sm btn-danger ws-action-btn" @click="deleteActiveWorkspace()"
               :disabled="!activeWorkspaceId"
-              style="display:flex;align-items:center;justify-content:center;gap:6px;"
               title="{{ t('workspace.delete_title') }}">
         <span><span class="ki" data-icon="trash" aria-hidden="true"></span></span> {{ t('workspace.delete') }}
       </button>
@@ -55,7 +54,7 @@
   </style>
 
   <!-- ── Create Workspace Modal ── -->
-  <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showCreateModal = false">
+  <div x-show="showCreateModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak @click.self="showCreateModal = false">
     <div class="card" style="max-width:520px;width:100%;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
       <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span x-html="KazmaIcons.plus()"></span> {{ t('workspace.create_modal_title') }}</h3>
@@ -82,7 +81,7 @@
   </div>
 
   <!-- ── Select Folder Modal ── -->
-  <div x-show="showFolderModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
+  <div x-show="showFolderModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
     <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.folder_modal_title') }}</h3>
@@ -114,7 +113,7 @@
   </div>
 
   <!-- ── GitHub Repo Picker Modal ── -->
-  <div x-show="showRepoPicker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showRepoPicker = false">
+  <div x-show="showRepoPicker" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak @click.self="showRepoPicker = false">
     <div class="card" style="max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.repo_picker_title') }}</h3>
@@ -145,7 +144,7 @@
   </div>
 
   <!-- ── GitHub Token Config Modal ── -->
-  <div x-show="showPatModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
+  <div x-show="showPatModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
     <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.pat_modal_title') }}</h3>
@@ -170,7 +169,7 @@
   </div>
 
   <!-- ── GitHub App Config Modal ── -->
-  <div x-show="showAppModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
+  <div x-show="showAppModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
     <div class="card" style="max-width:520px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> Configure GitHub App</h3>
@@ -255,7 +254,7 @@
         </div>
       </div>
 
-      <div style="padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--bg-surface);" x-show="gitIsGit">
+      <div class="ic-col" style="padding:12px;gap:10px;background:var(--bg-surface);" x-show="gitIsGit" x-cloak>
         <!-- Staged Files -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
@@ -349,7 +348,7 @@
             </span>
           </template>
           <!-- Connect options when not authenticated -->
-          <div x-show="!ghAuthenticated" style="display:flex;align-items:center;gap:6px;">
+          <div x-show="!ghAuthenticated" class="ic-row">
             <button class="btn btn-xs btn-primary" @click="showAppModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
               <span class="ki" data-icon="github" aria-hidden="true"></span> Configure App
             </button>
@@ -360,7 +359,7 @@
               OAuth
             </button>
           </div>
-          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary ic-row-xs" @click="disconnectGitHub()" style="font-size:0.75rem;padding:4px 8px;">
             {{ t('workspace.gh_disconnect') }}
           </button>
         </div>
@@ -373,7 +372,7 @@
         <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">Connect Kazma to <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span> to view live pull requests, issues, commits, and workflow runs.</p>
         
         <!-- Surface API / App errors prominently on the unauthenticated card -->
-        <div x-show="ghError" x-cloak style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:left;word-break:break-word;display:flex;align-items:start;gap:8px;">
+        <div x-show="ghError" x-cloak class="ic-row-start" style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:left;word-break:break-word;">
           <span style="color:#ef4444;font-size:1rem;flex-shrink:0;"><span class="ki" data-icon="x-circle" aria-hidden="true"></span></span>
           <div style="flex:1;">
             <div style="font-weight:600;margin-bottom:2px;color:#ef4444;">GitHub Connection Error</div>
@@ -658,7 +657,7 @@
       <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
         <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;"><span x-html="KazmaIcons.zap({class:'icon-md'})"></span> {{ t('workspace.activity_title') }}</h3>
         <!-- Filter chips -->
-        <div style="display:flex;gap:4px;" x-show="ghOAuthConnected" x-cloak>
+        <div class="ic-row" style="gap:4px;" x-show="ghOAuthConnected" x-cloak>
           <template x-for="chip in [['all',t('workspace.filter_all')],['commit',t('workspace.filter_commits')],['pr',t('workspace.filter_prs')],['issue',t('workspace.filter_issues')],['ci',t('workspace.filter_ci')]]" :key="chip[0]">
             <button @click="ghActivityFilter = chip[0]" :style="{ background: ghActivityFilter === chip[0] ? 'var(--accent)' : 'var(--bg-elevated)', color: ghActivityFilter === chip[0] ? '#fff' : 'var(--text-muted)', border: ghActivityFilter === chip[0] ? '1px solid var(--accent)' : '1px solid var(--border-subtle)' }" style="font-size:0.62rem;font-weight:600;padding:2px 7px;border-radius:10px;cursor:pointer;" x-text="chip[1]"></button>
           </template>

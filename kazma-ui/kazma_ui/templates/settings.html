@@ -1517,8 +1517,8 @@
             <div style="padding:12px 16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                 <div>
                     <div style="font-weight:600;font-size:0.95rem">
-                        <span x-show="vaultStatus.enabled" style="color:var(--success);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> Vault Enabled</span>
-                        <span x-show="!vaultStatus.enabled" style="color:var(--danger);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="alert-circle" aria-hidden="true"></span> Vault Disabled</span>
+                        <span x-show="vaultStatus.enabled" class="ic-row-xs" style="color:var(--success);gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> Vault Enabled</span>
+                        <span x-show="!vaultStatus.enabled" class="ic-row-xs" style="color:var(--danger);gap:6px"><span class="ki" data-icon="alert-circle" aria-hidden="true"></span> Vault Disabled</span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
                         <span x-show="vaultStatus.enabled" x-text="vaultStatus.secret_count + ' secrets stored'"></span>
@@ -1578,7 +1578,7 @@
                     <option value="anyip">anyIP.io</option>
                 </select>
             </div>
-            <div x-show="proxy.provider !== 'none'" style="display:flex;flex-direction:column;gap:12px;">
+            <div x-show="proxy.provider !== 'none'" class="ic-col" style="gap:12px;" x-cloak>
                 <div style="display:flex;gap:12px;">
                     <div class="form-group" style="flex:2;">
                         <label>{{ t('settings.proxy_host') }}</label>

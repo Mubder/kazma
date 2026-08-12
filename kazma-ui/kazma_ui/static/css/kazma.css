@@ -2587,6 +2587,16 @@ tbody tr:last-child td {
 .items-end { align-items: flex-end; }
 .justify-center { justify-content: center; }
 .justify-between { justify-content: space-between; }
+
+/* Layout rows for x-show-gated elements. Use these INSTEAD of inline
+   style="display:flex/inline-flex;..." on any element that also carries
+   x-show: an inline display declaration overrides Alpine's display:none
+   toggle and re-introduces the first-paint blink (AGENTS.md UI rule).
+   Non-display props (gap, padding, color) may stay inline. */
+.ic-row { display: flex; align-items: center; gap: var(--sp-2); }
+.ic-row-xs { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.ic-row-start { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.ic-col { display: flex; flex-direction: column; gap: var(--sp-3); }
 .justify-end { justify-content: flex-end; }
 .gap-1 { gap: var(--sp-1); }
 .gap-2 { gap: var(--sp-2); }
@@ -4084,6 +4094,32 @@ canvas { display: block; border-radius: 4px; }
   white-space: nowrap;
   flex-shrink: 0;
 }
+/* Create-workspace modal overlay. Layout (incl. display:flex) lives here,
+   NOT inline, so Alpine's x-show display:none toggle isn't overridden by
+   an inline display declaration (the x-show + inline display:flex blink
+   bug). Only the scrim color stays inline in the template. */
+.ws-modal-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+/* Memory panel pager (x-show-gated → layout must live in CSS, not inline,
+   or it blinks). */
+.mem-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+/* Inline spinner (x-show-gated). display lives here so Alpine's
+   display:none toggle works — was inline, which overrode it. */
+.spinner-inline { display: inline-block; }
 .card-header {
   display: flex;
   align-items: center;
