@@ -186,20 +186,31 @@ class EventBridge:
         args: Dict[str, Any],
         message: str = "",
         tools: Optional[list] = None,
+        kind: Optional[str] = None,
+        items: Optional[list] = None,
     ) -> TelemetryEvent:
-        """Create a TelemetryEvent for HITL tool approval required."""
-        return TelemetryEvent(
-            type="status_update",
-            data={
-                "status": "paused_for_approval",
-                "thread_id": thread_id,
-                "tool": tool_name,
-                "args": args or {},
-                "tools": tools or [],
-                "message": message or f"Approval required for danger tool '{tool_name}'",
-            },
-            thread_id=thread_id,
-        )
+        """Create a TelemetryEvent for HITL tool approval required.
+
+        For semantic clarify/confirm interrupts, pass ``kind`` (e.g.
+        ``"semantic_clarify"``) and ``items`` (the clarify payload's ``items``
+        with their ``options``) so the UI can render discrete option buttons
+        instead of a generic Approve/YOLO card (chat.js renderHitlCard gates
+        on ``data.kind`` starting with ``semantic_``). Security/danger tools
+        leave these unset → existing generic card behavior.
+        """
+        data: Dict[str, Any] = {
+            "status": "paused_for_approval",
+            "thread_id": thread_id,
+            "tool": tool_name,
+            "args": args or {},
+            "tools": tools or [],
+            "message": message or f"Approval required for danger tool '{tool_name}'",
+        }
+        if kind:
+            data["kind"] = kind
+        if items:
+            data["items"] = items
+        return TelemetryEvent(type="status_update", data=data, thread_id=thread_id)
 
     @staticmethod
     def create_idle_event(thread_id: Optional[str] = None) -> TelemetryEvent:

@@ -148,6 +148,24 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
         except Exception as exc:
             logger.debug("Failed to append Commitment metrics: %s", exc)
 
+        # ── In-process prometheus_client registry (kazma-core Counters) ──
+        # Exposes counters that aren't DB-derivable — notably
+        # kazma_commitment_terminal_total (PR3 loop-prevention signal) and the
+        # long-task / llm / swarm / memory counters. No name overlap with the
+        # hand-built lines above (those are DB-derived under different names).
+        # No-op + a single unavailable gauge if prometheus_client is absent.
+        try:
+            from kazma_core.metrics import get_metrics_response as _core_metrics
+
+            _body, _status, _ = _core_metrics()
+            if _status == 200:
+                _core_text = _body.decode("utf-8") if isinstance(_body, (bytes, bytearray)) else str(_body)
+                if _core_text.strip():
+                    lines.append("# kazma-core in-process prometheus registry")
+                    lines.append(_core_text.rstrip())
+        except Exception as exc:
+            logger.debug("Failed to merge kazma-core prometheus registry: %s", exc)
+
         return PlainTextResponse(
             content="\n".join(lines) + "\n",
             media_type="text/plain; version=0.0.4; charset=utf-8",

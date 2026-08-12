@@ -295,6 +295,8 @@ def create_ws_chat_router(
                                 args=payload.get("args", {}),
                                 message=payload.get("message", ""),
                                 tools=payload.get("tools"),
+                                kind=payload.get("kind"),
+                                items=payload.get("items"),
                             )
                             await websocket.send_json(approval_ev.to_dict())
                             logger.info(
