@@ -259,7 +259,7 @@ def classify_turn_intent(
         } or s.split()[0] in ("proceed", "continue", "resume", "retry")
         if hard_continue or status in ("", "idle", "in_progress"):
             return "continue"
-        if status in ("completed", "superseded") and not hard_continue:
+        if status in ("completed", "superseded", "abandoned") and not hard_continue:
             return "normal"
         return "continue"
 

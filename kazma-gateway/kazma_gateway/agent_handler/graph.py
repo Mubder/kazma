@@ -845,6 +845,186 @@ def create_graph_handler(
                 ))
             return
 
+        # ── /steer <text> (soft) / /steer! <text> (hard) / /abort ────
+        # Out-of-band signals to a RUNNING turn. These intercept BEFORE the
+        # real turn's thread_lock so they don't queue behind the in-flight
+        # ainvoke. Soft push + abort cancel are lock-free; hard resume and
+        # the abort marker take cmd_lock (free: the turn is paused/cancelled).
+        _steer_kind: str | None = None
+        _steer_text = ""
+        if msg.text:
+            _st = msg.text.strip()
+            _low = _st.lower()
+            if _low == "/steer" or _low.startswith("/steer "):
+                _steer_kind = "soft"
+                _steer_text = _st.split(maxsplit=1)[1].strip() if " " in _st else ""
+            elif _low == "/steer!" or _low.startswith("/steer! "):
+                _steer_kind = "hard"
+                _steer_text = _st.split(maxsplit=1)[1].strip() if " " in _st else ""
+
+        if _steer_kind is not None:
+            from kazma_core.agent.steer import (
+                clear_all_steers,
+                is_hard_steer_interrupt,
+                push_hard_steer,
+                push_soft_steer,
+            )
+
+            ctx = await _store.get(thread_id) or msg.context_metadata
+
+            if not _steer_text:
+                _usage = (
+                    "🧭 *Steer a running task*\n\n"
+                    "• `/steer <extra context>` — add info; I fold it into the next step.\n"
+                    "• `/steer! <requirement>` — pause the task, inject it, then resume.\n\n"
+                    "Use either while a task is running."
+                )
+                _u_text, _u_ctx = _prepare_tg_outbound(msg, _usage, ctx)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=_u_text, context_metadata=_u_ctx,
+                ))
+                return
+
+            if _steer_kind == "soft":
+                push_soft_steer(thread_id, _steer_text)
+                logger.info("[agent-handler] /steer soft thread=%s", thread_id[:12])
+                _ok, _ok_ctx = _prepare_tg_outbound(
+                    msg, "🧭 Steer noted — I'll fold it into the next step.", ctx,
+                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=_ok, context_metadata=_ok_ctx,
+                ))
+                return
+
+            # ── hard steer: queue, wait for the interrupt, resume ──
+            push_hard_steer(thread_id, _steer_text)
+            _p_text, _p_ctx = _prepare_tg_outbound(
+                msg, "⏸️ Pausing the task to apply your steer…", ctx,
+            )
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=_p_text, context_metadata=_p_ctx,
+            ))
+            _paused = None
+            _deadline = time.monotonic() + 12.0
+            while time.monotonic() < _deadline:
+                try:
+                    _snap = await graph.aget_state(config)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[agent-handler] steer poll aget_state failed: %s", exc)
+                    break
+                _paused = is_hard_steer_interrupt(_snap)
+                if _paused is not None or not getattr(_snap, "next", None):
+                    break
+                await asyncio.sleep(0.2)
+
+            if _paused is None:
+                # Turn never paused (finalizing) — demote to soft.
+                clear_all_steers(thread_id)
+                push_soft_steer(thread_id, _steer_text)
+                logger.info("[agent-handler] /steer! demoted to soft thread=%s", thread_id[:12])
+                _d_text, _d_ctx = _prepare_tg_outbound(
+                    msg,
+                    "⚠️ The task was finalizing, so I noted your steer for the "
+                    "next step instead of pausing.",
+                    ctx,
+                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=_d_text, context_metadata=_d_ctx,
+                ))
+                return
+
+            # Resume under cmd_lock (free: the paused turn released it).
+            from langgraph.types import Command as _SteerCmd
+
+            try:
+                async with cmd_lock:
+                    _rs = await graph.ainvoke(
+                        _SteerCmd(resume={"action": "apply"}), config,
+                    )
+                _asst = ""
+                for _m in reversed((_rs.get("messages") if isinstance(_rs, dict) else []) or []):
+                    if isinstance(_m, dict) and _m.get("role") == "assistant" and _m.get("content"):
+                        _asst = _m["content"]
+                        break
+                if _asst:
+                    _a_text, _a_ctx = _prepare_tg_outbound(msg, _asst, ctx)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=_a_text, context_metadata=_a_ctx,
+                    ))
+                else:
+                    _c_text, _c_ctx = _prepare_tg_outbound(
+                        msg, "✅ Steer applied — continuing.", ctx,
+                    )
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=_c_text, context_metadata=_c_ctx,
+                    ))
+            except Exception:
+                logger.exception("[agent-handler] /steer! resume failed thread=%s", thread_id[:12])
+                _e_text, _e_ctx = _prepare_tg_outbound(
+                    msg, "⚠️ Could not resume the task after steering.", ctx,
+                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=_e_text, context_metadata=_e_ctx,
+                ))
+            return
+
+        # ── /abort: cancel + abandon the running task ──────────────
+        if msg.text and msg.text.strip().lower() == "/abort":
+            from kazma_core.agent.steer import abort_marker, clear_all_steers
+
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            clear_all_steers(thread_id)
+            _ab_cancelled = False
+            try:
+                from kazma_ui.active_turns import cancel_turn as _gw_cancel
+
+                _ab_cancelled = _gw_cancel(thread_id) is not None
+            except Exception:
+                pass
+            try:
+                async with cmd_lock:
+                    _snap = await graph.aget_state(config)
+                    _msgs = list(
+                        (_snap.values if _snap and _snap.values else {}).get("messages") or []
+                    )
+                    _msgs.append({"role": "system", "content": abort_marker()})
+                    await graph.aupdate_state(config, {
+                        "messages": _msgs,
+                        "task_status": "abandoned",
+                        "auto_continue": False,
+                    })
+                logger.info(
+                    "[agent-handler] /abort thread=%s cancelled=%s",
+                    thread_id[:12], _ab_cancelled,
+                )
+                _ab_text, _ab_ctx = _prepare_tg_outbound(
+                    msg,
+                    "⛔ Task aborted — I won't continue it unless you ask me "
+                    "to redo it.",
+                    ctx,
+                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=_ab_text, context_metadata=_ab_ctx,
+                ))
+            except Exception:
+                logger.exception("[agent-handler] /abort marker failed thread=%s", thread_id[:12])
+                _x_text, _x_ctx = _prepare_tg_outbound(
+                    msg, "⚠️ Could not abort the task.", ctx,
+                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=_x_text, context_metadata=_x_ctx,
+                ))
+            return
+
         # ── Slash-command intercept (/model, /help, /reset, etc.) ──
         # Resolve common commands without an LLM call. This keeps
         # responses instant and saves tokens.
@@ -1176,8 +1356,28 @@ def create_graph_handler(
                 _lt_progress_token = None
 
             start = time.monotonic()
+            # Register the running turn in the shared active_turns registry so
+            # /abort can cancel it and is_turn_running() reflects gateway turns
+            # (same registry the Web UI uses). Scoped to the ainvoke only.
+            _gw_registered = False
             try:
-                result_state = await graph.ainvoke(state, config)
+                from kazma_ui.active_turns import register_turn as _gw_reg
+
+                _gw_reg(thread_id, asyncio.current_task())
+                _gw_registered = True
+            except Exception:
+                pass
+            try:
+                try:
+                    result_state = await graph.ainvoke(state, config)
+                finally:
+                    if _gw_registered:
+                        try:
+                            from kazma_ui.active_turns import unregister_turn as _gw_unreg
+
+                            _gw_unreg(thread_id)
+                        except Exception:
+                            pass
                 duration_ms = (time.monotonic() - start) * 1000
 
                 # ── HITL: detect interrupt() pause ──────────────────

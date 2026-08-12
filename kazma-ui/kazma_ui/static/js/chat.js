@@ -444,6 +444,9 @@
     { cmd: '/yolo status', desc: 'Show YOLO / grant status for this session' },
     { cmd: '/new', desc: 'Start a new chat session' },
     { cmd: '/reset', desc: 'Clear this conversation history' },
+    { cmd: '/steer <text>', desc: 'Add context to the running task (applies next step)' },
+    { cmd: '/steer! <text>', desc: 'Pause the running task, inject a requirement, resume' },
+    { cmd: '/abort', desc: 'Stop and abandon the running task' },
     { cmd: '/help', desc: 'List available slash commands' },
   ];
 
@@ -1314,6 +1317,56 @@
       newSession();
       inputEl.value = '';
       inputEl.style.height = 'auto';
+      return;
+    }
+
+    // Handle /steer <text>, /steer! <text>, /abort — out-of-band signals to
+    // a RUNNING turn. Intercepted before the normal send so they never start
+    // a new turn. Hard steer is fire-and-forget like /api/approve: the WS
+    // bus / delivery poll surfaces the resumed turn.
+    var _cmdLow = text.toLowerCase();
+    var _steerHard = _cmdLow === '/steer!' || _cmdLow.startsWith('/steer! ');
+    var _steerSoft = !_steerHard && (_cmdLow === '/steer' || _cmdLow.startsWith('/steer '));
+    var _abortCmd = _cmdLow === '/abort';
+    if (_steerHard || _steerSoft || _abortCmd) {
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+
+      if (_abortCmd) {
+        if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
+        if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
+        fetch('/api/chat/abort', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: chatSessionId || '' }),
+          credentials: 'same-origin',
+        }).catch(function() { /* best-effort */ });
+        forceEndTurn();
+        return;
+      }
+
+      var _steerText = (text.split(/\s(.+)/)[1] || '').trim();
+      if (!_steerText) {
+        if (window.showToast) window.showToast(
+          'Usage: /steer <context>  or  /steer! <requirement>', 'info', 3500);
+        return;
+      }
+      var _turnActive = !!_isGenerating ||
+        !!(window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive);
+      if (!_turnActive) {
+        if (window.showToast) window.showToast(
+          'No active task to steer — send a message first.', 'info', 3000);
+        return;
+      }
+      if (window.showToast) window.showToast(
+        _steerHard ? '⏸️ Pausing task to apply your steer…' : '🧭 Steer noted — applying on the next step.',
+        'info', 3000);
+      fetch('/api/chat/steer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: chatSessionId || '', text: _steerText, mode: _steerHard ? 'hard' : 'soft',
+        }),
+        credentials: 'same-origin',
+      }).catch(function() { /* best-effort */ });
       return;
     }
 

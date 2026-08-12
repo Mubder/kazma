@@ -1387,6 +1387,49 @@ async def supervisor_node(
         except Exception:
             logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
 
+    # ── Steer: hard pause + soft drain, right before the LLM call ────
+    # HARD steer: if one is pending, fire a LangGraph interrupt so the
+    # running turn pauses cleanly. The /api/chat/steer (mode=hard) / gateway
+    # /steer! poller detects the pause and resumes via
+    # ainvoke(Command(resume=...)). On resume LangGraph re-runs this node;
+    # peek-then-pop keeps the text present across that re-run (interrupt()
+    # returns the resume value instead of pausing the second time), so we
+    # pop+apply exactly once. Mirrors the commitment-gate conditional
+    # interrupt (~line 1909).
+    #
+    # SOFT steer drain runs AFTER the hard gate (unconditionally). This
+    # placement matters: LangGraph re-runs the node on resume, so draining
+    # before the interrupt would pop soft steers on the pre-pause pass and
+    # then discard them. Draining after the gate guarantees a single drain
+    # on the path that actually reaches the LLM.
+    try:
+        from kazma_core.agent.steer import (
+            drain_soft_steers,
+            hard_steer_note,
+            hard_steer_payload,
+            peek_hard_steer,
+            pop_hard_steer,
+            soft_steer_note,
+        )
+
+        _steer_tid = str(state.get("thread_id") or "")
+        _hard_text = peek_hard_steer(_steer_tid)
+        if _hard_text:
+            from langgraph.types import interrupt  # local import (cf. commitment gate)
+
+            logger.info("[Supervisor] hard steer interrupt thread=%s", _steer_tid[:12])
+            interrupt(hard_steer_payload(_hard_text))  # pauses; returns on resume
+            _applied = pop_hard_steer(_steer_tid) or _hard_text
+            messages.append({"role": "user", "content": hard_steer_note(_applied)})
+
+        # Soft steer: append queued user notes for this LLM call. Persisted
+        # into the checkpoint (messages), so they apply for the rest of the
+        # turn + future turns. Zero disruption — no cancel, no pause.
+        for _s in drain_soft_steers(_steer_tid):
+            messages.append({"role": "user", "content": soft_steer_note(_s["text"])})
+    except Exception:
+        logger.exception("[Supervisor] steer gate/drain failed")
+
     start = time.monotonic()
     try:
         from kazma_core.retry import friendly_llm_error, load_retry_config
@@ -1656,9 +1699,9 @@ async def supervisor_node(
             )
             # Prune context specifically for nudge call to prevent sending bloated prompt
             _nudge_tail = (
-                "Answer only the latest user request; do not resume a superseded prior task."
+                "Answer only the latest user request; do not resume a superseded or abandoned prior task."
                 if intent_patch.get("intent_mode") == "shift"
-                or intent_patch.get("task_status") == "superseded"
+                or intent_patch.get("task_status") in ("superseded", "abandoned")
                 else (
                     "Based on the conversation and tool results above, tell the "
                     "user what you found and what remains unfinished."
@@ -1701,7 +1744,7 @@ async def supervisor_node(
         is_auto = bool(state.get("auto_continue", False))
         if "auto_continue" in intent_patch:
             is_auto = bool(intent_patch["auto_continue"])
-        if intent_patch.get("task_status") == "superseded" or intent_patch.get("intent_mode") == "shift":
+        if intent_patch.get("task_status") in ("superseded", "abandoned") or intent_patch.get("intent_mode") == "shift":
             is_auto = False
         if not is_auto and content:
             _content_lower = content.lower()
@@ -1750,7 +1793,7 @@ async def supervisor_node(
         _done_patch = dict(intent_patch)
         if _done_patch.get("intent_mode") in ("normal", "shift") and _done_patch.get(
             "task_status"
-        ) not in ("superseded",):
+        ) not in ("superseded", "abandoned"):
             # Final answer with no tools — focus can rest as completed for
             # short Q&A; multi-part/store stay in_progress until tools finish.
             if _done_patch.get("intent_mode") == "normal" and len(

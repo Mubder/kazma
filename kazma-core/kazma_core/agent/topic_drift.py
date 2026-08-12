@@ -166,7 +166,7 @@ def should_stub_prior_tools(
         return False
     if mode == "shift":
         return True
-    if status in ("completed", "superseded") and mode not in ("continue",):
+    if status in ("completed", "superseded", "abandoned") and mode not in ("continue",):
         return True
     return False
 

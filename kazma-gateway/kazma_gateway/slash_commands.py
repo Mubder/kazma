@@ -216,12 +216,13 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd == "/context":
         return _cmd_context(ctx)
 
-    # NOTE: /undo, /edit, /fork, and /replay <n> are intentionally NOT
-    # handled here. They mutate LangGraph checkpoint state and are resolved
-    # by the graph handler in agent_handler/graph.py (_handle_undo /
-    # _handle_edit / _handle_replay / _handle_fork) before this resolver
-    # runs. Returning None lets them fall through to the graph on live
-    # platforms, and to the LLM otherwise.
+    # NOTE: /undo, /edit, /fork, /replay <n>, /steer, /steer!, and /abort
+    # are intentionally NOT handled here. They target a running turn or
+    # mutate LangGraph checkpoint state and are resolved by the graph
+    # handler in agent_handler/graph.py (_handle_undo / _handle_edit /
+    # _handle_replay / _handle_fork, and the /steer+/abort intercepts)
+    # before this resolver runs. Returning None lets them fall through to
+    # the graph on live platforms, and to the LLM otherwise.
 
     return None  # not a recognised command → passed to LLM
 
@@ -238,6 +239,10 @@ def _cmd_help() -> str:
         "• `/replay compare <a> <b>` — Compare two snapshots\n"
         "• `/replay clear` — Clear snapshots for this thread\n"
         "• `/fork <iteration>` — Fork from iteration into a new thread\n\n"
+        "🧭 *Running task*\n"
+        "• `/steer <text>` — Add context to the running task (applies next step)\n"
+        "• `/steer! <text>` — Pause the task, inject a requirement, then resume\n"
+        "• `/abort` — Stop and abandon the running task (won't continue unless re-asked)\n\n"
         "🔧 *Tools*\n"
         "• `/personality` — Show current personality\n"
         "• `/personality list` — List all available personalities\n"

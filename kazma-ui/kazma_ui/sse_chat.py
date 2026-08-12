@@ -2236,4 +2236,170 @@ def create_sse_chat_router(
         )
         return {"cancelled": task is not None}
 
+    # ── Steer: inject info into a RUNNING turn (/steer, /steer!) ──────
+    @r.post("/api/chat/steer")
+    async def steer_chat_turn(request: Request) -> Any:
+        """Soft/hard-steer an in-progress turn without cancelling it.
+
+        Body: ``{"session_id": ..., "thread_id"?: ..., "text": "...",
+        "mode": "soft"|"hard"}``.
+
+        * **soft** (default): buffer the note; the supervisor drains it on the
+          next iteration and folds it into the LLM call. Returns ``{ok: true}``.
+        * **hard**: pause the running turn at the next supervisor entry via a
+          LangGraph ``interrupt()``, inject the note as a first-class message,
+          and resume. Returns a streaming response (like ``/api/approve``) so
+          the continued turn streams back to the client. If the turn is
+          finalizing and the pause isn't reached within ~12s, demotes to soft.
+
+        Requires an active turn on the thread; otherwise returns
+        ``{ok: false, reason: "no_active_task"}``.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        session_id = str(payload.get("session_id") or "")
+        thread_id = str(payload.get("thread_id") or "")
+        if not thread_id and session_id:
+            try:
+                sess = _get_store().get(session_id)
+                thread_id = (sess.thread_id if sess else "") or session_id
+            except Exception:
+                thread_id = session_id
+        text = str(payload.get("text") or "").strip()
+        mode = str(payload.get("mode") or "soft").strip().lower()
+        if mode not in ("soft", "hard"):
+            mode = "soft"
+        if not thread_id or not text:
+            return {"ok": False, "reason": "missing_session_or_text"}
+        if not is_turn_running(thread_id):
+            return {"ok": False, "reason": "no_active_task"}
+
+        from kazma_core.agent.steer import (
+            clear_all_steers,
+            is_hard_steer_interrupt,
+            push_hard_steer,
+            push_soft_steer,
+        )
+
+        if mode == "soft":
+            push_soft_steer(thread_id, text)
+            logger.info("[SSE] soft steer queued thread=%s", thread_id[:12])
+            return {"ok": True, "mode": "soft"}
+
+        # ── hard steer: queue, wait for the interrupt, then resume ──
+        push_hard_steer(thread_id, text)
+        graph_inst = _get_graph()
+        try:
+            from kazma_core.agent.long_task import resolve_turn_budgets
+
+            _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+        except Exception:
+            _rec = 100
+        config = {
+            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+            "recursion_limit": _rec,
+        }
+        # Poll up to ~12s for the supervisor to reach the hard_steer interrupt.
+        # The running turn's pump exhausts when interrupt() fires, so
+        # is_turn_running flips to False; the authoritative signal is the
+        # hard_steer payload on aget_state().
+        paused_text: str | None = None
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            try:
+                snap = await graph_inst.aget_state(config)
+            except Exception as exc:  # noqa: BLE001 — poll must not crash
+                logger.debug("[SSE] steer poll aget_state failed: %s", exc)
+                break
+            paused_text = is_hard_steer_interrupt(snap)
+            if paused_text is not None:
+                break
+            # Turn finished without pausing (ran to END) → give up cleanly.
+            if not getattr(snap, "next", None):
+                break
+            await asyncio.sleep(0.2)
+
+        if paused_text is None:
+            # Never reached the pause (finalizing / long tool) — demote to
+            # soft so the note isn't lost, and tell the client honestly.
+            clear_all_steers(thread_id)
+            push_soft_steer(thread_id, text)
+            logger.info("[SSE] hard steer demoted to soft thread=%s", thread_id[:12])
+            return {"ok": True, "mode": "soft", "demoted": True, "reason": "finalizing"}
+
+        # Resume: drive the graph forward. The supervisor pops the steer,
+        # injects it as a first-class message, and continues. Stream the
+        # continued turn to the client (same shape as /api/approve).
+        logger.info("[SSE] hard steer resuming thread=%s", thread_id[:12])
+        from langgraph.types import Command as _Command
+
+        resume_input = _Command(resume={"action": "apply"})
+        return StreamingResponse(
+            _stream_langgraph_events(
+                graph_inst, resume_input, config,
+                thread_id=thread_id, session_id=session_id,
+            ),
+            media_type="text/event-stream",
+        )
+
+    # ── Abort: cancel + abandon the running task (/abort) ────────────
+    @r.post("/api/chat/abort")
+    async def abort_chat_turn(request: Request) -> dict[str, Any]:
+        """Cancel the in-flight turn AND mark it abandoned.
+
+        Unlike ``/api/chat/stop`` (which only cancels the pump and leaves
+        ``task_status="in_progress"`` so the model resumes on the next
+        "continue"), abort writes a terminal abandonment marker into the
+        checkpoint (``task_status="abandoned"``, ``auto_continue=False``) so
+        the model will NOT auto-continue — it only re-engages if the user
+        explicitly re-asks.
+
+        Body: ``{"session_id": ...}`` (or ``{"thread_id": ...}``).
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        session_id = str(payload.get("session_id") or "")
+        thread_id = str(payload.get("thread_id") or "")
+        if not thread_id and session_id:
+            try:
+                sess = _get_store().get(session_id)
+                thread_id = (sess.thread_id if sess else "") or session_id
+            except Exception:
+                thread_id = session_id
+        if not thread_id:
+            return {"ok": False, "reason": "missing_session"}
+
+        from kazma_core.agent.steer import abort_marker, clear_all_steers
+
+        # Drop any pending steers first so a stray drain/resume can't fire.
+        clear_all_steers(thread_id)
+        # Cancel the running pump (no-op if no turn is running).
+        cancelled = cancel_turn(thread_id) is not None
+
+        graph_inst = _get_graph()
+        config = {
+            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+        }
+        try:
+            snap = await graph_inst.aget_state(config)
+            msgs = list((snap.values if snap and snap.values else {}).get("messages") or [])
+            msgs.append({"role": "system", "content": abort_marker()})
+            await graph_inst.aupdate_state(config, {
+                "messages": msgs,
+                "task_status": "abandoned",
+                "auto_continue": False,
+            })
+            logger.info(
+                "[SSE] Abort thread=%s cancelled=%s marker_written=True",
+                thread_id[:12], cancelled,
+            )
+            return {"ok": True, "cancelled": cancelled}
+        except Exception as exc:  # noqa: BLE001 — never fail the HTTP call
+            logger.warning("[SSE] Abort marker write failed thread=%s: %s", thread_id[:12], exc)
+            return {"ok": cancelled, "cancelled": cancelled, "warning": str(exc)}
+
     return r

@@ -678,6 +678,124 @@ def create_ws_chat_router(
                     )
                     continue
 
+                # ── Action: steer — soft/hard-steer a running turn ──────
+                if action == "steer":
+                    _st_text = str(payload.get("text") or "").strip()
+                    _st_mode = str(payload.get("mode") or "soft").strip().lower()
+                    if not _st_text:
+                        await websocket.send_json(TelemetryEvent(
+                            type="graph_error", data={"message": "empty steer text"}, thread_id=thread_id,
+                        ).to_dict())
+                        continue
+                    if not is_turn_running(thread_id):
+                        await websocket.send_json(TelemetryEvent(
+                            type="graph_error", data={"message": "no active task to steer"}, thread_id=thread_id,
+                        ).to_dict())
+                        continue
+                    from kazma_core.agent.steer import (
+                        clear_all_steers,
+                        is_hard_steer_interrupt,
+                        push_hard_steer,
+                        push_soft_steer,
+                    )
+
+                    if _st_mode != "hard":
+                        push_soft_steer(thread_id, _st_text)
+                        await websocket.send_json(TelemetryEvent(
+                            type="steer", data={"ok": True, "mode": "soft"}, thread_id=thread_id,
+                        ).to_dict())
+                        continue
+
+                    # Hard steer: queue, wait for the interrupt, resume.
+                    push_hard_steer(thread_id, _st_text)
+                    await websocket.send_json(TelemetryEvent(
+                        type="steer", data={"ok": True, "mode": "hard", "status": "pausing"},
+                        thread_id=thread_id,
+                    ).to_dict())
+                    _st_graph = _get_graph()
+                    _st_cfg = {
+                        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+                        "recursion_limit": _ws_recursion_limit(thread_id),
+                    }
+                    _st_paused = None
+                    _st_dl = time.monotonic() + 12.0
+                    while time.monotonic() < _st_dl:
+                        try:
+                            _st_snap = await _st_graph.aget_state(_st_cfg)
+                        except Exception:  # noqa: BLE001
+                            break
+                        _st_paused = is_hard_steer_interrupt(_st_snap)
+                        if _st_paused is not None or not getattr(_st_snap, "next", None):
+                            break
+                        await asyncio.sleep(0.2)
+
+                    if _st_paused is None:
+                        clear_all_steers(thread_id)
+                        push_soft_steer(thread_id, _st_text)
+                        await websocket.send_json(TelemetryEvent(
+                            type="steer", data={"ok": True, "mode": "soft", "demoted": True},
+                            thread_id=thread_id,
+                        ).to_dict())
+                        continue
+
+                    from langgraph.types import Command as _StCmd
+
+                    register_turn(thread_id, asyncio.current_task())
+                    try:
+                        _st_rs = await _st_graph.ainvoke(_StCmd(resume={"action": "apply"}), _st_cfg)
+                    finally:
+                        unregister_turn(thread_id)
+                    # Surface the resumed assistant text (custom LLM provider
+                    # doesn't stream, so emit it as one delta then finalize).
+                    _st_asst = ""
+                    for _m in reversed((_st_rs.get("messages") if isinstance(_st_rs, dict) else []) or []):
+                        if isinstance(_m, dict) and _m.get("role") == "assistant" and _m.get("content"):
+                            _st_asst = _m["content"]
+                            break
+                    if _st_asst:
+                        await websocket.send_json(TelemetryEvent(
+                            type="llm_delta", data={"content": _st_asst}, thread_id=thread_id,
+                        ).to_dict())
+                    await websocket.send_json(TelemetryEvent(
+                        type="stream_end", data={"steer_resumed": True}, thread_id=thread_id,
+                    ).to_dict())
+                    continue
+
+                # ── Action: abort — cancel + abandon the running task ────
+                if action == "abort":
+                    from kazma_core.agent.steer import abort_marker, clear_all_steers
+
+                    clear_all_steers(thread_id)
+                    _ab_task = cancel_turn(thread_id)
+                    _ab_graph = _get_graph()
+                    _ab_cfg = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                    try:
+                        _ab_snap = await _ab_graph.aget_state(_ab_cfg)
+                        _ab_msgs = list(
+                            (_ab_snap.values if _ab_snap and _ab_snap.values else {}).get("messages") or []
+                        )
+                        _ab_msgs.append({"role": "system", "content": abort_marker()})
+                        await _ab_graph.aupdate_state(_ab_cfg, {
+                            "messages": _ab_msgs,
+                            "task_status": "abandoned",
+                            "auto_continue": False,
+                        })
+                        logger.info(
+                            "[WS-Chat] Abort thread=%s cancelled=%s",
+                            thread_id[:12], _ab_task is not None,
+                        )
+                        await websocket.send_json(TelemetryEvent(
+                            type="stream_end", data={"aborted": True},
+                            thread_id=thread_id,
+                        ).to_dict())
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("[WS-Chat] Abort marker failed thread=%s: %s", thread_id[:12], exc)
+                        await websocket.send_json(TelemetryEvent(
+                            type="graph_error", data={"message": f"abort failed: {exc}"},
+                            thread_id=thread_id,
+                        ).to_dict())
+                    continue
+
                 graph_inst = _get_graph()
                 if not graph_inst:
                     await websocket.send_json(

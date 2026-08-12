@@ -54,6 +54,10 @@ class TaskStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     SUPERSEDED = "superseded"
+    # /abort: the user explicitly cancelled and abandoned the running task.
+    # Treated like SUPERSEDED for continuity suppression, but the abort
+    # marker message tells the model NOT to resume unless re-asked.
+    ABANDONED = "abandoned"
 
 
 # ── Pending tool call (fan-out item) ───────────────────────────────────
