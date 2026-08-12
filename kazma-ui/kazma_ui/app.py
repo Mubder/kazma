@@ -587,6 +587,21 @@ class KazmaAppBuilder:
             self._current_lang.set(req_lang)
             return await call_next(request)
 
+        @self.app.middleware("http")
+        async def html_no_cache_middleware(request: Request, call_next):
+            """Force HTML pages to always revalidate.
+
+            Without this, mobile Safari heuristically caches page HTML and
+            serves a STALE copy after a deploy — e.g. the old <head> without
+            the inline critical theme <style>, which re-introduces the iOS
+            dark-canvas flash on the first tab tap after an update ("first
+            tap shows dark, next tap shows light"). Static assets stay
+            cacheable (CSS/JS carry a ?v= mtime cache-buster)."""
+            response = await call_next(request)
+            if "text/html" in response.headers.get("content-type", ""):
+                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            return response
+
     def _setup_swarm(self) -> None:
         """Initialize SwarmManager, load persisted workers, and restore paused tasks."""
         from kazma_core.service_container import get_container
