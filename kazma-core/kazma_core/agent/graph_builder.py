@@ -1906,9 +1906,11 @@ def _commitment_resolve_gate(
             load_constraint_beliefs as _load_beliefs,
         )
         from kazma_core.safety.side_effects import requires_semantic_check as _needs_sem
+        from kazma_core.metrics import record_commitment_terminal
     except Exception:
         _cmt_on = None  # type: ignore[assignment]
         _authz = None; _load_beliefs = None; _needs_sem = None  # type: ignore[assignment]
+        record_commitment_terminal = None  # type: ignore[assignment]
     if _cmt_on and _cmt_on() and _needs_sem and _authz:
         try:
             _sem = [_tc for _tc in pending if _needs_sem(_tc["name"])]
@@ -1942,10 +1944,13 @@ def _commitment_resolve_gate(
                         semantic_blocked.append(ToolResult(
                             tool_call_id=str(_tc.get("id") or ""),
                             name=_tc["name"],
-                            content=(f"Commitment gate denied {_tc['name']}: {_q}. "
+                        content=(f"Commitment gate denied {_tc['name']}: {_q}. "
                                  "Do not retry; tell the user why and what they can do."),
-                            is_error=True, duration_ms=0,
-                        ))
+                        is_error=True, duration_ms=0, outcome="terminal",
+                    ))
+                    if record_commitment_terminal:
+                        try: record_commitment_terminal("denied")
+                        except Exception: pass
                 pending = _kept
         except Exception:
             logger.debug("[ToolWorker] commitment gate skipped — fail-open", exc_info=True)
@@ -1978,8 +1983,11 @@ def _commitment_resolve_gate(
                     tool_call_id=_tcid, name=_tc["name"],
                     content=("Commitment clarify cancelled by the user. Stop this "
                              "scheduling attempt; confirm what the user wants instead."),
-                    is_error=True, duration_ms=0,
+                    is_error=True, duration_ms=0, outcome="terminal",
                 ))
+                if record_commitment_terminal:
+                    try: record_commitment_terminal("cancelled")
+                    except Exception: pass
             elif _patch is not None:
                 _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
                 pending.append(_tc)
@@ -1990,8 +1998,11 @@ def _commitment_resolve_gate(
                              f"{_dec.clarify_question or 'a specific time is required'}. "
                              "Ask the user for the exact date/time; do not re-call "
                              "this tool until they answer."),
-                    is_error=True, duration_ms=0,
+                    is_error=True, duration_ms=0, outcome="terminal",
                 ))
+                if record_commitment_terminal:
+                    try: record_commitment_terminal("clarify_unresolved")
+                    except Exception: pass
     return pending, semantic_blocked
 
 
@@ -2492,6 +2503,14 @@ async def tool_worker_node(
                 consecutive_failures,
             )
 
+        # PR3 (loop kill): a TERMINAL outcome (unresolved / cancelled / denied
+        # commitment clarify) ends the turn immediately. It is classified
+        # TERMINAL (not HARD) so it doesn't credit the failure counter; here we
+        # just force RESPOND so the model is never handed a retryable tool error
+        # for a gate outcome. This is the invariant that makes the permission-
+        # card loop class unkillable (incident 2026-08-12).
+        _terminal_now = any(str(r.get("outcome", "")) == "terminal" for r in results)
+
         # ── Semantic stagnation detection ───────────────────────────
         # The hard-failure breaker misses loops of *successful-but-useless*
         # calls (same no-op edit, same denied path, same empty search). Track
@@ -2600,7 +2619,7 @@ async def tool_worker_node(
             "circuit_breaker_tripped": breaker_tripped_now,
             "tool_signatures": sigs,
             # If the breaker just tripped or max consecutive failures hit, force RESPOND
-            "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3) else NodeName.SUPERVISOR,
+            "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3 or _terminal_now) else NodeName.SUPERVISOR,
         }
         if state.get("_research_depth_nudged"):
             out["_research_depth_nudged"] = True

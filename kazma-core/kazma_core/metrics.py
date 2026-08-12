@@ -69,6 +69,17 @@ if _PROMETHEUS_AVAILABLE:
         ["kind"],  # enable|disable|heartbeat|budget_recursion|continue_stored|tool_loop_break|…
     )
 
+    # Commitment gate — terminal clarify/deny outcomes (loop-prevention signal).
+    # Increments when the orchestrator ends a turn on a TERMINAL gate outcome
+    # (unresolved/cancelled/denied clarify) instead of handing the model a
+    # retryable error. A non-zero, growing rate indicates reminders/actions the
+    # gate can't auto-resolve — worth product attention, but no longer a loop.
+    COMMITMENT_TERMINAL_TOTAL = Counter(
+        "kazma_commitment_terminal_total",
+        "Commitment gate outcomes that ended the turn (loop prevented)",
+        ["decision"],  # clarify_unresolved | cancelled | denied
+    )
+
     # Latency histograms
     LLM_LATENCY_SECONDS = Histogram(
         "kazma_llm_latency_seconds",
@@ -82,6 +93,7 @@ else:
     SWARM_HANDOFFS_TOTAL = None
     MEMORY_OPERATIONS_TOTAL = None
     LONG_TASK_EVENTS_TOTAL = None
+    COMMITMENT_TERMINAL_TOTAL = None
     LLM_LATENCY_SECONDS = None
 
 
@@ -136,6 +148,18 @@ def record_long_task(kind: str) -> None:
         return
     label = (kind or "unknown")[:64]
     LONG_TASK_EVENTS_TOTAL.labels(kind=label).inc()
+
+
+def record_commitment_terminal(decision: str) -> None:
+    """Record a terminal commitment outcome (turn ended, loop prevented).
+
+    ``decision`` ∈ {clarify_unresolved, cancelled, denied}. No-op without
+    prometheus-client.
+    """
+    if not _PROMETHEUS_AVAILABLE or COMMITMENT_TERMINAL_TOTAL is None:
+        return
+    label = (decision or "unknown")[:64]
+    COMMITMENT_TERMINAL_TOTAL.labels(decision=label).inc()
 
 
 def record_memory_op(operation: str, layer: str = "unknown") -> None:

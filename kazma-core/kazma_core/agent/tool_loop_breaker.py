@@ -76,6 +76,12 @@ class ToolOutcome(StrEnum):
     USER_DENY = "user_deny"
     TRANSIENT = "transient"
     HARD = "hard"
+    # Control-plane terminal: the gate ended the turn deliberately (e.g. an
+    # unresolved/cancelled/denied commitment clarify). Not a tool death — must
+    # NOT credit the hard-failure breaker (would poison the next turn) and the
+    # orchestrator must route straight to RESPOND instead of handing the model
+    # a retryable error. See PR3 (incident 2026-08-12 loop kill).
+    TERMINAL = "terminal"
 
 
 @dataclass

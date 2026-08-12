@@ -82,6 +82,11 @@ class ToolResult(TypedDict, total=False):
     content: str
     is_error: bool
     duration_ms: float
+    # Optional structured outcome honored by tool_loop_breaker.classify_tool_result
+    # (ok | empty | policy | user_deny | transient | hard | terminal). "terminal"
+    # marks a control-plane turn-ender (e.g. unresolved commitment clarify) —
+    # not tool death; forces RESPOND and does not credit the hard-failure breaker.
+    outcome: str
 
 
 # ── Supervisor State ────────────────────────────────────────────────────
