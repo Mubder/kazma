@@ -5,7 +5,7 @@ const {themes: prismThemes} = require('prism-react-renderer');
 const config = {
   title: 'Kazma',
   tagline: 'Autonomous AI Agent Framework — LangGraph, Swarm, HITL, Arabic RTL',
-  favicon: 'img/logo.svg',
+  favicon: 'img/kazma-logo.png',
   url: 'https://kazma.ai',
   baseUrl: '/kazma/',
   organizationName: 'kazma-ai',
@@ -63,7 +63,7 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      image: 'img/logo.svg',
+      image: 'img/kazma-logo.png',
       colorMode: {
         defaultMode: 'dark',
         respectPrefersColorScheme: true,
@@ -72,7 +72,7 @@ const config = {
         title: 'Kazma',
         logo: {
           alt: 'Kazma Logo',
-          src: 'img/logo.svg',
+          src: 'img/kazma-logo.png',
         },
         items: [
           {
