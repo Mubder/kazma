@@ -439,7 +439,13 @@
   var _deliveryPollTimer = null;
   function _startDeliveryPoll() {
     if (_deliveryPollTimer) clearTimeout(_deliveryPollTimer);
-    _deliveryPoll();
+    // Delay the first poll — the server needs time to register the turn
+    // (register_thread happens after the graph starts, which can take 1-2s
+    // on slow models). If we poll immediately, /status might return
+    // generating=false (turn not registered yet) and we'd prematurely
+    // reload — killing the just-started SSE stream and causing duplicated
+    // responses. The poll is a BACKSTOP, not a race.
+    _deliveryPollTimer = setTimeout(_deliveryPoll, 10000);
   }
   function _stopDeliveryPoll() {
     if (_deliveryPollTimer) { clearTimeout(_deliveryPollTimer); _deliveryPollTimer = null; }
