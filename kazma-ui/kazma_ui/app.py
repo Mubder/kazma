@@ -497,7 +497,10 @@ class KazmaAppBuilder:
         # so every edit forces browsers to reload (otherwise a stale cached
         # kazma.css / app.js keeps old soft-nav bugs alive). Computed PER
         # REQUEST so edits take effect without restarting the server.
-        _css_file = _STATIC_DIR / "css" / "kazma.css"
+        _css_files = (
+            _STATIC_DIR / "css" / "kazma.css",
+            _STATIC_DIR / "css" / "kazma.v5.css",
+        )
         _js_version_files = (
             _STATIC_DIR / "js" / "app.js",
             _STATIC_DIR / "js" / "modules" / "nav.js",
@@ -524,10 +527,13 @@ class KazmaAppBuilder:
         )
 
         def _css_version() -> int:
-            try:
-                return int(os.path.getmtime(_css_file))
-            except Exception:
-                return 1
+            latest = 1
+            for path in _css_files:
+                try:
+                    latest = max(latest, int(os.path.getmtime(path)))
+                except Exception:
+                    pass
+            return latest
 
         def _js_version() -> int:
             latest = 1

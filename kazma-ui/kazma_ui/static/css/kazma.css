@@ -91,7 +91,7 @@
   /* Layout */
   --sidebar-width: 250px;
   --sidebar-collapsed: 60px;
-  --header-height: 56px;
+  --header-height: calc(56px + env(safe-area-inset-top, 0px));
 
   /* Typography
      ─────────
@@ -181,28 +181,47 @@ html[dir="rtl"] .text-xs {
 
 /* Font size persistence — controlled by Alpine settings.js applyFontSize() */
 
-/* html canvas: paint the themed background so the browser's own dark
-   canvas can never bleed through on devices in dark mode. Without this,
-   <html> is transparent and mobile Safari paints its default #121212
-   canvas behind <body> wherever body doesn't cover (dynamic viewport,
-   overscroll, safe-area gaps) — visible as a flat "gray" even in light
-   theme. var(--bg) tracks the active theme, so this stays correct in
-   both themes and on every device. */
+/* Canvas ownership — iOS Safari paints a UA dark-gray (#121212) behind
+   the page when color-scheme includes "dark" and the phone is in Dark
+   Mode. Three things have to be true or that gray leaks through the
+   chat empty-state / page-body (header and cards have their own paint):
+     1. color-scheme is ONLY the active theme (never "light dark" on :root)
+     2. every full-bleed shell layer has an opaque background-color
+     3. body grid stops use var(--bg), not the `transparent` keyword
+        (WebKit's dark-mode adjuster remaps `transparent` to gray) */
+html[data-theme="light"] { color-scheme: only light; }
+html[data-theme="dark"]  { color-scheme: only dark; }
+
 html {
   background-color: var(--bg);
+  min-height: 100%;
+  min-height: 100dvh;
+}
+
+/* Fixed paint layer: covers the visual viewport even if WebKit ignores
+   the root element's background-color for the UA canvas. z-index: -1
+   keeps it behind all app chrome. */
+html::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--bg);
+  pointer-events: none;
 }
 
 body {
   font-family: var(--font-sans);
   background-color: var(--bg);
   background-image:
-    linear-gradient(var(--grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    linear-gradient(var(--grid) 1px, var(--bg) 1px),
+    linear-gradient(90deg, var(--grid) 1px, var(--bg) 1px);
   background-size: 32px 32px;
   color: var(--text-primary);
   line-height: 1.6;
   overflow: hidden;
   height: 100vh;
+  height: 100dvh;
 }
 a { color: var(--accent-light); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -283,7 +302,9 @@ button { cursor: pointer; font-family: inherit; }
 .app-layout {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  background-color: var(--bg);
 }
 .main-content {
   flex: 1;
@@ -293,6 +314,7 @@ button { cursor: pointer; font-family: inherit; }
   min-width: 0;
   margin-inline-start: var(--sidebar-width);
   transition: margin-inline-start var(--transition);
+  background-color: var(--bg);
 }
 .main-content.sidebar-collapsed {
   margin-inline-start: var(--sidebar-collapsed);
@@ -301,6 +323,7 @@ button { cursor: pointer; font-family: inherit; }
   flex: 1;
   overflow-y: auto;
   padding: var(--sp-6);
+  background-color: var(--bg);
 }
 
 /* ── 4. Sidebar ─────────────────────────────────────────────────── */
@@ -573,6 +596,7 @@ button { cursor: pointer; font-family: inherit; }
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--sp-6);
+  padding-top: env(safe-area-inset-top, 0px);
   border-bottom: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
   backdrop-filter: blur(16px);
@@ -1391,6 +1415,7 @@ tbody tr:last-child td {
   overflow: hidden;
   height: calc(100vh - var(--header-height));   /* was inline calc(100vh - 60px) */
   margin: calc(-1 * var(--sp-6));               /* was inline margin:-24px (cancels page-body padding) */
+  background-color: var(--bg);
 }
 .chat-sidebar {
   width: 240px;
@@ -1421,7 +1446,13 @@ tbody tr:last-child td {
 .session-title { display: block; font-weight: 500; font-size: 0.875rem; }
 .session-meta { display: block; font-size: 0.75rem; color: var(--text-tertiary); }
 
-.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: var(--bg);
+}
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -1429,11 +1460,13 @@ tbody tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  background-color: var(--bg);
 }
 .chat-welcome {
   text-align: center;
   padding: 60px 20px;
   color: var(--text-secondary);
+  background-color: var(--bg);
 }
 .welcome-icon { font-size: 3rem; margin-bottom: var(--sp-4); }
 .chat-welcome h2 { font-size: 1.5rem; margin-bottom: var(--sp-2); color: var(--text-primary); }
@@ -3486,7 +3519,7 @@ tbody tr:last-child td {
   .two-col-grid { grid-template-columns: 1fr !important; }   /* inline-grid helper */
 
   /* ── Padding reductions ── */
-  .page-header { padding: 0 var(--sp-4); }
+  .page-header { padding: env(safe-area-inset-top, 0px) var(--sp-4) 0; }
   .page-body { padding: var(--sp-4); }
   .header-left { gap: var(--sp-2); }
   .breadcrumbs { display: none; }

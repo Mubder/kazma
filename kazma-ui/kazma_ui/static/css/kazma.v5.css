@@ -16,13 +16,16 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── 1. Dark palette (default) ───────────────────────────────────── */
+/* color-scheme lives on html[data-theme], NEVER on bare :root.
+   :root { color-scheme: dark } made iOS Safari paint a dark UA canvas
+   even when the user had picked Kazma Light. See kazma.css html rules. */
 :root {
-  color-scheme: dark;
 
   /* Backgrounds — dark slate (lifted off near-black so the app reads as a
      comfortable dark gray, with visible elevation layers for depth rather
      than a flat #04070f canvas). */
   --bg: #0e1626;
+  --bg-deep: #0e1626;
   --bg-2: #121b2e;
   --bg-panel: #16223a;
   --bg-surface: #1b2945;
@@ -71,8 +74,10 @@
 }
 
 /* ── 2. Light palette — ice blue paper ───────────────────────────── */
+html[data-theme="dark"] { color-scheme: only dark; }
+html[data-theme="light"],
 [data-theme="light"] {
-  color-scheme: light;
+  color-scheme: only light;
 
   --bg: #f0f4fa;
   --bg-2: #e6edf7;
@@ -124,7 +129,7 @@
 /* System-preference auto-light — mirrors the block above (same values) */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    color-scheme: light;
+    color-scheme: only light;
     --bg: #f0f4fa;
     --bg-2: #e6edf7;
     --bg-deep: #f0f4fa;

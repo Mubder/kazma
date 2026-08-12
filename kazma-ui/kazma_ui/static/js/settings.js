@@ -2055,10 +2055,12 @@ function settingsApp() {
                 // Apply theme immediately
                 const root = Alpine.$data(document.querySelector('[x-data]'));
                 if (root) root.fontSize = this.appearance.font_size;
-                if (this.appearance.theme === 'light') {
-                    document.documentElement.setAttribute('data-theme', 'light');
-                } else if (this.appearance.theme === 'dark') {
-                    document.documentElement.setAttribute('data-theme', 'dark');
+                if (this.appearance.theme === 'light' || this.appearance.theme === 'dark') {
+                    if (window.syncDocumentColorScheme) {
+                        window.syncDocumentColorScheme(this.appearance.theme);
+                    } else {
+                        document.documentElement.setAttribute('data-theme', this.appearance.theme);
+                    }
                 }
                 showToast('Appearance saved', 'success');
             } catch (e) {
@@ -2068,7 +2070,13 @@ function settingsApp() {
         },
 
         previewTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme);
+            if (theme === 'light' || theme === 'dark') {
+                if (window.syncDocumentColorScheme) {
+                    window.syncDocumentColorScheme(theme);
+                } else {
+                    document.documentElement.setAttribute('data-theme', theme);
+                }
+            }
         },
 
         applyFontSize(size) {

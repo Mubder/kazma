@@ -105,11 +105,20 @@ class TestBaseTemplate:
     def test_has_data_theme(self, base_html):
         assert "data-theme" in base_html
 
+    def test_color_scheme_meta_is_single_theme(self, base_html):
+        """Must not list both schemes — iOS Safari then paints system gray."""
+        assert 'name="color-scheme"' in base_html
+        assert 'content="light dark"' not in base_html
+        assert "viewport-fit=cover" in base_html
+        assert 'name="theme-color"' in base_html
+
     def test_has_alpine_app_data(self, base_html):
         assert "kazmaApp()" in base_html
 
-    def test_has_dark_theme_default(self, base_html):
-        assert 'data-theme="dark"' in base_html
+    def test_has_ssr_theme_binding(self, base_html):
+        """Theme is account-authoritative (SSR), not a hardcoded dark default."""
+        assert "data-theme=" in base_html
+        assert "theme()" in base_html
 
 
 # ── 3. Sidebar Component ───────────────────────────────────────────
@@ -368,6 +377,18 @@ class TestCSSDesignSystem:
 
     def test_has_dark_theme_default(self, css):
         assert '[data-theme="dark"]' in css or ":root" in css
+
+    def test_color_scheme_follows_data_theme_only(self, css):
+        """iOS Safari canvas: never declare both schemes on :root."""
+        assert "color-scheme: only light" in css
+        assert "color-scheme: only dark" in css
+        assert "color-scheme: light dark" not in css
+
+    def test_shell_layers_paint_opaque_bg(self, css):
+        """Chat empty-state and page body must cover the UA canvas."""
+        assert ".page-body" in css
+        assert ".chat-messages" in css
+        assert "background-color: var(--bg)" in css
 
     # Animations
     def test_has_fade_animation(self, css):

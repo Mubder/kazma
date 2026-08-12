@@ -1,52 +1,65 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang()|default('en') }}" data-theme="{{ theme()|default('light') }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Same canvas contract as base.html — single color-scheme, theme-color,
+     viewport-fit=cover. Login is a fork of the shell and used to always
+     paint the old dark indigo page, which leaked iOS gray the same way. #}
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="{{ theme()|default('light') }}">
+  <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
+  <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
   <title>Kazma — Login</title>
   <link rel="icon" href="/static/img/favicon.png">
-  <link rel="stylesheet" href="/static/css/kazma.css">
-  <link rel="stylesheet" href="/static/css/kazma.v5.css">
+  <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
+  <link rel="stylesheet" href="/static/css/kazma.v5.css?v={{ css_version() }}">
   <style>
+    html, body.login-page {
+      min-height: 100%;
+      min-height: 100dvh;
+      overflow: auto;
+      height: auto;
+      background-color: var(--bg);
+    }
     body.login-page {
-      min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--bg-deep, #0d0f14);
       margin: 0;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+               env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
       font-family: var(--font-sans, system-ui, sans-serif);
     }
     .login-card {
       width: min(440px, 92vw);
-      background: var(--bg-panel, #161a22);
-      border: 1px solid var(--border-subtle, #2a3140);
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
       border-radius: 12px;
       padding: 28px 24px;
       box-shadow: 0 12px 40px rgba(0,0,0,.35);
     }
-    .login-card h1 { margin: 0 0 6px; font-size: 1.25rem; color: var(--text-primary, #e8ecf4); }
-    .login-card p { margin: 0 0 14px; font-size: 0.85rem; color: var(--text-muted, #8b93a7); line-height: 1.45; }
+    .login-card h1 { margin: 0 0 6px; font-size: 1.25rem; color: var(--text-primary); }
+    .login-card p { margin: 0 0 14px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.45; }
     .login-card label {
       display: block; font-size: 0.78rem; font-weight: 600;
-      color: var(--text-secondary, #b4bcd0); margin-bottom: 6px;
+      color: var(--text-secondary); margin-bottom: 6px;
     }
     .login-card input[type="password"],
     .login-card input[type="text"] {
       width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
-      border: 1px solid var(--border-subtle, #2a3140); background: var(--bg-deep, #0d0f14);
-      color: var(--text-primary, #e8ecf4); font-size: 0.9rem; margin-bottom: 14px;
+      border: 1px solid var(--border-subtle); background: var(--bg-deep);
+      color: var(--text-primary); font-size: 0.9rem; margin-bottom: 14px;
     }
-    .login-card input:focus { outline: 2px solid var(--accent, #5e6ad2); outline-offset: 1px; }
+    .login-card input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
     .login-card button, .login-card .btn-oidc {
       width: 100%; padding: 10px 14px; border: none; border-radius: 8px;
-      background: var(--accent, #5e6ad2); color: #fff; font-weight: 600;
+      background: var(--accent); color: #fff; font-weight: 600;
       font-size: 0.9rem; cursor: pointer; margin-bottom: 8px; text-align: center;
       text-decoration: none; display: inline-block; box-sizing: border-box;
     }
     .login-card .btn-oidc {
-      background: transparent; border: 1px solid var(--border-subtle, #2a3140);
-      color: var(--text-primary, #e8ecf4);
+      background: transparent; border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
     }
     .login-card button:disabled { opacity: 0.6; cursor: not-allowed; }
     .login-error {
@@ -59,18 +72,18 @@
     .login-brand img { height: 32px; width: 32px; border-radius: 6px; }
     .login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
     .login-tabs button {
-      flex: 1; background: transparent; border: 1px solid var(--border-subtle, #2a3140);
-      color: var(--text-muted, #8b93a7); padding: 8px; border-radius: 8px; cursor: pointer;
+      flex: 1; background: transparent; border: 1px solid var(--border-subtle);
+      color: var(--text-muted); padding: 8px; border-radius: 8px; cursor: pointer;
       font-size: 0.8rem; font-weight: 600; margin: 0;
     }
     .login-tabs button.active {
-      border-color: var(--accent, #5e6ad2); color: var(--text-primary, #e8ecf4);
-      background: rgba(59, 130, 246, 0.12);
+      border-color: var(--accent); color: var(--text-primary);
+      background: var(--accent-subtle);
     }
     .mode-panel { display: none; }
     .mode-panel.active { display: block; }
     .login-divider {
-      text-align: center; color: var(--text-muted, #8b93a7); font-size: 0.75rem;
+      text-align: center; color: var(--text-muted); font-size: 0.75rem;
       margin: 12px 0; position: relative;
     }
   </style>

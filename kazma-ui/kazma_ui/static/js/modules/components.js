@@ -3,6 +3,38 @@
 // Re-exported onto `window` by the app.js entry so x-data and inline
 // handlers keep working after the ESM migration.
 
+// Keep <meta name="color-scheme"> / theme-color in lockstep with data-theme.
+// iOS Safari paints its UA canvas from these metas (not from CSS html
+// background). Listing both schemes, or leaving color-scheme: dark on
+// :root, is what made Light theme show a dark-gray page on a phone.
+const _THEME_COLOR = { light: '#f0f4fa', dark: '#0e1626' };
+
+export function syncDocumentColorScheme(theme) {
+    const scheme = theme === 'dark' ? 'dark' : 'light';
+    const root = document.documentElement;
+    if (root.getAttribute('data-theme') !== scheme) {
+        root.setAttribute('data-theme', scheme);
+    }
+    _setMeta('color-scheme', scheme);
+    _setMeta('supported-color-schemes', scheme);
+    let canvas = _THEME_COLOR[scheme];
+    try {
+        const computed = getComputedStyle(root).getPropertyValue('--bg').trim();
+        if (computed) canvas = computed;
+    } catch (_) { /* computed style unavailable in some test harnesses */ }
+    _setMeta('theme-color', canvas);
+}
+
+function _setMeta(name, content) {
+    let el = document.querySelector('meta[name="' + name + '"]');
+    if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute('name', name);
+        document.head.appendChild(el);
+    }
+    el.setAttribute('content', content);
+}
+
 export function kazmaApp() {
     return {
         theme: 'dark',
@@ -148,7 +180,7 @@ export function kazmaApp() {
         },
 
         _applyTheme() {
-            document.documentElement.setAttribute('data-theme', this.theme);
+            syncDocumentColorScheme(this.theme);
         },
 
         _handleKeyboard(e) {

@@ -11,6 +11,7 @@ import {
     sidebarComponent,
     sidebarModel,
     systemAlertsBanner,
+    syncDocumentColorScheme,
 } from './modules/components.js';
 import {
     KazmaAPI,
@@ -26,6 +27,7 @@ window.kazmaApp = kazmaApp;
 window.sidebarComponent = sidebarComponent;
 window.sidebarModel = sidebarModel;
 window.systemAlertsBanner = systemAlertsBanner;
+window.syncDocumentColorScheme = syncDocumentColorScheme;
 window.KazmaAPI = KazmaAPI;
 window.KazmaUtils = KazmaUtils;
 window.showToast = showToast;

@@ -2,12 +2,15 @@
 <html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}" x-data="kazmaApp()" x-init="init()" :style="'font-size: ' + effectiveFontSize() + 'px'">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    {# Declare both schemes; the CSS color-scheme property (per data-theme)
-       remains authoritative for the canvas + UA controls. The html element
-       also carries an explicit var(--bg) background so no browser-default
-       dark canvas can bleed through on mobile devices. #}
-    <meta name="color-scheme" content="light dark">
+    {# viewport-fit=cover is required for env(safe-area-inset-*) on iOS.
+       color-scheme MUST be a single value matching data-theme — never
+       "light dark". iOS Safari uses the meta (+ system preference) to
+       paint the UA canvas; listing both schemes makes it pick the phone's
+       own dark gray (#121212) regardless of Kazma's Light/Dark choice. #}
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="{{ theme()|default('light') }}">
+    <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
+    <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
     <link rel="shortcut icon" href="/favicon.ico">
