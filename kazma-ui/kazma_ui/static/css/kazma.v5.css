@@ -254,6 +254,26 @@
 @media (max-width: 768px) {
   .hamburger-btn { display: none !important; }
 
+  /* Chat sessions drawer toggle (speech-bubble icon in the chat model-bar).
+     Distinct from .hamburger-btn on purpose: v5 retires the app-nav hamburger
+     (the bottom-nav "More" tab replaces it), but the CHAT session list still
+     needs its own entry point on phones — otherwise sessions + new-session are
+     unreachable. Hidden on desktop (default in kazma.css). */
+  .chat-sessions-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md, 10px);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chat-sessions-btn:active { color: var(--accent); background: var(--bg-elevated); }
+
   /* In-drawer close button (v4 hides .sidebar-toggle on mobile — bring
      it back only while the drawer is open) */
   .sidebar.mobile-open .sidebar-toggle { display: flex; }

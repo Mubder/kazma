@@ -40,8 +40,11 @@
   <main class="chat-main">
     <!-- Model selector bar & WebSocket connection status -->
     <div class="chat-model-bar">
-      {# Mobile sessions-toggle button #}
-      <button class="hamburger-btn" @click="toggleMobileChatSidebar()" aria-label="Sessions"
+      {# Mobile sessions-toggle button. Distinct class (.chat-sessions-btn), NOT
+         .hamburger-btn, so kazma.v5.css's mobile "retire the app-nav hamburger"
+         rule (.hamburger-btn { display:none !important }) can't hide it — that
+         rule previously made the session list unreachable on phones. #}
+      <button class="chat-sessions-btn" @click="toggleMobileChatSidebar()" aria-label="Sessions"
               style="margin-inline-end: 4px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round">

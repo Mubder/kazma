@@ -871,22 +871,11 @@ button { cursor: pointer; font-family: inherit; }
     display: none;
   }
   
-  /* Responsive chat layout */
-  .chat-layout {
-    flex-direction: column;
-  }
-  
-  .chat-sidebar {
-    width: 100%;
-    height: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  
-  .chat-main {
-    width: 100%;
-  }
-  
+  /* Note: chat layout on phones is handled by the ≤768px drawer rules
+     (kazma.css §25 / kazma.v5.css) — the legacy .chat-layout stacking
+     that used to live here was dead (.chat-layout is unused in any
+     template) and overridden. Removed. */
+
   /* Responsive swarm panel */
   .swarm-layout {
     flex-direction: column;
@@ -3300,6 +3289,11 @@ tbody tr:last-child td {
   flex-shrink: 0;
 }
 .hamburger-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Chat sessions drawer toggle (chat model-bar) — mobile-only: hidden on
+   desktop, shown at ≤768px by kazma.v5.css. Distinct class so v5's
+   .hamburger-btn retire rule can't hide it (incident: sessions unreachable). */
+.chat-sessions-btn { display: none; align-items: center; justify-content: center; flex-shrink: 0; }
 
 /* Mobile nav backdrop — hidden on desktop */
 .sidebar-backdrop {
