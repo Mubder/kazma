@@ -715,7 +715,8 @@ def create_documents_router() -> APIRouter:
             )
         try:
             data = await svc.search_library(
-                tenant_id=tenant, library_id=library_id, query=query, top_k=top_k
+                tenant_id=tenant, library_id=library_id, query=query, top_k=top_k,
+                actor_id=_actor,
             )
             return {"ok": True, "search": data}
         except Exception as exc:  # noqa: BLE001

@@ -234,6 +234,7 @@ async def document_search(library_id: str, query: str, top_k: int = 5) -> str:
             library_id=library_id.strip(),
             query=query.strip(),
             top_k=int(top_k) if top_k else 5,
+            actor_id=_actor,
         )
         context = data.get("prompt_context") or ""
         if not context:

@@ -677,12 +677,14 @@ class DocumentService:
         tenant_id: str,
         library_id: str,
         top_k: int = 5,
+        actor_id: str | None = None,
     ) -> DocumentResult[DocumentSearchResult]:
         return await self._knowledge().search_library(
             query,
             tenant_id=tenant_id,
             library_id=library_id,
             top_k=top_k,
+            actor_id=actor_id,
         )
 
     def delete_document(

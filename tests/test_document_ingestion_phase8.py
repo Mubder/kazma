@@ -265,6 +265,13 @@ async def test_cancel_pending_job(tmp_path):
             workspace_id="ws-1",
             actor_id="alice",
         )
+        # ACL: a non-reader principal cannot cancel the owner's job.
+        with pytest.raises(DocumentAccessError):
+            await asyncio.to_thread(
+                svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id,
+                actor_id="bob",
+            )
+        # Backward-compatible: no actor → no per-principal gate.
         cancelled = await asyncio.to_thread(
             svc.cancel_job, tenant_id="tenant-a", job_id=result.job_id
         )

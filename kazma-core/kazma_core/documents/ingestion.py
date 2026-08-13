@@ -886,7 +886,24 @@ class DocumentIngestionService:
         self, *, tenant_id: str, job_id: JobId | str, actor_id: str | None = None
     ) -> dict[str, Any]:
         tenant = _clean(tenant_id, "tenant_id")
-        job = self.jobs.request_cancel(tenant_id=tenant, job_id=JobId(job_id))
+        job = self.jobs.get(tenant_id=tenant, job_id=JobId(job_id))
+        if job is None:
+            raise JobNotFoundError("job is unavailable in this tenant")
+        if actor_id:
+            # Enforce the same per-principal read gate as get_content —
+            # cancelling is destructive control over another principal's
+            # ingestion, and reads already gate the same bytes. Previously the
+            # actor was only written to the audit row, so principal B could
+            # cancel principal A's job they can't even read (audit finding).
+            _actor = _clean(actor_id, "actor_id")
+            if not self.repository.has_access(
+                tenant_id=tenant,
+                document_id=job.document_id,
+                actor_id=_actor,
+                permission="read",
+            ):
+                raise DocumentAccessError("document is unavailable to this actor")
+        job = self.jobs.request_cancel(tenant_id=tenant, job_id=job.id)
         self.audit.record(
             tenant_id=tenant,
             event_type="cancel",
@@ -920,6 +937,20 @@ class DocumentIngestionService:
         owner_record = self.repository.get_document(
             tenant_id=tenant, document_id=job.document_id, include_deleted=True
         )
+        # Enforce the read gate when a principal is provided AND the document
+        # still exists: previously retry was actor-agnostic, so principal B
+        # could force re-processing of principal A's document (audit finding).
+        # (Deleted docs skip the check — has_access filters deleted_at IS NULL,
+        # and the old owner="system" fallback below stays for that edge case.)
+        if actor_id and owner_record is not None:
+            _actor = _clean(actor_id, "actor_id")
+            if not self.repository.has_access(
+                tenant_id=tenant,
+                document_id=job.document_id,
+                actor_id=_actor,
+                permission="read",
+            ):
+                raise DocumentAccessError("document is unavailable to this actor")
         owner = owner_record.owner_id if owner_record is not None else "system"
         fresh = self.jobs.enqueue(
             tenant_id=tenant,
@@ -1024,13 +1055,15 @@ class DocumentIngestionService:
         return payload
 
     async def search_library(
-        self, *, tenant_id: str, library_id: str, query: str, top_k: int = 5
+        self, *, tenant_id: str, library_id: str, query: str, top_k: int = 5,
+        actor_id: str | None = None,
     ) -> dict[str, Any]:
         result = await self.service.search_library(
             _clean(query, "query"),
             tenant_id=_clean(tenant_id, "tenant_id"),
             library_id=_clean(library_id, "library_id"),
             top_k=top_k,
+            actor_id=(_clean(actor_id, "actor_id") if actor_id else None),
         )
         return self._result_payload(result)
 

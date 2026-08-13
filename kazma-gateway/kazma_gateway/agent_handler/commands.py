@@ -1446,7 +1446,8 @@ async def _try_documents_command(
         query = body.split(None, 2)[2]
         try:
             data = await svc.search_library(
-                tenant_id=tenant, library_id=library, query=query, top_k=5
+                tenant_id=tenant, library_id=library, query=query, top_k=5,
+                actor_id="agent",
             )
             context = data.get("prompt_context") or ""
             await _send_model_reply(

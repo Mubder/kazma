@@ -300,6 +300,7 @@ class DocumentKnowledgeAdapter:
         tenant_id: str,
         library_id: str,
         top_k: int = 5,
+        actor_id: str | None = None,
     ) -> DocumentResult[DocumentSearchResult]:
         if self.store.get_library_for_tenant(library_id, tenant_id) is None:
             return DocumentResult(
@@ -310,6 +311,21 @@ class DocumentKnowledgeAdapter:
         hits = await self.index.search(
             query, library_id, top_k=top_k, tenant_id=tenant_id
         )
+        if actor_id:
+            # Enforce per-document read ACL on library-wide search (mirror
+            # search_document's get_document(actor_id=...) gate). Previously an
+            # actor denied read on a document could still retrieve its chunk
+            # text through any library it can query (audit finding).
+            hits = [
+                h for h in hits
+                if not h.document_id
+                or self.repository.has_access(
+                    tenant_id=tenant_id,
+                    document_id=h.document_id,
+                    actor_id=actor_id,
+                    permission="read",
+                )
+            ]
         return DocumentResult(
             ok=True,
             code="library_search_complete",
