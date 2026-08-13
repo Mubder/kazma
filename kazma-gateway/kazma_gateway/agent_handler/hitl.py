@@ -370,7 +370,11 @@ async def _handle_hitl_resume(
                 try:
                     from kazma_core.safety.task_grants import grant_task
 
-                    actor = (msg.sender_id or msg.user_id or "unknown")
+                    # IncomingMessage has no user_id attribute — the `or
+                    # msg.user_id` would AttributeError if sender_id was ever
+                    # empty (caught by the surrounding try, silently dropping
+                    # the actor from the grant audit) (audit finding).
+                    actor = msg.sender_id or "unknown"
                     grant_task(target_thread, actor=actor)
                     logger.info(
                         "[HITL] Task grant activated for thread=%s actor=%s",

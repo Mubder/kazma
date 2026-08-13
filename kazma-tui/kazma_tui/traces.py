@@ -205,8 +205,11 @@ class TracesPanel(Vertical):
             # Formatted type
             type_markup = f"[dim]{entry.trace_type.upper()}[/dim]"
             
-            # Formatted duration
-            dur_str = f"{entry.duration_ms:.0f}ms" if entry.duration_ms >= 0 else "N/A"
+            # Formatted duration (None-safe — an entry recorded before
+            # completion / on an error path may have duration_ms=None, which
+            # made `None >= 0` raise TypeError and blanked the traces refresh)
+            _ms = entry.duration_ms
+            dur_str = f"{_ms:.0f}ms" if (_ms is not None and _ms >= 0) else "N/A"
             
             table.add_row(
                 time_str,

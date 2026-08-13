@@ -119,10 +119,18 @@ class DocumentsPanel(VerticalScroll):
             )
             return
         for d in docs:
+            # Defensive: a partial/quarantined record or older ingestion
+            # version may omit title/document_id; a hard subscript raises
+            # KeyError and blanks the whole Documents tab (audit finding).
+            doc_id = d.get("document_id")
+            if not doc_id:
+                continue
             key = table.add_row(
-                d["title"], d.get("state") or "unknown", d["document_id"][:8]
+                d.get("title") or "(untitled)",
+                d.get("state") or "unknown",
+                str(doc_id)[:8],
             )
-            self._rows[str(key.value)] = d["document_id"]
+            self._rows[str(key.value)] = doc_id
 
     async def _preview(self, document_id: str) -> None:
         preview = self.query_one("#docs-preview", Static)

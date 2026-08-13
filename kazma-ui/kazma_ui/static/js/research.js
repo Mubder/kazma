@@ -436,11 +436,11 @@
           if (data.error) { toast('Export failed: ' + data.error, 'error'); return; }
           toast('Exported: ' + (data.filename || fmt), 'success');
           if (data.download_url) {
-            window.open(data.download_url, '_blank');
+            window.open(data.download_url, '_blank', 'noopener');
           } else if (data.filename) {
-            window.open('/api/research/download?path=' + encodeURIComponent(data.filename), '_blank');
+            window.open('/api/research/download?path=' + encodeURIComponent(data.filename), '_blank', 'noopener');
           } else if (data.path) {
-            window.open('/api/research/download?path=' + encodeURIComponent(data.path), '_blank');
+            window.open('/api/research/download?path=' + encodeURIComponent(data.path), '_blank', 'noopener');
           }
         })
         .catch(function () { toast('Export request failed', 'error'); });

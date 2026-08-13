@@ -1453,7 +1453,6 @@
     // Route over Central WebSocket Telemetry Bus if connected
     const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
     if (agentStore && agentStore.connectionStatus === 'connected') {
-      console.log('[KazmaChat] WS path: sendPrompt via agentStore (delivery poll should still be running from beginTurn)');
       agentStore.sendPrompt(content, selectedModel || '', attachmentsPayload);
       return;
     }

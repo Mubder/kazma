@@ -829,7 +829,6 @@ class TelegramAdapter(BaseAdapter):
         if not self._http:
             return False
         try:
-            form_data = httpx.AsyncClient()
             files = {"voice": ("reply.ogg", audio_bytes, "audio/ogg")}
             data: dict[str, Any] = {"chat_id": chat_id}
             if reply_to:
