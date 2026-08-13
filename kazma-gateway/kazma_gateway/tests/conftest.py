@@ -86,6 +86,7 @@ class MockTelegramBusAdapter:
     async def request_approval(
         self,
         request: Any,
+        timeout: float = 60.0,
     ) -> bool:
         """Mock approval request - records request."""
         self.approval_requests.append({
@@ -113,7 +114,7 @@ class MockDiscordBusAdapter:
         self.sent_messages.append(str(report))
         return True
     
-    async def request_approval(self, request: Any) -> bool:
+    async def request_approval(self, request: Any, timeout: float = 60.0) -> bool:
         self.approval_requests.append({"text": str(request)})
         return True
     
@@ -141,7 +142,7 @@ class MockSlackBusAdapter:
         self.sent_messages.append(str(report))
         return True
     
-    async def request_approval(self, request: Any) -> bool:
+    async def request_approval(self, request: Any, timeout: float = 60.0) -> bool:
         self.approval_requests.append({"text": str(request)})
         return True
 

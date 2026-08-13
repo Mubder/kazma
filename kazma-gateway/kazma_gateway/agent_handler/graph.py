@@ -1180,7 +1180,7 @@ def create_graph_handler(
                 from kazma_core.agent.long_task import consume_long_task_turn
 
                 # Consume long_task turn-budget at the start of each new message.
-                consume_long_task_turn(_thread_id)
+                consume_long_task_turn(thread_id)
 
                 user_text = ""
                 for m in reversed(list(state.get("messages") or [])):

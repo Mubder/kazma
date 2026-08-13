@@ -95,7 +95,7 @@ class BusAdapter(ABC):
         ...
 
     @abstractmethod
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(self, approval: ApprovalRequest, timeout: float = 60.0) -> bool:
         """Request HITL approval. Returns True if approved, False if rejected or timed out."""
         ...
 
@@ -124,7 +124,7 @@ class NullBusAdapter(BusAdapter):
     async def send_report(self, report: SwarmReport) -> None:
         pass
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(self, approval: ApprovalRequest, timeout: float = 60.0) -> bool:
         # Fail-closed (audit M9): headless danger must go through
         # SafetyMiddleware.allow_headless_danger, not silent auto-approve.
         return False
@@ -171,10 +171,10 @@ class FanOutBusAdapter(BusAdapter):
             return_exceptions=True,
         )
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(self, approval: ApprovalRequest, timeout: float = 60.0) -> bool:
         async def _one(adapter: BusAdapter) -> bool:
             try:
-                return bool(await adapter.request_approval(approval))
+                return bool(await adapter.request_approval(approval, timeout=timeout))
             except Exception as exc:
                 logger.debug(
                     "[FanOutBus] approval on %s failed: %s",

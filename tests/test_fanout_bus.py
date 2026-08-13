@@ -30,7 +30,7 @@ class _RecordingAdapter(BusAdapter):
     async def send_report(self, report: SwarmReport) -> None:
         self.reports.append(report.status)
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(self, approval: ApprovalRequest, timeout: float = 60.0) -> bool:
         self.approvals += 1
         if self.delay:
             await asyncio.sleep(self.delay)

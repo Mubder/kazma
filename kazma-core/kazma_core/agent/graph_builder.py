@@ -1753,6 +1753,12 @@ async def supervisor_node(
                 if intent_patch.get("intent_mode") != "shift":
                     is_auto = True
 
+        # ``max_iter`` was referenced here without ever being bound in
+        # ``supervisor_node`` (only the mission-mode local ``_max_iter`` and the
+        # router's own ``max_iter`` exist), so the auto-continue path raised
+        # NameError whenever ``is_auto`` was truthy. Resolve it from the same
+        # source the router uses (state.max_iterations, default 15).
+        max_iter = int(state.get("max_iterations") or 15)
         if is_auto and iteration + 1 < max_iter and content:
             logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
             assistant_msg = {"role": "assistant", "content": content}
@@ -1989,8 +1995,40 @@ def _commitment_resolve_gate(
                     try: record_commitment_terminal("cancelled")
                     except Exception: pass
             elif _patch is not None:
-                _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
-                pending.append(_tc)
+                # No-late-approve (AGENTS.md §20C): the LangGraph interrupt stays
+                # resumable in the checkpointer long after the commitment's TTL
+                # has passed, and sweep_expired may have already moved it to
+                # 'expired'. The store-level "no late approve" guard only covers
+                # resumes that go through update_status — NOT this clarify path,
+                # which applies slots_patch directly. Re-check liveness here so a
+                # stale fire_at cannot slip through.
+                _alive = True
+                if _dec.commitment_id:
+                    try:
+                        from kazma_core.safety.commitment.store import get_commitment
+                        _c = get_commitment(_dec.commitment_id)
+                        if _c is None or _c.status not in ("needs_clarify", "needs_confirm") or (
+                            _c.expires_at is not None and time.time() > _c.expires_at
+                        ):
+                            _alive = False
+                    except Exception:  # noqa: BLE001
+                        logger.debug("[ToolWorker] commitment liveness check failed; assuming live")
+                if not _alive:
+                    semantic_blocked.append(ToolResult(
+                        tool_call_id=_tcid, name=_tc["name"],
+                        content=("This scheduling clarification has expired — the original "
+                                 "timing is no longer valid. Ask the user to confirm the "
+                                 "exact date/time again before re-scheduling."),
+                        is_error=True, duration_ms=0, outcome="terminal",
+                    ))
+                    if record_commitment_terminal:
+                        try:
+                            record_commitment_terminal("clarify_expired")
+                        except Exception:
+                            pass
+                else:
+                    _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
+                    pending.append(_tc)
             else:
                 semantic_blocked.append(ToolResult(
                     tool_call_id=_tcid, name=_tc["name"],
