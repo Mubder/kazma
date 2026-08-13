@@ -224,16 +224,13 @@ document.addEventListener('alpine:init', () => {
       this._closeSocket();
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      let wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(sessionId)}`;
+      const wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(sessionId)}`;
 
-      // Append token from localStorage or meta tag as query param fallback
-      // (browser WebSocket can't send custom headers; cookies are sent automatically)
-      const token = localStorage.getItem('kazma.ws.token') ||
-        document.querySelector('meta[name="kazma-ws-token"]')?.getAttribute('content') ||
-        '';
-      if (token) {
-        wsUrl += `?token=${encodeURIComponent(token)}`;
-      }
+      // Auth via the same-origin kazma-session cookie, which the browser sends
+      // automatically on the WS handshake (+ loopback trust for localhost).
+      // The old meta-tag / ?token= path was removed: it leaked the bearer
+      // token into page source, proxy logs, history, and referrer headers
+      // (audit MED #6).
 
       this.connectionStatus = 'connecting';
       try {

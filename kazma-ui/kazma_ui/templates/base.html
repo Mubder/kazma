@@ -187,11 +187,10 @@
        covered. Must come AFTER window.t injection above (it uses window.t). #}
     <script src="/static/js/auth-guard.js?v={{ js_version() }}"></script>
 
-    {# WebSocket auth token for browser WS connections (query param fallback) #}
-    {% set ws_token = ws_token() if ws_token is callable else ws_token %}
-    {% if ws_token %}
-    <meta name="kazma-ws-token" content="{{ ws_token }}">
-    {% endif %}
+    {# No browser WS token meta tag — the WS authenticates via the same-origin
+       kazma-session cookie (sent automatically) + loopback trust. The
+       ?token= meta path was removed: it leaked the bearer token into page
+       source, proxy logs, history, and referrer headers (audit MED #6). #}
 
     {# ES module cache-bust: relative imports from app.js resolve to absolute
        /static/js/modules/* URLs; map them to versioned paths so nav.js edits

@@ -490,12 +490,12 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
         return True
 
     # Loopback peers: trusted for single-operator local use.
-    # The browser connects from localhost and gets the WS session token via
-    # the <meta> tag. While removing loopback trust entirely would be more
-    # secure, it breaks legitimate browser connections when the token hasn't
-    # loaded yet (Alpine race on page load). The practical risk is low:
-    # malware on the same machine already has full access to the filesystem
-    # and vault. The session-token requirement applies to REMOTE connections.
+    # The browser authenticates via the same-origin kazma-session cookie; the
+    # old <meta> token path was removed (leaked the bearer into page source /
+    # logs). Loopback trust keeps local single-operator use working without
+    # any credential. The practical risk is low: malware on the same machine
+    # already has full access to the filesystem and vault. The session-cookie
+    # requirement applies to REMOTE connections.
     if _is_loopback_client(websocket):
         return True
 
