@@ -602,6 +602,11 @@
   /** No tool/token/status for this long → unlock UI + start catch-up poller (NOT false Done). */
   var TURN_IDLE_WATCHDOG_MS = 5 * 60 * 1000;
   var _lastTurnActivityTs = 0;
+  /** True once the server has emitted any frame (token/tool/status) this turn.
+   *  Gates the desync healer (below) so it can't fire during the startup gap
+   *  between beginTurn() and the first server frame — the cause of the false
+   *  "Done · 1s" heading that sometimes flashed ~1.5s after sending a message. */
+  var _serverActivitySeen = false;
 
   function _clearTurnTimers() {
     if (_turnWatchdogTimer) {
@@ -626,6 +631,7 @@
   function noteTurnActivity() {
     _lastTurnActivityTs = Date.now();
     lastActivityTs = _lastTurnActivityTs;
+    _serverActivitySeen = true;
     if (_isGenerating && !_awaitingApproval) {
       _armTurnWatchdog();
     }
@@ -677,6 +683,7 @@
     _isGenerating = true;
     _awaitingApproval = false;
     _lastTurnActivityTs = Date.now();
+    _serverActivitySeen = false;
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     lastActivityTs = _lastTurnActivityTs;
@@ -836,6 +843,11 @@
   if (!_turnSyncTimer) {
     _turnSyncTimer = setInterval(function() {
       if (!_isGenerating || _awaitingApproval) return;
+      // Don't heal before the server has emitted anything this turn. At turn
+      // start the bus is still idle until the first status frame lands, so a
+      // 1.5s tick landing in that gap would otherwise release the Stop lock and
+      // paint a false "Done · 1s" heading while the turn is still running.
+      if (!_serverActivitySeen) return;
       try {
         if (!window.Alpine || !Alpine.store || !Alpine.store('agent')) return;
         var store = Alpine.store('agent');
