@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 import os
 import struct
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
@@ -178,6 +179,9 @@ class OpenAICompatibleEmbedder:
         # Simple LRU-ish cache (dict + size cap; good enough for query dedup).
         self._cache: dict[str, list[float]] = {}
         self._cache_size = cache_size
+        # Guards _cache — encode() is called from the consolidator's per-turn
+        # threads AND recall threads concurrently (audit finding).
+        self._cache_lock = threading.Lock()
 
     def _ensure_client(self) -> Any:
         if self._client is not None:
@@ -205,9 +209,11 @@ class OpenAICompatibleEmbedder:
         Returns ``[]`` if both attempts fail. Results are cached so identical
         queries don't re-hit the API.
         """
-        # Cache lookup
-        if text in self._cache:
-            return self._cache[text]
+        # Cache lookup (thread-safe)
+        with self._cache_lock:
+            cached = self._cache.get(text)
+        if cached is not None:
+            return cached
         client = self._ensure_client()
         emb: list[float] = []  # initialized to prevent UnboundLocalError
         # Retry once on failure (NIM endpoints can be slow / rate-limited).
@@ -227,10 +233,15 @@ class OpenAICompatibleEmbedder:
                 else:
                     logger.warning("[Embedder:openai-compatible] encode failed: %s", exc)
                     return []
-        # Cache store (evict oldest if over capacity)
-        if len(self._cache) >= self._cache_size:
-            self._cache.pop(next(iter(self._cache)))
-        self._cache[text] = emb
+        # Cache store — only successful (non-empty) results, so a transient
+        # empty/malformed response doesn't poison the cache permanently. The
+        # httpx call above runs WITHOUT the lock (don't serialize encodes);
+        # only dict mutation is guarded (audit finding).
+        if emb:
+            with self._cache_lock:
+                if len(self._cache) >= self._cache_size:
+                    self._cache.pop(next(iter(self._cache)), None)
+                self._cache[text] = emb
         return emb
 
     def encode_batch(self, texts: list[str]) -> list[list[float]]:

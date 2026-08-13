@@ -1675,6 +1675,16 @@ class KazmaAppBuilder:
                     set_ingestion_service(None)
                 except Exception:  # noqa: BLE001
                     pass
+            # Drain the V2 memory worker's in-flight handler tasks so a
+            # mid-execution belief extraction / entity merge is awaited rather
+            # than abandoned on loop close (audit finding). The schedulers are
+            # fire-and-forget loops the loop cancellation handles.
+            try:
+                from kazma_core.memory.worker_bootstrap import stop_memory_worker
+
+                await stop_memory_worker()
+            except Exception:  # noqa: BLE001
+                pass
                 logger.info("[Documents] ingestion coordinator stopped")
         except Exception as e:
             logger.warning("[Documents] ingestion coordinator stop failed: %s", e)

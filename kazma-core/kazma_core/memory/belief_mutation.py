@@ -543,8 +543,10 @@ def _mutate_functional(
     # sees ALL prior committed writes (no stale WAL snapshot). This is
     # essential when mutations run across separate connections/threads —
     # a deferred read transaction could miss a just-committed supersede.
+    _began = False
     try:
         conn.execute("BEGIN IMMEDIATE")
+        _began = True
     except Exception:
         pass  # already in a transaction
     # Find the currently-active belief for this (subject, predicate)
@@ -566,6 +568,16 @@ def _mutate_functional(
         )
         # If the new object equals the existing one, this is a no-op
         if old_obj == obj:
+            # Release the BEGIN IMMEDIATE lock we acquired (no writes to
+            # commit). Only roll back if WE started the txn — if the caller
+            # already had one open, leave it to the caller (audit finding:
+            # early returns leaked the write lock until the connection closed
+            # if the caller's later commit raised).
+            if _began:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             return {"action": "noop", "belief_id": superseded_id, "superseded_id": None}
         # Commitment Layer Phase 1 — source-trust gate (plan §3.6 rule 2):
         # a user_explicit (gold-standard) functional belief may NOT be
@@ -592,6 +604,11 @@ def _mutate_functional(
                 state_before={"id": superseded_id, "object": old_obj},
                 state_after={"id": superseded_id, "object": old_obj, "blocked": True},
             )
+            if _began:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             return {"action": "noop", "belief_id": superseded_id,
                     "superseded_id": None, "blocked": "lower_trust_source"}
         state_before = {"id": superseded_id, "object": old_obj}

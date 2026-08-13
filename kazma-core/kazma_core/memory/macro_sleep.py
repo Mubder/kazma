@@ -195,5 +195,10 @@ def run_macro_sleep(
 
         primary_conn.commit()
     except Exception:
-        logger.debug("[macro_sleep] sweep failed", exc_info=True)
+        # A broken sweep (schema drift, corrupt row, locked DB) previously
+        # logged at DEBUG and the caller still reported success — macro_sleep
+        # could be effectively a no-op for weeks with no signal (the "silent
+        # amnesia" pattern). Surface it at WARNING + flag the stat.
+        logger.warning("[macro_sleep] sweep failed", exc_info=True)
+        stats["sweep_error"] = True
     return stats

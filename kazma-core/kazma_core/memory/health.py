@@ -25,6 +25,14 @@ _recall_fail_count: int = 0
 _recall_last_failure: float = 0.0
 _recall_last_reason: str = ""
 
+# TTL cache for the embedder liveness probe in build_memory_health. The
+# dashboard polls health every few seconds; without this, each poll fired a
+# real embed API call (billed + latency) on a remote embedder (audit finding).
+# Only successful (non-empty) probes are cached; a fresh process re-probes.
+_HEALTH_EMBED_TTL = 300.0
+_health_embed_cache: dict[str, Any] = {}
+_health_embed_cache_ts: float = 0.0
+
 
 def mark_recall_degraded(reason: str = "") -> None:
     """Record a recall failure so build_memory_health() can surface it.
@@ -186,7 +194,23 @@ def build_memory_health() -> dict[str, Any]:
         if emb is None:
             emb_detail = "get_embedder() returned None — check logs."
         else:
-            sample = emb.encode("health-check")
+            # Reuse a cached successful probe within the TTL (values are stable
+            # for a given embedder) instead of calling encode() on every poll.
+            _now = time.monotonic()
+            _cached = (
+                _health_embed_cache
+                if (_now - _health_embed_cache_ts) < _HEALTH_EMBED_TTL
+                and _health_embed_cache.get("_emb_class") == type(emb).__name__
+                else None
+            )
+            if _cached and _cached.get("sample"):
+                sample = _cached["sample"]
+            else:
+                sample = emb.encode("health-check")
+                if sample:  # only cache a successful probe
+                    _health_embed_cache["sample"] = sample
+                    _health_embed_cache["_emb_class"] = type(emb).__name__
+                    _health_embed_cache_ts = _now
             dim = getattr(emb, "dim", len(sample) if sample else 0)
             emb_meta["dim"] = dim
             emb_meta["class"] = type(emb).__name__

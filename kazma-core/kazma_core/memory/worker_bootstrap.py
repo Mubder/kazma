@@ -186,43 +186,11 @@ async def _handle_global_reconsolidation(payload: dict[str, Any]) -> bool:
         return False
 
 
-def _apply_merge(conn: sqlite3.Connection, source_id: str, target_id: str) -> None:
-    """Merge source entity's aliases into target, then drop the source row."""
-    try:
-        src = conn.execute(
-            "SELECT aliases_json, name FROM entities WHERE id=?", (source_id,)
-        ).fetchone()
-        tgt = conn.execute(
-            "SELECT aliases_json FROM entities WHERE id=?", (target_id,)
-        ).fetchone()
-        if src and tgt:
-            src_aliases = json.loads(src[0] or "[]")
-            tgt_aliases = json.loads(tgt[0] or "[]")
-            for a in src_aliases:
-                if a not in tgt_aliases:
-                    tgt_aliases.append(a)
-            if src[1] and src[1] not in tgt_aliases:
-                tgt_aliases.append(src[1])
-            conn.execute(
-                "UPDATE entities SET aliases_json=? WHERE id=?",
-                (json.dumps(tgt_aliases), target_id),
-            )
-            # Redirect beliefs pointing at the source to the target
-            conn.execute(
-                "UPDATE beliefs SET subject=? WHERE subject=?", (target_id, source_id)
-            )
-            conn.execute(
-                "UPDATE beliefs SET object=? WHERE object=?", (target_id, source_id)
-            )
-            conn.execute("DELETE FROM entities WHERE id=?", (source_id,))
-            conn.commit()
-    except Exception:
-        logger.debug("[memory_worker] merge apply failed", exc_info=True)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+# (Removed) ``_apply_merge`` was dead code (zero callers). It closed a
+# caller-owned connection in its finally, did an unscoped cross-tenant belief
+# redirect (no tenant_id filter), and hard-deleted the source entity row
+# instead of soft-retiring it. The live path is
+# entity_resolution.decide_entity_merge. (audit finding)
 
 
 async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
@@ -326,6 +294,22 @@ def start_memory_worker() -> None:
         _start_commitment_gc_scheduler()
     except Exception:
         logger.warning("[memory_worker] could not start worker", exc_info=True)
+
+
+async def stop_memory_worker() -> None:
+    """Stop the durable V2 memory worker + drain in-flight handler tasks.
+
+    Call on shutdown so a handler mid-execution (e.g. an LLM belief extraction
+    holding a SQLite transaction) is awaited/cancelled rather than abandoned
+    when the loop closes. The schedulers are fire-and-forget loops the loop
+    cancellation handles. (audit finding: stop_worker existed but was unwired.)
+    """
+    try:
+        from kazma_core.memory.task_queue import stop_worker
+
+        await stop_worker()
+    except Exception:
+        logger.debug("[memory_worker] stop failed", exc_info=True)
 
 
 _MACRO_SLEEP_INTERVAL_HOURS = 6
