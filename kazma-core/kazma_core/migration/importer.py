@@ -21,6 +21,7 @@ preserved on failure for inspection (printed in the report).
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -253,6 +254,10 @@ def import_bundle(
 
     staged_data = staging / "data"
     swapped: list[str] = []
+    # Track per-DB install failures so a failed swap fails the whole import
+    # (previously a failed install only warned and report.ok stayed True — a
+    # partial import reported as success) (audit finding).
+    install_failures: list[str] = []
     for arc_name, resolver_name in _BUNDLE_DB_TO_DEST_RESOLVER.items():
         src_staged = staged_data / arc_name
         if not src_staged.exists():
@@ -277,12 +282,26 @@ def import_bundle(
         for suffix in ("-wal", "-shm", "-journal"):
             stale = dest.with_name(dest.name + suffix)
             stale.unlink(missing_ok=True)
-        # Install the staged file → live via the WAL-safe online backup,
-        # which checkpoints any WAL state into a single consistent file.
-        # (Equivalent to: copy main + drop sidecars, but robust to the
-        # staged file itself being a WAL-mode DB.)
-        if not _backup_one(src_staged, dest):
-            report.warn(f"failed to install {arc_name} (online backup failed)")
+        # Install via the WAL-safe online backup INTO A SIBLING TEMP, then
+        # atomically replace the live file. Backing up directly into the live
+        # dest left it half-overwritten if the process died mid-swap (a 304MB
+        # snapshots.db checkpoint is not instantaneous) — os.replace is atomic
+        # on the same volume, so the live file is never in a partial state
+        # (audit finding).
+        swap_tmp = dest.with_name(dest.name + ".swap-tmp")
+        if not _backup_one(src_staged, swap_tmp):
+            report.error(f"failed to install {arc_name} (online backup failed)")
+            install_failures.append(arc_name)
+            swap_tmp.unlink(missing_ok=True)
+            continue
+        # dest's -wal/-shm sidecars were already removed above; replace the
+        # main file atomically (overwrites the existing live file).
+        try:
+            os.replace(swap_tmp, dest)
+        except OSError as exc:
+            report.error(f"failed to swap {arc_name} into place: {exc}")
+            install_failures.append(arc_name)
+            swap_tmp.unlink(missing_ok=True)
             continue
         # NOTE: do NOT unlink src_staged here — _backup_one's sqlite3
         # connection has just released the Windows file handle and the OS
@@ -430,7 +449,13 @@ def import_bundle(
 
     # Clean up staging on success.
     shutil.rmtree(staging, ignore_errors=True)
-    report.ok = True
+    # Only succeed if every DB swapped cleanly. A partial install (some DBs
+    # swapped, one failed) must not report ok=True — the operator would believe
+    # the migration succeeded while live data is stale/missing (audit finding).
+    report.ok = not install_failures
+    if install_failures:
+        _log(f"  {len(install_failures)} DB(s) failed to install: "
+             + ", ".join(install_failures))
     _log("Import complete.")
     if report.backup_path:
         _log(f"  pre-import backup: {report.backup_path}")

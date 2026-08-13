@@ -461,6 +461,25 @@ Output ONLY the delta text, no preamble."""
             registry = get_worker_registry()
             worker_entry = registry.get(entry["worker_name"])
             if worker_entry is not None:
+                # Defense-in-depth: re-check the prompt fence at APPLY time
+                # (AGENTS.md §11B). The other apply sites (_auto_apply /
+                # apply_agent_mutation) already do this; this HITL approve
+                # path did not, so a tampered queue entry could inject an
+                # override directive into the worker Soul unchecked.
+                from kazma_core.safety.prompt_fence import is_override_delta
+
+                if is_override_delta(entry["delta"]):
+                    entry["status"] = "rejected"
+                    remaining.append(entry)
+                    path.write_text(json.dumps(remaining, indent=2, ensure_ascii=False))
+                    logger.warning(
+                        "[SelfImprovement] Delta %s rejected at approve: override marker", delta_id,
+                    )
+                    return {
+                        "success": False,
+                        "error": "rejected: prompt-injection override marker",
+                        "delta_id": delta_id,
+                    }
                 new_prompt = _cap_evolution_prompt(worker_entry.system_prompt, entry["delta"])
                 registry.update(entry["worker_name"], system_prompt=new_prompt)
             entry["status"] = "approved"

@@ -387,6 +387,25 @@ class CronScheduler:
         for job in jobs:
             status = getattr(job, "status", None)
             if status == JobStatus.RUNNING or getattr(status, "value", None) == "running":
+                # A recurring job (e.g. "daily at 09:00") interrupted mid-fire
+                # must NOT be stranded as FAILED — list_active() filters it out
+                # and the user stops receiving the reminder forever (audit
+                # finding). Reschedule it to its next run instead.
+                timing = getattr(job, "timing", "") or ""
+                if timing.startswith("daily"):
+                    try:
+                        nr = parse_timing(timing)
+                        await self._store.update_next_run(job.job_id, nr.isoformat())
+                        logger.warning(
+                            "[CronScheduler] recovered stale RUNNING daily job %s → rescheduled to %s",
+                            job.job_id, nr.isoformat(),
+                        )
+                        continue
+                    except Exception:
+                        logger.warning(
+                            "[CronScheduler] could not reschedule daily job %s; marking FAILED",
+                            job.job_id, exc_info=True,
+                        )
                 await self._store.update_status(job.job_id, JobStatus.FAILED)
                 try:
                     await self._store.update_result(
