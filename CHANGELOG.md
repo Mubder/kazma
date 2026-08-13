@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Unreleased — Postgres shared-state backup & schema assurance (2026-08-14)
+
+After a second app dropped Kazma's tables from the shared `kazma` database
+(checkpoints/settings/chat sessions/document jobs), this closes the gap so it
+can't happen un-recoverably again:
+
+- **Nightly PG dump** (`kazma_core/db/pg_backup.py`): filtered `pg_dump -Fc` of
+  exactly `KAZMA_PG_TABLES` (never the whole DB), atomic tmp+rename,
+  magic-validated, retention-capped (default 7), wired into the 24h
+  backup/export loop (`native_pg_backup` task). Self-disables on SQLite.
+- **Boot-time schema verification** (`app.py:_on_startup`): missing required
+  tables → CRITICAL log + exact restore command; fail-open, never blocks boot.
+- **Operator CLI** `scripts/pg_backup.py` (`backup` / `restore --latest` /
+  `list` / `--dry-run`) reusing the migration `pg_bridge` (docker-exec
+  discovery, PGPASSWORD via env).
+- Config: `backups.pg.enabled` / `backups.pg.retention`,
+  env `KAZMA_PG_BACKUP_ENABLED` / `KAZMA_PG_BACKUP_RETENTION`.
+- `pg_bridge.dump_database(tables=...)` table-filter support.
+- Tests: `tests/test_pg_backup.py` (16 tests, ConfigStore-isolated).
+
 ## Unreleased — Path grants + mid-session language switch (2026-08-12)
 
 - **Path grants:** Outside-workspace access is still deny-by-default, but can be

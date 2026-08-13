@@ -134,13 +134,23 @@ def _resolve_tool(tool: str) -> Sequence[str]:
 # ── Dump / restore ───────────────────────────────────────────────────────
 
 
-def dump_database(dsn: str, out_path: str | Path, *, progress=None) -> Path:
+def dump_database(
+    dsn: str,
+    out_path: str | Path,
+    *,
+    progress=None,
+    tables: Sequence[str] | None = None,
+) -> Path:
     """Dump the database at ``dsn`` to ``out_path`` in custom format (-Fc).
 
     Args:
         dsn: the source ``postgresql://...`` URL (from KAZMA_DATABASE_URL).
         out_path: destination file (overwritten).
         progress: optional callback ``(phase: str)`` for status messages.
+        tables: optional explicit table names to dump (one ``-t`` per name).
+            None (default) dumps the whole database. The nightly PG backup
+            passes its SoT list so a shared DB never leaks a foreign app's
+            tables into Kazma's backups.
 
     Returns:
         The Path to the written dump.
@@ -166,6 +176,10 @@ def dump_database(dsn: str, out_path: str | Path, *, progress=None) -> Path:
         "--no-owner",
         "--no-privileges",
         "-Fc",  # custom format — the only format pg_restore reads
+    ]
+    for table in tables or ():
+        cmd += ["-t", table]
+    cmd += [
         "-U", conn_parts.user,
         "-h", conn_parts.host,
         "-p", conn_parts.port,

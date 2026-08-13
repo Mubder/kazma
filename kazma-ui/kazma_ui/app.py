@@ -1367,6 +1367,53 @@ class KazmaAppBuilder:
             self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
             logger.info("[Checkpoint] SQLite checkpointer initialized")
 
+            # ── Postgres schema assurance ─────────────────────────────
+            # A second app was once pointed at the shared `kazma` DB and its
+            # migration dropped Kazma's tables mid-flight (the 2026-08-14
+            # UndefinedTable incident). Verify the required PG tables exist
+            # at boot; if not, log a CRITICAL with the exact restore command
+            # instead of limping along with runtime UndefinedTable errors.
+            # Best-effort and fail-open: a verification problem must never
+            # block boot (SQLite-side features keep working).
+            try:
+                from kazma_core.db.pg_backup import (
+                    KAZMA_PG_TABLES,
+                    latest_pg_backup,
+                    pg_backup_enabled,
+                    verify_required_pg_tables,
+                )
+
+                if pg_backup_enabled():
+                    from kazma_core.db.postgres_pool import get_postgres_pool
+
+                    _pool = get_postgres_pool()
+                    if _pool is not None:
+                        import asyncio as _aio
+
+                        _missing = await _aio.to_thread(verify_required_pg_tables, _pool)
+                        if _missing:
+                            _backup = latest_pg_backup()
+                            _hint = (
+                                f"Restore the latest backup with: "
+                                f"python scripts/pg_backup.py restore --latest"
+                                if _backup
+                                else "No pg_backup dump exists yet — restore from your "
+                                "migration bundle, then run: python scripts/pg_backup.py backup"
+                            )
+                            logger.critical(
+                                "[PG-BACKUP] REQUIRED POSTGRES TABLES MISSING: %s. "
+                                "Chat history / settings / document jobs are broken until restored. %s",
+                                ", ".join(_missing),
+                                _hint,
+                            )
+                        else:
+                            logger.info(
+                                "[PG-BACKUP] schema verification OK (all %d tables present)",
+                                len(KAZMA_PG_TABLES),
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[PG-BACKUP] boot schema verification failed: %s", exc)
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)

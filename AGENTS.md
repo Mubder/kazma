@@ -378,10 +378,11 @@ exact gap that previously left backups/export inert).
   `macro_sleep` task every 6h → decay scoring, tier demotion/promotion,
   archival (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
 - **24h backup/export loop** (`_BACKUP_EXPORT_INTERVAL_HOURS = 24`): enqueues
-  `native_backup` + `nightly_export` tasks every 24h → native
-  `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML dumps
-  (`export.py`). First sweep 120s after boot. Kept separate from the 6h
-  loop so a slow disk on backup can't stall decay.
+  `native_backup` + `nightly_export` + `native_pg_backup` tasks every 24h →
+  native `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML
+  dumps (`export.py`) + a filtered `pg_dump` of Kazma's Postgres
+  shared-state tables (§21). First sweep 120s after boot. Kept separate
+  from the 6h loop so a slow disk on backup can't stall decay.
 Both loops only `enqueue_task(...)`; the durable worker drains the actual
 work, so a failed enqueue cannot kill the cadence and a failed handler is
 retried/bounded by the queue.
@@ -389,10 +390,11 @@ retried/bounded by the queue.
 **C. Handler registration is idempotent via separate module-level flags.**
 `register_v2_handlers()` guards on `_registered` (macro_sleep /
 entity_merge / micro_consolidation); `register_backup_export_handlers()`
-guards on `_backup_export_registered` (native_backup / nightly_export). The
-underlying `register_handler()` is a plain dict assignment (idempotent
-overwrite), but the flags avoid re-churning on re-boot / repeated calls and
-let the backup handlers register independently of the core V2 set.
+guards on `_backup_export_registered` (native_backup / nightly_export /
+native_pg_backup). The underlying `register_handler()` is a plain dict
+assignment (idempotent overwrite), but the flags avoid re-churning on
+re-boot / repeated calls and let the backup handlers register
+independently of the core V2 set.
 
 **D. The durable queue lives in `memory_ops.db` (`task_queue.py`).** Bounded
 retries: `max_attempts` (default 3) then dead-letter (`status='failed'`);
@@ -735,6 +737,55 @@ fail-open throughout.
 interrupt+resume, tool_worker gate, scenarios (7), act resolvers, modes, scope,
 soul, cancel_job, config. Run:
 `python -m pytest tests/test_commitment_*.py tests/test_side_effects.py -m "not slow"`.
+
+### 21. Postgres Shared-State Backup & Schema Assurance (`kazma-core/kazma_core/db/pg_backup.py`)
+
+Scheduled `pg_dump` backups + boot-time schema verification for the tables
+Kazma owns in Postgres. Built after the 2026-08-14 incident where a second
+app pointed at the shared `kazma` database dropped Kazma's tables
+(checkpoints / settings / chat sessions / document jobs) and there was no
+scheduled PG backup to restore from.
+
+**A. `KAZMA_PG_TABLES` is the single SoT of which tables Kazma owns.**
+The list (LangGraph `checkpoints*`, `kazma_settings`, `kazma_chat_sessions`,
+`kazma_swarm_tasks`, `kazma_swarm_worker_metrics`, `kazma_platform_users`,
+`kazma_web_sessions`, `document_jobs`, `document_job_events`) drives BOTH
+the nightly dump's `-t` filter AND the boot verification. A new
+shared-state PG table MUST be added here or it silently stops being backed
+up. The dump is deliberately table-filtered — never a whole-DB dump — so a
+shared database neither leaks foreign-app data into Kazma's backups nor
+restores over another app's tables.
+
+**B. Nightly dump pipeline (24h loop, `worker_bootstrap.py`).**
+The 24h backup/export loop enqueues `native_pg_backup` when
+`pg_backup_enabled()` (live-checked: Postgres backend + `backups.pg.enabled`
+config + `KAZMA_PG_BACKUP_ENABLED` env kill-switch). The handler
+(`_handle_native_pg_backup`) runs `perform_pg_backup()` in a worker thread:
+dump via `migration/pg_bridge.dump_database(tables=KAZMA_PG_TABLES)` to a
+`.tmp` file, validate the `PGDMP` magic, atomically rename into
+`{kazma-data}/backups/pg/pg_shared_<epoch>.dump`, then prune to
+`backups.pg.retention` (default 7, env `KAZMA_PG_BACKUP_RETENTION`).
+Failures return False so the durable queue retries (max 3) then
+dead-letters; a failed dump never leaves a valid-looking file behind.
+
+**C. Boot-time schema verification (fail-open, never blocks boot).**
+`app.py:_on_startup` calls `verify_required_pg_tables(pool)` when PG is
+active. Missing tables → CRITICAL log naming the missing tables + the
+restore command (`python scripts/pg_backup.py restore --latest`); the
+server still boots (SQLite-side features work) but chat/settings/document
+history is broken until restored. A pool failure returns None = "unknown",
+not "all present".
+
+**D. Operator CLI (`scripts/pg_backup.py`).**
+`backup` (one-shot dump now), `restore --latest|--file <name> [--dry-run]`
+(via `pg_bridge.restore_database`, `--clean --if-exists` — only the dumped
+tables are touched), `list`. Loads `.env` from CWD; never prints the DSN
+userinfo.
+
+**E. Config is live-read, never raises** (mirrors `get_hitl_config`):
+ConfigStore keys `backups.pg.enabled` / `backups.pg.retention`; env
+kill-switch `KAZMA_PG_BACKUP_ENABLED=0`. Tests:
+`python -m pytest tests/test_pg_backup.py`.
 
 ## UI Conventions (Web)
 

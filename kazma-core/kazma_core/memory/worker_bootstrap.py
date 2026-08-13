@@ -428,8 +428,13 @@ def _start_backup_export_scheduler() -> None:
         while True:
             try:
                 from kazma_core.memory.task_queue import enqueue_task
+                from kazma_core.db.pg_backup import pg_backup_enabled
 
                 enqueue_task("native_backup", {"retention": 10})
+                # Postgres shared-state dump (self-disables on SQLite installs
+                # or the backups.pg.enabled kill-switch — checked live here).
+                if pg_backup_enabled():
+                    enqueue_task("native_pg_backup", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
                 # their own file (not overwritten by "default").
                 for tenant in _distinct_tenants():
@@ -555,6 +560,7 @@ def register_backup_export_handlers() -> None:
 
     register_handler("native_backup", _handle_native_backup)
     register_handler("nightly_export", _handle_nightly_export)
+    register_handler("native_pg_backup", _handle_native_pg_backup)
     _backup_export_registered = True
     logger.info("[memory_worker] backup/export task handlers registered")
 
@@ -604,4 +610,30 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
         return True
     except Exception:
         logger.warning("[memory_worker] nightly_export handler failed", exc_info=True)
+        return False
+
+
+async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
+    """Run one nightly pg_dump of the Postgres shared-state tables.
+
+    Self-disabling: returns True (success/no-op) when Kazma is not on
+    Postgres or the ``backups.pg.enabled`` kill-switch is off — the durable
+    queue must not retry a deliberately-disabled task. The dump itself runs
+    in a worker thread (pg_dump is a blocking subprocess).
+    """
+    try:
+        import asyncio
+
+        from kazma_core.db.pg_backup import perform_pg_backup, pg_backup_enabled
+
+        if not pg_backup_enabled():
+            return True  # not on Postgres / kill-switched — nothing to do
+        path = await asyncio.to_thread(perform_pg_backup)
+        if path is None:
+            logger.warning("[memory_worker] native_pg_backup produced no dump")
+            return False  # real failure — let the queue retry
+        logger.info("[memory_worker] native_pg_backup done: %s", path.name)
+        return True
+    except Exception:
+        logger.warning("[memory_worker] native_pg_backup handler failed", exc_info=True)
         return False
