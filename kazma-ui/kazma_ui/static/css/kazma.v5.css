@@ -287,17 +287,7 @@ html[data-theme="light"] { color-scheme: only light; }
    tile so the logo isn't a harsh black square on ice-blue paper. */
 .welcome-logo {
   border-radius: 16px;
-  background: #05070d;
-  padding: 6px;
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
-  box-shadow: 0 8px 24px -6px rgba(var(--accent-rgb), 0.45),
-              inset 0 1px 0 rgba(255, 255, 255, 0.10);
-}
-[data-theme="light"] .welcome-logo {
-  background: var(--bg-surface);
-  border-color: rgba(var(--accent-rgb), 0.35);
-  box-shadow: 0 8px 24px -6px rgba(var(--accent-rgb), 0.28),
-              inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  /* Transparent mark — no background tile, border, or shadow (logo floats). */
 }
 
 /* Hint chips — kill the last indigo remnant, accent hover */

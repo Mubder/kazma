@@ -28,6 +28,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from kazma_core.exceptions import sanitize_error
+from kazma_core.shutdown import is_shutting_down
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +431,12 @@ async def _stream_langgraph_events(
 
                 try:
                     while True:
+                        if is_shutting_down():
+                            # Server is stopping — close the stream now so
+                            # uvicorn's graceful shutdown completes inside its
+                            # timeout instead of hard-cancelling us (which logs
+                            # a noisy CancelledError traceback).
+                            break
                         try:
                             event = await asyncio.wait_for(_event_queue.get(), timeout=10.0)
                         except asyncio.TimeoutError:

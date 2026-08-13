@@ -1322,6 +1322,19 @@ class KazmaAppBuilder:
 
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
+        # ── Early shutdown signal hooks ───────────────────────────────
+        # Install BEFORE subsystems come up so a Ctrl+C (while a long-lived
+        # SSE/WS stream is open, or during boot) flips the global shutdown
+        # flag at signal time. Streams that check is_shutting_down() then
+        # self-close inside uvicorn's graceful window, instead of being
+        # hard-cancelled with a noisy CancelledError traceback.
+        try:
+            from kazma_core.shutdown import install_shutdown_signal_hooks
+
+            install_shutdown_signal_hooks()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[app] shutdown signal hooks not installed: %s", e)
+
         # ── Lifecycle status notification: "starting" ────────────────
         # Emitted before any subsystem comes up. Pairs with the "started"
         # message at the end of this method — if you see "starting" but no
@@ -1843,6 +1856,13 @@ class KazmaAppBuilder:
                     logger.info("[app] Shutdown completed (task was cancelled during teardown)")
                 except BaseException as e:  # pragma: no cover - last-resort
                     logger.warning("[app] Error during lifespan shutdown: %s", e)
+                finally:
+                    try:
+                        from kazma_core.shutdown import uninstall_shutdown_signal_hooks
+
+                        uninstall_shutdown_signal_hooks()
+                    except Exception:  # noqa: BLE001
+                        pass
 
         # Attach lifespan after app construction (Starlette/FastAPI)
         self.app.router.lifespan_context = lifespan
