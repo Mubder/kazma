@@ -257,9 +257,13 @@ class TelegramBusAdapter(BusAdapter):
         """
         safe_name = _escape_md(approval.worker_name)
         safe_task = _escape_md(approval.task_description[:200])
-        safe_output = _escape_md(
-            approval.proposed_output[:300] if approval.proposed_output else ""
-        )
+        # Inside a MarkdownV2 ``` code block only `` ` `` and `` \ `` need
+        # escaping. _escape_md escapes the full spec (_*[]()~>#+=|{}.!), so
+        # every other char rendered with a literal backslash — making the HITL
+        # approval card hard to read (e.g. `result=\{a:1\}`). Escape only the
+        # two characters Telegram requires inside preformatted blocks (audit).
+        _raw_output = approval.proposed_output[:300] if approval.proposed_output else ""
+        safe_output = _raw_output.replace("\\", "\\\\").replace("`", "\\`")
 
         text = (
             "⚠️ *APPROVAL REQUIRED*\n"

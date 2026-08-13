@@ -101,7 +101,7 @@ class SlackAdapter(BaseAdapter):
         self._http: httpx.AsyncClient | None = None
         self._known_channels: list[dict[str, Any]] = []
         self._last_ts: dict[str, str] = {}  # channel_id → last seen ts
-        self._seen_events: set[tuple[str, str]] = set()  # (channel_id, ts) — deduplicates app_mention+message
+        self._seen_events: dict[tuple[str, str], None] = {}  # (channel_id, ts) — insertion-ordered dedup of app_mention+message
 
     # ── Helpers ─────────────────────────────────────────────────────
 
@@ -480,7 +480,11 @@ class SlackAdapter(BaseAdapter):
                                             trigger_package_promotion,
                                         )
 
-                                        await trigger_package_promotion(package_name)
+                                        # Fire-and-forget: a slow pip install
+                                        # (minutes) must not stall the Socket
+                                        # Mode WS reader (Telegram/Discord both
+                                        # use create_task here) (audit finding).
+                                        asyncio.create_task(trigger_package_promotion(package_name))
                                         response_url = payload.get("response_url", "")
                                         if response_url:
                                             try:
@@ -594,15 +598,29 @@ class SlackAdapter(BaseAdapter):
                                     key = (cid, msg_ts)
                                     if key in self._seen_events:
                                         continue
-                                    self._seen_events.add(key)
-                                    # Prune old entries periodically (keep last 500)
+                                    self._seen_events[key] = None
+                                    # Prune oldest entries when over capacity.
+                                    # Previously this was a set and
+                                    # list(set)[-250:] kept an ARBITRARY subset
+                                    # (set order is not insertion-ordered) —
+                                    # could drop a fresh key and re-process a
+                                    # Slack-retried event (duplicate agent
+                                    # turn). dict IS insertion-ordered, so
+                                    # pop the oldest (audit finding).
                                     if len(self._seen_events) > 500:
-                                        self._seen_events = set(list(self._seen_events)[-250:])
+                                        for _ in range(len(self._seen_events) - 250):
+                                            del self._seen_events[next(iter(self._seen_events))]
                                 # Enforce channel whitelist if configured
                                 if self._allowed_channels and cid not in self._allowed_channels:
                                     logger.debug("[Slack] Event from non-whitelisted channel %s — skipping", cid)
                                     continue
-                                # Audit G2c: enforce user allowlist if configured
+                                # Enforce user allowlist — fail-CLOSED (mirror
+                                # Telegram/Discord): an empty allowlist with
+                                # allow_all=False rejects everyone, rather than
+                                # accepting the whole workspace (audit finding).
+                                if not self._allowed_users and not self._allow_all:
+                                    logger.warning("[Slack] Dropping event — no allowed_users and allow_all is false")
+                                    continue
                                 if self._allowed_users:
                                     _uid = incoming.context_metadata.get("user_id", "")
                                     if not _uid or _uid not in self._allowed_users:

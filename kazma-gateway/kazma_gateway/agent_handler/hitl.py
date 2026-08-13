@@ -123,7 +123,25 @@ def _build_approval_prompt(
     """
     tool = payload.get("tool", "unknown")
     args = payload.get("args", {})
-    args_str = str(args)
+    # Redact known-sensitive keys before stringifying into the chat-visible
+    # approval card — args can carry credentials (http_request Authorization
+    # header, MCP env API keys, git token URLs) (audit finding).
+    _SENSITIVE = {
+        "authorization", "token", "api_key", "apikey", "password", "secret",
+        "header", "headers", "env", "cookie", "private_key",
+    }
+
+    def _redact(obj):
+        if isinstance(obj, dict):
+            return {
+                k: ("***" if k.lower() in _SENSITIVE else _redact(v))
+                for k, v in obj.items()
+            }
+        if isinstance(obj, list):
+            return [_redact(x) for x in obj]
+        return obj
+
+    args_str = str(_redact(args))
     if len(args_str) > 300:
         args_str = args_str[:300] + "…"
     # Phase 3: semantic clarify/confirm → render question + per-option keyboard
