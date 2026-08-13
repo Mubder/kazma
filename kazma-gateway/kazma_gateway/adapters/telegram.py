@@ -419,6 +419,24 @@ class TelegramAdapter(BaseAdapter):
             self._running = False
             logger.info("[telegram] Polling stopped")
 
+    def _ensure_http(self) -> httpx.AsyncClient:
+        """Return the shared API client, recreating it when missing or closed.
+
+        Post-shutdown callbacks (fire-and-forget sends racing stop()) used
+        bare ``if not self._http`` re-creation: a client that was closed but
+        not None'd was reused broken, and each re-creation replaced the prior
+        one without closing it. Centralizing here makes the lifecycle
+        is_closed-aware and single-owner (audit finding).
+        """
+        if self._http is not None and not getattr(self._http, "is_closed", False):
+            return self._http
+        self._http = None  # drop a stale/closed client
+        self._http = httpx.AsyncClient(
+            base_url=self._api_base,
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
+        return self._http
+
     async def _poll(self) -> list[dict[str, Any]]:
         """Execute a single getUpdates call with long-poll.
 
@@ -493,12 +511,21 @@ class TelegramAdapter(BaseAdapter):
             import secrets as _secrets
 
             if not self._webhook_secret:
-                # Lazy one-time generation so accidental open mount is still gated
-                self._webhook_secret = _secrets.token_urlsafe(24)
+                # No secret configured → Telegram never sends the
+                # X-Telegram-Bot-Api-Secret-Token header, so the webhook mount
+                # is INERT (every request would 401). Fail closed explicitly
+                # and say so: previously an ephemeral secret was generated
+                # that Telegram could never know, which made the mount dead
+                # while the warning implied it was gated (audit finding).
+                # To activate: set TELEGRAM_WEBHOOK_SECRET (or connector
+                # webhook_secret) AND pass the same value to setWebhook.
                 logger.warning(
-                    "[telegram-webhook] No webhook_secret configured — generated "
-                    "ephemeral secret for this process. Set TELEGRAM_WEBHOOK_SECRET "
-                    "(or connector webhook_secret) and pass it to setWebhook."
+                    "[telegram-webhook] No webhook_secret configured — webhook "
+                    "mount is inactive (all requests rejected). Set "
+                    "TELEGRAM_WEBHOOK_SECRET and pass it to setWebhook."
+                )
+                return JSONResponse(
+                    {"error": "Webhook secret not configured"}, status_code=503
                 )
             provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
             if not provided or not hmac.compare_digest(provided, self._webhook_secret):
@@ -915,11 +942,7 @@ class TelegramAdapter(BaseAdapter):
         """Send a 'typing…' chat action to the user (fire-and-forget)."""
         chat_id = target_id.split(":", 1)[1] if ":" in target_id else target_id
         try:
-            if not self._http:
-                self._http = httpx.AsyncClient(
-                    base_url=self._api_base,
-                    timeout=httpx.Timeout(30.0, connect=5.0),
-                )
+            self._http = self._ensure_http()
             await self._http.post("/sendChatAction", json={"chat_id": chat_id, "action": "typing"})
         except Exception as exc:
             logger.debug("[telegram] typing indicator failed (fire-and-forget): %s", exc)
@@ -944,11 +967,7 @@ class TelegramAdapter(BaseAdapter):
         """
         reaction = _EMOJI_MAP.get(emoji, [{"type": "emoji", "emoji": emoji}])
         try:
-            if not self._http:
-                self._http = httpx.AsyncClient(
-                    base_url=self._api_base,
-                    timeout=httpx.Timeout(30.0, connect=5.0),
-                )
+            self._http = self._ensure_http()
             resp = await self._http.post(
                 "/setMessageReaction",
                 json={
@@ -984,11 +1003,7 @@ class TelegramAdapter(BaseAdapter):
             text:              Optional notification text to show.
         """
         try:
-            if not self._http:
-                self._http = httpx.AsyncClient(
-                    base_url=self._api_base,
-                    timeout=httpx.Timeout(30.0, connect=5.0),
-                )
+            self._http = self._ensure_http()
             payload: dict[str, Any] = {"callback_query_id": callback_query_id}
             if text:
                 payload["text"] = text
@@ -1041,11 +1056,7 @@ class TelegramAdapter(BaseAdapter):
             message_id = message.get("message_id")
             if chat_id and message_id:
                 try:
-                    if not self._http:
-                        self._http = httpx.AsyncClient(
-                            base_url=self._api_base,
-                            timeout=httpx.Timeout(30.0, connect=5.0),
-                        )
+                    self._http = self._ensure_http()
                     await self._http.post(
                         "/editMessageReplyMarkup",
                         json={
@@ -1095,11 +1106,7 @@ class TelegramAdapter(BaseAdapter):
             message_id = message.get("message_id")
             if chat_id and message_id:
                 try:
-                    if not self._http:
-                        self._http = httpx.AsyncClient(
-                            base_url=self._api_base,
-                            timeout=httpx.Timeout(30.0, connect=5.0),
-                        )
+                    self._http = self._ensure_http()
                     await self._http.post(
                         "/editMessageText",
                         json={
@@ -1121,11 +1128,7 @@ class TelegramAdapter(BaseAdapter):
             message_id = message.get("message_id")
             if chat_id and message_id:
                 try:
-                    if not self._http:
-                        self._http = httpx.AsyncClient(
-                            base_url=self._api_base,
-                            timeout=httpx.Timeout(30.0, connect=5.0),
-                        )
+                    self._http = self._ensure_http()
                     await self._http.post(
                         "/editMessageText",
                         json={
@@ -1235,12 +1238,7 @@ class TelegramAdapter(BaseAdapter):
         # Typing is kept alive by agent_handler during the whole turn.
         # One final pulse before send keeps the indicator visible for the reply.
 
-        if not self._http:
-            self._http = httpx.AsyncClient(
-                base_url=self._api_base,
-                timeout=httpx.Timeout(30.0, connect=5.0),
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-            )
+        self._http = self._ensure_http()
 
         from kazma_gateway.adapters.telegram_send import (
             chunk_message,

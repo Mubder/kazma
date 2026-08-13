@@ -159,8 +159,17 @@ export function initSoftNav() {
         );
         if (i18nScript && i18nScript.textContent) {
             try {
-                // eslint-disable-next-line no-new-func
-                new Function(i18nScript.textContent)();
+                // The script tag holds `window.KAZMA_I18N = <json>;` from the
+                // server. Parse the payload instead of executing the tag as
+                // code (new Function) — same-origin but an eval-equivalent
+                // that turns any reflected-content bug into code execution
+                // (audit finding).
+                const text = i18nScript.textContent.trim();
+                const m = /^\s*window\.KAZMA_I18N\s*=\s*/.exec(text);
+                if (m) {
+                    const payload = text.slice(m[0].length).replace(/;\s*$/, '');
+                    window.KAZMA_I18N = JSON.parse(payload);
+                }
             } catch (e) {
                 console.warn('[soft-nav] i18n refresh failed:', e);
             }

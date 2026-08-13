@@ -235,6 +235,12 @@ async def clear_pending_approvals(graph: Any, checkpointer: Any) -> int:
 def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
     """Create a router exposing the pending-approvals listing endpoint.
 
+    NOTE (SoT): the LIVE /api/pending-approvals routes are registered in
+    kazma_ui/routes_direct.py — this factory is kept because
+    tests/test_hitl_approval_ui.py builds a test app with it. Do not mount
+    both in the real app (duplicate routes); if you change one, mirror the
+    other or fold this factory away by porting its tests to routes_direct.
+
     Args:
         graph:        Compiled LangGraph instance (must support ``aget_state``).
         checkpointer: The checkpointer with a ``conn`` for thread enumeration.
