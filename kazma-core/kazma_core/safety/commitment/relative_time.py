@@ -100,8 +100,13 @@ def _lead_seconds(count: int, unit: str) -> int | None:
     u = unit.strip().lower()
     if u in _UNIT_SECONDS_EN:
         return count * _UNIT_SECONDS_EN[u]
-    if unit in _UNIT_SECONDS_AR:  # AR keys are case-sensitive
-        return count * _UNIT_SECONDS_AR[unit]
+    # AR keys are case-sensitive. _UNIT_SECONDS_AR never existed (only
+    # _UNIT_SECONDS_EN and _AR_FORM_TO_SECS do), so this branch was a latent
+    # NameError — unreachable today only because EN regexes don't emit AR
+    # tokens. Use the real AR table (value is a (seconds, _) tuple) (audit).
+    if unit in _AR_FORM_TO_SECS:
+        per, _ = _AR_FORM_TO_SECS[unit]
+        return count * per
     return None
 
 

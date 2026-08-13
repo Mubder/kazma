@@ -501,7 +501,10 @@ class LocalToolRegistry:
             from kazma_core.retry import load_retry_config
 
             cfg = load_retry_config()
-            max_attempts = cfg["max_attempts"]
+            # Clamp to >= 1: range(1, max_attempts + 1) is empty for 0/neg,
+            # so the tool function is never invoked and the method returns a
+            # nonsensical "Error: None" for every call (audit finding).
+            max_attempts = max(1, int(cfg["max_attempts"]))
             min_wait = cfg["min_wait"]
             max_wait = cfg["max_wait"]
         except Exception as exc:
