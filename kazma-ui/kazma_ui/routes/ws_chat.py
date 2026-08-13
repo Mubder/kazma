@@ -25,6 +25,7 @@ from kazma_ui.active_turns import (
     cancel_turn,
     get_active_turn,
     get_live_socket,
+    is_turn_running,
     mark_turn_orphaned,
     reap_stale_turn,
     register_turn,
