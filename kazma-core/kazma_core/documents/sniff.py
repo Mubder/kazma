@@ -319,7 +319,11 @@ def _pdf_has_active_content_structural(path: Path) -> bool | None:
                 ) or "/JavaScript" in annotation:
                     return True
     except Exception:
-        return False
+        # Parse failed mid-walk — can't judge structurally. Return None (not
+        # False) so the caller falls back to the conservative byte scan. A bare
+        # `return False` here previously declared such PDFs "clean" and skipped
+        # the byte-scan fallback entirely (audit finding).
+        return None
     return False
 
 

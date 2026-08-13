@@ -40,6 +40,7 @@ import hashlib
 import json
 import logging
 import shutil
+import sqlite3
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -531,6 +532,23 @@ class DocumentIngestionService:
                 error_code=exc.code,
                 error_message=exc.safe_message,
                 event_type="rejected",
+            )
+        except (OSError, sqlite3.Error) as exc:
+            # Transient infra fault (disk full while staging, OS error re-
+            # reading the quarantine blob, momentary DB error). The worker
+            # tier already routes TransientDocumentError to RETRY_WAIT; do the
+            # same here instead of permanently REJECTing (terminal) — a flaky
+            # disk shouldn't force the user to re-upload (audit finding).
+            logger.warning(
+                "[documents.ingestion] transient validation failure job=%s type=%s",
+                job.id, type(exc).__name__,
+            )
+            return self._transition(
+                job,
+                DocumentJobState.RETRY_WAIT,
+                error_code="validation_transient",
+                error_message=f"Document validation hit a transient error ({type(exc).__name__})",
+                event_type="transient_failure",
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(

@@ -541,6 +541,13 @@ class DocumentOperations:
             handle.flush()
             os.fsync(handle.fileno())
         core_root = Path(__file__).resolve().parents[2]
+        # Resolve the venv interpreter: the system python on PATH may lack the
+        # framework deps and crash the worker at import (no result.json). Mirrors
+        # service.py's parser-worker fix (audit finding). Lazy import to avoid a
+        # service↔operations cycle (service imports operations at module top).
+        from .service import _resolve_python_executable
+
+        _python_exe = _resolve_python_executable(Path(__file__).resolve().parents[3])
         bootstrap = (
             "import runpy,sys;"
             f"sys.path.insert(0,{str(core_root)!r});"
@@ -549,7 +556,7 @@ class DocumentOperations:
         result = run_isolated_subprocess(
             SandboxRequest(
                 command=(
-                    sys.executable,
+                    _python_exe,
                     "-I",
                     "-c",
                     bootstrap,
