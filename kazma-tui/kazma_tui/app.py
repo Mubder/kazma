@@ -655,7 +655,7 @@ class KazmaTUI(App[None]):
 
         # 3. Update Header title (stock Textual Header)
         try:
-            header = self.query_one(Header)
+            header = self.query_one(KazmaHeader)
             if lang == "ar":
                 header.add_class("header-title")
         except Exception as exc:
