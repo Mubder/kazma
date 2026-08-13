@@ -946,52 +946,64 @@ _pw_shared: dict[str, Any] = {"browser": None, "context": None, "pw": None}
 
 
 class _pw_browser_scope:
-    """Async context manager: reuse one Chromium for a crawl job."""
+    """Async context manager: reuse one Chromium for a crawl job.
+
+    The Playwright objects are created/used on the dedicated browser loop
+    (``kazma_core.playwright_loop``) — the server's SelectorEventLoop cannot
+    spawn the Node driver on Windows.
+    """
 
     async def __aenter__(self) -> "_pw_browser_scope":
         try:
-            from playwright.async_api import async_playwright
+            from playwright.async_api import async_playwright  # noqa: F401
         except ImportError:
             return self
         try:
-            try:
-                from kazma_core.proxy.client import playwright_proxy
+            from kazma_core.playwright_loop import run_in_browser_loop
 
-                pw_proxy = playwright_proxy()
-            except Exception:
-                pw_proxy = None
-            pw = await async_playwright().start()
-            launch_kwargs: dict = {
-                "headless": True,
-                "args": [
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
-            }
-            if pw_proxy:
-                launch_kwargs["proxy"] = pw_proxy
-            browser = await pw.chromium.launch(**launch_kwargs)
-            ctx = await browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent=_BROWSER_UA,
-                locale="en-US",
-                timezone_id="America/New_York",
-            )
-            await ctx.add_init_script(
-                """
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                window.chrome = { runtime: {} };
-                """
-            )
-            _pw_shared["pw"] = pw
-            _pw_shared["browser"] = browser
-            _pw_shared["context"] = ctx
+            await run_in_browser_loop(self._start_impl())
         except Exception as exc:
             logger.debug("[kb_ingest] shared Playwright launch failed: %s", exc)
         return self
+
+    async def _start_impl(self) -> None:
+        from playwright.async_api import async_playwright
+
+        try:
+            from kazma_core.proxy.client import playwright_proxy
+
+            pw_proxy = playwright_proxy()
+        except Exception:
+            pw_proxy = None
+        pw = await async_playwright().start()
+        launch_kwargs: dict = {
+            "headless": True,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        }
+        if pw_proxy:
+            launch_kwargs["proxy"] = pw_proxy
+        browser = await pw.chromium.launch(**launch_kwargs)
+        ctx = await browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=_BROWSER_UA,
+            locale="en-US",
+            timezone_id="America/New_York",
+        )
+        await ctx.add_init_script(
+            """
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = { runtime: {} };
+            """
+        )
+        _pw_shared["pw"] = pw
+        _pw_shared["browser"] = browser
+        _pw_shared["context"] = ctx
 
     async def __aexit__(self, *exc: Any) -> None:
         ctx = _pw_shared.get("context")
@@ -1000,22 +1012,48 @@ class _pw_browser_scope:
         _pw_shared["context"] = None
         _pw_shared["browser"] = None
         _pw_shared["pw"] = None
-        for obj, meth in ((ctx, "close"), (browser, "close"), (pw, "stop")):
-            if obj is None:
-                continue
-            try:
-                await getattr(obj, meth)()
-            except Exception:
-                pass
+
+        async def _close_impl() -> None:
+            for obj, meth in ((ctx, "close"), (browser, "close"), (pw, "stop")):
+                if obj is None:
+                    continue
+                try:
+                    await getattr(obj, meth)()
+                except Exception:
+                    pass
+
+        try:
+            from kazma_core.playwright_loop import run_in_browser_loop
+
+            await run_in_browser_loop(_close_impl())
+        except Exception:
+            logger.debug("[kb_ingest] shared Playwright teardown failed", exc_info=True)
 
 
 async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
     """Render a URL with stealth Chromium; reuse shared browser when scoped.
 
+    Runs on the dedicated browser loop (``kazma_core.playwright_loop``) —
+    the server's SelectorEventLoop cannot spawn Playwright's Node driver on
+    Windows.
+
     Args:
         want_text: ``False`` → raw HTML (link discovery).
                    ``True`` → full-DOM textContent (hidden tabs included).
     """
+    try:
+        from kazma_core.playwright_loop import run_in_browser_loop
+
+        return await run_in_browser_loop(
+            _render_with_playwright_impl(url, want_text=want_text)
+        )
+    except Exception as exc:
+        logger.debug("[kb_ingest] Playwright render failed %s: %s", url, exc)
+        return None
+
+
+async def _render_with_playwright_impl(url: str, *, want_text: bool) -> str | None:
+    """Playwright render body — must run on the dedicated browser loop."""
     try:
         from playwright.async_api import async_playwright
     except ImportError:

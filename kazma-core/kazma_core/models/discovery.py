@@ -472,12 +472,16 @@ async def pull_ollama_model(model: str) -> dict[str, Any]:
     model = model.strip()
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ollama",
-            "pull",
-            model,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # Windows: the server's SelectorEventLoop (psycopg compat) cannot
+        # host asyncio subprocesses — start Ollama via a worker thread
+        # (Popen is non-blocking; the pull continues in the background).
+        import subprocess
+
+        proc = await asyncio.to_thread(
+            subprocess.Popen,
+            ["ollama", "pull", model],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         logger.info("Ollama pull started: model=%s pid=%d", model, proc.pid)
         return {

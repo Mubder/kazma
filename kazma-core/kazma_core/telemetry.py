@@ -236,12 +236,18 @@ class HardwareMonitor:
             return (0.0, 0.0, 0.0)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *self._nvidia_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            # Windows: the server's SelectorEventLoop (psycopg compat) cannot
+            # host asyncio subprocesses — run nvidia-smi via a worker thread.
+            import subprocess
+
+            result = await asyncio.to_thread(
+                subprocess.run,
+                list(self._nvidia_cmd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5.0,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            stdout, stderr = result.stdout, result.stderr
         except FileNotFoundError:
             self._nvidia_available = False
             logger.info("nvidia-smi not found — GPU telemetry disabled")
@@ -254,11 +260,11 @@ class HardwareMonitor:
             logger.debug("nvidia-smi subprocess failed: %s", exc)
             return (0.0, 0.0, 0.0)
 
-        if proc.returncode != 0:
+        if result.returncode != 0:
             err = stderr.decode(errors="replace").strip()
             # nvidia-smi returns non-zero if no GPU or driver issue
             self._nvidia_available = False
-            logger.info("nvidia-smi exited %d: %s", proc.returncode, err[:200])
+            logger.info("nvidia-smi exited %d: %s", result.returncode, err[:200])
             return (0.0, 0.0, 0.0)
 
         self._nvidia_available = True

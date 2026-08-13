@@ -59,17 +59,21 @@ async def _run_promotion_task(package_name: str) -> None:
             cmd = [uv_path, "add"] + packages
             logger.info("[RuntimeManager] Executing primary promotion command: %s", " ".join(cmd))
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                # Windows: the server's SelectorEventLoop (psycopg compat)
+                # cannot host asyncio subprocesses — run via a worker thread.
+                import subprocess
+
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0:
+                if result.returncode == 0:
                     logger.info("[RuntimeManager] Package(s) %s added successfully with uv add!", packages)
                     success = True
                 else:
-                    err_msg = stderr.decode(errors="replace")
+                    err_msg = result.stderr.decode(errors="replace")
                     logger.warning("[RuntimeManager] `uv add` failed: %s. Trying fallback `uv pip install`.", err_msg)
             except Exception as e:
                 logger.warning("[RuntimeManager] Exception trying `uv add`: %s. Trying fallback.", e)
@@ -82,18 +86,20 @@ async def _run_promotion_task(package_name: str) -> None:
                 cmd = [sys.executable, "-m", "pip", "install"] + packages
 
             logger.info("[RuntimeManager] Executing fallback promotion command: %s", " ".join(cmd))
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            import subprocess
+
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
+            if result.returncode == 0:
                 logger.info("[RuntimeManager] Package(s) %s installed successfully via fallback!", packages)
                 success = True
             else:
-                err_msg = stderr.decode(errors="replace")
-                logger.error("[RuntimeManager] Fallback promotion installation failed with code %d. Error: %s", proc.returncode, err_msg)
+                err_msg = result.stderr.decode(errors="replace")
+                logger.error("[RuntimeManager] Fallback promotion installation failed with code %d. Error: %s", result.returncode, err_msg)
 
         if success:
             # Update ConfigStore status to ACTIVE

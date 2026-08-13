@@ -4,6 +4,16 @@ Maintains a single shared Playwright browser instance + a persistent page
 across calls for efficiency. The first ``browser_navigate`` boots Playwright;
 subsequent tools reuse the live page.
 
+Runs on Playwright's **sync API inside ``asyncio.to_thread`` worker threads**.
+Kazma's server runs a Windows ``SelectorEventLoop`` (forced by psycopg — see
+``kazma_core/eventloop.py``), on which ``asyncio.create_subprocess_exec``
+raises ``NotImplementedError``. The async Playwright transport needs exactly
+that call to spawn its Node driver, so the whole browser session died with a
+background "Task exception was never retrieved" and the tools silently
+returned nothing. The sync API spawns the driver with plain blocking
+subprocess calls from a worker thread, which works under any event loop.
+All page operations are serialized by a module lock (one page = one actor).
+
 Requires ``playwright`` (``pip install playwright && playwright install``).
 All tool functions return a friendly install-hint string if Playwright is
 missing, so the skill always loads.
@@ -11,14 +21,19 @@ missing, so the skill always loads.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Shared Playwright state (lazy-initialized on first navigate).
-_state: dict[str, object | None] = {"playwright": None, "browser": None, "page": None}
+# Shared Playwright state (lazy-initialized on first navigate). All access
+# goes through worker threads; the lock serializes boot + page operations.
+_state: dict[str, Any] = {"playwright": None, "browser": None, "page": None}
+_state_lock = threading.Lock()
 
 MAX_TEXT_CHARS = 8000
 SCREENSHOT_DIR = Path("kazma-data/images")
@@ -31,38 +46,111 @@ def _install_hint() -> str:
     )
 
 
-async def _ensure_page():
+async def _run_sync(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Run a blocking Playwright op on a worker thread.
+
+    ``asyncio.to_thread`` keeps the server's SelectorEventLoop out of the
+    subprocess-spawning path entirely (see module docstring).
+    """
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+def _ensure_page_sync() -> Any:
     """Boot Playwright (if needed) and return the shared page, or raise."""
-    if _state["page"] is not None:
-        return _state["page"]  # type: ignore[return-value]
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        raise RuntimeError(_install_hint())
+    with _state_lock:
+        if _state["page"] is not None:
+            return _state["page"]
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            raise RuntimeError(_install_hint()) from None
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        _state.update(playwright=pw, browser=browser, page=page)
+        return page
 
-    pw = await async_playwright().start()
-    browser = await pw.chromium.launch(headless=True)
-    page = await browser.new_page()
-    _state.update(playwright=pw, browser=browser, page=page)
-    return page
 
-
-async def _close() -> None:
+def _close_sync() -> None:
     """Tear down the shared browser (call on errors to force a fresh boot)."""
-    page = _state.get("page")
-    browser = _state.get("browser")
-    pw = _state.get("playwright")
-    try:
-        if page is not None:
-            await page.close()  # type: ignore[union-attr]
-        if browser is not None:
-            await browser.close()  # type: ignore[union-attr]
-        if pw is not None:
-            await pw.stop()  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        logger.debug("[browser] teardown error", exc_info=True)
-    finally:
-        _state.update(playwright=None, browser=None, page=None)
+    with _state_lock:
+        page = _state.get("page")
+        browser = _state.get("browser")
+        pw = _state.get("playwright")
+        try:
+            if page is not None:
+                page.close()
+            if browser is not None:
+                browser.close()
+            if pw is not None:
+                pw.stop()
+        except Exception:
+            logger.debug("[browser] teardown error", exc_info=True)
+        finally:
+            _state.update(playwright=None, browser=None, page=None)
+
+
+# ── per-tool sync ops (run on worker threads, serialized by the lock) ──────
+
+
+def _navigate_sync(url: str) -> tuple[str, str]:
+    page = _ensure_page_sync()
+    with _state_lock:
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        title = page.title()
+        text = page.evaluate("() => document.body ? document.body.innerText : ''")
+    return title or "", text or ""
+
+
+def _click_sync(selector: str) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        page.click(selector, timeout=10000)
+        text = page.evaluate("() => document.body ? document.body.innerText : ''")
+    return text or ""
+
+
+def _extract_sync(selector: str) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        if selector:
+            text = page.eval_on_selector_all(
+                selector, "(els) => els.map(e => e.innerText).join('\\n---\\n')"
+            )
+        else:
+            text = page.evaluate("() => document.body ? document.body.innerText : ''")
+    return text or ""
+
+
+def _screenshot_sync(full_page: bool) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        dest = SCREENSHOT_DIR / f"browser_{int(time.time())}.png"
+        page.screenshot(path=str(dest), full_page=full_page)
+    return str(dest)
+
+
+def _fill_form_sync(fields: dict[str, str], submit_selector: str) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        for sel, val in fields.items():
+            page.fill(sel, str(val), timeout=10000)
+        result = f"Filled {len(fields)} field(s)."
+        if submit_selector:
+            page.click(submit_selector, timeout=10000)
+            text = page.evaluate("() => document.body ? document.body.innerText : ''")
+            result += f"\n\nSubmitted. Result text:\n{(text or '')[:MAX_TEXT_CHARS]}"
+    return result
+
+
+def _eval_js_sync(expression: str) -> Any:
+    page = _ensure_page_sync()
+    with _state_lock:
+        return page.evaluate(expression)
+
+
+# ── tool surface (unchanged signatures) ────────────────────────────────────
 
 
 async def browser_navigate(url: str) -> str:
@@ -76,17 +164,13 @@ async def browser_navigate(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     try:
-        page = await _ensure_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)  # type: ignore[union-attr]
-        title = await page.title()  # type: ignore[union-attr]
-        text = await page.evaluate("() => document.body ? document.body.innerText : ''")  # type: ignore[union-attr]
+        title, text = await _run_sync(_navigate_sync, url)
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
-        await _close()
+        await _run_sync(_close_sync)
         return f"Error: navigation failed — {type(exc).__name__}: {exc}"
-    snippet = (text or "")[:MAX_TEXT_CHARS]
-    return f"Navigated to {url}\nTitle: {title}\n\n{snippet}"
+    return f"Navigated to {url}\nTitle: {title}\n\n{text[:MAX_TEXT_CHARS]}"
 
 
 async def browser_click(selector: str) -> str:
@@ -94,41 +178,29 @@ async def browser_click(selector: str) -> str:
     if not selector or not selector.strip():
         return "Error: No CSS selector provided."
     try:
-        page = await _ensure_page()
-        await page.click(selector.strip(), timeout=10000)  # type: ignore[union-attr]
-        text = await page.evaluate("() => document.body ? document.body.innerText : ''")  # type: ignore[union-attr]
+        text = await _run_sync(_click_sync, selector.strip())
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"Error: click failed — {type(exc).__name__}: {exc}"
-    return f"Clicked '{selector}'.\n\n{(text or '')[:MAX_TEXT_CHARS]}"
+    return f"Clicked '{selector}'.\n\n{text[:MAX_TEXT_CHARS]}"
 
 
 async def browser_extract_text(selector: str = "") -> str:
     """Extract text from elements matching *selector*, or full body if empty."""
     try:
-        page = await _ensure_page()
-        if selector and selector.strip():
-            sel = selector.strip()
-            text = await page.eval_on_selector_all(  # type: ignore[union-attr]
-                sel, "(els) => els.map(e => e.innerText).join('\\n---\\n')"
-            )
-        else:
-            text = await page.evaluate("() => document.body ? document.body.innerText : ''")  # type: ignore[union-attr]
+        text = await _run_sync(_extract_sync, selector.strip())
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"Error: extraction failed — {type(exc).__name__}: {exc}"
-    return f"{(text or '')[:MAX_TEXT_CHARS]}"
+    return text[:MAX_TEXT_CHARS]
 
 
 async def browser_screenshot(full_page: bool = True) -> str:
     """Capture a full-page screenshot and save it to kazma-data/images/."""
     try:
-        page = await _ensure_page()
-        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        dest = SCREENSHOT_DIR / f"browser_{int(time.time())}.png"
-        await page.screenshot(path=str(dest), full_page=full_page)  # type: ignore[union-attr]
+        dest = await _run_sync(_screenshot_sync, bool(full_page))
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -148,14 +220,9 @@ async def browser_fill_form(
     if not fields or not isinstance(fields, dict):
         return "Error: 'fields' must be a non-empty {selector: value} mapping."
     try:
-        page = await _ensure_page()
-        for sel, val in fields.items():
-            await page.fill(sel, str(val), timeout=10000)  # type: ignore[union-attr]
-        result = f"Filled {len(fields)} field(s)."
-        if submit_selector and submit_selector.strip():
-            await page.click(submit_selector.strip(), timeout=10000)  # type: ignore[union-attr]
-            text = await page.evaluate("() => document.body ? document.body.innerText : ''")  # type: ignore[union-attr]
-            result += f"\n\nSubmitted. Result text:\n{(text or '')[:MAX_TEXT_CHARS]}"
+        result = await _run_sync(
+            _fill_form_sync, fields, (submit_selector or "").strip()
+        )
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -171,8 +238,7 @@ async def browser_eval_js(expression: str) -> str:
     if not expression or not expression.strip():
         return "Error: No JavaScript expression provided."
     try:
-        page = await _ensure_page()
-        result = await page.evaluate(expression.strip())  # type: ignore[union-attr]
+        result = await _run_sync(_eval_js_sync, expression.strip())
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001

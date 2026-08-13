@@ -2617,55 +2617,73 @@ class LocalToolRegistry:
                         "native tools (file_read, file_write, git_*) individually."
                     )
 
-                proc = await asyncio.create_subprocess_exec(
-                    args[0],
-                    *args[1:],
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=child_env,
-                )
-                
-                # Bounded stream reader to cap memory allocations for large outputs
-                async def _read_stream_capped(stream: asyncio.StreamReader | None, limit: int) -> bytes:
-                    if stream is None:
-                        return b""
-                    buf = bytearray()
-                    while len(buf) < limit:
-                        chunk = await stream.read(min(4096, limit - len(buf)))
-                        if not chunk:
-                            break
-                        buf.extend(chunk)
-                    return bytes(buf)
+                # Windows: the server runs a SelectorEventLoop (psycopg compat),
+                # which does NOT implement subprocess transports —
+                # asyncio.create_subprocess_exec raises NotImplementedError and
+                # every shell_exec silently returned "Shell command execution
+                # failed.". Run a blocking Popen in a worker thread instead
+                # (to_thread), keeping the bounded-output + timeout semantics.
+                import subprocess
+                import threading
+
+                def _run_shell_capped(
+                    args: list[str],
+                    *,
+                    cwd: str | None,
+                    env: dict[str, str] | None,
+                    timeout: float,
+                ) -> tuple[bytes, bytes, int]:
+                    proc = subprocess.Popen(
+                        args,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=cwd,
+                        env=env,
+                    )
+                    chunks: dict[str, bytes] = {"out": b"", "err": b""}
+
+                    def _drain(stream, key: str, limit: int) -> None:
+                        while len(chunks[key]) < limit:
+                            chunk = stream.read(min(4096, limit - len(chunks[key])))
+                            if not chunk:
+                                break
+                            chunks[key] += chunk
+
+                    t_out = threading.Thread(
+                        target=_drain, args=(proc.stdout, "out", 20_000), daemon=True
+                    )
+                    t_err = threading.Thread(
+                        target=_drain, args=(proc.stderr, "err", 10_000), daemon=True
+                    )
+                    t_out.start()
+                    t_err.start()
+                    try:
+                        proc.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                        raise
+                    t_out.join(timeout=2)
+                    t_err.join(timeout=2)
+                    return chunks["out"], chunks["err"], proc.returncode
 
                 try:
-                    async def _communicate_capped():
-                        so_task = asyncio.create_task(_read_stream_capped(proc.stdout, 20_000))
-                        se_task = asyncio.create_task(_read_stream_capped(proc.stderr, 10_000))
-                        so, se = await asyncio.gather(so_task, se_task)
-                        await proc.wait()
-                        return so, se
-
-                    stdout, stderr = await asyncio.wait_for(_communicate_capped(), timeout=timeout)
-                except asyncio.TimeoutError:
-                    try:
-                        proc.kill()
-                        await proc.wait()
-                    except ProcessLookupError:
-                        pass
-                    finally:
-                        if proc.stdout:
-                            proc.stdout.close()
-                        if proc.stderr:
-                            proc.stderr.close()
+                    stdout, stderr, returncode = await asyncio.to_thread(
+                        _run_shell_capped,
+                        args,
+                        cwd=cwd,
+                        env=child_env,
+                        timeout=timeout,
+                    )
+                except subprocess.TimeoutExpired:
                     return f"Error: Command timed out after {timeout}s"
 
                 output = stdout.decode("utf-8", errors="replace")
                 err_output = stderr.decode("utf-8", errors="replace")
                 if err_output:
                     output += f"\n[stderr]\n{err_output}"
-                if proc.returncode != 0:
-                    output += f"\n[exit code: {proc.returncode}]"
+                if returncode != 0:
+                    output += f"\n[exit code: {returncode}]"
                 return output[:10_000]  # cap output
             except FileNotFoundError:
                 return f"Error: Command not found: {args[0]}"

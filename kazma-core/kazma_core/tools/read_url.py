@@ -467,9 +467,25 @@ def _slice_window(
 
 async def _fetch_with_playwright(url: str) -> str | None:
     try:
-        from playwright.async_api import async_playwright
+        from playwright.async_api import async_playwright  # noqa: F401
     except ImportError:
         return None
+
+    # Run on the dedicated browser loop (kazma_core.playwright_loop) — the
+    # server's SelectorEventLoop cannot spawn Playwright's Node driver on
+    # Windows (asyncio.create_subprocess_exec → NotImplementedError).
+    try:
+        from kazma_core.playwright_loop import run_in_browser_loop
+
+        return await run_in_browser_loop(_fetch_with_playwright_impl(url))
+    except Exception as exc:
+        logger.debug("[read_url] Playwright fetch failed: %s", exc)
+        return None
+
+
+async def _fetch_with_playwright_impl(url: str) -> str | None:
+    """Playwright fetch body — must run on the dedicated browser loop."""
+    from playwright.async_api import async_playwright
 
     try:
         # Route Chromium through Settings → Proxy Provider when configured

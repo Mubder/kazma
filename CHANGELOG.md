@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased — Fix Windows SelectorEventLoop breaking browser + exec tools (2026-08-14)
+
+Kazma's server runs a SelectorEventLoop (forced for psycopg async). On Windows
+that loop has no subprocess transport, so every tool that spawns a process via
+`asyncio.create_subprocess_exec` died silently (Playwright's Node driver spawn
+crashed with a background `NotImplementedError` — "Task exception was never
+retrieved" — while tools reported `error=False`).
+
+- **Browser tools** (`browser_automation/tools.py`): rewritten on Playwright's
+  sync API inside `asyncio.to_thread` worker threads — works under any loop.
+- **`kazma_core/playwright_loop.py`** (new): dedicated ProactorEventLoop thread
+  helper; `knowledge_ingest.py` (crawl render + shared browser scope) and
+  `read_url.py` (stealth fetch fallback) now route through it.
+- **`shell_exec`** (`tool_registry.py`): blocking Popen in a worker thread with
+  the same bounded-output (20k/10k) + timeout-kill semantics — it previously
+  swallowed the NotImplementedError and returned "Shell command execution
+  failed." for every command on Windows.
+- **`nvidia-smi` telemetry**, **Ollama model pull** (`models/discovery.py`),
+  **`uv add`/pip runtime promotion** (`runtime_manager.py`): same
+  to_thread/Popen pattern. MCP manager already had an explicit fallback.
+
 ## Unreleased — Postgres shared-state backup & schema assurance (2026-08-14)
 
 After a second app dropped Kazma's tables from the shared `kazma` database
