@@ -583,6 +583,12 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
         except Exception:
             pass  # fail-open if workspace resolution fails
     # 3. Safe command → allow (the HITL security card still applies separately).
+    # Audit trail: the exec resolver returns before the generic allow logging,
+    # so "silent allows" skipped the audit entirely (§8.2) — log here (audit).
+    logger.info(
+        "[commitment] allow exec %s (no denylist match; HITL still applies) source=%s",
+        tool_name, source,
+    )
     return EffectDecision("allow", "exec: no denylist match (HITL still applies)",
                           profile, audit)
 
@@ -596,9 +602,17 @@ def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, te
     allowlist = (get_commitment_config().get("outbound_allowed_targets") or [])
     # If no allowlist configured → allow (audit; the HITL security card still applies).
     if not allowlist:
+        logger.info(
+            "[commitment] allow outbound %s (no allowlist configured; HITL applies) source=%s",
+            tool_name, source,
+        )
         return EffectDecision("allow", "outbound: no target allowlist configured (HITL applies)",
                               profile, audit)
     if target and target in allowlist:
+        logger.info(
+            "[commitment] allow outbound %s target=%r (allowlisted) source=%s",
+            tool_name, target[:100], source,
+        )
         return EffectDecision("allow", f"outbound: target {target!r} is allowlisted", profile, audit)
     # Unknown target → clarify (with the allowlist so the user picks a valid one).
     c = Commitment(thread_id=thread_id or "", act="send_outbound", tool_name=tool_name,
@@ -631,4 +645,8 @@ def _resolve_config_change_act(profile, tool_name, args, *, audit, thread_id, te
         logger.warning("[commitment] DENY config — protected key %s", key)
         return EffectDecision("deny", f"config: key {key!r} is protected (safety-critical)",
                               profile, audit, commitment_id=cid)
+    logger.info(
+        "[commitment] allow config %s (key not protected) source=%s",
+        tool_name, source,
+    )
     return EffectDecision("allow", "config: key is not protected", profile, audit)

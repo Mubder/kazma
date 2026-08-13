@@ -104,6 +104,31 @@ def register_tasks_routes(
         svc = get_swarm_service()
         return svc.resolve_engine(swarm_manager)
 
+    def _require_admin(request: Request) -> JSONResponse | None:
+        """Admin/operator gate for the task action routes (approve/reject/cancel/retry).
+
+        Previously these operated on {task_id} with no ownership check — any
+        authenticated user could approve/reject/cancel another user's swarm
+        HITL checkpoint (audit finding). Mirrors documents_api._require_admin:
+        fail-open for single-user / no-secret deployments.
+        """
+        try:
+            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+            secret = get_kazma_secret()
+            if secret and not is_authenticated(request, secret):
+                return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+            principal = get_request_principal(request) or {}
+            if principal.get("source") == "secret":
+                return None
+            if principal.get("role") != "admin":
+                return JSONResponse(
+                    {"status": "error", "message": "Admin role required"}, status_code=403
+                )
+        except Exception:  # noqa: BLE001 - single-user/no-auth deployments allow it
+            return None
+        return None
+
     async def _maybe_send_to_output_target_fallback(
         text: str, *, is_html: bool = False
     ) -> bool:
@@ -624,8 +649,11 @@ def register_tasks_routes(
         })
 
     @router.post("/api/swarm/tasks/{task_id}/approve")
-    async def swarm_approve_checkpoint(task_id: str) -> JSONResponse:
+    async def swarm_approve_checkpoint(task_id: str, request: Request) -> JSONResponse:
         """Approve an HITL checkpoint and resume the pipeline."""
+        _denied = _require_admin(request)
+        if _denied is not None:
+            return _denied
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
@@ -669,7 +697,10 @@ def register_tasks_routes(
         })
 
     @router.post("/api/swarm/tasks/{task_id}/reject")
-    async def swarm_reject_checkpoint(task_id: str) -> JSONResponse:
+    async def swarm_reject_checkpoint(task_id: str, request: Request) -> JSONResponse:
+        _denied = _require_admin(request)
+        if _denied is not None:
+            return _denied
         """Reject an HITL checkpoint and abort the pipeline."""
         engine = _current_engine()
         svc = get_swarm_service()
@@ -713,7 +744,10 @@ def register_tasks_routes(
         })
 
     @router.post("/api/swarm/tasks/{task_id}/cancel")
-    async def swarm_cancel_task(task_id: str) -> JSONResponse:
+    async def swarm_cancel_task(task_id: str, request: Request) -> JSONResponse:
+        _denied = _require_admin(request)
+        if _denied is not None:
+            return _denied
         """Cancel a running task."""
         engine = _current_engine()
         if engine is None:
@@ -739,7 +773,10 @@ def register_tasks_routes(
         )
 
     @router.post("/api/swarm/tasks/{task_id}/retry")
-    async def swarm_retry_task(task_id: str) -> JSONResponse:
+    async def swarm_retry_task(task_id: str, request: Request) -> JSONResponse:
+        _denied = _require_admin(request)
+        if _denied is not None:
+            return _denied
         """Retry a failed/timeout/cancelled task by re-dispatching."""
         engine = _current_engine()
         if engine is None:

@@ -224,8 +224,14 @@ class ModelRegistry:
             api_key = str(self._config_store.get("llm.api_key", "") or "")
             if not effective_model:
                 effective_model = str(self._config_store.get("llm.model", "") or "")
-            if not provider_name:
-                provider_name = "custom"
+            # ALWAYS pin to "custom": a named provider with no provider entry
+            # would hit get_client's cross-provider auto-correction, which
+            # silently REPLACES the legacy base_url/model with the active
+            # provider's — the exact model/provider desync the legacy path
+            # must avoid (audit finding). The env fallback below then reads
+            # CUSTOM_API_KEY / KAZMA_API_KEY, which is the correct generic
+            # behavior for a custom endpoint.
+            provider_name = "custom"
 
         # Env-var fallback: when no key was resolved from ConfigStore, try the
         # conventional <PROVIDER>_API_KEY env var (e.g. GROQ_API_KEY). This
@@ -649,10 +655,18 @@ class ModelRegistry:
         url = f"{base_url.rstrip('/')}{models_path}"
 
         # SSRF guard: prevent the server from fetching internal/private URLs
-        # (e.g. cloud metadata 169.254.169.254, localhost services).
+        # (e.g. cloud metadata 169.254.169.254, localhost services). Private
+        # ranges are allowed ONLY for loopback hosts (Ollama / LM Studio) —
+        # previously allow_private=True unconditionally, so an admin-pasted
+        # provider URL could probe any private/internal host with the API key
+        # attached (audit finding).
         try:
+            from urllib.parse import urlparse
+
+            _host = (urlparse(url).hostname or "").lower()
+            _loopback = _host in ("localhost", "127.0.0.1", "::1")
             from kazma_core.security.ssrf import SSRFError, validate_url
-            validate_url(url, block_unresolved=True, allow_private=True)
+            validate_url(url, block_unresolved=True, allow_private=_loopback)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return []
