@@ -1391,7 +1391,18 @@ class KazmaAppBuilder:
                         import asyncio as _aio
 
                         _missing = await _aio.to_thread(verify_required_pg_tables, _pool)
-                        if _missing:
+                        if _missing is None:
+                            # Pool connection raced startup — retry once, then
+                            # report UNKNOWN. Never log a green "OK" for None:
+                            # None means "couldn't check", not "all present".
+                            await _aio.sleep(2.0)
+                            _missing = await _aio.to_thread(verify_required_pg_tables, _pool)
+                        if _missing is None:
+                            logger.warning(
+                                "[PG-BACKUP] schema verification skipped (pool unavailable) — "
+                                "could not confirm the required Postgres tables"
+                            )
+                        elif _missing:
                             _backup = latest_pg_backup()
                             _hint = (
                                 f"Restore the latest backup with: "
