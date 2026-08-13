@@ -46,7 +46,7 @@
     <div class="app-layout">
         {# Mobile nav backdrop — fades in when drawer is open (≤768px) #}
         <div class="sidebar-backdrop" x-show="mobileNavOpen" x-transition.opacity
-             @click="closeMobileNav()" style="display: none;"></div>
+             @click="closeMobileNav()" x-cloak></div>
 
         {# Sidebar #}
         {% include "components/sidebar.html" %}
@@ -122,7 +122,7 @@
        `search` Alpine store (modules/stores.js). Search results: static
        pages + chat sessions, navigable with ↑/↓/Enter. #}
     <div class="search-overlay" x-show="$store.search.open" x-transition.opacity
-         @click.self="$store.search.close()" style="display: none;"
+         @click.self="$store.search.close()" x-cloak
          @keydown.down.prevent="$store.search.next()"
          @keydown.up.prevent="$store.search.prev()"
          @keydown.enter.prevent="$store.search.go()">
