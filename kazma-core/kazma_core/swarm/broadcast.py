@@ -73,15 +73,33 @@ async def broadcast_task(engine: "SwarmEngine", task: SwarmTask) -> TaskResult:
                 validation_schema=task.validation_schema,
             )
 
-    worker_results = await asyncio.gather(
-        *(_dispatch_with_concurrency(name) for name in target_names)
-    )
-    result_status = overall_status(worker_results)
-    aggregated_output = aggregate_outputs(worker_results)
-    error = None
-    if result_status != "success":
-        error_messages = [result.error for result in worker_results if result.error]
-        error = "; ".join(error_messages) if error_messages else None
+    # Wrap the gather in try/except so a failure finalizes the task (removing
+    # it from _active_tasks) instead of leaking it as RUNNING forever.
+    # broadcast() returns from dispatch() BEFORE dispatch()'s own try/except
+    # and _active_tasks population, so without this a gather/emit exception
+    # propagated uncaught and orphaned the entry (audit finding).
+    try:
+        worker_results = await asyncio.gather(
+            *(_dispatch_with_concurrency(name) for name in target_names)
+        )
+        result_status = overall_status(worker_results)
+        aggregated_output = aggregate_outputs(worker_results)
+        error = None
+        if result_status != "success":
+            error_messages = [result.error for result in worker_results if result.error]
+            error = "; ".join(error_messages) if error_messages else None
+    except Exception as exc:
+        logger.exception("[broadcast] task %s failed mid-dispatch", task.id)
+        engine._tracing_emitter.end_span(task_span, status="error")
+        return engine._finalize_task(
+            task,
+            worker_results=[],
+            status="failed",
+            aggregated_output=None,
+            error=str(exc),
+            duration_seconds=perf_counter() - started,
+            metadata=await engine._build_result_metadata(blackboard),
+        )
 
     span_status = "ok" if result_status in ("success", "partial") else "error"
     engine._tracing_emitter.end_span(task_span, status=span_status)

@@ -37,6 +37,24 @@ def _key(task_id: str) -> str:
     return f"{_KEY_PREFIX}{task_id}"
 
 
+def _schedule_eviction(task_id: str, *, delay: float = 60.0) -> None:
+    """Remove the in-process entries for *task_id* after *delay*.
+
+    By then any waiter has woken (``wait_for_resolution``'s timeout is ≤60s)
+    and read its result; the durable ConfigStore row remains the
+    cross-replica source of truth. Bounds the module-level dicts, which
+    previously grew for the whole process lifetime (audit finding).
+    """
+    def _evict() -> None:
+        _local_events.pop(task_id, None)
+        _local_results.pop(task_id, None)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.call_later(delay, _evict)
+    except RuntimeError:
+        _evict()  # no running loop (sync context) — evict eagerly
+
+
 def create_pending(task_id: str, *, meta: dict[str, Any] | None = None) -> None:
     """Register a pending approval (local event + durable row)."""
     if not task_id:
@@ -89,6 +107,9 @@ def resolve(task_id: str, approved: bool) -> None:
         cs.set(_key(task_id), prev, category="swarm")
     except Exception as exc:
         logger.debug("[shared_approvals] resolve durable failed: %s", exc)
+
+    # Evict the local event/result after waiters have drained.
+    _schedule_eviction(task_id)
 
 
 def get_result(task_id: str) -> bool | None:

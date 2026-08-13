@@ -43,7 +43,6 @@ class _PausedPipeline:
     checkpoint: HITLCheckpoint
     worker_results: list[WorkerResult]
     blackboard_data: dict[str, Any]
-    approval_event: asyncio.Event = field(default_factory=asyncio.Event)
     completion_event: asyncio.Event = field(default_factory=asyncio.Event)
     timeout_task: asyncio.Task[None] | None = None
     final_result: TaskResult | None = None
@@ -98,40 +97,6 @@ class HITLCheckpointHandler:
         entry = self._paused.get(task_id)
         if entry:
             entry.timeout_task = timeout_task
-
-    async def approve(self, task_id: str) -> TaskResult | None:
-        """Approve a paused pipeline and return the final result.
-
-        Returns ``None`` if no active checkpoint exists for *task_id*.
-        The caller should await the returned coroutine result which is set
-        once the remaining pipeline steps complete.
-        """
-        entry = self._paused.get(task_id)
-        if entry is None:
-            return None
-
-        # Cancel timeout if running.
-        if entry.timeout_task is not None and not entry.timeout_task.done():
-            entry.timeout_task.cancel()
-            entry.timeout_task = None
-
-        entry.checkpoint.status = "approved"
-        entry.checkpoint.needs_approval = False
-        logger.info(
-            "[HITL] checkpoint approved for pipeline '%s' at step %d",
-            task_id,
-            entry.checkpoint.step,
-        )
-
-        # Signal the engine to resume.
-        entry.approval_event.set()
-
-        # Wait for the pipeline to complete (completion_event is set by
-        # complete_pipeline() once final_result is populated).
-        await entry.completion_event.wait()
-
-        # Return the final result once available.
-        return entry.final_result
 
     async def reject(
         self,
