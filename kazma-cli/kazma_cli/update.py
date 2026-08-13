@@ -94,6 +94,7 @@ _UPDATE_BOOL_FLAGS = {
 # Operator tracking branches that may hard-reset to origin/main.
 _TRACKING_BRANCHES = frozenset({"main", "master"})
 _UPDATE_REMOTE_REF = "origin/main"
+_GITHUB_REPO = "Mubder/kazma"
 _STASH_MSG_PREFIX = "kazma-update-"
 
 # ── Supply-chain safety for the operator upgrade path ────────────────────
@@ -290,8 +291,8 @@ def get_latest_pypi_version() -> str | None:
 
             # Fallback: GitHub Releases (primary distribution for monorepo)
             for url in (
-                "https://api.github.com/repos/Mubder/kazma/releases/latest",
-                "https://api.github.com/repos/Mubder/kazma/tags?per_page=1",
+                f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
+                f"https://api.github.com/repos/{_GITHUB_REPO}/tags?per_page=1",
             ):
                 try:
                     response = client.get(
@@ -1553,7 +1554,7 @@ def _run_pip_check_and_update(
         console.print()
         console.print("[red]Could not fetch version info from PyPI or GitHub.[/red]")
         console.print("If you cloned the repo, run from the monorepo: [cyan]git pull[/cyan]")
-        console.print("Or check network / GitHub releases: https://github.com/Mubder/kazma")
+        console.print(f"Or check network / GitHub releases: https://github.com/{_GITHUB_REPO}")
         sys.exit(1)
 
     console.print(f"  Latest:       [cyan]v{latest}[/cyan] (PyPI)")

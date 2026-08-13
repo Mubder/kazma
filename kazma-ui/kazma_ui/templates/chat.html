@@ -15,7 +15,7 @@
 <div class="chat-container">
   <!-- ── Mobile chat-sidebar backdrop ── -->
   <div class="sidebar-backdrop" x-show="mobileChatSidebarOpen" x-transition.opacity
-       @click="closeMobileChatSidebar()" style="display: none;"></div>
+       @click="closeMobileChatSidebar()" x-cloak></div>
 
   <!-- ── Session Sidebar (slide-in drawer on mobile) ── -->
   <aside class="chat-sidebar" :class="{ 'mobile-open': mobileChatSidebarOpen }">

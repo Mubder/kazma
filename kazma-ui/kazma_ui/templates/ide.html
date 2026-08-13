@@ -258,7 +258,7 @@
               <div class="chat-bubble" :class="m.role">
                 <span x-show="m.role === 'user'" style="font-weight:600;font-size:0.7rem;color:var(--accent);">You</span>
                 <span x-show="m.role === 'assistant' && m.content" style="font-weight:600;font-size:0.7rem;color:var(--success);">Kazma</span>
-                <div x-html="m.role === 'system' ? m.content : _renderMd(m.content)"></div>
+                <div x-html="_renderMd(m.content)"></div>
                 <span x-show="m.role === 'assistant' && chatBusy && i === chatMessages.length - 1 && !m.content"
                       style="color:var(--text-muted);font-size:0.75rem;">thinking…</span>
               </div>
