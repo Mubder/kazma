@@ -337,6 +337,15 @@ class EditorScreen(Screen[None]):
             return
         self.dismiss()
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        # New edits invalidate the "press Esc again" ack — without this, the
+        # sequence (dirty → Esc warns → edit more → Esc) closes immediately
+        # because _confirm_close is still True, discarding the NEW edits
+        # without a second confirmation (audit finding).
+        if getattr(self, "_confirm_close", False):
+            self._confirm_close = False
+            self._set_status("Ready")
+
     def action_run_cmd(self) -> None:
         async def _on_cmd(cmd: str) -> None:
             if not cmd:

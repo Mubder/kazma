@@ -1268,6 +1268,24 @@ def do_git_update(
     stash_msg: str | None = None
     from_commit = get_git_commit("HEAD")
 
+    # Crash-recovery (audit): _write_update_state records the phase at every
+    # transition, but nothing ever read it — so an update killed mid-flight
+    # (Ctrl+C during reinstall, OOM) left kazma-data/update-state.json at e.g.
+    # phase="reset_ok" (HEAD advanced, reinstall never finished) with no
+    # warning on the next `kazma update`. Surface it.
+    try:
+        _prior = _read_update_state(cwd)
+        if _prior.get("phase") not in (None, "done"):
+            console.print(
+                "[yellow]WARNING: a previous update was interrupted "
+                f"(phase={_prior.get('phase')!r}, "
+                f"from_commit={_prior.get('from_commit')!r}).[/yellow]\n"
+                "If `kazma serve` is broken, recover with: "
+                "[cyan]kazma update --reinstall -y[/cyan]"
+            )
+    except Exception:
+        pass
+
     # Supply-chain gate (audit): refuse to pull+exec from a non-canonical
     # origin. kazma update hard-resets to origin/main and runs the freshly-
     # pulled installer, so an attacker who can redirect `origin` would gain

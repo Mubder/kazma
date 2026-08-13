@@ -342,7 +342,13 @@ class ChatPanel(Vertical):
             if content:
                 self._last_response = content
                 self._messages.append({"role": "assistant", "content": content})
-                log.write(content)
+                # Write as plain Text, not markup — the chat-log RichLog is
+                # markup=True, so raw content with [...] (citations, array
+                # indices, "[ERROR]") got parsed as Rich markup → mis-rendered
+                # colors / swallowed text / MarkupError. The sibling write()
+                # already does this (audit finding).
+                from rich.text import Text
+                log.write(Text(content))
             else:
                 log.write("[dim](empty response)[/]")
         except Exception as e:
