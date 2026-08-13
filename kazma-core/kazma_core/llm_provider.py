@@ -133,6 +133,9 @@ class LLMProvider:
             self.config.base_url = normalize_provider_url(self.config.base_url)
         self._resolve_api_key()
         self._http: httpx.AsyncClient | None = None
+        # Strong references for fire-and-forget aclose() tasks scheduled by
+        # reconfigure(), so CPython doesn't GC them before aclose runs.
+        self._pending_closes: list = []
         logger.info(
             "LLMProvider initialized: base_url=%s model=%s",
             self.config.base_url,
@@ -389,10 +392,15 @@ class LLMProvider:
                         # Still rate-limited, continue retrying
                         continue
                 else:
-                    # All retries exhausted with 429
+                    # All retries exhausted with 429. Raise as NON-transient so
+                    # the supervisor retry loop doesn't immediately re-attempt
+                    # (we already did bounded exponential backoff here), which
+                    # would amplify load against an already-rate-limited
+                    # provider (audit finding). The turn fails with a clear
+                    # rate-limit message; the user can retry later.
                     raise LLMError(
                         f"LLM rate-limited after 3 retries: {detail[:300]}",
-                        transient=True,
+                        transient=False,
                     ) from e
 
             # ── Context-window overflow ─────────────────────────────────
@@ -541,9 +549,35 @@ class LLMProvider:
                 logger.warning("LLMProvider: Event loop was closed. Re-creating HTTP client and retrying request.")
                 self._http = None
                 client = await self._get_client()
-                resp = await client.post("/chat/completions", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
+                # This retry lives inside the except handler, so it is NOT
+                # covered by the outer try — wrap it so a failure raises a
+                # classified LLMError (not a raw httpx exception) the
+                # supervisor's `except LLMError` can handle (audit finding).
+                try:
+                    resp = await client.post("/chat/completions", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except httpx.HTTPStatusError as exc:
+                    sc = exc.response.status_code
+                    raise LLMError(
+                        f"LLM call failed (HTTP {sc}) after event-loop recovery: {exc.response.text[:300]}",
+                        transient=(sc == 429 or sc >= 500),
+                    ) from exc
+                except (
+                    httpx.ConnectError,
+                    httpx.TimeoutException,
+                    httpx.ReadError,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    raise LLMError(
+                        f"LLM call failed (network) after event-loop recovery: {exc}",
+                        transient=True,
+                    ) from exc
+                except Exception as exc:  # noqa: BLE001
+                    raise LLMError(
+                        f"LLM call failed after event-loop recovery: {exc}",
+                        transient=False,
+                    ) from exc
             else:
                 logger.error("LLM call failed: %s", e, exc_info=True)
                 raise LLMError(f"LLM call failed: {e}") from e
@@ -729,7 +763,12 @@ class LLMProvider:
 
                     try:
                         loop = asyncio.get_running_loop()
-                        loop.create_task(old.aclose())
+                        task = loop.create_task(old.aclose())
+                        # Keep a strong reference so CPython doesn't GC the
+                        # task before aclose runs ("Task was destroyed but it
+                        # is pending!"); drop once done (audit finding).
+                        self._pending_closes.append(task)
+                        task.add_done_callback(self._pending_closes.discard)
                     except RuntimeError:
                         # No running loop (sync context / tests) — best-effort.
                         try:

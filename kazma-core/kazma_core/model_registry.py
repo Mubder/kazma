@@ -611,7 +611,13 @@ class ModelRegistry:
                 if api_key:
                     try:
                         async with httpx.AsyncClient(timeout=10.0) as client:
-                            resp = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}")
+                            # Pass the key via header, not the URL query string —
+                            # ?key= leaks the API key into proxy/access logs and
+                            # httpx error tracebacks (audit finding).
+                            resp = await client.get(
+                                "https://generativelanguage.googleapis.com/v1beta/models",
+                                headers={"x-goog-api-key": api_key},
+                            )
                             if resp.status_code == 200:
                                 data = resp.json()
                                 model_ids = []
@@ -814,11 +820,18 @@ class ModelRegistry:
             p_display = str(provider.get("display_name", "")).strip().lower()
             if p_display == clean_name:
                 return dict(provider)
-        # Pass 3: substring match (query is contained in provider name)
-        for provider in self.list_providers():
-            p_name = str(provider.get("name", "")).strip().lower()
-            if clean_name in p_name:
-                return dict(provider)
+        # Pass 3: substring match — only when EXACTLY one provider name contains
+        # the query. Previously first-match-wins, so `"openai"` could resolve to
+        # a stored `"my-openai-mirror"` instead of the real `"openai"` (misrouting
+        # traffic + the API key to the wrong endpoint). Requiring a unique
+        # substring match preserves the documented fuzzy tolerance (e.g.
+        # `xiaomi` → `"Xiaomi MiMo"`) while eliminating ambiguity.
+        matches = [
+            provider for provider in self.list_providers()
+            if clean_name in str(provider.get("name", "")).strip().lower()
+        ]
+        if len(matches) == 1:
+            return dict(matches[0])
         return None
 
     def upsert_provider(self, data: dict[str, Any]) -> dict[str, Any]:

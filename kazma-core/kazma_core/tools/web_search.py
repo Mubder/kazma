@@ -25,18 +25,16 @@ from typing import Any
 
 __all__ = ["web_search"]
 
-# Overrides the invasive warnings.simplefilter("always") in duckduckgo_search library
-_original_warn = warnings.warn
-
-
-def _custom_warn(message, category=None, stacklevel=1, *args, **kwargs):
-    msg_str = str(message)
-    if "duckduckgo_search" in msg_str or "ddgs" in msg_str:
-        return
-    return _original_warn(message, category, stacklevel, *args, **kwargs)
-
-
-warnings.warn = _custom_warn
+# Silence the noisy duckduckgo_search / ddgs deprecation warnings WITHOUT
+# replacing the global warnings.warn. The previous module-level monkeypatch
+# rewrote warnings.warn process-wide for EVERY library (masking unrelated
+# warnings whose text happened to contain "ddgs", and resetting caller
+# stacklevel) — audit finding. filterwarnings only affects matching warnings
+# and leaves the global machinery intact.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*(duckduckgo_search|ddgs).*",
+)
 
 logger = logging.getLogger(__name__)
 
