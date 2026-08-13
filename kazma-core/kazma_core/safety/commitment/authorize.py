@@ -485,15 +485,39 @@ import re as _re  # noqa: E402
 
 # Catastrophic command patterns (irreversible / system-wide). These DENY before
 # the security HITL card even shows — the model should never execute these.
+# Coverage notes (audit finding): the previous set only matched the literal
+# `rm -[f] /` and a narrow `|(sh|bash|zsh)`, so `rm -r /`, `rm -rf ~`,
+# `rm -rf .`, `rm -rf *`, `rm -rf /home`, `curl|python|perl`, `chmod -R 777
+# /etc` all reached the HITL card. Broadened below. System-dir targets use a
+# trailing `(?!\S)` so `rm -rf /home` is denied but `rm -rf /home/user/proj`
+# (a legitimate scoped delete) is not.
 _EXEC_DENYLIST = [
-    _re.compile(r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?/(?!\w)", _re.IGNORECASE),  # rm -rf /
+    # rm with a recursive flag targeting a catastrophic location.
+    _re.compile(
+        r"\brm\s+[^;|&\n]*?-[a-zA-Z]*r[a-zA-Z]*\s+"
+        r"(?:"
+        r"/(?![\w/])"                                                       # /           (root)
+        r"|/\*"                                                              # /*          (root glob)
+        r"|/(?:home|etc|root|var|usr|boot|bin|sbin|lib|opt|proc|sys)(?!\S)"  # /<sysdir> bare
+        r"|[\"']?(?:~|\$HOME|\$PWD)[\"']?(?!\S)"                            # home dir (quoted-tolerant)
+        r"|[\"']?\.[\"']?(?!\S)"                                            # .           (cwd wipe)
+        r"|[\"']?\*[\"']?(?!\S)"                                            # *           (cwd glob)
+        r")",
+        _re.IGNORECASE,
+    ),
     _re.compile(r":\s*\(\)\s*\{.*:.*\|.*&.*\}", _re.IGNORECASE),  # fork bomb
-    _re.compile(r"(curl|wget).*\|\s*(sh|bash|zsh)", _re.IGNORECASE),  # remote pipe to shell
-    _re.compile(r"dd\s+.*of=/dev/", _re.IGNORECASE),  # dd to device
-    _re.compile(r"mkfs", _re.IGNORECASE),  # format filesystem
+    # Remote content piped to ANY interpreter (sh/bash/zsh/python/perl/ruby/node).
+    _re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sh|bash|zsh|python\d?|perl|ruby|node)\b", _re.IGNORECASE),
+    _re.compile(r"\bdd\b\s+.*of\s*=\s*/dev/", _re.IGNORECASE),  # dd to device
+    _re.compile(r"\bmkfs\b", _re.IGNORECASE),  # format filesystem
     _re.compile(r">\s*/dev/(sd|nvme|hd|disk)", _re.IGNORECASE),  # redirect to raw disk
-    _re.compile(r"\b(shutdown|reboot|halt|poweroff|init\s+0)\b", _re.IGNORECASE),
-    _re.compile(r"chmod\s+(-R\s+)?[0-7]{3,4}\s+/(?!\w)", _re.IGNORECASE),  # chmod 777 /
+    _re.compile(r"\b(?:shutdown|reboot|halt|poweroff|init\s+0)\b", _re.IGNORECASE),
+    # chmod world-writable/recursive on system locations.
+    _re.compile(
+        r"\bchmod\s+(?:-R\s+)?[0-7]{3,4}\s+"
+        r"(?:/(?![\w/])|/\*|/(?:home|etc|root|var|usr|boot|bin|sbin|lib|opt)(?!\S)|~)",
+        _re.IGNORECASE,
+    ),
 ]
 
 # Protected config keys — mutating these could DISABLE the safety layer itself.
@@ -507,7 +531,14 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
     """exec resolver (denylist + cwd pin, plan §5 / WS5)."""
     from .store import Commitment, create_commitment
 
-    command = str(args.get("command", ""))
+    _raw_cmd = args.get("command", "")
+    # Normalize list-form commands (e.g. ["rm","-rf","/"]) to a string so the
+    # denylist regexes can match — str([...]) produces the repr, which silently
+    # bypassed every pattern (audit finding).
+    if isinstance(_raw_cmd, (list, tuple)):
+        command = " ".join(str(x) for x in _raw_cmd)
+    else:
+        command = str(_raw_cmd)
     # 1. Denylist: catastrophic commands → deny (before the HITL card).
     for pat in _EXEC_DENYLIST:
         if pat.search(command):

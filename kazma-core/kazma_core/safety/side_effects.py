@@ -14,9 +14,14 @@ Design
 - ``semantic_tier`` is the NEW dimension HITL didn't have: how much the
   commitment gate cares about this tool's meaning (not just its risk).
 - ``effect`` + ``act`` + ``required_slots`` seed the Phase 2/4 act catalog.
-- **Unregistered tools fail closed** (plan §5.2): a mutator-like name with no
-  profile is treated as ``critical`` / unsafe (deny by default), never
-  free-fire. Pure reads are allowed. This is the omission-bypass guard.
+- **Unregistered mutators are classified fail-closed** (plan §5.2): a
+  mutator-like name with no profile is treated as ``critical`` / unsafe.
+  Classification is always fail-closed; *enforcement* (the actual deny) is
+  opt-in via ``agent.commitment.enforce_unknown_mutators`` (default OFF, per
+  AGENTS.md §20E's safe-rollout rule). With the default, an unregistered
+  mutator is flagged dangerous but reaches audit-only allow unless that flag
+  is on — so rely on the HITL danger list / approval card for such tools
+  unless you enable the flag. Pure reads are always allowed.
 """
 
 from __future__ import annotations
