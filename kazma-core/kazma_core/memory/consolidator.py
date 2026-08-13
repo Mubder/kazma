@@ -242,7 +242,7 @@ def schedule_post_turn_memory(
 
                 enqueue_task(
                     "micro_consolidation",
-                    {"episode_id": eid},
+                    {"episode_id": eid, "tenant_id": tenant_id},
                 )
         except Exception as exc:
             logger.warning(

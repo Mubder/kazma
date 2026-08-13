@@ -316,6 +316,12 @@ async def dispatch_inner(
     worker_result = all_worker_results[-1]
 
     # Execute fallback chain if the primary failed and a chain is configured.
+    # NOTE: this top-level call does NOT thread _visited/_depth (unlike the
+    # mid-chain call in engine._dispatch_worker_by_name, which does — M13).
+    # That is correct BY CONSTRUCTION: at top level no handoffs have occurred
+    # yet, so the hop budget starts fresh. Do not "helpfully" thread state
+    # from here without also propagating it from the top-level dispatch —
+    # otherwise A→B→fallback→A could reset visit counts (audit finding).
     if worker_result.status != "success" and task.fallback_chain:
         fallback_result, fallback_all = await engine._execute_fallback_chain(
             worker_result,

@@ -635,7 +635,8 @@
 
   // Poll immediately and then every 5 seconds
   pollMemoryStatus();
-  setInterval(pollMemoryStatus, 5000);
+  // Skip the poll tick while the tab is hidden (long-lived interval — audit).
+  setInterval(function() { if (!document.hidden) pollMemoryStatus(); }, 5000);
 
   // ── V2 Cognitive Engine panel ─────────────────────────────────
   function _v2ChipStyle(status) {
@@ -1165,7 +1166,7 @@
   loadV2Merges();
   loadV2Procedural();
   loadV2Quality();
-  setInterval(function() { loadV2Queue(); loadV2Merges(); loadV2Procedural(); loadV2Quality(); }, 15000);
+  setInterval(function() { if (document.hidden) return; loadV2Queue(); loadV2Merges(); loadV2Procedural(); loadV2Quality(); }, 15000);
 
   async function loadV2Beliefs(q) {
     try {
@@ -1363,7 +1364,7 @@
     }
     pollV2Health();
     loadV2Beliefs('');
-    setInterval(pollV2Health, 5000);
+    setInterval(function() { if (!document.hidden) pollV2Health(); }, 5000);
   } catch (e) { /* V2 panel optional */ }
 
   // ══ V2 BELIEF TOPOLOGY GRAPH ══════════════════════════════════
@@ -4281,6 +4282,6 @@
     _v2gRenderFilters();
     _v2gWireControls();
     _v2gLoad();
-    setInterval(_v2gLoad, 30000);
+    setInterval(function() { if (!document.hidden) _v2gLoad(); }, 30000);
   } catch (e) { /* V2 graph optional */ }
 })();
