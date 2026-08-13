@@ -1723,22 +1723,37 @@ class DocumentIngestionService:
         """Return (logical_referenced_bytes, physical_on_disk_bytes)."""
         logical = 0
         physical = 0
+        _sql = """
+            SELECT
+              COALESCE(SUM(byte_size), 0) AS logical,
+              COALESCE(SUM(CASE WHEN rn = 1 THEN byte_size ELSE 0 END), 0) AS physical
+            FROM (
+              SELECT byte_size,
+                     ROW_NUMBER() OVER (PARTITION BY sha256, storage_kind ORDER BY id) AS rn
+              FROM document_blobs
+            )
+        """
         try:
-            with self.repository._lock:  # noqa: SLF001
-                row = self.repository._conn.execute(  # noqa: SLF001
-                    """
-                    SELECT
-                      COALESCE(SUM(byte_size), 0) AS logical,
-                      COALESCE(SUM(CASE WHEN rn = 1 THEN byte_size ELSE 0 END), 0) AS physical
-                    FROM (
-                      SELECT byte_size,
-                             ROW_NUMBER() OVER (PARTITION BY sha256, storage_kind ORDER BY id) AS rn
-                      FROM document_blobs
-                    )
-                    """
-                ).fetchone()
-            logical = int(row["logical"])
-            physical = int(row["physical"])
+            if getattr(self.repository, "_conn", None) is not None:
+                with self.repository._lock:  # noqa: SLF001
+                    row = self.repository._conn.execute(_sql).fetchone()  # noqa: SLF001
+                logical = int(row["logical"])
+                physical = int(row["physical"])
+            else:
+                # Postgres metadata backend: _conn is None (pool-based).
+                # Previously the bare _conn.execute raised AttributeError,
+                # swallowed at debug → storage gauges reported 0 forever in
+                # the multi-replica deployment (audit finding).
+                _pool = getattr(self.repository, "_pool", None)
+                if _pool is None:
+                    return 0, 0
+                with _pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(_sql)
+                        row = cur.fetchone()
+                    conn.commit()
+                logical = int(row["logical"])
+                physical = int(row["physical"])
         except Exception:  # noqa: BLE001
             logger.debug("[documents.ingestion] storage byte accounting failed", exc_info=True)
         return logical, physical

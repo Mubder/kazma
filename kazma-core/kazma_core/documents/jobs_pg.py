@@ -235,12 +235,42 @@ class PostgresDocumentJobRepository:
                             state, stage, idempotency_key, max_attempts,
                             created_at, updated_at
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
                         """,
                         (
-                            identifier, tenant, workspace, doc_id, ver_id,
+                            identifier, tenant, workspace_id, doc_id, ver_id,
                             "received", "received", key, int(max_attempts), now, now,
                         ),
                     )
+                    if cur.rowcount != 1:
+                        # Lost a concurrent enqueue race on the idempotency key
+                        # (another replica inserted first). Read the winner's
+                        # row and apply the same replay validation as the
+                        # pre-check path above. Previously the bare INSERT
+                        # raised UniqueViolation → HTTP 500 on the exact
+                        # condition idempotency keys exist for (audit finding).
+                        cur.execute(
+                            "SELECT * FROM document_jobs WHERE tenant_id = %s AND idempotency_key = %s",
+                            (tenant, key),
+                        )
+                        existing = cur.fetchone()
+                        if existing is None:
+                            raise RuntimeError(
+                                "idempotent enqueue lost the race but no row found"
+                            )
+                        replay = (
+                            existing["workspace_id"],
+                            existing["document_id"],
+                            existing["version_id"],
+                            int(existing["max_attempts"]),
+                        )
+                        requested = (workspace, doc_id, ver_id, int(max_attempts))
+                        if replay != requested:
+                            raise JobConflictError(
+                                "idempotency key is already bound to a different request"
+                            )
+                        conn.commit()
+                        return _row_to_record(existing)
                     self._insert_event(
                         cur, tenant_id=tenant, job_id=identifier, event_type="enqueued",
                         from_state=None, to_state="received", from_version=None,
