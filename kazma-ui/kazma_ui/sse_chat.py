@@ -298,7 +298,7 @@ async def _stream_langgraph_events(
                 # doesn't cause the SSE connection to time out silently.
                 # Yields a ":keepalive" SSE comment every 10s when no events
                 # arrive, keeping the HTTP connection alive.
-                _event_queue: asyncio.Queue = asyncio.Queue()
+                _event_queue: asyncio.Queue = asyncio.Queue(maxsize=512)
                 _stream_done = False
                 # T1 watchdog: last-progress clock written by the pump on every
                 # queue put; read by _pump_watchdog to detect a stalled pump.
@@ -312,7 +312,15 @@ async def _stream_langgraph_events(
                     nonlocal _stream_done
                     try:
                         async for ev in graph.astream_events(input_state, config=config, version="v2"):
-                            await _event_queue.put(ev)
+                            # Bounded queue: drop advisory stream events when
+                            # the consumer is gone/slow rather than grow the
+                            # queue unbounded for up to DETACHED_TTL_S. The
+                            # final state is backfilled from the checkpoint
+                            # anyway (audit finding).
+                            try:
+                                _event_queue.put_nowait(ev)
+                            except asyncio.QueueFull:
+                                pass
                             _progress["last"] = time.monotonic()
                     except Exception as exc:
                         await _event_queue.put(exc)

@@ -560,7 +560,16 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
             if root:
                 from pathlib import Path
                 p = Path(cwd).resolve()
-                if not str(p).startswith(str(root)):
+                root_path = Path(root).resolve()
+                # Real path containment, not a raw string prefix —
+                # startswith() let sibling dirs like "...\kazma-evil" pass
+                # "...\kazma" and skipped the clarify (audit finding).
+                try:
+                    p.relative_to(root_path)
+                    _outside = False
+                except ValueError:
+                    _outside = True
+                if _outside:
                     c = Commitment(thread_id=thread_id or "", act="exec", tool_name=tool_name,
                                    goal_text=command[:200], args_digest=_args_digest(args),
                                    request_at=time.time(), tenant_id=tenant_id,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -22,17 +23,26 @@ _DEFAULT_DB = "kazma-data/pipeline_logs.db"
 
 # Singleton connection
 _conn: sqlite3.Connection | None = None
+# Guards singleton init (logging is invoked from multiple worker threads).
+_conn_lock = threading.Lock()
 
 
 def _get_conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
     global _conn
     if _conn is not None:
         return _conn
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    _conn = sqlite3.connect(db_path)
-    from kazma_core.config_store import apply_sqlite_pragmas
+    with _conn_lock:
+        if _conn is not None:  # double-checked
+            return _conn
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False: pipeline logging is invoked from worker
+        # threads other than the connection's creator; the default would raise
+        # sqlite3.ProgrammingError. Write safety is provided by WAL +
+        # busy_timeout (apply_sqlite_pragmas) (audit finding).
+        _conn = sqlite3.connect(db_path, check_same_thread=False)
+        from kazma_core.config_store import apply_sqlite_pragmas
 
-    apply_sqlite_pragmas(_conn)
+        apply_sqlite_pragmas(_conn)
     _conn.execute("""
         CREATE TABLE IF NOT EXISTS pipeline_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

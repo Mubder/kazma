@@ -212,14 +212,20 @@ def grant_session_path(
         "expires_at": expires,
     }
     cs = _cs()
-    cs.set(_session_key(thread_id, gid), payload, category="safety")
     # Maintain index for reliable listing without full-store scan.
     idx_key = f"path_grant_index.{thread_id}"
     raw_idx = cs.get(idx_key) or []
     ids = list(raw_idx) if isinstance(raw_idx, list) else []
     if gid not in ids:
         ids.append(gid)
-        cs.set(idx_key, ids, category="safety")
+    # Atomic payload + index write (one transaction) so two concurrent grants
+    # for the same thread can't interleave their two writes. The read-modify-
+    # write of `ids` is still a narrow TOCTOU, but list_session_grants has a
+    # full-store scan fallback that recovers any orphaned grant (audit finding).
+    cs.batch_set([
+        (_session_key(thread_id, gid), payload, "safety"),
+        (idx_key, ids, "safety"),
+    ])
     logger.warning(
         "[SECURITY] PATH GRANT session thread=%s path=%s mode=%s actor=%s ttl=%s",
         thread_id[:16] if thread_id else "",

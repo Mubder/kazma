@@ -278,18 +278,39 @@ def _create_entity(
     is_high_stakes: int,
 ) -> None:
     aliases = [name]
-    conn.execute(
+    cur = conn.execute(
         """INSERT OR IGNORE INTO entities
            (id, tenant_id, type, name, aliases_json, is_high_stakes)
            VALUES (?, ?, ?, ?, ?, ?)""",
         (canonical, tenant_id, entity_type, name, json.dumps(aliases), is_high_stakes),
     )
-    # Add the alias hash to the aliases list so future tier-1 matches find it
-    conn.execute(
-        """UPDATE entities SET aliases_json = ?
-           WHERE id = ? AND aliases_json NOT LIKE ?""",
-        (json.dumps([name, ahash]), canonical, f'%{ahash}%'),
-    )
+    if cur.rowcount == 1:
+        # Fresh row — seed aliases with name + alias hash so tier-1 matches
+        # find it.
+        conn.execute(
+            "UPDATE entities SET aliases_json=? WHERE id=?",
+            (json.dumps([name, ahash]), canonical),
+        )
+    else:
+        # Entity already existed — APPEND the alias hash if absent instead of
+        # replacing the whole list. The old `aliases_json NOT LIKE ?` UPDATE
+        # clobbered any prior aliases with [name, ahash] whenever ahash was
+        # absent (audit finding).
+        row = conn.execute(
+            "SELECT aliases_json FROM entities WHERE id=?", (canonical,)
+        ).fetchone()
+        try:
+            existing = json.loads((row["aliases_json"] if row else None) or "[]")
+        except Exception:
+            existing = []
+        if not isinstance(existing, list):
+            existing = []
+        if ahash not in existing:
+            existing.append(ahash)
+            conn.execute(
+                "UPDATE entities SET aliases_json=? WHERE id=?",
+                (json.dumps(existing), canonical),
+            )
     conn.commit()
 
 

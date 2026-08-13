@@ -23,12 +23,10 @@ __all__ = ["register_direct_routes"]
 def register_direct_routes(self: Any) -> None:
     """Register direct FastAPI route handlers onto self.app."""
 
-    @self.app.get("/metrics")
-    async def _metrics():
-        """Prometheus metrics endpoint."""
-        from kazma_core.metrics import get_metrics_response
-        body, status, headers = get_metrics_response()
-        return _JSONResponse(content=body.decode() if isinstance(body, bytes) else body, media_type=headers["content-type"])
+    # NOTE: GET /metrics is provided by kazma_ui.metrics.create_metrics_router
+    # (mounted in app.py), which exposes the full set (swarm gauges,
+    # kazma_commitment_decisions_total, etc.). A minimal duplicate handler
+    # here shadowed it depending on registration order — removed (audit).
 
     @self.app.get("/api/system/debug/registry")
     async def _debug_registry():

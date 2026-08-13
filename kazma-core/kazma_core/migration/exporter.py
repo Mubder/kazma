@@ -126,6 +126,15 @@ def export_bundle(
     )
 
     # ── Build a staging dir, then zip it at the end ────────────────────
+    # Sweep any staging dir left behind by a previously-crashed export (the
+    # success-path rmtree at the end doesn't run if export raises mid-way, and
+    # each run mints a unique timestamp so orphans would otherwise accumulate)
+    # (audit finding).
+    for _old in data_dir.glob(".migrate-export-*"):
+        try:
+            shutil.rmtree(_old, ignore_errors=True)
+        except Exception:
+            pass
     staging = data_dir / f".migrate-export-{int(time.time())}"
     if staging.exists():
         shutil.rmtree(staging, ignore_errors=True)
