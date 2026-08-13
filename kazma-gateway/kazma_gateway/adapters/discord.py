@@ -324,6 +324,21 @@ class DiscordAdapter(BaseAdapter):
             except Exception as exc:
                 logger.debug("[discord] Interaction ack failed: %s", exc)
 
+        # Audit (allowlist bypass): enforce the user allowlist on EVERY interaction
+        # branch, not only the graph HITL/picker branch below. Previously the
+        # swarm-approval and dependency-install branches resolved with no user
+        # check, so a non-allowlisted guild member could Approve a danger tool,
+        # Reject a task, or trigger a remote package install by clicking a button.
+        _ia_user = data.get("member", {}).get("user") or data.get("user") or {}
+        _ia_user_id = str(_ia_user.get("id", ""))
+        if self._allowed_users and (not _ia_user_id or _ia_user_id not in self._allowed_users):
+            logger.info(
+                "[discord] Ignoring interaction from non-allowed user %s (action=%s)",
+                _ia_user_id, action.kind,
+            )
+            await _ack({"type": 6})
+            return
+
         if is_install_action(custom_id):
             package_name = package_from_install(custom_id)
             from kazma_core.system.runtime_manager import trigger_package_promotion

@@ -2550,13 +2550,26 @@ def register_direct_routes(self: Any) -> None:
         if not backup_name:
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="backup_name is required")
+        # Path-traversal guard: backup_name must be a plain filename inside
+        # backups_dir() — no separators, no parent refs. Otherwise a caller
+        # could point at any SQLite file on disk (clobber the live DB, or read
+        # it back via /api/memory/v2/beliefs).
+        if "/" in backup_name or "\\" in backup_name or ".." in backup_name:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="invalid backup name")
         import sqlite3
         from pathlib import Path
 
         from kazma_core.paths import backups_dir, primary_memory_db
 
         try:
-            src = Path(backups_dir()) / backup_name
+            _backups_root = Path(backups_dir()).resolve()
+            src = (Path(backups_dir()) / backup_name).resolve()
+            try:
+                src.relative_to(_backups_root)
+            except ValueError:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="invalid backup name")
             if not src.exists() or not src.is_file():
                 from fastapi import HTTPException
                 raise HTTPException(status_code=404, detail=f"backup {backup_name!r} not found")

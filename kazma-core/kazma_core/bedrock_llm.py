@@ -25,7 +25,7 @@ import os
 import time
 from typing import Any
 
-from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse, ToolCall
+from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -148,9 +148,14 @@ class BedrockProvider(LLMProvider):
         def _run() -> LLMResponse:
             client = self._get_client()
             if client is None:
-                return LLMResponse(
-                    content="[Bedrock unavailable: boto3 not installed]",
-                    finish_reason="error", model=model_id,
+                # boto3 not installed is a permanent configuration error, not a
+                # model reply. Previously this returned a string as content,
+                # making the failure indistinguishable from a normal response
+                # (AGENTS.md §3). Raise so the supervisor retry/turn_failed /
+                # friendly_llm_error machinery handles it.
+                raise LLMError(
+                    "Bedrock unavailable: boto3 is not installed",
+                    transient=False,
                 )
             start = time.monotonic()
             request: dict[str, Any] = {
@@ -169,11 +174,21 @@ class BedrockProvider(LLMProvider):
                 resp = client.converse(**request)
             except Exception as exc:  # noqa: BLE001
                 logger.error("[Bedrock] converse failed: %s", exc)
-                return LLMResponse(
-                    content=f"[Bedrock converse failed: {type(exc).__name__}]",
-                    finish_reason="error", model=model_id,
-                    duration_ms=(time.monotonic() - start) * 1000,
-                )
+                # Classify boto3 ClientError via duck typing (avoid hard-importing
+                # botocore, which is optional). 429 / 5xx / ThrottlingException
+                # are transient; everything else is permanent — mirrors the
+                # generic LLMProvider classification (AGENTS.md §3).
+                transient = False
+                err_resp = getattr(exc, "response", None)
+                if isinstance(err_resp, dict):
+                    meta = err_resp.get("ResponseMetadata") or {}
+                    status = meta.get("HTTPStatusCode")
+                    code = str((err_resp.get("Error") or {}).get("Code", ""))
+                    if status == 429 or (status and status >= 500) or "Throttling" in code:
+                        transient = True
+                raise LLMError(
+                    f"Bedrock converse failed: {exc}", transient=transient
+                ) from exc
             return self._parse(resp, model_id, start)
 
         return await asyncio.to_thread(_run)

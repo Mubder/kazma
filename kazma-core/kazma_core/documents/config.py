@@ -223,8 +223,17 @@ def _ocr_dpi(value: Any) -> int:
 
 def _malware_mode(value: Any) -> str:
     normalized = str(value).strip().lower()
-    if normalized not in {"auto", "enabled", "disabled"}:
-        raise ValueError("expected auto, enabled, or disabled")
+    # Canonicalize to the vocabulary the enforcer (documents/malware.py) and the
+    # Settings UI both use: {off, on, auto}. Accept the enabled/disabled aliases
+    # for back-compat. Previously this validator accepted ONLY {auto, enabled,
+    # disabled} and therefore *rejected* the UI's valid "on"/"off" values, while
+    # any "enabled" that did get stored silently degraded to fail-open "auto" in
+    # the enforcer (malware.py only knows {off, on, auto}). Unifying here makes
+    # "on" reach the strict fail-closed branch and "off" disable scanning.
+    alias = {"enabled": "on", "disabled": "off"}
+    normalized = alias.get(normalized, normalized)
+    if normalized not in {"auto", "on", "off"}:
+        raise ValueError("expected auto, on, or off (enabled/disabled aliases accepted)")
     return normalized
 
 

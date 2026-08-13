@@ -40,6 +40,7 @@ class VaultKeyStatus(str, Enum):
     EMPTY = "empty"
     MISMATCH = "mismatch"
     NO_VAULT = "no_vault"
+    INCONSISTENT = "inconsistent"
 
 
 @dataclass
@@ -76,8 +77,14 @@ def check_vault_key(
     # Cross-check meta.env against the manifest fingerprint. If they
     # disagree, the bundle is internally inconsistent — refuse.
     if bundle_fingerprint and vault_key_fingerprint(bundle_vault_key) != bundle_fingerprint:
+        # Distinct from a legitimate MISMATCH: the bundle itself is internally
+        # inconsistent (meta.env key disagrees with the manifest fingerprint),
+        # which signals tampering. This MUST NOT be bypassable by
+        # --reset-vault-key (which would overwrite the target's legitimate key
+        # with the tampered bundle's key). The importer hard-aborts on
+        # INCONSISTENT regardless of the reset flag.
         return VaultPairing(
-            status=VaultKeyStatus.MISMATCH,
+            status=VaultKeyStatus.INCONSISTENT,
             bundle_key=bundle_vault_key,
             target_key=current_vault_key(),
             message=(

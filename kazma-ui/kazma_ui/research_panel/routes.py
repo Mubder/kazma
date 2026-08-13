@@ -131,10 +131,13 @@ def create_research_router() -> APIRouter:
         raw = (path or "").strip().replace("\\", "/")
         if not raw or ".." in raw.split("/"):
             return JSONResponse({"error": "invalid path"}, status_code=400)
-        # Absolute path only if under a known reports tree
+        # Reject absolute paths outright — only relative paths under a known
+        # reports tree are served. (Previously an absolute path whose string
+        # contained "/research/reports/" bypassed the relative_to containment
+        # check via the substring fallback → arbitrary file read.)
         candidates: list[Path] = []
         if Path(raw).is_absolute():
-            candidates.append(Path(raw))
+            return JSONResponse({"error": "absolute paths are not allowed"}, status_code=400)
         elif raw.startswith("research/reports/"):
             for root in _candidate_report_roots():
                 candidates.append((root / raw).resolve())
@@ -148,20 +151,17 @@ def create_research_router() -> APIRouter:
             try:
                 if not cand.is_file():
                     continue
-                # Containment: must live under some root's research/reports
-                ok = False
+                # Containment: must live under some root's research/reports.
+                # (Substring matching removed — it allowed sibling dirs whose
+                # name merely extends "reports" to pass.)
                 for root in _candidate_report_roots():
                     try:
                         cand.relative_to((root / "research" / "reports").resolve())
-                        ok = True
+                        target = cand
                         break
                     except ValueError:
                         continue
-                if ok or any(
-                    str(cand).replace("\\", "/").find("/research/reports/") >= 0
-                    for _ in (1,)
-                ):
-                    target = cand
+                if target is not None:
                     break
             except Exception:
                 continue
@@ -643,13 +643,23 @@ def create_research_router() -> APIRouter:
         Accepts both absolute paths and bare filenames (looked up in
         kazma-data/documents/). Security: only serves files from that dir.
         """
-        safe_root = os.path.abspath("kazma-data/documents")
-        # Accept bare filename, relative path, or absolute path.
+        safe_root = os.path.realpath("kazma-data/documents")
+        # Resolve under the safe root and enforce segment-aware containment
+        # (relative_to semantics via relpath), not a byte-prefix startswith()
+        # check: the latter let sibling dirs like "documents_secret" pass.
+        # Absolute caller paths are still honored ONLY if they resolve inside
+        # safe_root.
         if os.path.isabs(path):
-            real_path = os.path.abspath(path)
+            real_path = os.path.realpath(path)
         else:
-            real_path = os.path.abspath(os.path.join("kazma-data/documents", path))
-        if not real_path.startswith(safe_root) or not os.path.isfile(real_path):
+            real_path = os.path.realpath(os.path.join(safe_root, path))
+        try:
+            rel = os.path.relpath(real_path, safe_root)
+            if rel.startswith("..") or os.path.isabs(rel):
+                raise ValueError
+        except ValueError:
+            return JSONResponse({"error": "invalid file path"}, status_code=403)
+        if not os.path.isfile(real_path):
             return JSONResponse({"error": "invalid file path"}, status_code=403)
         return FileResponse(
             real_path,

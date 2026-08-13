@@ -135,7 +135,19 @@ def _gate_mcp_path_access(
         from kazma_core.workspace.path_policy import check_path_access
         from kazma_core.safety.hitl import get_current_thread_id
     except ImportError:
-        return None  # safety modules unavailable → fail open (non-security env)
+        # Fail-closed: this gate is the ONLY filesystem-containment check for
+        # MCP tools. If the path-policy module cannot be imported (broken/partial
+        # install, import cycle), deny rather than allow out-of-workspace access —
+        # matches the fail-closed posture of tool_registry / vision_analyze /
+        # ShellTool, which all deny when the workspace module is unavailable.
+        return {
+            "content": (
+                "Access denied: workspace safety module unavailable — "
+                "MCP path access blocked (fail-closed)."
+            ),
+            "is_error": True,
+            "outcome": "hard",
+        }
 
     thread_id = get_current_thread_id() or ""
     for p in paths:

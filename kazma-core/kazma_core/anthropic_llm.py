@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse, ToolCall
+from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -169,26 +169,38 @@ class AnthropicProvider(LLMProvider):
             resp = await client.post("/messages", json=payload)
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
             body = ""
             try:
                 body = exc.response.text[:400]
             except Exception:  # noqa: BLE001
                 pass
-            logger.error("[Anthropic] HTTP %d: %s", exc.response.status_code, body)
-            return LLMResponse(
-                content=f"[Anthropic API error {exc.response.status_code}]",
-                finish_reason="error",
-                model=payload["model"],
-                duration_ms=(time.monotonic() - start) * 1000,
-            )
+            # Mirror the generic LLMProvider classification (AGENTS.md §3):
+            # 429 + 5xx are transient (retryable); 4xx content/auth/schema are
+            # permanent. Previously this branch *returned* the error string as
+            # LLMResponse.content, making a failure indistinguishable from a
+            # model reply and bypassing retry / turn_failed / friendly_llm_error.
+            transient = status_code == 429 or status_code >= 500
+            logger.error("[Anthropic] HTTP %d: %s", status_code, body)
+            raise LLMError(
+                f"Anthropic API error (HTTP {status_code}): {body}",
+                transient=transient,
+            ) from exc
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.ReadError,
+            httpx.RemoteProtocolError,
+        ) as exc:
+            logger.error("[Anthropic] network failure: %s", exc)
+            raise LLMError(
+                f"Anthropic request failed (network): {exc}", transient=True
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             logger.error("[Anthropic] request failed: %s", exc)
-            return LLMResponse(
-                content=f"[Anthropic request failed: {type(exc).__name__}]",
-                finish_reason="error",
-                model=payload["model"],
-                duration_ms=(time.monotonic() - start) * 1000,
-            )
+            raise LLMError(
+                f"Anthropic request failed: {exc}", transient=False
+            ) from exc
 
         data = resp.json()
         return self._parse_response(data, payload["model"], start)

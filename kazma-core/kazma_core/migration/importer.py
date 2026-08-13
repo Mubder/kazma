@@ -65,9 +65,16 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
 ]
 
 # The SQLite data files the bundle may contain, mapped to their destination
-# resolver. Any file present in the bundle is restored; absent files are skipped.
+# resolver. Any file present in the bundle is restored (swapped onto live);
+# absent files are skipped.
+#
+# NOTE: ``settings.db`` is intentionally ABSENT from this map. The bundled
+# settings.db carries ONLY the Knowledge Library tables (the exporter's
+# ``_export_kb_settings``), not config/workspaces. It must NEVER be swapped
+# onto the live settings.db (that would clobber the target's config + the
+# already-merged workspaces table). It is consumed merge-only by
+# ``_merge_kb_into_settings`` in step 7c, which reads it directly from staging.
 _BUNDLE_DB_TO_DEST_RESOLVER = {
-    "settings.db": "settings_db",
     "snapshots.db": "snapshots_db",
     "memory_state.db": "primary_memory_db",
     "memory_ops.db": "memory_ops_db",
@@ -169,6 +176,19 @@ def import_bundle(
     report.vault_message = pairing.message
     _log(f"  vault status: {pairing.status.value}")
 
+    # Internal inconsistency (tampered meta.env) is a HARD abort that
+    # --reset-vault-key MUST NOT bypass — otherwise an attacker-crafted bundle
+    # whose meta.env key disagrees with its manifest fingerprint could
+    # overwrite the target's legitimate KAZMA_VAULT_KEY via sync_vault_key
+    # and swap in the attacker's vault.db. (audit finding)
+    if pairing.status == VaultKeyStatus.INCONSISTENT:
+        report.error(pairing.message)
+        report.error(
+            "Refusing import: bundle is internally inconsistent. "
+            "--reset-vault-key cannot override a tamper signal."
+        )
+        return report
+
     if pairing.status == VaultKeyStatus.MISMATCH and not reset_vault_key:
         report.error(pairing.message)
         report.warn("Re-run with --reset-vault-key to overwrite the target's key.")
@@ -210,7 +230,18 @@ def import_bundle(
                     f"Existing target vault.db backed up to {backup.name} before overwrite."
                 )
         else:
-            report.warn("No .env found to write KAZMA_VAULT_KEY — set it manually.")
+            # No .env to persist KAZMA_VAULT_KEY into. If we continued, the
+            # bundle's vault.db would be swapped in (step 6) but its matching
+            # key would be written NOWHERE → every encrypted secret becomes
+            # undecryptable on next boot (the #1 silent-breakage mode invariant
+            # A exists to prevent), while the import still reported ok=True.
+            # Treat as fatal: the operator must provide a .env first.
+            report.error(
+                "No .env found to write KAZMA_VAULT_KEY. The bundle's vault.db "
+                "cannot decrypt without its matching key — create a .env (or set "
+                "KAZMA_VAULT_KEY in the environment) and re-run."
+            )
+            return report
 
     # ── 6. Backup live DBs, then swap ──────────────────────────────────
     backup_dir = data_dir / f".migrate-backup-{ts}"

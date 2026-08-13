@@ -23,6 +23,7 @@ import json
 import logging
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 from rich.console import Console
@@ -94,6 +95,61 @@ _UPDATE_BOOL_FLAGS = {
 _TRACKING_BRANCHES = frozenset({"main", "master"})
 _UPDATE_REMOTE_REF = "origin/main"
 _STASH_MSG_PREFIX = "kazma-update-"
+
+# ── Supply-chain safety for the operator upgrade path ────────────────────
+# ``kazma update`` hard-resets to ``origin/main`` and then executes the
+# freshly-pulled installer (``_reinstall_via_subprocess``). To prevent an
+# attacker who can push to / redirect ``origin`` from achieving arbitrary code
+# execution on every operator who upgrades, refuse to update unless ``origin``
+# points at the canonical Kazma repo. Legitimate forks opt in via the
+# ``KAZMA_UPDATE_REMOTE_ALLOWLIST`` env var (comma-separated substrings).
+_CANONICAL_REMOTE_MARKERS = ("github.com/mubder/kazma",)
+
+
+def _resolve_server_port() -> int:
+    """Resolve the port ``kazma serve`` listens on (KAZMA_PORT or 9090)."""
+    env_port = os.environ.get("KAZMA_PORT")
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            pass
+    return 9090
+
+
+def _origin_remote_url(cwd: str) -> str:
+    """Return the lowercased ``origin`` remote URL, or '' if unreadable."""
+    try:
+        r = _run_cmd(["git", "remote", "get-url", "origin"], cwd=cwd)
+        if r.returncode == 0:
+            return (r.stdout or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _origin_is_trusted(cwd: str) -> tuple[bool, str]:
+    """True when ``origin`` points at a canonical/trusted Kazma repo."""
+    url = _origin_remote_url(cwd)
+    if not url:
+        return False, ""
+    allow = os.environ.get("KAZMA_UPDATE_REMOTE_ALLOWLIST", "")
+    markers = (
+        tuple(m.strip().lower() for m in allow.split(",") if m.strip())
+        or _CANONICAL_REMOTE_MARKERS
+    )
+    if any(m in url for m in markers):
+        return True, url
+    return False, url
+
+
+def _target_commit_signed(cwd: str, ref: str) -> bool:
+    """Best-effort GPG signature verification of the target commit (opt-in)."""
+    try:
+        r = _run_cmd(["git", "verify-commit", "--raw", ref], cwd=cwd)
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1195,7 +1251,7 @@ def do_git_update(
     # Preflight: the Kazma server holds a lock on kazma.exe on Windows.
     # If it's running, reinstall will fail with WinError 32 halfway through
     # (git updated but package not reinstalled — a broken state).
-    if _is_server_running():
+    if _is_server_running(_resolve_server_port()):
         console.print(
             "[red]â Kazma server is running (port 9090).[/red]\n"
             "The server holds a lock on kazma.exe â€” the update cannot reinstall "
@@ -1211,6 +1267,24 @@ def do_git_update(
     cwd = str(git_root)
     stash_msg: str | None = None
     from_commit = get_git_commit("HEAD")
+
+    # Supply-chain gate (audit): refuse to pull+exec from a non-canonical
+    # origin. kazma update hard-resets to origin/main and runs the freshly-
+    # pulled installer, so an attacker who can redirect `origin` would gain
+    # code execution on every operator who upgrades. Forks opt in via
+    # KAZMA_UPDATE_REMOTE_ALLOWLIST.
+    trusted, origin_url = _origin_is_trusted(cwd)
+    if not trusted:
+        console.print(
+            "[red]Refusing update: origin remote is not the canonical Kazma repo.[/red]\n"
+            f"  origin = {origin_url or '(unreadable)'}\n"
+            "kazma update pulls and runs the installer from origin/main — an "
+            "untrusted origin could execute arbitrary code.\n\n"
+            "[yellow]If this is a legitimate fork, allow it with:[/yellow]\n"
+            "  [dim]KAZMA_UPDATE_REMOTE_ALLOWLIST=github.com/youruser/yourfork "
+            "kazma update[/dim]"
+        )
+        return False
 
     try:
         ok, branch = _preflight_git(
@@ -1265,6 +1339,21 @@ def do_git_update(
             f"[cyan]Updating to {_UPDATE_REMOTE_REF} "
             "(hard reset — no merge commits)…[/cyan]"
         )
+        # Optional supply-chain hardening: verify the target commit's signature
+        # before resetting to it. Opt-in via KAZMA_UPDATE_VERIFY_SIGNATURES=1.
+        if os.environ.get("KAZMA_UPDATE_VERIFY_SIGNATURES", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            if not _target_commit_signed(cwd, _UPDATE_REMOTE_REF):
+                console.print(
+                    f"[red]Refusing update: target ({_UPDATE_REMOTE_REF}) is not "
+                    "signed by a trusted key.[/red]\n"
+                    "Unset KAZMA_UPDATE_VERIFY_SIGNATURES to skip this check."
+                )
+                if stash_msg:
+                    _restore_stash(cwd, stash_msg)
+                return False
+            console.print("[green]Target commit signature verified.[/green]")
         _write_update_state(cwd, phase="resetting")
         result = _run_cmd(
             ["git", "reset", "--hard", _UPDATE_REMOTE_REF],
@@ -1309,9 +1398,22 @@ def do_git_update(
     _write_update_state(cwd, phase="reinstalling")
     if not _reinstall_via_subprocess(cwd):
         _write_update_state(cwd, phase="reinstall_failed")
+        # Roll the tree back to the pre-update commit so the venv (still
+        # expecting the old code) stays consistent. Previously a reinstall
+        # failure left source advanced to origin/main while the venv was stale
+        # → kazma serve hit ModuleNotFoundError on next boot (audit finding).
         console.print(
-            "[red]Code is on origin/main but package reinstall failed.[/red]\n"
-            "Repair: [cyan]kazma update --reinstall -y[/cyan]"
+            "[yellow]Reinstall failed — rolling HEAD back to pre-update commit…[/yellow]"
+        )
+        try:
+            _run_cmd(["git", "reset", "--hard", from_commit], cwd=cwd)
+            if stash_msg:
+                _restore_stash(cwd, stash_msg)
+        except Exception:  # noqa: BLE001
+            pass
+        console.print(
+            "[red]Update aborted; install restored to its pre-update state.[/red]\n"
+            "Repair manually with: [cyan]kazma update --reinstall -y[/cyan]"
         )
         return False
 

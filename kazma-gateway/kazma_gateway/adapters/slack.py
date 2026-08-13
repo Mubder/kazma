@@ -451,7 +451,29 @@ class SlackAdapter(BaseAdapter):
                                     route_swarm_bus,
                                 )
 
+                                # Audit (allowlist bypass): enforce channel + user
+                                # allowlists on EVERY block_actions branch, not only
+                                # the graph HITL/picker branch below. Previously the
+                                # swarm-approval and dependency-install branches
+                                # resolved with no check, so a non-allowlisted member
+                                # could Approve a danger tool, Reject a task, or
+                                # trigger a remote package install by clicking a button.
+                                _ia_user = payload.get("user", {}) or {}
+                                _ia_user_id = str(_ia_user.get("id", ""))
+                                _ia_channel = (payload.get("channel", {}) or {}).get("id", "")
                                 for value, action in iter_block_actions(payload):
+                                    if self._allowed_channels and _ia_channel and _ia_channel not in self._allowed_channels:
+                                        logger.info(
+                                            "[Slack] Ignoring interaction from non-allowed channel %s (action=%s)",
+                                            _ia_channel, action.kind,
+                                        )
+                                        continue
+                                    if getattr(self, "_allowed_users", None) and (not _ia_user_id or _ia_user_id not in self._allowed_users):
+                                        logger.info(
+                                            "[Slack] Ignoring interaction from non-allowed user %s (action=%s)",
+                                            _ia_user_id, action.kind,
+                                        )
+                                        continue
                                     if action.kind in ("sys_install", "install_dep"):
                                         package_name = action.package_name
                                         from kazma_core.system.runtime_manager import (
