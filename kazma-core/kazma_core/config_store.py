@@ -1236,6 +1236,11 @@ class ConfigStore:
 # ══════════════════════════════════════════════════════════════════════════
 
 _config_store: ConfigStore | None = None
+# Guards the get_config_store() singleton init — check-then-set was not locked,
+# so under a threaded ASGI server two threads could each construct a ConfigStore
+# (each opening its own SQLite connection + its own lock), and the loser's
+# cache/lock diverged from the survivor's (audit finding).
+_config_store_lock = __import__("threading").Lock()
 
 
 def get_config_store() -> ConfigStore:
@@ -1251,18 +1256,22 @@ def get_config_store() -> ConfigStore:
     """
     global _config_store
     if _config_store is None:
-        try:
-            _config_store = ConfigStore()
-        except Exception as e:
-            logger.critical(
-                "ConfigStore (SQLite) initialization FAILED: %s. "
-                "SAFETY-CRITICAL data (path grants, HITL approvals, YOLO state, "
-                "task grants) will NOT persist across restarts — using volatile "
-                "in-memory fallback with 1-hour TTL. Fix: check kazma-data/ "
-                "permissions, disk space, and that settings.db is not locked.",
-                e,
-            )
-            _config_store = _InMemoryStore()  # type: ignore[assignment]
+        with _config_store_lock:
+            # Double-checked locking: re-test inside the lock so only one thread
+            # constructs the singleton (audit finding).
+            if _config_store is None:
+                try:
+                    _config_store = ConfigStore()
+                except Exception as e:
+                    logger.critical(
+                        "ConfigStore (SQLite) initialization FAILED: %s. "
+                        "SAFETY-CRITICAL data (path grants, HITL approvals, YOLO state, "
+                        "task grants) will NOT persist across restarts — using volatile "
+                        "in-memory fallback with 1-hour TTL. Fix: check kazma-data/ "
+                        "permissions, disk space, and that settings.db is not locked.",
+                        e,
+                    )
+                    _config_store = _InMemoryStore()  # type: ignore[assignment]
     return _config_store
 
 

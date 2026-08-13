@@ -1018,6 +1018,16 @@ async def read_url_to_file(url: str, path: str | None = None) -> str:
         return target
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    # This is a deliberate second write path that bypasses file_write / the
+    # HITL gate (the research workflow fetches a URL into the workspace). To
+    # keep it from silently clobbering an existing workspace file, refuse to
+    # overwrite — the caller can pass a fresh path (audit finding §10B).
+    if target.exists():
+        return (
+            f"Refusing to overwrite existing file `{target.name}`. "
+            "Use a different path, or open file_write to save the fetched "
+            "content under an approval-gated path."
+        )
     header = (
         f"# Source: {url}\n"
         f"# Saved: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"
