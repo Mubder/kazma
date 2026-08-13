@@ -769,6 +769,20 @@ class KazmaAgent:
         if not streaming_hitl.get("enabled", True):
             streaming_hitl = None
 
+        # Ensure the snapshot recorder exists BEFORE building/caching the
+        # streaming graph. app.py calls get_streaming_graph() at startup
+        # (before the post-startup recorder-creation block runs), which
+        # previously cached a graph built with snapshot_recorder=None — so
+        # the voice/WS path never captured Time-Travel snapshots for the
+        # process lifetime (audit finding / AGENTS.md §12A). Mirror
+        # _ensure_graph's lazy-creation block.
+        if self._snapshot_recorder is None:
+            try:
+                from kazma_core.time_travel import create_recorder
+                self._snapshot_recorder = create_recorder(config=self.config.raw)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Snapshot recorder unavailable: %s", exc)
+
         self._streaming_graph = build_supervisor_graph(
             llm=self.llm,
             system_prompt=self.system_prompt,

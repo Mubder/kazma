@@ -248,6 +248,12 @@ class SubAgentManager:
                 "require_approval_for": danger,
                 "approval_timeout_seconds": 1,
                 "auto_deny_on_timeout": True,
+                # Signal to tool_worker_node to deny danger tools directly
+                # rather than route them through interrupt() — child graphs are
+                # built with checkpointer=None so the graph gate can't persist,
+                # and the external timeout watcher doesn't cover child threads.
+                # Without this the documented auto-deny never fired (audit M19).
+                "auto_deny": True,
             }
 
         # "inherit" — use process-wide HITL config

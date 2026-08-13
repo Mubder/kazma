@@ -248,10 +248,16 @@ class InProcessWorker(SwarmWorker):
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
 
-            # Override the LLM timeout for swarm workers — research tasks
-            # generate long outputs that need more than the default 60s.
-            if hasattr(provider, "config") and hasattr(provider.config, "timeout"):
-                provider.config.timeout = 180.0  # 3 minutes per LLM call
+            # NOTE: do NOT mutate provider.config.timeout here. The provider is a
+            # process-wide cached singleton shared by the main agent, every other
+            # worker, compaction, and cron — mutating its config permanently
+            # raised every LLM call's timeout to 180s and was never restored
+            # (audit finding). It was also ineffective: the httpx client bakes
+            # config.timeout in at first construction (_get_client) and is then
+            # cached, so by the time a worker runs the client already exists
+            # with the original timeout. A per-worker longer timeout would need
+            # a dedicated provider instance; until then the configured timeout
+            # applies uniformly and safely.
 
             # ── Tool definitions ──────────────────────────────────────
             tool_defs: list[dict[str, Any]] = []

@@ -228,6 +228,15 @@ class SupervisorState(TypedDict, total=False):
     (2026-08-03 empty-reply regression).
     """
 
+    _research_depth_nudged: bool
+    """One-shot guard so the research-depth "more sources" nudge fires once per
+    turn, not every tool-worker iteration. Must be declared (undeclared keys
+    are dropped by LangGraph) — previously this was always read as False, so
+    the nudge spammed the model every iteration (audit finding)."""
+
+    _research_pipeline_nudged: bool
+    """One-shot guard for the R4 deep-research pipeline nudge (see above)."""
+
     mission_rounds_used: int
     """Cumulative tool rounds already consumed in mission mode (wave tracking)."""
 
@@ -308,6 +317,8 @@ def initial_supervisor_state(
         hard_constraints=[],
         scratchpad={},
         force_synthesis=False,
+        _research_depth_nudged=False,
+        _research_pipeline_nudged=False,
         turn_failed=False,
         error_message="",
         mission_rounds_used=0,

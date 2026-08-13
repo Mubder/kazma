@@ -2446,6 +2446,34 @@ async def tool_worker_node(
         # *before* resume so later turns skip the gate entirely.
         approved = False
         approved_ids = None
+        # Sub-agent auto_deny policy (AGENTS.md §7A): spawned child graphs are
+        # built with checkpointer=None, so LangGraph interrupt() cannot persist
+        # a pause and the external approval-timeout watcher doesn't cover the
+        # ephemeral child thread_ids — the documented "1s auto-deny" never
+        # fired, and _graph_hitl_gate_ctx skipped the SwarmMessageBus gate,
+        # leaving child danger tools ungated/broken (audit finding). Deny them
+        # directly here instead of routing through the non-functional
+        # interrupt() path.
+        if danger_tools and hitl_config and hitl_config.get("auto_deny"):
+            for tc in danger_tools:
+                results.append(ToolResult(
+                    tool_call_id=str(tc.get("id") or ""),
+                    name=tc["name"],
+                    content=(
+                        f"Tool '{tc['name']}' is a danger tool and was auto-denied "
+                        "(sub-agent safety mode is 'auto_deny')."
+                    ),
+                    is_error=True,
+                    duration_ms=0.0,
+                    outcome="hard",
+                ))
+            if record_commitment_terminal:
+                try:
+                    record_commitment_terminal("auto_denied")
+                except Exception:
+                    pass
+            danger_tools = []
+
         if danger_tools:
             tools_payload = [
                 {
