@@ -121,6 +121,11 @@ def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
     match = re.match(r"^daily at (\d{1,2})(am|pm)$", timing)
     if match:
         hour = int(match.group(1))
+        # The regex admits 1-99; "13pm" → hour 25 → now.replace(hour=25)
+        # raises an opaque ValueError. Validate the 1-12 am/pm range up front
+        # so the user gets the intended "Unparseable timing" error (audit).
+        if not (1 <= hour <= 12):
+            raise ValueError(f"Unparseable timing: '{timing}'. Hour must be 1-12 with am/pm.")
         if match.group(2) == "pm" and hour != 12:
             hour += 12
         if match.group(2) == "am" and hour == 12:

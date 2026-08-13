@@ -186,6 +186,11 @@ def rewrite_paths_in_sqlite(
     total_changed = 0
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL;")
+    # Match the standard pragma set (§6/§8): without busy_timeout a rewrite
+    # UPDATE raises "database is locked" immediately if a live process still
+    # holds the staged DB, and the broad except turns it into a silent warning
+    # → paths left unrewritten (audit finding).
+    conn.execute("PRAGMA busy_timeout=5000;")
     try:
         for table, col in columns:
             total_changed += _rewrite_one_column(

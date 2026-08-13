@@ -148,6 +148,7 @@ def _consume_recent_shutdown(window_seconds: int) -> float | None:
     """
     if window_seconds <= 0:
         return None
+    raw = None
     try:
         from kazma_core.config_store import get_config_store
 

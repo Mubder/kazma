@@ -176,4 +176,10 @@ def _set_env_key(env_path: Path, key: str, value: str) -> None:
             lines.append(line)
     if not found:
         lines.append(f"{key}={value}")
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Atomic write (temp sibling + os.replace): a crash/power loss mid-
+    # write_text left a truncated .env that could drop KAZMA_VAULT_KEY (or
+    # other lines) — same corruptibility class §11A flags for JSON stores
+    # (audit finding).
+    tmp = env_path.with_suffix(env_path.suffix + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp, env_path)

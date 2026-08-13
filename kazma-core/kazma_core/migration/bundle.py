@@ -240,9 +240,19 @@ class KazmaBundle:
 
     def extract_all(self, dest: Path) -> Path:
         """Extract the whole bundle into ``dest``. Returns the dest path."""
-        dest = Path(dest)
+        dest = Path(dest).resolve()
         dest.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(self.path, "r") as zf:
+            # Zip-slip guard: reject any entry whose resolved target escapes
+            # dest (e.g. data/../../../etc/cron.d/x). CPython's extractall is
+            # not fully traversal-safe across versions; the bundle is operator-
+            # supplied, but defense-in-depth is cheap (audit finding).
+            for name in zf.namelist():
+                target = (dest / name).resolve()
+                try:
+                    target.relative_to(dest)
+                except ValueError:
+                    raise ValueError(f"unsafe bundle entry escapes staging: {name}")
             zf.extractall(dest)
         return dest
 
