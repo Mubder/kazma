@@ -477,6 +477,9 @@ class GatewayManager:
         self._shutdown = asyncio.Event()
         self._handler: MessageHandler | None = None
         self._consumer_task: asyncio.Task[None] | None = None
+        # Strong refs to per-message handler tasks (concurrent dispatch) so
+        # CPython can't GC them mid-turn, and stop() can drain them.
+        self._handler_tasks: set[asyncio.Task] = set()
         self._started = False
         # Metrics
         self.metrics = MessageMetrics()
@@ -594,6 +597,12 @@ class GatewayManager:
             except asyncio.CancelledError:
                 pass
 
+        # 5. Drain in-flight handler tasks (turns still being processed when
+        # shutdown began) so they finish rather than being abandoned.
+        if self._handler_tasks:
+            await asyncio.gather(*list(self._handler_tasks), return_exceptions=True)
+            self._handler_tasks.clear()
+
         self._started = False
         logger.info("Gateway stopped cleanly")
 
@@ -677,38 +686,53 @@ class GatewayManager:
                         continue  # Skip dispatching to handler
 
                 if self._handler:
-                    handler_ok = False
-                    try:
-                        await self._handler(msg)
-                        handler_ok = True
-                    except Exception:
-                        logger.exception(
-                            "Handler error for message from %s",
-                            msg.sender_id,
-                        )
+                    # Dispatch each message concurrently so one long turn can't
+                    # block every platform, and /steer /abort don't queue
+                    # behind the very turn they're meant to interrupt (audit
+                    # finding). Same-thread turns remain serialized by the
+                    # handler's per-thread lock. The consumer loop only
+                    # enqueues; per-message work (handler + post-task hints)
+                    # runs in a tracked task, drained on stop().
+                    handler = self._handler
+                    suggester = self._suggester
 
-                    # ── Post-task suggestions ────────────────────────
-                    # Send next-step hints after the handler completes
-                    # successfully — hinting after a failed turn is noise.
-                    # detect_tool_intent analyzes the user's message for
-                    # patterns that suggest a tool could help. Hints are
-                    # already "💡 "-prefixed; do not prefix them again.
-                    if handler_ok and self._suggester is not None and msg.text:
+                    async def _handle_one(msg: IncomingMessage = msg) -> None:
+                        handler_ok = False
                         try:
-                            from kazma_gateway.suggestions import detect_tool_intent
-
-                            hints = detect_tool_intent(msg.text)
-                            if hints:
-                                hint_text = "\n".join(hints[:2])
-                                try:
-                                    await self.send(OutboundMessage(
-                                        target_id=msg.reply_target(),
-                                        text=hint_text,
-                                    ))
-                                except Exception:
-                                    logger.debug("[Gateway] Failed to send suggestion hints")
+                            await handler(msg)
+                            handler_ok = True
                         except Exception:
-                            logger.debug("[Gateway] Suggestion detection failed")
+                            logger.exception(
+                                "Handler error for message from %s",
+                                msg.sender_id,
+                            )
+
+                        # ── Post-task suggestions ────────────────────────
+                        # Send next-step hints after the handler completes
+                        # successfully — hinting after a failed turn is noise.
+                        # detect_tool_intent analyzes the user's message for
+                        # patterns that suggest a tool could help. Hints are
+                        # already "💡 "-prefixed; do not prefix them again.
+                        if handler_ok and suggester is not None and msg.text:
+                            try:
+                                from kazma_gateway.suggestions import detect_tool_intent
+
+                                hints = detect_tool_intent(msg.text)
+                                if hints:
+                                    hint_text = "\n".join(hints[:2])
+                                    try:
+                                        await self.send(OutboundMessage(
+                                            target_id=msg.reply_target(),
+                                            text=hint_text,
+                                        ))
+                                    except Exception:
+                                        logger.debug("[Gateway] Failed to send suggestion hints")
+                            except Exception:
+                                logger.debug("[Gateway] Suggestion detection failed")
+
+                    _t = asyncio.create_task(_handle_one())
+                    self._handler_tasks.add(_t)
+                    _t.add_done_callback(self._handler_tasks.discard)
                 else:
                     logger.warning(
                         "[Gateway] Message from %s dropped — no handler registered",
