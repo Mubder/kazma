@@ -127,16 +127,21 @@ async def _run_install_task(
 
         logger.info("[Installer] Executing command (cwd=%s): %s", cwd, " ".join(cmd))
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
+        # Run the blocking install in a worker thread instead of
+        # asyncio.create_subprocess_exec. On Windows the asyncio subprocess
+        # transport requires a ProactorEventLoop, but this background task may
+        # run on a SelectorEventLoop (thread-spawned loop / uvicorn worker
+        # context), which raises NotImplementedError — every "Install ML
+        # Dependencies" click failed with that (issue report). subprocess.run
+        # in a thread works on any loop/platform.
+        import subprocess
+
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, cwd=cwd, capture_output=True,
         )
+        stderr = result.stderr
 
-        _stdout, stderr = await proc.communicate()
-
-        if proc.returncode == 0:
+        if result.returncode == 0:
             logger.info("[Installer] Installed successfully: %s", target_label)
             store = get_config_store()
             store.set("system.install.last_status", "OK", category="system")
@@ -154,7 +159,7 @@ async def _run_install_task(
             err_msg = stderr.decode(errors="replace")
             logger.error(
                 "[Installer] Installation failed code=%d target=%s err=%s",
-                proc.returncode, target_label, err_msg[:500],
+                result.returncode, target_label, err_msg[:500],
             )
             try:
                 store = get_config_store()

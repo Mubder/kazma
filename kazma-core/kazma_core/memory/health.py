@@ -95,6 +95,12 @@ def _comp(
 
 def build_memory_health() -> dict[str, Any]:
     """Return overall status + per-component health rows."""
+    # Declare the TTL-cache globals: _health_embed_cache_ts is REBOUND below
+    # (`_health_embed_cache_ts = _now`), which makes it a local for the whole
+    # function — the earlier TTL read then raised UnboundLocalError
+    # ("cannot access local variable ... where it is not associated with a
+    # value") and every health poll reported the embedder as DEGRADED.
+    global _health_embed_cache_ts
     cfg = _read_memory_cfg()
     components: list[dict[str, Any]] = []
     demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
