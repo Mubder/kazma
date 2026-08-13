@@ -87,11 +87,13 @@ class ShellTool(BaseTool):
     _READ_ONLY_COMMANDS = {
         "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
         "uniq", "echo", "date", "whoami", "pwd", "df", "du",
-        "free", "uptime", "uname", "hostname", "ps", "pgrep",
+        "free", "uptime", "uname", "hostname",
         "git", "tar", "gzip", "gunzip", "zip", "unzip",
         "jq", "tr", "cut", "mkdir", "cp", "mv", "touch",
         "kazma", "uv", "pytest", "ruff", "mypy",
     }
+    # NOTE: ps/pgrep were removed — process listing reveals other tenants'
+    # activity; the active shell_exec (agent/tool_registry) gates them too.
 
     @classmethod
     def is_safe(cls, command: str) -> bool:
@@ -191,10 +193,25 @@ class ShellTool(BaseTool):
 
         t0 = _time.perf_counter()
         try:
+            # Hardened spawn (audit MED #10): pin cwd to the active workspace
+            # and scrub the child env — previously the subprocess inherited
+            # the server's full environment (KAZMA_SECRET, vault key, every
+            # provider API key) and cwd. Mirrors the active shell_exec.
+            try:
+                from kazma_core.tools.file_write import _get_workspace
+                from kazma_core.safety.post_hitl import restricted_child_env
+
+                _cwd = _get_workspace()
+                _env = restricted_child_env(cwd=str(_cwd))
+            except Exception:
+                _cwd = None
+                _env = None
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=_cwd,
+                env=_env,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
