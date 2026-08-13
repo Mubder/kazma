@@ -73,6 +73,10 @@ var KazmaStream = (function() {
       function dispatch(type, data) {
         switch (type) {
           case 'token':
+            // Record that tokens were streamed so the done/turn_complete
+            // fallback below doesn't re-feed the full final text to onToken
+            // (the guard was read here but never set — audit finding).
+            callbacks._sawToken = true;
             if (callbacks.onToken) callbacks.onToken(data);
             break;
           case 'tool_call':

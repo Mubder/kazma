@@ -14,6 +14,15 @@
 
   const POLL_INTERVAL_MS = 5000;
   const containerId = 'hitl-approvals-panel';
+  // Hoisted poll timer so re-init (soft-nav re-inject of this script, or a
+  // second initHitlApproval call) doesn't stack a second setInterval on top
+  // of the first — each extra poller doubled the /api/pending-approvals rate
+  // forever (no clearInterval anywhere) (audit finding).
+  let _pollTimer = null;
+  function _startPolling() {
+    if (_pollTimer) return;
+    _pollTimer = setInterval(refreshPending, POLL_INTERVAL_MS);
+  }
 
   function t(key, fallback) {
     try {
@@ -320,13 +329,13 @@
 
     if (document.getElementById(containerId)) {
       refreshPending();
-      setInterval(refreshPending, POLL_INTERVAL_MS);
+      _startPolling();
       window.KazmaHITL = { refresh: refreshPending };
       return;
     }
 
     refreshPending();
-    setInterval(refreshPending, POLL_INTERVAL_MS);
+    _startPolling();
     window.KazmaHITL = { refresh: refreshPending };
   }
 
