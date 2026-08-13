@@ -601,18 +601,32 @@ class DocumentRepository:
                 if int(existing["byte_size"]) != size:
                     raise ValueError("existing blob metadata has a conflicting byte size")
                 return _blob(existing)
-            self._conn.execute(
-                """
-                INSERT INTO document_blobs
-                    (id, tenant_id, sha256, byte_size, storage_kind, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (str(identifier), tenant, digest, size, storage_kind, _now()),
-            )
+            try:
+                self._conn.execute(
+                    """
+                    INSERT INTO document_blobs
+                        (id, tenant_id, sha256, byte_size, storage_kind, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (str(identifier), tenant, digest, size, storage_kind, _now()),
+                )
+            except sqlite3.IntegrityError:
+                # Lost a concurrent insert race on the UNIQUE natural key —
+                # fall through to the re-fetch by natural key below.
+                pass
             row = self._conn.execute(
                 "SELECT * FROM document_blobs WHERE tenant_id = ? AND id = ?",
                 (tenant, str(identifier)),
             ).fetchone()
+            # Re-fetch by natural key so a lost cross-process INSERT race
+            # (UNIQUE tenant_id+sha256+storage_kind raised IntegrityError,
+            # caught below) still returns the winner's canonical row instead
+            # of the locally-minted id that never landed (audit finding).
+            if row is None:
+                row = self._conn.execute(
+                    "SELECT * FROM document_blobs WHERE tenant_id = ? AND sha256 = ? AND storage_kind = ?",
+                    (tenant, digest, storage_kind),
+                ).fetchone()
         if row is None:
             raise RuntimeError("blob insert succeeded but record was not found")
         return _blob(row)
