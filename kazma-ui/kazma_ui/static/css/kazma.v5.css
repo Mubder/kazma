@@ -36,34 +36,20 @@ html[data-theme="light"] { color-scheme: only light; }
   height: 38px;
   border-radius: 11px;
   flex-shrink: 0;
-  object-fit: cover;
-  background: #05070d;
-  padding: 3px;
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  box-shadow: 0 4px 14px -2px rgba(var(--accent-rgb), 0.45),
-              inset 0 1px 0 rgba(255, 255, 255, 0.10);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  object-fit: contain;
+  /* Transparent mark — no background tile, border, or shadow (logo floats). */
+  transition: transform var(--transition-fast);
 }
 .sidebar .logo-img:hover {
   transform: scale(1.05);
-  box-shadow: 0 6px 20px -4px rgba(var(--accent-rgb), 0.60),
-              inset 0 1px 0 rgba(255, 255, 255, 0.12);
-}
-[data-theme="light"] .sidebar .logo-img {
-  border-color: rgba(37, 99, 235, 0.35);
-  box-shadow: 0 4px 12px -3px rgba(37, 99, 235, 0.35),
-              inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
-/* Sidebar footer avatar — same intentional dark-tile badge, round */
+/* Sidebar footer avatar — transparent mark on a round surface */
 .sidebar .user-avatar-img {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  object-fit: cover;
-  background: #05070d;
-  padding: 2px;
-  border: 1px solid var(--border-strong);
+  object-fit: contain;
   flex-shrink: 0;
 }
 
