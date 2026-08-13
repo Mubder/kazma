@@ -70,6 +70,21 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         timeout_s,
     )
     try:
+        # Don't auto-deny if a manual resume (SSE/WS approve) is already in
+        # flight for this thread — the watchdog's ainvoke(deny) would race
+        # the just-clicked approve and could clobber it. The SSE/WS paths
+        # register their resume via register_turn/is_turn_running (audit).
+        from kazma_ui.active_turns import is_turn_running
+
+        if is_turn_running(thread_id):
+            logger.info(
+                "[HITL-WD] thread=%s has a turn in flight — skipping auto-deny "
+                "(manual resume racing)", thread_id,
+            )
+            return
+    except Exception:
+        pass
+    try:
         await graph.ainvoke(_resume_cmd, config)
     except Exception:
         logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)

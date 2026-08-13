@@ -58,6 +58,24 @@ def create_replay_router(
             status_code=503,
         )
 
+    def _require_thread_owned(thread_id: str) -> JSONResponse | None:
+        """Return a 404 if *thread_id* is not owned by the current tenant, else None.
+
+        Mirrors the HITL approval ownership gate (routes_direct). Without this,
+        any authenticated user could rewind/fork another tenant's thread via
+        ``aupdate_state`` (audit finding). Best-effort: if the session manager
+        is unavailable, fail open for the admin-scoped replay panel.
+        """
+        try:
+            from kazma_ui.session_manager import get_session_manager
+
+            if get_session_manager().get_by_thread_id(thread_id) is None:
+                logger.warning("[replay] thread not owned by current tenant: %s", thread_id)
+                return JSONResponse({"error": "not found"}, status_code=404)
+        except Exception:
+            logger.debug("[replay] ownership check skipped", exc_info=True)
+        return None
+
     @router.get("/api/replay/threads")
     async def list_threads() -> JSONResponse:
         """List distinct thread_ids that have at least one snapshot."""
@@ -129,6 +147,9 @@ def create_replay_router(
         iteration = body.get("iteration")
         if not thread_id or iteration is None:
             return JSONResponse({"error": "thread_id and iteration required"}, status_code=400)
+        _own = _require_thread_owned(thread_id)
+        if _own is not None:
+            return _own
         try:
             state = engine.replay_from(thread_id, int(iteration))
             if state is None:
@@ -162,6 +183,9 @@ def create_replay_router(
         iteration = body.get("iteration")
         if not thread_id or iteration is None:
             return JSONResponse({"error": "thread_id and iteration required"}, status_code=400)
+        _own = _require_thread_owned(thread_id)
+        if _own is not None:
+            return _own
         try:
             state = engine.replay_from(thread_id, int(iteration))
             if state is None:

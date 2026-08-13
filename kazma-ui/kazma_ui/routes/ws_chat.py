@@ -2173,6 +2173,17 @@ def create_ws_chat_router(
                         finally:
                             reset_current_thread_id(tid_token)
 
+                    # Guard against a cross-transport duplicate resume: if an
+                    # HTTP/SSE approve (or another WS approve) already resumed
+                    # this thread, starting a second ainvoke(resume) on the same
+                    # checkpoint would double-execute the tool + interleave
+                    # checkpoint writes. SSE guards this; the WS path did not
+                    # (audit finding).
+                    if is_turn_running(target_thread_id):
+                        await send({"type": "error", "code": "TURN_BUSY",
+                                    "thread_id": target_thread_id,
+                                    "message": "A turn is already running for this thread"})
+                        continue
                     if active_task and not active_task.done():
                         active_task.cancel()
                     active_task = asyncio.create_task(_run_approve_stream())
