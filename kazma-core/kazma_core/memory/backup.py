@@ -101,6 +101,10 @@ def prune_old_backups(*, retention: int = _DEFAULT_RETENTION) -> int:
 
     out_dir = backups_dir()
     deleted = 0
+    # Only the two memory DBs are backed up here; restrict to their stems so
+    # an unrelated *_<digits>.db file in backups_dir() (e.g. an export) isn't
+    # grouped and pruned if its "group" exceeded retention (audit finding).
+    _known_prefixes = {"memory_state", "memory_ops"}
     # Group by the prefix before the final _<timestamp>.db
     groups: dict[str, list[Path]] = {}
     for f in out_dir.glob("*_*.db"):
@@ -111,6 +115,8 @@ def prune_old_backups(*, retention: int = _DEFAULT_RETENTION) -> int:
         if len(parts) != 2 or not parts[1].isdigit():
             continue
         prefix = parts[0]
+        if prefix not in _known_prefixes:
+            continue
         groups.setdefault(prefix, []).append(f)
 
     for prefix, files in groups.items():

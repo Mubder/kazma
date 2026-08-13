@@ -548,7 +548,7 @@ def get_embedding_dim() -> int:
     """Return the configured embedding dimension (without loading the model).
 
     Used by sqlite-vec table DDL and semantic_router before the embedder is
-    instantiated. Reads from config; defaults to 384.
+    instantiated. Reads from config; defaults to 1024 (DEFAULT_DIM).
     """
     return _read_embedding_config()["dim"]
 

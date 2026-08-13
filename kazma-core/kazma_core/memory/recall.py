@@ -766,7 +766,13 @@ def _episode_fts(
     )
     params: list[Any] = []
     for t in terms:
-        cleaned = "".join(c for c in t if c.isalnum()) or t
+        # Strip non-alphanumerics for the LIKE pattern. `or t` previously
+        # fell back to the raw token when alnum-strip yielded empty — but `_`
+        # is a LIKE wildcard, so an all-punctuation token became a wildcard
+        # pattern. Skip such terms instead (audit finding).
+        cleaned = "".join(c for c in t if c.isalnum())
+        if not cleaned:
+            continue
         params.extend([f"%{cleaned}%", f"%{cleaned}%"])
     params.extend([limit])
     try:

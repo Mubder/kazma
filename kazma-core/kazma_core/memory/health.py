@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any
 
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 # they're watching the Dashboard. This lightweight counter lets the health
 # check surface "recall failures detected" as a DEGRADED status.
 _recall_fail_count: int = 0
+# Guards the recall-failure counters (mark_recall_degraded is called from
+# consolidator threads + the loop concurrently — bare `+= 1` undercounts).
+_recall_fail_lock = threading.Lock()
 _recall_last_failure: float = 0.0
 _recall_last_reason: str = ""
 
@@ -42,8 +46,12 @@ def mark_recall_degraded(reason: str = "") -> None:
     whether to flag DEGRADED.
     """
     global _recall_fail_count, _recall_last_failure, _recall_last_reason
-    _recall_fail_count += 1
-    _recall_last_failure = time.time()
+    # Guarded: recall runs from the consolidator's per-turn threads AND the
+    # loop concurrently; the bare `+= 1` on a module global could undercount
+    # under concurrent failures (audit finding).
+    with _recall_fail_lock:
+        _recall_fail_count += 1
+        _recall_last_failure = time.time()
     _recall_last_reason = reason or "unknown"
 
 
