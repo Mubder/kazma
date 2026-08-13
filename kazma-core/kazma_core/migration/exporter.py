@@ -148,6 +148,17 @@ def export_bundle(
     except Exception as exc:
         logger.warning("[migrate:export] workspaces export failed: %s", exc)
 
+    # 2b. settings.db — dedicated file holding ONLY the Knowledge Library
+    #     tables (knowledge_libraries + knowledge_chunks), so the importer's
+    #     _merge_kb_into_settings can restore the user's KB. NOT the whole
+    #     settings.db (the importer treats settings.db as merge-only; swapping
+    #     it whole would clobber the target's config/workspaces).
+    _log("Exporting Knowledge Library…")
+    try:
+        _export_kb_settings(staging / "data" / _SETTINGS_BUNDLE_NAME)
+    except Exception as exc:
+        logger.warning("[migrate:export] Knowledge Library export failed: %s", exc)
+
     manifest.source_data_dir = str(data_dir)
 
     # 3. SQLite data files — WAL-safe online copy.
@@ -316,6 +327,61 @@ def _detect_active_workspace_root() -> str:
         return (active or {}).get("root_path", "") or ""
     except Exception:
         return ""
+
+
+def _export_kb_settings(dest: Path) -> int:
+    """Write a SQLite file containing ONLY the Knowledge Library tables.
+
+    The KB (``knowledge_libraries`` + ``knowledge_chunks``) lives in SQLite
+    ``settings.db`` regardless of backend — it is NOT in Postgres. Previously
+    the exporter shipped no ``settings.db`` at all, so the importer's
+    ``_merge_kb_into_settings`` never ran and the entire Knowledge Library
+    (libraries + chunk embeddings + FTS index) was silently lost on every
+    migration (audit finding).
+
+    This emits a dedicated KB-only ``settings.db`` (created via ATTACH +
+    create-as-select, so it survives any ALTER-TABLE migrations the live
+    schema has accumulated). The importer recreates the canonical schema and
+    copies by explicit column name, so the copy's column set just needs to be
+    a superset of those columns. Crucially this is NOT the whole settings.db
+    — restoring that would clobber the target's config/workspaces tables.
+    """
+    import sqlite3
+    from kazma_core import paths as _paths
+
+    try:
+        live = _paths.settings_db()
+    except Exception:
+        return 0
+    if not live or not Path(live).exists():
+        return 0
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        dest.unlink()
+    copied = 0
+    conn = sqlite3.connect(str(dest))
+    try:
+        conn.execute("ATTACH DATABASE ? AS src", (live,))
+        for tbl in ("knowledge_libraries", "knowledge_chunks"):
+            try:
+                exists = conn.execute(
+                    "SELECT name FROM src.sqlite_master WHERE type='table' AND name=?",
+                    (tbl,),
+                ).fetchone()
+                if not exists:
+                    continue
+                conn.execute(f"CREATE TABLE {tbl} AS SELECT * FROM src.{tbl}")
+                copied += 1
+            except sqlite3.OperationalError as exc:
+                logger.debug("[migrate:export] KB table %s copy skipped: %s", tbl, exc)
+        conn.commit()
+    finally:
+        try:
+            conn.execute("DETACH DATABASE src")
+        except Exception:  # noqa: BLE001
+            pass
+        conn.close()
+    return copied
 
 
 def _export_document_store(

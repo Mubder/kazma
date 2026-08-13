@@ -1284,14 +1284,25 @@ class LocalToolRegistry:
                     "UPDATE entities SET aliases_json=? WHERE id=?",
                     (_json.dumps(tgt_aliases, ensure_ascii=False), tgt_id),
                 )
+                # Resolve the request-scoped tenant (matching the sibling
+                # memory helpers). ``entities.id`` is a GLOBAL primary key
+                # (AGENTS.md §16), so the belief redirects below MUST be scoped
+                # to this tenant — otherwise they rewrite every tenant's beliefs
+                # pointing at the entity, and the merge audit row was previously
+                # misattributed to the 'default' tenant (audit finding).
+                from kazma_core.safety.hitl import get_current_tenant_id
+
+                tenant = get_current_tenant_id()
                 for old in {src_id, src["name"]}:
                     if not old:
                         continue
                     conn.execute(
-                        "UPDATE beliefs SET subject=? WHERE subject=?", (tgt_id, old)
+                        "UPDATE beliefs SET subject=? WHERE subject=? AND tenant_id=?",
+                        (tgt_id, old, tenant),
                     )
                     conn.execute(
-                        "UPDATE beliefs SET object=? WHERE object=?", (tgt_id, old)
+                        "UPDATE beliefs SET object=? WHERE object=? AND tenant_id=?",
+                        (tgt_id, old, tenant),
                     )
                 conn.execute(
                     """UPDATE entities
@@ -1308,9 +1319,10 @@ class LocalToolRegistry:
                     """INSERT OR IGNORE INTO entity_merges
                        (id, tenant_id, source_entity_id, target_entity_id, status,
                         merge_tier, confidence, requested_at, resolved_at, metadata_json)
-                       VALUES (?, 'default', ?, ?, 'approved', 'agent_tool', 1.0, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, 'approved', 'agent_tool', 1.0, ?, ?, ?)""",
                     (
                         mid,
+                        tenant,
                         src_id,
                         tgt_id,
                         now,

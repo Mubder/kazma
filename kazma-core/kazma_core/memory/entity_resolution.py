@@ -481,13 +481,19 @@ def decide_entity_merge(
                     "UPDATE entities SET aliases_json=? WHERE id=?",
                     (json.dumps(tgt_aliases), target_id),
                 )
+                # Scope redirects to THIS merge's tenant. ``entities.id`` is a
+                # GLOBAL primary key (AGENTS.md §16), so an unscoped
+                # ``UPDATE beliefs SET subject=? WHERE subject=?`` rewrites EVERY
+                # tenant's beliefs pointing at this entity — irreversible
+                # cross-tenant graph corruption (audit finding).
+                _merge_tenant = row["tenant_id"]
                 conn.execute(
-                    "UPDATE beliefs SET subject=? WHERE subject=?",
-                    (target_id, source_id),
+                    "UPDATE beliefs SET subject=? WHERE subject=? AND tenant_id=?",
+                    (target_id, source_id, _merge_tenant),
                 )
                 conn.execute(
-                    "UPDATE beliefs SET object=? WHERE object=?",
-                    (target_id, source_id),
+                    "UPDATE beliefs SET object=? WHERE object=? AND tenant_id=?",
+                    (target_id, source_id, _merge_tenant),
                 )
                 # Soft-retire source (keep row — entity_merges FKs still reference it)
                 conn.execute(

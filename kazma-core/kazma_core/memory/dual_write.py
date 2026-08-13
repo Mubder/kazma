@@ -92,11 +92,18 @@ def _slug(text: str) -> str:
 
 
 def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) -> str:
-    """Stable belief PK = sha256(tenant + subject + predicate + valid_from)."""
+    """Belief PK. Includes a uuid suffix so two mirrors at the same timestamp
+    (e.g. rapid programmatic writes that share a ``valid_from`` float-second)
+    don't collide on PK and silently drop via INSERT OR IGNORE. The hash prefix
+    keeps the id visually traceable to its (tenant, subject, predicate,
+    valid_from). Mirrors ``belief_mutation._belief_id`` (audit finding: this
+    copy was missing the suffix the other one added to fix exactly this)."""
+    import uuid
+
     h = hashlib.sha256(
         f"{tenant_id}|{subject}|{predicate}|{valid_from}".encode("utf-8")
     ).hexdigest()
-    return f"b_{h[:24]}"
+    return f"b_{h[:20]}_{uuid.uuid4().hex[:6]}"
 
 
 def _episode_id(session_id: str, turn: int, content: str) -> str:

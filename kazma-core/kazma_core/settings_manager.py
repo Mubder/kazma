@@ -499,6 +499,8 @@ class SettingsManager:
         registry re-reads ``proxy.provider`` on each call.
         """
         allowed_networks = ("residential", "mobile", "mixed")
+        # Collect validated items and write them atomically (AGENTS.md §8).
+        items: list[tuple[str, Any, str]] = []
         for key, value in data.items():
             if key == "provider" and isinstance(value, str):
                 value = value.strip().lower()
@@ -517,7 +519,9 @@ class SettingsManager:
                 value = bool(value)
             elif key == "country" and isinstance(value, str):
                 value = value.strip().upper()[:3]  # ISO code, max 3 chars
-            self._cs.set(f"proxy.{key}", value, category="proxy")
+            items.append((f"proxy.{key}", value, "proxy"))
+        if items:
+            self._cs.batch_set(items)
 
     async def test_proxy(self) -> dict[str, Any]:
         """Health-check the active proxy provider. Returns {success, exit_ip?}."""
@@ -571,11 +575,16 @@ class SettingsManager:
         base_url = str(data.get("base_url") or "").strip()
         api_key_env = str(data.get("api_key_env") or "KAZMA_EMBED_API_KEY").strip() or "KAZMA_EMBED_API_KEY"
 
-        self._cs.set("embedding.provider", provider, category="embedding")
-        self._cs.set("embedding.model", model, category="embedding")
-        self._cs.set("embedding.dim", int(dim), category="embedding")
-        self._cs.set("embedding.base_url", base_url, category="embedding")
-        self._cs.set("embedding.api_key_env", api_key_env, category="embedding")
+        # Atomic multi-key write (AGENTS.md §8): embedding.model/dim MUST stay
+        # paired — a crash between independent sets left a half-updated block
+        # that silently corrupted every future vector recall (dim mismatch).
+        self._cs.batch_set([
+            ("embedding.provider", provider, "embedding"),
+            ("embedding.model", model, "embedding"),
+            ("embedding.dim", int(dim), "embedding"),
+            ("embedding.base_url", base_url, "embedding"),
+            ("embedding.api_key_env", api_key_env, "embedding"),
+        ])
 
     def get_time_travel_settings(self) -> dict[str, Any]:
         """Get the ConfigStore override for time travel (replay/fork).
@@ -672,50 +681,55 @@ class SettingsManager:
 
         ``failover_chain`` accepts a comma-separated string or a list of
         model ids. All values are validated/clamped before persisting.
+        Writes are atomic via ``batch_set`` (AGENTS.md §8): a watchdog /
+        failover policy block must not be left half-updated by a crash.
         """
+        items: list[tuple[str, Any, str]] = []
         if "enabled" in data:
-            self._cs.set("agent.nonstop.enabled", bool(data["enabled"]), category="agent")
+            items.append(("agent.nonstop.enabled", bool(data["enabled"]), "agent"))
         if "stall_threshold_seconds" in data:
             v = float(data["stall_threshold_seconds"])
             if v < 10 or v > 3600:
                 raise ValueError("Stall threshold must be between 10 and 3600 seconds.")
-            self._cs.set("agent.nonstop.watchdog.stall_threshold_seconds", v, category="agent")
+            items.append(("agent.nonstop.watchdog.stall_threshold_seconds", v, "agent"))
         if "tool_timeout_seconds" in data:
             v = float(data["tool_timeout_seconds"])
             if v != 0 and (v < 5 or v > 3600):
                 raise ValueError("Tool timeout must be 0 (disabled) or between 5 and 3600 seconds.")
-            self._cs.set("agent.nonstop.watchdog.tool_timeout_seconds", v, category="agent")
+            items.append(("agent.nonstop.watchdog.tool_timeout_seconds", v, "agent"))
         if "max_recovery_attempts" in data:
             v = int(data["max_recovery_attempts"])
             if v < 0 or v > 10:
                 raise ValueError("Max recovery attempts must be between 0 and 10.")
-            self._cs.set("agent.nonstop.healing.max_recovery_attempts", v, category="agent")
+            items.append(("agent.nonstop.healing.max_recovery_attempts", v, "agent"))
         if "backoff_base_seconds" in data:
             v = float(data["backoff_base_seconds"])
             if v < 0.5 or v > 600:
                 raise ValueError("Backoff base must be between 0.5 and 600 seconds.")
-            self._cs.set("agent.nonstop.healing.backoff_base_seconds", v, category="agent")
+            items.append(("agent.nonstop.healing.backoff_base_seconds", v, "agent"))
         if "backoff_max_seconds" in data:
             v = float(data["backoff_max_seconds"])
             if v < 1 or v > 3600:
                 raise ValueError("Backoff max must be between 1 and 3600 seconds.")
-            self._cs.set("agent.nonstop.healing.backoff_max_seconds", v, category="agent")
+            items.append(("agent.nonstop.healing.backoff_max_seconds", v, "agent"))
         if "failover_enabled" in data:
-            self._cs.set("agent.nonstop.failover.enabled", bool(data["failover_enabled"]), category="agent")
+            items.append(("agent.nonstop.failover.enabled", bool(data["failover_enabled"]), "agent"))
         if "failover_chain" in data:
             chain = data["failover_chain"]
             if isinstance(chain, str):
                 chain = [p.strip() for p in chain.split(",") if p.strip()]
             if not isinstance(chain, list) or len(chain) > 8:
                 raise ValueError("Failover chain must be a list of at most 8 model ids.")
-            self._cs.set("agent.nonstop.failover.chain", ",".join(str(m) for m in chain), category="agent")
+            items.append(("agent.nonstop.failover.chain", ",".join(str(m) for m in chain), "agent"))
         if "failover_cooldown_seconds" in data:
             v = float(data["failover_cooldown_seconds"])
             if v < 10 or v > 86400:
                 raise ValueError("Failover cooldown must be between 10 and 86400 seconds.")
-            self._cs.set("agent.nonstop.failover.cooldown_seconds", v, category="agent")
+            items.append(("agent.nonstop.failover.cooldown_seconds", v, "agent"))
         if "ledger_enabled" in data:
-            self._cs.set("agent.nonstop.ledger.enabled", bool(data["ledger_enabled"]), category="agent")
+            items.append(("agent.nonstop.ledger.enabled", bool(data["ledger_enabled"]), "agent"))
+        if items:
+            self._cs.batch_set(items)
 
     def save_context_settings(self, data: dict[str, Any]) -> None:
         """Update context window settings.
@@ -723,13 +737,17 @@ class SettingsManager:
         Writes only the 3 known keys explicitly — prevents the nested-prefix
         explosion that happens when the Alpine state object accumulates
         dotted ConfigStore keys from get_all() and then resends them.
+        Atomic via ``batch_set`` (AGENTS.md §8).
         """
+        items: list[tuple[str, Any, str]] = []
         if "max_context_tokens" in data:
-            self._cs.set("context.max_context_tokens", data["max_context_tokens"], category="context")
+            items.append(("context.max_context_tokens", data["max_context_tokens"], "context"))
         if "context_strategy" in data:
-            self._cs.set("context.context_strategy", data["context_strategy"], category="context")
+            items.append(("context.context_strategy", data["context_strategy"], "context"))
         if "summarization_threshold" in data:
-            self._cs.set("context.summarization_threshold", data["summarization_threshold"], category="context")
+            items.append(("context.summarization_threshold", data["summarization_threshold"], "context"))
+        if items:
+            self._cs.batch_set(items)
 
     # ══════════════════════════════════════════════════════════════════
     # CONNECTORS

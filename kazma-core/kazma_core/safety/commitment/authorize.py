@@ -121,6 +121,25 @@ def authorize_effect(
         "args_digest": _args_digest(args),
     }
 
+    # Kill-switch (AGENTS.md §20E): ``KAZMA_COMMITMENT_ENABLED=0`` must disable
+    # the WHOLE layer. The graph-side gate (tool_worker_node) already honors it;
+    # without this, ``LocalToolRegistry.execute`` (the registry/IDE/swarm choke)
+    # kept enforcing exec/config/outbound resolvers + swarm-scope even after the
+    # operator set the kill-switch — so the layer could not actually be turned
+    # off. Audit-only allow (no enforcement) when disabled.
+    try:
+        from .constraints import is_commitment_enabled
+        if not is_commitment_enabled():
+            audit["kill_switch"] = "disabled"
+            return EffectDecision(
+                decision="allow",
+                reason="commitment layer disabled (KAZMA_COMMITMENT_ENABLED=0)",
+                profile=profile, audit=audit,
+            )
+    except Exception:  # noqa: BLE001
+        # Fail-open: never let the kill-switch check itself block tool exec.
+        logger.debug("[commitment] kill-switch check failed; continuing enabled")
+
     # Phase 1 enforcement: fail-closed unregistered mutators (opt-in only).
     if (enforce_unknown_mutators
             and not profile.registered
