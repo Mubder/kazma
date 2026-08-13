@@ -54,7 +54,10 @@ class AnthropicProvider(LLMProvider):
         logger.info("AnthropicProvider initialized: model=%s", self.config.model)
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._http is None:
+        # Recreate if closed externally too (mirror LLMProvider._get_client) —
+        # a bare `is None` check reused a dead client after external close
+        # (audit finding).
+        if self._http is None or getattr(self._http, "is_closed", False):
             self._http = httpx.AsyncClient(
                 base_url=_API_BASE,
                 headers={

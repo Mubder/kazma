@@ -171,8 +171,10 @@ class SafetyMiddleware:
 
         bus = get_message_bus()
         # Fail-closed when no real adapter is wired (mirror check_sync).
-        # NullBusAdapter.request_approval() returns True (auto-approve), which
-        # would silently bypass HITL for danger tools in headless deployments.
+        # NullBusAdapter.request_approval() returns False (fail-closed); the
+        # explicit isinstance check short-circuits before relying on it, so a
+        # future change can't reintroduce silent auto-approve for headless
+        # danger tools. (Comment corrected — it claimed True/auto-approve.)
         if isinstance(bus.adapter, NullBusAdapter):
             if self.allow_headless_danger:
                 self._approved_count += 1

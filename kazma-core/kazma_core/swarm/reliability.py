@@ -253,6 +253,11 @@ class CircuitBreaker:
     _state: CircuitState = field(default=CircuitState.CLOSED, init=False, repr=False)
     consecutive_failures: int = field(default=0, init=False)
     _opened_at: float | None = field(default=None, init=False, repr=False)
+    # Wall-clock time the circuit opened (for multi-replica cooldown coherence
+    # / observability). Previously set/read via dynamic attrs + `# type:
+    # ignore` + getattr fallbacks — declaring it makes to_dict/from_dict and
+    # any future slots/frozen dataclass safe (audit finding).
+    _opened_at_wall: float | None = field(default=None, init=False, repr=False)
     _probe_in_flight: bool = field(default=False, init=False, repr=False)
 
     # ------------------------------------------------------------------

@@ -165,8 +165,13 @@ class SwarmEngine:
         if self._autoscaler is None:
             try:
                 from kazma_core.swarm.autoscaler import AutoScaler
-                self._autoscaler = AutoScaler(self)
-                self._autoscaler.load_templates()
+                # Build + load locally, then assign only on success —
+                # assigning before load_templates() left a half-initialized
+                # singleton (empty _templates) that was never reloaded if
+                # load raised (audit finding).
+                _scaler = AutoScaler(self)
+                _scaler.load_templates()
+                self._autoscaler = _scaler
             except Exception as exc:
                 logger.warning("[SwarmEngine] AutoScaler initialization failed: %s", exc)
                 try:

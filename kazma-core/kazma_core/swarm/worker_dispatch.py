@@ -100,19 +100,11 @@ async def dispatch_worker(
         )
 
     # Circuit breaker pre-check: reject immediately if open.
-    probe_held = False
     try:
-        # allow_probe sets _probe_in_flight in half-open; track so finally can release
-        before_probe = getattr(breaker, "_probe_in_flight", False)
+        # allow_probe sets _probe_in_flight in half-open; the finally below
+        # releases it via `recorded` (not a separate probe_held flag — that
+        # var was assigned 3x but never read, dead code) (audit finding).
         breaker.check_or_raise(worker.name)
-        probe_held = getattr(breaker, "_probe_in_flight", False) and not before_probe
-        # Also true when half-open was already our probe
-        if breaker.state.name == "HALF_OPEN" or str(breaker.state) in (
-            "CircuitState.HALF_OPEN",
-            "half_open",
-            "HALF_OPEN",
-        ):
-            probe_held = True
     except CircuitBreakerOpenError as exc:
         logger.warning("[SwarmEngine] %s", exc)
         if dispatch_span:
