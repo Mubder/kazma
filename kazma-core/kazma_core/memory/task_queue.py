@@ -112,6 +112,11 @@ class _MemoryWorker:
         self._task: asyncio.Task | None = None
         self._running = False
         self._lock = threading.Lock()
+        # Strong references to dispatched handler tasks. Without these, CPython
+        # may garbage-collect a task mid-handler (the asyncio docs warn to keep
+        # a reference), silently dropping a micro_consolidation/entity_merge
+        # run (audit finding).
+        self._inflight: set[asyncio.Task] = set()
 
     def start(self) -> None:
         """Start the background poll loop (idempotent)."""
@@ -139,6 +144,12 @@ class _MemoryWorker:
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
             self._task = None
+        # Drain handler tasks that were dispatched but not yet finished, so a
+        # handler mid-execution (e.g. an LLM belief extraction holding a SQLite
+        # transaction) is awaited/cancelled rather than abandoned on loop close.
+        if self._inflight:
+            await asyncio.gather(*self._inflight, return_exceptions=True)
+            self._inflight.clear()
 
     async def _run(self) -> None:
         """Main poll loop: claim → dispatch → ack/nack, repeat."""
@@ -148,7 +159,9 @@ class _MemoryWorker:
                 claimed = self._claim_batch()
                 for task in claimed:
                     await sem.acquire()
-                    asyncio.create_task(self._process(sem, task))
+                    t = asyncio.create_task(self._process(sem, task))
+                    self._inflight.add(t)
+                    t.add_done_callback(self._inflight.discard)
             except Exception:
                 logger.debug("[task_queue] poll cycle failed", exc_info=True)
             # Wait for the next poll interval or an explicit wake

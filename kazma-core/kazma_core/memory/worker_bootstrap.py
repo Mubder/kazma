@@ -32,6 +32,12 @@ _registered = False
 # of the core V2 handlers (e.g. by tests) without re-churning either set.
 _backup_export_registered = False
 
+# Strong references to the background scheduler loops (macro_sleep / backup /
+# commitment-gc / reconsolidation). Without these, CPython may GC a scheduler
+# task mid-loop and silently halt a cadence — the exact "scheduler existed but
+# nothing ran it" failure mode (audit finding).
+_scheduler_tasks: set = set()
+
 
 def register_v2_handlers() -> None:
     """Register all V2 task handlers on the durable queue (idempotent)."""
@@ -399,7 +405,9 @@ def _start_macro_sleep_scheduler() -> None:
             await asyncio.sleep(_MACRO_SLEEP_INTERVAL_HOURS * 3600)
 
     try:
-        loop.create_task(_loop())
+        _t = loop.create_task(_loop())
+        _scheduler_tasks.add(_t)
+        _t.add_done_callback(_scheduler_tasks.discard)
         logger.info(
             "[memory_worker] macro_sleep scheduler started (every %dh)",
             _MACRO_SLEEP_INTERVAL_HOURS,
@@ -448,7 +456,9 @@ def _start_backup_export_scheduler() -> None:
             await asyncio.sleep(_BACKUP_EXPORT_INTERVAL_HOURS * 3600)
 
     try:
-        loop.create_task(_loop())
+        _t = loop.create_task(_loop())
+        _scheduler_tasks.add(_t)
+        _t.add_done_callback(_scheduler_tasks.discard)
         logger.info(
             "[memory_worker] backup/export scheduler started (every %dh)",
             _BACKUP_EXPORT_INTERVAL_HOURS,
@@ -491,7 +501,9 @@ def _start_commitment_gc_scheduler() -> None:
             await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
 
     try:
-        loop.create_task(_loop())
+        _t = loop.create_task(_loop())
+        _scheduler_tasks.add(_t)
+        _t.add_done_callback(_scheduler_tasks.discard)
         logger.info(
             "[memory_worker] commitment GC scheduler started (every %dm)",
             _COMMITMENT_GC_INTERVAL_MINUTES,
@@ -531,7 +543,9 @@ def _start_reconsolidation_scheduler() -> None:
             await asyncio.sleep(_RECONSOLIDATION_INTERVAL_HOURS * 3600)
 
     try:
-        loop.create_task(_loop())
+        _t = loop.create_task(_loop())
+        _scheduler_tasks.add(_t)
+        _t.add_done_callback(_scheduler_tasks.discard)
         logger.info(
             "[memory_worker] reconsolidation scheduler started (every %dh)",
             _RECONSOLIDATION_INTERVAL_HOURS,

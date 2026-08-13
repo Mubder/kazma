@@ -154,6 +154,11 @@ class ModelRegistry:
     def __init__(self, config_store: ConfigStore | Any) -> None:
         self._config_store = config_store
         self._clients: dict[str, LLMProvider] = {}
+        # Every client this registry has ever built (superset of _clients'
+        # values). get_model / get_client_by_provider build one-off clients for
+        # the swarm path that are NOT entered into _clients, so close() iterating
+        # only _clients leaked their httpx connection pools (audit finding).
+        self._all_clients: set[LLMProvider] = set()
         self._active_provider: str = ""
         self._active_model: str = ""
         self._discovered_models: dict[str, list[str]] = {}
@@ -165,15 +170,23 @@ class ModelRegistry:
         # methods (e.g. set_active_* -> get_active_profile) re-enter.
         self._lock = threading.RLock()
 
+    def _track(self, client: LLMProvider) -> LLMProvider:
+        """Register a built client for shutdown cleanup, returning it unchanged."""
+        self._all_clients.add(client)
+        return client
+
     async def close(self) -> None:
         """Close all cached LLM clients (call on app shutdown)."""
         with self._lock:
-            for client in self._clients.values():
+            # Iterate the superset (_all_clients) so one-off clients built by
+            # get_model / get_client_by_provider are also closed (audit finding).
+            for client in list(self._all_clients):
                 try:
                     await client.close()
                 except Exception:
                     pass
             self._clients.clear()
+            self._all_clients.clear()
 
     # ── Active profile management ──────────────────────────────────
 
@@ -462,6 +475,7 @@ class ModelRegistry:
             if model is None:
                 self._clients[provider_name] = client
 
+            self._track(client)
             return client
 
     def get_model(self, model_id: str) -> LLMProvider:
@@ -485,22 +499,22 @@ class ModelRegistry:
             })
             if owner_name == "google":
                 from kazma_core.google_llm import GeminiProvider
-                return GeminiProvider(
+                return self._track(GeminiProvider(
                     config,
                     project_id=str(owner.get("project_id", "")),
                     location=str(owner.get("location", "")) or "us-central1",
                     google_mode=str(owner.get("google_mode", "")),
-                )
+                ))
             if owner_name == "anthropic":
                 from kazma_core.anthropic_llm import AnthropicProvider
-                return AnthropicProvider(config)
+                return self._track(AnthropicProvider(config))
             if owner_name == "azure":
                 from kazma_core.azure_llm import AzureProvider
-                return AzureProvider(config)
+                return self._track(AzureProvider(config))
             if owner_name == "bedrock":
                 from kazma_core.bedrock_llm import BedrockProvider
-                return BedrockProvider(config)
-            return LLMProvider(config)
+                return self._track(BedrockProvider(config))
+            return self._track(LLMProvider(config))
 
         # Fallback: use active profile with overridden model
         return self.get_client(model=clean_id)
@@ -529,22 +543,22 @@ class ModelRegistry:
         })
         if provider_name.lower() == "google":
             from kazma_core.google_llm import GeminiProvider
-            return GeminiProvider(
+            return self._track(GeminiProvider(
                 config,
                 project_id=str(entry.get("project_id", "")),
                 location=str(entry.get("location", "")) or "us-central1",
                 google_mode=str(entry.get("google_mode", "")),
-            )
+            ))
         if provider_name.lower() == "anthropic":
             from kazma_core.anthropic_llm import AnthropicProvider
-            return AnthropicProvider(config)
+            return self._track(AnthropicProvider(config))
         if provider_name.lower() == "azure":
             from kazma_core.azure_llm import AzureProvider
-            return AzureProvider(config)
+            return self._track(AzureProvider(config))
         if provider_name.lower() == "bedrock":
             from kazma_core.bedrock_llm import BedrockProvider
-            return BedrockProvider(config)
-        return LLMProvider(config)
+            return self._track(BedrockProvider(config))
+        return self._track(LLMProvider(config))
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
         """Return the provider entry that owns *model_id*.

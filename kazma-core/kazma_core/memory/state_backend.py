@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Any, Protocol, runtime_checkable
 
@@ -27,6 +28,10 @@ __all__ = [
     "search_state_episodes",
     "search_state_beliefs",
 ]
+
+# Singleton cache for the shared-state mirror backend (see get_state_backend).
+_state_backend_cache: dict[tuple, Any] = {}
+_state_backend_lock = threading.Lock()
 
 
 @runtime_checkable
@@ -450,15 +455,31 @@ def state_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def get_state_backend() -> Any:
-    """Live factory for optional shared state mirror."""
+    """Live factory for optional shared state mirror.
+
+    Cached per ``(provider, url, timeout_ms)``: previously every call minted a
+    fresh ``PostgresStateBackend`` and probed connectivity (TCP connect +
+    ``SELECT 1``), so a single recall with thin local hits opened 3+ fresh
+    connections per turn — a Postgres connection storm (audit finding). The
+    cache key captures every config field that changes the backend, so a
+    Settings change naturally invalidates (new key → new backend). The null
+    fallback is NOT cached so a later postgres-comes-back can be picked up.
+    """
     c = _cfg()
     st = c.get("state") or {}
     provider = str(st.get("provider") or "sqlite").lower()
     url = str(st.get("url") or "").strip()
     timeout_ms = int((c.get("failover") or {}).get("timeout_ms") or 5000)
+    key = (provider, url, timeout_ms)
+    with _state_backend_lock:
+        cached = _state_backend_cache.get(key)
+    if cached is not None:
+        return cached
     if provider in ("postgres", "postgresql", "pg") and url:
         be = PostgresStateBackend(url, timeout_s=timeout_ms / 1000.0)
         if be.available:
+            with _state_backend_lock:
+                _state_backend_cache[key] = be
             return be
         logger.info("[state_backend] postgres unavailable — null sink")
     return NullStateBackend()

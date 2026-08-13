@@ -103,6 +103,12 @@ def recall(
             from kazma_core.paths import primary_memory_db
 
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            # Apply WAL + busy_timeout so the access-bump UPDATE below doesn't
+            # fail instantly with "database is locked" when a background
+            # macro_sleep sweep holds the write lock (which silently skipped
+            # access accounting and blocked promotion) — audit finding.
+            from kazma_core.config_store import apply_sqlite_pragmas
+            apply_sqlite_pragmas(conn)
             conn.row_factory = sqlite3.Row
         except Exception:
             logger.debug("[recall] could not open primary DB", exc_info=True)

@@ -26,6 +26,8 @@ import logging
 import threading
 from typing import Any
 
+from kazma_core.config_store import apply_sqlite_pragmas
+
 __all__ = [
     "reset_turn_counter",
     "schedule_post_turn_memory",
@@ -39,6 +41,14 @@ logger = logging.getLogger(__name__)
 # Process-local turn counter for every_n_turns cost control
 _turn_lock = threading.Lock()
 _turn_counter = 0
+
+# Bounded concurrency for V2 post-turn extraction. Previously every finalized
+# turn spawned a fresh OS thread with no cap, so sustained multi-user load
+# spawned hundreds of concurrent daemon threads — each opening 2 fresh SQLite
+# connections — causing a thread/connection storm that hit "database is
+# locked" and silently dropped beliefs (audit finding).
+_V2_EXTRACT_CONCURRENCY = 4
+_v2_extract_sem = threading.Semaphore(_V2_EXTRACT_CONCURRENCY)
 
 # Phase A observability — process-local counters for Dashboard / health
 _metrics_lock = threading.Lock()
@@ -247,13 +257,25 @@ def schedule_post_turn_memory(
     # V2 path runs in a DEDICATED OS thread (not the loop's executor) so
     # blocking sync calls cannot starve or gate V2 writes. A plain Thread
     # is fully decoupled from the asyncio loop and runs even if the loop
-    # freezes.
-    import threading
+    # freezes. Concurrency is bounded by _v2_extract_sem (audit: previously
+    # unbounded → thread/connection storm).
+    def _run_v2_bounded() -> None:
+        try:
+            _run_v2_sync()
+        finally:
+            _v2_extract_sem.release()
 
+    # Best-effort: if the pool is full, skip this turn's consolidation rather
+    # than pile up threads or block the turn. The next turn picks up recent
+    # context.
+    if not _v2_extract_sem.acquire(blocking=False):
+        logger.debug("[post_turn] V2 extract pool full — skipping this turn")
+        return
     try:
-        t = threading.Thread(target=_run_v2_sync, daemon=True, name="kazma-v2-extract")
+        t = threading.Thread(target=_run_v2_bounded, daemon=True, name="kazma-v2-extract")
         t.start()
     except Exception as exc:
+        _v2_extract_sem.release()  # thread never started — free the slot
         logger.warning("[post_turn] could not start V2 thread: %s", exc, exc_info=True)
         _metric_fail("thread", exc)
 
@@ -276,6 +298,7 @@ def _promote_working_to_episodic(
     from kazma_core.paths import primary_memory_db
 
     conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+    apply_sqlite_pragmas(conn)
     try:
         ensure_primary_schema(conn)
         cur = conn.execute(
@@ -309,6 +332,7 @@ def clear_working_memory(
 
     try:
         conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+        apply_sqlite_pragmas(conn)
         try:
             ensure_primary_schema(conn)
             cur = conn.execute(
@@ -398,10 +422,12 @@ def _v2_extract_sync(
             primary_memory_db(), check_same_thread=False, isolation_level=None
         )
         primary_conn.row_factory = sqlite3.Row
+        apply_sqlite_pragmas(primary_conn)
         ensure_primary_schema(primary_conn)
         ops_conn = sqlite3.connect(
             memory_ops_db(), check_same_thread=False, isolation_level=None
         )
+        apply_sqlite_pragmas(ops_conn)
         ensure_ops_schema(ops_conn)
         stats = extract_and_apply_beliefs_sync(
             primary_conn,
