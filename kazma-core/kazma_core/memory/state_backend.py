@@ -15,6 +15,9 @@ import json
 import logging
 import threading
 import time
+
+# Liveness-probe cache TTL for the shared-state backend's `available`.
+_READY_PROBE_TTL = 60.0
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,7 @@ class PostgresStateBackend:
         self._dsn = dsn or ""
         self._timeout = max(0.5, float(timeout_s))
         self._ready: bool | None = None
+        self._ready_at: float = 0.0
         self._ensured = False
 
     def _connect(self) -> Any:
@@ -119,10 +123,15 @@ class PostgresStateBackend:
 
     @property
     def available(self) -> bool:
-        if self._ready is not None:
+        # TTL-cache the liveness probe (audit finding): a once-set _ready was
+        # never re-probed, so a backend that went down after a successful boot
+        # probe kept reporting available forever, and a boot-time outage stuck
+        # until restart.
+        if self._ready is not None and (time.monotonic() - self._ready_at) < _READY_PROBE_TTL:
             return self._ready
         if not self._dsn:
             self._ready = False
+            self._ready_at = time.monotonic()
             return False
         try:
             conn = self._connect()
@@ -133,9 +142,11 @@ class PostgresStateBackend:
             finally:
                 conn.close()
             self._ready = True
+            self._ready_at = time.monotonic()
             return True
         except Exception:
             self._ready = False
+            self._ready_at = time.monotonic()
             return False
 
     def _ensure(self, conn: Any) -> None:

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import logging
 import time
+
+# Liveness-probe cache TTL for remote vector backends' `available` property.
+_READY_PROBE_TTL = 60.0
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -214,6 +217,7 @@ class QdrantVectorBackend:
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
         self._ready: bool | None = None
+        self._ready_at: float = 0.0
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -223,10 +227,15 @@ class QdrantVectorBackend:
 
     @property
     def available(self) -> bool:
-        if self._ready is not None:
+        # TTL-cache the liveness probe (audit finding): a once-set _ready was
+        # never re-probed, so a backend that went down after a successful boot
+        # probe kept reporting available forever (search then failed silently)
+        # and a boot-time outage stuck until restart.
+        if self._ready is not None and (time.monotonic() - self._ready_at) < _READY_PROBE_TTL:
             return self._ready
         if not self._url:
             self._ready = False
+            self._ready_at = time.monotonic()
             return False
         try:
             import httpx
@@ -238,9 +247,11 @@ class QdrantVectorBackend:
                 )
                 # 404 = collection missing but server up → still usable
                 self._ready = r.status_code < 500
+                self._ready_at = time.monotonic()
                 return self._ready
         except Exception:
             self._ready = False
+            self._ready_at = time.monotonic()
             return False
 
     def _ensure_collection(self, client: Any) -> None:
@@ -412,6 +423,7 @@ class PgvectorBackend:
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
         self._ready: bool | None = None
+        self._ready_at: float = 0.0
 
     def _connect(self) -> Any:
         try:
@@ -425,10 +437,12 @@ class PgvectorBackend:
 
     @property
     def available(self) -> bool:
-        if self._ready is not None:
+        # TTL-cache the liveness probe (audit finding): see QdrantVectorBackend.
+        if self._ready is not None and (time.monotonic() - self._ready_at) < _READY_PROBE_TTL:
             return self._ready
         if not self._dsn:
             self._ready = False
+            self._ready_at = time.monotonic()
             return False
         try:
             conn = self._connect()
@@ -439,9 +453,11 @@ class PgvectorBackend:
             finally:
                 conn.close()
             self._ready = True
+            self._ready_at = time.monotonic()
             return True
         except Exception:
             self._ready = False
+            self._ready_at = time.monotonic()
             return False
 
     def _ensure_table(self, conn: Any) -> None:

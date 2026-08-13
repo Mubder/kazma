@@ -294,6 +294,10 @@ class DualWriteMirror:
             effective_tier = "working"
             meta["promote_reason"] = "working_buffer"
         try:
+            # Lock only the local SQLite writes. The remote embed, vector
+            # upsert, and state mirror below can each block up to ~60s;
+            # holding self._lock across them serialized ALL V2 mirror writes
+            # process-wide behind one slow embed call (audit finding).
             with self._lock:
                 self._primary.execute(
                     """
@@ -319,71 +323,75 @@ class DualWriteMirror:
                         _embedding_model_version(),
                     ),
                 )
-                # Compute + store the episode embedding so dense vector
-                # recall can find it. Also dual-write to VectorBackend
-                # (Qdrant/pgvector) when configured (P2-1 remote write path).
-                try:
-                    from kazma_core.memory.embedder import (
-                        encode_text_to_blob,
-                        get_embedder,
-                    )
+                self._primary.commit()
 
-                    ep_text = (summary_text or user_text or assistant_text or "").strip()
-                    if ep_text:
-                        emb_blob = encode_text_to_blob(ep_text)
-                        if emb_blob is not None:
+            # Compute + store the episode embedding so dense vector recall can
+            # find it. Also dual-write to VectorBackend (Qdrant/pgvector) when
+            # configured (P2-1 remote write path). All OUTSIDE the lock.
+            try:
+                from kazma_core.memory.embedder import (
+                    encode_text_to_blob,
+                    get_embedder,
+                )
+
+                ep_text = (summary_text or user_text or assistant_text or "").strip()
+                if ep_text:
+                    emb_blob = encode_text_to_blob(ep_text)
+                    if emb_blob is not None:
+                        with self._lock:
                             self._primary.execute(
                                 "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL",
                                 (emb_blob, eid),
                             )
-                        # Remote / hybrid vector upsert (best-effort)
-                        try:
-                            from kazma_core.memory.backends import get_vector_backend
+                            self._primary.commit()
+                    # Remote / hybrid vector upsert (best-effort)
+                    try:
+                        from kazma_core.memory.backends import get_vector_backend
 
-                            emb = get_embedder()
-                            if emb is not None:
-                                qvec = emb.encode(ep_text)
-                                if qvec:
-                                    be = get_vector_backend(self._primary)
-                                    be.upsert(
-                                        eid,
-                                        qvec,
-                                        tenant_id=tenant_id,
-                                        meta={
-                                            "tier": effective_tier,
-                                            "session_id": session_id,
-                                        },
-                                    )
-                        except Exception:
-                            logger.debug(
-                                "[dual_write] vector backend upsert failed for %s",
-                                eid,
-                                exc_info=True,
-                            )
-                except Exception:
-                    logger.debug("[dual_write] episode embedding failed for %s", eid, exc_info=True)
-                self._primary.commit()
-                # Optional multi-replica state dual-mirror (Postgres)
-                try:
-                    from kazma_core.memory.state_backend import mirror_episode_to_state
+                        emb = get_embedder()
+                        if emb is not None:
+                            qvec = emb.encode(ep_text)
+                            if qvec:
+                                be = get_vector_backend(self._primary)
+                                be.upsert(
+                                    eid,
+                                    qvec,
+                                    tenant_id=tenant_id,
+                                    meta={
+                                        "tier": effective_tier,
+                                        "session_id": session_id,
+                                    },
+                                )
+                    except Exception:
+                        logger.debug(
+                            "[dual_write] vector backend upsert failed for %s",
+                            eid,
+                            exc_info=True,
+                        )
+            except Exception:
+                logger.debug("[dual_write] episode embedding failed for %s", eid, exc_info=True)
 
-                    mirror_episode_to_state(
-                        {
-                            "id": eid,
-                            "tenant_id": tenant_id,
-                            "session_id": session_id,
-                            "turn_number": int(turn_number),
-                            "user_text": (user_text or "")[:4000],
-                            "assistant_text": (assistant_text or "")[:4000],
-                            "summary_text": (summary_text or "")[:2000],
-                            "tier": effective_tier,
-                            "structural_importance": effective_importance,
-                            "created_at": now,
-                            "metadata": meta,
-                        }
-                    )
-                except Exception:
-                    logger.debug("[dual_write] state mirror failed", exc_info=True)
+            # Optional multi-replica state dual-mirror (Postgres) — outside lock.
+            try:
+                from kazma_core.memory.state_backend import mirror_episode_to_state
+
+                mirror_episode_to_state(
+                    {
+                        "id": eid,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "turn_number": int(turn_number),
+                        "user_text": (user_text or "")[:4000],
+                        "assistant_text": (assistant_text or "")[:4000],
+                        "summary_text": (summary_text or "")[:2000],
+                        "tier": effective_tier,
+                        "structural_importance": effective_importance,
+                        "created_at": now,
+                        "metadata": meta,
+                    }
+                )
+            except Exception:
+                logger.debug("[dual_write] state mirror failed", exc_info=True)
             return eid
         except Exception:
             logger.debug("[dual_write] episode mirror failed", exc_info=True)
