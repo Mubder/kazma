@@ -809,7 +809,7 @@ async def supervisor_node(
         # and route to a structured pipeline when confident. Structured
         # tasks never enter the free-form tool loop — the model is the
         # content engine, not the execution planner.
-        if iteration == 0 and _intent_mode == "normal":
+        if iteration == 0 and _intent_mode not in ("continue", "cleanup", "shift"):
             try:
                 from kazma_core.agent.intent_router import classify_task
 
