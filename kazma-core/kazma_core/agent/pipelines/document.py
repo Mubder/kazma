@@ -54,19 +54,26 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
     source_content = ""
     if source_path:
         try:
+            import asyncio as _aio
+
             p = Path(source_path)
             if not p.is_absolute():
                 from kazma_core.workspace.binding import resolve_active_root
 
-                p = resolve_active_root() / p
-            if p.is_file():
+                p = await _aio.to_thread(resolve_active_root) / p
+            if await _aio.to_thread(p.is_file):
                 if p.suffix.lower() == ".pdf":
-                    source_content = _read_pdf(p)
+                    # fitz is synchronous — to_thread prevents event-loop
+                    # freeze on large PDFs (the 7.7MB calendar blocked
+                    # the whole server for minutes)
+                    source_content = await _aio.to_thread(_read_pdf, p)
                 else:
-                    source_content = p.read_text(encoding="utf-8", errors="replace")
+                    source_content = await _aio.to_thread(
+                        p.read_text, encoding="utf-8", errors="replace"
+                    )
                 steps_log.append(f"✓ Read source: {p.name} ({len(source_content)} chars)")
             else:
-                steps_log.append(f"⚠ Source not found: {source_path}")
+                steps_log.append(f"⚠ Source not found: {source_path} (resolved: {p})")
         except Exception as exc:
             steps_log.append(f"⚠ Source read failed: {exc}")
 
@@ -91,6 +98,8 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
     structured_md = source_content
     if llm is not None and len(source_content) > 200:
         try:
+            import asyncio as _aio
+
             extract_prompt = (
                 "Convert the following content into well-structured markdown "
                 "with # headings, ## subsections, bullet points, and tables "
@@ -99,8 +108,9 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
                 "English stays English).\n\n"
                 f"---CONTENT START---\n{source_content[:12000]}\n---CONTENT END---"
             )
-            resp = await llm.chat(
-                [{"role": "user", "content": extract_prompt}], tools=None
+            resp = await _aio.wait_for(
+                llm.chat([{"role": "user", "content": extract_prompt}], tools=None),
+                timeout=90.0,
             )
             content = (getattr(resp, "content", "") or "").strip()
             if content and not content.startswith("Error"):
@@ -116,9 +126,13 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
     # ── Step 3: WRITE the markdown file ─────────────────────────────
     md_filename = f"document_output_{int(__import__('time').time())}.md"
     try:
+        import asyncio as _aio
+
         from kazma_core.tools.file_write import file_write
 
-        write_result = await file_write(md_filename, structured_md)
+        write_result = await _aio.wait_for(
+            file_write(md_filename, structured_md), timeout=30.0
+        )
         if "Error" in write_result:
             return _format_result("Error", steps_log, f"file_write failed: {write_result}")
         steps_log.append(f"✓ Wrote markdown: {md_filename}")
@@ -128,21 +142,30 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
     # ── Step 4: GENERATE the document ───────────────────────────────
     title = params.get("title") or _derive_title(source_content, output_format)
     try:
+        import asyncio as _aio
+
         if output_format in ("docx", "word"):
             from kazma_skills.native.document_generator.tools import generate_docx
 
-            gen_result = await generate_docx(title, markdown_path=md_filename)
+            gen_result = await _aio.wait_for(
+                generate_docx(title, markdown_path=md_filename), timeout=120.0
+            )
         elif output_format in ("xlsx", "excel", "spreadsheet"):
             from kazma_skills.native.document_generator.tools import generate_xlsx
 
-            gen_result = await generate_xlsx(
-                [{"name": "Sheet1", "rows": [["Content"], [structured_md[:500]]]}],
-                filename=title,
+            gen_result = await _aio.wait_for(
+                generate_xlsx(
+                    [{"name": "Sheet1", "rows": [["Content"], [structured_md[:500]]]}],
+                    filename=title,
+                ),
+                timeout=120.0,
             )
         else:
             from kazma_skills.native.document_generator.tools import generate_pdf
 
-            gen_result = await generate_pdf(title, markdown_path=md_filename)
+            gen_result = await _aio.wait_for(
+                generate_pdf(title, markdown_path=md_filename), timeout=120.0
+            )
 
         if "Error" in gen_result:
             return _format_result("Error", steps_log, f"Generation failed: {gen_result}")
@@ -158,6 +181,8 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
     # ── Step 5: DELIVER (optional) ──────────────────────────────────
     if deliver_to:
         try:
+            import asyncio as _aio
+
             # Extract the output path from the generation result
             output_path = ""
             if "Saved to:" in gen_result:
@@ -174,10 +199,13 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
                     target = f"{deliver_to}:"
 
                 if target:
-                    send_result = await send_file_message(
-                        target_id=target,
-                        text=f"📎 {title}",
-                        file_path=output_path,
+                    send_result = await _aio.wait_for(
+                        send_file_message(
+                            target_id=target,
+                            text=f"📎 {title}",
+                            file_path=output_path,
+                        ),
+                        timeout=60.0,
                     )
                     steps_log.append(f"✓ Delivered via {deliver_to}: {send_result[:100]}")
                 else:
