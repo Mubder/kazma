@@ -39,10 +39,12 @@ class LLMConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "gpt-4o-mini"
-    # 8192 default: 4096 truncates large tool-call payloads (e.g. file_write
-    # with a full HTML page) mid-JSON, causing unrecoverable parse failures.
-    # Safe ceiling across OpenAI (16k+), DeepSeek (8k), Anthropic (8k+).
-    max_tokens: int = 8192
+    # 16384 default: 8192 truncates content-generation tasks (document
+    # restructuring, research synthesis, long code) mid-stream, forcing
+    # the wasteful auto-retry (doubles inference cost). 16384 is safe
+    # across OpenAI (16k+), DeepSeek (16k+), Anthropic (8k+ with automatic
+    # mapping), Qwen (32k+). Callers can override per-call for short tasks.
+    max_tokens: int = 16384
     temperature: float = 0.7
     timeout: float = 60.0
     # Cost tracking (per 1M tokens, in USD)

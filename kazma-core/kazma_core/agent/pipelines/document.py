@@ -302,20 +302,24 @@ def _looks_like_prose(text: str) -> bool:
     return (structured / total) < 0.30
 
 
+_CONTENT_TYPE_RE = None
+
+
 def _basic_structure(text: str) -> str:
     """Add basic markdown structure to flat text when the LLM is unavailable.
 
-    Detects date lines, short title-like lines, and list items — converts
-    them to headings and bullets so the PDF generator has sections to work
-    with instead of one unformatted blob.
+    Detects date lines, content-type lines (Reel/Carousel/Story), platform
+    lines, hashtags, and list items — groups them into per-entry sections
+    so the PDF generator produces structured output.
     """
     import re as _re
 
-    global _DATE_LINE_RE
+    global _DATE_LINE_RE, _CONTENT_TYPE_RE
     if _DATE_LINE_RE is None:
         _DATE_LINE_RE = _re.compile(
             r"^(?:"
             r"(?:Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul)\s+\d{1,2}"
+            r"|\d{1,2}\s+(?:Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul)"
             r"|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?"
             r"|(?:السبت|الأحد|الاثنين|الثلاثاء|الأربعاء|الخميس|الجمعة)\s+\d{1,2}"
             r"|(?:أغسطس|سبتمبر|أكتوبر)\s+\d{1,2}"
@@ -323,55 +327,87 @@ def _basic_structure(text: str) -> str:
             r"(?:\s|,|$)",
             _re.IGNORECASE,
         )
+        _CONTENT_TYPE_RE = _re.compile(
+            r"^(Reel|Carousel|Story|Stories|Static|Post|Video|Live|"
+            r"ريل|كاروسيل|ستوري|منشور|فيديو)",
+            _re.IGNORECASE,
+        )
 
     lines = text.split("\n")
     out: list[str] = []
-    in_list = False
+    current_entry: list[str] = []
+    entry_count = 0
+
+    def _flush_entry():
+        nonlocal current_entry, entry_count
+        if current_entry:
+            entry_count += 1
+            # Extract date and type for the heading if available
+            date_val = next((c.replace("**Date:** ", "") for c in current_entry if c.startswith("**Date:**")), "")
+            type_val = next((c.replace("**Type:** ", "") for c in current_entry if c.startswith("**Type:**")), "")
+            heading = f"## Entry {entry_count}"
+            if date_val and type_val:
+                heading = f"## {date_val} — {type_val}"
+            elif date_val:
+                heading = f"## {date_val}"
+            out.append(heading)
+            for item in current_entry:
+                out.append(item)
+            out.append("")
+            current_entry = []
 
     for line in lines:
         stripped = line.strip()
 
-        # Skip empty lines
         if not stripped:
-            if in_list:
-                out.append("")
-                in_list = False
-            else:
-                out.append("")
+            if current_entry:
+                current_entry.append("")
             continue
 
-        # Date lines → ## headings
+        # Date lines → new entry section
         if _DATE_LINE_RE.match(stripped):
-            if in_list:
-                out.append("")
-                in_list = False
-            out.append(f"## {stripped}")
+            _flush_entry()
+            current_entry.append(f"**Date:** {stripped}")
             continue
 
-        # Short title-like lines (3-60 chars, no trailing punctuation) → ### headings
-        if 3 <= len(stripped) <= 60 and not stripped.endswith((".", ",", ";", "!", "?", ":", ")")):
-            # Check it's not a continuation (starts with lowercase or Arabic prefix)
-            is_title = (
-                stripped[0].isupper()
-                or stripped[0].isdigit
-                or "\u0600" <= stripped[0] <= "\u06FF"  # Arabic block
-            )
-            if is_title and not stripped.startswith(("-", "•", "*", "#")):
-                if in_list:
-                    out.append("")
-                    in_list = False
-                out.append(f"### {stripped}")
-                continue
+        # Content type → entry metadata
+        if _CONTENT_TYPE_RE.match(stripped):
+            if current_entry and not any("**Type:**" in c for c in current_entry):
+                current_entry.append(f"**Type:** {stripped}")
+            else:
+                _flush_entry()
+                current_entry.append(f"**Type:** {stripped}")
+            continue
+
+        # Platform lines
+        if stripped in ("Instagram", "TikTok", "Instagram + TikTok", "Instagram & TikTok", ".."):
+            if current_entry and not any("**Platform:**" in c for c in current_entry):
+                current_entry.append(f"**Platform:** {stripped}")
+            else:
+                current_entry.append(stripped)
+            continue
+
+        # Hashtags (lines with multiple #)
+        if stripped.count("#") >= 2 or (stripped.startswith("#") and len(stripped) > 3):
+            current_entry.append(f"**Hashtags:** {stripped}")
+            continue
+
+        # Status
+        if "progress" in stripped.lower() or "✏" in stripped or "in progress" in stripped.lower():
+            current_entry.append(f"**Status:** {stripped}")
+            continue
 
         # List items → bullets
-        if stripped.startswith(("-", "•", "*")) or (len(stripped) > 2 and stripped[0].isdigit() and stripped[1] == "."):
-            out.append(f"- {stripped.lstrip('-•* ').lstrip('0123456789. ')}")
-            in_list = True
+        if stripped.startswith(("-", "•", "*")) or (
+            len(stripped) > 2 and stripped[0].isdigit() and stripped[1] == "."
+        ):
+            current_entry.append(f"- {stripped.lstrip('-•* ').lstrip('0123456789. ')}")
             continue
 
-        # Regular text
-        out.append(stripped)
-        in_list = False
+        # Regular content
+        current_entry.append(stripped)
+
+    _flush_entry()
 
     result = "\n".join(out)
 
@@ -412,27 +448,48 @@ def _resolve_platform_chat_id(platform: str) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    """Read PDF text content."""
+    """Read PDF text content with proper Arabic handling.
+
+    Raw fitz.get_text() returns Arabic in VISUAL order (reversed, isolated
+    forms) and reads table PDFs column-by-column. The documents service
+    handles Arabic correctly and produces better structured output.
+    """
+    # Primary: the documents service (proper Arabic + table handling)
     try:
-        import fitz  # PyMuPDF
+        from kazma_core.documents.service import DocumentService
+
+        result = DocumentService().read_transient_sync(
+            path, approved_path=path, max_chars=50000, fence=False
+        )
+        text = result.as_tool_output()
+        if text and len(text) > 50:
+            return text
+    except Exception as exc:
+        logger.debug("[document_pipeline] documents service failed: %s", exc)
+
+    # Fallback: fitz with Arabic bidi correction
+    try:
+        import fitz
 
         doc = fitz.open(str(path))
         text_parts = []
         for page in doc:
-            text_parts.append(page.get_text())
+            page_text = page.get_text()
+            # fitz returns Arabic in visual order (reversed). Apply bidi
+            # to convert back to logical order so downstream processing
+            # (reshaping, rendering) works correctly.
+            try:
+                from bidi.algorithm import get_display
+
+                page_text = get_display(page_text, base_dir="R")
+            except ImportError:
+                pass  # python-bidi not installed — use raw text
+            text_parts.append(page_text)
         doc.close()
         return "\n\n".join(text_parts)
-    except ImportError:
-        # Fall back to the documents service
-        try:
-            from kazma_core.documents.service import DocumentService
-
-            result = DocumentService().read_transient_sync(
-                path, approved_path=path, max_chars=50000, fence=False
-            )
-            return result.as_tool_output()
-        except Exception:
-            return path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        logger.warning("[document_pipeline] PDF read failed: %s", exc)
+        return ""
 
 
 def _derive_title(content: str, fmt: str) -> str:

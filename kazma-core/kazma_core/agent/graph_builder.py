@@ -1550,12 +1550,19 @@ async def supervisor_node(
         async def _call_llm_with_retry() -> Any:
             nonlocal _llm_attempts
             last_exc: Exception | None = None
+            # Per-call max_tokens: tool-call iterations need less output
+            # (tool JSON is bounded) — use 8192 to save cost. Content-only
+            # turns (no tools) may produce long answers — use the full
+            # configured limit (16384 default). This prevents the wasteful
+            # truncation-retry loop on content-generation tasks.
+            _call_max_tokens = 8192 if effective_tool_definitions else None
             for attempt in range(1, cfg["max_attempts"] + 1):
                 try:
                     return await llm.chat(
                         messages=messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
+                        max_tokens=_call_max_tokens,
                     )
                 except retryable_exc as exc:
                     last_exc = exc
