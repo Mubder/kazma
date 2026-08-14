@@ -19,6 +19,22 @@
   var liveSource = null;
   var liveSessionId = null;
 
+  // Sessions live in research_sessions.db, tasks in the swarm TaskStore —
+  // route mutations by id prefix so delete/archive work for BOTH.
+  function researchDeleteUrl(id) {
+    var s = String(id);
+    return s.indexOf('session:') === 0
+      ? '/api/research/sessions/' + encodeURIComponent(s.slice('session:'.length))
+      : '/api/research/tasks/' + encodeURIComponent(s);
+  }
+
+  function researchArchiveUrl(id, action) {
+    var s = String(id);
+    return s.indexOf('session:') === 0
+      ? '/api/research/sessions/' + encodeURIComponent(s.slice('session:'.length)) + '/' + action
+      : '/api/research/tasks/' + encodeURIComponent(s) + '/' + action;
+  }
+
   function $(id) { return document.getElementById(id); }
 
   // SVG icons (no emojis — consistent with the rest of the Kazma UI).
@@ -233,13 +249,30 @@
     },
 
     loadArchived: function () {
-      fetch('/api/research/tasks?page=1&page_size=50&archived=true', { credentials: 'same-origin' })
-        .then(function (r) { return r.ok ? r.json() : { tasks: [], count: 0 }; })
-        .then(function (data) {
-          archivedTasks = data.tasks || [];
-          renderArchivedList(archivedTasks);
-        })
-        .catch(function () { /* silent */ });
+      // Archived tab = archived swarm tasks + archived durable sessions.
+      Promise.all([
+        fetch('/api/research/tasks?page=1&page_size=50&archived=true', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { tasks: [], count: 0 }; }),
+        fetch('/api/research/sessions?limit=50&archived=true', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { sessions: [], count: 0 }; })
+          .catch(function () { return { sessions: [] }; }),
+      ]).then(function (results) {
+        var tasks = results[0].tasks || [];
+        var sessions = (results[1].sessions || []).map(function (s) {
+          // Render archived sessions through the task-shaped card.
+          return {
+            id: 'session:' + s.id,
+            prompt: '[Deep] ' + (s.topic || ''),
+            status: s.status || 'done',
+            workers: [],
+            cost: 0,
+            created_at: s.created_at,
+            completed_at: s.updated_at,
+          };
+        });
+        archivedTasks = tasks.concat(sessions);
+        renderArchivedList(archivedTasks);
+      }).catch(function () { /* silent */ });
     },
 
     searchArchived: function (e) {
@@ -317,8 +350,10 @@
             }
             var archBtn = $('detail-archive-btn');
             var restBtn = $('detail-restore-btn');
-            if (archBtn) archBtn.style.display = 'none';
-            if (restBtn) restBtn.style.display = 'none';
+            // Sessions support archive/restore natively now (their own
+            // endpoints); show the right button for the archived state.
+            if (archBtn) archBtn.style.display = s.archived ? 'none' : '';
+            if (restBtn) restBtn.style.display = s.archived ? '' : 'none';
             // Re-attach live stream if still running
             if (s.status === 'running' || s.status === 'pending') {
               liveSessionId = s.id;
@@ -371,7 +406,7 @@
         return;
       }
 
-      fetch('/api/research/tasks/' + encodeURIComponent(id), { credentials: 'same-origin' })
+      fetch(researchDeleteUrl(id), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
           if (!data || data.error) { toast('Could not load', 'error'); return; }
@@ -464,7 +499,7 @@
       if (!currentId) return;
       if (!await confirm('Delete this research result?')) return;
       var id = currentId;
-      fetch('/api/research/tasks/' + encodeURIComponent(id), {
+      fetch(researchDeleteUrl(id), {
         method: 'DELETE',
         credentials: 'same-origin',
       })
@@ -482,7 +517,7 @@
 
     del: async function (id) {
       if (!await confirm('Delete this research result?')) return;
-      fetch('/api/research/tasks/' + encodeURIComponent(id), {
+      fetch(researchDeleteUrl(id), {
         method: 'DELETE',
         credentials: 'same-origin',
       })
@@ -497,7 +532,7 @@
 
     delArchived: async function (id) {
       if (!await confirm('Delete this research result?')) return;
-      fetch('/api/research/tasks/' + encodeURIComponent(id), {
+      fetch(researchDeleteUrl(id), {
         method: 'DELETE',
         credentials: 'same-origin',
       })
@@ -511,7 +546,7 @@
     },
 
     archive: function (id) {
-      fetch('/api/research/tasks/' + encodeURIComponent(id) + '/archive', {
+      fetch(researchArchiveUrl(id, 'archive'), {
         method: 'POST',
         credentials: 'same-origin',
       })
@@ -529,7 +564,7 @@
     },
 
     restore: function (id) {
-      fetch('/api/research/tasks/' + encodeURIComponent(id) + '/unarchive', {
+      fetch(researchArchiveUrl(id, 'unarchive'), {
         method: 'POST',
         credentials: 'same-origin',
       })
@@ -545,7 +580,7 @@
     archiveCurrent: function () {
       if (!currentId) return;
       var id = currentId;
-      fetch('/api/research/tasks/' + encodeURIComponent(id) + '/archive', {
+      fetch(researchArchiveUrl(id, 'archive'), {
         method: 'POST',
         credentials: 'same-origin',
       })
@@ -562,7 +597,7 @@
     restoreCurrent: function () {
       if (!currentId) return;
       var id = currentId;
-      fetch('/api/research/tasks/' + encodeURIComponent(id) + '/unarchive', {
+      fetch(researchArchiveUrl(id, 'unarchive'), {
         method: 'POST',
         credentials: 'same-origin',
       })

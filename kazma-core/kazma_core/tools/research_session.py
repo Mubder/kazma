@@ -27,6 +27,8 @@ __all__ = [
     "update_session",
     "start_deep_research",
     "cancel_session",
+    "archive_session",
+    "delete_session",
     "subscribe_progress",
     "unsubscribe_progress",
     "record_chat_research",
@@ -80,6 +82,7 @@ class ResearchSession:
     created_at: float = 0.0
     updated_at: float = 0.0
     meta: dict[str, Any] = field(default_factory=dict)
+    archived: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -135,6 +138,11 @@ def _conn() -> sqlite3.Connection:
             c.execute("ALTER TABLE research_sessions ADD COLUMN rubric_ok INTEGER")
         except Exception:
             pass
+    if "archived" not in cols:
+        try:
+            c.execute("ALTER TABLE research_sessions ADD COLUMN archived INTEGER DEFAULT 0")
+        except Exception:
+            pass
     c.commit()
     return c
 
@@ -158,6 +166,12 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
             rscore = None
     if "rubric_ok" in keys and r["rubric_ok"] is not None:
         rok = bool(int(r["rubric_ok"]))
+    rarch = False
+    if "archived" in keys and r["archived"] is not None:
+        try:
+            rarch = bool(int(r["archived"]))
+        except (TypeError, ValueError):
+            rarch = False
     return ResearchSession(
         id=r["id"],
         topic=r["topic"] or "",
@@ -176,6 +190,7 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
         created_at=float(r["created_at"] or 0),
         updated_at=float(r["updated_at"] or 0),
         meta=meta if isinstance(meta, dict) else {},
+        archived=rarch,
     )
 
 
@@ -247,18 +262,61 @@ def get_session(session_id: str) -> ResearchSession | None:
         c.close()
 
 
-def list_sessions(*, limit: int = 50) -> list[ResearchSession]:
+def list_sessions(
+    *, limit: int = 50, archived: bool | None = False
+) -> list[ResearchSession]:
+    """List sessions newest-first.
+
+    Default excludes archived (the active list); ``archived=True`` returns
+    only archived (the panel's Archived tab); ``archived=None`` returns
+    everything.
+    """
     c = _conn()
     try:
+        where = ""
+        params: list[Any] = []
+        if archived is not None:
+            where = "WHERE archived = ?"
+            params.append(1 if archived else 0)
         rows = c.execute(
-            """
+            f"""
             SELECT * FROM research_sessions
+            {where}
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (max(1, min(200, int(limit or 50))),),
+            (*params, max(1, min(200, int(limit or 50)))),  # noqa: S608 — static WHERE
         ).fetchall()
         return [_row_to_session(r) for r in rows]
+    finally:
+        c.close()
+
+
+def archive_session(session_id: str, archived: bool = True) -> ResearchSession | None:
+    """Archive / unarchive a session (soft hide from the main list)."""
+    return update_session(session_id, archived=archived)
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a session row. Cancels it first when still running.
+
+    Returns True when a row was removed.
+    """
+    sess = get_session(session_id)
+    if sess is None:
+        return False
+    if sess.status in ("running", "pending"):
+        try:
+            cancel_session(session_id)
+        except Exception:
+            logger.debug("[research_session] cancel-before-delete failed", exc_info=True)
+    _SUBS.pop(session_id, None)
+    _RUNNING.pop(session_id, None)
+    c = _conn()
+    try:
+        cur = c.execute("DELETE FROM research_sessions WHERE id=?", (session_id,))
+        c.commit()
+        return bool(cur.rowcount)
     finally:
         c.close()
 
@@ -279,7 +337,7 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
               topic=?, depth=?, status=?, stage=?, message=?,
               log_json=?, report_path=?, summary=?, error=?,
               sources=?, max_sources=?, rubric_score=?, rubric_ok=?,
-              updated_at=?, meta_json=?
+              updated_at=?, meta_json=?, archived=?
             WHERE id=?
             """,
             (
@@ -298,6 +356,7 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
                 (None if sess.rubric_ok is None else (1 if sess.rubric_ok else 0)),
                 sess.updated_at,
                 json.dumps(sess.meta or {}),
+                1 if sess.archived else 0,
                 sess.id,
             ),
         )

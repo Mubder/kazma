@@ -223,12 +223,18 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
     @router.get("/api/research/sessions")
-    async def list_research_sessions(limit: int = 50) -> JSONResponse:
-        """List durable deep-research sessions (newest first)."""
+    async def list_research_sessions(
+        limit: int = 50, archived: bool = False
+    ) -> JSONResponse:
+        """List durable deep-research sessions (newest first).
+
+        Archived sessions are excluded by default (mirrors the tasks list);
+        pass ``archived=true`` for the Archived tab.
+        """
         try:
             from kazma_core.tools.research_session import list_sessions
 
-            sessions = list_sessions(limit=limit)
+            sessions = list_sessions(limit=limit, archived=archived)
             return JSONResponse(
                 {
                     "ok": True,
@@ -241,6 +247,48 @@ def create_research_router() -> APIRouter:
             return JSONResponse(
                 {"ok": False, "error": str(exc), "sessions": []}, status_code=500
             )
+
+    @router.post("/api/research/sessions/{session_id}/archive")
+    async def archive_research_session(session_id: str) -> JSONResponse:
+        """Soft-hide a session from the main Research list."""
+        try:
+            from kazma_core.tools.research_session import archive_session, get_session
+
+            if get_session(session_id) is None:
+                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            sess = archive_session(session_id, archived=True)
+            return JSONResponse({"ok": True, "session": sess.to_dict() if sess else None})
+        except Exception as exc:
+            logger.exception("[research] archive session failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @router.post("/api/research/sessions/{session_id}/unarchive")
+    async def unarchive_research_session(session_id: str) -> JSONResponse:
+        """Restore an archived session to the main Research list."""
+        try:
+            from kazma_core.tools.research_session import archive_session, get_session
+
+            if get_session(session_id) is None:
+                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            sess = archive_session(session_id, archived=False)
+            return JSONResponse({"ok": True, "session": sess.to_dict() if sess else None})
+        except Exception as exc:
+            logger.exception("[research] unarchive session failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @router.delete("/api/research/sessions/{session_id}")
+    async def delete_research_session(session_id: str) -> JSONResponse:
+        """Delete a session row (cancels first when still running)."""
+        try:
+            from kazma_core.tools.research_session import delete_session
+
+            deleted = delete_session(session_id)
+            if not deleted:
+                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            return JSONResponse({"ok": True, "deleted": session_id})
+        except Exception as exc:
+            logger.exception("[research] delete session failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
     @router.get("/api/research/sessions/{session_id}")
     async def get_research_session(session_id: str) -> JSONResponse:

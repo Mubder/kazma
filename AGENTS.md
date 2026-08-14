@@ -880,6 +880,63 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 `asyncio/base_events.py`. That means someone re-introduced
 `create_subprocess_exec` on the server loop.
 
+### 24. Import Integrity + Web Acquisition SoT + CSRF/Rate-Limit (2026-08-14 audit round)
+
+**A. Import-integrity gates — `tests/test_imports.py` (deletion SOP).**
+- Two tests: `test_every_product_module_imports` (imports every module of
+  every `kazma-*/kazma_*` package) and `test_no_dangling_kazma_import_references`
+  (AST scan: every `kazma_*` import reference must resolve to a real file;
+  imports inside try/except are exempt as deliberate degradation paths).
+- Born from the crawl.py incident: a module deletion left a dangling import
+  in `web_acquire/__init__` — py_compile passed (syntax-only), no test
+  imported the package, production research broke at first use
+  (`ModuleNotFoundError`). **Rule: deleting a module requires green
+  `tests/test_imports.py` in the SAME commit, and importers removed in the
+  same change.** Optional pre-commit hook: `.pre-commit-config.yaml`.
+- `tools/read_url.fetch_full_text` is the PUBLIC ladder entry point
+  (alias of `_fetch_full_text`); the `web_acquire.fetch` façade and KB
+  ingest fallback use the public name — do not import the underscored one.
+
+**B. Web acquisition — ONE egress stack.**
+- SoT ladder: `tools/read_url._fetch_full_text` (Jina → Firecrawl → httpx →
+  Playwright) built on `proxy.client.get_scraping_client` (proxy provider +
+  rotating UA pool); `web_acquire` is the façade (`fetch_text`/`search`/
+  `rank_urls`/profiles) used by research pipeline, KB ingest, and readiness.
+- `crawl_site(profile=...)` accepts named cap presets (`research_brief` |
+  `research_deep` | `kb_site` | `single_page`); explicit args win; hard env
+  ceilings (`KAZMA_CRAWL_MAX_PAGES` etc.) still clamp.
+- Deliberate direct-API exceptions (never route through the scraping proxy):
+  Jina Reader, Firecrawl, loopback SearXNG. The gateway attachment URL fetch
+  DOES route through `get_scraping_client_sync` (SSRF-per-redirect kept).
+
+**C. CSRF + rate limiting (`kazma_ui`).**
+- `csrf.py` middleware: non-GET `/api/*` with a mismatched Origin/Referer
+  host → 403. `Authorization`-header requests and origin-less clients
+  (curl/CLI/webhooks) are exempt; `X-Forwarded-Host` honored for proxies.
+  **Use `request.url.hostname` — Starlette's URL has no `.host`** (the
+  2026-08-14 every-browser-POST-500 crash). Tests must build REAL ASGI-scope
+  Requests (`tests/test_csrf.py`) — MagicMock auto-attributes and hides
+  exactly that bug class.
+- `rate_limit.py`: per-principal sliding window (cookie > Authorization > IP)
+  on chat stream / voice / research sessions / swarm dispatch / system flush.
+  Active ONLY when auth is enabled (never demo mode); live ConfigStore
+  `api.rate_limit.<bucket>_per_minute`; env `KAZMA_RATE_LIMIT_ENABLED=0`.
+
+**D. Research sessions.**
+- `suppress_chat_recording()` (ContextVar, research_session.py): the deep
+  pipeline wraps BOTH its search gathers in it — sub-queries must NOT mint
+  standalone `record_chat_research` rows (the panel flood: one deep run
+  showed 10+ "1 sources" rows). Chat-initiated searches still record.
+- Sessions support delete + archive (idempotent `archived` column via ALTER
+  TABLE; `list_sessions` EXCLUDES archived by default — pass
+  `archived=True`/`None` explicitly for the Archived tab / everything).
+  The panel routes `session:`-prefixed ids to `/api/research/sessions/*`
+  mutation endpoints — sessions live in `research_sessions.db`, NOT the
+  swarm TaskStore.
+- Chat-tool snapshots persist up to `_CHAT_RESULT_MAX` (200K — the old
+  [:500] cap discarded full output at write time); a longer re-query
+  refreshes the stored summary, a shorter one never clobbers it.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

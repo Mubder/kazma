@@ -219,6 +219,28 @@ def test_record_chat_research_dedupes_per_topic(session_db):
     assert len(rows) == 1
 
 
+def test_archive_and_delete_session(session_db):
+    """Archive soft-hides from the default list; delete removes the row."""
+    rs = session_db
+    s = rs.create_session("archive me")
+
+    # Archived sessions are excluded by default, included with archived=True.
+    rs.archive_session(s.id, archived=True)
+    assert all(x.id != s.id for x in rs.list_sessions(limit=100))
+    assert any(x.id == s.id for x in rs.list_sessions(limit=100, archived=True))
+    fetched = rs.get_session(s.id)
+    assert fetched is not None and fetched.archived is True
+
+    # Unarchive restores visibility.
+    rs.archive_session(s.id, archived=False)
+    assert any(x.id == s.id for x in rs.list_sessions(limit=100))
+
+    # Delete removes the row entirely.
+    assert rs.delete_session(s.id) is True
+    assert rs.get_session(s.id) is None
+    assert rs.delete_session(s.id) is False  # already gone — idempotent False
+
+
 def test_cancel_session(session_db):
     rs = session_db
     s = rs.create_session("cancel me")

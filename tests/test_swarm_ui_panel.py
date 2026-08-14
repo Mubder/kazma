@@ -39,11 +39,31 @@ from fastapi.testclient import TestClient
 
 
 def _build_client():
-    """Build a FastAPI TestClient with the swarm router for testing."""
+    """Build a FastAPI TestClient with the swarm router for testing.
+
+    The templates require the SAME env globals the real app registers
+    (app.py: lang/dir/theme/t/translations_json) — base.html reads them on
+    line 2. Registering only css/js_version used to fail every render with
+    UndefinedError ('theme' is undefined), which is why this file's 28
+    template-backed tests went red when the app moved to dynamic globals.
+    """
+    import contextvars
+    import json as _json
+
+    from kazma_ui.i18n import TRANSLATIONS, make_translator
+
     app = FastAPI()
     templates = Jinja2Templates(directory="kazma-ui/kazma_ui/templates")
     templates.env.globals["css_version"] = lambda: "test"
     templates.env.globals["js_version"] = lambda: "test"
+    _lang = contextvars.ContextVar("test_lang", default="en")
+    templates.env.globals["lang"] = _lang.get
+    templates.env.globals["dir"] = lambda: "rtl" if _lang.get() == "ar" else "ltr"
+    templates.env.globals["theme"] = lambda: "light"
+    templates.env.globals["t"] = make_translator("en")
+    templates.env.globals["translations_json"] = _json.dumps(
+        TRANSLATIONS, ensure_ascii=False
+    )
 
     from kazma_ui.swarm_panel import _reset_swarm_state, create_swarm_router
 
@@ -552,14 +572,28 @@ class TestHandoffVisualization:
 class TestHITLCheckpointUI:
     """Test HITL checkpoint UI elements."""
 
-    def test_approve_endpoint_exists(self):
+    @staticmethod
+    def _as_admin(monkeypatch):
+        """Bypass the admin gate for endpoint-existence smokes — the gate
+        runs BEFORE the task lookup, so anonymous requests 401/403 depending
+        on the host's auth config instead of the 404 under test."""
+        import kazma_ui.auth as _auth
+
+        monkeypatch.setattr(
+            _auth, "get_request_principal", lambda request: {"source": "secret"}
+        )
+        monkeypatch.setattr(_auth, "is_authenticated", lambda request, secret: True)
+
+    def test_approve_endpoint_exists(self, monkeypatch):
         """Approve endpoint returns 404 for unknown task."""
+        self._as_admin(monkeypatch)
         client = _build_client()
         response = client.post("/api/swarm/tasks/nonexistent/approve")
         assert response.status_code == 404
 
-    def test_reject_endpoint_exists(self):
+    def test_reject_endpoint_exists(self, monkeypatch):
         """Reject endpoint returns 404 for unknown task."""
+        self._as_admin(monkeypatch)
         client = _build_client()
         response = client.post("/api/swarm/tasks/nonexistent/reject")
         assert response.status_code == 404

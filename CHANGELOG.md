@@ -1,5 +1,53 @@
 # CHANGELOG
 
+## Unreleased — Full-repo deep audit executed + fail-safe gates (2026-08-14)
+
+**The 76-finding audit, executed end-to-end**: 14 HIGH / 27 MEDIUM / 26 LOW
+fixed, 1 withdrawn as not-a-bug, 2 kept-and-documented, the deferred queue
+(rate limiting, CSRF, orphan removal) cleared, and the legacy test debt
+repaired — the suite is fully green.
+
+- **Import-integrity gates** (`tests/test_imports.py`): imports every
+  product module (585 files) + AST-verifies every `kazma_*` import
+  reference resolves (guarded try/except imports exempt). Born from the
+  crawl.py incident — a deletion left a dangling import that py_compile
+  and the suite both missed and production research broke at first use.
+  Optional pre-commit hook in `.pre-commit-config.yaml` (~5s).
+- **CSRF guard** (`kazma_ui/csrf.py`): non-GET `/api/*` with a mismatched
+  Origin/Referer host → 403; `Authorization` requests and origin-less
+  clients (curl/CLI/webhooks) exempt; `X-Forwarded-Host` honored. Hotfix:
+  `request.url.hostname` (Starlette URL has no `.host` — every browser
+  POST 500'd for a window today).
+- **Per-principal rate limiting** (`kazma_ui/rate_limit.py`): sliding
+  window on chat stream (30/min), voice (30), research sessions (10),
+  swarm dispatch (20), system flush (6) — active only when auth is
+  enabled; live ConfigStore override; `KAZMA_RATE_LIMIT_ENABLED=0` kill
+  switch.
+- **Agent brain fixes**: sub-agent HITL auto-deny UnboundLocalError;
+  `_post_turn_memory` declared in SupervisorState (post-turn memory was
+  silently dropped by LangGraph); auto-continue SUPERVISOR self-edge;
+  broadcast subject to admission/tenant stamping; entity_merge enqueue;
+  asyncio NameError regression (recall/procedural hints silently
+  no-op'd) fixed; `send_file` platform-aware; agent identity settings
+  ConfigStore-first; TUI chat history.
+- **Research panel**: full chat-research output (200K cap, was [:500]
+  write-time truncation), session export endpoint (MD/DOCX/PDF), session
+  delete/archive (archived column + endpoints + UI routing), markdown
+  rendering for chat rows, and the deep-pipeline session flood fixed
+  (`suppress_chat_recording` — one run = one row).
+- **Web acquisition**: `crawl_site` profile presets
+  (research_brief/research_deep/kb_site/single_page);
+  `read_url.fetch_full_text` public ladder entry; gateway attachment
+  fetch through the scraping client — one egress stack everywhere.
+- **Orphan removal**: 9 dead modules (~2k lines incl. a Windows
+  subprocess landmine), 4 dead endpoint groups; mcp_client documented as
+  the deliberate diagnostics stack.
+- **Mermaid vendored** (10.9.8, offline Workflow Editor); restart
+  recovery polls a real route; memory-console XSS; dashboard HITL deny
+  button; Telegram FanOut approvals; Slack user-based thread ids; event
+  -loop blocking removed from clone/attachments/git; universal backup
+  Windows prune + zip handling; durable-queue claim race; cron task GC.
+
 ## Unreleased — Universal backup + boot fixes + research export (2026-08-14)
 
 **"The backup never left anything behind."** One unified backup system that

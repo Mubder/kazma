@@ -1,0 +1,17 @@
+# Pre-commit hooks (opt-in): pip install pre-commit && pre-commit install
+#
+# import-gates: the crawl.py incident class (2026-08-14) — a module deletion
+# left a dangling import that py_compile (syntax-only) and the behavioral
+# suite both missed; it broke research in production at first use. These
+# two tests import every product module and AST-verify every kazma_*
+# import reference resolves. ~5s. See tests/test_imports.py.
+repos:
+  - repo: local
+    hooks:
+      - id: kazma-import-gates
+        name: kazma import gates (every module imports + no dangling refs)
+        entry: .venv/Scripts/python.exe -m pytest tests/test_imports.py -q
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-commit]
