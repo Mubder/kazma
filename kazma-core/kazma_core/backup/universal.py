@@ -57,6 +57,33 @@ def _should_exclude(name: str, is_dir: bool = False) -> bool:
     return any(name.endswith(suf) for suf in _EXCLUDE_SUFFIXES)
 
 
+def _rmtree_force(path: Path) -> None:
+    """Force-remove a directory tree on Windows (handles read-only + locked files).
+
+    shutil.rmtree on Windows fails with WinError 145 ("directory is not empty")
+    when files have read-only attributes or handles are briefly open. This
+    clears the read-only bit on each file before removal.
+    """
+    import os
+    import stat
+
+    def _on_error(func: Any, fpath: str, exc_info: Any) -> None:
+        try:
+            os.chmod(fpath, stat.S_IWRITE)
+            func(fpath)
+        except Exception:
+            # Last resort: try once more after a tiny sleep (handle release).
+            import time
+            time.sleep(0.1)
+            try:
+                os.chmod(fpath, stat.S_IWRITE)
+                func(fpath)
+            except Exception:
+                pass  # leave it; not worth crashing the delete
+
+    shutil.rmtree(path, onerror=_on_error)
+
+
 def _backup_one_db(src: Path, dest: Path) -> bool:
     """WAL-safe copy of a single SQLite database via the Online Backup API."""
     try:
@@ -318,7 +345,7 @@ def delete_universal_backup(dir_name: str) -> dict[str, Any]:
     if not target.is_dir():
         return {"ok": False, "error": f"Backup '{dir_name}' not found"}
     try:
-        shutil.rmtree(target)
+        _rmtree_force(target)
         logger.info("[universal-backup] deleted %s", dir_name)
         return {"ok": True, "deleted": dir_name}
     except Exception as exc:
