@@ -68,16 +68,36 @@ async def test_engine_dispatch_returns_task_result_for_single_worker(in_process_
 
 
 @pytest.mark.asyncio
-async def test_engine_dispatch_missing_worker_returns_failed_result(empty_config):
+async def test_engine_dispatch_missing_worker_auto_creates(empty_config):
+    """A named worker that isn't registered is AUTO-CREATED from the active
+    model profile and dispatched (commit 761b62cf — "no more 'not found' dead
+    ends"), rather than failing with 'Worker not found'."""
+    from unittest.mock import MagicMock
+
+    from kazma_core.llm_provider import LLMResponse
     from kazma_core.swarm.engine import SwarmEngine
 
+    mock_provider = MagicMock()
+    mock_provider.chat = AsyncMock(return_value=LLMResponse(content="ghost output"))
+    mock_registry = MagicMock()
+    mock_registry.get_active_profile = MagicMock(
+        return_value={"model": "test-model", "provider": "test"}
+    )
+    # The auto-created InProcessWorker resolves its provider through any of
+    # these; point them all at the mocked provider so resilient_chat awaits
+    # an AsyncMock, not a bare MagicMock.
+    for meth in ("get_client", "get_client_by_provider", "get_model"):
+        setattr(mock_registry, meth, MagicMock(return_value=mock_provider))
+
     engine = SwarmEngine(empty_config)
+    with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+         patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
+        result = await engine.dispatch(SwarmTask(prompt="Do work", workers=["ghost"]))
 
-    result = await engine.dispatch(SwarmTask(prompt="Do work", workers=["ghost"]))
-
-    assert result.status == "failed"
-    assert result.aggregated_output is None
-    assert "Worker 'ghost' not found." in (result.error or "")
+    # The missing worker was auto-created (not "not found") and dispatched.
+    assert result.status == "success"
+    assert result.aggregated_output == "ghost output"
+    assert engine.get_worker("ghost") is not None
 
 
 @pytest.mark.asyncio
