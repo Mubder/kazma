@@ -1082,9 +1082,17 @@ class LocalToolRegistry:
                     store = get_config_store()
                     tg_id = store.get("connectors.telegram.swarm_chat_id")
                     if not tg_id:
-                        allowed = store.get("connectors.telegram.allowed_users") or []
+                        allowed = store.get("connectors.telegram.allowed_users")
+                        # ConfigStore may return a string ("1804015016" or
+                        # "123,456") or a list — normalize. The old code did
+                        # allowed[0] on a string, taking the FIRST CHARACTER
+                        # ("1") → chat_id 1 → "chat not found" 400.
+                        if isinstance(allowed, str):
+                            allowed = [u.strip() for u in allowed.replace(",", " ").split() if u.strip()]
+                        elif not isinstance(allowed, list):
+                            allowed = []
                         if allowed:
-                            tg_id = allowed[0]
+                            tg_id = str(allowed[0])
                     if tg_id:
                         target_id = f"telegram:{tg_id}"
                 except Exception as exc:
