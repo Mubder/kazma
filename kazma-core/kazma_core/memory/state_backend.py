@@ -28,6 +28,7 @@ __all__ = [
     "state_capability",
     "mirror_episode_to_state",
     "mirror_belief_to_state",
+    "backfill_state_mirror",
     "search_state_episodes",
     "search_state_beliefs",
 ]
@@ -510,6 +511,88 @@ def mirror_belief_to_state(row: dict[str, Any]) -> bool:
         return bool(get_state_backend().mirror_belief(row))
     except Exception:
         return False
+
+
+def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
+    """One-shot: push existing SQLite beliefs + episodes into the Postgres mirror.
+
+    The dual-mirror is write-forward only — it copies rows created AFTER it was
+    enabled, so existing memory is left behind. This backfill closes that gap so
+    the mirror isn't near-empty right after enabling, and re-running it re-syncs
+    after bulk edits. Idempotent (mirror_*_to_state use ``ON CONFLICT (id) DO
+    UPDATE``). SQLite stays the source of truth; this only writes copies.
+    """
+    be = get_state_backend()
+    if type(be).__name__ == "NullStateBackend" or not getattr(be, "available", False):
+        return {
+            "ok": False,
+            "synced": 0,
+            "error": (
+                "Postgres state backend not available — set provider=postgres "
+                "and a working DSN, then Save"
+            ),
+        }
+    try:
+        import sqlite3
+
+        from kazma_core.paths import primary_memory_db
+
+        conn = sqlite3.connect(primary_memory_db())
+        conn.row_factory = sqlite3.Row
+        ep_rows = conn.execute(
+            """
+            SELECT id, tenant_id, session_id, turn_number, user_text,
+                   assistant_text, summary_text, tier, structural_importance,
+                   created_at, metadata_json
+            FROM episodes WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        ).fetchall()
+        bel_rows = conn.execute(
+            """
+            SELECT id, tenant_id, subject, predicate, predicate_type, object,
+                   confidence, structural_importance, source_trust_weight,
+                   valid_from, valid_until, invalidated_at, metadata_json
+            FROM beliefs WHERE tenant_id = ?
+            """,
+            (tenant_id,),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        return {"ok": False, "synced": 0, "error": f"read sqlite failed: {exc}"[:300]}
+
+    ep_ok = ep_fail = bel_ok = bel_fail = 0
+    for r in ep_rows:
+        try:
+            if mirror_episode_to_state(dict(r)):
+                ep_ok += 1
+            else:
+                ep_fail += 1
+        except Exception:
+            ep_fail += 1
+    for r in bel_rows:
+        try:
+            if mirror_belief_to_state(dict(r)):
+                bel_ok += 1
+            else:
+                bel_fail += 1
+        except Exception:
+            bel_fail += 1
+
+    total_ok = ep_ok + bel_ok
+    total_fail = ep_fail + bel_fail
+    detail = (
+        f"Synced {total_ok} rows ({bel_ok} beliefs, {ep_ok} episodes) to Postgres"
+        + (f", {total_fail} failed" if total_fail else "")
+    )
+    return {
+        "ok": total_ok > 0 or total_fail == 0,
+        "synced": total_ok,
+        "beliefs": bel_ok,
+        "episodes": ep_ok,
+        "failed": total_fail,
+        "detail": detail,
+    }
 
 
 def search_state_episodes(

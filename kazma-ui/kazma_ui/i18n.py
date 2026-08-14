@@ -510,6 +510,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.memory_test_neo4j": {"en": "Test Neo4j", "ar": "اختبار Neo4j"},
     "settings.memory_sync_neo4j": {"en": "Sync beliefs → Neo4j", "ar": "مزامنة المعتقدات → Neo4j"},
+    "settings.memory_sync_postgres": {"en": "Sync beliefs + episodes → Postgres", "ar": "مزامنة المعتقدات + الحلقات → Postgres"},
     "settings.tab_connectors": {"en": "Connectors", "ar": "الموصلات"},
     "settings.tab_mcp": {"en": "MCP", "ar": "MCP"},
     "settings.tab_skills": {"en": "Skills", "ar": "المهارات"},

@@ -815,6 +815,15 @@
                 <label>Postgres DSN</label>
                 <input type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
             </div>
+            <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'" style="margin-top:4px;">
+                <p style="font-size:0.72rem;color:var(--text-muted);margin:0 0 8px;">
+                    The mirror is write-forward only — existing beliefs/episodes aren't copied automatically. Use Sync once after enabling (and to re-sync after bulk edits).
+                </p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    <button type="button" class="btn btn-sm" @click="syncMemoryState()" x-text="t('settings.memory_sync_postgres')"></button>
+                </div>
+                <p style="font-size:0.75rem;margin-top:8px;" x-text="memoryStateSyncStatus" :style="memoryStateSyncOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
+            </div>
 
             <!-- Neo4j — always visible (not only after dropdown pick) -->
             <div id="memory-neo4j-section" style="margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-card);background:rgba(99,102,241,0.06);">

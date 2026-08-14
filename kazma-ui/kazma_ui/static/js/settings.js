@@ -116,6 +116,8 @@ function settingsApp() {
         memoryExplainRecall: true,
         memoryNeo4jStatus: '',
         memoryNeo4jOk: false,
+        memoryStateSyncStatus: '',
+        memoryStateSyncOk: false,
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
@@ -886,6 +888,28 @@ function settingsApp() {
                 }
             } catch (e) {
                 this.memoryNeo4jStatus = 'Sync error: ' + e;
+            }
+        },
+
+        async syncMemoryState() {
+            this.memoryStateSyncStatus = 'Syncing beliefs + episodes to Postgres…';
+            this.memoryStateSyncOk = false;
+            try {
+                const resp = await fetch('/api/settings/memory/backends/sync-postgres', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    this.memoryStateSyncOk = true;
+                    this.memoryStateSyncStatus = data.detail || ('Synced ' + (data.synced || 0) + ' rows');
+                    showToast(data.detail || ('Synced ' + (data.synced || 0) + ' rows to Postgres'), 'success');
+                } else {
+                    this.memoryStateSyncStatus = data.error || 'Sync failed';
+                    showToast('Postgres sync failed', 'error');
+                }
+            } catch (e) {
+                this.memoryStateSyncStatus = 'Sync error: ' + e;
             }
         },
 

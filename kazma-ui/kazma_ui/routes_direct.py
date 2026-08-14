@@ -1270,6 +1270,17 @@ def register_direct_routes(self: Any) -> None:
 
         return sync_beliefs_to_neo4j(tenant_id="default", limit=1000)
 
+    @self.app.post("/api/settings/memory/backends/sync-postgres")
+    async def _settings_memory_sync_postgres():
+        """Backfill existing SQLite beliefs + episodes into the Postgres state mirror.
+
+        The dual-mirror is write-forward only; this one-shot copies existing rows
+        (and re-running re-syncs after edits). Idempotent. SQLite stays primary.
+        """
+        from kazma_core.memory.state_backend import backfill_state_mirror
+
+        return backfill_state_mirror(tenant_id="default")
+
     @self.app.post("/api/settings/memory/backends/reset-local")
     async def _settings_memory_reset_local():
         from kazma_core.memory.backends import reset_backends_to_local
