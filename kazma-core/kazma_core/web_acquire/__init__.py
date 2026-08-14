@@ -4,7 +4,7 @@
 
 | Consumer | Uses |
 |----------|------|
-| Research tools / pipeline | :func:`search`, :func:`fetch_text`, :func:`crawl` |
+| Research tools / pipeline | :func:`search`, :func:`fetch_text` |
 | Knowledge Library ingest | :func:`fetch_text`, discover (KB-owned policy) |
 | Chat tools (`read_url`, …) | Same fetch recovery ladder via ``tools/read_url`` |
 

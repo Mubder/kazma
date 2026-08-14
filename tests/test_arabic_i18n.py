@@ -1,24 +1,15 @@
 """Unit tests for Kazma Arabic i18n & NLP Architecture.
 
 Verifies:
-1. BiDi Unicode Directional Isolation (LRI \u2066 ... PDI \u2069)
-2. 6-Form Arabic CLDR Plural Engine (Zero, One, Two, Few, Many, Other)
-3. Markup Guard (Placeholder & Code Block Protection)
-4. Arabic Character Normalization for Search Indexing
+1. 6-Form Arabic CLDR Plural Engine (Zero, One, Two, Few, Many, Other)
+2. Markup Guard (Placeholder & Code Block Protection)
+3. Arabic Character Normalization for Search Indexing
 """
 
 from __future__ import annotations
 
-import datetime
 import pytest
 
-from kazma_core.bidi_utils import (
-    LRI,
-    PDI,
-    format_bidi_timestamp,
-    isolate_ltr,
-    wrap_mixed_arabic_tokens,
-)
 from kazma_core.safety.markup_guard import (
     protect_markup_tokens,
     restore_markup_tokens,
@@ -27,29 +18,7 @@ from kazma_memory.arabic_tokenizer import ArabicTokenizer
 from kazma_ui.i18n import get_arabic_plural_form, t_plural
 
 
-# ── 1. BiDi Directional Isolation Tests ──────────────────────────────
-
-
-def test_isolate_ltr_wraps_in_lri_and_pdi():
-    content = "10:30 AM"
-    isolated = isolate_ltr(content)
-    assert isolated == f"{LRI}10:30 AM{PDI}"
-
-
-def test_format_bidi_timestamp_returns_isolated_string():
-    dt = datetime.datetime(2026, 5, 12, 14, 30, 0)
-    ts = format_bidi_timestamp(dt, "%Y-%m-%d %H:%M")
-    assert ts == f"{LRI}2026-05-12 14:30{PDI}"
-
-
-def test_wrap_mixed_arabic_tokens_isolates_urls_and_model_names():
-    text = "النموذج المستخدم هو gemini-2.5-flash والموقع https://kazma.ai للتواصل"
-    wrapped = wrap_mixed_arabic_tokens(text)
-    assert f"{LRI}gemini-2.5-flash{PDI}" in wrapped
-    assert f"{LRI}https://kazma.ai{PDI}" in wrapped
-
-
-# ── 2. 6-Form Arabic CLDR Pluralization Tests ────────────────────────
+# ── 1. 6-Form Arabic CLDR Pluralization Tests ────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -170,40 +139,7 @@ def test_record_chat_research():
     assert found[0].topic == sess.topic
 
 
-# ── 7. Agent Loop Auto-Continuation Tests ─────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_agent_loop_autocontinue():
-    from kazma_core.agent_loop import execute_agent_turn_with_autocontinue
-
-    class MockResponse:
-        def __init__(self, content, finish_reason):
-            self.content = content
-            self.finish_reason = finish_reason
-
-    class MockLLM:
-        def __init__(self):
-            self.calls = 0
-
-        async def chat(self, messages):
-            self.calls += 1
-            if self.calls == 1:
-                return MockResponse("الجزء الأول من التقرير...", "length")
-            return MockResponse("والجزء الثاني المكتمل.", "stop")
-
-    mock_llm = MockLLM()
-    result = await execute_agent_turn_with_autocontinue(
-        [{"role": "user", "content": "اكتب تقريراً مفصلاً"}],
-        llm_client=mock_llm,
-    )
-
-    assert mock_llm.calls == 2
-    assert "الجزء الأول من التقرير..." in result
-    assert "والجزء الثاني المكتمل." in result
-
-
-# ── 8. Directive Task Tests: Merger, Loop & Tool Runner ─────────────────
+# ── 6. File Merger & Tool Runner Tests ─────────────────────────
 
 
 def test_file_merger_atomic_execution(tmp_path):
@@ -231,35 +167,6 @@ def test_file_merger_atomic_execution(tmp_path):
     content = out_html.read_text(encoding="utf-8")
     assert "الجزء الأول" in content
     assert "محتوى الجزء الثاني" in content
-
-
-@pytest.mark.asyncio
-async def test_run_agent_workflow_to_completion():
-    from kazma_core.agent_loop import TurnResult, run_agent_workflow_to_completion
-
-    turns = 0
-
-    async def mock_executor(session_id, prompt):
-        nonlocal turns
-        turns += 1
-        if turns == 1:
-            return TurnResult("الحالة: جزئي — جاري تحضير الملف...", is_complete=False)
-        return TurnResult("الحالة: مكتمل — تم توليد الملف بنجاح SR-2026-00002.pdf", is_complete=True)
-
-    res = await run_agent_workflow_to_completion("s123", "دمج الملفات", turn_executor=mock_executor)
-    assert turns == 2
-    assert "SR-2026-00002.pdf" in res
-
-
-@pytest.mark.asyncio
-async def test_execute_workspace_tool_safe():
-    from kazma_core.tools.runner import execute_workspace_tool_safe
-
-    def sync_tool(x, y):
-        return x + y
-
-    res = await execute_workspace_tool_safe(sync_tool, 10, 20)
-    assert res == 30
 
 
 

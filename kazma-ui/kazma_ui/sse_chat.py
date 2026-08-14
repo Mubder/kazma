@@ -24,7 +24,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Callable
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from kazma_ui.rate_limit import rate_limit
 from fastapi.responses import StreamingResponse
 
 from kazma_core.exceptions import sanitize_error
@@ -948,7 +949,7 @@ def create_sse_chat_router(
     # Mutable provider profile (can be switched at runtime)
     _active_profile: dict[str, Any] = provider_profile or {}
 
-    @r.post("/api/chat/stream")
+    @r.post("/api/chat/stream", dependencies=[Depends(rate_limit("chat", 30))])
     async def chat_stream(request: Request) -> StreamingResponse:
         """Stream a chat turn as Server-Sent Events.
 

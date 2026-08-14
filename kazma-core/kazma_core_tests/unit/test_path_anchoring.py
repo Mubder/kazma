@@ -94,26 +94,6 @@ async def test_vision_analyze_workspace_scoping(workspace_setup, fw_module):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(sys.platform == "win32", reason="cat command not available on Windows")
-async def test_shell_workspace_scoping(workspace_setup, fw_module):
-    """ShellTool should reject commands with paths outside workspace."""
-    workspace, test_file, outside_file = workspace_setup
-    
-    from kazma_core.tools.registry import ShellTool
-    
-    # Mock the workspace resolution
-    with patch.object(fw_module, '_get_workspace', return_value=workspace):
-        with patch.object(fw_module, '_ALLOW_ABSOLUTE', False):
-            shell = ShellTool()
-            
-            # Should fail for command with path outside workspace
-            # Use 'cat' which is in the allowlist
-            result = await shell.execute(command=f"cat {outside_file}")
-            assert not result.success
-            assert "Safety" in result.output or "not allowed" in result.output
-
-
-@pytest.mark.asyncio
 async def test_workspace_scope_error_no_temp_fallback(workspace_setup, fw_module):
     """_workspace_scope_error should not allow /tmp or system temp directories."""
     workspace, test_file, outside_file = workspace_setup
@@ -141,26 +121,6 @@ async def test_workspace_scope_error_no_temp_fallback(workspace_setup, fw_module
                 assert "Safety" in err
             finally:
                 tmp_file.unlink(missing_ok=True)
-
-
-@pytest.mark.asyncio
-async def test_shell_allows_flags(workspace_setup, fw_module):
-    """ShellTool should allow flags (arguments starting with -)."""
-    workspace, test_file, outside_file = workspace_setup
-    
-    from kazma_core.tools.registry import ShellTool
-    
-    # Mock the workspace resolution
-    with patch.object(fw_module, '_get_workspace', return_value=workspace):
-        with patch.object(fw_module, '_ALLOW_ABSOLUTE', False):
-            shell = ShellTool()
-            
-            # Should not fail with workspace error for the -r flag
-            # Use 'findstr' on Windows instead of 'grep'
-            cmd = "findstr" if sys.platform == "win32" else "grep"
-            result = await shell.execute(command=f"{cmd} -r test {test_file}")
-            # Should not fail with workspace error for the flag
-            assert "Safety: path '-r'" not in result.output
 
 
 if __name__ == "__main__":

@@ -10,15 +10,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
+
+from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 
-@router.post("/stt")
+@router.post("/stt", dependencies=[Depends(rate_limit("voice", 30))])
 async def speech_to_text(
     file: UploadFile = File(...),
     provider: str = Form("openai"),
@@ -95,7 +97,7 @@ async def speech_to_text(
         raise e
 
 
-@router.post("/tts")
+@router.post("/tts", dependencies=[Depends(rate_limit("voice", 30))])
 async def text_to_speech(
     text: str = Form(...),
     provider: str = Form("edgetts"),

@@ -25,9 +25,10 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from kazma_ui.rate_limit import rate_limit
 from kazma_ui.sse_utils import sse_frame
 
 logger = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ def create_research_router() -> APIRouter:
                 status_code=500,
             )
 
-    @router.post("/api/research/sessions")
+    @router.post("/api/research/sessions", dependencies=[Depends(rate_limit("research", 10))])
     async def start_research_session(body: dict[str, Any]) -> JSONResponse:
         """Start a deep research pipeline run in the background.
 

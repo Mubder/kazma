@@ -1,7 +1,19 @@
-"""MCP Client — Connects to MCP servers and executes tools.
+"""MCP Client — ephemeral one-off connections for MCP server diagnostics.
 
 Supports both stdio and SSE transports per the Model Context Protocol
 (JSON-RPC 2.0). Each MCPClient instance manages a single server connection.
+
+**Role note (audit M33 — do not "unify" away):** the production tool path
+runs through :mod:`kazma_core.mcp.manager` (``AsyncMCPManager`` — registry,
+reconnect, line limits). This client exists deliberately as a SECOND
+implementation for the Settings "Test connection" flow
+(``mcp_ui.api_test_server`` / ``api_test_config``): it spins up a throwaway
+subprocess, captures the server's **stderr** (surfaced in the UI so a 0-tool
+server explains itself), and disconnects without touching the live manager
+registry. The manager does not expose subprocess stderr — migrating this
+path onto it would regress that diagnostics feature. If you change the
+stdio protocol handling here, mirror the change in ``mcp/manager.py`` (and
+vice versa; see ``KAZMA_MCP_STDIO_LIMIT`` there).
 """
 
 from __future__ import annotations

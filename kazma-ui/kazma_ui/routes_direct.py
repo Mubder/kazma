@@ -12,8 +12,10 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import Request, WebSocket
+from fastapi import Depends, Request, WebSocket
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse as _JSONResponse
+
+from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ def register_direct_routes(self: Any) -> None:
             "unified_options": reg.list_unified_options(),
         }
 
-    @self.app.post("/api/system/flush")
+    @self.app.post("/api/system/flush", dependencies=[Depends(rate_limit("system_flush", 6))])
     async def _system_flush():
         import glob as _glob_sys
         import os as _os_sys
@@ -3403,14 +3405,6 @@ def register_direct_routes(self: Any) -> None:
         logger.info("[routes_direct] Commitment soul-confirm router mounted at /api/commitment")
     except Exception as _exc:
         logger.warning("[routes_direct] Commitment router failed to mount: %s", _exc)
-
-    # Config Migration UI (extracted to routes_migrate)
-    try:
-        from kazma_ui.routes_migrate import register_migrate_routes
-
-        register_migrate_routes(self.app)
-    except Exception as _exc:
-        logger.warning("[routes_direct] Config migration endpoints failed to mount: %s", _exc)
 
     # Chaos Testing UI (extracted to routes_chaos; env-gated)
     try:

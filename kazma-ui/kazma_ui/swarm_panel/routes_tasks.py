@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from kazma_gateway.telegram_format import (
     tg_escape,
@@ -18,6 +18,7 @@ from kazma_gateway.telegram_format import (
     tg_heading,
     HEADING_RULE,
 )
+from kazma_ui.rate_limit import rate_limit
 from kazma_ui.services import get_swarm_service
 
 logger = logging.getLogger(__name__)
@@ -293,7 +294,7 @@ def register_tasks_routes(
             await _maybe_send_to_output_target_fallback(error_msg)
             raise exc
 
-    @router.post("/api/swarm/dispatch")
+    @router.post("/api/swarm/dispatch", dependencies=[Depends(rate_limit("swarm_dispatch", 20))])
     async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
         """Dispatch a task to one or more workers."""
         worker_names = payload.get("workers", [])

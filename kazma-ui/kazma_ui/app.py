@@ -343,12 +343,15 @@ class KazmaAppBuilder:
         container.register(KazmaAgent, self.agent)
 
     def _setup_templates_and_middlewares(self) -> None:
-        """Configure auth, CORS, language middleware, static files, and templates."""
+        """Configure auth, CORS, CSRF, language middleware, static files, and templates."""
         from kazma_ui.auth import create_auth_middleware, create_tenant_middleware
+        from kazma_ui.csrf import create_csrf_middleware
         from kazma_ui.replica_affinity import create_replica_affinity_middleware
 
         self.app.middleware("http")(create_auth_middleware())
         self.app.middleware("http")(create_tenant_middleware())
+        # Cross-origin mutation guard (CSRF) — see kazma_ui/csrf.py.
+        self.app.middleware("http")(create_csrf_middleware())
         # Sticky-session cookie for multi-replica LB (SSE / in-process state)
         self.app.middleware("http")(create_replica_affinity_middleware())
 

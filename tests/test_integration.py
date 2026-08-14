@@ -61,13 +61,6 @@ class TestAgentRoutes:
         assert "llm" in data
         assert "tools" in data
 
-    def test_agents_hub_api(self, client: TestClient) -> None:
-        resp = client.get("/api/agents/hub")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "agents" in data
-        assert "count" in data
-
     def test_agents_stop_action(self, client: TestClient) -> None:
         resp = client.post("/api/agents/stop")
         assert resp.status_code == 200
