@@ -106,10 +106,13 @@ def validate_manifest(manifest: dict[str, Any], *, source: str = "") -> list[str
     if not manifest:
         problems.append(f"empty or unparseable manifest ({source or 'unknown source'})")
         return problems
+    # agentskills.io spec: `name` + `description` are the only REQUIRED
+    # fields. `version` is optional — most ecosystem skills (vercel-labs,
+    # qwencloud) omit it, and warning on it spammed every list/activation.
     if not str(manifest.get("name") or "").strip():
         problems.append("missing required field: name")
-    if not str(manifest.get("version") or "").strip():
-        problems.append("missing required field: version")
+    if not str(manifest.get("description") or "").strip():
+        problems.append("missing required field: description")
     return problems
 
 
