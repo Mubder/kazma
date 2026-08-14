@@ -570,7 +570,8 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
 
     Also performs a consistent document-store backup (documents.db + the
     referenced content-addressed tree) so the document platform is covered by
-    the same nightly cadence.
+    the same nightly cadence. Finally, runs a **universal backup** (ALL
+    kazma-data DBs + assets + Postgres) so nothing is ever left behind.
     """
     try:
         from kazma_core.memory.backup import perform_native_backups
@@ -596,6 +597,21 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
             logger.warning("[memory_worker] document backup: %s", report.get("error"))
     except Exception:
         logger.warning("[memory_worker] document backup failed", exc_info=True)
+    # Universal backup — ALL DBs + assets + Postgres. "Never left behind."
+    try:
+        import asyncio as _aio
+
+        from kazma_core.backup.universal import perform_universal_backup
+
+        result = await _aio.to_thread(perform_universal_backup)
+        logger.info(
+            "[memory_worker] universal_backup: %d DBs, %.1f MB, %s",
+            result.get("databases_ok", 0),
+            result.get("total_size_mb", 0),
+            "PG ok" if result.get("postgres") else "no PG",
+        )
+    except Exception:
+        logger.warning("[memory_worker] universal_backup failed", exc_info=True)
     return True
 
 

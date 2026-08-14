@@ -3264,6 +3264,24 @@ def register_direct_routes(self: Any) -> None:
             "init_errors": self._init_errors,
         }
 
+    # ── Universal Backup ────────────────────────────────────────────────
+    @self.app.post("/api/backup/now")
+    async def _backup_now() -> Any:
+        """Trigger a universal backup (all DBs + assets + Postgres) now."""
+        import asyncio
+
+        from kazma_core.backup.universal import perform_universal_backup
+
+        result = await asyncio.to_thread(perform_universal_backup)
+        return result
+
+    @self.app.get("/api/backup/list")
+    async def _backup_list() -> Any:
+        """List all universal backups (newest first)."""
+        from kazma_core.backup.universal import list_universal_backups
+
+        return {"backups": list_universal_backups()}
+
     # ── Workspace selection + file-tree scanner ────────────────────────
     try:
         from kazma_gateway.routers.workspace import create_workspace_select_router

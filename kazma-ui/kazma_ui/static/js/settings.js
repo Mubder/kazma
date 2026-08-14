@@ -244,6 +244,11 @@ function settingsApp() {
         importSections: [],
         availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'appearance', 'shortcuts', 'tools', 'safety'],
 
+        // ── Backup Tab ──
+        backupRunning: false,
+        backupResult: null,
+        backupList: [],
+
         // ── Voice Tab ──
         voiceForm: {
             enabled: false,
@@ -3015,6 +3020,7 @@ function settingsApp() {
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
+                case 'backup': await this.loadBackupList(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
                 case 'voice':
@@ -3407,6 +3413,37 @@ function settingsApp() {
                 showToast('Disconnect failed: ' + e.message, 'error');
             } finally {
                 this.emailSaving = false;
+            }
+        },
+
+        // ── Backup Tab ──
+        async runBackup() {
+            this.backupRunning = true;
+            this.backupResult = null;
+            try {
+                const resp = await fetch('/api/backup/now', { method: 'POST' });
+                this.backupResult = await resp.json();
+                if (this.backupResult.ok) {
+                    showToast('Backup complete: ' + this.backupResult.databases_ok + ' DBs, ' + this.backupResult.total_size_mb + ' MB', 'success');
+                    await this.loadBackupList();
+                } else {
+                    showToast('Backup failed', 'error');
+                }
+            } catch (e) {
+                this.backupResult = { ok: false, error: e.message };
+                showToast('Backup error: ' + e.message, 'error');
+            } finally {
+                this.backupRunning = false;
+            }
+        },
+
+        async loadBackupList() {
+            try {
+                const resp = await fetch('/api/backup/list');
+                const data = await resp.json();
+                this.backupList = data.backups || [];
+            } catch (e) {
+                this.backupList = [];
             }
         },
     };
