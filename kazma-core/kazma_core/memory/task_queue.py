@@ -81,9 +81,13 @@ def enqueue_task(
                 (tid, task_type, json.dumps(payload, ensure_ascii=False), max_attempts, now, now),
             )
             conn.commit()
-            # Nudge the worker to wake up and poll
+            # Nudge the worker to wake up and poll. enqueue_task may be called
+            # from a non-asyncio OS thread (the kazma-v2-extract consolidator)
+            # — asyncio.Event.set() is not thread-safe, so route the wake
+            # through the worker's own loop (no-op if the worker isn't
+            # running; the 2s poll catches up).
             try:
-                get_worker()._wake.set()
+                get_worker().wake()
             except Exception:
                 pass
             return tid
@@ -117,6 +121,18 @@ class _MemoryWorker:
         # a reference), silently dropping a micro_consolidation/entity_merge
         # run (audit finding).
         self._inflight: set[asyncio.Task] = set()
+
+    def wake(self) -> None:
+        """Thread-safe wake for enqueue_task (may run on a non-asyncio thread)."""
+        try:
+            task = self._task
+            if task is None:
+                return
+            loop = task.get_loop()
+            if loop.is_running():
+                loop.call_soon_threadsafe(self._wake.set)
+        except RuntimeError:
+            pass
 
     def start(self) -> None:
         """Start the background poll loop (idempotent)."""
@@ -181,27 +197,47 @@ class _MemoryWorker:
             conn.row_factory = sqlite3.Row
             try:
                 apply_sqlite_pragmas(conn)
+                conn.isolation_level = None  # manual BEGIN/COMMIT below
                 now = time.time()
                 stuck_cutoff = now - _STUCK_THRESHOLD_SEC
-                # Claim pending tasks + reclaim stuck 'processing' ones
-                rows = conn.execute(
-                    """SELECT * FROM memory_task_queue
-                       WHERE status = 'pending'
-                          OR (status = 'processing' AND updated_at < ?)
-                       ORDER BY created_at ASC LIMIT ?""",
-                    (stuck_cutoff, batch_size),
-                ).fetchall()
-                claimed_ids = [r["id"] for r in rows]
-                if not claimed_ids:
-                    return []
-                placeholders = ",".join("?" * len(claimed_ids))
-                conn.execute(
-                    f"""UPDATE memory_task_queue
-                        SET status = 'processing', updated_at = ?
-                        WHERE id IN ({placeholders})""",
-                    [now, *claimed_ids],
-                )
-                conn.commit()
+                # Claim pending tasks + reclaim stuck 'processing' ones.
+                # BEGIN IMMEDIATE takes the write lock BEFORE the SELECT so
+                # two processes (app + CLI / HA replicas) cannot claim the
+                # same rows and double-run a task (double belief-extraction
+                # / double pg_dump); the UPDATE re-checks status as a
+                # backstop for degraded isolation.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    rows = conn.execute(
+                        """SELECT * FROM memory_task_queue
+                           WHERE status = 'pending'
+                              OR (status = 'processing' AND updated_at < ?)
+                           ORDER BY created_at ASC LIMIT ?""",
+                        (stuck_cutoff, batch_size),
+                    ).fetchall()
+                    claimed_ids = [r["id"] for r in rows]
+                    if not claimed_ids:
+                        conn.execute("ROLLBACK")
+                        return []
+                    placeholders = ",".join("?" * len(claimed_ids))
+                    cur = conn.execute(
+                        f"""UPDATE memory_task_queue
+                            SET status = 'processing', updated_at = ?
+                            WHERE id IN ({placeholders})
+                              AND (status = 'pending'
+                                   OR (status = 'processing' AND updated_at < ?))""",
+                        [now, *claimed_ids, stuck_cutoff],
+                    )
+                    if not cur.rowcount:
+                        conn.execute("ROLLBACK")
+                        return []
+                    conn.execute("COMMIT")
+                except Exception:
+                    try:
+                        conn.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    raise
                 return [dict(r) for r in rows]
             finally:
                 conn.close()

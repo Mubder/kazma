@@ -504,9 +504,12 @@ def delete_retained(now: float | None = None, *,
         ).fetchall()
         for r in list(rows) + list(crit_rows):
             cid = r["commitment_id"]
+            # Hard-delete: no post-delete `gc` event — emitting after the
+            # DELETEs inserted an orphan row referencing the now-deleted
+            # commitment (one immortal orphan per GC'd commitment, nothing
+            # ever cleaned them).
             conn.execute("DELETE FROM commitment_events WHERE commitment_id=?", (cid,))
             conn.execute("DELETE FROM commitments WHERE commitment_id=?", (cid,))
-            _emit_event(conn, cid, "gc", {})
             deleted += 1
         conn.commit()
     if deleted:

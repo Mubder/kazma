@@ -1913,6 +1913,21 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Gateway] Error during shutdown: %s", e)
 
+        # Swarm bus adapters are standalone httpx pools independent of
+        # gateway.start()/stop() (lifecycle-notifier requirement) — close
+        # them explicitly, or each restart leaks one pool per platform.
+        try:
+            from kazma_core.swarm.bus import get_message_bus
+
+            _bus_adapter = get_message_bus().adapter
+            for _child in getattr(_bus_adapter, "adapters", [_bus_adapter]):
+                _close = getattr(_child, "close", None)
+                if _close is not None:
+                    await _close()
+            logger.info("[SwarmBus] Adapters closed cleanly")
+        except Exception as e:
+            logger.debug("[SwarmBus] adapter close: %s", e)
+
     def _setup_lifecycle_and_errors(self) -> None:
         """Register lifespan (replaces deprecated on_event) and exception handlers."""
         builder = self

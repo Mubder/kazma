@@ -1136,7 +1136,10 @@ async def supervisor_node(
                     )
                 except Exception:
                     _explain = False
-                result = recall(
+                # to_thread: recall() is synchronous SQLite + embedding work
+                # — running it on the loop stalled concurrent SSE/WS turns.
+                result = await asyncio.to_thread(
+                    recall,
                     _recall_query or last_user_content,
                     limit=_top_k,
                     session_id=_recall_session_id,
@@ -1263,23 +1266,28 @@ async def supervisor_node(
                     from kazma_core.memory.schema_v2 import ensure_primary_schema
                     from kazma_core.paths import primary_memory_db
 
-                    pconn = sqlite3.connect(
-                        primary_memory_db(), check_same_thread=False
-                    )
-                    try:
-                        ensure_primary_schema(pconn)
-                        dags = match_procedural_dags(
-                            pconn,
-                            last_user_content,
-                            tenant_id=state.get("tenant_id", "default"),
-                            limit=3,
+                    def _fetch_procedural_dags() -> list[Any]:
+                        # to_thread: sync SQLite + DAG matching must stay off
+                        # the event loop (same rule as recall() above).
+                        pconn = sqlite3.connect(
+                            primary_memory_db(), check_same_thread=False
                         )
-                        if dags:
-                            hint = format_procedural_hints(dags)
-                            if hint:
-                                messages.insert(1, {"role": "system", "content": hint})
-                    finally:
-                        pconn.close()
+                        try:
+                            ensure_primary_schema(pconn)
+                            return list(match_procedural_dags(
+                                pconn,
+                                last_user_content,
+                                tenant_id=state.get("tenant_id", "default"),
+                                limit=3,
+                            ))
+                        finally:
+                            pconn.close()
+
+                    dags = await asyncio.to_thread(_fetch_procedural_dags)
+                    if dags:
+                        hint = format_procedural_hints(dags)
+                        if hint:
+                            messages.insert(1, {"role": "system", "content": hint})
                 except Exception:
                     logger.debug(
                         "[Supervisor] procedural inject skipped", exc_info=True
@@ -2274,10 +2282,15 @@ async def tool_worker_node(
             _delivery_token = set_current_delivery_target(str(_delivery))
 
     # Phase 2.5: the semantic commitment gate is extracted to
-    # _commitment_resolve_gate for SRP (policy != execution).
-    pending, semantic_blocked = _commitment_resolve_gate(state, pending)
+    # _commitment_resolve_gate for SRP (policy != execution). Runs INSIDE
+    # the try below: the gate can raise GraphInterrupt (clarify/confirm
+    # card), and the finally must restore the session/thread/tenant/
+    # delivery ContextVar binds on that path too — with the call outside
+    # the try, every clarify/confirm interrupt leaked the binds.
 
     try:
+        pending, semantic_blocked = _commitment_resolve_gate(state, pending)
+
         # ── HITL: separate safe and danger tools ──────────────────────
         safe_tools: list[PendingToolCall] = []
         danger_tools: list[PendingToolCall] = []
@@ -2682,10 +2695,16 @@ async def tool_worker_node(
         except Exception:
             pass
 
-        # Merge into cumulative tool_results
+        # Merge into cumulative tool_results, bounded to a recent window —
+        # the dict is checkpointed every superstep and previously grew for
+        # the thread's whole life (memory + checkpoint bloat on long
+        # mission threads). dict order ≈ insertion order, so the tail is
+        # the newest entries.
         cumulative = dict(state.get("tool_results", {}))
         for tr in results:
             cumulative[tr["tool_call_id"]] = tr
+        if len(cumulative) > 200:
+            cumulative = dict(list(cumulative.items())[-200:])
 
         out: dict[str, Any] = {
             "messages": messages + tool_messages,

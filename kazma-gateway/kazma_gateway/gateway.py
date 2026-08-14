@@ -679,6 +679,11 @@ class GatewayManager:
                                 feedback_msg = OutboundMessage(
                                     target_id=msg.reply_target(),
                                     text=feedback_text,
+                                    # Carry the inbound metadata so
+                                    # SlackAdapter resolves the channel
+                                    # instead of treating slack:<user_id>
+                                    # as a channel name (channel_not_found).
+                                    context_metadata=msg.context_metadata,
                                 )
                                 await self.send(feedback_msg)
                             except Exception:
@@ -724,6 +729,7 @@ class GatewayManager:
                                         await self.send(OutboundMessage(
                                             target_id=msg.reply_target(),
                                             text=hint_text,
+                                            context_metadata=msg.context_metadata,
                                         ))
                                     except Exception:
                                         logger.debug("[Gateway] Failed to send suggestion hints")

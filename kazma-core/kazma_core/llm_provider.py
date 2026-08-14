@@ -388,8 +388,23 @@ class LLMProvider:
                         # Still 429, continue retrying
                     except httpx.HTTPStatusError as retry_err:
                         if retry_err.response is not None and retry_err.response.status_code != 429:
-                            # Non-429 error, propagate it
-                            raise
+                            # Non-429 during 429 backoff (e.g. a 5xx). A bare
+                            # `raise` escapes chat() as a raw
+                            # httpx.HTTPStatusError — unclassified, so the
+                            # supervisor treats it as permanent and model
+                            # failover refuses to fire. Classify here: 5xx is
+                            # transient per the §3 taxonomy; 4xx is permanent.
+                            _retry_sc = retry_err.response.status_code
+                            _retry_detail = ""
+                            try:
+                                _retry_detail = retry_err.response.text
+                            except Exception:
+                                _retry_detail = ""
+                            raise LLMError(
+                                f"LLM call failed during 429 backoff (HTTP {_retry_sc}): "
+                                f"{_retry_detail[:300]}",
+                                transient=(_retry_sc >= 500),
+                            ) from retry_err
                         # Still rate-limited, continue retrying
                         continue
                 else:

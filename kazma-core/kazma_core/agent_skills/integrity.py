@@ -185,5 +185,28 @@ def verify_skill(skill_md_path: Path, *, meta: dict[str, Any] | None = None) -> 
                 ok=False, reason="signature mismatch (skill may have been re-signed by an attacker)",
                 signed=True,
             )
+    else:
+        # Checksum-only meta while a secret IS configured. The plain
+        # checksum is publicly computable, so an attacker with write access
+        # to the skill tree can rewrite SKILL.md AND the checksum; simply
+        # deleting the signature field used to downgrade verification to
+        # ok=True (signature-strip). Fail closed — remediation is reinstall
+        # or 'kazma agent-skills sign'.
+        secret = _get_secret()
+        if secret:
+            logger.warning(
+                "[AgentSkill] '%s' stores a checksum but no signature while "
+                "KAZMA_SECRET is configured — refusing (stripped meta or "
+                "pre-signing install). Reinstall or run 'kazma agent-skills sign'.",
+                skill_md_path.parent.name,
+            )
+            return VerifyResult(
+                ok=False,
+                reason=(
+                    "checksum-only meta rejected: signature missing while "
+                    "KAZMA_SECRET is configured (reinstall or sign the skill)"
+                ),
+                signed=False,
+            )
 
     return VerifyResult(ok=True, reason="verified", signed=True)

@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,9 @@ _DEFAULT_RETENTION = 7
 # Live progress for the UI (phase + detail). Updated by perform_universal_backup,
 # read by GET /api/backup/status.
 _backup_progress: dict[str, Any] = {"phase": "idle", "detail": "", "error": ""}
+# Serializes the concurrent-backup guard (check + phase flip must be atomic
+# across the 24h loop thread and a manual UI trigger).
+_backup_lock = threading.Lock()
 
 
 def get_backup_progress() -> dict[str, Any]:
@@ -36,9 +40,10 @@ def get_backup_progress() -> dict[str, Any]:
 
 
 def _set_progress(phase: str, **kwargs: Any) -> None:
-    _backup_progress.clear()
-    _backup_progress["phase"] = phase
-    _backup_progress.update(kwargs)
+    # Swap in a fresh dict (rebinding is atomic) — clear()+update() let a
+    # concurrent GET /api/backup/status observe a half-cleared dict.
+    global _backup_progress
+    _backup_progress = {"phase": phase, **kwargs}
 
 
 def _data_dir() -> Path:
@@ -174,7 +179,16 @@ def _prune(retention: int) -> int:
     deleted = 0
     for stale in backups[retention:]:
         try:
-            shutil.rmtree(stale)
+            if stale.is_dir():
+                # _rmtree_force handles Windows read-only/locked files; plain
+                # shutil.rmtree fails with WinError 145 and silently skipped
+                # every prune on Windows.
+                _rmtree_force(stale)
+            else:
+                # .zip archives from archive_universal_backup count against
+                # retention too (previously immortal — rmtree raised
+                # NotADirectoryError on them and the UI delete refused files).
+                stale.unlink(missing_ok=True)
             deleted += 1
         except Exception:
             logger.debug("[universal-backup] could not prune %s", stale.name, exc_info=True)
@@ -214,16 +228,37 @@ def perform_universal_backup(
 
     # Guard against concurrent universal backups — the 24h auto loop and a
     # manual "Back Up Now" click can fire within seconds of each other.
-    if _backup_progress.get("phase") not in ("idle", "done", "error"):
-        logger.info(
-            "[universal-backup] already running (phase=%s) — skipping",
-            _backup_progress.get("phase"),
+    # Lock held across check + phase flip: the old check-then-act let both
+    # threads observe "idle" and run two full concurrent copies.
+    with _backup_lock:
+        _phase = _backup_progress.get("phase")
+        _started_ts = _backup_progress.get("started_ts")
+        # A run that died mid-backup (process kill) leaves a mid phase
+        # forever; anything older than 30 min is treated as crashed so the
+        # cadence can never brick.
+        _crashed = (
+            _phase not in ("idle", "done", "error")
+            and isinstance(_started_ts, (int, float))
+            and time.time() - _started_ts > 1800
         )
-        return {
-            "ok": False,
-            "error": "A universal backup is already running",
-            "phase": _backup_progress.get("phase"),
-        }
+        if _phase not in ("idle", "done", "error") and not _crashed:
+            logger.info(
+                "[universal-backup] already running (phase=%s) — skipping",
+                _phase,
+            )
+            return {
+                "ok": False,
+                "error": "A universal backup is already running",
+                "phase": _phase,
+            }
+        if _crashed:
+            logger.warning(
+                "[universal-backup] previous run (phase=%s, started %.0fs ago) never "
+                "completed — treating as crashed and starting a new backup",
+                _phase,
+                time.time() - _started_ts,
+            )
+        _set_progress("databases", detail="Preparing backup…", started_ts=time.time())
 
     (dest / "dbs").mkdir(parents=True, exist_ok=True)
     (dest / "assets").mkdir(parents=True, exist_ok=True)
@@ -356,10 +391,15 @@ def delete_universal_backup(dir_name: str) -> dict[str, Any]:
     if not re.match(r"^\d+$", dir_name):
         return {"ok": False, "error": "Invalid backup name (must be a timestamp)"}
     target = _universal_dir() / dir_name
-    if not target.is_dir():
-        return {"ok": False, "error": f"Backup '{dir_name}' not found"}
     try:
-        _rmtree_force(target)
+        if target.is_dir():
+            _rmtree_force(target)
+        elif target.is_file():
+            # .zip archive from archive_universal_backup — deletable too
+            # (previously immortal: the is_dir() check refused them).
+            target.unlink(missing_ok=True)
+        else:
+            return {"ok": False, "error": f"Backup '{dir_name}' not found"}
         logger.info("[universal-backup] deleted %s", dir_name)
         return {"ok": True, "deleted": dir_name}
     except Exception as exc:

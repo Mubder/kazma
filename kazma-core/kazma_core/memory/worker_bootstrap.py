@@ -70,7 +70,10 @@ async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
             ensure_primary_schema(conn)
             stats = run_macro_sleep(conn, cfg=cfg, tenant_id=tenant_id)
             logger.info("[memory_worker] macro_sleep done: %s", stats)
-            return True
+            # False when the sweep flagged sweep_error — run_macro_sleep
+            # never raises, so returning True unconditionally marked broken
+            # sweeps as done and the queue never retried them.
+            return not bool(stats.get("sweep_error"))
         finally:
             conn.close()
     except Exception:

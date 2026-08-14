@@ -779,7 +779,11 @@ class SlackAdapter(BaseAdapter):
         msg_text = text or (f"[{attachments[0].kind}]" if attachments else "")
         incoming = IncomingMessage(
             platform="slack",
-            sender_id=f"slack:{channel_id}",
+            # User-based minting — MUST match socket mode (slack_parse.py).
+            # Polling previously minted slack:<channel_id>, giving the same
+            # human two thread ids depending on transport; switching modes
+            # orphaned all history/sessions/HITL threads.
+            sender_id=f"slack:{user_id}",
             text=msg_text,
             attachments=attachments,
             context_metadata={

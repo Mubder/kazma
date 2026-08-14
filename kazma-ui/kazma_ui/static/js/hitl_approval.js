@@ -49,9 +49,15 @@
   }
 
   function escapeHtml(text) {
-    var div = document.createElement('div');
-    div.textContent = String(text == null ? '' : text);
-    return div.innerHTML;
+    // Escape quotes too — the output is used inside HTML attributes
+    // (data-tool / data-opt / data-tcid), where the textContent→innerHTML
+    // trick left " unescaped and allowed attribute injection.
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function renderApprovals(pending) {

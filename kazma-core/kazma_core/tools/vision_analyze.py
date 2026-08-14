@@ -366,7 +366,15 @@ async def analyze_image(
         logger.debug("[vision_analyze] LLM call failed: %s", exc, exc_info=True)
         return "Error: LLM call failed. Please check your model configuration."
     finally:
-        await provider.close()
+        # Close only ONE-OFF clients. reason == "active-model" is the shared
+        # registry singleton the whole agent uses — closing it killed every
+        # concurrent/next LLM call on that client ("client closed") and
+        # forced constant re-creation.
+        if reason != "active-model":
+            try:
+                await provider.close()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
 
     content = (response.content or "").strip()
     if not content:

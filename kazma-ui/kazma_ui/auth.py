@@ -28,8 +28,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import Header, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+# One-shot loud warning for KAZMA_DEMO_MODE (see auth_middleware_with_gate).
+_demo_mode_warned = False
 
 # ── Configuration ────────────────────────────────────────────────────────
 
@@ -689,6 +693,29 @@ def create_auth_middleware(
         #    without login. Only enable this on a throwaway demo instance —
         #    never on a production deployment with real secrets/data.
         if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+            global _demo_mode_warned
+            if not _demo_mode_warned:
+                _demo_mode_warned = True
+                logger.warning(
+                    "[Auth] KAZMA_DEMO_MODE is active — the ENTIRE auth gate is "
+                    "disabled and every /api endpoint is open. Enable this only "
+                    "on throwaway demo instances."
+                )
+            if os.environ.get("KAZMA_PRODUCTION", "").lower() in ("1", "true", "yes"):
+                # Refuse to silently open a production instance.
+                logger.error(
+                    "[Auth] KAZMA_DEMO_MODE and KAZMA_PRODUCTION are both set — "
+                    "refusing to disable auth; returning 503."
+                )
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": (
+                            "KAZMA_DEMO_MODE cannot be combined with "
+                            "KAZMA_PRODUCTION — refusing to disable auth."
+                        )
+                    },
+                )
             return await call_next(request)
 
         # 1. Read-only & page routes always pass through.

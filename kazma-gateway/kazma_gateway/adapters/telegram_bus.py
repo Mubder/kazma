@@ -98,7 +98,11 @@ class TelegramBusAdapter(BusAdapter):
             )
             return resp.json()
         except Exception as exc:
-            logger.warning("[TelegramBus] %s failed: %s", method, exc)
+            # httpx exception strings embed the full request URL — including
+            # bot<token>. Log the exception class only so a connect/timeout
+            # error can never write the bot token to log files (the main
+            # Telegram adapter already follows this practice).
+            logger.warning("[TelegramBus] %s failed: %s", method, type(exc).__name__)
             return None
 
     async def _edit_message(
@@ -118,7 +122,8 @@ class TelegramBusAdapter(BusAdapter):
                 },
             )
         except Exception as exc:
-            logger.debug("[TelegramBus] editMessage failed: %s", exc)
+            # Exception class only — the string form embeds bot<token> (see _post).
+            logger.debug("[TelegramBus] editMessage failed: %s", type(exc).__name__)
 
     # ── Formatting ──────────────────────────────────────────────────
 
@@ -394,7 +399,8 @@ class TelegramBusAdapter(BusAdapter):
             }, method="setMessageReaction")
             logger.debug("[TelegramBus] Reaction set: %s on msg %d", emoji, message_id)
         except Exception as exc:
-            logger.debug("[TelegramBus] setReaction failed: %s", exc)
+            # Exception class only — the string form embeds bot<token> (see _post).
+            logger.debug("[TelegramBus] setReaction failed: %s", type(exc).__name__)
 
     async def send_rate_limit_feedback(self, retry_after: int) -> None:
         """Notify the user that the bot is rate-limited."""

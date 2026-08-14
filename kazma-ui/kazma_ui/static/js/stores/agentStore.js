@@ -714,6 +714,11 @@ document.addEventListener('alpine:init', () => {
               args: frame.args || data.args || {},
               tools: frame.tools || data.tools || [],
               message: frame.message || data.message || '',
+              // kind/items drive the semantic clarify/confirm option cards
+              // in chat.js — dropping them degraded every WS approval to a
+              // generic Approve/Deny (SSE passed them through correctly).
+              kind: frame.kind || data.kind || '',
+              items: frame.items || data.items || null,
             });
           } else if (statusVal === 'idle') {
             // End of turn — MUST release chat.js Stop / Enter lock.
@@ -804,6 +809,10 @@ document.addEventListener('alpine:init', () => {
             args: frame.args || data.args || {},
             tools: frame.tools || data.tools || [],
             message: frame.message || data.message || '',
+            // kind/items drive the semantic clarify/confirm option cards
+            // (see the paused_for_approval case above).
+            kind: frame.kind || data.kind || '',
+            items: frame.items || data.items || null,
           });
           break;
 
@@ -924,6 +933,24 @@ document.addEventListener('alpine:init', () => {
           }
           this._endTurn();
           break;
+
+        case 'steer': {
+          // WS steer ack — previously unhandled, so the "demoted: true"
+          // notification (hard steer timed out, fell back to soft) never
+          // reached the user.
+          const sMsg =
+            (data && data.message) ||
+            ((data && data.demoted)
+              ? 'Hard steer timed out — applied as a soft steer hint instead.'
+              : 'Steer applied.');
+          this._progress({
+            kind: 'status',
+            title: sMsg,
+            detail: '',
+            state: 'info',
+          });
+          break;
+        }
 
         default:
           console.debug('[AgentStore] Unhandled telemetry event type:', type, frame);

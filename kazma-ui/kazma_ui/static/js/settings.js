@@ -2423,7 +2423,7 @@ function settingsApp() {
             const origin = window.location.origin || 'http://127.0.0.1:9090';
             const cmd =
                 'curl -s -H "Authorization: Bearer ' + this.lastCreatedToken + '" \\\n  ' +
-                origin + '/api/memory/graph/stats';
+                origin + '/api/memory/v2/health';
             try {
                 await navigator.clipboard.writeText(cmd);
                 showToast('curl example copied', 'success');

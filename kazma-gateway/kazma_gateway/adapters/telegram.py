@@ -145,6 +145,8 @@ class TelegramAdapter(BaseAdapter):
         self._stt_language = stt_language
         # Webhook secret token for validating webhook ingress (optional)
         self._webhook_secret = webhook_secret or ""
+        # Strong refs for fire-and-forget tasks (see _spawn).
+        self._bg_tasks: set[asyncio.Task] = set()
 
     def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
         """Set the whitelist of allowed Telegram user IDs (public setter).
@@ -314,7 +316,7 @@ class TelegramAdapter(BaseAdapter):
                     try:
                         # Handle inline keyboard callbacks
                         if "callback_query" in update:
-                            asyncio.create_task(
+                            self._spawn(
                                 self._handle_callback_query(
                                     update["callback_query"],
                                 )
@@ -389,7 +391,7 @@ class TelegramAdapter(BaseAdapter):
                             )
                             # Fire 👀 reaction on the user's message
                             if msg.context_metadata.get("message_id"):
-                                asyncio.create_task(
+                                self._spawn(
                                     self._set_reaction(
                                         msg.context_metadata["chat_id"],
                                         msg.context_metadata["message_id"],
@@ -418,6 +420,18 @@ class TelegramAdapter(BaseAdapter):
                 self._http = None
             self._running = False
             logger.info("[telegram] Polling stopped")
+
+    def _spawn(self, coro: Any) -> asyncio.Task:
+        """Fire-and-forget with a strong reference.
+
+        The event loop keeps only weak refs to tasks; an unheld task can be
+        garbage-collected mid-execution (intermittent missing reactions /
+        unanswered callback queries). Held here until done.
+        """
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
 
     def _ensure_http(self) -> httpx.AsyncClient:
         """Return the shared API client, recreating it when missing or closed.
@@ -1040,7 +1054,7 @@ class TelegramAdapter(BaseAdapter):
             user_id = from_user.get("id", 0)
             if user_id not in self._allowed_users:
                 logger.warning("[telegram] Callback from non-whitelisted user %d", user_id)
-                asyncio.create_task(self._answer_callback_query(cb_id, "Not authorized"))
+                self._spawn(self._answer_callback_query(cb_id, "Not authorized"))
                 return
 
         from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
@@ -1051,9 +1065,15 @@ class TelegramAdapter(BaseAdapter):
         # Dismiss loading indicator with status text
         alert_text = None
         if action.kind == "hitl":
-            approved = "approve" in data
-            alert_text = "✅ Approved — processing..." if approved else "❌ Denied."
-        asyncio.create_task(self._answer_callback_query(cb_id, alert_text))
+            if data.startswith("hitl:opt:"):
+                # Semantic clarify/confirm option buttons — their data never
+                # contains "approve", so the old substring check showed
+                # "❌ Denied." for every option the user actually selected.
+                alert_text = "🔘 Option selected — processing..."
+            else:
+                approved = "approve" in data
+                alert_text = "✅ Approved — processing..." if approved else "❌ Denied."
+        self._spawn(self._answer_callback_query(cb_id, alert_text))
 
         # Immediately deactivate the inline keyboard to prevent double-click or stale interaction
         if action.kind == "hitl":
@@ -1108,7 +1128,7 @@ class TelegramAdapter(BaseAdapter):
                         "[telegram] Non-whitelisted user %d tried to trigger installation.",
                         user_id,
                     )
-                    asyncio.create_task(
+                    self._spawn(
                         self._answer_callback_query(
                             cb_id, "Not authorized: Admin privilege required."
                         )
@@ -1116,7 +1136,7 @@ class TelegramAdapter(BaseAdapter):
                     return
             from kazma_core.system.runtime_manager import trigger_package_promotion
 
-            asyncio.create_task(trigger_package_promotion(action.package_name))
+            self._spawn(trigger_package_promotion(action.package_name))
             chat_id = message.get("chat", {}).get("id")
             message_id = message.get("message_id")
             if chat_id and message_id:
@@ -1138,7 +1158,7 @@ class TelegramAdapter(BaseAdapter):
         if action.kind == "install_dep":
             package_name = action.package_name
             from kazma_core.system import asynchronous_install_package
-            asyncio.create_task(asynchronous_install_package(package_name))
+            self._spawn(asynchronous_install_package(package_name))
             chat_id = message.get("chat", {}).get("id")
             message_id = message.get("message_id")
             if chat_id and message_id:
@@ -1286,7 +1306,7 @@ class TelegramAdapter(BaseAdapter):
             original_msg_id = outbound.context_metadata.get("message_id")
             if original_msg_id:
                 emoji = "🎯" if outbound.context_metadata.get("tool_used") else "✅"
-                asyncio.create_task(
+                self._spawn(
                     self._set_reaction(chat_id, original_msg_id, emoji)
                 )
             # Send any media attachments (photos/documents/video) after text.
@@ -1297,7 +1317,7 @@ class TelegramAdapter(BaseAdapter):
                 from kazma_gateway.adapters.voice_helpers import should_send_tts_reply
 
                 if should_send_tts_reply(outbound.context_metadata):
-                    asyncio.create_task(
+                    self._spawn(
                         self._send_tts_reply(chat_id, outbound.text, original_msg_id)
                     )
             except Exception:
@@ -1307,7 +1327,7 @@ class TelegramAdapter(BaseAdapter):
             # React with ❌ on failure
             original_msg_id = outbound.context_metadata.get("message_id")
             if original_msg_id:
-                asyncio.create_task(
+                self._spawn(
                     self._set_reaction(chat_id, original_msg_id, "❌")
                 )
             return False

@@ -25,6 +25,7 @@ raising exceptions or polluting the log with errors.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 from pathlib import Path
@@ -140,20 +141,28 @@ def create_git_router() -> APIRouter:
         }
 
         # Check whether this is actually a git repo
-        ok, rev_parse = _run_git(
-            ["git", "rev-parse", "--is-inside-work-tree"], cwd
+        # to_thread: sync git subprocess (up to 4 sequential calls) must not
+        # run on the shared server loop — it stalls platform consumption.
+        ok, rev_parse = await asyncio.to_thread(
+            _run_git, ["git", "rev-parse", "--is-inside-work-tree"], cwd
         )
         if not ok or rev_parse.lower() != "true":
             return JSONResponse(empty)
 
         # Get current branch
-        _, branch = _run_git(["git", "branch", "--show-current"], cwd)
+        _, branch = await asyncio.to_thread(
+            _run_git, ["git", "branch", "--show-current"], cwd
+        )
         if not branch:
             # Detached HEAD — try to get short SHA
-            _, branch = _run_git(["git", "rev-parse", "--short", "HEAD"], cwd)
+            _, branch = await asyncio.to_thread(
+                _run_git, ["git", "rev-parse", "--short", "HEAD"], cwd
+            )
 
         # Get porcelain status
-        _, porcelain = _run_git(["git", "status", "--porcelain"], cwd)
+        _, porcelain = await asyncio.to_thread(
+            _run_git, ["git", "status", "--porcelain"], cwd
+        )
         parsed = _parse_porcelain(porcelain)
 
         is_dirty = bool(parsed["staged"] or parsed["modified"] or parsed["untracked"])

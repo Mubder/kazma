@@ -9,6 +9,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import DataTable, RichLog, Static, TabbedContent, TabPane, Tree
 
+from kazma_tui.widgets.log_stream import LogStream
 from kazma_tui.widgets.sparkline import Sparkline
 
 __all__ = ["ActiveTasksLog", "SwarmPanel", "SwarmTasksTable", "WorkerTable", "WorkerTree"]
@@ -310,10 +311,41 @@ class SwarmPanel(VerticalScroll):
             with TabPane("Tree", id="tree"):
                 yield Static("Worker capability hierarchy", classes="section-label")
                 yield WorkerTree()
+            with TabPane("Log", id="log"):
+                yield Static("Live SwarmMessageBus stream", classes="section-label")
+                yield LogStream(id="swarm-log-stream")
 
     def on_mount(self) -> None:
         self._refresh_metrics()
         self.set_interval(self.REFRESH_INTERVAL, self._refresh_metrics)
+        self._subscribe_bus_log()
+
+    def _subscribe_bus_log(self) -> None:
+        """Wire the Log tab's LogStream to the SwarmMessageBus.
+
+        The widget existed but was never mounted anywhere — the advertised
+        "live swarm log stream" did not exist. The closure checks is_mounted
+        so a replaced panel drops events instead of writing to a dead
+        widget (the bus has no unsubscribe — see the audit hygiene note).
+        """
+        try:
+            from kazma_core.swarm.bus import get_message_bus
+        except Exception:
+            logger.debug("[swarm-panel] bus unavailable — Log tab idle", exc_info=True)
+            return
+        try:
+            widget = self.query_one("#swarm-log-stream", LogStream)
+
+            def _on_bus_event(event_type: str, data: dict) -> None:
+                try:
+                    if self.is_mounted:
+                        widget.handle_bus_event(event_type, data)
+                except Exception:
+                    pass
+
+            get_message_bus().subscribe(_on_bus_event)
+        except Exception:
+            logger.debug("[swarm-panel] bus subscribe failed", exc_info=True)
 
     def on_show(self) -> None:
         self._refresh_metrics()

@@ -1959,7 +1959,13 @@ def create_graph_handler(
         from kazma_core.tools.send_message import register_message_backend
 
         async def _telegram_backend_handler(target_id: str, text: str, **kwargs: Any) -> str:
-            ctx = await _store.get(target_id)
+            # SessionStore is keyed by thread ids (gw-…), never by the
+            # platform-prefixed target ids (telegram:…) this dispatcher
+            # receives — the old unconditional _store.get(target_id) could
+            # never hit. Only a genuine thread id (gw-…) resolves.
+            ctx = None
+            if str(target_id).startswith("gw-"):
+                ctx = await _store.get(target_id)
             if not ctx:
                 ctx = {"thread_id": target_id}
             # target_id is prefixed "telegram:..." — convert markdown to HTML

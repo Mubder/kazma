@@ -3317,13 +3317,27 @@ def register_direct_routes(self: Any) -> None:
     @self.app.get("/api/backup/{dir_name}/download")
     async def _backup_download(dir_name: str) -> Any:
         """Download an archived backup (.zip)."""
+        import re
         from pathlib import Path
         from kazma_core.backup.universal import _universal_dir
         from fastapi.responses import FileResponse
 
+        # Same containment guard as delete/archive (universal.py) — without
+        # it, an encoded ..\ segment could read arbitrary .zip files outside
+        # the backups dir on Windows.
+        if not re.match(r"^\d+$", dir_name):
+            return _JSONResponse(
+                status_code=400,
+                content={"error": "Invalid backup name (must be a timestamp)"},
+            )
         zip_path = _universal_dir() / f"{dir_name}.zip"
         if not zip_path.is_file():
-            return {"error": "Archive not found. Archive the backup first."}
+            # 404 (not a bare JSON dict) — the UI opens this in a tab via
+            # window.open, so a bare dict rendered as raw JSON text.
+            return _JSONResponse(
+                status_code=404,
+                content={"error": "Archive not found. Archive the backup first."},
+            )
         return FileResponse(str(zip_path), filename=f"kazma-backup-{dir_name}.zip",
                             media_type="application/zip")
 

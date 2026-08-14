@@ -119,6 +119,8 @@ class SwarmEngine:
         self._task_history: dict[str, SwarmTask] = {}
         self._active_tasks: dict[str, SwarmTask] = {}  # in-flight tasks
         self._task_handles: dict[str, asyncio.Task] = {}  # asyncio handles for cancel
+        # Strong refs for fire-and-forget alert tasks (see get_autoscaler).
+        self._alert_tasks: set[asyncio.Task] = set()
         # threading.Lock: usable from both sync (_finalize_task) and async paths
         self._task_lock = threading.Lock()  # protects _task_history mutations
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
@@ -178,11 +180,16 @@ class SwarmEngine:
                     from kazma_core.observability import AlertDispatcher
                     import asyncio
                     loop = asyncio.get_running_loop()
-                    loop.create_task(AlertDispatcher.trigger_system_alert(
+                    _alert_task = loop.create_task(AlertDispatcher.trigger_system_alert(
                         subsystem="AutoScaler",
                         status="DEGRADED",
                         message=f"AutoScaler initialization failed: {exc}"
                     ))
+                    # Strong ref: the loop holds only weak refs — a GC'd task
+                    # silently dropped the DEGRADED alert (the one signal an
+                    # autoscaler failure exists).
+                    self._alert_tasks.add(_alert_task)
+                    _alert_task.add_done_callback(self._alert_tasks.discard)
                 except Exception as alert_exc:
                     logger.debug(
                         "[SwarmEngine] Failed to dispatch degraded alert for AutoScaler: %s",

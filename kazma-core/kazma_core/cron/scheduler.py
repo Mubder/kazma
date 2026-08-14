@@ -363,6 +363,10 @@ class CronScheduler:
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._in_flight: set[str] = set()
+        # Strong refs to exec tasks — the loop holds only weak refs, and a
+        # GC'd task left its job id stuck in _in_flight (job shown RUNNING
+        # until restart, where recovery marks it FAILED).
+        self._exec_tasks: set[asyncio.Task] = set()
         self._sem: asyncio.Semaphore | None = None
 
     async def start(self) -> None:
@@ -540,10 +544,19 @@ class CronScheduler:
                         break
                     if job.next_run and self._is_due(job.next_run, now):
                         self._in_flight.add(job.job_id)
-                        asyncio.create_task(
+                        exec_task = asyncio.create_task(
                             self._execute_bounded(job, sem),
                             name=f"cron-exec-{job.job_id}",
                         )
+                        self._exec_tasks.add(exec_task)
+
+                        def _exec_done(t: asyncio.Task, _jid: str = job.job_id) -> None:
+                            self._exec_tasks.discard(t)
+                            # Clear _in_flight even if _execute exited
+                            # without its own discard (line above).
+                            self._in_flight.discard(_jid)
+
+                        exec_task.add_done_callback(_exec_done)
             except Exception:
                 logger.exception("[CronScheduler] Poll error")
 

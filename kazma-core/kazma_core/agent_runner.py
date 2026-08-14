@@ -879,8 +879,11 @@ class KazmaAgent:
 
             # Durable checkpointer — Postgres when multi-replica, else SQLite.
             db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
-            self._checkpointer = None
-            self._checkpoint_conn = None
+            # Close any stale checkpointer left behind by a model switch:
+            # sync_active_model() nulls _graph without closing, so each
+            # rebuild used to leak the aiosqlite connection / PG pool for
+            # the process lifetime.
+            await self._close_checkpointer()
             try:
                 from kazma_core.db.backend import get_database_url, is_postgres
 
@@ -1104,6 +1107,29 @@ class KazmaAgent:
                 self._on_model_change_cb()
             except Exception as cb_exc:
                 logger.warning("[KazmaAgent] Model change callback failed: %s", cb_exc)
+
+    async def _close_checkpointer(self) -> None:
+        """Close the current checkpointer's resources (SQLite conn / PG pool).
+
+        Only safe once no live graph references it (self._graph is None).
+        Idempotent.
+        """
+        if self._checkpoint_conn is not None:
+            try:
+                await self._checkpoint_conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Error closing stale checkpointer connection: %s", e)
+            self._checkpoint_conn = None
+        elif self._checkpointer is not None:
+            # Postgres path: the saver wraps an AsyncConnectionPool.
+            pool = getattr(self._checkpointer, "conn", None)
+            aclose = getattr(pool, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Error closing stale PG checkpointer pool: %s", e)
+        self._checkpointer = None
 
     async def shutdown(self) -> None:
         """Clean shutdown of the agent."""

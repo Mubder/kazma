@@ -1074,7 +1074,13 @@ def is_tool_allowed_under_constraints(
         return False
     if "no_send" in cons and n in ("send_file", "send_email", "email_send"):
         return False
-    if _is_write_execute_tool(n) and cons.intersection(AUDIT_ONLY_CONSTRAINTS):
+    if _is_write_execute_tool(n) and cons.intersection(
+        {"audit_only", "read_only", "no_code_change", "no_writes"}
+    ):
+        # Deliberately NOT AUDIT_ONLY_CONSTRAINTS here — that set includes
+        # no_send, which used to strip every write/exec tool (file_write,
+        # shell_exec, memory_store, …) when the user only asked not to be
+        # messaged on Telegram/email.
         return False
     return True
 
