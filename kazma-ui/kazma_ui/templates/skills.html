@@ -11,6 +11,9 @@
         <button class="tab-btn" :class="{ active: tab === 'hub' }" @click="tab = 'hub'">
             {{ t('skills.tab_hub') }}
         </button>
+        <button class="tab-btn" :class="{ active: tab === 'marketplace' }" @click="tab = 'marketplace'">
+            {{ t('skills.tab_marketplace') }}
+        </button>
         <button class="tab-btn" :class="{ active: tab === 'validate' }" @click="tab = 'validate'">
             {{ t('skills.tab_validate') }}
         </button>
@@ -89,6 +92,41 @@
                     </div>
                 </div>
             </template>
+        </div>
+    </div>
+
+    <!-- Marketplace (open Agent Skills ecosystem — GitHub topic:agent-skills) -->
+    <div x-show="tab === 'marketplace'" x-cloak>
+        <div class="settings-group" style="margin-bottom:1.25rem">
+            <h3>{{ t('skills.marketplace_heading') }}</h3>
+            <p class="text-muted" style="margin-bottom:0.75rem">
+                {{ t('skills.marketplace_hint') }}
+                <a href="https://agentskills.io/" target="_blank" rel="noopener">agentskills.io</a>
+            </p>
+            <div class="search-bar">
+                <input type="text" x-model="marketQuery" @input.debounce.400ms="searchMarketplace()"
+                       :placeholder="t('skills.marketplace_ph')" class="form-input">
+            </div>
+        </div>
+        <div class="skills-grid">
+            <template x-for="skill in marketResults" :key="skill.id">
+                <div class="skill-card">
+                    <div class="skill-header">
+                        <h3><a :href="skill.html_url" target="_blank" rel="noopener" x-text="skill.name"></a></h3>
+                        <span class="badge">★ <span x-text="skill.stars"></span></span>
+                    </div>
+                    <p class="skill-desc" dir="auto" x-text="skill.description"></p>
+                    <div class="skill-actions">
+                        <button class="btn btn-primary btn-sm" @click="installFromMarket(skill.source)"
+                                :disabled="installing">
+                            <span x-text="installing === skill.source ? t('skills.installing') : t('skills.install')"></span>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div x-show="!marketSearching && marketQuery && marketResults.length === 0" class="empty-state">
+            <p>{{ t('skills.marketplace_empty') }}</p>
         </div>
     </div>
 

@@ -5,6 +5,9 @@ function skillsApp() {
         tab: 'installed',
         hubQuery: '',
         hubResults: [],
+        marketQuery: '',
+        marketResults: [],
+        marketSearching: false,
         validatePath: '',
         validateResult: null,
         agentSkillSource: '',
@@ -100,6 +103,47 @@ function skillsApp() {
                 this.hubResults = await resp.json();
             } catch (e) {
                 console.error('Hub search failed:', e);
+            }
+        },
+
+        async searchMarketplace() {
+            var q = (this.marketQuery || '').trim();
+            if (!q) {
+                this.marketResults = [];
+                return;
+            }
+            this.marketSearching = true;
+            try {
+                var resp = await fetch('/api/skills/marketplace/search?q=' + encodeURIComponent(q));
+                this.marketResults = await resp.json();
+            } catch (e) {
+                console.error('Marketplace search failed:', e);
+                this.marketResults = [];
+            } finally {
+                this.marketSearching = false;
+            }
+        },
+
+        async installFromMarket(source) {
+            if (!source) return;
+            this.installing = source;
+            try {
+                var resp = await fetch('/api/skills/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill_id: source })
+                });
+                var result = await resp.json();
+                if (result.status === 'ok') {
+                    showToast(result.message || 'Skill installed', 'success');
+                    location.reload();
+                } else {
+                    showToast('Install failed: ' + (result.error || ''), 'error');
+                }
+            } catch (e) {
+                showToast('Install failed', 'error');
+            } finally {
+                this.installing = false;
             }
         },
 

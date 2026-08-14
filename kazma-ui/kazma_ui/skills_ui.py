@@ -221,6 +221,61 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 )
         return results
 
+    @router.get("/api/skills/marketplace/search")
+    async def api_search_marketplace(
+        request: Request, q: str = "", limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Search the open Agent Skills marketplace (GitHub topic:agent-skills).
+
+        Returns repos with full_name, stars, description, html_url. Uses
+        GITHUB_TOKEN when present for higher rate limits. This is the public
+        ecosystem index (anthropics/skills, addyosmani/agent-skills, …) that
+        ``install_agent_skill`` can install from directly.
+        """
+        query = (q or "").strip()
+        if not query:
+            return []
+        lim = max(1, min(int(limit or 10), 30))
+        import os
+
+        import httpx
+
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "kazma"}
+        token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    "https://api.github.com/search/repositories",
+                    params={
+                        "q": f"topic:agent-skills {query}",
+                        "sort": "stars",
+                        "order": "desc",
+                        "per_page": lim,
+                    },
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            logger.warning("[skills] marketplace search failed: %s", exc)
+            return []
+        out: list[dict[str, Any]] = []
+        for it in (data.get("items") or [])[:lim]:
+            full = it.get("full_name", "")
+            out.append(
+                {
+                    "id": full,
+                    "name": full,
+                    "stars": it.get("stargazers_count", 0),
+                    "description": (it.get("description") or "").strip(),
+                    "html_url": it.get("html_url", ""),
+                    "source": full,
+                }
+            )
+        return out
+
     @router.post("/api/skills/install")
     async def api_install_skill(req: SkillInstallRequest) -> dict[str, str]:
         """Install a skill from the Kazma hub or Agent Skills (GitHub / path).
