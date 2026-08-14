@@ -557,6 +557,32 @@ async def supervisor_node(
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
+    # ── Iteration-efficiency nudges (audit 2026-08-15) ──────────────
+    # Long tasks burn iterations on one-tool-per-turn patterns (71 of 117
+    # calls were python_exec on a calendar reproduction task). Inject a
+    # strategy-change hint at milestones so the model course-corrects
+    # BEFORE hitting the hard iteration wall.
+    _ITER_NUDGE_MARKERS = (20, 40, 60, 80)
+    if iteration in _ITER_NUDGE_MARKERS:
+        _remaining = int(state.get("max_iterations") or 15) - iteration
+        messages = list(messages) + [
+            {
+                "role": "system",
+                "content": (
+                    f"SYSTEM BUDGET CHECK: You have used {iteration} iterations "
+                    f"({_remaining} remaining). If you are making steady progress, "
+                    "continue. If you are LOOPING (re-reading files you already read, "
+                    "writing debug scripts, retrying similar code):\n"
+                    "- BATCH tool calls: issue MULTIPLE reads/writes in ONE response\n"
+                    "- Use structured tools (generate_pdf, file_write) not python_exec\n"
+                    "- Summarize what you have so far and produce the final output NOW"
+                ),
+            }
+        ]
+        logger.info(
+            "[Supervisor] iteration-efficiency nudge injected at iteration=%d", iteration
+        )
+
     # ── Mission mode: auto-extend past soft max_iterations ─────────
     # Budget /long still force-stops. Mission mode resets the wave counter
     # and continues until mission_hard_rounds (safety wall), without asking
@@ -2356,6 +2382,42 @@ async def tool_worker_node(
                     is_error=True,
                     duration_ms=duration_ms,
                 )
+
+            # Document-generation guard: the model is trying to build a
+            # PDF/DOCX/XLSX via raw Python (reportlab/fpdf/openpyxl) instead
+            # of the purpose-built generate_* tools. This burns dozens of
+            # iterations on code that produces inferior output — intercept
+            # and redirect BEFORE execution (audit 2026-08-14: 100-iteration
+            # rabbit hole on a 24-post Arabic calendar).
+            _tool_name_low = str(tc["name"]).lower()
+            if _tool_name_low in ("python_exec", "code_exec", "shell_exec"):
+                _code = str(_args.get("code") or _args.get("command") or "")
+                _code_low = _code.lower()
+                if any(
+                    marker in _code_low
+                    for marker in (
+                        "reportlab", "fpdf", "from fpdf", "simpledoctemplate",
+                        "canvas(", "platypus", "openpyxl.workbook",
+                        "docx.document", "from docx",
+                    )
+                ) and "generate_pdf" not in _code_low and "generate_docx" not in _code_low:
+                    _doc_hint = (
+                        "SYSTEM OVERRIDE: You are trying to build a document via raw "
+                        "Python. STOP — use the dedicated document generator tools instead:\n"
+                        "1. Write content to a .md file: file_write(path='output.md', content=...)\n"
+                        "2. Generate: generate_pdf(title='...', markdown_path='output.md')\n"
+                        "The generate_pdf tool handles Arabic shaping, RTL layout, styling, "
+                        "and page numbering automatically — your manual code cannot. "
+                        "Do NOT retry with Python."
+                    )
+                    _dur = (time.monotonic() - start) * 1000
+                    return ToolResult(
+                        tool_call_id=tc["id"],
+                        name=tc["name"],
+                        content=_doc_hint,
+                        is_error=True,
+                        duration_ms=_dur,
+                    )
             # Per-tool wall-clock timeout (audit B: fault isolation). A hung
             # tool (deadlocked MCP server, wedged subprocess) previously
             # blocked the whole turn until the outer KAZMA_TURN_TIMEOUT
@@ -2778,6 +2840,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     """
     messages = [_normalize_msg(m) for m in state.get("messages", [])]
     iteration = state.get("iteration", 0) + 1
+
+    # Clear the per-turn file-read dedup cache (turn boundary — audit 2026-08-15)
+    try:
+        from kazma_core.tools.file_read import clear_turn_read_cache
+
+        clear_turn_read_cache()
+    except Exception:
+        pass
 
     # Sanitize tool chains to remove any unhandled/dangling tool_calls
     # (e.g. when max_iterations forced routing to respond before ToolWorker ran)

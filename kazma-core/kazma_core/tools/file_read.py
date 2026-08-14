@@ -44,6 +44,16 @@ def _friendly_error(exc: Exception, path: str) -> str:
     return f"Error: Could not read {path} — {exc}"
 
 
+# Per-turn file-read dedup cache: the model re-reads the same file up to 9x
+# per task (audit 2026-08-15) because context trimming makes it forget the
+# content. This cache stores reads keyed by (path, offset, limit) for the
+# current turn; a re-read returns the cached content with a "already read"
+# note instead of a fresh disk read + full context injection.
+_turn_read_cache: dict[tuple, str] = {}
+_turn_read_cache_order: list[tuple] = []
+_READ_CACHE_MAX = 50
+
+
 async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     """Read a file and return its contents with line numbers.
 
@@ -59,6 +69,18 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         return "Error: No path provided."
 
     p = Path(path).expanduser().resolve()
+
+    # ── Per-turn dedup: same path+offset+limit already read this turn ─
+    cache_key = (str(p), int(offset or 0), int(limit or 500))
+    cached = _turn_read_cache.get(cache_key)
+    if cached is not None:
+        return (
+            f"[ALREADY READ THIS TURN — file_read({path}, offset={offset}, "
+            f"limit={limit}). The content below is IDENTICAL to what you "
+            "already received. Do NOT re-read; use the content from your "
+            "context. If you need different lines, use a DIFFERENT offset/"
+            f"limit.]\n\n{cached}"
+        )
 
     # ── Safety check (workspace + path grants + allow_absolute) ───
     from kazma_core.workspace.path_policy import check_path_access, denied_message
@@ -145,4 +167,18 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     if len(result) > MAX_CHARS:
         result = result[:MAX_CHARS] + f"\n[truncated — output exceeded {MAX_CHARS} chars]"
 
+    # Store in per-turn dedup cache (LRU-bounded)
+    if len(_turn_read_cache) >= _READ_CACHE_MAX:
+        oldest = _turn_read_cache_order.pop(0)
+        _turn_read_cache.pop(oldest, None)
+    _turn_read_cache[cache_key] = result
+    if cache_key not in _turn_read_cache_order:
+        _turn_read_cache_order.append(cache_key)
+
     return result
+
+
+def clear_turn_read_cache() -> None:
+    """Clear the per-turn file-read dedup cache (called on turn start/end)."""
+    _turn_read_cache.clear()
+    _turn_read_cache_order.clear()
