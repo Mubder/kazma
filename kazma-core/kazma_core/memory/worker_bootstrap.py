@@ -431,6 +431,10 @@ def _start_backup_export_scheduler() -> None:
                 from kazma_core.db.pg_backup import pg_backup_enabled
 
                 enqueue_task("native_backup", {"retention": 10})
+                # Universal backup (all DBs + assets + PG) — separate task so
+                # the native_backup handler stays fast (<300s) and doesn't
+                # trigger the queue's processing-reclaim.
+                enqueue_task("universal_backup", {})
                 # Postgres shared-state dump (self-disables on SQLite installs
                 # or the backups.pg.enabled kill-switch — checked live here).
                 if pg_backup_enabled():
@@ -561,6 +565,7 @@ def register_backup_export_handlers() -> None:
     register_handler("native_backup", _handle_native_backup)
     register_handler("nightly_export", _handle_nightly_export)
     register_handler("native_pg_backup", _handle_native_pg_backup)
+    register_handler("universal_backup", _handle_universal_backup)
     _backup_export_registered = True
     logger.info("[memory_worker] backup/export task handlers registered")
 
@@ -570,8 +575,8 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
 
     Also performs a consistent document-store backup (documents.db + the
     referenced content-addressed tree) so the document platform is covered by
-    the same nightly cadence. Finally, runs a **universal backup** (ALL
-    kazma-data DBs + assets + Postgres) so nothing is ever left behind.
+    the same nightly cadence. The universal backup (ALL DBs + assets + PG)
+    is a SEPARATE task (``universal_backup``) so this handler stays fast.
     """
     try:
         from kazma_core.memory.backup import perform_native_backups
@@ -597,22 +602,34 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
             logger.warning("[memory_worker] document backup: %s", report.get("error"))
     except Exception:
         logger.warning("[memory_worker] document backup failed", exc_info=True)
-    # Universal backup — ALL DBs + assets + Postgres. "Never left behind."
+    return True
+
+
+async def _handle_universal_backup(payload: dict[str, Any]) -> bool:
+    """Run the universal backup (ALL DBs + assets + Postgres) as its own task.
+
+    Separated from _handle_native_backup so the memory+document backup stays
+    fast (<300s) and doesn't trigger the durable queue's processing-reclaim
+    (which was re-enqueuing every 5 min and causing duplicate backups).
+    """
     try:
         import asyncio as _aio
 
         from kazma_core.backup.universal import perform_universal_backup
 
         result = await _aio.to_thread(perform_universal_backup, trigger="auto")
-        logger.info(
-            "[memory_worker] universal_backup: %d DBs, %.1f MB, %s",
-            result.get("databases_ok", 0),
-            result.get("total_size_mb", 0),
-            "PG ok" if result.get("postgres") else "no PG",
-        )
+        if result.get("ok"):
+            logger.info(
+                "[memory_worker] universal_backup done: %d DBs, %.1f MB",
+                result.get("databases_ok", 0),
+                result.get("total_size_mb", 0),
+            )
+        else:
+            logger.debug("[memory_worker] universal_backup skipped: %s", result.get("error", ""))
+        return True
     except Exception:
         logger.warning("[memory_worker] universal_backup failed", exc_info=True)
-    return True
+        return True  # never fail the queue on backup errors
 
 
 async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
