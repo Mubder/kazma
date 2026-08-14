@@ -40,6 +40,42 @@ mcp:
     tools: []
     trust: approval_required
     auth: {}
+  - name: sequential-thinking
+    transport: stdio
+    command:
+    - C:\Users\balfa\kazma\AppData\Roaming\uv\tools\mcp-sequential-thinking\Scripts\mcp-sequential-thinking.exe
+  - name: test-server
+    transport: stdio
+    command:
+    - echo
+    url: ''
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+    trust: approval_required
+  - name: dup
+    transport: stdio
+    command:
+    - echo
+    url: ''
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+    trust: approval_required
+  - name: sse-server
+    transport: sse
+    command: []
+    url: http://localhost:8080
+    env: {}
+    enabled: true
+    connected: false
+    tool_count: 0
+    tools: []
+    trust: approval_required
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.
 

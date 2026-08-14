@@ -198,6 +198,7 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/health",
     "/health/live",
     "/health/ready",
+    "/health/deep",  # ops canary — bounded work, TTL-cached 30s
     "/api/status",
     "/api/telemetry",
     "/favicon.ico",

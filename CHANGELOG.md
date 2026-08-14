@@ -48,6 +48,17 @@ repaired — the suite is fully green.
   -loop blocking removed from clone/attachments/git; universal backup
   Windows prune + zip handling; durable-queue claim race; cron task GC.
 
+- **CI is now a real gate + deep health canary**: the test step's
+  `|| true` (which let every regression class ship silently) is gone —
+  bare `pytest` covers ALL testpaths including the five package suites
+  that were previously orphaned, with `--timeout=300` and a new
+  node --check job for static JS. `GET /health/deep` exercises one real
+  roundtrip per critical path (config write/read/delete, a real memory
+  recall, workspace binding, research readiness, brain imports, DB ping)
+  — TTL-cached 30s, 503 on any failure — built to catch the silent-no-op
+  class. Five V1-era test files that broke suite collection
+  (`vector_store`/`fts5` imports removed in the V2 cutover) deleted.
+
 ## Unreleased — Universal backup + boot fixes + research export (2026-08-14)
 
 **"The backup never left anything behind."** One unified backup system that

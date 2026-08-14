@@ -937,6 +937,20 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   [:500] cap discarded full output at write time); a longer re-query
   refreshes the stored summary, a shorter one never clobbers it.
 
+**E. Deep canary + CI gate.**
+- `GET /health/deep` (kazma_ui/health.py): one REAL roundtrip per critical
+  path — ConfigStore write→read→delete, a real `recall()`, workspace
+  binding, research-stack readiness, brain entry-point imports, DB ping.
+  503 when any check fails; TTL-cached 30s (aggressive polling is free).
+  Poll it in ops dashboards — it exists to catch SILENT no-ops (the
+  recall-NameError class), which structural checks cannot see.
+- CI (`ci.yml`) GATES on the full suite: bare `pytest` (all testpaths —
+  the five package suites were previously orphaned by `pytest tests/`),
+  `-m "not slow"`, `--timeout=300`. Never reintroduce `|| true` on the
+  test step — that single flag let every regression class in this audit
+  ship silently. Lint/bandit remain advisory (`--exit-zero`/`|| true`)
+  until their backlogs are triaged.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
