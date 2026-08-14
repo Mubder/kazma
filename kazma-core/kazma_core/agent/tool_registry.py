@@ -3135,7 +3135,18 @@ class LocalToolRegistry:
                 activate_skill,
                 install_agent_skill,
                 list_agent_skills,
+                search_agent_skills,
                 uninstall_agent_skill,
+            )
+            self.register_function(
+                "search_agent_skills",
+                search_agent_skills,
+                description=(
+                    "Search the open Agent Skills marketplace (GitHub topic:agent-skills) "
+                    "for installable skills matching a query. Returns repos with stars, "
+                    "descriptions, and the install_agent_skill command for each."
+                ),
+                category="skills",
             )
             self.register_function(
                 "list_agent_skills",

@@ -116,7 +116,12 @@ def skill_base_dirs(
     """
     dirs: list[tuple[str, Path]] = []
 
-    # User-level (lowest precedence)
+    # Bundled skills shipped with Kazma (lowest precedence — a user/project
+    # install of the same name wins). Integrity is checked against
+    # bundled/checksums.json at activation, not via install-time signing.
+    dirs.append(("bundled", Path(__file__).resolve().parent / "bundled"))
+
+    # User-level
     dirs.append(("user", Path.home() / ".agents" / "skills"))
     try:
         from kazma_core.paths import agent_skills_dir, legacy_user_home

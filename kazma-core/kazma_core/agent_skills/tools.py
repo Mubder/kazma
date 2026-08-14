@@ -1,15 +1,19 @@
-"""Agent-facing tools for Agent Skills (list / activate / install / uninstall)."""
+"""Agent-facing tools for Agent Skills (search / list / activate / install / uninstall)."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
+
+import httpx
 
 __all__ = [
     "activate_skill",
     "install_agent_skill",
     "list_agent_skills",
+    "search_agent_skills",
     "uninstall_agent_skill",
 ]
 
@@ -123,3 +127,57 @@ async def uninstall_agent_skill(name: str) -> str:
         return "Error: skill name is required."
     result = uninstall_skill(skill_name)
     return result.to_user_message()
+
+
+async def search_agent_skills(query: str, limit: int = 8) -> str:
+    """Search the open Agent Skills marketplace and return installable repos.
+
+    Uses GitHub's ``topic:agent-skills`` repository search (the de-facto
+    marketplace index — anthropics/skills, addyosmani/agent-skills, curated
+    lists). Uses GITHUB_TOKEN when available for higher rate limits.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "Error: query required — e.g. search_agent_skills(query='release notes')"
+    lim = max(1, min(int(limit or 8), 20))
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "kazma"}
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.github.com/search/repositories",
+                params={
+                    "q": f"topic:agent-skills {q}",
+                    "sort": "stars",
+                    "order": "desc",
+                    "per_page": lim,
+                },
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        return f"Error: marketplace search failed — {type(exc).__name__}: {exc}"
+
+    items = list(data.get("items") or [])
+    if not items:
+        return (
+            f"No matching skill repos found for {q!r}. "
+            "Try broader terms (e.g. 'design', 'testing', 'react')."
+        )
+    lines = [f"**{len(items)} matching skill repo(s) for {q!r}:**\n"]
+    for it in items[:lim]:
+        name = it.get("full_name", "?")
+        stars = it.get("stargazers_count", 0)
+        desc = (it.get("description") or "").strip()
+        lines.append(f"- **{name}** ★{stars}")
+        if desc:
+            lines.append(f"  {desc[:180]}")
+        lines.append(f"  Install: install_agent_skill(source='{name}')")
+    lines.append(
+        "\nTip: install requires one HITL approval. Review the repo's "
+        "SKILL.md files before approving."
+    )
+    return "\n".join(lines)

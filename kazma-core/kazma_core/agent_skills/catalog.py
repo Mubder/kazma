@@ -98,7 +98,13 @@ def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> st
     try:
         from kazma_core.agent_skills.integrity import verify_skill
 
-        vr = verify_skill(skill.location)
+        if skill.scope == "bundled":
+            # Bundled skills ship with the distribution: integrity is a
+            # SHA-256 comparison against the committed bundled/checksums.json
+            # (there is no install-time signing event for them).
+            vr = _verify_bundled_skill(skill)
+        else:
+            vr = verify_skill(skill.location)
         if not vr.ok:
             return (
                 f"[Kazma] Skill '{skill.name}' failed integrity verification — "
@@ -138,6 +144,48 @@ def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> st
         )
     parts.append("</skill_content>")
     return "\n".join(parts)
+
+
+def _verify_bundled_skill(skill: AgentSkill) -> VerifyResult:
+    """Verify a bundled skill against the committed checksums manifest.
+
+    Bundled skills have no install event to sign them, so their integrity is
+    the SHA-256 comparison against ``bundled/checksums.json`` (committed with
+    the skill). Missing manifest entry → fail closed, like a tampered file.
+    """
+    import hashlib
+    import json
+
+    from kazma_core.agent_skills.integrity import VerifyResult
+
+    manifest_path = skill.base_dir.parent / "checksums.json"
+    if not manifest_path.is_file():
+        return VerifyResult(
+            ok=False, reason="bundled checksums manifest missing", signed=False
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return VerifyResult(
+            ok=False, reason="bundled checksums manifest unreadable", signed=False
+        )
+    expected = manifest.get(skill.name)
+    if not expected:
+        return VerifyResult(
+            ok=False,
+            reason=f"skill not listed in bundled checksums manifest: {skill.name}",
+            signed=False,
+        )
+    try:
+        text = skill.location.read_text(encoding="utf-8")
+    except Exception as exc:
+        return VerifyResult(ok=False, reason=f"unreadable: {exc}", signed=False)
+    actual = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if actual != expected:
+        return VerifyResult(
+            ok=False, reason="SKILL.md does not match the committed checksum", signed=False
+        )
+    return VerifyResult(ok=True, reason="bundled checksum match", signed=True)
 
 
 def _list_resources(base: Path, *, max_resources: int = 40) -> list[str]:
