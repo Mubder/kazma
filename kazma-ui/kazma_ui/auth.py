@@ -800,17 +800,25 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
     ) -> Response:
         allow_spoof = client_tenant_spoof_allowed()
         tenant_id: str | None = None
+        # Whether the tenant was EXPLICITLY chosen (JWT/principal/header/cookie)
+        # vs the 'default' fallback. The X-Tenant-ID cookie is only persisted
+        # for explicit choices — stamping 'default' onto every anonymous
+        # request would pollute clients for no benefit (audit follow-up).
+        explicit_tenant = False
 
         # Always try verified JWT first
         auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             tenant_id = extract_tenant_from_jwt(auth_header[7:].strip())
+            if tenant_id:
+                explicit_tenant = True
         if not tenant_id:
             for cookie_name in ("jwt", "token", "x-tenant-id-jwt", "tenant_jwt"):
                 tok = request.cookies.get(cookie_name)
                 if tok:
                     tenant_id = extract_tenant_from_jwt(tok)
                     if tenant_id:
+                        explicit_tenant = True
                         break
 
         # Opaque session / principal may carry tenant (multi-user)
@@ -818,6 +826,8 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
             try:
                 principal = get_request_principal(request)
                 tenant_id = principal_tenant_id(principal)
+                if tenant_id:
+                    explicit_tenant = True
             except Exception:
                 pass
 
@@ -830,6 +840,8 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     or request.cookies.get("x-tenant-id")
                     or request.cookies.get("tenant_id")
                 )
+            if tenant_id:
+                explicit_tenant = True
         elif not tenant_id:
             # Hardened mode — never trust client header
             tenant_id = "default"
@@ -843,7 +855,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         token = set_current_tenant_id(tenant_id)
         try:
             response = await call_next(request)
-            if tenant_id and allow_spoof:
+            if explicit_tenant and tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
                     response.set_cookie(
                         key="X-Tenant-ID",

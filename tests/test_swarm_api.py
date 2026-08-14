@@ -30,6 +30,7 @@ def _build_client(config_store=None):
     templates.env.globals.setdefault("js_version", lambda: 1)
     templates.env.globals.setdefault("lang", lambda: "en")
     templates.env.globals.setdefault("dir", lambda: "ltr")
+    templates.env.globals.setdefault("theme", lambda: "light")
     templates.env.globals.setdefault("translations_json", lambda: "{}")
     templates.env.globals.setdefault("ws_token", lambda: "test-token")
 

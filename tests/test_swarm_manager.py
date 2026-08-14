@@ -185,7 +185,8 @@ class TestDispatchInProcess:
         worker = InProcessWorker(name="brain", role="reasoning")
         await worker.start()
 
-        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+             patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
             result = await worker.dispatch("Analyze the codebase")
 
         assert result["worker"] == "brain"
@@ -205,7 +206,8 @@ class TestDispatchInProcess:
         worker = InProcessWorker(name="brain", role="reasoning")
         await worker.start()
 
-        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+             patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
             result = await worker.dispatch("Fix bug", context="In auth module")
 
         assert result["status"] == "success"
@@ -220,7 +222,8 @@ class TestDispatchInProcess:
         worker = InProcessWorker(name="brain", role="reasoning")
         await worker.start()
 
-        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+             patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
             result = await worker.dispatch(
                 "Fix bug",
                 context=SwarmDispatchContext(
@@ -237,7 +240,8 @@ class TestDispatchInProcess:
         worker = InProcessWorker(name="orphan", role="test")
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=None)
-        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+             patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
             result = await worker.dispatch("task")
         assert result["status"] == "error"
         assert "No provider available" in result["error"]
@@ -272,7 +276,8 @@ class TestDispatchTelegramBotType:
         # get_model raises so dispatch falls through to get_client()
         mock_registry.get_model = MagicMock(side_effect=RuntimeError("not found"))
 
-        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+             patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
             result = await worker.dispatch("Deploy to staging")
 
         assert result["worker"] == "core"
@@ -293,7 +298,8 @@ class TestDispatchTelegramBotType:
         mock_registry.get_client = MagicMock(return_value=None)
         mock_registry.get_model = MagicMock(side_effect=RuntimeError("no model"))
 
-        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry), \
+             patch("kazma_core.models.selection.select_provider_for_task", return_value=None):
             result = await worker.dispatch("task")
 
         assert result["worker"] == "core"

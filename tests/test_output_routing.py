@@ -686,8 +686,10 @@ class TestWebUIDispatchOutputRouting:
         mock_cs.get.return_value = config_target
 
         with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
-             patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
-            
+             patch("kazma_core.config_store.get_config_store", return_value=mock_cs), \
+             patch("kazma_ui.auth.get_kazma_secret", return_value=""), \
+             patch("kazma_ui.auth.get_request_principal", return_value={"source": "secret"}):
+
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/tasks/task-old/retry")
 

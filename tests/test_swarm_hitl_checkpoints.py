@@ -29,6 +29,18 @@ def empty_config() -> SwarmConfig:
     return SwarmConfig(enabled=True, workers=[])
 
 
+@pytest.fixture(autouse=True)
+def _bypass_task_action_admin_gate(monkeypatch):
+    """The swarm task-action routes (approve/reject/cancel/retry) carry an
+    admin/operator gate (LOW #9 audit fix). These tests exercise the
+    checkpoint routing logic, not auth, so bypass the gate for the whole
+    module — the gate reads these at request time via `from ... import`."""
+    monkeypatch.setattr("kazma_ui.auth.get_kazma_secret", lambda: "")
+    monkeypatch.setattr(
+        "kazma_ui.auth.get_request_principal", lambda *a, **k: {"source": "secret"}
+    )
+
+
 def _build_client() -> TestClient:
     _reset_swarm_state()
     app = FastAPI()

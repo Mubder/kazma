@@ -56,11 +56,11 @@ def create_signed_jwt(tenant_id: str, secret: str) -> str:
 
 
 def test_tenant_middleware_no_tenant():
-    """Verify that if no tenant context is passed, get_current_tenant_id returns None."""
+    """No tenant context → resolves to the 'default' tenant (never None)."""
     client = TestClient(app)
     response = client.get("/api/test-tenant")
     assert response.status_code == 200
-    assert response.json() == {"active_tenant": None}
+    assert response.json() == {"active_tenant": "default"}
     assert "X-Tenant-ID" not in response.cookies
 
 
@@ -112,7 +112,8 @@ def test_tenant_middleware_bearer_jwt_unsigned_rejected(monkeypatch):
         headers={"Authorization": f"Bearer {jwt_token}"},
     )
     assert response.status_code == 200
-    assert response.json() == {"active_tenant": None}
+    # Forged tenant is NOT trusted; request falls back to 'default' (never None).
+    assert response.json() == {"active_tenant": "default"}
 
 
 def test_tenant_middleware_bearer_jwt_verified(monkeypatch):
@@ -140,7 +141,8 @@ def test_tenant_middleware_cookie_jwt_unsigned_rejected(monkeypatch):
     client.cookies.set("jwt", jwt_token)
     response = client.get("/api/test-tenant")
     assert response.status_code == 200
-    assert response.json() == {"active_tenant": None}
+    # Forged tenant is NOT trusted; request falls back to 'default' (never None).
+    assert response.json() == {"active_tenant": "default"}
 
 
 def test_tenant_context_leak_isolation():
@@ -154,6 +156,7 @@ def test_tenant_context_leak_isolation():
     # Clear cookies so client doesn't resend X-Tenant-ID from cookie
     client.cookies.clear()
     
-    # Request 2 (no headers) doesn't see tenant-1 because of clean reset
+    # Request 2 (no headers) doesn't see tenant-1 because of clean reset;
+    # it falls back to 'default' (never None, and never the leaked tenant-1).
     res2 = client.get("/api/test-tenant")
-    assert res2.json() == {"active_tenant": None}
+    assert res2.json() == {"active_tenant": "default"}
