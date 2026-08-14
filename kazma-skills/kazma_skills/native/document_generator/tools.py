@@ -75,8 +75,17 @@ async def generate_pdf(
     images: list[dict[str, str]] | None = None,
     lang: str | None = None,
     rtl: bool | None = None,
+    markdown_path: str | None = None,
 ) -> str:
     """Generate a verified, styled PDF through the isolated renderer worker.
+
+    Content source (pick ONE — markdown_path preferred for large documents):
+      - ``markdown_path``: workspace-relative path to a .md file written via
+        file_write (chunked). Headings (``#``/``##``/``###``) become PDF
+        sections automatically. Keeps the tool call tiny regardless of
+        document size — inline sections that exceed the model's output
+        token limit get truncated into unparseable JSON.
+      - ``sections``: inline [{"heading": …, "body": …}] (small docs only)
 
     Section bodies support lightweight markdown for real formatting:
       - ``#`` / ``##`` / ``###`` headings
@@ -87,7 +96,35 @@ async def generate_pdf(
     Arabic is auto-detected (or set ``lang="ar"`` / ``rtl=True``). PDF path
     applies arabic-reshaper + python-bidi so letters join and order correctly.
     """
+    from pathlib import Path as _P
 
+    if markdown_path:
+        # Resolve within the workspace (same ladder as file_read).
+        from kazma_core.workspace.binding import resolve_active_root
+
+        root = resolve_active_root()
+        p = _P(markdown_path)
+        if not p.is_absolute():
+            p = root / p
+        p = p.resolve()
+        if not p.is_file():
+            return f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write."
+        md = p.read_text(encoding="utf-8", errors="replace")
+        # Parse markdown headings into sections (same split as the export endpoints).
+        parsed: list[dict[str, str]] = []
+        cur_h = "Report"
+        cur_b: list[str] = []
+        for line in md.splitlines():
+            if line.startswith("#"):
+                if cur_b or parsed:
+                    parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+                cur_h = line
+                cur_b = []
+            else:
+                cur_b.append(line)
+        if cur_b or not parsed:
+            parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+        sections = parsed
     payload: dict[str, Any] = {
         "title": title,
         "sections": _sections(sections),
@@ -115,15 +152,47 @@ async def generate_docx(
     tables: list[dict[str, Any]] | None = None,
     lang: str | None = None,
     rtl: bool | None = None,
+    markdown_path: str | None = None,
 ) -> str:
     """Generate a verified DOCX with PDF-parity styling.
+
+    Content source (pick ONE — markdown_path preferred for large documents):
+      - ``markdown_path``: workspace-relative path to a .md file written via
+        file_write (chunked). Headings become DOCX sections automatically.
+      - ``sections``: inline [{"heading": …, "body": …}] (small docs only)
 
     Body markdown: headings, lists, **bold**, GFM tables, quotes.
     Also accepts structured ``tables=[{heading, headers, rows}]`` like PDF.
     Word shapes Arabic; we set ``w:bidi``, justify (``w:jc=both``), heading
     fills, and styled tables.
     """
+    from pathlib import Path as _P
 
+    if markdown_path:
+        from kazma_core.workspace.binding import resolve_active_root
+
+        root = resolve_active_root()
+        p = _P(markdown_path)
+        if not p.is_absolute():
+            p = root / p
+        p = p.resolve()
+        if not p.is_file():
+            return f"Error: markdown_path '{markdown_path}' not found (resolved: {p}). Write the file first via file_write."
+        md = p.read_text(encoding="utf-8", errors="replace")
+        parsed: list[dict[str, str]] = []
+        cur_h = "Report"
+        cur_b: list[str] = []
+        for line in md.splitlines():
+            if line.startswith("#"):
+                if cur_b or parsed:
+                    parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+                cur_h = line
+                cur_b = []
+            else:
+                cur_b.append(line)
+        if cur_b or not parsed:
+            parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+        sections = parsed
     payload: dict[str, Any] = {
         "title": title,
         "sections": _sections(sections),

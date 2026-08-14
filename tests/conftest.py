@@ -1,47 +1,13 @@
-"""Conftest — shared pytest fixtures for Kazma tests."""
+"""Conftest — shared pytest fixtures for Kazma tests.
+
+The production-database shield (sqlite forced, DSNs stripped, dotenv
+neutered, re-introduction guard) lives in the ROOT conftest.py so it
+covers every testpath — see that file for the incident context.
+"""
 
 from __future__ import annotations
 
 import os
-# Prevent local .env file leakage and environment variable pollution from breaking tests
-os.environ.pop("KAZMA_SECRET", None)
-
-# ── PRODUCTION-DATABASE SHIELD (2026-08-14 incident) ─────────────────────
-# A dev-repo .env pointing at the PRODUCTION Postgres + an app-building
-# test let the suite write test providers/settings straight into the live
-# kazma_settings table (providers "wiped": 566→127 rows, sk-test keys).
-# Tests must NEVER reach a real database regardless of .env files, shell
-# profiles, or loader tricks: force sqlite, strip every DSN, and keep any
-# code path from re-introducing one mid-session.
-os.environ["KAZMA_DB_BACKEND"] = "sqlite"
-for _dsn_key in ("KAZMA_DATABASE_URL", "DATABASE_URL", "KAZMA_DOCUMENTS_METADATA_BACKEND"):
-    os.environ.pop(_dsn_key, None)
-
-import dotenv
-dotenv.load_dotenv = lambda *args, **kwargs: None
-dotenv.dotenv_values = lambda *args, **kwargs: {}
-
-# Re-introduction guard: if anything loads the DSN back into the environ
-# during the session (real load_dotenv reference, manual .env parser,
-# subprocess env inheritance), remove it again immediately.
-_real_setitem = os.environ.__class__.__setitem__
-
-
-def _shielded_setitem(self, key, value):
-    _real_setitem(self, key, value)
-    if key in ("KAZMA_DATABASE_URL", "DATABASE_URL"):
-        import warnings
-
-        warnings.warn(
-            f"tests must not use a real database — {key} was re-introduced "
-            "into the environment and has been removed again",
-            stacklevel=2,
-        )
-        _real_setitem(self, "KAZMA_DB_BACKEND", "sqlite")
-        del self[key]
-
-
-os.environ.__class__.__setitem__ = _shielded_setitem
 
 # Import i18n early so the Jinja2Templates patch (which injects the default
 # ``t`` global) is applied before any test creates a Jinja2Templates instance.
