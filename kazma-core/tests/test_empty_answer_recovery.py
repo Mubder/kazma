@@ -81,9 +81,13 @@ async def test_empty_reply_at_iteration_0_triggers_nudge(monkeypatch):
     from kazma_core.agent.state import NodeName
 
     # First call returns empty (the bug); the nudge retry returns real text.
+    # NOTE: the recovery text must be a COMPLETE sentence — the leak/stub
+    # classifier (is_unusable_assistant_content) flags short replies ending
+    # with "…"/":"/"—" as mid-task stubs and force-synthesizes instead of
+    # passing them through, which is intended behavior.
     llm = _ScriptedLLM([
-        _Response(content=""),                       # empty first reply
-        _Response(content="Here is my opinion on…"),  # recovered on nudge
+        _Response(content=""),                        # empty first reply
+        _Response(content="Here is my opinion on memory structures for your use case."),
     ])
 
     state = {
@@ -124,10 +128,10 @@ async def test_empty_reply_at_iteration_0_triggers_nudge(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_respond_node_injects_fallback_when_final_text_empty(monkeypatch):
-    """Defence-in-depth: if a normal (non-max-iter) turn somehow reaches
-    respond_node with empty final assistant text, the user still gets a
-    visible message instead of an empty "Done" turn."""
+async def test_respond_node_empty_final_attempts_synthesis(monkeypatch):
+    """Empty final text on a non-max-iter turn is never shipped as-is —
+    respond_node attempts ONE synthesis call first (2026-08-03 regression
+    fix: "never ship 'no written answer' without attempting synthesis")."""
     from kazma_core.agent import graph_builder as gb
 
     monkeypatch.setattr(
@@ -137,9 +141,7 @@ async def test_respond_node_injects_fallback_when_final_text_empty(monkeypatch):
 
     class _LLM:
         async def chat(self, messages, tools=None):
-            # Synthesis should NOT run (this is not a max-iter turn); if it
-            # did, it would be a fabricated answer.
-            return _Response(content="FABRICATED")
+            return _Response(content="SYNTHESIZED: here is a complete final answer.")
 
     state = {
         "messages": [
@@ -158,9 +160,53 @@ async def test_respond_node_injects_fallback_when_final_text_empty(monkeypatch):
         for m in out["messages"]
         if m.get("role") == "assistant" and (m.get("content") or "").strip()
     ]
-    # A fallback was appended so the UI is not empty.
-    assert finals, "no assistant message was injected for an empty final turn"
-    assert "FABRICATED" not in finals  # synthesis did not run
+    # Synthesis ran and its complete output is the shipped final message —
+    # the user never sees an empty "Done" turn.
+    assert finals, "no assistant message was produced for an empty final turn"
+    assert "SYNTHESIZED" in finals[-1]
+
+
+@pytest.mark.asyncio
+async def test_respond_node_turn_failed_skips_synthesis(monkeypatch):
+    """Anti-fabrication guard (the real one): when the turn already failed,
+    respond_node surfaces the honest error and NEVER synthesizes a
+    plausible-looking answer over the broken turn."""
+    from kazma_core.agent import graph_builder as gb
+
+    monkeypatch.setattr(
+        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        lambda *_a, **_k: None,
+    )
+
+    class _TrackingLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, tools=None):
+            self.calls += 1
+            return _Response(content="FABRICATED")
+
+    llm = _TrackingLLM()
+    state = {
+        "messages": [
+            {"role": "user", "content": "give me your opinion"},
+            {"role": "assistant", "content": ""},
+        ],
+        "iteration": 1,
+        "max_iterations": 15,
+        "turn_failed": True,
+    }
+
+    out = await gb.respond_node(state, llm=llm)
+
+    assert llm.calls == 0, "synthesis ran over a failed turn"
+    finals = [
+        m["content"]
+        for m in out["messages"]
+        if m.get("role") == "assistant" and (m.get("content") or "").strip()
+    ]
+    assert finals, "no honest fallback was injected for the failed turn"
+    assert "FABRICATED" not in finals
     assert any(t.strip().startswith("⚠️") for t in finals), \
         "fallback message was not an honest notice"
 

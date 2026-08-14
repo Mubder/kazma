@@ -296,9 +296,14 @@ async def test_analyze_image_clear_error_when_no_vision_model(monkeypatch, tmp_p
     img = tmp_path / "t.png"
     img.write_bytes(png)
 
-    import sys
-    fw_mod = sys.modules["kazma_core.tools.file_write"]
-    monkeypatch.setattr(fw_mod, "_is_within_workspace", lambda path, ws: True)
+    # Patch the path-policy SoT (the containment check moved from
+    # file_write._is_within_workspace to workspace.path_policy) — the temp
+    # dir is outside the real workspace, which would fire the containment
+    # error before we ever reach the provider-selection step under test.
+    monkeypatch.setattr(
+        "kazma_core.workspace.path_policy.check_path_access",
+        lambda path, action: type("R", (), {"allowed": True})(),
+    )
     monkeypatch.setattr(
         va, "_get_llm_provider",
         lambda: (None, "deepseek-v4-pro", "no-vision-model"),

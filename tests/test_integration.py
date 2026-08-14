@@ -160,9 +160,11 @@ class TestStaticFiles:
 
 class TestLanguageDirection:
     def test_page_has_rtl_dir(self, client: TestClient) -> None:
-        resp = client.get("/chat")
+        # Language is request-scoped via the kazma-lang cookie (the shipped
+        # default is en/ltr); Arabic must render RTL.
+        resp = client.get("/chat", cookies={"kazma-lang": "ar"})
         assert 'dir="rtl"' in resp.text
 
     def test_page_has_arabic_lang(self, client: TestClient) -> None:
-        resp = client.get("/chat")
+        resp = client.get("/chat", cookies={"kazma-lang": "ar"})
         assert 'lang="ar"' in resp.text
