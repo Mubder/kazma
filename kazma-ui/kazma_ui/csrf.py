@@ -64,7 +64,12 @@ def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
             # No browser context (curl/CLI/webhook) — nothing to check.
             return await call_next(request)
 
-        allowed: set[str] = {(request.url.host or "").lower()}
+        # request.url.HOSTNAME — Starlette's URL has no `host` property
+        # (netloc/hostname); the original `request.url.host` raised
+        # AttributeError on the first real browser POST (every non-GET
+        # /api/* request carrying Origin/Referer 500'd). TestClient requests
+        # carry no Origin, which is why the test suites never hit it.
+        allowed: set[str] = {(request.url.hostname or "").lower()}
         forwarded = request.headers.get("x-forwarded-host")
         if forwarded:
             allowed.update(
