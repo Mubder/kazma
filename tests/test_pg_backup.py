@@ -46,8 +46,12 @@ class _FakeCursor:
     def execute(self, sql: str) -> None:  # noqa: ARG002
         pass
 
-    def fetchall(self) -> list[tuple[str]]:
-        return [(t,) for t in self._tables]
+    def fetchall(self) -> list[dict[str, str]]:
+        # Mirror the real PostgresPool (psycopg dict_row factory): rows are
+        # dict-like keyed by column name, NOT tuple-indexed. Indexing row[0]
+        # would raise KeyError: 0 — this is what verify_required_pg_tables
+        # must handle.
+        return [{"tablename": t} for t in self._tables]
 
 
 class _FakeConn:

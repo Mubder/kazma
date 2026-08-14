@@ -246,7 +246,10 @@ def verify_required_pg_tables(pool: Any) -> list[str] | None:
                 cur.execute(
                     "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
                 )
-                present = {row[0] for row in cur.fetchall()}
+                # The shared PostgresPool uses psycopg's dict_row factory, so
+                # rows are dict-like keyed by column name (row[0] would raise
+                # KeyError: 0). Index by the selected column name.
+                present = {row["tablename"] for row in cur.fetchall()}
     except Exception:
         logger.warning("[pg_backup] schema verification skipped (pool unavailable)", exc_info=True)
         return None
