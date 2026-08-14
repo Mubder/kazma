@@ -735,6 +735,9 @@
       var hfEl = $('handoff-' + taskId);
       if (hfEl) {
         hfEl.style.display = 'block';
+        // Cap the chain at 8 badges — innerHTML += used to grow unboundedly
+        // within a card's lifetime.
+        while (hfEl.children.length >= 8) hfEl.removeChild(hfEl.firstChild);
         hfEl.innerHTML += '<span class="badge badge-info" style="margin-right:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
       }
     });

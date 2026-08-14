@@ -941,6 +941,9 @@ def should_quarantine_documents_search(
 
 
 # Scratchpad mutation buffer (tool → tool_worker merge). Keyed by thread_id.
+# Bounded: turns that abort before the drain (exception, abandoned HITL
+# interrupt, /abort) would otherwise leak their buffer forever.
+_MAX_SCRATCHPAD_THREADS = 256
 _scratchpad_buffers: dict[str, dict[str, str]] = {}
 _scratchpad_thread_ctx: ContextVar[str | None] = ContextVar(
     "kazma_scratchpad_thread", default=None
@@ -965,6 +968,8 @@ def apply_scratchpad_write(key: str, finding: str) -> str:
     if not key_s:
         return "Error: key must be non-empty"
     val = str(finding or "").strip()[:4000]
+    while len(_scratchpad_buffers) > _MAX_SCRATCHPAD_THREADS:
+        _scratchpad_buffers.pop(next(iter(_scratchpad_buffers)), None)
     buf = _scratchpad_buffers.setdefault(tid, {})
     buf[key_s] = val
     return f"Scratchpad saved: {key_s} ({len(val)} chars). Survives context trim."

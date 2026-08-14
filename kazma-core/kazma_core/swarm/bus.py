@@ -247,9 +247,21 @@ class SwarmMessageBus:
     def adapter(self) -> BusAdapter:
         return self._adapter
 
-    def subscribe(self, callback: callable) -> None:  # type: ignore[type-arg]
-        """Register a callback for bus events (used by TUI panels)."""
+    def subscribe(self, callback: callable) -> "callable[[], None]":  # type: ignore[type-arg]
+        """Register a callback for bus events (used by TUI panels).
+
+        Returns an unsubscribe handle — without one, re-rendered panels that
+        re-subscribe leaked closures into ``_subscribers`` forever.
+        """
         self._subscribers.append(callback)
+
+        def _unsubscribe() -> None:
+            try:
+                self._subscribers.remove(callback)
+            except ValueError:
+                pass
+
+        return _unsubscribe
 
     async def _notify_subscribers(self, event_type: str, data: dict[str, Any]) -> None:
         for cb in self._subscribers:

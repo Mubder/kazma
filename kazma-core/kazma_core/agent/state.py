@@ -155,9 +155,6 @@ class SupervisorState(TypedDict, total=False):
     episodes, and entities are isolated in the V2 cognitive engine.
     """
 
-    last_checkpoint_id: str
-    """Most recent checkpoint UUID (avoids LangGraph reserved name)."""
-
     # ── Time Travel ─────────────────────────────────────────────────
     snapshot_id: str
     """UUID of the most recent Time Travel snapshot captured for this state."""
@@ -215,9 +212,6 @@ class SupervisorState(TypedDict, total=False):
     user knows the turn broke rather than mistaking a fabricated answer for
     a real result (the "model stopped thinking" symptom).
     """
-
-    error_message: str
-    """Human-readable message describing the failure when ``turn_failed`` is True."""
 
     force_synthesis: bool
     """When True, ``respond_node`` MUST run a final synthesis LLM call.
@@ -312,7 +306,6 @@ def initial_supervisor_state(
         last_cost_usd=0.0,
         thread_id=thread_id or str(uuid.uuid4()),
         tenant_id=tenant_id,
-        last_checkpoint_id=str(uuid.uuid4()),
         snapshot_id="",
         snapshot_iteration=-1,
         created_at=now,
@@ -331,7 +324,6 @@ def initial_supervisor_state(
         _research_depth_nudged=False,
         _research_pipeline_nudged=False,
         turn_failed=False,
-        error_message="",
         mission_rounds_used=0,
         mission_hard_rounds=_mission_hard if _mode == "mission" else 0,
     )

@@ -1933,11 +1933,15 @@ def create_graph_handler(
 
                 web_store = get_session_manager()
                 username = msg.context_metadata.get("username") or "fork"
+                # Convert snapshot messages to plain dicts — the raw state can
+                # contain LangGraph message objects the session store / sidebar
+                # renderer don't understand.
+                _fork_messages = _convert_messages_to_dicts(state.get("messages", []))
                 web_session = ChatSession(
                     session_id=new_thread_id,
                     thread_id=new_thread_id,
                     title=f"Fork of {username} (iter {iteration})",
-                    messages=state.get("messages", []),
+                    messages=_fork_messages,
                 )
                 web_store.put(web_session)
             except Exception:

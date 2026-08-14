@@ -6,6 +6,11 @@ mint_soul_commitment) and the confirm→re-apply trigger. When
 operator confirms it here; the confirm flips the commitment to ``committed`` and
 re-applies the delta (apply is event-driven, so the confirm path must trigger
 the apply — a bare status flip would leave the delta unapplied).
+
+NOTE: intentionally API-only for now — ``soul_requires_confirm`` defaults OFF,
+so the queue is empty on default deployments and no UI panel exists yet.
+Operators enable the flag via ``agent.commitment.soul_requires_confirm`` and
+drive these endpoints directly (curl/API token); a Web panel is future work.
 """
 
 from __future__ import annotations

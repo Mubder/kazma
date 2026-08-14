@@ -95,6 +95,9 @@ class KazmaTUI(App[None]):
         self._high_contrast: Optional[HighContrastMode] = None
         self._status_bar: Optional[KazmaStatusBar] = None
         self._shown_approvals: set[str] = set()
+        # Shared HTTP client for the 3s HITL poll (a fresh client per poll
+        # leaked a connection pool every 3 seconds).
+        self._hitl_http: Any = None
         # When True, user manually toggled the nav rail — skip auto collapse.
         self._nav_user_set: bool = False
 
@@ -548,34 +551,41 @@ class KazmaTUI(App[None]):
                 headers["X-Kazma-Secret"] = secret
 
             _port = os.environ.get("KAZMA_PORT", "8000")
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get(f"http://127.0.0.1:{_port}/api/pending-approvals", headers=headers)
-                if response.status_code == 200:
-                    data = response.json()
-                    pending_list = data.get("pending", [])
-                    
-                    for item in pending_list:
-                        thread_id = item.get("thread_id")
-                        if thread_id and thread_id not in self._shown_approvals:
-                            # Don't stack multiple modals — skip if one is already open
-                            if isinstance(self.screen, HitlApprovalScreen):
-                                break
-                            self._shown_approvals.add(thread_id)
-                            tool_name = item.get("tool_name", "unknown")
-                            arguments = item.get("arguments", {})
-                            message = item.get("message", "")
-                            
-                            def handle_dismiss(approved: bool | None) -> None:
-                                self.run_worker(self._submit_hitl_decision(thread_id, approved))
-                            
-                            screen = HitlApprovalScreen(
-                                thread_id=thread_id,
-                                tool_name=tool_name,
-                                arguments=arguments,
-                                message=message
-                            )
-                            self.push_screen(screen, handle_dismiss)
-                            break  # Show one modal at a time
+            if self._hitl_http is None:
+                self._hitl_http = httpx.AsyncClient(timeout=2.0)
+            response = await self._hitl_http.get(f"http://127.0.0.1:{_port}/api/pending-approvals", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                pending_list = data.get("pending", [])
+
+                # Reconcile: threads no longer pending were resolved elsewhere
+                # (Telegram/Web) — without this they suppressed the modal for
+                # any future approval on the same thread, forever.
+                _live = {i.get("thread_id") for i in pending_list if i.get("thread_id")}
+                self._shown_approvals &= _live
+
+                for item in pending_list:
+                    thread_id = item.get("thread_id")
+                    if thread_id and thread_id not in self._shown_approvals:
+                        # Don't stack multiple modals — skip if one is already open
+                        if isinstance(self.screen, HitlApprovalScreen):
+                            break
+                        self._shown_approvals.add(thread_id)
+                        tool_name = item.get("tool_name", "unknown")
+                        arguments = item.get("arguments", {})
+                        message = item.get("message", "")
+
+                        def handle_dismiss(approved: bool | None) -> None:
+                            self.run_worker(self._submit_hitl_decision(thread_id, approved))
+
+                        screen = HitlApprovalScreen(
+                            thread_id=thread_id,
+                            tool_name=tool_name,
+                            arguments=arguments,
+                            message=message
+                        )
+                        self.push_screen(screen, handle_dismiss)
+                        break  # Show one modal at a time
         except Exception as exc:
             logger.debug("Failed to check pending approvals: %s", exc)
 

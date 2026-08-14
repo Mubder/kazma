@@ -2577,7 +2577,7 @@
           var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once',
                           session_id: chatSessionId || '', choices: {} };
           payload.choices[_semTcid] = optId;
-          fetch('/api/approve/' + (data.thread_id || targetThreadId), {
+          fetch('/api/approve/' + encodeURIComponent(data.thread_id || targetThreadId), {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           }).catch(function() {

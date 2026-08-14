@@ -726,7 +726,9 @@ class LocalToolRegistry:
 
         # All retry attempts exhausted
         duration_ms = (time.monotonic() - start) * 1000
-        logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc, exc_info=True)
+        # exc_info=last_exc (not True) — we are outside an except block here,
+        # so exc_info=True logged no traceback on the retryable-failure path.
+        logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc, exc_info=last_exc)
         _record_procedural_outcome(tool_name, arguments, success=False)
         return {"content": f"Error: {last_exc}", "is_error": True}
 

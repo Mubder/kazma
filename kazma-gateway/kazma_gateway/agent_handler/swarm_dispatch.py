@@ -445,7 +445,9 @@ async def _send_swarm_reply(
     """
     ctx = await store.get(thread_id)
     if not ctx:
-        ctx = msg.context_metadata
+        # Copy — the parse_mode setdefault below must not mutate the shared
+        # inbound context metadata (it can outlive this send).
+        ctx = dict(msg.context_metadata or {})
     
     # Apply markdown-to-HTML conversion for Telegram platform.
     # If text_is_html=True, preserve trusted preformatted Telegram HTML.

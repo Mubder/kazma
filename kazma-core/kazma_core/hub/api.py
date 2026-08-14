@@ -2,6 +2,11 @@
 
 FastAPI-based REST API wrapping the KazmaHub registry and
 CertificationBadgeSystem for the public hub.
+
+DEPLOYED SEPARATELY: nothing in the kazma-ui server or gateway imports this
+module — it is a standalone service (see
+``docs/docs/guide/skills-mcp-and-tools.md``), authenticated with
+``X-Kazma-Secret``. Zero product importers is by design, not an orphan.
 """
 
 from __future__ import annotations

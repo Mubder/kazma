@@ -2005,6 +2005,12 @@ def register_direct_routes(self: Any) -> None:
 
         client_ip = (request.client.host if request.client else "") or "unknown"
         now = _time.time()
+        # Bound the per-IP map: unique attacking IPs used to leave stale
+        # keys forever (pruning only ever ran for the retrying same IP).
+        if len(_login_failures) > 1000:
+            for _ip in list(_login_failures):
+                if not any(now - t < _LOGIN_WINDOW_S for t in _login_failures[_ip]):
+                    del _login_failures[_ip]
         recent = [
             t for t in _login_failures.get(client_ip, [])
             if now - t < _LOGIN_WINDOW_S
@@ -2661,10 +2667,14 @@ def register_direct_routes(self: Any) -> None:
     async def ws_dashboard(websocket: WebSocket) -> None:
         from kazma_ui.auth import websocket_is_authenticated
 
+        # Accept FIRST, then close 4003 — closing before accept makes the
+        # server send an HTTP handshake rejection, so the client saw a 1006
+        # close instead of 4003 and the session-expired redirect never fired
+        # (the /ws/chat endpoint already does it in this order).
+        await websocket.accept()
         if not websocket_is_authenticated(websocket):
             await websocket.close(code=4003, reason="Unauthorized")
             return
-        await websocket.accept()
         from kazma_core.shutdown import is_shutting_down
         from kazma_core.tracing import get_trace_store
 

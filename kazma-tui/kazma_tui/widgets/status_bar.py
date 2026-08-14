@@ -58,9 +58,10 @@ class StatusIndicator(Static):
         self._pulse = True
     
     def on_mount(self) -> None:
-        """Only pulse when connecting — don't burn cycles otherwise."""
-        if self.status == "connecting":
-            self.set_interval(1.0, self._toggle_pulse)
+        """Always start the 1s interval — _toggle_pulse self-gates on the
+        reactive status. Creating it only when status == "connecting" at
+        mount meant the pulse could never animate later (default is online)."""
+        self.set_interval(1.0, self._toggle_pulse)
     
     def _toggle_pulse(self) -> None:
         """Toggle pulse state for animation."""

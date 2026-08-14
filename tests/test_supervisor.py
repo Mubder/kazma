@@ -43,7 +43,6 @@ class TestSupervisorState:
         assert state["last_cost_usd"] == 0.0
         assert isinstance(state["thread_id"], str)
         assert len(state["thread_id"]) == 36  # UUID
-        assert isinstance(state["last_checkpoint_id"], str)
         assert isinstance(state["created_at"], str)
 
     def test_initial_state_custom_thread_id(self):

@@ -1058,8 +1058,15 @@ class KazmaAgent:
                         "Try a shorter request or raise KAZMA_TURN_TIMEOUT_SECONDS."
                     )
         except Exception as e:
-            logger.error("Graph invocation failed: %s", e)
-            return "عذراً، حدث خطأ تقني. يرجى المحاولة مرة أخرى."
+            logger.error("Graph invocation failed: %s", e, exc_info=True)
+            # Classified, actionable message (same helper the graph path
+            # uses) — the old generic Arabic string hid the failure class.
+            try:
+                from kazma_core.retry import friendly_llm_error
+
+                return friendly_llm_error(e)
+            except Exception:
+                return "⚠️ حدث خطأ تقني أثناء تنفيذ الطلب. يرجى المحاولة مرة أخرى."
         finally:
             reset_current_thread_id(token)
             reset_turn_id(_turn_token)

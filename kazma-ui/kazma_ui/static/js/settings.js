@@ -3433,7 +3433,9 @@ function settingsApp() {
                     this.backupRunning = false;
                     return;
                 }
-                // Poll for progress.
+                // Poll for progress. Clear any prior interval first — a
+                // re-entered runBackup used to stack parallel poll loops.
+                if (this._backupPollId) clearInterval(this._backupPollId);
                 this._backupPollId = setInterval(() => this._pollBackup(), 2000);
             } catch (e) {
                 this.backupResult = { ok: false, error: e.message };

@@ -612,9 +612,10 @@ class LLMProvider:
         # fails in a retry loop. Instead of telling the USER to bump
         # Settings, transparently retry once with a doubled limit. Capped at
         # 4x the configured value (or 32k) so a runaway can't balloon cost.
-        if response.finish_reason == "length" and not getattr(
-            self, "_in_truncation_retry", False
-        ):
+        # No re-entrancy guard needed: the retry is an inline client.post
+        # (never a recursive chat() call), so an instance-level flag would
+        # only make CONCURRENT truncating calls skip their own retry.
+        if response.finish_reason == "length":
             current_cap = int(payload.get("max_tokens") or self.config.max_tokens)
             retry_cap = min(current_cap * 2, max(self.config.max_tokens * 4, 32768))
             logger.warning(
@@ -622,7 +623,6 @@ class LLMProvider:
                 "with max_tokens=%d (model=%s)",
                 current_cap, retry_cap, payload.get("model"),
             )
-            self._in_truncation_retry = True
             try:
                 retry_resp = await client.post(
                     "/chat/completions",
@@ -650,8 +650,6 @@ class LLMProvider:
                         "truncated response; tool worker will guide chunked writes",
                         retry_cap,
                     )
-            finally:
-                self._in_truncation_retry = False
 
         if cache_enabled and response.finish_reason != "length":
             try:

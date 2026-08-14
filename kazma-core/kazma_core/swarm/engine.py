@@ -253,16 +253,9 @@ class SwarmEngine:
 
     def list_workers(self) -> list:
         """Public accessor returning worker objects. Preferred over direct _workers access from UI layers."""
-        # Prefer phonebook when possible; fallback to internal for compatibility
-        try:
-            if hasattr(self, "_phonebook") and self._phonebook:
-                return list(self._phonebook._entries.values())  # internal but stable for now
-        except AttributeError as attr_exc:
-            logger.debug(
-                "[SwarmEngine] Phonebook attribute lookup failed: %s",
-                attr_exc,
-                exc_info=True,
-            )
+        # Direct registry read — the previous "prefer phonebook" branch read
+        # ``_phonebook._entries``, an attribute WorkerPhonebook never had, so
+        # every call took the exception-per-call fallback.
         return list(getattr(self, "_workers", {}).values())
 
     def set_sse_bus(self, bus: Any) -> None:

@@ -49,7 +49,10 @@
   window.KazmaResearch = {
     init: function () {
       this.load();
-      pollTimer = setInterval(this.load.bind(this), 15000);
+      // Skip the poll while the tab is hidden (matches memory_console.js).
+      pollTimer = setInterval(function() {
+        if (!document.hidden) window.KazmaResearch.load();
+      }, 15000);
     },
 
     switchTab: function (name) {

@@ -11,6 +11,7 @@ from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
+from kazma_core.swarm.dispatch_helpers import wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
@@ -323,7 +324,7 @@ async def execute_pipeline(
                     dispatch_context,
                     fallback_chain=task.fallback_chain or None,
                 ),
-                timeout=task.timeout,
+                timeout=wait_timeout(task.timeout),
             )
         except TimeoutError:
             logger.warning(
@@ -453,7 +454,7 @@ async def resume_pipeline(
                     dispatch_context,
                     fallback_chain=task.fallback_chain or None,
                 ),
-                timeout=task.timeout,
+                timeout=wait_timeout(task.timeout),
             )
         except TimeoutError:
             logger.warning(
@@ -582,7 +583,7 @@ async def execute_conditional(
                 task.context,
                 fallback_chain=task.fallback_chain or None,
             ),
-            timeout=task.timeout,
+            timeout=wait_timeout(task.timeout),
         )
     except TimeoutError:
         logger.warning(
@@ -642,7 +643,7 @@ async def execute_conditional(
     try:
         target_result = await asyncio.wait_for(
             dispatch_worker_by_name(target_worker, task.prompt, task.context),
-            timeout=task.timeout,
+            timeout=wait_timeout(task.timeout),
         )
     except TimeoutError:
         logger.warning(
@@ -726,7 +727,7 @@ async def execute_fan_out(
                         dispatch_context,
                         fallback_chain=task.fallback_chain or None,
                     ),
-                    timeout=task.timeout,
+                    timeout=wait_timeout(task.timeout),
                 )
         except TimeoutError:
             logger.warning(

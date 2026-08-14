@@ -10,6 +10,7 @@ from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
+from kazma_core.swarm.dispatch_helpers import wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerCapabilities, WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
@@ -169,7 +170,7 @@ async def execute_consult(
             async with concurrency:
                 worker_result = await asyncio.wait_for(
                     dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
-                    timeout=task.timeout,
+                    timeout=wait_timeout(task.timeout),
                 )
         except TimeoutError:
             logger.warning(

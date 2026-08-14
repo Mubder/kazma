@@ -58,7 +58,11 @@ def resolve_channel_id(
 
 
 def chunk_message(text: str, limit: int = DISCORD_MAX_MESSAGE_LEN) -> list[str]:
-    """Split *text* into Discord-safe chunks."""
+    """Split *text* into Discord-safe chunks.
+
+    Empty text yields NO chunks — the old ``[""]`` made Discord 400 on empty
+    content and blocked the attachments sent after the text.
+    """
     if not text:
-        return [""]
+        return []
     return [text[i : i + limit] for i in range(0, len(text), limit)]

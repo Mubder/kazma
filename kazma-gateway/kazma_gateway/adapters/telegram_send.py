@@ -148,9 +148,11 @@ def chunk_message(
     """Split *text* into Telegram-safe message chunks.
 
     When *parse_mode* is HTML, use tag-aware splitting so markup stays valid.
+    Empty text yields NO chunks — the old ``[""]`` made Telegram 400 on
+    "message text is empty" and the attachments after it were never sent.
     """
     if not text:
-        return [""]
+        return []
     if parse_mode and str(parse_mode).upper() == "HTML":
         return chunk_html_message(text, max_len=max_len)
     return [text[i : i + max_len] for i in range(0, len(text), max_len)]

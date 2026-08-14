@@ -145,6 +145,19 @@ def _is_safe_url(url: str) -> bool:
     return True
 
 
+def _sniff_image_mime(data: bytes) -> str | None:
+    """Magic-byte sniff for the vision-supported image types (or None)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 async def _download_image(url: str) -> tuple[bytes, str]:
     """Download an image from *url* and return ``(image_bytes, mime_type)``.
 
@@ -186,12 +199,21 @@ async def _download_image(url: str) -> tuple[bytes, str]:
                     )
                 chunks.append(chunk)
             image_bytes = b"".join(chunks)
+            # Capture inside the stream context — reading resp.headers after
+            # close only works because httpx retains received headers.
+            content_type = resp.headers.get("content-type", "")
 
-        # Detect MIME from Content-Type header, fallback to PNG
-        content_type = resp.headers.get("content-type", "image/png")
-        mime = content_type.split(";")[0].strip().lower()
+        # Validate the MIME instead of silently sending mismatched bytes as
+        # PNG (an SVG labeled image/png got rejected by vision endpoints).
+        mime = (content_type or "").split(";")[0].strip().lower()
         if mime not in MIME_MAP.values():
-            mime = "image/png"  # best-effort fallback
+            mime = _sniff_image_mime(image_bytes)
+        if mime is None:
+            raise ValueError(
+                "Unsupported image type"
+                f" (content-type: {content_type or 'unknown'}). "
+                "Supported: PNG, JPEG, GIF, WebP."
+            )
 
         return image_bytes, mime
 

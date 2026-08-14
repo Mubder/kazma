@@ -101,6 +101,15 @@ class MetricsCollector:
         key = (worker, metric_date)
 
         with self._lock:
+            # Bound the in-memory dict — one entry per (worker, date) used
+            # to accumulate for the whole process lifetime. Drop entries
+            # older than 30 days once the dict grows large.
+            if len(self._metrics) > 2_000:
+                from datetime import UTC as _UTC, datetime as _dt, timedelta as _td
+
+                cutoff = (_dt.now(_UTC).date() - _td(days=30)).isoformat()
+                for _k in [k for k in self._metrics if k[1] < cutoff]:
+                    del self._metrics[_k]
             snapshot = self._metrics.get(key)
             if snapshot is None:
                 snapshot = WorkerMetricSnapshot(

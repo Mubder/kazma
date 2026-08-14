@@ -7,7 +7,7 @@ from typing import Any
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
-__all__ = ["WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "resolve_max_concurrent"]
+__all__ = ["WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "resolve_max_concurrent", "wait_timeout"]
 
 # Map free-form worker type aliases to canonical WorkerConfig.type values
 WORKER_TYPE_ALIASES: dict[str, str] = {
@@ -19,8 +19,22 @@ WORKER_TYPE_ALIASES: dict[str, str] = {
 
 
 def normalize_worker_type(worker_type: str) -> str:
-    """Normalize worker type aliases to canonical config types."""
+    """Normalize worker type aliases to canonical config values."""
     return WORKER_TYPE_ALIASES.get(worker_type, worker_type)
+
+
+def wait_timeout(timeout: float | None) -> float | None:
+    """Normalize ``SwarmTask.timeout`` for ``asyncio.wait_for``.
+
+    The engine treats ``timeout <= 0`` as "no timeout"; patterns previously
+    passed the raw value to ``wait_for``, where ``0`` meant an INSTANT
+    ``TimeoutError`` for every fan-out/pipeline/consultation worker.
+    """
+    try:
+        t = float(timeout)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return t if t > 0 else None
 
 
 def aggregate_outputs(worker_results: list[WorkerResult]) -> str | None:

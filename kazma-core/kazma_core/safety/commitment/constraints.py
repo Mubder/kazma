@@ -88,23 +88,37 @@ def cron_pending_jobs(
         db_path = getattr(getattr(sched, "_store", None), "_db_path", None)
         if not db_path:
             db_path = str(data_dir() / "cron.db")
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        try:
-            if thread_id:
-                rows = conn.execute(
-                    "SELECT job_id, prompt FROM cron_jobs "
-                    "WHERE status='pending' AND thread_id=? AND tenant_id=?",
-                    (thread_id, tenant_id),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT job_id, prompt FROM cron_jobs "
-                    "WHERE status='pending' AND tenant_id=?",
-                    (tenant_id,),
-                ).fetchall()
-        finally:
-            conn.close()
-        return [{"job_id": r[0], "prompt": r[1] or ""} for r in rows]
+        # One bounded retry: a briefly-locked WAL window used to flip this
+        # read to None and the cancel_job resolver fail-open (a hallucinated
+        # job_id then "cancelled" successfully).
+        import time as _time
+
+        last_exc: Exception | None = None
+        for _attempt in range(2):
+            try:
+                conn = sqlite3.connect(db_path, check_same_thread=False, timeout=3.0)
+                try:
+                    if thread_id:
+                        rows = conn.execute(
+                            "SELECT job_id, prompt FROM cron_jobs "
+                            "WHERE status='pending' AND thread_id=? AND tenant_id=?",
+                            (thread_id, tenant_id),
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            "SELECT job_id, prompt FROM cron_jobs "
+                            "WHERE status='pending' AND tenant_id=?",
+                            (tenant_id,),
+                        ).fetchall()
+                finally:
+                    conn.close()
+                return [{"job_id": r[0], "prompt": r[1] or ""} for r in rows]
+            except sqlite3.OperationalError as _op_exc:
+                last_exc = _op_exc
+                if _attempt == 0:
+                    _time.sleep(0.25)
+                    continue
+        raise last_exc if last_exc else RuntimeError("cron read failed")
     except Exception:
         logger.debug("[commitment] cron_pending_jobs failed — degrading to None", exc_info=True)
         return None

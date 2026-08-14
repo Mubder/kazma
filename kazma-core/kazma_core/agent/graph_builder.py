@@ -1635,7 +1635,6 @@ async def supervisor_node(
             **_mission_carry,
             "next_node": NodeName.RESPOND,
             "turn_failed": True,
-            "error_message": error_content,
             "messages": messages
             + [
                 {
@@ -2568,7 +2567,6 @@ async def tool_worker_node(
                 allow = approved and (approved_ids is None or tc_id in approved_ids)
                 if allow:
                     logger.info("[ToolWorker] HITL approved: %s", tc["name"])
-                    consecutive_failures = 0
                     _token = _hitl_approved_ctx.set(True)
                     try:
                         results.append(await _exec_one(tc))

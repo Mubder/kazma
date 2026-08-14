@@ -26,7 +26,9 @@ def test_resolve_chat_id_missing():
 
 
 def test_chunk_message():
-    assert chunk_message("") == [""]
+    # Empty text yields NO chunks — a [""] chunk made Telegram 400 on
+    # "message text is empty" and blocked the attachments after it.
+    assert chunk_message("") == []
     text = "a" * 5000
     chunks = chunk_message(text, max_len=4096)
     assert len(chunks) == 2

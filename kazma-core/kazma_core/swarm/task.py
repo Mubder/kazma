@@ -314,6 +314,11 @@ class SwarmTask(_JsonSerializable):
     type: TaskType = TaskType.DISPATCH
     context: str = ""
     workers: list[str] = field(default_factory=list)
+    # NOTE: dependencies / priority / cost_estimate are persisted by
+    # TaskStore but NOT yet consumed by any scheduler (no dependency-ordered
+    # execution, no priority queue, actual cost comes from
+    # result.total_cost). Reserved for future DAG/priority scheduling — do
+    # not assume behavior from setting them.
     dependencies: list[str] = field(default_factory=list)
     priority: int = 0
     timeout: float = 300.0

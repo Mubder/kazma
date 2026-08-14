@@ -28,8 +28,11 @@
       onStatus: function(status) { updateConnectionStatus(status); }
     });
 
-    // Set up auto-refresh fallback
-    setInterval(fetchStatusFallback, 10000);
+    // Set up auto-refresh fallback (skipped while the tab is hidden —
+    // memory_console.js already gates its polls this way)
+    setInterval(function() {
+      if (!document.hidden) fetchStatusFallback();
+    }, 10000);
 
     // Time range selector
     var rangeBtns = document.querySelectorAll('.range-btn');
