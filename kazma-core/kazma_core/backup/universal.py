@@ -200,6 +200,18 @@ def perform_universal_backup(
     data = _data_dir()
     dest = _universal_dir() / str(ts)
 
+    # Clean up incomplete backups from interrupted runs (server restart while
+    # a backup was in progress). Any dir without a manifest.json is incomplete.
+    try:
+        base = _universal_dir()
+        if base.is_dir():
+            for old in base.iterdir():
+                if old.is_dir() and not (old / "manifest.json").is_file():
+                    logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
+                    _rmtree_force(old)
+    except Exception:
+        logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
+
     # Guard against concurrent universal backups — the 24h auto loop and a
     # manual "Back Up Now" click can fire within seconds of each other.
     if _backup_progress.get("phase") not in ("idle", "done", "error"):
@@ -243,10 +255,12 @@ def perform_universal_backup(
     asset_results = _copy_assets(data, dest / "assets")
     _set_progress("assets", detail=f"Assets done ({len(asset_results)} groups)")
 
-    # 3. Postgres dump (if configured).
-    _set_progress("postgres", detail="Dumping Postgres…")
-    pg_result = _backup_postgres(dest)
-    _set_progress("postgres", detail="Postgres done" if pg_result and pg_result.get("ok") else "Postgres skipped")
+    # 3. Postgres dump — SKIP (the native_pg_backup task already dumps PG
+    # separately into backups/pg/. Running it here was redundant (two pg_dump
+    # calls) and added 3-5s of I/O. The PG dump is listed in the manifest as
+    # "handled by native_pg_backup" for documentation.
+    _set_progress("manifest", detail="Writing manifest…")
+    pg_result = {"ok": True, "note": "handled by native_pg_backup task"}
 
     # 4. Manifest.
     elapsed = round(time.time() - started, 1)
