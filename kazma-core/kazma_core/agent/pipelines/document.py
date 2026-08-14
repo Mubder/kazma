@@ -52,20 +52,33 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
 
     # ── Step 1: READ the source ─────────────────────────────────────
     source_content = ""
+
+    # If no explicit source path, look for one in the conversation history.
+    # "reproduce this PDF" in an ongoing session refers to a file that was
+    # uploaded or mentioned earlier — search recent messages for file paths
+    # and attachment references.
+    if not source_path and messages:
+        source_path = _find_source_in_history(messages, state)
+
     if source_path:
         try:
             import asyncio as _aio
 
             p = Path(source_path)
             if not p.is_absolute():
+                # Try workspace-relative, then attachments dir, then as-is
                 from kazma_core.workspace.binding import resolve_active_root
 
-                p = await _aio.to_thread(resolve_active_root) / p
+                root = await _aio.to_thread(resolve_active_root)
+                candidates = [
+                    root / p,
+                    Path("kazma-data/attachments") / p.name,
+                    Path("kazma-data/documents") / p.name,
+                    p,
+                ]
+                p = next((c for c in candidates if c.is_file()), candidates[0])
             if await _aio.to_thread(p.is_file):
                 if p.suffix.lower() == ".pdf":
-                    # fitz is synchronous — to_thread prevents event-loop
-                    # freeze on large PDFs (the 7.7MB calendar blocked
-                    # the whole server for minutes)
                     source_content = await _aio.to_thread(_read_pdf, p)
                 else:
                     source_content = await _aio.to_thread(
@@ -77,21 +90,21 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
         except Exception as exc:
             steps_log.append(f"⚠ Source read failed: {exc}")
 
-    if not source_content and messages:
-        # Fall back to extracting from the conversation context
-        user_texts = [
-            m.get("content", "")
-            for m in messages
-            if m.get("role") == "user" and isinstance(m.get("content"), str)
-        ]
-        source_content = "\n\n".join(user_texts[-3:])  # last 3 user messages
-        if source_content:
-            steps_log.append(f"✓ Extracted from conversation ({len(source_content)} chars)")
-
     if not source_content:
+        # Do NOT fall back to conversation text as document content — that
+        # produces a garbage PDF containing the user's instruction text.
+        # Instead, return an actionable error.
+        _att_dir = Path("kazma-data/attachments")
+        _pdfs = sorted(
+            [f.name for f in _att_dir.glob("*.pdf")],
+            key=lambda f: (_att_dir / f).stat().st_mtime,
+            reverse=True,
+        )[:3]
+        _hint = f" Available PDFs: {', '.join(_pdfs)}" if _pdfs else ""
         return _format_result(
             "Error", steps_log,
-            "No source content found. Please provide a file or describe what to generate.",
+            f"No source document found. Please attach a file or specify a path"
+            f" (e.g., 'reproduce kazma-data/attachments/Calender.pdf').{_hint}",
         )
 
     # ── Step 2: EXTRACT/STRUCTURE ───────────────────────────────────
@@ -417,6 +430,69 @@ def _basic_structure(text: str) -> str:
         result = f"# {first_line}\n\n{result}"
 
     return result
+
+
+_FILE_REF_RE = None
+
+
+def _find_source_in_history(messages: list[dict], state: dict) -> str:
+    """Find a source file path from the conversation history.
+
+    When the user says 'reproduce this PDF' in an ongoing session, the
+    referenced file was uploaded or mentioned in an earlier message. Search:
+    1. Attachment stubs in messages ([Attached: <path>])
+    2. Explicit file paths in user messages
+    3. Active attachments from the state
+    4. Most recent PDF in the attachments directory
+    """
+    import re as _re
+
+    global _FILE_REF_RE
+    if _FILE_REF_RE is None:
+        # Matches: file paths with extensions, [Attached: path], attachment stubs
+        _FILE_REF_RE = _re.compile(
+            r"(?:\[Attached:\s*([^\]]+\.\w{2,5})\])"
+            r"|(?:path[=:\s]+([\w\-./\\]+\.\w{2,5}))"
+            r"|(?:file[=:\s]+([\w\-./\\]+\.\w{2,5}))"
+            r"|(?:([\w\-./\\]+\.(?:pdf|docx?|xlsx?|pptx?|csv)))",
+            _re.IGNORECASE,
+        )
+
+    # 1. Scan messages from most recent to oldest for file references
+    for msg in reversed(messages):
+        content = msg.get("content", "")
+        if not isinstance(content, str):
+            continue
+        # Only look at user messages and attachment stubs
+        if msg.get("role") not in ("user", "assistant"):
+            continue
+        matches = _FILE_REF_RE.findall(content)
+        for match in matches:
+            for group in match:
+                if group:
+                    path = group.strip()
+                    # Verify it looks like a real file path (has extension)
+                    if Path(path).suffix:
+                        return path
+
+    # 2. Check active attachments from the state
+    for att in state.get("active_attachments") or []:
+        path = att.get("path") or att.get("filename") or ""
+        if path:
+            return path
+
+    # 3. Most recent PDF in the attachments directory
+    att_dir = Path("kazma-data/attachments")
+    if att_dir.is_dir():
+        pdfs = sorted(
+            [f for f in att_dir.iterdir() if f.suffix.lower() == ".pdf"],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if pdfs:
+            return str(pdfs[0])
+
+    return ""
 
 
 def _resolve_platform_chat_id(platform: str) -> str:
