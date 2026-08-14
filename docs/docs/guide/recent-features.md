@@ -17,6 +17,24 @@ the deep docs when you need detail.
 
 ---
 
+## What's new — reliability & ecosystem (August 2026)
+
+| Area | What you get | Where |
+|------|--------------|-------|
+| **Postgres backup** | Nightly automatic `pg_dump` of Kazma's tables (atomic, validated, 7-day retention) + boot-time schema verification + one-command restore | `kazma-data/backups/pg/`; `python scripts/pg_backup.py backup\|restore --latest\|list` |
+| **Agent Skills marketplace** | Browse/install the open `agentskills.io` ecosystem (GitHub `topic:agent-skills`) from the UI; the agent can `search_agent_skills` + `install_agent_skill` | `/skills` → Marketplace tab |
+| **Bundled starter skills** | 3 Kazma-native skills ship in-tree (release-notes, conventional-commits, ui-conventions), checksum-verified | `/skills` (scope: bundled) |
+| **Windows tool fixes** | Browser tools, `shell_exec`, telemetry, Ollama pull, runtime installs now actually work on Windows (selector-loop subprocess trap fixed) | transparent — tools that silently did nothing now run |
+| **Memory recall fix** | Search no longer returns `[]` for queries containing punctuation (`==`, `//`) | transparent |
+| **429 failover restored** | A rate-limited primary model now fails over to the backup chain instead of hard-failing the turn | transparent |
+
+**Operator actions after `git pull`:** restart the server to activate the
+template fixes (MCP/skills buttons) and the new backup scheduler (first dump
+~2 min after boot). Full engineering detail in `CHANGELOG.md` and `AGENTS.md`
+§21–§23.
+
+---
+
 ## At a glance
 
 | Area | What you get | Where |

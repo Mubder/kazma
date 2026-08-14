@@ -128,7 +128,9 @@ unattended-danger-tool security gap:
 
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
-- **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested)
+- **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested by
+  `tests/test_agent_skills.py::TestHitlWiring::test_yaml_parity`; both lists are
+  alphabetical — add a new danger tool to BOTH or the test fails)
 - **Settings UI / ConfigStore:** `safety.require_approval_for` — consumed by
   `get_hitl_config()` (runtime override)
 - **Swarm bus:** `swarm/safety.py` `_EXTENDED_DANGER` is an **alias** of CANONICAL
@@ -786,6 +788,82 @@ userinfo.
 ConfigStore keys `backups.pg.enabled` / `backups.pg.retention`; env
 kill-switch `KAZMA_PG_BACKUP_ENABLED=0`. Tests:
 `python -m pytest tests/test_pg_backup.py`.
+
+### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
+
+Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`
+ecosystem — it can install, run, and publish skills that also work in Claude
+Code, Cursor, Codex, etc. Four modules; understanding them is essential before
+touching skill loading.
+
+**A. Parser + spec (`parser.py`).** `SKILL.md` = YAML frontmatter + markdown
+body. Required fields per the spec: **`name`** + **`description`** only.
+`version` is OPTIONAL — do not re-introduce a "missing required field: version"
+warning (it spam-listed every ecosystem skill). `validate_manifest` enforces
+name+description and is the single gate.
+
+**B. Discovery scopes (`discovery.py`).** `skill_base_dirs()` returns
+`(scope, path)` pairs, lowest → highest precedence:
+`bundled` (shipped with Kazma) → `user` (`~/.agents/skills` + Kazma/Claude/
+Cursor compat dirs) → `project` (`<root>/.agents/skills`, `skills/`, …).
+Project overrides user overrides bundled on name collision. The `bundled`
+scope is `kazma_core/agent_skills/bundled/` — 3 Kazma-native starter skills.
+
+**C. Integrity — two paths, do not flatten.**
+- **User/project skills** (`integrity.py`): HMAC-SHA256 signed at install time
+  (keyed by `KAZMA_SECRET`); activation verifies checksum+signature, **fail-closed** on tamper, warn-only on unsigned.
+- **Bundled skills** (`catalog._verify_bundled_skill`): verified against the
+  committed `bundled/checksums.json` (SHA-256 per skill); a bundled skill NOT
+  listed in the manifest fails closed. Adding a bundled skill ⇒ regenerate
+  `checksums.json` (see the generator at the bottom of the bundled dir's git
+  history) or it won't activate.
+
+**D. Activation always fences the body** (`catalog.format_skill_activation`):
+the SKILL.md body is wrapped in `format_untrusted_block(source="agent_skill:…")`
+— it is GitHub-sourced text, data-not-instructions. Never inject a skill body
+raw into the system prompt.
+
+**E. Install with no Node/npm** (`installer.py`). `install_from_any(source)`
+handles `owner/repo`, full GitHub URLs, `tree/branch/path`, git URLs, local
+paths, and `npx skills add …` strings — downloads the GitHub zipball via httpx.
+`rglob("SKILL.md")` so multi-skill repos install all skills. One HITL approval
+covers an install (the user is the gate for what enters the system).
+
+**F. Marketplace search** (`tools.search_agent_skills` + `/api/skills/marketplace/search`):
+GitHub `topic:agent-skills` repository search (GITHUB_TOKEN-aware for rate
+limits). The `/skills` page has a Marketplace tab (debounced search + one-click
+install). Do not build a parallel registry — the GitHub topic IS the index.
+
+### 23. Windows asyncio.subprocess trap (`SelectorEventLoop`)
+
+The Kazma server runs a **`SelectorEventLoop`** (`kazma_core/eventloop.py` —
+forced because psycopg async refuses the Proactor loop, and Postgres-backed
+checkpoints must persist on Windows). On Windows the selector loop **does not
+implement subprocess transports**: `asyncio.create_subprocess_exec` /
+`create_subprocess_shell` raise `NotImplementedError`. This is a recurring
+footgun — every tool that spawns a subprocess must avoid the bare asyncio API.
+
+**The rule:** on the server loop, spawn subprocesses via
+**`asyncio.to_thread(subprocess.run, …)`** (blocking, bounded) or
+**`asyncio.to_thread(subprocess.Popen, …)`** (non-blocking start). The MCP
+manager (`mcp/manager.py`) already has an explicit `NotImplementedError` →
+Popen fallback — mirror that.
+
+**Known-correct sites (keep them):**
+- `system/installer.py`, `system/runtime_manager.py`, `telemetry.py`,
+  `models/discovery.py`, `agent/tool_registry.py:shell_exec` — all use
+  `to_thread` + `subprocess`.
+- **Playwright**: the browser tools (`kazma_skills/native/browser_automation`)
+  run on the **sync API inside `to_thread`**; the heavier crawl/fetch paths
+  (`knowledge_ingest.py`, `read_url.py`) route through
+  `kazma_core/playwright_loop.py` (a dedicated ProactorEventLoop daemon thread).
+  Do NOT revert these to the async Playwright API on the server loop.
+
+**Symptom of a regression:** a tool reports `error=False` in 0 ms while doing
+nothing, and the log shows `Task exception was never retrieved …
+NotImplementedError` from `playwright/_impl/_transport.py` or
+`asyncio/base_events.py`. That means someone re-introduced
+`create_subprocess_exec` on the server loop.
 
 ## UI Conventions (Web)
 

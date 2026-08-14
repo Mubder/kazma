@@ -1,5 +1,73 @@
 # CHANGELOG
 
+## Unreleased — Agent Skills ecosystem + marketplace (2026-08-14)
+
+Kazma already spoke the agentskills.io `SKILL.md` format (parser/discovery/
+installer/integrity). This round makes it first-class and fixes the spec drift:
+
+- **Parser spec fix** (`agent_skills/parser.py`): `version` is OPTIONAL per the
+  agentskills.io spec (was wrongly required); `description` is now the required
+  field it always should have been. Kills the "missing required field: version"
+  warning spam on every ecosystem skill (vercel-labs, qwencloud, …).
+- **Bundled starter skills** (`agent_skills/bundled/`): 3 Kazma-native skills
+  (release-notes, conventional-commits, ui-conventions) shipped in-tree with a
+  `checksums.json` manifest; discovery scans them at lowest precedence
+  (`bundled` scope) and activation verifies SHA-256 against the committed
+  manifest (fail-closed).
+- **Marketplace search**: new `search_agent_skills` agent tool (GitHub
+  `topic:agent-skills` index, GITHUB_TOKEN-aware) + a **Marketplace tab** on the
+  `/skills` page (debounced search, one-click install via the existing
+  `/api/skills/install`). Backend `GET /api/skills/marketplace/search`.
+- **Template-click bug fix**: `mcp.html` Start/Stop/Test/OAuth buttons and
+  `skills.html` toggle/uninstall were DEAD — `{{ name|tojson }}` emits literal
+  `"` that terminated the double-quoted `@click` attribute, so Alpine could
+  never parse the expression. Single-quoted attributes fix all 6 bindings.
+
+## Unreleased — MED/LOW audit-review follow-ups (2026--08-14)
+
+A line-by-line review of the DeepSeek session's MED/LOW remediation found 4 real
+bugs + 9 minors; all fixed:
+
+- **429 failover killed** (`llm_provider`): rate-limit-exhausted was
+  `transient=False`, violating §3 and silently disabling model failover. Now
+  `transient=True` + `kind="rate_limit_exhausted"`; the supervisor skips its own
+  re-retry on that kind (failover still fires).
+- **aclose task leak** (`llm_provider`): `_pending_closes` was a `list` but
+  called `.discard()` → swallowed `AttributeError`, slow leak. Now a `set`.
+- **Sub-agent NameError** (`graph_builder`): the auto-deny path referenced
+  `record_commitment_terminal` out of scope → crashed the turn. Local import.
+- **Memory search broken for punctuation** (`recall`): LIKE fallback built `?`
+  placeholders from full terms but skipped params for punctuation tokens → count
+  desync → swallowed `OperationalError` → search silently returned `[]` for
+  queries like `deploy == error`.
+- 9 minors: app.py log indent, jobs_pg workspace stripping, retry_job
+  soft-deleted ACL, Slack fail-closed log, TUI Arabic header CSS,
+  pipeline_logger DDL-in-lock, Telegram httpx limits, consolidator dead field,
+  importer swap-tmp pre-clean.
+
+## Unreleased — Test hygiene + HITL YAML parity restored (2026-08-14)
+
+- **HITL YAML parity**: `kazma.yaml safety.hitl.require_approval_for` had fallen
+  14 tools behind `CANONICAL_DANGER_TOOLS` (python_exec, git_commit,
+  schedule_task, install_agent_skill, …). Restored to mirror the SoT (§7) —
+  those tools now correctly require approval.
+- **tenant middleware**: unresolved tenant now resolves to `'default'` (never
+  `None`, consistent with the codebase); the `X-Tenant-ID` cookie is now only
+  persisted for *explicitly* chosen tenants (was stamping `'default'` on every
+  anonymous request).
+- Stale-test fixups: `_is_thin_extraction` (JS-shell is correctly thin),
+  Slack `app_mention` (@bot mention intentionally stripped), defaults
+  (`max_iterations` 10→15, `max_tokens` 4096→8192, appearance dark→light),
+  supervisor execute-error surfacing + file_read line-numbering, swarm_manager
+  auto-model-selection, swarm_panel `theme()` Jinja global, the admin-gate
+  cluster (output_routing + hitl_checkpoints), and the swarm engine
+  missing-worker auto-create test (commit 761b62cf made "not found" an
+  intentional auto-create — the test was stale).
+- `test_document_certification_phase10`: hostile-corpus baseline cert now
+  `skipif(win32)` — the parser leaks a raw `ValueError` on `malformed-xref.pdf`
+  because Windows Job Objects can't enforce the CPU limits that contain it on
+  Linux (§19E). Stays enforced on Linux/CI.
+
 ## Unreleased — Fix Windows SelectorEventLoop breaking browser + exec tools (2026-08-14)
 
 Kazma's server runs a SelectorEventLoop (forced for psycopg async). On Windows
