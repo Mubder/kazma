@@ -544,6 +544,12 @@ async def start_deep_research(
     return sess
 
 
+# Cap for chat-tool result snapshots. The old 500-char cap discarded the
+# full output at WRITE time, so the research detail view could never show
+# more than a teaser. 200K chars ≈ 50K tokens — generous but bounded.
+_CHAT_RESULT_MAX = 200_000
+
+
 def record_chat_research(
     topic: str,
     *,
@@ -572,8 +578,13 @@ def record_chat_research(
             entry = f"Tool {tool_name} executed for '{topic[:60]}'"
             if entry not in sess.log:
                 sess.log.append(entry)
-            if result_text and not sess.summary:
-                sess.summary = result_text[:500]
+            if result_text:
+                # Keep the richest snapshot — the same topic can be re-queried
+                # with fuller results and the detail view/export should show
+                # the most complete output.
+                new_summary = result_text[:_CHAT_RESULT_MAX]
+                if not sess.summary or len(new_summary) > len(sess.summary):
+                    sess.summary = new_summary
             update_session(sess.id, status=sess.status, stage=sess.stage, message=sess.message, sources=sess.sources, summary=sess.summary)
             return sess
         else:
@@ -585,7 +596,7 @@ def record_chat_research(
                 stage="complete",
                 message=f"Executed in chat ({tool_name})",
                 log=[f"Tool {tool_name} executed for '{topic[:60]}'"],
-                summary=result_text[:500] if result_text else "",
+                summary=result_text[:_CHAT_RESULT_MAX] if result_text else "",
                 sources=1,
                 created_at=now,
                 updated_at=now,

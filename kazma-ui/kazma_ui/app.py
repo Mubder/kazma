@@ -537,6 +537,8 @@ class KazmaAppBuilder:
             # Memory page — graph ops / cut-hub UI lives here; omit = stale canvas JS
             _STATIC_DIR / "js" / "memory.js",
             _STATIC_DIR / "js" / "memory_console.js",
+            # Swarm Workflow Editor DAG renderer (vendored, no CDN)
+            _STATIC_DIR / "js" / "mermaid.min.js",
         )
 
         def _css_version() -> int:

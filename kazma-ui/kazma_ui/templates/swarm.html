@@ -827,7 +827,10 @@
 <script>
   window.KAZMA_WORKERS = JSON.parse('{{ workers | tojson | replace("<", "\\u003c") | safe if workers else "[]" }}');
 </script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" integrity="sha384-qX9VvWkP79m/O121ZE6sOYp0nf/pldQgtvWDbkpzi+3mUo4Wn4Ix4cFzNPay3VaB" crossorigin="anonymous"></script>
+<!-- Mermaid 10.9.8 vendored locally (matches htmx/alpine) — the CDN load
+     left window.mermaid undefined whenever the browser couldn't reach
+     jsdelivr, breaking the Workflow Editor DAG ("Mermaid library not loaded"). -->
+<script src="/static/js/mermaid.min.js?v={{ js_version() }}"></script>
 <script src="/static/js/streaming.js"></script>
 <script src="/static/js/swarm.js"></script>
 {% endblock %}

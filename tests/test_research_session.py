@@ -148,7 +148,44 @@ def test_session_router_import():
     assert "/api/research/sessions/{session_id}" in paths
     assert "/api/research/sessions/{session_id}/stream" in paths
     assert "/api/research/sessions/{session_id}/cancel" in paths
+    # Sessions export through their OWN endpoint — the swarm-task export
+    # path 404'd for them (different store).
+    assert "/api/research/sessions/{session_id}/export" in paths
     assert "/api/research/eval" in paths
+
+
+def test_record_chat_research_persists_full_output(session_db):
+    """The old [:500] write-time cap discarded the full chat-tool output —
+    the detail view could never show more than a teaser."""
+    rs = session_db
+    long_result = "R" * 5000 + " (end)"
+    s = rs.record_chat_research("full output test", result_text=long_result)
+    assert len(s.summary) == len(long_result)
+    fetched = rs.get_session(s.id)
+    assert fetched is not None
+    assert fetched.summary == long_result
+
+
+def test_record_chat_research_refreshes_on_longer_result(session_db):
+    """Re-querying the same topic with a LONGER result refreshes the stored
+    snapshot (richest wins); a shorter one does not clobber it."""
+    rs = session_db
+    s1 = rs.record_chat_research("refresh topic", result_text="short result")
+    assert s1.summary == "short result"
+
+    longer = "L" * 800 + " fuller answer"
+    s2 = rs.record_chat_research("refresh topic", result_text=longer)
+    assert s2.summary == longer
+
+    s3 = rs.record_chat_research("refresh topic", result_text="tiny")
+    assert s3.summary == longer  # shorter result must NOT overwrite
+
+
+def test_record_chat_research_caps_at_bound(session_db):
+    """The snapshot is generous but bounded (200K chars)."""
+    rs = session_db
+    s = rs.record_chat_research("cap topic", result_text="x" * (rs._CHAT_RESULT_MAX + 5000))
+    assert len(s.summary) == rs._CHAT_RESULT_MAX
 
 
 def test_cancel_session(session_db):

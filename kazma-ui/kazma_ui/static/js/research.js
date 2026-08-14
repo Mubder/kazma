@@ -306,24 +306,19 @@
                   }
                 });
             } else {
-              el.textContent = body;
+              // Chat-research rows have no report.md — render the stored
+              // summary (now persisted in full) as markdown like papers.
+              if (window.KazmaStream && KazmaStream.markdown) {
+                el.innerHTML = KazmaStream.markdown(body);
+              } else {
+                el.textContent = body;
+              }
+              if (window.KazmaBidi) KazmaBidi.apply(el, body);
             }
             var archBtn = $('detail-archive-btn');
             var restBtn = $('detail-restore-btn');
             if (archBtn) archBtn.style.display = 'none';
             if (restBtn) restBtn.style.display = 'none';
-            // Treat as paper for export if report exists
-            if (s.report_path) {
-              currentId = 'paper:session-' + sid;
-              // stash report on allTasks for export
-              allTasks.push({
-                id: currentId,
-                prompt: '[Deep] ' + (s.topic || ''),
-                status: 'paper',
-                report_path: s.report_path,
-                sources: s.sources,
-              });
-            }
             // Re-attach live stream if still running
             if (s.status === 'running' || s.status === 'pending') {
               liveSessionId = s.id;
@@ -412,16 +407,20 @@
       if (!currentId) { toast('Select a research result first', 'error'); return; }
       toast('Exporting to ' + fmt + '…', 'info');
       // The panel stores session selections as 'session:<id>' and pipeline
-      // papers as 'paper:<id>'. The export endpoint expects the RAW research
-      // task id (no 'session:' prefix) — strip it, mirroring selectSession().
-      var rawId = String(currentId).indexOf('session:') === 0
+      // papers as 'paper:<id>'. Sessions export via their own endpoint
+      // (research_sessions.db, not the swarm TaskStore); papers use the
+      // report.md export; bare ids are swarm research tasks.
+      var isSession = String(currentId).indexOf('session:') === 0;
+      var isPaper = String(currentId).indexOf('paper:') === 0;
+      var rawId = isSession
         ? String(currentId).slice('session:'.length)
         : currentId;
-      // Pipeline papers: use dedicated export that reads report.md
-      var exportUrl = String(currentId).indexOf('paper:') === 0
+      var exportUrl = isPaper
         ? '/api/research/papers/export'
-        : '/api/research/' + encodeURIComponent(rawId) + '/export';
-      var body = String(currentId).indexOf('paper:') === 0
+        : isSession
+          ? '/api/research/sessions/' + encodeURIComponent(rawId) + '/export'
+          : '/api/research/' + encodeURIComponent(rawId) + '/export';
+      var body = isPaper
         ? (function () {
             var paper = null;
             for (var i = 0; i < allTasks.length; i++) {
