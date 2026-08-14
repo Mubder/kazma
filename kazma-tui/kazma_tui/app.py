@@ -653,7 +653,7 @@ class KazmaTUI(App[None]):
         except Exception as exc:
             logger.debug("Failed to locate or update main-tabs: %s", exc)
 
-        # 3. Update Header title (stock Textual Header)
+        # 3. Update Header title (KazmaHeader — RTL class for Arabic)
         try:
             header = self.query_one(KazmaHeader)
             if lang == "ar":

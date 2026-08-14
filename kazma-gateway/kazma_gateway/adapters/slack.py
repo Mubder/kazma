@@ -836,9 +836,9 @@ class SlackAdapter(BaseAdapter):
             return
         if not self._allowed_users:
             logger.warning(
-                "[Slack] No allowed_users configured — accepting messages "
-                "from ALL users. Set connectors.slack.allowed_users in "
-                "Settings to restrict access."
+                "[Slack] No allowed_users configured — REJECTING all incoming "
+                "messages (fail-closed). Set connectors.slack.allowed_users in "
+                "Settings to allow access."
             )
         self._queue = queue
         self._shutdown = shutdown_event

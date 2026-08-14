@@ -238,7 +238,7 @@ class PostgresDocumentJobRepository:
                         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
                         """,
                         (
-                            identifier, tenant, workspace_id, doc_id, ver_id,
+                            identifier, tenant, workspace, doc_id, ver_id,
                             "received", "received", key, int(max_attempts), now, now,
                         ),
                     )

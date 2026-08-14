@@ -134,8 +134,9 @@ class LLMProvider:
         self._resolve_api_key()
         self._http: httpx.AsyncClient | None = None
         # Strong references for fire-and-forget aclose() tasks scheduled by
-        # reconfigure(), so CPython doesn't GC them before aclose runs.
-        self._pending_closes: list = []
+        # reconfigure(), so CPython doesn't GC them before aclose runs. A set
+        # (not a list) so add_done_callback(discard) works.
+        self._pending_closes: set = set()
         logger.info(
             "LLMProvider initialized: base_url=%s model=%s",
             self.config.base_url,
@@ -392,15 +393,16 @@ class LLMProvider:
                         # Still rate-limited, continue retrying
                         continue
                 else:
-                    # All retries exhausted with 429. Raise as NON-transient so
-                    # the supervisor retry loop doesn't immediately re-attempt
-                    # (we already did bounded exponential backoff here), which
-                    # would amplify load against an already-rate-limited
-                    # provider (audit finding). The turn fails with a clear
-                    # rate-limit message; the user can retry later.
+                    # All retries exhausted with 429. Per AGENTS.md §3 a 429 IS
+                    # transient (so model failover still fires), but we tag it
+                    # kind="rate_limit_exhausted" so the supervisor's own
+                    # retry loop skips re-invoking THIS provider (we already
+                    # did bounded exponential backoff here) — re-retrying would
+                    # amplify load against an already-rate-limited provider.
                     raise LLMError(
                         f"LLM rate-limited after 3 retries: {detail[:300]}",
-                        transient=False,
+                        transient=True,
+                        kind="rate_limit_exhausted",
                     ) from e
 
             # ── Context-window overflow ─────────────────────────────────
@@ -767,7 +769,7 @@ class LLMProvider:
                         # Keep a strong reference so CPython doesn't GC the
                         # task before aclose runs ("Task was destroyed but it
                         # is pending!"); drop once done (audit finding).
-                        self._pending_closes.append(task)
+                        self._pending_closes.add(task)
                         task.add_done_callback(self._pending_closes.discard)
                     except RuntimeError:
                         # No running loop (sync context / tests) — best-effort.

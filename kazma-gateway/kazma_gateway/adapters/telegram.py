@@ -434,6 +434,11 @@ class TelegramAdapter(BaseAdapter):
         self._http = httpx.AsyncClient(
             base_url=self._api_base,
             timeout=httpx.Timeout(30.0, connect=5.0),
+            # Preserve the connection cap from the original constructor (10/5)
+            # rather than httpx's default (100/20) — Telegram polling keeps a
+            # single long-lived connection; a tighter pool catches leaks
+            # (audit finding: _ensure_http had silently widened the pool).
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
         return self._http
 

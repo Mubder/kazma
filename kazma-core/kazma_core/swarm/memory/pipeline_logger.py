@@ -43,24 +43,27 @@ def _get_conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
         from kazma_core.config_store import apply_sqlite_pragmas
 
         apply_sqlite_pragmas(_conn)
-    _conn.execute("""
-        CREATE TABLE IF NOT EXISTS pipeline_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp REAL NOT NULL,
-            correlation_id TEXT NOT NULL,
-            worker_name TEXT DEFAULT '',
-            stage TEXT DEFAULT '',
-            level TEXT DEFAULT 'info',
-            event_type TEXT NOT NULL,
-            message TEXT DEFAULT '',
-            metadata TEXT DEFAULT '{}',
-            raw_output TEXT DEFAULT ''
-        )
-    """)
-    _conn.execute("CREATE INDEX IF NOT EXISTS idx_correlation ON pipeline_logs(correlation_id)")
-    _conn.execute("CREATE INDEX IF NOT EXISTS idx_worker ON pipeline_logs(worker_name)")
-    _conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON pipeline_logs(timestamp)")
-    _conn.commit()
+        # Schema DDL runs INSIDE the lock so a racing second thread can't
+        # observe a non-None _conn before the table exists and INSERT into a
+        # missing table (audit finding).
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS pipeline_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                correlation_id TEXT NOT NULL,
+                worker_name TEXT DEFAULT '',
+                stage TEXT DEFAULT '',
+                level TEXT DEFAULT 'info',
+                event_type TEXT NOT NULL,
+                message TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}',
+                raw_output TEXT DEFAULT ''
+            )
+        """)
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_correlation ON pipeline_logs(correlation_id)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_worker ON pipeline_logs(worker_name)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON pipeline_logs(timestamp)")
+        _conn.commit()
     return _conn
 
 

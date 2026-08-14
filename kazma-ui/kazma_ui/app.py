@@ -1740,7 +1740,7 @@ class KazmaAppBuilder:
                 await stop_memory_worker()
             except Exception:  # noqa: BLE001
                 pass
-                logger.info("[Documents] ingestion coordinator stopped")
+            logger.info("[Documents] ingestion coordinator stopped")
         except Exception as e:
             logger.warning("[Documents] ingestion coordinator stop failed: %s", e)
 

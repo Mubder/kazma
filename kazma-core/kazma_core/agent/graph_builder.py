@@ -1490,7 +1490,11 @@ async def supervisor_node(
                     is_transient = bool(getattr(exc, "transient", False))
                     last_exc = exc
                     _llm_attempts = attempt
-                    if is_transient and attempt < cfg["max_attempts"]:
+                    # A rate-limit-exhausted 429 is transient (so failover
+                    # fires) but the provider already did bounded backoff, so
+                    # don't re-retry the SAME provider here.
+                    skip_retry = getattr(exc, "kind", "") == "rate_limit_exhausted"
+                    if is_transient and not skip_retry and attempt < cfg["max_attempts"]:
                         wait_time = min(cfg["min_wait"] * (2 ** (attempt - 1)), cfg["max_wait"])
                         logger.warning(
                             "[Supervisor] LLM call attempt %d/%d failed (transient): %s "
@@ -2467,6 +2471,10 @@ async def tool_worker_node(
                     duration_ms=0.0,
                     outcome="hard",
                 ))
+            try:
+                from kazma_core.metrics import record_commitment_terminal
+            except Exception:
+                record_commitment_terminal = None  # type: ignore[assignment]
             if record_commitment_terminal:
                 try:
                     record_commitment_terminal("auto_denied")

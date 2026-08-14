@@ -27,6 +27,13 @@ class KazmaHeader(Static):
         padding: 0 2;
         text-style: none;
     }
+    /* Applied by app.py when the UI language is Arabic — right-align the
+       brand/model strip so it reads RTL. Without this rule the class added
+       by add_class("header-title") had no visual effect. */
+    KazmaHeader.header-title {
+        content-align: right middle;
+        text-align: right;
+    }
     """
 
     provider: reactive[str] = reactive("?")

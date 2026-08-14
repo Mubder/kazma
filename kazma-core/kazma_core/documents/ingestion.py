@@ -938,11 +938,14 @@ class DocumentIngestionService:
             tenant_id=tenant, document_id=job.document_id, include_deleted=True
         )
         # Enforce the read gate when a principal is provided AND the document
-        # still exists: previously retry was actor-agnostic, so principal B
-        # could force re-processing of principal A's document (audit finding).
-        # (Deleted docs skip the check — has_access filters deleted_at IS NULL,
-        # and the old owner="system" fallback below stays for that edge case.)
-        if actor_id and owner_record is not None:
+        # is live: previously retry was actor-agnostic, so principal B could
+        # force re-processing of principal A's document (audit finding).
+        # Soft-deleted docs (tombstones) skip the check — has_access filters
+        # deleted_at IS NULL and would otherwise deny them — and fall through
+        # to the owner="system" legacy fallback below (same as hard-deleted).
+        if actor_id and owner_record is not None and not getattr(
+            owner_record, "deleted_at", None
+        ):
             _actor = _clean(actor_id, "actor_id")
             if not self.repository.has_access(
                 tenant_id=tenant,

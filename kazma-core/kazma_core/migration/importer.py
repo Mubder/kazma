@@ -289,6 +289,10 @@ def import_bundle(
         # on the same volume, so the live file is never in a partial state
         # (audit finding).
         swap_tmp = dest.with_name(dest.name + ".swap-tmp")
+        # Pre-clean a stale swap-tmp from a crashed prior run before backing
+        # up into it — otherwise sqlite3.backup into the corrupt leftover
+        # fails and the whole import aborts on re-run (audit finding).
+        swap_tmp.unlink(missing_ok=True)
         if not _backup_one(src_staged, swap_tmp):
             report.error(f"failed to install {arc_name} (online backup failed)")
             install_failures.append(arc_name)

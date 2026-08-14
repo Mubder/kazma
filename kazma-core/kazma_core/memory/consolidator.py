@@ -242,7 +242,10 @@ def schedule_post_turn_memory(
 
                 enqueue_task(
                     "micro_consolidation",
-                    {"episode_id": eid, "tenant_id": tenant_id},
+                    # episode_id only: the handler reads tenant_id from the
+                    # episode ROW (authoritative). A payload tenant_id was
+                    # dead data — the handler never consulted it (audit finding).
+                    {"episode_id": eid},
                 )
         except Exception as exc:
             logger.warning(

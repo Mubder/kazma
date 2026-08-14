@@ -757,22 +757,27 @@ def _episode_fts(
             logger.debug("[recall] episodes_fts MATCH failed — LIKE fallback", exc_info=True)
 
     # ── LIKE fallback (FTS missing / empty / error) ──
+    # Strip non-alphanumerics per token and drop all-punctuation tokens (an
+    # all-punctuation token would otherwise become a LIKE wildcard `_`/%).
+    # Derive clauses AND params from the SAME filtered list so the `?`
+    # placeholder count stays in lockstep with the binding count (audit
+    # finding: the old code built clauses from `terms` but skipped params for
+    # punctuation tokens → placeholder/count desync → OperationalError → the
+    # LIKE fallback silently returned [] for any query like "deploy == error").
     terms = [t for t in query.lower().split() if len(t) >= 2]
-    if not terms:
+    cleaned_terms: list[str] = []
+    for t in terms:
+        cleaned = "".join(c for c in t if c.isalnum())
+        if cleaned:
+            cleaned_terms.append(cleaned)
+    if not cleaned_terms:
         return []
     clauses = " OR ".join(
         "(LOWER(COALESCE(e.user_text,'')) LIKE ? OR LOWER(COALESCE(e.assistant_text,'')) LIKE ?)"
-        for _ in terms
+        for _ in cleaned_terms
     )
     params: list[Any] = []
-    for t in terms:
-        # Strip non-alphanumerics for the LIKE pattern. `or t` previously
-        # fell back to the raw token when alnum-strip yielded empty — but `_`
-        # is a LIKE wildcard, so an all-punctuation token became a wildcard
-        # pattern. Skip such terms instead (audit finding).
-        cleaned = "".join(c for c in t if c.isalnum())
-        if not cleaned:
-            continue
+    for cleaned in cleaned_terms:
         params.extend([f"%{cleaned}%", f"%{cleaned}%"])
     params.extend([limit])
     try:
