@@ -16,7 +16,6 @@ LLM API traffic must **never** use this package (use ``http_pool``).
 
 from __future__ import annotations
 
-from kazma_core.web_acquire.crawl import CrawlResult, crawl
 from kazma_core.web_acquire.fetch import FetchResult, fetch_text
 from kazma_core.web_acquire.profiles import (
     CRAWL_PROFILES,
@@ -29,11 +28,9 @@ from kazma_core.web_acquire.search import SearchResult, extract_urls_from_search
 __all__ = [
     "CrawlProfile",
     "CRAWL_PROFILES",
-    "CrawlResult",
     "FetchResult",
     "RankedUrl",
     "SearchResult",
-    "crawl",
     "extract_urls_from_search",
     "fetch_text",
     "get_crawl_profile",

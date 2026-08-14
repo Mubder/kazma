@@ -111,9 +111,19 @@ class SQLiteMemoryBackend:
         # Canonical table + FTS + safe triggers (see kazma_core.memory.schema).
         # Always reinstall triggers — legacy FTS5 'delete' command form raised
         # SQL logic error on every UPDATE (blocked timestamp/embedding writes).
-        from kazma_core.memory.schema import ensure_memories_schema_async
-
-        await ensure_memories_schema_async(conn)
+        # NOTE: kazma_core.memory.schema was removed in the V1→V2 memory
+        # cutover — this legacy backend now degrades LOUDLY instead of
+        # crashing the connect path (fresh DBs will lack the V1 tables).
+        try:
+            from kazma_core.memory.schema import ensure_memories_schema_async
+        except ImportError:
+            logger.warning(
+                "[SQLiteMemoryBackend] kazma_core.memory.schema was removed in "
+                "the V2 memory cutover — skipping V1 schema ensure (legacy "
+                "backend; fresh DBs will not have the V1 memories/FTS tables)."
+            )
+        else:
+            await ensure_memories_schema_async(conn)
         return conn
 
     async def index(self, memory: Any, tenant_id: str | None = None) -> str:

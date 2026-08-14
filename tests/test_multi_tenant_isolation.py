@@ -79,6 +79,14 @@ async def test_session_store_multi_tenant_isolation() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(
+    reason=(
+        "V1 SQLiteMemoryBackend depends on kazma_core.memory.schema, removed "
+        "in the V1→V2 memory cutover — the backend degrades loudly (warning) "
+        "and cannot provision its V1 tables. V2 tenant isolation is covered "
+        "by tests/test_memory_v2_tenant_routes.py."
+    )
+)
 async def test_memory_store_multi_tenant_isolation() -> None:
     """Test SQLiteMemoryBackend segregating memory documents per tenant_id."""
     # Use in-memory database for testing
