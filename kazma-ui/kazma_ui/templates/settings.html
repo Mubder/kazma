@@ -2407,8 +2407,11 @@
                 <div style="padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
                     <div>
                         <strong x-text="new Date(b.timestamp * 1000).toLocaleString()"></strong>
+                        <span class="badge" style="margin-left:8px;font-size:0.7rem;padding:2px 8px;border-radius:10px"
+                              :style="b.trigger === 'manual' ? 'background:rgba(46,213,115,0.15);color:#2ed573' : 'background:rgba(79,140,255,0.15);color:#4f8cff'"
+                              x-text="b.trigger === 'manual' ? 'Manual' : 'Auto'"></span>
                         <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
-                              x-text="b.databases_ok + ' DBs · ' + b.size_mb + ' MB' + (b.postgres ? ' · PG ✓' : '')"></span>
+                              x-text="b.databases_ok + ' DBs · ' + b.size_mb + ' MB' + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · incomplete' : '')"></span>
                     </div>
                     <div style="display:flex;gap:6px">
                         <button class="btn btn-secondary btn-sm" @click="archiveBackup(b.dir)"

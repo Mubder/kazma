@@ -603,7 +603,7 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
 
         from kazma_core.backup.universal import perform_universal_backup
 
-        result = await _aio.to_thread(perform_universal_backup)
+        result = await _aio.to_thread(perform_universal_backup, trigger="auto")
         logger.info(
             "[memory_worker] universal_backup: %d DBs, %.1f MB, %s",
             result.get("databases_ok", 0),

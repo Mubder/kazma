@@ -154,7 +154,9 @@ def _prune(retention: int) -> int:
     return deleted
 
 
-def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str, Any]:
+def perform_universal_backup(
+    *, retention: int = _DEFAULT_RETENTION, trigger: str = "auto"
+) -> dict[str, Any]:
     """Back up EVERYTHING: all kazma-data SQLite DBs + assets + Postgres dump.
 
     Creates ``kazma-data/backups/universal/<timestamp>/`` containing:
@@ -224,6 +226,7 @@ def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str
     manifest: dict[str, Any] = {
         "timestamp": ts,
         "version": 1,
+        "trigger": trigger,
         "elapsed_seconds": elapsed,
         "databases": {"ok": db_ok, "failed": db_fail, "items": db_results},
         "assets": asset_results,
@@ -240,6 +243,7 @@ def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str
         "ok": True,
         "backup_dir": str(dest),
         "timestamp": ts,
+        "trigger": trigger,
         "databases_ok": db_ok,
         "databases_failed": db_fail,
         "assets_copied": len(asset_results),
@@ -280,6 +284,8 @@ def list_universal_backups() -> list[dict[str, Any]]:
             "postgres": False,
             "elapsed": 0,
             "incomplete": not manifest_path.is_file(),
+            "trigger": "auto",
+            "archived": (d.parent / f"{d.name}.zip").is_file(),
         }
         if manifest_path.is_file():
             try:
@@ -289,6 +295,7 @@ def list_universal_backups() -> list[dict[str, Any]]:
                 entry["assets"] = len(m.get("assets", []))
                 entry["postgres"] = (m.get("postgres") or {}).get("ok", False)
                 entry["elapsed"] = m.get("elapsed_seconds", 0)
+                entry["trigger"] = m.get("trigger", "auto")
             except Exception:
                 pass
         backups.append(entry)

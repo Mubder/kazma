@@ -3471,7 +3471,7 @@ function settingsApp() {
                 const resp = await fetch('/api/backup/list');
                 const data = await resp.json();
                 this.backupList = (data.backups || []).map(function (b) {
-                    b.archived = false; b.archiving = false; return b;
+                    return b; // server provides archived + trigger flags
                 });
             } catch (e) {
                 this.backupList = [];

@@ -3278,7 +3278,7 @@ def register_direct_routes(self: Any) -> None:
         async def _run():
             try:
                 from kazma_core.backup.universal import perform_universal_backup
-                await asyncio.to_thread(perform_universal_backup)
+                await asyncio.to_thread(perform_universal_backup, trigger="manual")
             except Exception as exc:
                 from kazma_core.backup.universal import _set_progress
                 _set_progress("error", detail=str(exc)[:300], error=str(exc)[:300])
