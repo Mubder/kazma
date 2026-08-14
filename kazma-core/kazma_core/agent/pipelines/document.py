@@ -61,7 +61,7 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
                 p = resolve_active_root() / p
             if p.is_file():
                 if p.suffix.lower() == ".pdf":
-                    source_content = await _read_pdf(p)
+                    source_content = _read_pdf(p)
                 else:
                     source_content = p.read_text(encoding="utf-8", errors="replace")
                 steps_log.append(f"✓ Read source: {p.name} ({len(source_content)} chars)")

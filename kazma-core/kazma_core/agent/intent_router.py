@@ -252,15 +252,29 @@ def _tier1_classify(text: str, attachments: list[dict] | None) -> TaskIntent:
 # ─── Helper extractors ───────────────────────────────────────────────────
 
 
-_PATH_RE = re.compile(r"(?:from|of|source|file|attach)\s+[\"']?([\w\-./\\]+\.\w{2,4})[\"']?", re.IGNORECASE)
-_SEND_TO_RE = re.compile(r"\b(?:send|deliver|share|share it)\s+(?:it\s+)?(?:to|on|via|through)\s+(\w+)", re.IGNORECASE)
+_PATH_RE = re.compile(
+    r"(?:from|of|source|file|attach|read|open|using|based\s+on)\s+"
+    r"[\"']?([\w\-./\\]+\.\w{2,5})[\"']?"
+    r"|(?:the\s+file\s+|this\s+file\s+)[\"']?([\w\-./\\]+\.\w{2,5})[\"']?"
+    r"|[\"']([\w\-./\\]+\.(?:pdf|docx?|xlsx?|pptx?|csv|txt|md))[\"']"
+    r"|(?<!\w)([\w\-]+\.(?:pdf|docx?|xlsx?|pptx?))(?!\w)",
+    re.IGNORECASE,
+)
+_SEND_TO_RE = re.compile(
+    r"\b(?:send|deliver|share|share\s+it)\s+(?:it\s+)?(?:to|on|via|through)\s+"
+    r"(?:my\s+|the\s+|our\s+|your\s+)?(telegram|discord|slack|whatsapp|email)",
+    re.IGNORECASE,
+)
 
 
 def _extract_source_path(text: str, attachments: list[dict] | None) -> str:
     """Try to extract a source file path from the text or attachments."""
     m = _PATH_RE.search(text or "")
     if m:
-        return m.group(1)
+        # Return the first non-None group (the regex has 4 capture groups)
+        for g in m.groups():
+            if g:
+                return g
     if attachments:
         for a in attachments:
             p = a.get("path") or a.get("filename") or ""
@@ -274,12 +288,22 @@ def _extract_delivery_target(text: str) -> str:
     m = _SEND_TO_RE.search(text or "")
     if m:
         platform = m.group(1).lower()
-        if platform in ("telegram", "tg", "تيليجرام"):
+        if platform in ("telegram", "tg"):
             return "telegram"
-        if platform in ("discord", "ديسكورد"):
+        if platform == "discord":
             return "discord"
-        if platform in ("slack", "سلاك"):
+        if platform == "slack":
             return "slack"
+        if platform == "email":
+            return "email"
+    # Fallback: bare platform mention near "send"
+    t = (text or "").lower()
+    if "send" in t and ("telegram" in t or "تيليجرام" in t or "تليجرام" in t):
+        return "telegram"
+    if "send" in t and "discord" in t:
+        return "discord"
+    if "send" in t and "slack" in t:
+        return "slack"
     return ""
 
 
