@@ -3267,13 +3267,31 @@ def register_direct_routes(self: Any) -> None:
     # ── Universal Backup ────────────────────────────────────────────────
     @self.app.post("/api/backup/now")
     async def _backup_now() -> Any:
-        """Trigger a universal backup (all DBs + assets + Postgres) now."""
+        """Trigger a universal backup in the background. Returns immediately."""
         import asyncio
 
-        from kazma_core.backup.universal import perform_universal_backup
+        from kazma_core.backup.universal import _backup_progress, get_backup_progress
 
-        result = await asyncio.to_thread(perform_universal_backup)
-        return result
+        if _backup_progress.get("phase") not in ("idle", "done", "error"):
+            return {"ok": False, "error": "A backup is already running", "progress": get_backup_progress()}
+
+        async def _run():
+            try:
+                from kazma_core.backup.universal import perform_universal_backup
+                await asyncio.to_thread(perform_universal_backup)
+            except Exception as exc:
+                from kazma_core.backup.universal import _set_progress
+                _set_progress("error", detail=str(exc)[:300], error=str(exc)[:300])
+
+        asyncio.create_task(_run())
+        return {"ok": True, "message": "Backup started", "progress": get_backup_progress()}
+
+    @self.app.get("/api/backup/status")
+    async def _backup_status() -> Any:
+        """Poll the current backup progress (phase + detail)."""
+        from kazma_core.backup.universal import get_backup_progress
+
+        return get_backup_progress()
 
     @self.app.get("/api/backup/list")
     async def _backup_list() -> Any:

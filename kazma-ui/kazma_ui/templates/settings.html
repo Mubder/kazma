@@ -2377,7 +2377,21 @@
                     <span x-show="!backupRunning">{{ t('settings.backup_now') }}</span>
                     <span x-show="backupRunning">{{ t('settings.backup_running') }}</span>
                 </button>
-                <span x-show="backupResult" x-cloak style="font-size:0.85rem"
+            </div>
+            <!-- Live progress bar -->
+            <div x-show="backupRunning" x-cloak style="margin-bottom:1.25rem;padding:14px;background:rgba(79,140,255,0.06);border:1px solid var(--border);border-radius:var(--radius-card)">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                    <div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--primary,#4f8cff);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+                    <strong x-text="backupProgressText || 'Working…'"></strong>
+                </div>
+                <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+                    <div :style="'width:' + (backupProgressPhase === 'done' ? '100%' : backupProgressPhase === 'postgres' ? '85%' : backupProgressPhase === 'assets' ? '60%' : backupProgressPhase === 'databases' ? '35%' : '10%') + ';height:100%;background:var(--primary,#4f8cff);transition:width 0.5s ease'"></div>
+                </div>
+                <p style="font-size:0.75rem;color:var(--text-muted);margin:6px 0 0 0" x-text="'Phase: ' + backupProgressPhase"></p>
+            </div>
+            <!-- Result message -->
+            <div x-show="backupResult && !backupRunning" x-cloak style="margin-bottom:1.25rem">
+                <span style="font-size:0.85rem"
                       :class="backupResult?.ok ? 'text-success' : 'text-error'"
                       x-text="backupResult?.ok
                         ? (t('settings.backup_done') + ' ' + backupResult.databases_ok + ' DBs, ' + backupResult.total_size_mb + ' MB')

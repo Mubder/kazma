@@ -21,9 +21,24 @@ logger = logging.getLogger(__name__)
 __all__ = ["perform_universal_backup", "list_universal_backups", "latest_universal_backup"]
 
 # Directories/patterns to EXCLUDE from the backup (never copy these).
-_EXCLUDE_DIRS = frozenset({"backups", "__pycache__", ".git", "node_modules", ".tmp"})
+_EXCLUDE_DIRS = frozenset({"backups", "__pycache__", ".git", "node_modules", ".tmp", "cache", "lo-profile"})
 _EXCLUDE_SUFFIXES = (".pyc", "-wal", "-shm", "-journal", ".tmp")
 _DEFAULT_RETENTION = 7
+
+# Live progress for the UI (phase + detail). Updated by perform_universal_backup,
+# read by GET /api/backup/status.
+_backup_progress: dict[str, Any] = {"phase": "idle", "detail": "", "error": ""}
+
+
+def get_backup_progress() -> dict[str, Any]:
+    """Return the current backup progress state (for the UI status poll)."""
+    return dict(_backup_progress)
+
+
+def _set_progress(phase: str, **kwargs: Any) -> None:
+    _backup_progress.clear()
+    _backup_progress["phase"] = phase
+    _backup_progress.update(kwargs)
 
 
 def _data_dir() -> Path:
@@ -53,6 +68,36 @@ def _backup_one_db(src: Path, dest: Path) -> bool:
         return False
 
 
+def _robust_copytree(src: Path, dest: Path) -> int:
+    """Copy a directory tree file-by-file, skipping files that vanish mid-copy.
+
+    LibreOffice conversion runs leave ephemeral cache files (.bin under
+    lo-profile/cache/) that can disappear between the directory walk and the
+    copy. shutil.copytree aborts the ENTIRE directory on one missing file;
+    this walker skips individual failures so the real data (content-addressed
+    blobs) always lands. Returns the number of files successfully copied.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for item in sorted(src.iterdir()):
+        if _should_exclude(item.name):
+            continue
+        target = dest / item.name
+        try:
+            if item.is_symlink():
+                continue  # don't follow symlinks
+            if item.is_dir():
+                count += _robust_copytree(item, target)
+            elif item.is_file():
+                shutil.copy2(item, target)
+                count += 1
+        except (FileNotFoundError, OSError) as exc:
+            logger.debug("[universal-backup] skipped ephemeral file %s: %s", item.name, exc)
+        except Exception as exc:
+            logger.debug("[universal-backup] copy error %s: %s", item.name, exc)
+    return count
+
+
 def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
     """Copy all non-DB files and directories (recursive) excluding backups."""
     copied: list[dict[str, Any]] = []
@@ -66,11 +111,7 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
         target = dest / rel
         try:
             if item.is_dir():
-                shutil.copytree(item, target, dirs_exist_ok=True,
-                                ignore=shutil.ignore_patterns(*_EXCLUDE_DIRS,
-                                                              *_EXCLUDE_SUFFIXES))
-                # Count files inside
-                count = sum(1 for _ in target.rglob("*") if _.is_file())
+                count = _robust_copytree(item, target)
                 copied.append({"path": rel, "type": "dir", "files": count})
             else:
                 shutil.copy2(item, target)
@@ -133,13 +174,16 @@ def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str
     (dest / "assets").mkdir(parents=True, exist_ok=True)
 
     # 1. All SQLite databases (WAL-safe).
+    _set_progress("databases", detail="Copying databases…", total=0, done=0)
     db_results: list[dict[str, Any]] = []
     db_files = sorted(data.rglob("*.db"))
     # Exclude any .db inside backups/ or excluded dirs.
     db_files = [f for f in db_files if not any(p in _EXCLUDE_DIRS for p in f.parts)]
     db_ok = db_fail = 0
-    for db in db_files:
+    for i, db in enumerate(db_files):
         rel = db.relative_to(data)
+        _set_progress("databases", detail=f"DB {i+1}/{len(db_files)}: {rel.name}",
+                       total=len(db_files), done=i)
         db_dest = dest / "dbs" / rel
         db_dest.parent.mkdir(parents=True, exist_ok=True)
         if _backup_one_db(db, db_dest):
@@ -148,12 +192,18 @@ def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str
         else:
             db_fail += 1
             db_results.append({"path": str(rel), "error": "backup failed"})
+    _set_progress("databases", detail=f"Databases done ({db_ok} ok, {db_fail} failed)",
+                   total=len(db_files), done=len(db_files))
 
     # 2. All non-DB assets (attachments, document-store, workspace, etc.).
+    _set_progress("assets", detail="Copying assets (attachments, document-store, workspace)…")
     asset_results = _copy_assets(data, dest / "assets")
+    _set_progress("assets", detail=f"Assets done ({len(asset_results)} groups)")
 
     # 3. Postgres dump (if configured).
+    _set_progress("postgres", detail="Dumping Postgres…")
     pg_result = _backup_postgres(dest)
+    _set_progress("postgres", detail="Postgres done" if pg_result and pg_result.get("ok") else "Postgres skipped")
 
     # 4. Manifest.
     elapsed = round(time.time() - started, 1)
@@ -188,6 +238,8 @@ def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str
         "[universal-backup] complete: %d DBs, %d asset groups, %.1f MB, %.1fs, pruned %d",
         db_ok, len(asset_results), size_mb, elapsed, pruned,
     )
+    _set_progress("done", detail=f"Complete: {db_ok} DBs, {size_mb} MB, {elapsed}s",
+                   result=summary)
     return summary
 
 

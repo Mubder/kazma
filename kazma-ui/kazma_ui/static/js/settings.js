@@ -247,7 +247,10 @@ function settingsApp() {
         // ── Backup Tab ──
         backupRunning: false,
         backupResult: null,
+        backupProgressText: '',
+        backupProgressPhase: '',
         backupList: [],
+        _backupPollId: null,
 
         // ── Voice Tab ──
         voiceForm: {
@@ -3420,21 +3423,47 @@ function settingsApp() {
         async runBackup() {
             this.backupRunning = true;
             this.backupResult = null;
+            this.backupProgressText = 'Starting…';
+            this.backupProgressPhase = 'starting';
             try {
                 const resp = await fetch('/api/backup/now', { method: 'POST' });
-                this.backupResult = await resp.json();
-                if (this.backupResult.ok) {
-                    showToast('Backup complete: ' + this.backupResult.databases_ok + ' DBs, ' + this.backupResult.total_size_mb + ' MB', 'success');
-                    await this.loadBackupList();
-                } else {
-                    showToast('Backup failed', 'error');
+                const data = await resp.json();
+                if (!data.ok) {
+                    this.backupResult = { ok: false, error: data.error || 'Failed to start' };
+                    this.backupRunning = false;
+                    return;
                 }
+                // Poll for progress.
+                this._backupPollId = setInterval(() => this._pollBackup(), 2000);
             } catch (e) {
                 this.backupResult = { ok: false, error: e.message };
-                showToast('Backup error: ' + e.message, 'error');
-            } finally {
                 this.backupRunning = false;
             }
+        },
+
+        async _pollBackup() {
+            try {
+                const resp = await fetch('/api/backup/status');
+                const data = await resp.json();
+                this.backupProgressPhase = data.phase || '';
+                this.backupProgressText = data.detail || data.phase || '';
+                if (data.phase === 'done') {
+                    clearInterval(this._backupPollId);
+                    this._backupPollId = null;
+                    this.backupRunning = false;
+                    this.backupResult = data.result || { ok: true };
+                    if (this.backupResult.ok) {
+                        showToast('Backup complete: ' + this.backupResult.databases_ok + ' DBs, ' + this.backupResult.total_size_mb + ' MB', 'success');
+                    }
+                    await this.loadBackupList();
+                } else if (data.phase === 'error') {
+                    clearInterval(this._backupPollId);
+                    this._backupPollId = null;
+                    this.backupRunning = false;
+                    this.backupResult = { ok: false, error: data.error || data.detail };
+                    showToast('Backup failed: ' + (data.error || data.detail), 'error');
+                }
+            } catch (e) { /* keep polling */ }
         },
 
         async loadBackupList() {
