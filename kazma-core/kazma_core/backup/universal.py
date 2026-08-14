@@ -170,6 +170,20 @@ def perform_universal_backup(*, retention: int = _DEFAULT_RETENTION) -> dict[str
     ts = int(time.time())
     data = _data_dir()
     dest = _universal_dir() / str(ts)
+
+    # Guard against concurrent universal backups — the 24h auto loop and a
+    # manual "Back Up Now" click can fire within seconds of each other.
+    if _backup_progress.get("phase") not in ("idle", "done", "error"):
+        logger.info(
+            "[universal-backup] already running (phase=%s) — skipping",
+            _backup_progress.get("phase"),
+        )
+        return {
+            "ok": False,
+            "error": "A universal backup is already running",
+            "phase": _backup_progress.get("phase"),
+        }
+
     (dest / "dbs").mkdir(parents=True, exist_ok=True)
     (dest / "assets").mkdir(parents=True, exist_ok=True)
 
@@ -253,12 +267,19 @@ def list_universal_backups() -> list[dict[str, Any]]:
         if not d.is_dir():
             continue
         manifest_path = d / "manifest.json"
+        # Always set defaults so the UI never shows "undefined".
         entry: dict[str, Any] = {
             "dir": d.name,
             "timestamp": int(d.name) if d.name.isdigit() else 0,
             "size_mb": round(
                 sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / (1024 * 1024), 1
             ),
+            "databases_ok": 0,
+            "databases_failed": 0,
+            "assets": 0,
+            "postgres": False,
+            "elapsed": 0,
+            "incomplete": not manifest_path.is_file(),
         }
         if manifest_path.is_file():
             try:
