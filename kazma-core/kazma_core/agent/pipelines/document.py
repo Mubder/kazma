@@ -94,47 +94,62 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
             "No source content found. Please provide a file or describe what to generate.",
         )
 
-    # ── Step 2: EXTRACT/STRUCTURE via one LLM call ──────────────────
+    # ── Step 2: EXTRACT/STRUCTURE ───────────────────────────────────
+    # LLM structuring is EXPENSIVE for large content: asking the model to
+    # "preserve all" 12K chars means re-emitting 12K chars in its output,
+    # which hits max_tokens (8192) and gets truncated. For structured
+    # content (calendars, tables, reports), _basic_structure() is
+    # sufficient and instant.
+    #
+    # LLM extraction is reserved for UNSTRUCTURED PROSE only, with a
+    # capped input size to keep the output manageable.
     structured_md = source_content
-    if llm is not None and len(source_content) > 200:
+    _needs_llm = len(source_content) > 500 and _looks_like_prose(source_content)
+
+    if llm is not None and _needs_llm:
         try:
             import asyncio as _aio
 
+            # Cap input to 6K chars — the model outputs a STRUCTURED
+            # SUMMARY, not the full content (which would hit max_tokens)
             extract_prompt = (
-                "Convert the following content into well-structured markdown "
-                "with # headings, ## subsections, bullet points, and tables "
-                "where appropriate. Preserve ALL information, do not summarize "
-                "or omit. Keep the original language (Arabic stays Arabic, "
-                "English stays English).\n\n"
-                f"---CONTENT START---\n{source_content[:12000]}\n---CONTENT END---"
+                "Organize this content into markdown with headings (# ## ###), "
+                "bullet points, and tables. You may condense repetitive patterns "
+                "into templates — do NOT try to reproduce every word. Output "
+                "should be under 3000 words. Keep the original language.\n\n"
+                f"{source_content[:6000]}"
             )
             resp = await _aio.wait_for(
-                llm.chat([{"role": "user", "content": extract_prompt}], tools=None),
-                timeout=300.0,
+                llm.chat(
+                    [{"role": "user", "content": extract_prompt}],
+                    tools=None,
+                    max_tokens=6000,
+                ),
+                timeout=180.0,
             )
             content = (getattr(resp, "content", "") or "").strip()
             if content and not content.startswith("Error"):
                 structured_md = content
                 steps_log.append(f"✓ LLM structured content ({len(structured_md)} chars)")
             else:
-                steps_log.append(
-                    f"⚠ LLM returned empty/error ({content[:80]}...) — using raw content"
-                )
+                steps_log.append("⚠ LLM returned empty — applying basic structuring")
+                structured_md = _basic_structure(source_content)
         except TimeoutError:
-            steps_log.append(
-                "⚠ LLM extraction timed out (300s) — applying basic structuring"
-            )
+            steps_log.append("⚠ LLM extraction timed out — applying basic structuring")
             structured_md = _basic_structure(source_content)
-            steps_log.append(f"✓ Basic structuring applied ({len(structured_md)} chars)")
         except Exception as exc:
             _exc_name = type(exc).__name__
-            _exc_msg = str(exc)[:120] or "(no message)"
-            steps_log.append(f"⚠ LLM extraction error ({_exc_name}: {_exc_msg}) — applying basic structuring")
+            _exc_msg = str(exc)[:100] or "(no message)"
+            steps_log.append(f"⚠ LLM extraction error ({_exc_name}: {_exc_msg}) — basic structuring")
             structured_md = _basic_structure(source_content)
-            steps_log.append(f"✓ Basic structuring applied ({len(structured_md)} chars)")
     else:
+        # Default path: deterministic structuring (instant, no LLM cost,
+        # handles dates/titles/lists/Arabic — perfect for calendars)
         structured_md = _basic_structure(source_content)
-        steps_log.append("✓ Basic structuring applied (content short or no LLM)")
+        if _needs_llm:
+            steps_log.append("✓ Basic structuring applied (LLM path skipped)")
+        else:
+            steps_log.append(f"✓ Basic structuring applied ({len(structured_md)} chars)")
 
     # ── Step 3: WRITE the markdown file ─────────────────────────────
     md_filename = f"document_output_{int(__import__('time').time())}.md"
@@ -244,6 +259,47 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
 
 
 _DATE_LINE_RE = None  # compiled lazily
+
+
+import re as _re
+
+_PROSE_RE = None
+
+
+def _looks_like_prose(text: str) -> bool:
+    """True when the content is unstructured prose (needs LLM structuring).
+
+    False for already-structured content: calendars, tables, lists with
+    dates, form-like data. These are handled perfectly by _basic_structure().
+    """
+    global _PROSE_RE
+    if _PROSE_RE is None:
+        _PROSE_RE = _re.compile(
+            r"^(?:"
+            r"(?:Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul)\s+\d{1,2}"
+            r"|\d{1,2}[/-]\d{1,2}"
+            r"|- |• |\* |\d+\.\s"
+            r"|(?:السبت|الأحد|الاثنين|الثلاثاء|الأربعاء|الخميس|الجمعة)"
+            r"|(?:أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر)"
+            r"|#{1,3}\s"
+            r"|\|.*\|"  # table row
+            r")",
+            _re.MULTILINE | _re.IGNORECASE,
+        )
+
+    lines = text.strip().split("\n")
+    if not lines:
+        return False
+
+    # Count structured lines (dates, bullets, tables, headings)
+    structured = sum(1 for line in lines if line.strip() and _PROSE_RE.match(line.strip()))
+    total = sum(1 for line in lines if line.strip())
+
+    if total == 0:
+        return False
+
+    # If >30% of lines look structured, it's NOT prose — use basic structuring
+    return (structured / total) < 0.30
 
 
 def _basic_structure(text: str) -> str:
