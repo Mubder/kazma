@@ -110,18 +110,31 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
             )
             resp = await _aio.wait_for(
                 llm.chat([{"role": "user", "content": extract_prompt}], tools=None),
-                timeout=90.0,
+                timeout=300.0,
             )
             content = (getattr(resp, "content", "") or "").strip()
             if content and not content.startswith("Error"):
                 structured_md = content
                 steps_log.append(f"✓ LLM structured content ({len(structured_md)} chars)")
             else:
-                steps_log.append("⚠ LLM extraction failed — using raw content")
+                steps_log.append(
+                    f"⚠ LLM returned empty/error ({content[:80]}...) — using raw content"
+                )
+        except TimeoutError:
+            steps_log.append(
+                "⚠ LLM extraction timed out (300s) — applying basic structuring"
+            )
+            structured_md = _basic_structure(source_content)
+            steps_log.append(f"✓ Basic structuring applied ({len(structured_md)} chars)")
         except Exception as exc:
-            steps_log.append(f"⚠ LLM extraction error: {exc} — using raw content")
+            _exc_name = type(exc).__name__
+            _exc_msg = str(exc)[:120] or "(no message)"
+            steps_log.append(f"⚠ LLM extraction error ({_exc_name}: {_exc_msg}) — applying basic structuring")
+            structured_md = _basic_structure(source_content)
+            steps_log.append(f"✓ Basic structuring applied ({len(structured_md)} chars)")
     else:
-        steps_log.append("✓ Content short enough — no LLM structuring needed")
+        structured_md = _basic_structure(source_content)
+        steps_log.append("✓ Basic structuring applied (content short or no LLM)")
 
     # ── Step 3: WRITE the markdown file ─────────────────────────────
     md_filename = f"document_output_{int(__import__('time').time())}.md"
@@ -228,6 +241,90 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
         steps_log.append("✓ File saved (no delivery requested)")
 
     return _format_result("Success", steps_log, gen_result[:500])
+
+
+_DATE_LINE_RE = None  # compiled lazily
+
+
+def _basic_structure(text: str) -> str:
+    """Add basic markdown structure to flat text when the LLM is unavailable.
+
+    Detects date lines, short title-like lines, and list items — converts
+    them to headings and bullets so the PDF generator has sections to work
+    with instead of one unformatted blob.
+    """
+    import re as _re
+
+    global _DATE_LINE_RE
+    if _DATE_LINE_RE is None:
+        _DATE_LINE_RE = _re.compile(
+            r"^(?:"
+            r"(?:Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul)\s+\d{1,2}"
+            r"|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?"
+            r"|(?:السبت|الأحد|الاثنين|الثلاثاء|الأربعاء|الخميس|الجمعة)\s+\d{1,2}"
+            r"|(?:أغسطس|سبتمبر|أكتوبر)\s+\d{1,2}"
+            r")"
+            r"(?:\s|,|$)",
+            _re.IGNORECASE,
+        )
+
+    lines = text.split("\n")
+    out: list[str] = []
+    in_list = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Skip empty lines
+        if not stripped:
+            if in_list:
+                out.append("")
+                in_list = False
+            else:
+                out.append("")
+            continue
+
+        # Date lines → ## headings
+        if _DATE_LINE_RE.match(stripped):
+            if in_list:
+                out.append("")
+                in_list = False
+            out.append(f"## {stripped}")
+            continue
+
+        # Short title-like lines (3-60 chars, no trailing punctuation) → ### headings
+        if 3 <= len(stripped) <= 60 and not stripped.endswith((".", ",", ";", "!", "?", ":", ")")):
+            # Check it's not a continuation (starts with lowercase or Arabic prefix)
+            is_title = (
+                stripped[0].isupper()
+                or stripped[0].isdigit
+                or "\u0600" <= stripped[0] <= "\u06FF"  # Arabic block
+            )
+            if is_title and not stripped.startswith(("-", "•", "*", "#")):
+                if in_list:
+                    out.append("")
+                    in_list = False
+                out.append(f"### {stripped}")
+                continue
+
+        # List items → bullets
+        if stripped.startswith(("-", "•", "*")) or (len(stripped) > 2 and stripped[0].isdigit() and stripped[1] == "."):
+            out.append(f"- {stripped.lstrip('-•* ').lstrip('0123456789. ')}")
+            in_list = True
+            continue
+
+        # Regular text
+        out.append(stripped)
+        in_list = False
+
+    result = "\n".join(out)
+
+    # Add a top-level heading if none exists
+    if not result.startswith("#"):
+        first_line = text.strip().split("\n")[0][:80]
+        result = f"# {first_line}\n\n{result}"
+
+    return result
 
 
 def _resolve_platform_chat_id(platform: str) -> str:
