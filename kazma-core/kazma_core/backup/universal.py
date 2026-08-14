@@ -278,3 +278,42 @@ def latest_universal_backup() -> dict[str, Any] | None:
     """Return the newest universal backup entry, or None."""
     items = list_universal_backups()
     return items[0] if items else None
+
+
+def delete_universal_backup(dir_name: str) -> dict[str, Any]:
+    """Delete a universal backup by its directory name (timestamp)."""
+    import re
+    # Only allow deleting inside backups/universal/ — reject path traversal.
+    if not re.match(r"^\d+$", dir_name):
+        return {"ok": False, "error": "Invalid backup name (must be a timestamp)"}
+    target = _universal_dir() / dir_name
+    if not target.is_dir():
+        return {"ok": False, "error": f"Backup '{dir_name}' not found"}
+    try:
+        shutil.rmtree(target)
+        logger.info("[universal-backup] deleted %s", dir_name)
+        return {"ok": True, "deleted": dir_name}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}
+
+
+def archive_universal_backup(dir_name: str) -> dict[str, Any]:
+    """Archive a universal backup into a single .zip for download/transfer."""
+    import re
+    import zipfile
+    if not re.match(r"^\d+$", dir_name):
+        return {"ok": False, "error": "Invalid backup name (must be a timestamp)"}
+    src = _universal_dir() / dir_name
+    if not src.is_dir():
+        return {"ok": False, "error": f"Backup '{dir_name}' not found"}
+    zip_path = _universal_dir() / f"{dir_name}.zip"
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file in src.rglob("*"):
+                if file.is_file():
+                    zf.write(file, file.relative_to(src.parent))
+        size_mb = round(zip_path.stat().st_size / (1024 * 1024), 1)
+        logger.info("[universal-backup] archived %s → %s (%.1f MB)", dir_name, zip_path.name, size_mb)
+        return {"ok": True, "archive": str(zip_path), "size_mb": size_mb}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}

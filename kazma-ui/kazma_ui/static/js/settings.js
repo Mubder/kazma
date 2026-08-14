@@ -3470,9 +3470,57 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/backup/list');
                 const data = await resp.json();
-                this.backupList = data.backups || [];
+                this.backupList = (data.backups || []).map(function (b) {
+                    b.archived = false; b.archiving = false; return b;
+                });
             } catch (e) {
                 this.backupList = [];
+            }
+        },
+
+        async deleteBackup(dirName) {
+            if (!(await window.kazmaConfirm({
+                title: 'Delete backup',
+                message: 'Delete backup ' + new Date(parseInt(dirName) * 1000).toLocaleString() + '? This cannot be undone.',
+                confirmText: 'Delete', danger: true,
+            }))) return;
+            try {
+                const resp = await fetch('/api/backup/' + encodeURIComponent(dirName), { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.ok) {
+                    showToast('Backup deleted', 'success');
+                    await this.loadBackupList();
+                } else {
+                    showToast('Delete failed: ' + (data.error || ''), 'error');
+                }
+            } catch (e) {
+                showToast('Delete failed: ' + e.message, 'error');
+            }
+        },
+
+        async archiveBackup(dirName) {
+            // If already archived, trigger download.
+            var item = this.backupList.find(function (b) { return b.dir === dirName; });
+            if (item && item.archived) {
+                window.open('/api/backup/' + encodeURIComponent(dirName) + '/download', '_blank');
+                return;
+            }
+            if (item) item.archiving = true;
+            try {
+                const resp = await fetch('/api/backup/' + encodeURIComponent(dirName) + '/archive', { method: 'POST' });
+                const data = await resp.json();
+                if (data.ok) {
+                    if (item) { item.archived = true; item.archiving = false; }
+                    showToast('Archived: ' + data.size_mb + ' MB. Click Download to save.', 'success');
+                    // Auto-trigger download.
+                    window.open('/api/backup/' + encodeURIComponent(dirName) + '/download', '_blank');
+                } else {
+                    if (item) item.archiving = false;
+                    showToast('Archive failed: ' + (data.error || ''), 'error');
+                }
+            } catch (e) {
+                if (item) item.archiving = false;
+                showToast('Archive failed: ' + e.message, 'error');
             }
         },
     };

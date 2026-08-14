@@ -3300,6 +3300,33 @@ def register_direct_routes(self: Any) -> None:
 
         return {"backups": list_universal_backups()}
 
+    @self.app.delete("/api/backup/{dir_name}")
+    async def _backup_delete(dir_name: str) -> Any:
+        """Delete a universal backup by its directory name (timestamp)."""
+        from kazma_core.backup.universal import delete_universal_backup
+
+        return delete_universal_backup(dir_name)
+
+    @self.app.post("/api/backup/{dir_name}/archive")
+    async def _backup_archive(dir_name: str) -> Any:
+        """Archive a universal backup into a downloadable .zip."""
+        from kazma_core.backup.universal import archive_universal_backup
+
+        return archive_universal_backup(dir_name)
+
+    @self.app.get("/api/backup/{dir_name}/download")
+    async def _backup_download(dir_name: str) -> Any:
+        """Download an archived backup (.zip)."""
+        from pathlib import Path
+        from kazma_core.backup.universal import _universal_dir
+        from fastapi.responses import FileResponse
+
+        zip_path = _universal_dir() / f"{dir_name}.zip"
+        if not zip_path.is_file():
+            return {"error": "Archive not found. Archive the backup first."}
+        return FileResponse(str(zip_path), filename=f"kazma-backup-{dir_name}.zip",
+                            media_type="application/zip")
+
     # ── Workspace selection + file-tree scanner ────────────────────────
     try:
         from kazma_gateway.routers.workspace import create_workspace_select_router

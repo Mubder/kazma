@@ -2410,6 +2410,12 @@
                         <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
                               x-text="b.databases_ok + ' DBs · ' + b.size_mb + ' MB' + (b.postgres ? ' · PG ✓' : '')"></span>
                     </div>
+                    <div style="display:flex;gap:6px">
+                        <button class="btn btn-secondary btn-sm" @click="archiveBackup(b.dir)"
+                                x-text="b.archived ? 'Download' : 'Archive'"
+                                :disabled="b.archiving"></button>
+                        <button class="btn btn-danger btn-sm" @click="deleteBackup(b.dir)">×</button>
+                    </div>
                 </div>
             </template>
         </div>
