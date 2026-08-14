@@ -789,6 +789,21 @@ ConfigStore keys `backups.pg.enabled` / `backups.pg.retention`; env
 kill-switch `KAZMA_PG_BACKUP_ENABLED=0`. Tests:
 `python -m pytest tests/test_pg_backup.py`.
 
+**F. Universal backup — "never left anything behind"**
+(`kazma_core/backup/universal.py`). One unified backup that backs up
+literally everything: every `*.db` in `kazma-data/` (WAL-safe via
+`sqlite3.backup()` API), every non-DB dir (attachments, document-store,
+workspace, exports, vectors — via `_robust_copytree` that skips ephemeral
+files like LibreOffice cache), and the Postgres dump (delegates to
+`pg_backup.perform_pg_backup`). Produces `manifest.json` + retention-capped
+(default 7). Wired into the 24h `native_backup` handler (auto) +
+`POST /api/backup/now` (manual, background task) + Settings → Backup tab
+(animated progress bar polling `GET /api/backup/status` every 2s).
+Delete/archive/download: `DELETE /api/backup/{name}`,
+`POST …/archive` (zip), `GET …/download`. The per-file copy MUST be robust
+(`_robust_copytree`) — `shutil.copytree` aborts on one vanishing file and
+loses the entire `document-store`. Do NOT revert to `copytree`.
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`

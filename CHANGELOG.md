@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Unreleased — Universal backup + boot fixes + research export (2026-08-14)
+
+**"The backup never left anything behind."** One unified backup system that
+backs up literally everything in Kazma — all SQLite databases (WAL-safe), all
+asset directories, and Postgres — with auto + manual triggers, a progress bar,
+and delete/archive/download.
+
+- **Universal backup module** (`kazma_core/backup/universal.py`):
+  `perform_universal_backup()` enumerates every `*.db` file in `kazma-data/`
+  (19 databases: memory, settings, checkpoints, snapshots, cron, chat sessions,
+  swarm tasks, vault, documents, research, llm_calls, pipeline_logs, etc.),
+  copies each WAL-safe via `sqlite3.backup()` API, copies all non-DB dirs
+  (attachments, document-store, workspace, exports, vectors — via a robust
+  per-file walker that skips vanishing ephemeral files like LibreOffice cache),
+  and dumps Postgres (when configured). Produces a `manifest.json` with an
+  itemised listing. Retention-capped (default 7).
+- **Auto trigger**: wired into the 24h `native_backup` handler — runs after
+  memory + document backups, first sweep ~2 min after boot.
+- **Manual trigger**: `POST /api/backup/now` (background task + immediate
+  return) + Settings → **Backup tab** with animated progress bar (databases →
+  assets → postgres → done, polls every 2s).
+- **Manage backups**: `DELETE /api/backup/{name}` (delete), `POST …/archive`
+  (zip), `GET …/download` (serve zip). UI buttons in the backup history list.
+- **Paused-task restore fix** (`checkpoint_manager.py`): `restore_paused_tasks`
+  called `asyncio.create_task` in the sync boot path (no event loop) →
+  coroutine never awaited. Deferred to `arm_pending_checkpoint_timeouts()`
+  called from the async startup.
+- **Research export fix** (`research.js`): export sent `session:rs_chat_…`
+  (prefixed ID) to an endpoint expecting `rs_chat_…` → 404. Stripped prefix.
+- **PG boot guard fix** (`pg_backup.py`): `verify_required_pg_tables` used
+  `row[0]` (tuple index) on a `dict_row` cursor → `KeyError: 0`. Fixed to
+  `row["tablename"]`. The guard had been silently no-oping since it shipped.
+
 ## Unreleased — Agent Skills ecosystem + marketplace (2026-08-14)
 
 Kazma already spoke the agentskills.io `SKILL.md` format (parser/discovery/
