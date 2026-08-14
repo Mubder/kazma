@@ -804,6 +804,63 @@ async def supervisor_node(
 
         intent_patch["intent_mode"] = _intent_mode
 
+        # ── Universal Intent Router (industry-level task routing) ────
+        # Classify the task TYPE (document/research/code/swarm/analysis)
+        # and route to a structured pipeline when confident. Structured
+        # tasks never enter the free-form tool loop — the model is the
+        # content engine, not the execution planner.
+        if iteration == 0 and _intent_mode == "normal":
+            try:
+                from kazma_core.agent.intent_router import classify_task
+
+                _task_intent = classify_task(
+                    last_user_content,
+                    messages=messages,
+                    attachments=state.get("active_attachments"),
+                    llm=llm,
+                )
+                if _task_intent.should_route:
+                    from kazma_core.agent.pipeline_registry import get_registry
+
+                    _pipeline = get_registry().match(_task_intent.category)
+                    if _pipeline is not None:
+                        logger.info(
+                            "[Supervisor] Intent Router: category=%s pipeline=%s "
+                            "confidence=%.2f reason=%s — routing to pipeline",
+                            _task_intent.category,
+                            _pipeline.name,
+                            _task_intent.confidence,
+                            _task_intent.reason,
+                        )
+                        try:
+                            _pipeline_result = await _pipeline.handler(
+                                _task_intent, state, llm=llm,
+                                tool_executor=tool_executor,
+                            )
+                        except Exception as _pipe_exc:
+                            logger.warning(
+                                "[Supervisor] Pipeline '%s' failed: %s — falling back to free-form",
+                                _pipeline.name,
+                                _pipe_exc,
+                            )
+                        else:
+                            return {
+                                "messages": messages
+                                + [{"role": "assistant", "content": _pipeline_result}],
+                                "next_node": NodeName.RESPOND,
+                                "iteration": iteration + 1,
+                                "intent_mode": "normal",
+                            }
+                    else:
+                        logger.debug(
+                            "[Supervisor] Intent Router: category=%s but no pipeline registered",
+                            _task_intent.category,
+                        )
+            except Exception as _router_exc:
+                logger.debug(
+                    "[Supervisor] Intent Router failed (non-fatal): %s", _router_exc
+                )
+
         # Collapse prior multi-step tool payloads when focus is done/shifted
         # so attention is not dominated by stale tool chains (PR5).
         if iteration == 0:
