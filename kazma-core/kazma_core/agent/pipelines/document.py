@@ -196,9 +196,13 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
 
                 target = get_current_delivery_target()
                 if not target and deliver_to:
-                    target = f"{deliver_to}:"
+                    # No active session target (e.g., chatting from Web UI)
+                    # — resolve the configured chat ID for the platform
+                    # (same fallback as the send_file tool, with the
+                    # string-as-list normalization fix)
+                    target = f"{deliver_to}:{_resolve_platform_chat_id(deliver_to)}"
 
-                if target:
+                if target and not target.endswith(":"):
                     send_result = await _aio.wait_for(
                         send_file_message(
                             target_id=target,
@@ -208,8 +212,14 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
                         timeout=60.0,
                     )
                     steps_log.append(f"✓ Delivered via {deliver_to}: {send_result[:100]}")
+                elif target.endswith(":"):
+                    steps_log.append(
+                        f"⚠ Could not resolve {deliver_to} chat ID — "
+                        "file saved locally. Set connectors.{deliver_to}.swarm_chat_id "
+                        "in Settings, or ask from the {deliver_to} chat directly."
+                    )
                 else:
-                    steps_log.append("⚠ No delivery target bound — file saved locally")
+                    steps_log.append("⚠ No delivery target — file saved locally")
             else:
                 steps_log.append("⚠ Could not extract output path for delivery")
         except Exception as exc:
@@ -218,6 +228,34 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
         steps_log.append("✓ File saved (no delivery requested)")
 
     return _format_result("Success", steps_log, gen_result[:500])
+
+
+def _resolve_platform_chat_id(platform: str) -> str:
+    """Resolve the configured chat ID for a delivery platform.
+
+    Checks ConfigStore for connectors.<platform>.swarm_chat_id, then
+    connectors.<platform>.allowed_users (normalizing string→list — the
+    send_file tool had the same string-as-list bug).
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+        chat_id = store.get(f"connectors.{platform}.swarm_chat_id")
+        if chat_id:
+            return str(chat_id).strip()
+        allowed = store.get(f"connectors.{platform}.allowed_users")
+        if isinstance(allowed, str):
+            candidates = [u.strip() for u in allowed.replace(",", " ").split() if u.strip()]
+        elif isinstance(allowed, list):
+            candidates = [str(u).strip() for u in allowed if str(u).strip()]
+        else:
+            candidates = []
+        if candidates:
+            return candidates[0]
+    except Exception as exc:
+        logger.debug("[document_pipeline] chat ID resolution failed: %s", exc)
+    return ""
 
 
 def _read_pdf(path: Path) -> str:
