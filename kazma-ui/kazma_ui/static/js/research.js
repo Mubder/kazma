@@ -408,10 +408,16 @@
     exportCurrent: function (fmt) {
       if (!currentId) { toast('Select a research result first', 'error'); return; }
       toast('Exporting to ' + fmt + '…', 'info');
+      // The panel stores session selections as 'session:<id>' and pipeline
+      // papers as 'paper:<id>'. The export endpoint expects the RAW research
+      // task id (no 'session:' prefix) — strip it, mirroring selectSession().
+      var rawId = String(currentId).indexOf('session:') === 0
+        ? String(currentId).slice('session:'.length)
+        : currentId;
       // Pipeline papers: use dedicated export that reads report.md
       var exportUrl = String(currentId).indexOf('paper:') === 0
         ? '/api/research/papers/export'
-        : '/api/research/' + encodeURIComponent(currentId) + '/export';
+        : '/api/research/' + encodeURIComponent(rawId) + '/export';
       var body = String(currentId).indexOf('paper:') === 0
         ? (function () {
             var paper = null;
