@@ -174,10 +174,11 @@ async def _fetch_html(url: str) -> tuple[str | None, str]:
 
 async def crawl_site(
     start_url: str,
-    max_pages: int = 8,
-    max_depth: int = 2,
-    same_domain_only: bool = True,
-    delay_ms: int = 300,
+    max_pages: int | None = None,
+    max_depth: int | None = None,
+    same_domain_only: bool | None = None,
+    delay_ms: int | None = None,
+    profile: str | None = None,
     save: bool = True,
     path_prefix: str | None = None,
     respect_robots: bool | None = None,
@@ -186,9 +187,15 @@ async def crawl_site(
 
     Args:
         start_url: Seed public URL.
-        max_pages: Max pages to fetch (default 8; hard cap via
+        profile: Optional named cap preset (kazma_core.web_acquire.profiles)
+            — ``research_brief`` (default: 8 pages/depth 2), ``research_deep``
+            (20/2), ``kb_site`` (200/4), ``single_page`` (1/0). Explicit
+            numeric args below win over the profile; hard env ceilings still
+            clamp.
+        max_pages: Max pages to fetch (default from profile; hard cap via
             ``KAZMA_CRAWL_MAX_PAGES``, max 50).
-        max_depth: Link depth from seed (0 = seed only; default 2; hard max 5).
+        max_depth: Link depth from seed (0 = seed only; default from
+            profile; hard max 5).
         same_domain_only: Stay on seed hostname (recommended True).
         delay_ms: Pause between fetches (politeness).
         save: Save each page under workspace research dir.
@@ -206,6 +213,20 @@ async def crawl_site(
     start = str(start_url).strip()
     if not start.startswith(("http://", "https://")):
         start = "https://" + start
+
+    # Named profile supplies cap defaults; explicit args win; the hard env
+    # ceilings below still clamp (presets: web_acquire.profiles).
+    from kazma_core.web_acquire import get_crawl_profile, profile_to_crawl_kwargs
+
+    _pk = profile_to_crawl_kwargs(get_crawl_profile(profile))
+    if max_pages is None:
+        max_pages = _pk["max_pages"]
+    if max_depth is None:
+        max_depth = _pk["max_depth"]
+    if same_domain_only is None:
+        same_domain_only = _pk["same_domain_only"]
+    if delay_ms is None:
+        delay_ms = _pk["delay_ms"]
 
     hard_pages = _env_int("KAZMA_CRAWL_MAX_PAGES", 50, lo=1, hi=50)
     hard_depth = _env_int("KAZMA_CRAWL_MAX_DEPTH", 5, lo=0, hi=5)

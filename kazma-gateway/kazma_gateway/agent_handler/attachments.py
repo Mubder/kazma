@@ -55,12 +55,31 @@ MAX_TOTAL_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
 
 def _fetch_attachment_url(url: str) -> bytes:
-    """Fetch a remote attachment after SSRF-validating every redirect target."""
-    import httpx
+    """Fetch a remote attachment after SSRF-validating every redirect target.
+
+    Routes through the shared scraping client factory (proxy provider +
+    rotating UA pool when configured) so platform file downloads follow the
+    same egress stack as the rest of Kazma — previously a bare httpx.Client
+    was the one web-egress path outside it.
+    """
     from kazma_core.security.ssrf import validate_url
 
+    try:
+        from kazma_core.proxy.client import get_scraping_client_sync
+    except Exception:
+        # Proxy module unavailable — degrade to a plain client (SSRF loop
+        # below still applies).
+        import httpx
+
+        _client_factory = lambda: httpx.Client(timeout=30.0, follow_redirects=False)  # noqa: E731
+    else:
+        def _client_factory():
+            return get_scraping_client_sync(
+                follow_redirects=False, timeout=30.0, rotate_ua=True
+            )
+
     current_url = url
-    with httpx.Client(timeout=30.0, follow_redirects=False) as client:
+    with _client_factory() as client:
         for _ in range(_MAX_ATTACHMENT_REDIRECTS + 1):
             validate_url(current_url, block_unresolved=True)
             with client.stream("GET", current_url) as response:

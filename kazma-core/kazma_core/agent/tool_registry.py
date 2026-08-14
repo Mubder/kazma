@@ -3109,9 +3109,12 @@ class LocalToolRegistry:
                 crawl_site,
                 description=(
                     "Bounded multi-page crawl (same-domain by default). "
-                    "Args: start_url, max_pages=8 (hard max 50; use 12–20 for deep docs), "
-                    "max_depth=2, same_domain_only=True, delay_ms=300, save=True. "
-                    "Saves pages under workspace; returns markdown index. SSRF-safe."
+                    "Args: start_url, profile=research_brief|research_deep|"
+                    "kb_site|single_page (named cap preset), max_pages "
+                    "(default from profile; hard max 50; use 12–20 for deep "
+                    "docs), max_depth, same_domain_only=True, delay_ms, "
+                    "save=True. Saves pages under workspace; returns markdown "
+                    "index. SSRF-safe."
                 ),
                 category="search",
             )

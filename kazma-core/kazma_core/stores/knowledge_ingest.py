@@ -62,7 +62,12 @@ try:
     from kazma_core.web_acquire import fetch_text as _web_fetch_text
 except Exception:  # pragma: no cover
     _web_fetch_text = None  # type: ignore[assignment]
-from kazma_core.tools.read_url import _fetch_full_text  # fallback / private ladder
+# Fallback: the ladder's PUBLIC entry point (private _fetch_full_text is an
+# implementation detail — renaming it must not break KB import-time).
+try:
+    from kazma_core.tools.read_url import fetch_full_text as _ladder_fetch
+except Exception:  # pragma: no cover
+    _ladder_fetch = None  # type: ignore[assignment]
 
 __all__ = [
     "IngestResult",
@@ -1157,7 +1162,7 @@ async def _extract_page(url: str) -> tuple[str | None, str, str]:
     """Extract markdown from one page.
 
     Tiered:
-      1. ``_fetch_full_text`` (Jina → Firecrawl → httpx+trafilatura → Playwright).
+      1. ``fetch_full_text`` (Jina → Firecrawl → httpx+trafilatura → Playwright).
       2. If (1) returns thin content, an error stub, or fails on what looks
          like a bot-walled JS/tab page, fall back to Playwright full-DOM
          extraction (hidden panels included).
@@ -1172,8 +1177,10 @@ async def _extract_page(url: str) -> tuple[str | None, str, str]:
     if _web_fetch_text is not None:
         fr = await _web_fetch_text(url, purpose="kb")
         text = fr.text if fr.ok or fr.text else (f"Error: {fr.error}" if fr.error else "Error: empty")
+    elif _ladder_fetch is not None:
+        text = await _ladder_fetch(url)
     else:
-        text = await _fetch_full_text(url)
+        return None, "error", "no fetch backend available (web_acquire + read_url)"
     # Only treat *Error:* strings as hard failures — never re-scan extracted
     # plain text with HTML bot-wall heuristics (false-positive on example.com).
     if isinstance(text, str) and text.startswith("Error:"):

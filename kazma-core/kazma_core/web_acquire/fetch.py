@@ -64,9 +64,13 @@ async def fetch_text(
             latency_ms=0.0,
         )
     try:
-        from kazma_core.tools.read_url import _fetch_full_text
+        # Public alias first; the private name is the backward-compat fallback.
+        try:
+            from kazma_core.tools.read_url import fetch_full_text as _ladder
+        except ImportError:
+            from kazma_core.tools.read_url import _fetch_full_text as _ladder
 
-        text = await _fetch_full_text(u)
+        text = await _ladder(u)
     except Exception as exc:
         ms = (time.perf_counter() - t0) * 1000
         logger.debug("[web_acquire.fetch] failed purpose=%s url=%s", purpose, u[:120], exc_info=True)

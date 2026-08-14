@@ -964,6 +964,12 @@ def _workspace_root() -> Path:
         return (Path.cwd() / "kazma-data" / "workspace").resolve()
 
 
+# Public alias — the shared recovery ladder's SoT entry point. Consumers
+# (web_acquire.fetch façade, KB ingest fallback) must import THIS name;
+# the underscored original stays for backward compatibility.
+fetch_full_text = _fetch_full_text
+
+
 def _default_research_subdir() -> str:
     """Default relative folder for auto-named saves (``KAZMA_RESEARCH_DIR``)."""
     raw = (os.environ.get("KAZMA_RESEARCH_DIR") or "research").strip().replace("\\", "/")

@@ -54,11 +54,13 @@ async def test_fetch_text_uses_ladder(monkeypatch):
     async def _fake(url: str) -> str:
         return f"# page\n\ncontent for {url}"
 
-    # tools/__init__.py can shadow submodule names with functions — use importlib
+    # tools/__init__.py can shadow submodule names with functions — use importlib.
+    # Patch the PUBLIC alias — the façade's contract since the read_url
+    # public-entry refactor (the private _fetch_full_text is impl detail).
     import importlib
 
     ru_mod = importlib.import_module("kazma_core.tools.read_url")
-    monkeypatch.setattr(ru_mod, "_fetch_full_text", _fake)
+    monkeypatch.setattr(ru_mod, "fetch_full_text", _fake)
     r = await fetch_text("https://example.com/x", purpose="research")
     assert r.ok is True
     assert "content for" in r.text

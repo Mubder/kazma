@@ -13,9 +13,11 @@ import logging
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, Iterator
 
 __all__ = [
     "ResearchSession",
@@ -28,11 +30,31 @@ __all__ = [
     "subscribe_progress",
     "unsubscribe_progress",
     "record_chat_research",
+    "suppress_chat_recording",
 ]
 
 logger = logging.getLogger(__name__)
 
 _ProgressCb = Callable[[str, str], Awaitable[None] | None]
+
+# Chat-research session minting suppresses while a deep research pipeline
+# runs its sub-queries: every sub-search flows through the shared
+# web_search tool, which otherwise records a standalone "chat research"
+# session row PER SUB-QUERY — the Research panel used to show 10+ "1
+# sources · done" rows for a single deep run (pipeline flood, 2026-08-14).
+_chat_record_suppressed: ContextVar[bool] = ContextVar(
+    "kazma_chat_record_suppressed", default=False
+)
+
+
+@contextmanager
+def suppress_chat_recording() -> Iterator[None]:
+    """Scope in which ``record_chat_research`` no-ops (pipeline sub-queries)."""
+    token = _chat_record_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _chat_record_suppressed.reset(token)
 
 # session_id → list of asyncio.Queue for SSE subscribers
 _SUBS: dict[str, list[asyncio.Queue]] = {}
@@ -561,7 +583,15 @@ def record_chat_research(
     """Record a research activity from chat tools into research_sessions.db.
 
     Ensures all chat research queries populate dynamically in the Research Tab list.
+    Returns None (no row) when called inside :func:`suppress_chat_recording`
+    (deep-pipeline sub-queries log into their parent session instead).
     """
+    if _chat_record_suppressed.get():
+        logger.debug(
+            "[research_session] chat recording suppressed (pipeline sub-query): %s",
+            (topic or "")[:60],
+        )
+        return None
     now = time.time()
     sid = session_id or f"rs_chat_{hashlib.md5((topic or '').encode()).hexdigest()[:12]}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}"
     c = _conn()

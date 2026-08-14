@@ -427,7 +427,12 @@ async def run_research_pipeline(
             async with lock:
                 log.append(f"Search failed `{q}`: {exc}")
 
-    await asyncio.gather(*[_one_search(q) for q in queries])
+    # Sub-queries must NOT mint standalone chat-research session rows —
+    # they log into THIS pipeline's parent session (Research panel flood).
+    from kazma_core.tools.research_session import suppress_chat_recording
+
+    with suppress_chat_recording():
+        await asyncio.gather(*[_one_search(q) for q in queries])
     log.append(f"### Discover — {len(candidates)} unique URLs (pre-rank)")
     await _emit(progress_cb, "discover", f"Found {len(candidates)} candidate URLs")
 
@@ -689,7 +694,8 @@ async def run_research_pipeline(
             "discover",
             f"Gap fill: {len(gap.followup_queries)} follow-up searches…",
         )
-        await asyncio.gather(*[_one_search(q) for q in gap.followup_queries])
+        with suppress_chat_recording():
+            await asyncio.gather(*[_one_search(q) for q in gap.followup_queries])
         # Re-rank remaining unused URLs
         already = {m.get("url") for m in acquire_meta if m.get("url")}
         new_cands = [u for u in candidates if u not in already]

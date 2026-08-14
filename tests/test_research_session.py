@@ -188,6 +188,37 @@ def test_record_chat_research_caps_at_bound(session_db):
     assert len(s.summary) == rs._CHAT_RESULT_MAX
 
 
+def test_suppress_chat_recording_blocks_pipeline_flood(session_db):
+    """Deep-pipeline sub-queries must NOT mint standalone session rows —
+    one deep run used to flood the Research panel with 10+ '1 sources ·
+    done' rows, one per decomposed sub-query."""
+    rs = session_db
+
+    # Inside the suppression scope: no row, returns None.
+    with rs.suppress_chat_recording():
+        out = rs.record_chat_research("pipeline sub-query", result_text="sub result")
+    assert out is None
+    assert rs.list_sessions(limit=100) == [] or all(
+        s.topic != "pipeline sub-query" for s in rs.list_sessions(limit=100)
+    )
+
+    # After the scope: chat searches record again (the intended behavior
+    # for user-initiated chat searches).
+    out2 = rs.record_chat_research("pipeline sub-query", result_text="sub result")
+    assert out2 is not None
+    assert out2.summary == "sub result"
+
+
+def test_record_chat_research_dedupes_per_topic(session_db):
+    """Same topic re-searched in chat UPDATES one row (md5 topic id), not many."""
+    rs = session_db
+    s1 = rs.record_chat_research("dedupe topic", result_text="first")
+    s2 = rs.record_chat_research("dedupe topic", result_text="second longer result")
+    assert s1.id == s2.id
+    rows = [s for s in rs.list_sessions(limit=100) if s.id == s1.id]
+    assert len(rows) == 1
+
+
 def test_cancel_session(session_db):
     rs = session_db
     s = rs.create_session("cancel me")
