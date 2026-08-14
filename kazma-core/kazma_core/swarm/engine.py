@@ -1056,6 +1056,10 @@ class SwarmEngine:
         """Load paused tasks from SQLite so they can be resumed."""
         return self._checkpoint_mgr.restore_paused_tasks()
 
+    async def arm_pending_checkpoint_timeouts(self) -> int:
+        """Arm checkpoint auto-reject timeouts deferred during sync-boot restore."""
+        return await self._checkpoint_mgr.arm_pending_checkpoint_timeouts()
+
     @property
     def task_store(self) -> TaskStore | None:
         """Return the configured task store, or ``None``."""

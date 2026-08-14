@@ -53,6 +53,11 @@ class CheckpointManager:
         self._task_store = task_store
         self._task_history = task_history if task_history is not None else {}
         self._max_history = max_history
+        # Checkpoint auto-reject timeouts that couldn't be armed at restore
+        # time (restore_paused_tasks runs in the sync boot path before the
+        # event loop is up). Drained by arm_pending_checkpoint_timeouts()
+        # from the async startup.
+        self._pending_timeout_arms: list[tuple[str, float]] = []
         # Engine owns the lock; we borrow it so history mutations are
         # consistent with _finalize_task / list_tasks. If not supplied we
         # fall back to a private lock (degraded but never unlocked).
@@ -112,13 +117,7 @@ class CheckpointManager:
         # Set up checkpoint timeout auto-reject if configured.
         timeout_seconds = task.metadata.get("checkpoint_timeout")
         if timeout_seconds and float(timeout_seconds) > 0:
-            timeout_task = asyncio.create_task(
-                self._checkpoint_timeout_reject(
-                    task_id,
-                    float(timeout_seconds),
-                )
-            )
-            self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
+            self._arm_checkpoint_timeout(task_id, float(timeout_seconds))
 
         # Store in task history as paused.
         task.status = TaskStatus.PAUSED
@@ -218,6 +217,48 @@ class CheckpointManager:
         """Return checkpoint info for a paused task, or ``None``."""
         return self._checkpoint_handler.get_checkpoint(task_id)
 
+    def _arm_checkpoint_timeout(self, task_id: str, timeout_seconds: float) -> None:
+        """Arm a checkpoint auto-reject timeout.
+
+        ``asyncio.create_task`` requires a running loop. At boot
+        (``restore_paused_tasks`` runs in the sync constructor path) there is
+        no loop yet, so the arm is deferred to ``_pending_timeout_arms`` and
+        drained by :meth:`arm_pending_checkpoint_timeouts` from the async
+        startup. This fixes the "coroutine was never awaited" /
+        "no running event loop" boot warning.
+        """
+        try:
+            timeout_task = asyncio.create_task(
+                self._checkpoint_timeout_reject(task_id, timeout_seconds)
+            )
+            self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
+        except RuntimeError:
+            # No running event loop (sync boot path) — defer.
+            self._pending_timeout_arms.append((task_id, timeout_seconds))
+
+    async def arm_pending_checkpoint_timeouts(self) -> int:
+        """Arm checkpoint timeouts deferred during sync-boot restore.
+
+        Call once from the async application startup (after the event loop is
+        running). Returns the number of timeouts armed.
+        """
+        armed = 0
+        while self._pending_timeout_arms:
+            task_id, seconds = self._pending_timeout_arms.pop(0)
+            try:
+                timeout_task = asyncio.create_task(
+                    self._checkpoint_timeout_reject(task_id, seconds)
+                )
+                self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
+                armed += 1
+            except Exception:
+                logger.debug(
+                    "[CheckpointManager] failed to arm deferred timeout for %s",
+                    task_id,
+                    exc_info=True,
+                )
+        return armed
+
     def restore_paused_tasks(self) -> list[SwarmTask]:
         """Load paused tasks from SQLite so they can be resumed.
 
@@ -260,13 +301,7 @@ class CheckpointManager:
                 # rejected, never resumed) until manual action.
                 timeout_seconds = task.metadata.get("checkpoint_timeout")
                 if timeout_seconds and float(timeout_seconds) > 0:
-                    timeout_task = asyncio.create_task(
-                        self._checkpoint_timeout_reject(
-                            task.id,
-                            float(timeout_seconds),
-                        )
-                    )
-                    self._checkpoint_handler.set_timeout_task(task.id, timeout_task)
+                    self._arm_checkpoint_timeout(task.id, float(timeout_seconds))
                 logger.info(
                     "[CheckpointManager] restored paused pipeline '%s' at step %d",
                     task.id,

@@ -1345,6 +1345,19 @@ class KazmaAppBuilder:
             logger.debug("[App] lifecycle 'starting' notification failed: %s", e)
 
         try:
+            # ── Arm deferred checkpoint timeouts ────────────────────────
+            # _setup_swarm() (sync, constructor) restores paused HITL
+            # pipeline tasks but can't asyncio.create_task their auto-reject
+            # timeouts (no event loop yet). Arm them now that the loop is up
+            # so a paused task never hangs forever after a restart.
+            try:
+                if getattr(self, "swarm_manager", None) and self.swarm_manager.engine:
+                    _armed = await self.swarm_manager.engine.arm_pending_checkpoint_timeouts()
+                    if _armed:
+                        logger.info("[Swarm] Armed %d deferred checkpoint timeout(s)", _armed)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[Swarm] deferred checkpoint arming failed: %s", exc)
+
             # ── Connect MCP servers ────────────────────────────────────
             # The CLI path (agent_runner.run_once/main) calls
             # connect_mcp_servers() explicitly, but the web path was
