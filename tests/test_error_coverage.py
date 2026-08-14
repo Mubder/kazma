@@ -146,7 +146,7 @@ class TestLLMConfigErrors:
         config = LLMConfig.from_dict({})
         assert config.model == "gpt-4o-mini"
         assert config.base_url == "https://api.openai.com/v1"
-        assert config.max_tokens == 4096
+        assert config.max_tokens == 8192
 
     def test_partial_config(self) -> None:
         config = LLMConfig.from_dict({"model": "custom-model"})

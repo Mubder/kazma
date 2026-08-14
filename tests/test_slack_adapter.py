@@ -115,7 +115,10 @@ class TestSlackAdapter:
 
         assert msg is not None
         assert msg.sender_id == "slack:U9876543210"
-        assert msg.text == "<@U0000BOT> do something"
+        # The leading @bot mention is intentionally stripped on app_mention
+        # events (slack_parse.py) so the agent receives the clean command,
+        # mirroring Telegram/Discord.
+        assert msg.text == "do something"
 
     def test_parse_non_message_event_skipped(self):
         """Test that non-message event types are skipped."""

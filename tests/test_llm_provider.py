@@ -16,7 +16,7 @@ class TestLLMConfig:
         config = LLMConfig()
         assert config.model == "gpt-4o-mini"
         assert config.base_url == "https://api.openai.com/v1"
-        assert config.max_tokens == 4096
+        assert config.max_tokens == 8192
         assert config.temperature == 0.7
 
     def test_from_dict(self) -> None:

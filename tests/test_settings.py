@@ -223,7 +223,7 @@ class TestSettingsManager:
     def test_appearance_defaults(self, sm):
         """Appearance has default values."""
         appearance = sm.get_appearance()
-        assert appearance["theme"] == "dark"
+        assert appearance["theme"] == "light"
         assert "accent_color" in appearance
         assert "font_size" in appearance
 

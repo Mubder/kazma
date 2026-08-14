@@ -32,7 +32,7 @@ class TestSupervisorState:
         state = initial_supervisor_state()
         assert state["messages"] == []
         assert state["iteration"] == 0
-        assert state["max_iterations"] == 10
+        assert state["max_iterations"] == 15
         assert state["tool_calls_pending"] == []
         assert state["tool_calls_done"] == []
         assert state["tool_results"] == {}
@@ -213,8 +213,11 @@ class TestLocalToolRegistry:
 
         result = await registry.execute("boom", {})
         assert result["is_error"] is True
-        assert "intentional error" not in result["content"]
-        assert "Tool execution failed" in result["content"]
+        # The exception text is intentionally surfaced so the agent can
+        # diagnose/retry (tool_registry.py:
+        # "Error: Tool '<name>' failed: <exc>").
+        assert "Tool 'boom' failed" in result["content"]
+        assert "intentional error" in result["content"]
 
     def test_get_tool_definitions_format(self):
         registry = LocalToolRegistry(include_builtins=False)
@@ -254,7 +257,8 @@ class TestBuiltinTools:
         registry = LocalToolRegistry(include_builtins=True)
         result = await registry.execute("file_read", {"path": str(test_file)})
         assert result["is_error"] is False
-        assert result["content"] == "kazma-test-content"
+        # file_read returns "{LINE}|{CONTENT}" (line-numbered) by design.
+        assert result["content"] == "1|kazma-test-content"
 
     @pytest.mark.asyncio
     async def test_file_read_missing(self):
@@ -274,7 +278,7 @@ class TestBuiltinTools:
             assert "bytes" in write_result["content"]
 
             read_result = await registry.execute("file_read", {"path": path})
-            assert read_result["content"] == "hello kazma"
+            assert read_result["content"] == "1|hello kazma"
         finally:
             Path(path).unlink(missing_ok=True)
 

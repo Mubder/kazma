@@ -55,7 +55,13 @@ def test_is_thin_extraction() -> None:
     assert ru._is_thin_extraction("", big_shell) is True
     assert ru._is_thin_extraction("short", big_shell) is True
     rich = "A" * 500
-    assert ru._is_thin_extraction(rich, big_shell) is False
+    # Rich text on a NORMAL (non-shell) page is not thin. (A JS-shell page
+    # correctly stays thin regardless of extract length — its static extract
+    # is chrome, not content — so test the non-thin path against real HTML.)
+    normal_html = "<html><body>" + ("y" * 600) + "</body></html>"
+    assert ru._is_thin_extraction(rich, normal_html) is False
+    # Rich text against a JS shell IS still thin → Playwright worth trying
+    assert ru._is_thin_extraction(rich, big_shell) is True
     # Short static page with real words is NOT thin
     static = "Example Domain This domain is for use in illustrative examples in documents."
     assert ru._is_thin_extraction(static, "<html><body><h1>x</h1></body></html>") is False

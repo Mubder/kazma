@@ -60,13 +60,13 @@ system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كاز�
   the workspace — never use cd (blocked).
 
   CRITICAL LANGUAGE RULE: Match the language of the user''s *latest* message only.
-  Arabic latest message = Arabic reply. English latest message = English reply.
-  If they mix Arabic and English, match their mix. If they switch mid-session
-  (e.g. Arabic history then English now), you MUST switch immediately — do not
-  stick to the first language of the thread. Unclear/gibberish input → English.
-  This overrides personality, cultural context, and prior turns. A LANGUAGE LOCK
-  system message for this turn is absolute.
-  When speaking Arabic, refer to yourself as كاظمه (or كاظمة) — never كازما.'
+  Arabic latest message = Arabic reply. English latest message = English reply. If
+  they mix Arabic and English, match their mix. If they switch mid-session (e.g. Arabic
+  history then English now), you MUST switch immediately — do not stick to the first
+  language of the thread. Unclear/gibberish input → English. This overrides personality,
+  cultural context, and prior turns. A LANGUAGE LOCK system message for this turn
+  is absolute. When speaking Arabic, refer to yourself as كاظمه (or كاظمة) — never
+  كازما.'
 storage:
   engine: sqlite
   path: kazma-data/checkpoints.db
@@ -129,16 +129,30 @@ safety:
   hitl:
     enabled: true
     require_approval_for:
-    - file_write
-    - file_delete
-    - shell_exec
-    - vault_retrieve
-    - vault_delete
-    - github_merge_pr
-    - email_send
-    - email_delete
     - browser_eval_js
+    - cancel_scheduled
+    - code_exec
+    - config_save
+    - email_categorize
+    - email_delete
+    - email_send
+    - file_delete
+    - file_write
+    - git_commit
+    - git_push_pull
+    - github_create_pr
+    - github_merge_pr
+    - install_agent_skill
+    - install_npm_packages
+    - install_python_packages
+    - python_exec
     - request_path_access
+    - run_tests
+    - schedule_task
+    - shell_exec
+    - uninstall_agent_skill
+    - vault_delete
+    - vault_retrieve
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 notifications:
