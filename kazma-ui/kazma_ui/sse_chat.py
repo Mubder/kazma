@@ -1591,7 +1591,11 @@ def create_sse_chat_router(
                 from kazma_ui.chat_attachments import attachments_from_client_payload
 
                 atts = attachments_from_client_payload(raw_attachments)
-                multimodal_content = build_user_content(user_message or "", atts)
+                # to_thread: build_user_content persists + parses documents
+                # synchronously — keep that disk work off the event loop.
+                multimodal_content = await asyncio.to_thread(
+                    build_user_content, user_message or "", atts
+                )
                 # Replace the trailing user message content.
                 for i in range(len(messages) - 1, -1, -1):
                     if isinstance(messages[i], dict) and messages[i].get("role") == "user":

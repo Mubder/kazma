@@ -162,7 +162,7 @@
     });
     list.querySelectorAll('.hitl-deny-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        submitApproval(btn.getAttribute('data-thread_id'), false, btn, 'once', '');
+        submitApproval(btn.getAttribute('data-thread-id'), false, btn, 'once', '');
       });
     });
     // Phase 3: wire semantic per-option buttons

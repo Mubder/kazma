@@ -2450,6 +2450,9 @@ async def tool_worker_node(
         # *before* resume so later turns skip the gate entirely.
         approved = False
         approved_ids = None
+        # Bound here (not at the safe-tool section below) because the
+        # auto_deny block appends deny ToolResults before that section runs.
+        results: list[ToolResult] = []
         # Sub-agent auto_deny policy (AGENTS.md §7A): spawned child graphs are
         # built with checkpointer=None, so LangGraph interrupt() cannot persist
         # a pause and the external approval-timeout watcher doesn't cover the
@@ -2539,7 +2542,7 @@ async def tool_worker_node(
                     approved_ids = {str(x) for x in raw_ids}
 
         # ── Execute safe tools in parallel ────────────────────────────
-        results: list[ToolResult] = list(constraint_blocked_results) + list(semantic_blocked)
+        results.extend(list(constraint_blocked_results) + list(semantic_blocked))
         if safe_tools:
             results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
 
@@ -3159,6 +3162,12 @@ def build_supervisor_graph(
                 max_iter,
             )
 
+        if next_node == NodeName.SUPERVISOR:
+            # Auto-continue path: supervisor returned a continuation message
+            # (next_node=SUPERVISOR) — loop straight back into the supervisor
+            # instead of dead-ending into respond. Must be below the max-iter
+            # gate so an exhausted budget still forces respond.
+            return NodeName.SUPERVISOR
         if next_node == NodeName.TOOL_WORKER:
             return NodeName.TOOL_WORKER
         return NodeName.RESPOND
@@ -3183,11 +3192,12 @@ def build_supervisor_graph(
     # Entry: START → supervisor (no LLM summarize path)
     graph.set_entry_point(NodeName.SUPERVISOR)
 
-    # Supervisor → {tool_worker, respond}
+    # Supervisor → {supervisor (auto-continue), tool_worker, respond}
     graph.add_conditional_edges(
         NodeName.SUPERVISOR,
         _route,
         {
+            NodeName.SUPERVISOR: NodeName.SUPERVISOR,
             NodeName.TOOL_WORKER: NodeName.TOOL_WORKER,
             NodeName.RESPOND: NodeName.RESPOND,
         },

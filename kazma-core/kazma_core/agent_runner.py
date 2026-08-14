@@ -94,17 +94,39 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
     except Exception:
         _version = str(agent_cfg.get("version", "0.9.4")).split("+", 1)[0]
 
+    # Settings-UI overrides (ConfigStore) win over YAML for the agent identity
+    # fields — the Settings page persists agent.name / agent.language /
+    # agent.system_prompt there. Previously these keys were read back for
+    # display only, so UI edits silently never reached the running agent.
+    # Applied at agent construction (next boot), mirroring settings.py's
+    # ConfigStore-first display fallback.
+    try:
+        from kazma_core.config_store import get_config_store
+
+        _cs = get_config_store()
+        _name = _cs.get("agent.name") or agent_cfg.get("name", "kazma")
+        _language = _cs.get("agent.language") or agent_cfg.get("language", "en")
+        _system_prompt = _cs.get("agent.system_prompt") or raw.get("system_prompt", "")
+    except Exception:
+        logger.debug(
+            "[AgentRunner] ConfigStore agent-identity read failed — YAML values apply",
+            exc_info=True,
+        )
+        _name = agent_cfg.get("name", "kazma")
+        _language = agent_cfg.get("language", "en")
+        _system_prompt = raw.get("system_prompt", "")
+
     return AgentConfig(
-        name=agent_cfg.get("name", "kazma"),
+        name=_name,
         version=_version,
         # Default to English so cultural Arabic context does not bias every
         # reply when the user has not set agent.language explicitly.
-        language=agent_cfg.get("language", "en"),
+        language=_language,
         rtl=agent_cfg.get("rtl", False),
         default_model=models_cfg.get("default", "gpt-4o-mini"),
         storage_path=storage_cfg.get("path", "data/kazma.db"),
         vector_dim=storage_cfg.get("vector_dim", 384),
-        system_prompt=raw.get("system_prompt", ""),
+        system_prompt=_system_prompt,
         raw=raw,
     )
 

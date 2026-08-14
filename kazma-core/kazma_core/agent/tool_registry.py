@@ -1063,7 +1063,17 @@ class LocalToolRegistry:
                 return "Error: send_file requires the chat-platform dispatcher (not available in CLI mode)"
 
             target_id = get_current_delivery_target()
-            if not target_id or not str(target_id).startswith("telegram:"):
+            backend = "telegram"
+            if target_id:
+                # Respect the session's platform: the gateway binds
+                # delivery_target per platform (discord:/slack:/telegram:), so
+                # route to that backend. Previously ANY non-telegram target
+                # was discarded and rerouted to the configured Telegram chat,
+                # delivering files to the wrong platform's users.
+                backend = str(target_id).split(":", 1)[0].strip().lower() or "telegram"
+            else:
+                # No bound target (e.g. cron/CLI context) — fall back to the
+                # configured Telegram swarm chat / first allowed user.
                 try:
                     from kazma_core.config_store import get_config_store
 
@@ -1086,6 +1096,7 @@ class LocalToolRegistry:
                     target_id=target_id,
                     text=caption or f"📎 {p.name}",
                     file_path=str(p),
+                    backend=backend,
                 )
                 return f"File sent: {p.name} ({p.stat().st_size // 1024} KB) → {result}"
             except Exception as exc:

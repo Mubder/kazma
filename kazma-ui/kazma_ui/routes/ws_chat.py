@@ -1268,7 +1268,10 @@ def create_ws_chat_router(
                             )
 
                             atts = attachments_from_client_payload(raw_attachments)
-                            multimodal_content = build_user_content(text or "", atts)
+                            # to_thread: keep sync persist/parse work off the loop.
+                            multimodal_content = await asyncio.to_thread(
+                                build_user_content, text or "", atts
+                            )
                             for i in range(len(full_messages) - 1, -1, -1):
                                 if (
                                     isinstance(full_messages[i], dict)

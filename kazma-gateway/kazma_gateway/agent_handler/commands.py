@@ -652,6 +652,8 @@ async def _try_ide_command(
                     f"⚠️ Usage: /ide repo clone <owner/repo>",
                 )
                 return True
+            import asyncio
+            import base64
             import os
             import subprocess
             from kazma_core.stores import get_workspace_store
@@ -686,23 +688,35 @@ async def _try_ide_command(
                     i += 1
                 repo_dir = Path(f"{repo_dir}-{i}")
             url = f"https://github.com/{slug}.git"
-            # Inject token for private repo access (PAT/OAuth/App installation).
-            clone_url = url
+            # Inject token for private repo access (PAT/OAuth/App installation)
+            # via git config env vars — the token never enters argv (clone URL
+            # or -c flag), so it cannot leak through process listings, and a
+            # failed clone's stderr can no longer echo it back to chat.
+            clone_env = {**os.environ}
             try:
                 from kazma_gateway.routers.github_client import get_github_token
 
                 token = get_github_token()
                 if token:
-                    clone_url = f"https://x-access-token:{token}@github.com/{slug}.git"
+                    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+                    clone_env.update({
+                        "GIT_CONFIG_COUNT": "1",
+                        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+                        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Basic {basic}",
+                    })
             except Exception:
                 pass
             await _send_model_reply(
                 msg, store, manager, thread_id, f"⏳ Cloning `{slug}`…",
             )
             try:
-                subprocess.run(
-                    ["git", "clone", "--depth", "1", clone_url, str(repo_dir)],
+                # to_thread: a sync clone would freeze the shared event loop
+                # (all platforms + web UI) for up to the 120s timeout.
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["git", "clone", "--depth", "1", url, str(repo_dir)],
                     check=True, capture_output=True, text=True, timeout=120,
+                    env=clone_env,
                 )
             except subprocess.CalledProcessError as exc:
                 await _send_model_reply(

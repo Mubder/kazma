@@ -1206,7 +1206,7 @@ function settingsApp() {
                 const start = Date.now();
                 const poll = async () => {
                     try {
-                        const r = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
+                        const r = await fetch('/health/live', { method: 'GET', cache: 'no-store' });
                         if (r.ok && Date.now() - start > 3000) {
                             window.location.reload();
                             return;

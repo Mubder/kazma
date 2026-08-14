@@ -368,6 +368,15 @@ def _quarantine_merge(
         (mid, tenant_id, source_id, target_id, tier, max(0.0, 1.0 - distance), time.time()),
     )
     conn.commit()
+    # Wake the durable worker to resolve this merge under the auto-policy
+    # (tier1_exact always; tier2_vector >= 0.85). Without this enqueue the
+    # pending row sat forever — the "entity_merge" handler had no producer.
+    try:
+        from kazma_core.memory.task_queue import enqueue_task
+
+        enqueue_task("entity_merge", {"merge_id": mid, "tenant_id": tenant_id})
+    except Exception:
+        logger.debug("[entity_resolution] entity_merge enqueue failed", exc_info=True)
 
 
 def _record_merge(

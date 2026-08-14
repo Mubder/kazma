@@ -1074,15 +1074,25 @@ class TelegramAdapter(BaseAdapter):
                     logger.warning("[telegram] Failed to remove HITL keyboard: %s", exc)
 
         if action.kind == "swarm":
-            # Swarm HITL approval — resolve bus Event in-process
+            # Swarm HITL approval — resolve bus Event in-process.
+            # Fan-out safe: when 2+ platforms are configured the bus is a
+            # FanOutBusAdapter, so unwrap it and dispatch to the Telegram
+            # child (same pattern as discord_callbacks.route_swarm_bus —
+            # previously the isinstance check failed under FanOut and the
+            # approval button silently no-opped).
             task_id = None
             try:
-                from kazma_core.swarm.bus import get_message_bus
+                from kazma_core.swarm.bus import FanOutBusAdapter, get_message_bus
 
                 from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
                 adapter = get_message_bus().adapter
-                if isinstance(adapter, TelegramBusAdapter):
+                if isinstance(adapter, FanOutBusAdapter):
+                    for child in adapter.adapters:
+                        if isinstance(child, TelegramBusAdapter):
+                            task_id = child.handle_callback(action.swarm_data or data)
+                            break
+                elif isinstance(adapter, TelegramBusAdapter):
                     task_id = adapter.handle_callback(action.swarm_data or data)
             except Exception as exc:
                 logger.warning("[telegram] Swarm approval callback failed: %s", exc)

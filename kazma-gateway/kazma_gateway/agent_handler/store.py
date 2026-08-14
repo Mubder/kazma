@@ -192,9 +192,16 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     # Plain text (no attachments) stays a string; images become an OpenAI
     # vision content list; documents are persisted and referenced as text.
     try:
+        import asyncio as _asyncio
+
         from kazma_gateway.agent_handler.attachments import build_user_content
 
-        user_content = build_user_content(msg.text, msg.attachments)
+        # to_thread: URL attachments (Slack/Discord) do sync HTTP + disk
+        # persist + document parse inside build_user_content — running it
+        # on the loop stalls every platform for up to the fetch timeout.
+        user_content = await _asyncio.to_thread(
+            build_user_content, msg.text, msg.attachments
+        )
     except Exception:  # noqa: BLE001 — never block a turn on attachment building
         user_content = msg.text
     state["messages"] = [{"role": "user", "content": user_content}]

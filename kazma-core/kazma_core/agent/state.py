@@ -237,6 +237,17 @@ class SupervisorState(TypedDict, total=False):
     _research_pipeline_nudged: bool
     """One-shot guard for the R4 deep-research pipeline nudge (see above)."""
 
+    _post_turn_memory: dict[str, Any]
+    """Signal that post-turn memory work is pending for this thread.
+
+    Written by ``respond_node`` (session_id/turn/tenant_id) and consumed by
+    the gateway handler AFTER the graph reaches terminal state. Must be a
+    declared state key — undeclared fields are dropped by LangGraph and the
+    gateway's ``result_state.get("_post_turn_memory")`` would always see
+    None, silently disabling post-turn memory (episode mirror + belief
+    extraction + micro-consolidation).
+    """
+
     mission_rounds_used: int
     """Cumulative tool rounds already consumed in mission mode (wave tracking)."""
 

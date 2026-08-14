@@ -23,6 +23,11 @@ ROLE_HEX: dict[str, str] = {
     "thinking": "#56b6c2",
 }
 
+# Conversation turns sent to the provider per chat (≈2 messages per turn).
+# Bounds prompt size for long TUI sessions; older turns stay in
+# self._messages for /context and /export.
+_MAX_HISTORY_TURNS = 30
+
 
 class ChatPanel(Vertical):
     """Chat: RichLog + ProgressBar + Input. Supports token-by-token streaming."""
@@ -330,13 +335,17 @@ class ChatPanel(Vertical):
                 )
                 return
 
-            messages = [{"role": "user", "content": prompt}]
             self._messages.append({"role": "user", "content": prompt})
+            # Send the (capped) conversation history so follow-up turns keep
+            # context — previously each turn was a fresh single-message chat
+            # while self._messages only fed /context and /export.
             # Inject system prompt from kazma.yaml so the model knows to
             # respond in the user's language and follow Kazma's persona.
             system_prompt = self._get_system_prompt()
+            messages: list[dict[str, Any]] = []
             if system_prompt:
-                messages.insert(0, {"role": "system", "content": system_prompt})
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(self._messages[-(_MAX_HISTORY_TURNS * 2):])
             response = await provider.chat(messages)
             content = getattr(response, "content", "") or ""
             if content:

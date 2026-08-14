@@ -3769,7 +3769,7 @@
     ordered = ordered.slice(0, 40);
     box.innerHTML = ordered.map(function (p) {
       var active = (p === cur) ? 'chip-sel' : '';
-      var esc = String(p).replace(/"/g, '&quot;');
+      var esc = _esc(String(p));
       return '<button type="button" class="v2g-chip ' + active + '" data-pred="' + esc + '" '
         + 'style="font-size:0.62rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;'
         + 'border:1px solid ' + (active ? 'var(--accent)' : 'var(--border-subtle)') + ';'
@@ -3809,7 +3809,7 @@
       var name = String(_v2gPredVocab[j].name).toLowerCase();
       if (name.length < 4) continue;
       if (typed !== name && typedTokens.indexOf(name) >= 0) {
-        hintEl.innerHTML = 'Similar to <b style="color:var(--accent);cursor:pointer;" data-adopt="' + name + '">' + name + '</b>? Click to reuse.';
+        hintEl.innerHTML = 'Similar to <b style="color:var(--accent);cursor:pointer;" data-adopt="' + _esc(name) + '">' + _esc(name) + '</b>? Click to reuse.';
         var adopt = hintEl.querySelector('[data-adopt]');
         if (adopt) adopt.addEventListener('click', function () {
           var predEl = document.getElementById('v2g-ops-predicate');

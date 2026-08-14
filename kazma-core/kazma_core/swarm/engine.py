@@ -332,10 +332,7 @@ class SwarmEngine:
         )
 
     async def dispatch(self, task: SwarmTask) -> TaskResult:
-        """Dispatch a swarm task to a single worker."""
-        if task.type == TaskType.BROADCAST:
-            return await self.broadcast(task)
-
+        """Dispatch a swarm task to a single worker (or broadcast to all)."""
         # Sweep stale tasks before checking capacity
         self.reap_stale_tasks()
 
@@ -377,6 +374,13 @@ class SwarmEngine:
             "task_id": task.id,
             "workers": list(task.workers) if task.workers else [],
         })
+
+        # Broadcast fans out to every worker — dispatch it AFTER the shared
+        # preamble above so it is subject to the same admission cap, tenant
+        # stamping, and task_started SSE as a normal dispatch (previously it
+        # returned before all four, exempting the most expensive pattern).
+        if task.type == TaskType.BROADCAST:
+            return await self.broadcast(task)
 
         # Start a root tracing span for this task.
         task_span = self._tracing_emitter.start_task_span(
