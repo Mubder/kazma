@@ -63,7 +63,7 @@ def test_federated_memory_hits(mem_db, monkeypatch):
 def test_federated_knowledge_label(monkeypatch):
     from kazma_core.memory import federated_search as fs
 
-    def _fake_kb(query, limit=5):
+    def _fake_kb(query, limit=5, **kwargs):
         return [
             {
                 "store": "knowledge",
