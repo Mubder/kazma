@@ -73,6 +73,31 @@ def _plan_note_for(kind: str, slots: dict, entities: EntitySet) -> str:
             "INTENT ENGINE: If parallel workers are needed, tell the user to use "
             "`/swarm` or the swarm panel. Do not invent a dispatch."
         )
+    if kind == ActKind.CODE_EXEC:
+        return (
+            "INTENT ENGINE: Use `python_exec` for short scripts only. For document "
+            "generation use generate_* tools. For file operations use file_* tools."
+        )
+    if kind == ActKind.FILE_MGMT:
+        return (
+            "INTENT ENGINE: Use `file_list` to see what exists, then `file_*` tools "
+            "for the requested operation. Confirm before bulk deletions."
+        )
+    if kind == ActKind.ANALYSIS:
+        return (
+            "INTENT ENGINE: Use `python_exec` with pandas/matplotlib for data "
+            "analysis and charting. Save outputs via `file_write`."
+        )
+    if kind == ActKind.REMIND:
+        return (
+            "INTENT ENGINE: Use the `schedule_task` tool to set a reminder. "
+            "Confirm the date/time with the user before scheduling."
+        )
+    if kind == ActKind.DOCUMENT_INTEL:
+        return (
+            "INTENT ENGINE: Use `/documents` commands or the document_intel tools "
+            "for ingestion, indexing, and redaction."
+        )
     return f"INTENT ENGINE: {kind} act detected."
 
 

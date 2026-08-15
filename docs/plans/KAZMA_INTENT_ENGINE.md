@@ -1,6 +1,6 @@
 # Kazma Intent Engine — Implementation Spec
 
-**Status:** Ready to implement. This document is the **single source of truth**.
+**Status:** Implemented through Phase 4 (2026-08-15).
 **Date:** 2026-08-15
 **Supersedes:** `docs/plans/UNIVERSAL_INTENT_ROUTER.md` (that plan produced the current costume router; do not implement it).
 **Audience:** A coding agent that has not seen the design conversation. Follow this file only.

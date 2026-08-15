@@ -77,6 +77,15 @@ def classify_turn_sync(
         registry=get_registry(),
     )
 
+    # Record metrics
+    try:
+        from kazma_core.agent.intent.metrics import record_decision
+
+        primary_kind = primary.kind if (primary := max(acts, key=lambda a: a.confidence, default=None)) else "general"
+        record_decision(str(route), str(primary_kind))
+    except Exception:
+        pass
+
     return TurnDecision(
         focus=focus,
         acts=acts,

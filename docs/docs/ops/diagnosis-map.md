@@ -447,3 +447,27 @@ Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document
 3. **Conservative auto-store** (`memory/belief_extractor._apply_beliefs_to_v2`): low-confidence inferred beliefs are dropped post-turn.
 
 **Kill-switch**: `KAZMA_COMMITMENT_ENABLED=0` disables the gate. Check the commitment audit: `SELECT * FROM commitments WHERE act='remind' ORDER BY created_at DESC LIMIT 10`.
+
+## Intent Engine
+
+**Element:** `kazma_core/agent/intent/` — classify_turn → execute/constrain/loop
+
+**Symptoms:**
+- Wrong pipeline triggered (e.g., "build a PDF parser" → document execute)
+- HITL card skipped on document generation
+- Research topic mangled or routed to wrong path
+- Model ignores system-prompt tool guidance
+
+**Diagnosis:**
+1. Check supervisor log for `[Supervisor] Intent Engine: focus=X route=Y acts=Z reason=W`
+2. Verify kill-switches: `KAZMA_INTENT_ENGINE`, `KAZMA_INTENT_EXECUTE`, `KAZMA_INTENT_TIER2` are not `0`
+3. Test classification: `python -c "from kazma_core.agent.intent.classify import classify_turn_sync; d = classify_turn_sync('reproduce this PDF'); print(d.route, [a.kind for a in d.acts], d.reason)"`
+4. If route is unexpected → check `heuristics.py` regex patterns
+5. If execute but no result → check handler registration in `registry.py`
+
+**Key files:**
+- `agent/intent/heuristics.py` — act detection (multi-label)
+- `agent/intent/policy.py` — route decision (execute allowlist)
+- `agent/intent/entities.py` — file resolution
+- `agent/intent/classify.py` — single entry point
+- `agent/intent/handlers/` — execute handlers (document, research, composer)

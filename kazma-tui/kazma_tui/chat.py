@@ -336,6 +336,28 @@ class ChatPanel(Vertical):
                 return
 
             self._messages.append({"role": "user", "content": prompt})
+            # §21 Phase 4: intent engine classify (display-only — the TUI
+            # doesn't go through the supervisor, but the classification
+            # is logged and available for debugging)
+            try:
+                from kazma_core.agent.intent.classify import classify_turn_sync
+                from kazma_core.agent.intent.types import RouteKind
+
+                _td = classify_turn_sync(prompt, messages=self._messages[:-1])
+                _route_icon = {
+                    RouteKind.EXECUTE: "⚡",
+                    RouteKind.CONSTRAIN: "📋",
+                    RouteKind.LOOP: "💬",
+                }.get(_td.route, "❓")
+                _acts_str = ",".join(a.kind for a in _td.acts if a.kind != "general")
+                if _acts_str or _td.route != RouteKind.LOOP:
+                    log.write(
+                        f"\n[dim]{_route_icon} intent: {_td.route.value}"
+                        + (f" [{_acts_str}]" if _acts_str else "")
+                        + f" ({_td.reason})[/]\n"
+                    )
+            except Exception:
+                pass  # TUI intent display is best-effort
             # Send the (capped) conversation history so follow-up turns keep
             # context — previously each turn was a fresh single-message chat
             # while self._messages only fed /context and /export.

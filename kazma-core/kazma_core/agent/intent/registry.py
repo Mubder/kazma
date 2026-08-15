@@ -83,3 +83,9 @@ def _auto_register() -> None:
         _reg_res()
     except Exception as exc:
         logger.warning("[intent_registry] research handler registration failed: %s", exc)
+    try:
+        from kazma_core.agent.intent.handlers.compose import register_composer as _reg_com
+
+        _reg_com()
+    except Exception as exc:
+        logger.warning("[intent_registry] composer registration failed: %s", exc)

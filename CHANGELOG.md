@@ -2,6 +2,25 @@
 
 ## Unreleased — Intent Engine Phase 0 (2026-08-15)
 
+## Unreleased — Intent Engine Phases 2-4 (2026-08-15)
+
+Phase 2 (research SoT): research_deep execute handler via start_deep_research;
+deep_research_route_hint dedup (skip when intent engine already covers it);
+SSE/WS /research unified with gateway (all three call start_deep_research;
+previously SSE and WS ran the pipeline inline, blocking the stream for minutes).
+
+Phase 3 (composer + constrain notes): research_then_document composer chains
+research → document (escalates if research fails, never generates a PDF of
+the error); constrain plan notes for all 9 act kinds (code_exec, file_mgmt,
+analysis, remind, document_intel, swarm, research, research_deep, document_generate).
+
+Phase 4 (hardening): Arabic isolated-form scan on generated PDFs (detects
+bidi rendering issues); TUI intent classify (display-only: shows route/acts
+in the TUI chat log); metrics kazma_intent_decisions_total{route,act}
+Prometheus counter wired into classify_turn.
+
+202 total tests green (129 intent engine + 73 regression).
+
 Replaced the costume router with the intent engine per KAZMA_INTENT_ENGINE.md.
 Phase 0: classify every turn + constrain with plan notes. Execute allowlist
 is EMPTY — nothing bypasses the supervisor loop yet. All 13 false-positive

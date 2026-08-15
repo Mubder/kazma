@@ -214,9 +214,30 @@ async def run_document(decision: TurnDecision, state: dict[str, Any], **ctx: Any
 
             doc = fitz.open(str(op))
             page_count = len(doc)
-            doc.close()
+            # §21 Phase 4: Arabic isolated-form scan — check for rendering
+            # issues (isolated/presentation forms indicate bidi failure)
+            _arabic_issue = False
+            if page_count > 0:
+                sample_text = doc[0].get_text()[:500]
+                doc.close()
+                # Check for isolated Arabic forms (U+FE70-FEFF presentation
+                # forms that indicate the text wasn't properly shaped)
+                isolated_count = sum(
+                    1 for c in sample_text if "\uFE70" <= c <= "\uFEFF"
+                )
+                if isolated_count > 10:  # >10 isolated forms = rendering issue
+                    _arabic_issue = True
+                    logger.warning(
+                        "[intent_document] Arabic isolated forms detected (%d) — "
+                        "possible bidi rendering issue",
+                        isolated_count,
+                    )
+            else:
+                doc.close()
             if page_count < 1:
                 return HandlerResult(ok=False, escalate=True, message="Quality gate: PDF has 0 pages")
+            # Arabic issue doesn't fail the gate (the renderer may handle it
+            # correctly on re-render) but we log it for Phase 4 retry logic
         except Exception:
             pass  # fitz unavailable — size check is sufficient
 
