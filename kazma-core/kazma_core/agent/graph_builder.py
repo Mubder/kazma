@@ -1494,19 +1494,30 @@ async def supervisor_node(
             messages.append({"role": "system", "content": _plan_nudge})
 
     # R4: soft-route deep research intent toward run_research_pipeline
+    # §18 Phase 2: skip when the intent engine's constrain note already
+    # covers research_deep (avoid double-nudging)
     if iteration == 0 and effective_tool_definitions and last_user_content:
-        try:
-            from kazma_core.agent.research_policy import deep_research_route_hint
-
-            route = deep_research_route_hint(last_user_content)
-            if route and not any(
-                m.get("role") == "system"
-                and "DEEP RESEARCH ROUTE" in str(m.get("content", ""))
+        _intent_covers_research = (
+            _decision is not None
+            and any(a.kind == "research_deep" for a in _decision.acts)
+            and any(
+                m.get("role") == "system" and "INTENT ENGINE" in str(m.get("content", ""))
                 for m in messages
-            ):
-                messages.append({"role": "system", "content": route})
-        except Exception:
-            logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
+            )
+        )
+        if not _intent_covers_research:
+            try:
+                from kazma_core.agent.research_policy import deep_research_route_hint
+
+                route = deep_research_route_hint(last_user_content)
+                if route and not any(
+                    m.get("role") == "system"
+                    and "DEEP RESEARCH ROUTE" in str(m.get("content", ""))
+                    for m in messages
+                ):
+                    messages.append({"role": "system", "content": route})
+            except Exception:
+                logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
 
     # ── Steer: hard pause + soft drain, right before the LLM call ────
     # HARD steer: if one is pending, fire a LangGraph interrupt so the

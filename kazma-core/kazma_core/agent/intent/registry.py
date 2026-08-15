@@ -77,3 +77,9 @@ def _auto_register() -> None:
         _reg_doc()
     except Exception as exc:
         logger.warning("[intent_registry] document handler registration failed: %s", exc)
+    try:
+        from kazma_core.agent.intent.handlers.research import register as _reg_res
+
+        _reg_res()
+    except Exception as exc:
+        logger.warning("[intent_registry] research handler registration failed: %s", exc)

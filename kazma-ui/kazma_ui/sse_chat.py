@@ -1001,9 +1001,10 @@ def create_sse_chat_router(
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
-        # Deep research slash (runs pipeline, skips graph)
+        # Deep research slash (§18 Phase 2: unified with gateway — uses
+        # start_deep_research session wrapper, not inline run_research_pipeline)
         if raw_msg.lower().startswith("/research"):
-            from kazma_core.tools.research_pipeline import run_research_pipeline
+            from kazma_core.tools.research_session import start_deep_research
 
             parts = raw_msg.split(maxsplit=2)
             if len(parts) == 1:
@@ -1029,24 +1030,31 @@ def create_sse_chat_router(
                     {"content": f"🔬 Deep research starting: **{topic}**…\n\n"},
                 )
                 try:
-                    stages: list[str] = []
-
-                    async def _progress_sse(stage: str, message: str) -> None:
-                        stages.append(f"_{stage}: {message}_\n")
-
-                    out = await run_research_pipeline(
-                        topic,
-                        depth=depth,
-                        max_sources=8,
-                        progress_cb=_progress_sse,
-                        export_docx=True,
-                    )
-                    if stages:
+                    sess = await start_deep_research(topic, depth=depth, max_sources=8)
+                    if sess and sess.status not in ("error",):
                         yield _sse_frame(
                             "token",
-                            {"content": "\n".join(stages[-12:]) + "\n"},
+                            {
+                                "content": (
+                                    f"✅ Research session created: `{sess.id}`\n\n"
+                                    f"The pipeline is running in background.\n"
+                                    f"Track progress: Research panel or "
+                                    f"`/api/research/sessions/{sess.id}`\n\n"
+                                    f"Use `/research status` to check completion."
+                                )
+                            },
                         )
-                    yield _sse_frame("token", {"content": out})
+                    else:
+                        err = getattr(sess, "error", "") or "unknown"
+                        yield _sse_frame(
+                            "token",
+                            {"content": f"⚠️ Research failed to start: {err}"},
+                        )
+                except Exception as exc:
+                    yield _sse_frame(
+                        "token",
+                        {"content": f"⚠️ Research error: {exc}"},
+                    )
                     try:
                         session.add_message("assistant", out)
                         _get_store().put(session)

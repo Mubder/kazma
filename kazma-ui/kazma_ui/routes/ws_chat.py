@@ -969,38 +969,32 @@ def create_ws_chat_router(
                                     ).to_dict()
                                 )
 
-                                from kazma_core.tools.research_pipeline import (
-                                    run_research_pipeline,
+                                # §18 Phase 2: unified with gateway — uses
+                                # start_deep_research, not inline pipeline
+                                from kazma_core.tools.research_session import (
+                                    start_deep_research,
                                 )
 
-                                async def _progress(stage: str, message: str) -> None:
-                                    await websocket.send_json(
-                                        TelemetryEvent(
-                                            type="tool_start",
-                                            data={
-                                                "tool_name": f"research:{stage}",
-                                                "inputs": message[:200],
-                                            },
-                                            thread_id=thread_id,
-                                        ).to_dict()
-                                    )
-
-                                out = await run_research_pipeline(
-                                    topic,
-                                    depth=depth,
-                                    max_sources=8,
-                                    progress_cb=_progress,
-                                    export_docx=True,
+                                sess = await start_deep_research(
+                                    topic, depth=depth, max_sources=8
+                                )
+                                _ws_out = (
+                                    f"✅ Research session created: `{sess.id}`\n\n"
+                                    f"The pipeline is running in background.\n"
+                                    f"Track progress: Research panel or "
+                                    f"`/api/research/sessions/{sess.id}`"
+                                    if sess and sess.status not in ("error",)
+                                    else f"⚠️ Research failed: {getattr(sess, 'error', 'unknown')}"
                                 )
                                 await websocket.send_json(
                                     TelemetryEvent(
                                         type="llm_delta",
-                                        data={"content": out},
+                                        data={"content": _ws_out},
                                         thread_id=thread_id,
                                     ).to_dict()
                                 )
                                 try:
-                                    session.add_message("assistant", out)
+                                    session.add_message("assistant", _ws_out)
                                     get_session_manager().put(session)
                                 except Exception:
                                     pass

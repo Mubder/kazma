@@ -15,11 +15,11 @@ __all__ = ["decide"]
 
 logger = logging.getLogger(__name__)
 
-# Phase 1: document_generate added to the execute allowlist.
-# Phase 2: add "research_deep"
+# Phase 2: research_deep added.
 # Phase 3: add composer "research_then_document"
 _PHASE_EXECUTE_ALLOWLIST: frozenset[str] = frozenset({
     ActKind.DOCUMENT_GENERATE,
+    ActKind.RESEARCH_DEEP,
 })
 
 _SOFT_KINDS = frozenset({
