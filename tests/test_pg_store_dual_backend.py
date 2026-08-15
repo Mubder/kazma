@@ -72,8 +72,10 @@ def test_session_manager_sqlite_roundtrip(tmp_path, monkeypatch):
 
 
 def test_task_store_pg_flag(monkeypatch):
-    monkeypatch.setenv("KAZMA_DATABASE_URL", "postgresql://u:p@localhost/db")
-    monkeypatch.delenv("KAZMA_DB_BACKEND", raising=False)
+    # Set the backend flag directly — setting KAZMA_DATABASE_URL would trip the
+    # root production-DB shield (which strips the DSN and reverts the backend
+    # to sqlite). use_postgres() reads the flag via is_postgres().
+    monkeypatch.setenv("KAZMA_DB_BACKEND", "postgres")
     # Don't open real pool in unit test — only verify backend detection path
     from kazma_core.db.pg_helpers import use_postgres
 
