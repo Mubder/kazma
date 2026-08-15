@@ -244,6 +244,45 @@ def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+# F7: cap for the Majlis fast-path. A greeting/farewell longer than this is
+# assumed to carry a real request after the pleasantry and must reach the graph.
+_MAJLIS_FAST_PATH_MAX_LEN = 60
+
+
+def _majlis_fast_path_reply(text: str) -> str | None:
+    """Return a canned cultural reply iff *text* is a SHORT pure greeting/farewell.
+
+    F7: only short-circuit when the message is ONLY a greeting/farewell. A
+    greeting followed by a real request ("صباح الخير، ابحث لي عن ...") must
+    reach the graph, so this returns None for long messages. Returns None to
+    fall through to the normal agent path. Fail-open: any error returns None.
+
+    Note: detect_intent/get_greeting_response are methods on ConversationPacing
+    (not module functions); the prior inline import of them as module symbols
+    raised ImportError and silently disabled this fast-path entirely.
+    """
+    try:
+        from kazma_core.cultural_context import CulturalContext
+        from kazma_core.pacing import ConversationPacing, Intent
+
+        pacing = ConversationPacing()
+        intent = pacing.detect_intent(text)
+        if intent not in (Intent.GREETING, Intent.FAREWELL):
+            return None
+        if len((text or "").strip()) > _MAJLIS_FAST_PATH_MAX_LEN:
+            return None
+        if intent == Intent.FAREWELL:
+            return "في أمان الله 👋"
+        cc = CulturalContext()
+        return pacing.get_greeting_response(
+            dialect="kw",
+            is_ramadan=cc.state.is_ramadan,
+            is_eid=cc.state.is_eid,
+        )
+    except Exception:
+        return None
+
+
 def create_graph_handler(
     graph: Any = None,
     manager: Any = None,  # GatewayManager (avoid circular import)
@@ -1126,42 +1165,21 @@ def create_graph_handler(
 
         # ── Majlis cultural fast-path ─────────────────────────────
         # Detect pure greetings/farewells before invoking the LLM.
-        # Instant (< 50ms), zero token cost, culturally aware.
-        try:
-            from kazma_core.pacing import detect_intent, Intent, get_greeting_response
-            from kazma_core.cultural_context import CulturalContext
-
-            intent = detect_intent(msg.text)
-            # F7: only short-circuit when the message is ONLY a greeting/farewell.
-            # A greeting followed by a real request ("صباح الخير، ابحث لي عن ...")
-            # must reach the graph, not be swallowed by the canned reply.
-            _fast_path_len = len((msg.text or "").strip())
-            if intent in (Intent.GREETING, Intent.FAREWELL) and _fast_path_len <= 60:
-                cc = CulturalContext()
-                if intent == Intent.GREETING:
-                    greeting = get_greeting_response(
-                        dialect="kw",
-                        is_ramadan=cc.state.is_ramadan,
-                        is_eid=cc.state.is_eid,
-                    )
-                    reply_text = greeting
-                else:
-                    # Farewell
-                    reply_text = "في أمان الله 👋"
-
-                ctx = msg.context_metadata
-                tg_text, tg_ctx = _prepare_tg_outbound(msg, reply_text, ctx)
-                await manager.send(
-                    OutboundMessage(
-                        target_id=_build_target_id(msg.platform, ctx),
-                        text=tg_text,
-                        context_metadata=tg_ctx,
-                    )
+        # Instant (< 50ms), zero token cost, culturally aware. F7: only
+        # short pure greetings short-circuit (see _majlis_fast_path_reply).
+        _majlis_reply = _majlis_fast_path_reply(msg.text)
+        if _majlis_reply is not None:
+            ctx = msg.context_metadata
+            tg_text, tg_ctx = _prepare_tg_outbound(msg, _majlis_reply, ctx)
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=tg_text,
+                    context_metadata=tg_ctx,
                 )
-                logger.info("[agent-handler] Majlis fast-path: %s (thread=%s)", intent.name, thread_id)
-                return  # skip LLM — instant cultural greeting/farewell
-        except Exception as exc:
-            logger.debug("[agent-handler] Majlis fast-path unavailable: %s", exc)
+            )
+            logger.info("[agent-handler] Majlis fast-path (thread=%s)", thread_id)
+            return  # skip LLM — instant cultural greeting/farewell
 
         # ── Serialize per thread_id ────────────────────────────────
         # Two concurrent messages for the same thread_id must NOT interleave

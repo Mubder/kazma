@@ -11,7 +11,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -350,3 +350,72 @@ class TestStreamContent:
         assert len(error_frames) == 1
         assert "LLM crashed" not in error_frames[0]
         assert "error" in error_frames[0].lower()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# F6 — /research exception path (audit fix)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestResearchSlashErrorPath:
+    """F6: the /research exception branch must yield a real error frame.
+
+    Before the fix the except handler referenced an undefined ``out``
+    (NameError swallowed by a bare except) and carried a duplicate,
+    unreachable except clause. Now the branch yields the actual error
+    text and still terminates with a done frame.
+    """
+
+    def _client(self):
+        graph = MagicMock()
+        router = create_sse_chat_router(graph=graph, checkpointer=None)
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app)
+
+    def test_research_exception_yields_error_frame(self):
+        client = self._client()
+        with patch(
+            "kazma_core.tools.research_session.start_deep_research",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("SearXNG unreachable"),
+        ):
+            resp = client.post(
+                "/api/chat/stream",
+                json={"message": "/research deep quantum computing"},
+            )
+        assert resp.status_code == 200
+        text = resp.text
+        # The real exception message reaches the client in a token frame.
+        assert "Research error" in text
+        assert "SearXNG unreachable" in text
+        # The stream still terminates cleanly with a done frame.
+        assert "event: done" in text
+
+    def test_research_error_status_yields_error_frame(self):
+        """start_deep_research returns a session in error status."""
+        client = self._client()
+        sess = MagicMock()
+        sess.status = "error"
+        sess.error = "rate limited"
+        with patch(
+            "kazma_core.tools.research_session.start_deep_research",
+            new_callable=AsyncMock,
+            return_value=sess,
+        ):
+            resp = client.post(
+                "/api/chat/stream",
+                json={"message": "/research deep solar energy"},
+            )
+        assert resp.status_code == 200
+        text = resp.text
+        assert "Research failed to start" in text
+        assert "rate limited" in text
+        assert "event: done" in text
+
+    def test_research_usage_without_topic(self):
+        """Bare /research with no topic yields the usage hint."""
+        client = self._client()
+        resp = client.post("/api/chat/stream", json={"message": "/research"})
+        assert resp.status_code == 200
+        assert "Usage" in resp.text

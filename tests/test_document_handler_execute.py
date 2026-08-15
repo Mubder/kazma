@@ -291,3 +291,115 @@ class TestInlineContent:
 
         result = await run_document(decision, state, tool_executor=executor, llm=None)
         assert result.ok
+
+
+class TestDeliveryRouting:
+    """F8: delivery must route through the send_file tool (execute path),
+    never the raw send_file_message function."""
+
+    def _decision_with_delivery(self, rf):
+        acts = (IntentAct(
+            kind=ActKind.DOCUMENT_GENERATE,
+            confidence=0.90,
+            slots={"format": "pdf", "deliver_to": "telegram"},
+        ),)
+        return TurnDecision(
+            focus="normal",
+            acts=acts,
+            entities=EntitySet(files=(rf,)),
+            route=RouteKind.EXECUTE,
+            handler="document_generate",
+            reason="test",
+        )
+
+    @pytest.mark.asyncio
+    async def test_delivery_routes_through_send_file(self, hitl_off, tmp_path):
+        pdf = tmp_path / "src.pdf"
+        pdf.write_bytes(b"%PDF-test")
+
+        executor = FakeExecutor(results={
+            "file_write": {"content": "OK", "is_error": False},
+            "generate_pdf": {"content": f"Saved to: {tmp_path}/out.pdf", "is_error": False},
+            "send_file": {"content": "Sent file to chat", "is_error": False},
+        })
+        (tmp_path / "out.pdf").write_bytes(b"x" * 300)
+
+        rf = ResolvedFile(path=str(pdf), filename="src.pdf")
+        decision = self._decision_with_delivery(rf)
+
+        with patch(
+            "kazma_core.agent.intent.handlers.document._read_pdf_raw",
+            return_value="test content",
+        ), patch(
+            "kazma_core.agent.intent.handlers.document._resolve_delivery_target",
+            return_value="telegram:12345",
+        ), patch(
+            "kazma_core.tools.send_message.send_file_message",
+            new_callable=AsyncMock,
+        ) as direct_send:
+            result = await run_document(decision, {}, tool_executor=executor, llm=None)
+
+        assert result.ok, f"Handler failed: {result.message}"
+        tool_names = [c[0] for c in executor.calls]
+        assert "send_file" in tool_names, f"send_file not called via executor: {tool_names}"
+        # The send_file call carries the generated output path + a caption.
+        send_calls = [c for c in executor.calls if c[0] == "send_file"]
+        assert send_calls[0][1].get("file_path", "").endswith("out.pdf")
+        assert "caption" in send_calls[0][1]
+        # The raw outbound function is never invoked directly.
+        direct_send.assert_not_called()
+        assert "Delivered via telegram" in result.message
+
+    @pytest.mark.asyncio
+    async def test_delivery_no_target_saves_locally(self, hitl_off, tmp_path):
+        """When no delivery target resolves, the file is saved locally (no send)."""
+        pdf = tmp_path / "src.pdf"
+        pdf.write_bytes(b"%PDF-test")
+
+        executor = FakeExecutor(results={
+            "file_write": {"content": "OK", "is_error": False},
+            "generate_pdf": {"content": f"Saved to: {tmp_path}/out.pdf", "is_error": False},
+        })
+        (tmp_path / "out.pdf").write_bytes(b"x" * 300)
+
+        rf = ResolvedFile(path=str(pdf), filename="src.pdf")
+        decision = self._decision_with_delivery(rf)
+
+        with patch(
+            "kazma_core.agent.intent.handlers.document._read_pdf_raw",
+            return_value="test content",
+        ), patch(
+            "kazma_core.agent.intent.handlers.document._resolve_delivery_target",
+            return_value="",
+        ):
+            result = await run_document(decision, {}, tool_executor=executor, llm=None)
+
+        assert result.ok
+        tool_names = [c[0] for c in executor.calls]
+        assert "send_file" not in tool_names
+        assert "file saved locally" in result.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_deliver_slot_skips_delivery(self, hitl_off, tmp_path):
+        """Without a deliver_to slot the handler does not attempt any send."""
+        pdf = tmp_path / "src.pdf"
+        pdf.write_bytes(b"%PDF-test")
+
+        executor = FakeExecutor(results={
+            "file_write": {"content": "OK", "is_error": False},
+            "generate_pdf": {"content": f"Saved to: {tmp_path}/out.pdf", "is_error": False},
+        })
+        (tmp_path / "out.pdf").write_bytes(b"x" * 300)
+
+        rf = ResolvedFile(path=str(pdf), filename="src.pdf")
+        decision = _decision(files=[rf])  # no deliver_to slot
+
+        with patch(
+            "kazma_core.agent.intent.handlers.document._read_pdf_raw",
+            return_value="test content",
+        ):
+            result = await run_document(decision, {}, tool_executor=executor, llm=None)
+
+        assert result.ok
+        tool_names = [c[0] for c in executor.calls]
+        assert "send_file" not in tool_names
