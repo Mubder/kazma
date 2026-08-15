@@ -61,6 +61,25 @@ def uvicorn_server():
         server.should_exit = True
         thread.join(timeout=3.0)
         cs.close()
+        # Reset the GLOBAL shutdown event (the app's lifespan shutdown fired
+        # signal_shutdown(), which stays set and breaks later SSE tests) and
+        # the process-wide singletons initialized against the temp config.
+        try:
+            from kazma_core.shutdown import reset_shutdown, uninstall_shutdown_signal_hooks
+            uninstall_shutdown_signal_hooks()
+            reset_shutdown()
+        except Exception:
+            pass
+        for _reset in (
+            lambda: __import__("kazma_ui.session_manager", fromlist=["reset_session_manager"]).reset_session_manager(),
+            lambda: __import__("kazma_ui.services", fromlist=["reset_swarm_service"]).reset_swarm_service(),
+            lambda: __import__("kazma_core.config_store", fromlist=["reset_config_store"]).reset_config_store(),
+            lambda: __import__("kazma_core.model_registry", fromlist=["reset_model_registry"]).reset_model_registry(),
+        ):
+            try:
+                _reset()
+            except Exception:
+                pass
 
     if orig_secret is not None:
         os.environ["KAZMA_SECRET"] = orig_secret
