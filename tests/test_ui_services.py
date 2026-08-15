@@ -95,23 +95,30 @@ def test_set_sse_bus():
 
 
 def test_fallback_when_no_public_methods():
-    mock_engine = MagicMock(spec=[])  # no methods
-    mock_worker = MagicMock()
-    del mock_worker.to_dict
-    mock_worker.name = "brain"
-    mock_worker._running = True
-    mock_worker.busy = False
-    mock_worker.model = "gpt"
-    mock_worker.provider = "openai"
-    mock_worker.worker_type = "in_process"
-    mock_worker.role = "assistant"
-    mock_worker.bot_token = None
-    mock_worker.added_at = None
-    mock_worker.last_task = None
-    mock_worker.last_heartbeat = None
-    mock_worker.logs = []
-    mock_worker.capabilities = None
-    mock_engine._workers = {"brain": mock_worker}
+    """Worker without to_dict() serializes via the attribute fallback."""
+    from types import SimpleNamespace
+
+    # A plain namespace: no to_dict (unlike MagicMock, which auto-creates
+    # attributes on access and would defeat the hasattr check).
+    mock_worker = SimpleNamespace(
+        name="brain",
+        _running=True,
+        busy=False,
+        model="gpt",
+        provider="openai",
+        worker_type="in_process",
+        role="assistant",
+        bot_token=None,
+        added_at=None,
+        last_task=None,
+        last_heartbeat=None,
+        logs=[],
+        capabilities=None,
+    )
+    mock_engine = MagicMock()
+    # The service reads workers via the public engine.list_workers() API only
+    # (the engine._workers fallback was removed).
+    mock_engine.list_workers.return_value = [mock_worker]
 
     with patch("kazma_core.swarm.get_swarm_engine", return_value=mock_engine):
         svc = get_swarm_service()
@@ -119,6 +126,7 @@ def test_fallback_when_no_public_methods():
         workers = svc.list_workers()
         assert len(workers) == 1
         assert workers[0]["name"] == "brain"
+        assert workers[0]["status"] == "online"
 
 
 def test_is_started():

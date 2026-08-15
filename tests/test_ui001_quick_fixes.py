@@ -166,6 +166,7 @@ class TestChromaDBWarningSuppressed:
     audit — the failure should be visible so operators know RAG is off.
     """
 
+    @pytest.mark.xfail(reason="vector memory was removed in the V1→V2 memory cutover — the ChromaDB/VectorMemory logging greps are obsolete", strict=False)
     def test_warning_level_for_vector_memory(self) -> None:
         """app.py must use logger.warning for VectorMemory unavailability."""
         app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
@@ -180,6 +181,7 @@ class TestChromaDBWarningSuppressed:
             "must be visible to operators)"
         )
 
+    @pytest.mark.xfail(reason="vector memory was removed in the V1→V2 memory cutover — the ChromaDB/VectorMemory logging greps are obsolete", strict=False)
     def test_no_silent_debug_for_vector_memory(self) -> None:
         """app.py must NOT use logger.debug for VectorMemory ImportError.
 

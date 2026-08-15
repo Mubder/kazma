@@ -136,11 +136,8 @@ async def test_tool_worker_binds_state_thread_id_for_yolo(monkeypatch):
         interrupted["called"] = True
         raise AssertionError(f"interrupt should not run under YOLO: {payload}")
 
-    monkeypatch.setattr(
-        "kazma_core.agent.graph_builder.interrupt",
-        _fake_interrupt,
-    )
-    # interrupt is imported from langgraph inside the function path — patch langgraph too
+    # interrupt is imported from langgraph INSIDE the function (local import,
+    # not a module-level graph_builder attribute) — patch the source module.
     import langgraph.types as lg_types
 
     monkeypatch.setattr(lg_types, "interrupt", _fake_interrupt)
