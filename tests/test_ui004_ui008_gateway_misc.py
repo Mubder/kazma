@@ -196,42 +196,6 @@ class TestChromaDBDebugLevel:
     causing silent RAG disablement). Elevated to WARNING per the memory audit.
     """
 
-    @pytest.mark.xfail(reason="vector memory (memory/vector_store.py, vector_memory wiring) was removed in the V1->V2 memory cutover — obsolete grep", strict=False)
-    def test_app_py_uses_warning_for_vector_memory(self) -> None:
-        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
-        vm_idx = app_source.find("[VectorMemory] Not available")
-        assert vm_idx != -1
-        context = app_source[max(0, vm_idx - 120) : vm_idx + 50]
-        assert "logger.warning" in context, (
-            "VectorMemory ImportError must use logger.warning (elevated from "
-            "debug per memory audit — RAG disablement must be visible)"
-        )
-
-    @pytest.mark.xfail(reason="vector memory (memory/vector_store.py, vector_memory wiring) was removed in the V1->V2 memory cutover — obsolete grep", strict=False)
-    def test_vector_store_uses_warning_for_chromadb_failures(self) -> None:
-        """vector_store.py may use logger.warning for ChromaDB failures.
-
-        Non-ImportError failures (corrupt DB, disk permission errors) SHOULD
-        be visible at WARNING level. The old ImportError-only warning was
-        broadened to catch all ChromaDB init failures per the memory audit.
-        """
-        vs_source = (
-            Path(__file__).resolve().parent.parent
-            / "kazma-core"
-            / "kazma_core"
-            / "memory"
-            / "vector_store.py"
-        ).read_text(encoding="utf-8")
-        # The warning is expected for non-import failures now.
-        assert "logger.warning" in vs_source, (
-            "vector_store.py should use logger.warning for ChromaDB failures "
-            "(non-import errors like corrupt DB, disk permission, etc.)"
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# VAL-UI-008: Workspace path is config-relative (not drive root)
-# ══════════════════════════════════════════════════════════════════════════
 
 
 class TestWorkspacePathConfigRelative:
