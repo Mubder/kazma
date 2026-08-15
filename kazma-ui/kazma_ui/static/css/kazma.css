@@ -374,9 +374,15 @@ button { cursor: pointer; font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--sp-4);
+  /* Horizontal-only padding + a FIXED height (not min-height) so this
+     header's bottom border lands exactly on --header-height like the
+     page-header's does. The old 16px vertical padding + the 38px v5 logo
+     overflowed the 56px minimum (~70px actual) and the two separators
+     drifted apart — they live in separate paint contexts (fixed sidebar
+     vs .main-content), so nothing else keeps them in sync. */
+  padding: 0 var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
-  min-height: var(--header-height);
+  height: var(--header-height);
 }
 .logo {
   display: flex;
