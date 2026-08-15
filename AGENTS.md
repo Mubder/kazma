@@ -976,6 +976,12 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 
 ## Server Management
 
+> **RULE (user directive, 2026-08-15): NEVER start or restart the Kazma server.**
+> The user ALWAYS starts it themselves. Do not run uvicorn, do not kill the
+> running server to "apply changes", do not restart it as part of any task.
+> After code changes, just tell the user a restart is needed — they will do it.
+
+
 ```powershell
 # Kill existing server
 Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } | ForEach-Object { Stop-Process -Id $_.Id -Force }
