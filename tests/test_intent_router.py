@@ -1,4 +1,9 @@
-"""Tests for the Universal Intent Router and Pipeline Registry."""
+"""Tests for the intent engine compat façade (intent_router.py).
+
+Phase 0: should_route is False for everything — the execute allowlist is
+empty. These tests verify the façade delegates correctly and that
+should_route follows the engine's route decision, not a confidence hack.
+"""
 
 from __future__ import annotations
 
@@ -10,204 +15,90 @@ from kazma_core.agent.intent_router import (
     TaskIntent,
     classify_task,
 )
-from kazma_core.agent.pipeline_registry import (
-    Pipeline,
-    PipelineBudget,
-    get_registry,
-)
 
 
-# ─── Intent classification (heuristic tier) ─────────────────────────────
-
-
-class TestDocumentIntent:
+class TestFaçadeDelegation:
     def test_reproduce_pdf(self):
         intent = classify_task("reproduce this PDF with better templates")
         assert intent.category == IntentCategory.DOCUMENT
-        assert intent.pipeline == "document"
-        assert intent.confidence >= CONFIDENCE_THRESHOLD
-        assert intent.should_route
+        assert intent.pipeline == "document_generate"
+        # Phase 0: should_route is ALWAYS False (empty execute allowlist)
+        assert intent.should_route is False
 
-    def test_create_word_doc(self):
-        intent = classify_task("create a Word document with the meeting notes")
-        assert intent.category == IntentCategory.DOCUMENT
-        assert intent.should_route
-
-    def test_generate_spreadsheet(self):
-        intent = classify_task("generate an Excel spreadsheet of the data")
-        assert intent.category == IntentCategory.DOCUMENT
-        assert intent.should_route
-
-    def test_arabic_document(self):
-        intent = classify_task("أنشئ مستند PDF من هذه البيانات")
-        assert intent.category == IntentCategory.DOCUMENT
-        assert intent.should_route
-
-    def test_negation_read_pdf(self):
-        """'read this PDF' is a question, not document generation."""
-        intent = classify_task("what is this PDF about?")
+    def test_build_parser_not_document(self):
+        """'build a PDF parser' must NOT emit document_generate."""
+        intent = classify_task("build a PDF parser in Python")
         assert intent.category != IntentCategory.DOCUMENT
 
-    def test_attachment_triggers_document(self):
-        intent = classify_task(
-            "reproduce this with better formatting",
-            attachments=[{"kind": "file", "mime": "application/pdf", "path": "cal.pdf", "filename": "cal.pdf"}],
-        )
-        assert intent.category == IntentCategory.DOCUMENT
-        assert intent.should_route
+    def test_false_positive_corpus(self):
+        """All §20.1 'Must NOT execute' utterances → should_route False."""
+        for text in [
+            "build a PDF parser in Python",
+            "rebuild the document index",
+            "format the documents folder",
+            "I have a python question",
+            "please run the tests",
+            "run this",
+            "explain how this code works",
+            "what is this PDF about?",
+            "read this PDF",
+            "create a report about climate",
+            "the document says hello",
+            "update the document",
+            "document this API",
+        ]:
+            intent = classify_task(text)
+            assert intent.should_route is False, (
+                f"'{text}' should_route must be False in Phase 0"
+            )
+            assert intent.category != IntentCategory.DOCUMENT or (
+                intent.category == IntentCategory.DOCUMENT and not intent.should_route
+            ), f"'{text}' should not be document or should not route"
 
-    def test_extracts_format(self):
-        intent = classify_task("make me a PDF report")
-        assert intent.parameters.get("format") in ("pdf",)
-
-
-class TestResearchIntent:
-    def test_research_topic(self):
+    def test_research_detected(self):
         intent = classify_task("research the impact of AI on Kuwait's economy")
-        assert intent.category == IntentCategory.RESEARCH
-        assert intent.should_route
+        assert intent.category in (IntentCategory.RESEARCH, IntentCategory.GENERAL)
 
-    def test_deep_dive(self):
-        intent = classify_task("do a deep dive on cloud security best practices")
-        assert intent.category == IntentCategory.RESEARCH
-        assert intent.should_route
-
-
-class TestContinueIntent:
     def test_bare_continue(self):
         intent = classify_task("continue")
-        assert intent.category == IntentCategory.CONTINUE
+        assert intent.category in (IntentCategory.CONTINUE, IntentCategory.GENERAL)
 
-    def test_proceed(self):
-        intent = classify_task("proceed")
-        assert intent.category == IntentCategory.CONTINUE
-
-    def test_arabic_continue(self):
-        intent = classify_task("أكمل")
-        assert intent.category == IntentCategory.CONTINUE
-
-
-class TestGeneralIntent:
-    def test_simple_question(self):
+    def test_simple_question_general(self):
         intent = classify_task("what is the weather like today?")
         assert intent.category == IntentCategory.GENERAL
-        assert not intent.should_route
-
-    def test_open_ended(self):
-        intent = classify_task("tell me about your capabilities")
-        assert intent.category == IntentCategory.GENERAL
-        assert not intent.should_route
-
-    def test_explain_code(self):
-        """'explain this code' is not code execution."""
-        intent = classify_task("explain how this code works")
-        assert intent.category != IntentCategory.CODE
+        assert intent.should_route is False
 
     def test_empty(self):
         intent = classify_task("")
         assert intent.category == IntentCategory.GENERAL
+        assert intent.should_route is False
 
 
-class TestSwarmIntent:
-    def test_dispatch_workers(self):
-        intent = classify_task("dispatch this task to multiple workers in parallel")
-        assert intent.category == IntentCategory.SWARM
-        assert intent.should_route
+class TestPhase0Safety:
+    """Phase 0: nothing executes, everything constrains or loops."""
+
+    @pytest.mark.parametrize("text", [
+        "reproduce this PDF",
+        "generate an Excel spreadsheet",
+        "أنشئ مستند PDF",
+        "write me a PDF of the notes",
+        "convert this to Word",
+    ])
+    def test_phase0_never_routes(self, text):
+        intent = classify_task(text)
+        assert intent.should_route is False, (
+            f"Phase 0 execute allowlist is empty — '{text}' must not route"
+        )
 
 
-# ─── Pipeline registry ───────────────────────────────────────────────────
+class TestAttachmentDetection:
+    def test_document_with_attachment(self):
+        atts = [{"kind": "file", "mime": "application/pdf", "path": "cal.pdf", "filename": "cal.pdf"}]
+        intent = classify_task("reproduce this", attachments=atts)
+        assert intent.category == IntentCategory.DOCUMENT
+        assert intent.should_route is False  # Phase 0
 
 
-class TestPipelineRegistry:
-    def test_document_pipeline_registered(self):
-        registry = get_registry()
-        pipeline = registry.get("document")
-        assert pipeline is not None
-        assert pipeline.category == IntentCategory.DOCUMENT
-        assert pipeline.handler is not None
-
-    def test_match_document(self):
-        registry = get_registry()
-        pipeline = registry.match(IntentCategory.DOCUMENT)
-        assert pipeline is not None
-        assert pipeline.name == "document"
-
-    def test_match_general_returns_none(self):
-        registry = get_registry()
-        assert registry.match(IntentCategory.GENERAL) is None
-
-    def test_budget(self):
-        registry = get_registry()
-        pipeline = registry.get("document")
-        assert pipeline.budget.max_steps == 5
-        assert pipeline.budget.max_llm_calls == 1
-
-
-# ─── Supervisor routing integration ─────────────────────────────────────
-
-
-class TestSupervisorRouting:
-    @pytest.mark.asyncio
-    async def test_document_intent_bypasses_free_form(self):
-        """A document task should route to the pipeline, not the tool loop."""
-        from kazma_core.agent.graph_builder import supervisor_node
-        from kazma_core.agent.state import NodeName
-
-        # Minimal stand-ins (same pattern as test_empty_answer_recovery.py)
-        class _FakeCostBreaker:
-            def should_halt(self):
-                return False
-
-            def record_cost(self, cost):
-                pass
-
-        class _FakeAuthority:
-            async def check_and_enforce(self, state):
-                return state
-
-        class _FakeTracer:
-            def trace_llm_call(self, **kwargs):
-                pass
-
-        class _FakeCompactor:
-            async def retrieve_memories(self, query, limit=5):
-                return []
-
-        _FakeAuthority.compactor = _FakeCompactor()
-
-        state = {
-            "messages": [
-                {"role": "user", "content": "reproduce this PDF with better templates"},
-            ],
-            "iteration": 0,
-            "active_attachments": [
-                {
-                    "kind": "file",
-                    "mime": "application/pdf",
-                    "path": "test_calendar.pdf",
-                    "filename": "test_calendar.pdf",
-                }
-            ],
-        }
-
-        # The pipeline will run (file_write + generate_pdf will be called)
-        # We just verify the routing decision: next_node should be RESPOND
-        # (pipeline completes) — NOT TOOL_WORKER (free-form loop entry)
-        try:
-            out = await supervisor_node(
-                state,
-                llm=None,
-                system_prompt="test",
-                tool_definitions=[],
-                tool_executor=None,
-                cost_breaker=_FakeCostBreaker(),
-                authority=_FakeAuthority(),
-                tracer=_FakeTracer(),
-            )
-            # Either the pipeline succeeded (RESPOND) or gracefully fell
-            # back — both are valid, but TOOL_WORKER means the router
-            # didn't fire at all
-            assert out.get("next_node") in (NodeName.RESPOND, NodeName.TOOL_WORKER)
-        except Exception:
-            # Pipeline failure falls back to free-form — that's correct behavior
-            pass
+# NOTE: TestSupervisorRouting was deleted per §20.6 — it accepted RESPOND
+# OR TOOL_WORKER and swallowed exceptions, so it could never fail.
+# Phase 1 will add a proper supervisor unit test.

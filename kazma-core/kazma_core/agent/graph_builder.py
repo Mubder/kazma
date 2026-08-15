@@ -804,62 +804,91 @@ async def supervisor_node(
 
         intent_patch["intent_mode"] = _intent_mode
 
-        # ── Universal Intent Router (industry-level task routing) ────
-        # Classify the task TYPE (document/research/code/swarm/analysis)
-        # and route to a structured pipeline when confident. Structured
-        # tasks never enter the free-form tool loop — the model is the
-        # content engine, not the execution planner.
-        if iteration == 0 and _intent_mode not in ("continue", "cleanup", "shift"):
+        # ── Intent Engine (§14 of KAZMA_INTENT_ENGINE.md) ─────────────
+        # Classify every turn (focus + acts + entities) and write the
+        # decision onto SupervisorState. Route is execute/constrain/loop.
+        # Phase 0: execute allowlist is EMPTY — constrains only.
+        _decision = None
+        if iteration == 0:
             try:
-                from kazma_core.agent.intent_router import classify_task
+                from kazma_core.agent.intent.classify import classify_turn
+                from kazma_core.agent.intent.config import intent_engine_enabled
 
-                _task_intent = classify_task(
-                    last_user_content,
-                    messages=messages,
-                    attachments=state.get("active_attachments"),
-                    llm=llm,
-                )
-                if _task_intent.should_route:
-                    from kazma_core.agent.pipeline_registry import get_registry
-
-                    _pipeline = get_registry().match(_task_intent.category)
-                    if _pipeline is not None:
-                        logger.info(
-                            "[Supervisor] Intent Router: category=%s pipeline=%s "
-                            "confidence=%.2f reason=%s — routing to pipeline",
-                            _task_intent.category,
-                            _pipeline.name,
-                            _task_intent.confidence,
-                            _task_intent.reason,
-                        )
+                if intent_engine_enabled():
+                    _atts = list(state.get("active_attachments") or [])
+                    if not _atts:
                         try:
-                            _pipeline_result = await _pipeline.handler(
-                                _task_intent, state, llm=llm,
-                                tool_executor=tool_executor,
+                            from kazma_core.agent.turn_input import extract_active_attachments
+
+                            _atts = extract_active_attachments(
+                                messages, user_text=last_user_content
                             )
-                        except Exception as _pipe_exc:
-                            logger.warning(
-                                "[Supervisor] Pipeline '%s' failed: %s — falling back to free-form",
-                                _pipeline.name,
-                                _pipe_exc,
-                            )
-                        else:
-                            return {
-                                "messages": messages
-                                + [{"role": "assistant", "content": _pipeline_result}],
-                                "next_node": NodeName.RESPOND,
-                                "iteration": iteration + 1,
-                                "intent_mode": "normal",
-                            }
-                    else:
-                        logger.debug(
-                            "[Supervisor] Intent Router: category=%s but no pipeline registered",
-                            _task_intent.category,
-                        )
-            except Exception as _router_exc:
-                logger.debug(
-                    "[Supervisor] Intent Router failed (non-fatal): %s", _router_exc
-                )
+                        except Exception:
+                            _atts = []
+                    _decision = await classify_turn(
+                        last_user_content,
+                        messages=messages,
+                        attachments=_atts,
+                        task_status=_prev_status,
+                        task_goal_summary=_prev_goal,
+                        llm=llm,
+                        use_embedding_drift=(iteration == 0),
+                    )
+                    _intent_mode = _decision.focus
+                    intent_patch["intent_mode"] = _decision.focus
+                    intent_patch["intent_route"] = str(_decision.route)
+                    intent_patch["intent_acts"] = [
+                        {"kind": a.kind, "confidence": a.confidence, "slots": a.slots, "source": a.source}
+                        for a in _decision.acts
+                    ]
+                    intent_patch["intent_reason"] = _decision.reason
+                    logger.info(
+                        "[Supervisor] Intent Engine: focus=%s route=%s acts=%s reason=%s",
+                        _decision.focus,
+                        _decision.route,
+                        [a.kind for a in _decision.acts],
+                        _decision.reason,
+                    )
+            except Exception:
+                logger.debug("[Supervisor] Intent engine failed (non-fatal)", exc_info=True)
+                _decision = None
+
+        # Execute (Phase 0: allowlist empty — this branch is dormant)
+        if _decision is not None and _decision.route.value == "execute" and _decision.handler:
+            try:
+                from kazma_core.agent.intent.registry import get_registry as _get_intent_registry
+
+                _h = _get_intent_registry().get(_decision.handler)
+                if _h is not None:
+                    _res = await asyncio.wait_for(
+                        _h.run(_decision, {**state, "messages": messages}, llm=llm, tool_executor=tool_executor),
+                        timeout=_h.timeout_seconds,
+                    )
+                else:
+                    _res = None
+            except Exception as exc:
+                logger.warning("[Supervisor] handler %s failed: %s — loop", _decision.handler, exc)
+                _res = None
+            if _res is not None and _res.ok and not _res.escalate:
+                return {
+                    **intent_patch,
+                    "messages": messages + [{"role": "assistant", "content": _res.message}],
+                    "next_node": NodeName.RESPOND,
+                    "iteration": iteration + 1,
+                }
+            # else fall through to loop
+
+        # Constrain: inject plan_note once
+        if (
+            _decision is not None
+            and _decision.route.value == "constrain"
+            and _decision.plan_note
+            and not any(
+                m.get("role") == "system" and "INTENT ENGINE" in str(m.get("content") or "")
+                for m in messages
+            )
+        ):
+            messages = list(messages) + [{"role": "system", "content": _decision.plan_note}]
 
         # Collapse prior multi-step tool payloads when focus is done/shifted
         # so attention is not dominated by stale tool chains (PR5).

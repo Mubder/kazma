@@ -242,6 +242,15 @@ class SupervisorState(TypedDict, total=False):
     extraction + micro-consolidation).
     """
 
+    intent_route: str
+    """Intent engine route for this turn: execute | constrain | loop | ""."""
+
+    intent_acts: list[dict]
+    """Serialized IntentAct dicts from the intent engine."""
+
+    intent_reason: str
+    """Human-readable reason for the intent engine's route decision."""
+
     mission_rounds_used: int
     """Cumulative tool rounds already consumed in mission mode (wave tracking)."""
 

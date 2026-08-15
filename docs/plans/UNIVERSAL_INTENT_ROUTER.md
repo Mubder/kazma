@@ -1,8 +1,14 @@
 # Universal Intent Router — Industrial Architecture Plan
 
-**Status:** Approved for implementation.
+**Status:** SUPERSEDED by `docs/plans/KAZMA_INTENT_ENGINE.md` — do not implement this plan.
+**Superseded by:** [`docs/plans/KAZMA_INTENT_ENGINE.md`](KAZMA_INTENT_ENGINE.md) (2026-08-15).
+**Why:** This plan produced a document-generation early-return wearing a
+universal-router costume (fake 0.75 confidence, dead Tier 2, HITL-bypassing
+handler, global newest-PDF fallback). The replacement is the product-wide
+fail-safe engine spec.
+
 **Date:** 2026-08-15
-**Scope:** Make the intent system the central routing brain — every task,
+**Scope (historical):** Make the intent system the central routing brain — every task,
 every pipeline, everything flows through it.
 
 ---

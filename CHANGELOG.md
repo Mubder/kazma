@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Intent Engine Phase 0 (2026-08-15)
+
+Replaced the costume router with the intent engine per KAZMA_INTENT_ENGINE.md.
+Phase 0: classify every turn + constrain with plan notes. Execute allowlist
+is EMPTY — nothing bypasses the supervisor loop yet. All 13 false-positive
+corpus utterances verified green (build a PDF parser, rebuild the document
+index, etc.). Kill-switches: KAZMA_INTENT_ENGINE=0, KAZMA_INTENT_EXECUTE=0,
+KAZMA_INTENT_TIER2=0. Arabic continue split (bare أكمل = continue;
+أكمل هذا المستند PDF = document_generate). Mtime glob killed. Old
+document_pipeline early-return removed from supervisor. 85 tests green.
+
 ## Unreleased — Full-repo deep audit executed + fail-safe gates (2026-08-14)
 
 **The 76-finding audit, executed end-to-end**: 14 HIGH / 27 MEDIUM / 26 LOW

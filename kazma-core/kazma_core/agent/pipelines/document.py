@@ -91,20 +91,12 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
             steps_log.append(f"⚠ Source read failed: {exc}")
 
     if not source_content:
-        # Do NOT fall back to conversation text as document content — that
-        # produces a garbage PDF containing the user's instruction text.
-        # Instead, return an actionable error.
-        _att_dir = Path("kazma-data/attachments")
-        _pdfs = sorted(
-            [f.name for f in _att_dir.glob("*.pdf")],
-            key=lambda f: (_att_dir / f).stat().st_mtime,
-            reverse=True,
-        )[:3]
-        _hint = f" Available PDFs: {', '.join(_pdfs)}" if _pdfs else ""
+        # Do NOT fall back to conversation text or global mtime glob —
+        # return an actionable error (§21 Phase 0: kill mtime glob).
         return _format_result(
             "Error", steps_log,
-            f"No source document found. Please attach a file or specify a path"
-            f" (e.g., 'reproduce kazma-data/attachments/Calender.pdf').{_hint}",
+            "No source document found. Please attach a file or specify a path "
+            "(e.g., 'reproduce the attached file').",
         )
 
     # ── Step 2: EXTRACT/STRUCTURE ───────────────────────────────────
@@ -481,17 +473,7 @@ def _find_source_in_history(messages: list[dict], state: dict) -> str:
         if path:
             return path
 
-    # 3. Most recent PDF in the attachments directory
-    att_dir = Path("kazma-data/attachments")
-    if att_dir.is_dir():
-        pdfs = sorted(
-            [f for f in att_dir.iterdir() if f.suffix.lower() == ".pdf"],
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
-        if pdfs:
-            return str(pdfs[0])
-
+    # §21 Phase 0: NO global mtime glob — cross-session leak.
     return ""
 
 
