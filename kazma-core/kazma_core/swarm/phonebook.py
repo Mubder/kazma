@@ -82,14 +82,20 @@ class WorkerPhonebook:
             from kazma_core.memory.config import resolve_tenant_id
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
-            # recall.search is sync; call both directly (fast local SQLite).
+            # recall.search is sync SQLite + potential embedding work (first-use
+            # SentenceTransformer load is ~12s) — run off the event loop so
+            # concurrent SSE/WS turns aren't stalled.
             # resolve_tenant_id requires a platform arg; swarm dispatch has no
             # request platform, so use the "system" convention (mirrors
             # self_improvement). Without it the call raised TypeError and
             # enrichment was silently skipped (workers dispatched unfenced).
+            import asyncio as _aio
+
             _tenant = resolve_tenant_id("system", prefer_context=True)
-            strategies_hits = search(task, limit=3, tenant_id=_tenant)
-            evo_hits = search(f"{worker_name} evolution learning", limit=2, tenant_id=_tenant)
+            strategies_hits = await _aio.to_thread(search, task, limit=3, tenant_id=_tenant)
+            evo_hits = await _aio.to_thread(
+                search, f"{worker_name} evolution learning", limit=2, tenant_id=_tenant
+            )
 
             # Process past strategies
             if isinstance(strategies_hits, list) and strategies_hits:

@@ -60,10 +60,14 @@ async def _index_worker_l4_memory(
     # No worker→produced belief is written — nothing reads it and it flooded
     # the Beliefs UI; per-worker recall is served by the episode's worker
     # metadata + embedding instead of a worker_vectors_<name> table.
+    # to_thread: store_swarm_result → embedder.encode → SentenceTransformer
+    # cold-start (~12s first-use) BLOCKS the event loop if run inline.
     try:
+        import asyncio as _aio
+
         from kazma_core.memory.swarm_bridge import store_swarm_result
 
-        store_swarm_result(name, task_id or "", snippet, meta)
+        await _aio.to_thread(store_swarm_result, name, task_id or "", snippet, meta)
     except Exception:
         logger.debug("[SwarmEngine] V2 swarm_result store failed for %s", name, exc_info=True)
 
