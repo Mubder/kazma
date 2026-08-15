@@ -70,11 +70,10 @@ def get_registry() -> IntentRegistry:
 
 
 def _auto_register() -> None:
-    """Import and register handlers. Phase 0: no execute handlers."""
-    # Phase 1 will add:
-    # try:
-    #     from kazma_core.agent.intent.handlers.document import register as _reg_doc
-    #     _reg_doc()
-    # except Exception as exc:
-    #     logger.warning("[intent_registry] document handler registration failed: %s", exc)
-    pass
+    """Import and register handlers."""
+    try:
+        from kazma_core.agent.intent.handlers.document import register as _reg_doc
+
+        _reg_doc()
+    except Exception as exc:
+        logger.warning("[intent_registry] document handler registration failed: %s", exc)

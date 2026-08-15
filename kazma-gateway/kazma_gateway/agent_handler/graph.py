@@ -452,6 +452,21 @@ def create_graph_handler(
         # ── Build platform-agnostic state ──────────────────────────
         state = await _build_initial_state(msg, _store)
 
+        # §17: pin working memory (attachments, constraints) so the intent
+        # engine sees them at iteration 0. No platform IDs enter _wm.
+        try:
+            from kazma_core.agent.turn_input import build_turn_working_memory
+
+            _wm = build_turn_working_memory(
+                user_text,
+                messages=state.get("messages"),
+                client_attachments=msg.attachments or [],
+            )
+            if _wm:
+                state.update(_wm)
+        except Exception as _wm_exc:
+            logger.debug("[agent-handler] WM pin skipped: %s", _wm_exc)
+
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
 

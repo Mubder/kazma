@@ -15,10 +15,12 @@ __all__ = ["decide"]
 
 logger = logging.getLogger(__name__)
 
-# Phase 0: execute allowlist is EMPTY — engine classifies + constrains only.
-# Phase 1: add "document_generate"
+# Phase 1: document_generate added to the execute allowlist.
 # Phase 2: add "research_deep"
-_PHASE_EXECUTE_ALLOWLIST: frozenset[str] = frozenset()
+# Phase 3: add composer "research_then_document"
+_PHASE_EXECUTE_ALLOWLIST: frozenset[str] = frozenset({
+    ActKind.DOCUMENT_GENERATE,
+})
 
 _SOFT_KINDS = frozenset({
     ActKind.RESEARCH,
