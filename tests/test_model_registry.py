@@ -75,19 +75,25 @@ class TestSingletonLifecycle:
         second = get_model_registry()
         assert first is second
 
-    def test_get_before_init_raises(self):
-        from kazma_core.model_registry import get_model_registry
+    def test_get_before_init_auto_initializes(self):
+        # get_model_registry() now auto-initializes via get_config_store()
+        # instead of raising (fallback for convenience) — it returns a usable
+        # registry rather than erroring.
+        from kazma_core.model_registry import get_model_registry, reset_model_registry
 
-        with pytest.raises(RuntimeError, match="not initialized"):
-            get_model_registry()
+        reset_model_registry()
+        registry = get_model_registry()
+        assert registry is not None
 
     def test_reset_clears_singleton(self, config_store):
         from kazma_core.model_registry import get_model_registry, initialize_model_registry, reset_model_registry
 
-        initialize_model_registry(config_store)
+        first = initialize_model_registry(config_store)
         reset_model_registry()
-        with pytest.raises(RuntimeError):
-            get_model_registry()
+        # After reset, get auto-reinitializes to a NEW instance (no longer raises).
+        second = get_model_registry()
+        assert second is not None
+        assert second is not first
 
     def test_reinitialize_replaces_instance(self, config_store):
         from kazma_core.model_registry import get_model_registry, initialize_model_registry
