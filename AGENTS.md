@@ -691,7 +691,7 @@ fail-open throughout.
 - **Swarm scope default** (`worker_dispatch._do_dispatch`): when
   `swarm_scope_enforce` is on, dispatched workers are capped at semantic_tier
   HIGH (deny exec/outbound/config/identity CRITICAL) + denied_acts=
-  {soul_delta, identity, config_change}. Default OFF — opt-in.
+  {soul_delta, identity, config_change}. Default ON since 2026-08-15 (intent-engine auto-dispatch) — opt-OUT via the env/ConfigStore kill-switch.
 - **Soul confirm gate** (`apply_agent_mutation`/`_auto_apply`): when
   `soul_requires_confirm` is on, soul deltas are held until confirmed via
   `POST /api/commitment/soul/{cid}/confirm`. Mint-wired at both apply callers.
@@ -730,7 +730,7 @@ fail-open throughout.
   balanced (default) | autonomous | yolo.
 - Kill-switches (all default OFF / layer default ON):
   `KAZMA_COMMITMENT_ENABLED` (layer, default on),
-  `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` (default off),
+  `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` (default ON since 2026-08-15),
   `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` (default off),
   `KAZMA_AUTO_STORE_BELIEFS` (default conservative).
 
@@ -988,7 +988,14 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
-- **Run tests:** `& '.venv\Scripts\python.exe' -m pytest <path> -v`
+- **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`
+- **Fast FULL suite (use this — ~5 min, not 20+):**
+  `python scripts/fast_test.py`
+  Crash-tolerant chunked runner: file-chunks run as independent serial pytest
+  processes; crashed/empty chunks are retried per-file; poison files are
+  reported. Do NOT use pytest-xdist here — worker segfaults (native lib) make
+  it silently drop ~half the suite. The serial monolithic run intermittently
+  segfaults and takes 20+ min.
 - **Manual verification:** Restart server, test via Telegram and Web UI
 
 ## Key References

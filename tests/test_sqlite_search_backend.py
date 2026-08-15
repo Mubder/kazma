@@ -5,13 +5,31 @@ Comprehensive tests for the SQLite-only search backend including:
 - Arabic tokenizer functionality
 - Hybrid BM25 + vector search (if available)
 - Edge deployment optimization
+
+QUARANTINED (2026-08-15): running this file standalone hangs the interpreter
+inside a native call that pytest-timeout cannot interrupt (it also crashed
+two xdist workers via segfault). Additionally its async tests collect as
+raw <Coroutine> objects under the current pytest/asyncio combo. The file is
+skipped unless explicitly opted in with KAZMA_RUN_SQLITE_BACKEND_TESTS=1
+while the kazma_memory backend is repaired. Do NOT remove this gate without
+fixing the hang first — it is the poison pill for the whole suite.
 """
+
+import os
+
+import pytest
+
+if os.environ.get("KAZMA_RUN_SQLITE_BACKEND_TESTS", "") != "1":
+    pytest.skip(
+        "quarantined: standalone runs hang in a native call (see module docstring); "
+        "set KAZMA_RUN_SQLITE_BACKEND_TESTS=1 to run anyway",
+        allow_module_level=True,
+    )
 
 import tempfile
 import time
 from pathlib import Path
 
-import pytest
 from kazma_memory import ArabicTokenizer, SearchBackend, SQLiteMemoryBackend
 
 

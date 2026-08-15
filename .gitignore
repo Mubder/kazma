@@ -112,3 +112,6 @@ research/kb/
 
 # Generated document demos (regenerable artifacts, not source)
 demo_documents/
+
+# Test artifact from tests/test_tool_arg_validation.py (file_write demo)
+hello.html

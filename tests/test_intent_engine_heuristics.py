@@ -201,3 +201,38 @@ class TestOtherActs:
     def test_empty(self):
         acts = detect_acts("")
         assert _has(acts, ActKind.GENERAL)
+
+    # ── Positive detection (audit follow-up: these three kinds had
+    # regexes but zero positive tests — only code_exec negatives).
+
+    def test_code_exec_positive(self):
+        acts = detect_acts("run the script for me")
+        assert _has(acts, ActKind.CODE_EXEC)
+
+    def test_code_exec_positive_py_file(self):
+        acts = detect_acts("execute this .py file please")
+        assert _has(acts, ActKind.CODE_EXEC)
+
+    def test_code_exec_positive_arabic(self):
+        acts = detect_acts("شغل السكربت")
+        assert _has(acts, ActKind.CODE_EXEC)
+
+    def test_file_mgmt_positive(self):
+        acts = detect_acts("organize my files by date")
+        assert _has(acts, ActKind.FILE_MGMT)
+
+    def test_file_mgmt_positive_move(self):
+        acts = detect_acts("move these files into the archive folder")
+        assert _has(acts, ActKind.FILE_MGMT)
+
+    def test_analysis_positive(self):
+        acts = detect_acts("analyze this dataset for trends")
+        assert _has(acts, ActKind.ANALYSIS)
+
+    def test_analysis_positive_chart(self):
+        acts = detect_acts("chart the csv numbers")
+        assert _has(acts, ActKind.ANALYSIS)
+
+    def test_analysis_positive_arabic(self):
+        acts = detect_acts("حلل هذه البيانات")
+        assert _has(acts, ActKind.ANALYSIS)

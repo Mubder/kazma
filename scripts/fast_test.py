@@ -1,0 +1,208 @@
+#!/usr/bin/env python
+"""Fast, crash-tolerant full-suite test runner.
+
+Why this exists (2026-08-15):
+  - The monolithic serial run takes ~20 minutes and intermittently segfaults
+    (a native library), killing the whole run with no results.
+  - pytest-xdist parallelizes, but worker segfaults under ``--dist loadfile``
+    silently drop that worker's remaining files (observed: 48 worker crashes
+    losing ~half the suite) and can crash the scheduler itself.
+
+Strategy: chunk the test FILES into N independent serial pytest processes
+(balanced round-robin). A segfaulting chunk loses only itself; its files are
+then retried one-by-one with a hard timeout, and any file that still crashes
+is reported as POISON (needs a native fix; quarantine it like
+tests/test_sqlite_search_backend.py).
+
+Usage:
+    python scripts/fast_test.py                 # default: cpu-count chunks
+    python scripts/fast_test.py --chunks 8      # explicit chunk count
+    python scripts/fast_test.py --chunk-timeout 900
+
+Output: per-chunk summaries, aggregated totals, all FAILED test ids, and a
+POISON list. Exit code: 0 only if zero failures and zero poison files.
+"""
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+# Directories that contain test files — sourced from pyproject testpaths so
+# the runner can never drift from what bare `pytest` collects.
+def _test_dirs_from_pyproject() -> list[str]:
+    try:
+        import tomllib
+
+        data = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        tp = data.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("testpaths")
+        if tp:
+            return [str(p) for p in tp]
+    except Exception:
+        pass
+    return ["tests"]
+
+
+TEST_DIRS = _test_dirs_from_pyproject()
+
+_FAILED_RE = re.compile(r"^(FAILED|ERROR)\s+(\S+::\S+)", re.M)
+
+# Windows segfault exit code (0xC0000005) and POSIX SIGSEGV.
+_CRASH_CODES = {139, -1073741819}
+
+
+def discover_test_files() -> list[Path]:
+    files: list[Path] = []
+    for d in TEST_DIRS:
+        base = REPO / d
+        if not base.is_dir():
+            continue
+        files.extend(sorted(base.rglob("test_*.py")))
+        files.extend(sorted(base.rglob("*_test.py")))
+    return sorted(set(f for f in files if f.is_file()))
+
+
+def chunk_files(files: list[Path], chunks: int) -> list[list[Path]]:
+    """Round-robin so heavy/light files spread evenly (files sorted -> mixed)."""
+    out: list[list[Path]] = [[] for _ in range(chunks)]
+    for i, f in enumerate(files):
+        out[i % chunks].append(f)
+    return [c for c in out if c]
+
+
+def _parse_summary(log: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    tail = log[-2500:]
+    for kind in ("passed", "failed", "skipped", "error", "deselected", "xfailed", "xpassed"):
+        mm = re.search(rf"(\d+) {kind}", tail)
+        if mm:
+            counts[kind] = int(mm.group(1))
+    return counts
+
+
+def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
+    """Run pytest serially; return (exit_code, output). Crash-tolerant."""
+    cmd = [sys.executable, "-m", "pytest", *args, "-q", "-p", "no:cacheprovider"]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        return 124, out + "\nRUNNER: chunk timed out"
+    except Exception as exc:  # noqa: BLE001 — report, never crash the runner
+        return -1, f"RUNNER error: {exc}"
+
+
+def run_chunk(idx: int, files: list[Path], timeout: float) -> dict:
+    args = [
+        *[str(f.relative_to(REPO)) for f in files],
+        "-m", "not slow",
+        "--timeout=120",
+        "--continue-on-collection-errors",
+    ]
+    code, log = run_pytest(args, timeout)
+    counts = _parse_summary(log)
+    fail_ids = sorted({m.group(2) for m in _FAILED_RE.finditer(log)})
+    return {
+        "idx": idx,
+        "code": code,
+        "counts": counts,
+        "failed": fail_ids,
+        "log_tail": log[-800:],
+        "files": files,
+    }
+
+
+def is_crash(code: int) -> bool:
+    # Windows subprocess returns large negative codes for access violations.
+    return code in _CRASH_CODES or code < -1000 or code == 139
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--chunks", type=int, default=max(2, (os.cpu_count() or 4)))
+    ap.add_argument("--chunk-timeout", type=float, default=900.0)
+    ap.add_argument("--file-timeout", type=float, default=180.0,
+                    help="per-file timeout during poison-file retry")
+    args = ap.parse_args()
+
+    files = discover_test_files()
+    chunks = chunk_files(files, args.chunks)
+    print(f"[fast-test] {len(files)} test files in {len(chunks)} chunks "
+          f"({args.chunks} requested, timeout {args.chunk_timeout:.0f}s/chunk)")
+    t0 = time.time()
+
+    totals: dict[str, int] = {}
+    all_failed: list[str] = []
+    crashed_chunks: list[dict] = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as pool:
+        futs = {pool.submit(run_chunk, i, c, args.chunk_timeout): i
+                for i, c in enumerate(chunks)}
+        for fut in concurrent.futures.as_completed(futs):
+            r = fut.result()
+            status = "OK" if r["code"] in (0, 1) else f"exit={r['code']}"
+            print(f"[fast-test] chunk {r['idx']:02d}: {status} "
+                  f"{r['counts'].get('passed', 0)}p/{r['counts'].get('failed', 0)}f "
+                  f"({len(r['files'])} files)")
+            for k, v in r["counts"].items():
+                totals[k] = totals.get(k, 0) + v
+            all_failed.extend(r["failed"])
+            # A chunk that produced NO summary line lost its output (observed
+            # under heavy concurrency) — treat like a crash and retry per-file.
+            if is_crash(r["code"]) or r["code"] == 124 or (
+                r["code"] in (0, 1) and not r["counts"]
+            ):
+                crashed_chunks.append(r)
+
+    # ── Retry crashed chunks file-by-file to isolate poison ────────────────
+    poison: list[str] = []
+    for r in crashed_chunks:
+        print(f"[fast-test] chunk {r['idx']:02d} crashed/timed out "
+              f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
+        for f in r["files"]:
+            code, log = run_pytest(
+                [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
+                 "--continue-on-collection-errors"],
+                args.file_timeout,
+            )
+            if code in (0, 1):
+                for k, v in _parse_summary(log).items():
+                    totals[k] = totals.get(k, 0) + v
+                all_failed.extend(m.group(2) for m in _FAILED_RE.finditer(log))
+            elif code == 124:
+                poison.append(f"{f.relative_to(REPO)} (hang)")
+            else:
+                poison.append(f"{f.relative_to(REPO)} (exit={code})")
+
+    wall = time.time() - t0
+    print(f"\n[fast-test] TOTALS in {wall:.0f}s: " +
+          ", ".join(f"{v} {k}" for k, v in sorted(totals.items())))
+    if all_failed:
+        print(f"\n[fast-test] {len(all_failed)} failing tests:")
+        for t in sorted(set(all_failed)):
+            print(f"  FAILED {t}")
+    if poison:
+        print(f"\n[fast-test] POISON files (crash/hang even standalone):")
+        for p in poison:
+            print(f"  POISON {p}")
+    return 0 if (not all_failed and not poison) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

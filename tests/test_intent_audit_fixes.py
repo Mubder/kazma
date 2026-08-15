@@ -409,6 +409,47 @@ class TestFocusShiftGate:
         assert reason == "focus_cleanup"
 
 
+# ─── command= merge path (audit follow-up: previously untested) ────────
+
+
+class TestCommandMergeActs:
+    def test_command_seeds_act_at_high_confidence(self):
+        """A bare chat text + command=research seeds a research act @0.95."""
+        d = classify_turn_sync("hello there", command="research", use_embedding_drift=False)
+        seeded = [a for a in d.acts if a.kind == ActKind.RESEARCH]
+        assert seeded, "command=research must seed a RESEARCH act"
+        assert seeded[0].confidence == 0.95
+        assert seeded[0].source == "command"
+
+    def test_command_documents_maps_to_document_intel(self):
+        d = classify_turn_sync("hello there", command="documents", use_embedding_drift=False)
+        seeded = [a for a in d.acts if a.kind == ActKind.DOCUMENT_INTEL]
+        assert seeded
+        assert seeded[0].source == "command"
+
+    def test_command_does_not_duplicate_existing_kind(self):
+        """Text already detected as research + command=research → one act."""
+        d = classify_turn_sync(
+            "research the topic thoroughly",
+            command="research",
+            use_embedding_drift=False,
+        )
+        research_acts = [a for a in d.acts if a.kind == ActKind.RESEARCH]
+        assert len(research_acts) == 1
+
+    def test_unknown_command_is_ignored(self):
+        d = classify_turn_sync("hello there", command="no_such_cmd", use_embedding_drift=False)
+        assert [a.kind for a in d.acts] == [ActKind.GENERAL]
+
+    @pytest.mark.asyncio
+    async def test_command_accepted_on_async_path(self):
+        d = await classify_turn("hello there", command="swarm", use_embedding_drift=False)
+        seeded = [a for a in d.acts if a.kind == ActKind.SWARM]
+        assert seeded
+        assert seeded[0].confidence == 0.95
+        assert seeded[0].source == "command"
+
+
 # ─── F9.5 Sync/async parity (Tier-2 disabled) ─────────────────────────
 
 

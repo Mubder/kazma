@@ -19,10 +19,11 @@ class TestKuwaitiTokenizer:
         assert self.tok.tokenize("") == []
 
     def test_basic_tokenization(self):
-        tokens = self.tok.tokenize("الحمد لله")
-        # "الحمد" and "لله" are regular words
+        tokens = self.tok.tokenize("كتاب جديد عن التاريخ")
+        # "الحمد لله" is now preserved whole as a DIALECT phrase (religious-
+        # phrase preservation), so use neutral words for the WORD check.
         words = [t for t in tokens if t.token_type == TokenType.WORD]
-        assert len(words) >= 1
+        assert len(words) >= 2
 
     def test_dialect_marker_preserved(self):
         tokens = self.tok.tokenize("شلونك")
@@ -74,9 +75,14 @@ class TestKuwaitiTokenizer:
         assert code_switch[0].language == "en"
 
     def test_arabic_word_token_type(self):
-        tokens = self.tok.tokenize("الحمد لله")
+        tokens = self.tok.tokenize("كتاب جديد عن التاريخ")
         words = [t for t in tokens if t.token_type == TokenType.WORD]
         assert len(words) >= 2
+
+    def test_religious_phrase_preserved_as_dialect(self):
+        """'الحمد لله' is deliberately kept whole as a DIALECT phrase."""
+        tokens = self.tok.tokenize("الحمد لله")
+        assert any(t.token_type == TokenType.DIALECT for t in tokens)
 
     def test_token_positions(self):
         tokens = self.tok.tokenize("وين")

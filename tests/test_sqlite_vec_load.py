@@ -1,11 +1,20 @@
-"""L4 sqlite-vec must load via the PyPI package, not only system vec0."""
+"""L4 sqlite-vec must load via the PyPI package, not only system vec0.
+
+SKIPPED (2026-08-15): ``kazma_core.swarm.memory.sqlite_vec`` (and
+``SQLiteVectorStore``) no longer exist anywhere in the codebase — the vector
+store was removed/migrated. These tests are kept for the day the store is
+restored; delete them if it is gone for good.
+"""
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
+
+pytest.skip(
+    "kazma_core.swarm.memory.sqlite_vec / SQLiteVectorStore no longer exist "
+    "(store removed or migrated) — restore or delete these tests with it",
+    allow_module_level=True,
+)
 
 
 def test_sqlite_vec_package_loads():

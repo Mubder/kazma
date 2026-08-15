@@ -165,12 +165,18 @@ async def test_in_process_worker_dispatch_includes_system_prompt_in_spawn_contex
                 ),
             )
 
-    # Verify the system prompt was included in the messages
+    # Verify the custom system prompt was included in the messages. The
+    # worker also injects its env-context awareness block (AGENTS.md §10C),
+    # so more than one system message is expected — the custom prompt must
+    # be present as its own message.
     call_args = mock_provider.chat.call_args
     messages = call_args.args[0]
     system_msgs = [m for m in messages if m.get("role") == "system"]
-    assert len(system_msgs) == 1
-    assert "backend architect for consult mode" in system_msgs[0]["content"]
+    matching = [
+        m for m in system_msgs
+        if "backend architect for consult mode" in m.get("content", "")
+    ]
+    assert matching, f"custom system prompt missing from: {system_msgs}"
 
 
 @pytest.mark.asyncio

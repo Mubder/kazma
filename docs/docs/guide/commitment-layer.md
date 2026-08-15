@@ -149,13 +149,13 @@ Every injected delta still goes through the [untrusted-data prompt fence](./secu
 | **`autonomous`** | Minimal interruption |
 | **`yolo`** | Effectively passthrough (danger tools still HITL-gated separately) |
 
-### Kill-switches (all default OFF unless noted)
+### Kill-switches (all default OFF unless noted — `SWARM_SCOPE_ENFORCE` defaults ON since 2026-08-15)
 
 | Env var | Layer | Default | Effect |
 |---|---|---|---|
 | `KAZMA_COMMITMENT_ENABLED` | Whole layer | **ON** | `0` disables the entire layer |
 | `KAZMA_COMMITMENT_MODE` | Mode | `balanced` | Overrides the mode |
-| `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` | Swarm scope | off | Caps dispatched-worker privileges |
+| `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` | Swarm scope | **on** | Caps dispatched-worker privileges (disable to opt out) |
 | `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` | Soul gate | off | Holds Soul deltas for confirmation |
 | `KAZMA_AUTO_STORE_BELIEFS` | Memory auto-store | conservative | How aggressively beliefs are stored |
 

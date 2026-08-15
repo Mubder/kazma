@@ -1306,7 +1306,7 @@ Today `hitl_timeout.py` and `hitl_supersede.py` send the security
 
 - `docs/docs/ops/production-checklist.md`: add a "Commitment Layer" row —
   kill-switch (`KAZMA_COMMITMENT_ENABLED`), GC cadence (15min),
-  `swarm_scope_enforce` / `soul_requires_confirm` flags default OFF,
+  `swarm_scope_enforce` defaults ON since 2026-08-15 (intent-engine auto-dispatch); `soul_requires_confirm` defaults OFF,
   `/metrics` endpoint.
 - `docs/docs/ops/diagnosis-map.md`: add "Wrong reminder date / memory
   overwrite" → commitment gate + source-trust gate + conservative auto-store.

@@ -28,7 +28,10 @@ _DEFAULTS: dict[str, Any] = {
     "mode": "balanced",
     "high_confidence": 0.85,
     "enforce_unknown_mutators": False,
-    "swarm_scope_enforce": False,
+    # Default ON (2026-08-15): the intent engine can now auto-dispatch
+    # (execute route), so dispatched workers get the HIGH-tier cap unless
+    # explicitly disabled via env/ConfigStore. Kill-switch still wins.
+    "swarm_scope_enforce": True,
     "soul_requires_confirm": False,
     "false_clarify_budget": 0.15,
     "outbound_allowed_targets": [],  # empty = permissive (HITL handles); populate to enforce an allowlist
