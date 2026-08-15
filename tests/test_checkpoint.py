@@ -5,7 +5,7 @@
     2. checkpoint roundtrip (state stored → retrieved)
     3. different threads are isolated
     4. state survives new graph instance with same checkpointer
-    5. checkpointed _gateway has only {thread_id, display_name, platform}
+    5. checkpointed _gateway has {thread_id, display_name, platform, delivery_target}
 """
 
 from __future__ import annotations
@@ -151,10 +151,13 @@ class TestCheckpointer:
         state = await agent_handler._build_initial_state(msg, store)
 
         gw = state["_gateway"]
+        # delivery_target is an intentional member of the internal routing
+        # block (AGENTS.md §2/§16) — platform-prefixed, not a raw chat_id.
         assert gw == {
             "thread_id": "clean-gw-thread",
             "display_name": "checkpoint_user",
             "platform": "telegram",
+            "delivery_target": "telegram:50",
         }
         assert "chat_id" not in gw
         assert "user_id" not in gw
