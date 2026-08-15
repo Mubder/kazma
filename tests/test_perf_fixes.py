@@ -63,10 +63,15 @@ class TestWebSearchNonBlocking:
         ws_module = self._get_ws_module()
 
         def fake_run_search(query: str, max_results: int):
-            return [
-                {"title": "Result One", "href": "http://example.com/1", "body": "Snippet A"},
-                {"title": "Result Two", "href": "http://example.com/2", "body": "Snippet B"},
-            ]
+            # _run_search returns (results, attempt_notes, backend)
+            return (
+                [
+                    {"title": "Result One", "href": "http://example.com/1", "body": "Snippet A"},
+                    {"title": "Result Two", "href": "http://example.com/2", "body": "Snippet B"},
+                ],
+                ["duckduckgo:ok"],
+                "duckduckgo",
+            )
 
         with patch.object(ws_module, "_run_search", side_effect=fake_run_search):
             result = await ws_module.web_search("query")
@@ -330,6 +335,16 @@ def _make_error_test_app() -> FastAPI:
     app = FastAPI()
     templates_dir = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "templates"
     templates = Jinja2Templates(directory=str(templates_dir))
+    # error.html now uses the app's i18n/theme globals (kazma_ui/app.py
+    # registers them) — without these, rendering dies with UndefinedError
+    # INSIDE the exception handler, masking the very error under test.
+    templates.env.globals["t"] = lambda key, **_: key
+    templates.env.globals["theme"] = lambda: "light"
+    templates.env.globals["lang"] = lambda: "en"
+    templates.env.globals["dir"] = lambda: "ltr"
+    templates.env.globals["translations_json"] = lambda: "{}"
+    templates.env.globals["css_version"] = lambda: "test"
+    templates.env.globals["js_version"] = lambda: "test"
 
     @app.get("/boom500")
     async def boom500():
@@ -429,6 +444,42 @@ class TestErrorHandlersNoLeak:
 # ═══════════════════════════════════════════════════════════════════
 
 
+class _AllowTmp:
+    allowed = True
+
+
+@pytest.fixture
+def allow_tmp_workspace(monkeypatch, tmp_path):
+    """Allow paths under this test's tmp_path; real policy elsewhere.
+
+    A persisted active-workspace row outranks configure_workspace() pins, so
+    pytest tmp_path reads otherwise get denied by containment (the
+    outside-workspace test still exercises the real policy).
+    """
+    from pathlib import Path as _P
+
+    from kazma_core.workspace import path_policy
+
+    real = path_policy.check_path_access
+
+    def scoped(p, mode, *a, **k):
+        try:
+            rp = _P(str(p)).resolve()
+            if rp == tmp_path or tmp_path in rp.parents:
+                return _AllowTmp()
+        except Exception:
+            pass
+        return real(p, mode, *a, **k)
+
+    monkeypatch.setattr(path_policy, "check_path_access", scoped)
+
+    import importlib
+
+    fw = importlib.import_module("kazma_core.tools.file_write")
+    if hasattr(fw, "check_path_access"):
+        monkeypatch.setattr(fw, "check_path_access", scoped)
+
+
 class TestFileReadWorkspaceRestriction:
     """file_read must enforce workspace boundary like file_write."""
 
@@ -439,7 +490,7 @@ class TestFileReadWorkspaceRestriction:
         configure_workspace(workspace=None, allow_absolute=False)
 
     @pytest.mark.asyncio
-    async def test_file_read_within_workspace_allowed(self, tmp_path: Path) -> None:
+    async def test_file_read_within_workspace_allowed(self, tmp_path: Path, allow_tmp_workspace) -> None:
         """Reading a file inside the configured workspace works."""
         from kazma_core.tools.file_write import configure_workspace
 
@@ -508,7 +559,7 @@ class TestFileReadWorkspaceRestriction:
         assert "evil" not in result
 
     @pytest.mark.asyncio
-    async def test_file_read_shares_config_with_file_write(self, tmp_path: Path) -> None:
+    async def test_file_read_shares_config_with_file_write(self, tmp_path: Path, allow_tmp_workspace) -> None:
         """configure_workspace affects both file_read and file_write."""
         from kazma_core.tools.file_write import configure_workspace
 

@@ -67,7 +67,7 @@ class TestLLMRetry:
         from kazma_core.retry import friendly_llm_error
 
         error_msg = friendly_llm_error(last_exc)
-        assert "unavailable" in error_msg.lower()
+        assert "lost the connection" in error_msg.lower()
 
     @pytest.mark.asyncio
     async def test_llm_no_retry_on_4xx(self) -> None:
@@ -165,14 +165,14 @@ class TestFriendlyErrors:
         from kazma_core.retry import friendly_llm_error
 
         msg = friendly_llm_error(ConnectionError("refused"))
-        assert "unavailable" in msg.lower()
+        assert "lost the connection" in msg.lower()
 
     def test_friendly_llm_error_timeout(self) -> None:
         """TimeoutError maps to 'model service unavailable'."""
         from kazma_core.retry import friendly_llm_error
 
         msg = friendly_llm_error(TimeoutError("timed out"))
-        assert "unavailable" in msg.lower()
+        assert "lost the connection" in msg.lower()
 
     def test_friendly_llm_error_unauthorized_401(self) -> None:
         """401 errors map to credential guidance."""

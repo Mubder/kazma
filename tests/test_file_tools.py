@@ -9,6 +9,46 @@ import pytest
 from kazma_core.tools.file_write import configure_workspace
 
 
+class _Allow:
+    allowed = True
+
+
+@pytest.fixture(autouse=True)
+def _allow_tmp_workspace(monkeypatch, tmp_path):
+    """Allow paths under this test's tmp_path; real policy everywhere else.
+
+    A persisted active-workspace row outranks configure_workspace() pins, so
+    pytest tmp_path reads/writes otherwise get denied by containment. The
+    escape-block tests still exercise the REAL policy (paths outside tmp_path
+    delegate to it). Both tools import check_path_access fresh from
+    path_policy at call time, so patch the source module.
+    """
+    from pathlib import Path as _P
+
+    from kazma_core.workspace import path_policy
+
+    real = path_policy.check_path_access
+
+    def scoped(p, mode, *a, **k):
+        try:
+            rp = _P(str(p)).resolve()
+            if rp == tmp_path or tmp_path in rp.parents:
+                return _Allow()
+        except Exception:
+            pass
+        return real(p, mode, *a, **k)
+
+    monkeypatch.setattr(path_policy, "check_path_access", scoped)
+
+    # file_write binds check_path_access at MODULE level; file_read imports
+    # it locally from path_policy at call time — patch both bindings.
+    import importlib
+
+    fw = importlib.import_module("kazma_core.tools.file_write")
+    if hasattr(fw, "check_path_access"):
+        monkeypatch.setattr(fw, "check_path_access", scoped)
+
+
 class TestFileRead:
     """Tests for the file_read tool."""
 

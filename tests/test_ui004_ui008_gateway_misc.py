@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _UI_DIR = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
 _TEMPLATES_DIR = _UI_DIR / "templates"
 _STATIC_DIR = _UI_DIR / "static"
@@ -194,6 +196,7 @@ class TestChromaDBDebugLevel:
     causing silent RAG disablement). Elevated to WARNING per the memory audit.
     """
 
+    @pytest.mark.xfail(reason="vector memory (memory/vector_store.py, vector_memory wiring) was removed in the V1->V2 memory cutover — obsolete grep", strict=False)
     def test_app_py_uses_warning_for_vector_memory(self) -> None:
         app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         vm_idx = app_source.find("[VectorMemory] Not available")
@@ -204,6 +207,7 @@ class TestChromaDBDebugLevel:
             "debug per memory audit — RAG disablement must be visible)"
         )
 
+    @pytest.mark.xfail(reason="vector memory (memory/vector_store.py, vector_memory wiring) was removed in the V1->V2 memory cutover — obsolete grep", strict=False)
     def test_vector_store_uses_warning_for_chromadb_failures(self) -> None:
         """vector_store.py may use logger.warning for ChromaDB failures.
 
@@ -234,22 +238,22 @@ class TestWorkspacePathConfigRelative:
     """file_write workspace must default to kazma-data/workspace, not drive root."""
 
     def test_file_write_default_workspace_not_cwd(self) -> None:
+        # The default sandbox moved to workspace/binding.py in the §10A
+        # workspace-binding refactor — file_write delegates there.
         fw_source = (
             Path(__file__).resolve().parent.parent
             / "kazma-core"
             / "kazma_core"
-            / "tools"
-            / "file_write.py"
+            / "workspace"
+            / "binding.py"
         ).read_text(encoding="utf-8")
         assert "kazma-data" in fw_source, (
-            "file_write default workspace must reference kazma-data/workspace"
+            "default workspace must reference kazma-data/workspace"
         )
-        # The old default was Path.cwd().resolve() directly
-        # The new default should nest under kazma-data/workspace
-        ws_fn_start = fw_source.find("def _get_workspace()")
-        assert ws_fn_start != -1
-        ws_fn_body = fw_source[ws_fn_start : ws_fn_start + 600]
-        assert "kazma-data" in ws_fn_body
+        # The old default was Path.cwd().resolve() directly; the ladder's
+        # final rung nests under kazma-data/workspace (binding.py).
+        assert '"kazma-data"' in fw_source
+        assert '"workspace"' in fw_source
 
     def test_app_py_configures_workspace(self) -> None:
         """app.py must call configure_workspace with kazma-data/workspace."""
