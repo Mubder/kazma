@@ -439,7 +439,14 @@ def perform_universal_backup(
     _set_progress("manifest", detail="Writing manifest…")
     pg_result = {"ok": True, "note": "handled by native_pg_backup task"}
 
-    # 4. Manifest.
+    # 4. Offsite sync FIRST (backup-audit gap #2): copy the finished backup
+    # to a configured rclone remote. Fail-open — local backup stays
+    # authoritative. Runs BEFORE the manifest write so the manifest records
+    # the cloud sync result (the UI reads it to badge backups as ☁ Cloud).
+    _set_progress("offsite", detail="Syncing to cloud…" if _offsite_config()["enabled"] else "Skipping offsite…")
+    offsite = _offsite_sync(dest)
+
+    # 5. Manifest — written AFTER the offsite sync so it records the result.
     elapsed = round(time.time() - started, 1)
     manifest: dict[str, Any] = {
         "timestamp": ts,
@@ -450,15 +457,12 @@ def perform_universal_backup(
         "assets": asset_results,
         "root_artifacts": root_artifacts,
         "postgres": pg_result,
+        "offsite": offsite,
     }
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    # 5. Prune old backups.
+    # 6. Prune old backups.
     pruned = _prune(max(1, retention))
-
-    # 6. Offsite sync (backup-audit gap #2): copy the finished backup to a
-    # configured rclone remote. Fail-open — local backup stays authoritative.
-    offsite = _offsite_sync(dest)
 
     total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
     size_mb = round(total_size / (1024 * 1024), 1)
@@ -522,6 +526,12 @@ def list_universal_backups() -> list[dict[str, Any]]:
                 entry["postgres"] = (m.get("postgres") or {}).get("ok", False)
                 entry["elapsed"] = m.get("elapsed_seconds", 0)
                 entry["trigger"] = m.get("trigger", "auto")
+                # Cloud sync status from the manifest (written after the sync).
+                offsite = m.get("offsite") or {}
+                entry["cloud_synced"] = bool(offsite.get("ok"))
+                entry["cloud_remote"] = offsite.get("remote", "")
+                if not entry["cloud_synced"] and offsite.get("skipped"):
+                    entry["cloud_skipped_reason"] = str(offsite.get("skipped", ""))[:80]
             except Exception:
                 pass
         backups.append(entry)

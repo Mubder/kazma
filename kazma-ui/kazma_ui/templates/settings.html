@@ -2394,8 +2394,9 @@
                 <span style="font-size:0.85rem"
                       :class="backupResult?.ok ? 'text-success' : 'text-error'"
                       x-text="backupResult?.ok
-                        ? (t('settings.backup_done') + ' ' + backupResult.databases_ok + ' DBs, ' + backupResult.total_size_mb + ' MB')
-                        : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
+                          ? (t('settings.backup_done') + ' ' + backupResult.databases_ok + ' DBs, ' + backupResult.total_size_mb + ' MB'
+                             + (backupResult?.offsite?.ok ? ' · ☁ Synced to ' + (backupResult.offsite.remote || 'cloud').split(':')[0] : ''))
+                          : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
             </div>
         </div>
         <div class="settings-group">
@@ -2410,6 +2411,13 @@
                         <span class="badge" style="margin-left:8px;font-size:0.7rem;padding:2px 8px;border-radius:10px"
                               :style="b.trigger === 'manual' ? 'background:rgba(46,213,115,0.15);color:#2ed573' : 'background:rgba(79,140,255,0.15);color:#4f8cff'"
                               x-text="b.trigger === 'manual' ? 'Manual' : 'Auto'"></span>
+                        <!-- Cloud sync badge -->
+                        <span x-show="b.cloud_synced" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(155,89,182,0.15);color:#9b59b6"
+                              :title="'Synced to: ' + (b.cloud_remote || 'cloud')"
+                              x-text="'☁ ' + (b.cloud_remote ? b.cloud_remote.split(':')[0] : 'Cloud')"></span>
+                        <span x-show="!b.cloud_synced && b.cloud_skipped_reason" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,193,7,0.12);color:#b8860b"
+                              title="Not synced to cloud"
+                              x-text="' locals only'"></span>
                         <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
                               x-text="b.databases_ok + ' DBs · ' + b.size_mb + ' MB' + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · incomplete' : '')"></span>
                     </div>
@@ -2425,6 +2433,16 @@
         <div class="settings-group">
             <h3>{{ t('settings.offsite_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.offsite_desc') }}</p>
+
+            <!-- Current status banner -->
+            <div x-show="offsiteConfig && offsiteConfig.rclone_remote" x-cloak
+                 style="padding:10px 16px;background:rgba(155,89,182,0.06);border:1px solid rgba(155,89,182,0.2);border-radius:var(--radius-card);margin-bottom:1rem;font-size:0.85rem;display:flex;align-items:center;gap:8px">
+                <span style="font-size:1.1em">☁️</span>
+                <div>
+                    <strong x-text="offsiteConfig.enabled ? 'Offsite sync active' : 'Offsite sync disabled'"></strong>
+                    <span style="color:var(--text-muted);margin-left:8px" x-text="'→ ' + offsiteConfig.rclone_remote"></span>
+                </div>
+            </div>
 
             <!-- rclone not installed warning -->
             <div x-show="offsiteConfig && !offsiteConfig.rclone_available" x-cloak
