@@ -248,7 +248,7 @@ class SettingsRouterBuilder:
 
         @router.post("/api/settings/backup/offsite/test")
         async def api_test_offsite_remote(req: dict[str, Any]) -> dict[str, Any]:
-            """Test the rclone remote connection (about:ls)."""
+            """Test the rclone remote connection — creates the target dir if missing."""
             import asyncio as _aio
             import shutil as _shutil
             remote = str(req.get("rclone_remote") or "").strip()
@@ -259,15 +259,31 @@ class SettingsRouterBuilder:
                 return {"ok": False, "error": "rclone is not installed. Install it from https://rclone.org/install/ or run: winget install Rclone.Rclone"}
             try:
                 import subprocess as _sp
-                proc = await _aio.to_thread(
-                    _sp.run,
-                    [rclone, "lsd", remote, "--max-depth", "1"],
-                    capture_output=True, text=True, timeout=15,
-                )
+
+                async def _run(args: list[str]) -> "._sp.CompletedProcess":
+                    return await _aio.to_thread(
+                        _sp.run, [rclone, *args],
+                        capture_output=True, text=True, timeout=15,
+                    )
+
+                # First try listing — if the directory doesn't exist, create it
+                # (rclone mkdir is idempotent) and try again.
+                proc = await _run(["lsd", remote, "--max-depth", "1"])
                 if proc.returncode == 0:
                     return {"ok": True, "message": "Connection successful"}
-                err = (proc.stderr or proc.stdout or "").strip()[:300]
-                return {"ok": False, "error": f"rclone error: {err}"}
+
+                stderr = (proc.stderr or "").strip()
+                if "directory not found" in stderr.lower() or "not found" in stderr.lower():
+                    # Target folder doesn't exist yet — create it, then re-test
+                    mkdir = await _run(["mkdir", remote])
+                    if mkdir.returncode == 0:
+                        retest = await _run(["lsd", remote, "--max-depth", "1"])
+                        if retest.returncode == 0:
+                            return {"ok": True, "message": "Connected (created target folder)"}
+                    err = (mkdir.stderr or mkdir.stdout or "").strip()[:300]
+                    return {"ok": False, "error": f"Could not create target folder: {err}"}
+
+                return {"ok": False, "error": f"rclone error: {stderr[:300]}"}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
 
