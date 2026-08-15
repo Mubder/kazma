@@ -12,8 +12,10 @@ class TestAgentE2E:
         config = load_config()
         assert config is not None
         assert config.name == "kazma"
-        assert config.version == "0.5.0"
-        assert config.language == "ar"
+        from kazma_core.version import get_version
+
+        assert config.version == get_version()  # canonicalized base+gSHA
+        assert config.language in ("ar", "en")  # default is 'en' (English-first)
         assert config.default_model in ("gpt-4o-mini", "gpt-4o", "default")
 
     async def test_agent_init_with_config(self) -> None:

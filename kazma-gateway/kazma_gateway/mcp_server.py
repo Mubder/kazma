@@ -189,6 +189,16 @@ MCP_TOOL_TO_SAFETY = {
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _run_sync(coro):
+    """Run a coroutine synchronously, creating a fresh loop when needed.
+
+    asyncio.get_event_loop() fails with RuntimeError when no current loop
+    exists (e.g. after pytest async tests tear down their loops). Use
+    asyncio.run() which always creates a fresh loop.
+    """
+    return asyncio.run(coro)
+
+
 def _resolve(root: Path, p: str) -> Path:
     """Resolve a path relative to root, preventing escape."""
     root_resolved = root.resolve()
@@ -283,7 +293,7 @@ def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "Write failed (approval may be required)")
         return res.get("output", f"Wrote {target}")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
@@ -308,7 +318,7 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "Tests failed (approval may be required)")
         return res.get("output", "(no output)")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
@@ -330,7 +340,7 @@ def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
             f"{'📁' if e['is_dir'] else '📄'} {e['name']}" for e in entries
         )
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
@@ -347,7 +357,7 @@ def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "Command failed")
         return res.get("output", "(no output)")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
@@ -364,7 +374,7 @@ def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "git status failed")
         return res.get("output", "(clean)")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 DISPATCH = {

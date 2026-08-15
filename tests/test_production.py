@@ -102,6 +102,7 @@ class TestGatewayStatusMetrics:
         mock_response.json.return_value = {"ok": True}
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=mock_response)
+        mock_http.is_closed = False  # keep the mock through _ensure_http()
         adapter._http = mock_http
 
         manager = GatewayManager()
