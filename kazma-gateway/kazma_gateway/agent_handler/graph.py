@@ -274,8 +274,11 @@ def _majlis_fast_path_reply(text: str) -> str | None:
         if intent == Intent.FAREWELL:
             return "في أمان الله 👋"
         cc = CulturalContext()
-        return pacing.get_greeting_response(
-            dialect="kw",
+        # Type-matched reply (2026-08-15): وعليكم السلام for السلام عليكم,
+        # صباح النور for صباح الخير, هلا والله for مرحبا — the old single
+        # pool answered "how are you" to every greeting.
+        return pacing.get_greeting_reply(
+            text,
             is_ramadan=cc.state.is_ramadan,
             is_eid=cc.state.is_eid,
         )

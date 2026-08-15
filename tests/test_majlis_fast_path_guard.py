@@ -21,10 +21,40 @@ class TestMajlisFastPathGuard:
         assert "في أمان الله" in reply
 
     def test_short_greeting_short_circuits(self):
-        """A short pure greeting gets a cultural reply (non-None)."""
+        """A short pure greeting gets a type-matched cultural reply."""
         reply = _majlis_fast_path_reply("السلام عليكم")
         assert reply is not None
-        assert len(reply.strip()) > 0
+        # السلام عليكم must be answered with وعليكم السلام — NOT an
+        # answer-to-شلونك like الحمد لله بخير (2026-08-15 fix).
+        assert "وعليكم السلام" in reply
+
+    # ── Type-matched replies (the reply relates to the greeting said) ─────
+
+    def test_salam_gets_wa_alaykom_reply(self):
+        for text in ("السلام عليكم", "السلام عليكم ورحمة الله"):
+            reply = _majlis_fast_path_reply(text)
+            assert reply is not None, text
+            assert "وعليكم السلام" in reply, (text, reply)
+            assert "بخير" not in reply, (text, reply)
+
+    def test_marhaba_gets_welcome_reply(self):
+        for text in ("مرحبا", "مرحباً", "مرحب", "أهلا", "هلا"):
+            reply = _majlis_fast_path_reply(text)
+            assert reply is not None, f"مرحبا-family must hit the fast path: {text}"
+            assert any(w in reply for w in ("هلا", "أهلا", "مرحبتين", "حياك")), (text, reply)
+
+    def test_morning_greeting_gets_morning_reply(self):
+        reply = _majlis_fast_path_reply("صباح الخير")
+        assert reply is not None and "صباح" in reply
+
+    def test_evening_greeting_gets_evening_reply(self):
+        reply = _majlis_fast_path_reply("مساء الخير")
+        assert reply is not None and "مساء" in reply
+
+    def test_how_are_you_gets_fine_reply(self):
+        reply = _majlis_fast_path_reply("شلونك")
+        assert reply is not None
+        assert any(w in reply for w in ("الحمد لله", "بخير"))
 
     def test_long_farewell_falls_through(self):
         """A farewell longer than the cap is treated as greeting+task."""
