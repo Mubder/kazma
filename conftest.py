@@ -52,3 +52,22 @@ def _shielded_setitem(self, key, value):
 
 
 os.environ.__class__.__setitem__ = _shielded_setitem
+
+
+# ── Global shutdown-event reset ─────────────────────────────────────────────
+# Tests that call create_app() + uvicorn (e2e, pipeline_sandbox, …) fire the
+# app's lifespan shutdown → signal_shutdown(), setting the GLOBAL event for
+# the rest of the process. Every later SSE/WS/stream test then sees
+# is_shutting_down()==True and immediately breaks. Reset before each test.
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _reset_shutdown_event():
+    try:
+        from kazma_core.shutdown import reset_shutdown
+
+        reset_shutdown()
+    except Exception:
+        pass
+    yield
