@@ -15,12 +15,16 @@ class TestWizardContext:
     """Tests for WizardContext."""
 
     def test_default_context(self):
+        from kazma_core.paths import hub_registry_db, installed_skills_dir
+
         ctx = WizardContext()
         assert ctx.selected_skill is None
         assert ctx.manifest_data is None
         assert ctx.security_results is None
-        assert ctx.registry_path == "~/.kazma/hub/registry.db"
-        assert ctx.skills_dir == Path("~/.kazma/skills").expanduser()
+        # Defaults resolve via kazma_core.paths (project-local .kazma/ hub),
+        # not a hardcoded ~/.kazma string.
+        assert ctx.registry_path == str(hub_registry_db())
+        assert ctx.skills_dir == installed_skills_dir()
 
     def test_custom_registry_path(self):
         ctx = WizardContext()
