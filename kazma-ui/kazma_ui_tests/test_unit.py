@@ -165,7 +165,9 @@ class TestSessionManager:
         manager.get_or_create("session-1")
         manager.get_or_create("session-2")
         
-        sessions = manager.list_all()
+        # list_all prunes/hides empty web sessions by default — the test's
+        # sessions are empty shells, so opt out of both behaviors.
+        sessions = manager.list_all(include_empty=True, prune_empty=False)
         assert len(sessions) == 2
 
     def test_delete_session(self):

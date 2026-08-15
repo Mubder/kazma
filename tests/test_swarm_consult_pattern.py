@@ -341,9 +341,13 @@ def test_api_consult_requires_workers_and_returns_consult_history() -> None:
     history_response = client.get("/api/swarm/tasks", params={"type": "consult"})
     assert history_response.status_code == 200
     history_payload = history_response.json()
-    assert history_payload["count"] == 1
-    assert history_payload["tasks"][0]["type"] == "consult"
-    assert len(history_payload["tasks"][0]["individual_opinions"]) == 2
-    assert history_payload["tasks"][0]["synthesized_output"] == dispatch_payload[
-        "synthesized_output"
+    # Other tests in this file also dispatch consult tasks into the shared
+    # store — find THIS dispatch's task by its synthesized output rather
+    # than asserting an exact count.
+    matching = [
+        t for t in history_payload["tasks"]
+        if t.get("synthesized_output") == dispatch_payload["synthesized_output"]
     ]
+    assert matching, f"This consult task not in history (count={history_payload['count']})"
+    assert matching[0]["type"] == "consult"
+    assert len(matching[0]["individual_opinions"]) == 2

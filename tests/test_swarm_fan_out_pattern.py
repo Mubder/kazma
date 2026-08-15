@@ -68,6 +68,11 @@ async def test_engine_fan_out_runs_workers_concurrently(empty_config):
     engine.get_worker("beta").dispatch = lambda task, context="": make_dispatch("beta")  # type: ignore[assignment,union-attr]
     engine.get_worker("gamma").dispatch = lambda task, context="": make_dispatch("gamma")  # type: ignore[assignment,union-attr]
 
+    # The outer bound must accommodate the cold-start embedder load
+    # (worker_dispatch stores results via swarm_bridge → first-use
+    # sentence-transformers init takes ~12s in a fresh process; the
+    # concurrency semantics are verified by the ready-event pattern below,
+    # not by wall-clock speed).
     result = await asyncio.wait_for(
         engine.dispatch(
             SwarmTask(
@@ -78,7 +83,7 @@ async def test_engine_fan_out_runs_workers_concurrently(empty_config):
                 aggregation="collect",
             )
         ),
-        timeout=0.2,
+        timeout=60.0,
     )
 
     assert started == {"alpha", "beta", "gamma"}

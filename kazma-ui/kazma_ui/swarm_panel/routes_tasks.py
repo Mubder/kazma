@@ -119,6 +119,10 @@ def register_tasks_routes(
             secret = get_kazma_secret()
             if secret and not is_authenticated(request, secret):
                 return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+            if not secret:
+                # Single-user / no-secret deployment: fail-open (documented
+                # intent — the role check below only applies when auth is on).
+                return None
             principal = get_request_principal(request) or {}
             if principal.get("source") == "secret":
                 return None
