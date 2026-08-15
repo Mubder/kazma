@@ -260,3 +260,20 @@ pipelines:
     system_prompt: You are a Builder. Implement based on the research above.
     depends_on:
     - researcher
+
+# ── Backups (universal sweep + Postgres dump) ─────────────────────────────
+# Pinned explicitly (2026-08-15 backup audit): these ran on code defaults.
+backups:
+  pg:
+    enabled: true      # nightly pg_dump of Kazma's shared-state tables
+    retention: 7       # generations kept under kazma-data/backups/pg/
+  # Offsite copy of each universal backup (audit gap #2 — the only protection
+  # against disk death). Set a configured rclone remote to enable, e.g.
+  #   backups.offsite.rclone_remote: "onedrive:kazma-backups"
+  # Requires rclone on PATH (or docker-exec fallback is NOT used here).
+  offsite:
+    enabled: true      # effective only when rclone_remote is set
+    rclone_remote: ""  # empty = offsite disabled (local-only backups)
+  # Workspace-root dirs/files to include in every universal backup
+  # (agent deliverables outside kazma-data/, audit gap #3).
+  extra_paths: research

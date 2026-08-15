@@ -56,6 +56,142 @@ def _universal_dir() -> Path:
     return _data_dir() / "backups" / "universal"
 
 
+# ── Backup-audit gaps (2026-08-15): .env, root work artifacts, offsite ──────
+# The universal sweep only scanned kazma-data/, which left three things
+# unprotected: the install-root .env (KAZMA_SECRET / vault key / DSN — with
+# it lost, the backed-up encrypted vault is unrecoverable), agent-generated
+# deliverables at the workspace root (research/ etc.), and any offsite copy
+# (a single disk failure took data + all backup generations at once).
+
+
+def _offsite_config() -> dict[str, Any]:
+    """Live-read offsite sync config (mirrors pg_backup's reader; never raises).
+
+    Keys: ``backups.offsite.rclone_remote`` (e.g. ``"onedrive:kazma-backups"``)
+    and ``backups.offsite.enabled`` (default true when a remote is set).
+    """
+    cfg: dict[str, Any] = {"enabled": False, "rclone_remote": ""}
+    try:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+        cfg["rclone_remote"] = str(store.get("backups.offsite.rclone_remote") or "").strip()
+        enabled = store.get("backups.offsite.enabled")
+        cfg["enabled"] = bool(enabled) if enabled is not None else bool(cfg["rclone_remote"])
+    except Exception:
+        logger.debug("[universal-backup] offsite config read failed", exc_info=True)
+    return cfg
+
+
+def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
+    """Copy the install-root .env + configured root work artifacts into *dest*.
+
+    ``backups.extra_paths`` (ConfigStore, comma-separated, default
+    ``research``) names workspace-root dirs/files to include — agent
+    deliverables that live outside kazma-data/ and outside git. The .env is
+    copied verbatim: it is the recovery key for the encrypted vault inside
+    settings.db, so an encrypted copy keyed BY it would be circular. Protect
+    the offsite copy instead (encrypted remote / rclone crypt).
+    """
+    result: dict[str, Any] = {"env": None, "artifacts": []}
+    root = _data_dir().parent
+    try:
+        env_path = root / ".env"
+        if env_path.is_file():
+            target = dest / ".env"
+            shutil.copy2(env_path, target)
+            result["env"] = {"path": ".env", "size": target.stat().st_size}
+        else:
+            result["env"] = {"path": ".env", "missing": True}
+    except Exception:
+        logger.warning("[universal-backup] .env copy failed", exc_info=True)
+        result["env"] = {"path": ".env", "error": True}
+
+    extra: list[str] = ["research"]
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("backups.extra_paths")
+        if isinstance(raw, str) and raw.strip():
+            extra = [p.strip() for p in raw.split(",") if p.strip()]
+        elif isinstance(raw, (list, tuple)) and raw:
+            extra = [str(p).strip() for p in raw if str(p).strip()]
+    except Exception:
+        logger.debug("[universal-backup] extra_paths read failed", exc_info=True)
+
+    for name in extra:
+        try:
+            src = root / name
+            if not src.exists():
+                continue
+            target = dest / name
+            if src.is_dir():
+                count = _robust_copytree(src, target)
+                result["artifacts"].append({"path": name, "files": count})
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, target)
+                result["artifacts"].append({"path": name, "size": target.stat().st_size})
+        except Exception:
+            logger.warning("[universal-backup] root artifact %r failed", name, exc_info=True)
+            result["artifacts"].append({"path": name, "error": True})
+    return result
+
+
+def _offsite_sync(dest: Path) -> dict[str, Any]:
+    """Copy the finished backup dir to a configured rclone remote (fail-open).
+
+    The ONLY protection against disk death — without it, data and all backup
+    generations share one drive. Gated on ``backups.offsite.rclone_remote``
+    being configured; runs ``rclone copy <dest> <remote>/<timestamp>`` via a
+    worker thread (Windows SelectorEventLoop cannot host subprocesses, §23).
+    Never raises — a missing rclone/bad remote logs and skips.
+    """
+    cfg = _offsite_config()
+    if not cfg["enabled"] or not cfg["rclone_remote"]:
+        return {"skipped": "no offsite remote configured"}
+    if shutil.which("rclone") is None:
+        logger.warning(
+            "[universal-backup] offsite remote configured (%s) but rclone is not on PATH — skipping",
+            cfg["rclone_remote"],
+        )
+        return {"skipped": "rclone not found on PATH"}
+
+    import asyncio
+
+    async def _run() -> dict[str, Any]:
+        import subprocess
+
+        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        if proc.returncode == 0:
+            logger.info("[universal-backup] offsite sync complete: %s", remote)
+            return {"ok": True, "remote": remote}
+        logger.warning(
+            "[universal-backup] offsite sync failed (rc=%d): %s",
+            proc.returncode, (proc.stderr or "")[:300],
+        )
+        return {"ok": False, "remote": remote, "error": (proc.stderr or "")[:300]}
+
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            return asyncio.run_coroutine_threadsafe(_run(), loop).result(timeout=1900)
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("[universal-backup] offsite sync error: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def _should_exclude(name: str, is_dir: bool = False) -> bool:
     if name in _EXCLUDE_DIRS:
         return True
@@ -290,6 +426,12 @@ def perform_universal_backup(
     asset_results = _copy_assets(data, dest / "assets")
     _set_progress("assets", detail=f"Assets done ({len(asset_results)} groups)")
 
+    # 2.5 Install-root .env + root work artifacts (backup-audit gap #1/#3):
+    # .env holds the vault key — without it the backed-up encrypted vault is
+    # unrecoverable; research/ & co. are deliverables no other sweep covers.
+    _set_progress("assets", detail="Copying .env + root artifacts…")
+    root_artifacts = _copy_root_artifacts(dest)
+
     # 3. Postgres dump — SKIP (the native_pg_backup task already dumps PG
     # separately into backups/pg/. Running it here was redundant (two pg_dump
     # calls) and added 3-5s of I/O. The PG dump is listed in the manifest as
@@ -306,12 +448,17 @@ def perform_universal_backup(
         "elapsed_seconds": elapsed,
         "databases": {"ok": db_ok, "failed": db_fail, "items": db_results},
         "assets": asset_results,
+        "root_artifacts": root_artifacts,
         "postgres": pg_result,
     }
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     # 5. Prune old backups.
     pruned = _prune(max(1, retention))
+
+    # 6. Offsite sync (backup-audit gap #2): copy the finished backup to a
+    # configured rclone remote. Fail-open — local backup stays authoritative.
+    offsite = _offsite_sync(dest)
 
     total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
     size_mb = round(total_size / (1024 * 1024), 1)
@@ -327,6 +474,9 @@ def perform_universal_backup(
         "total_size_mb": size_mb,
         "elapsed_seconds": elapsed,
         "pruned": pruned,
+        "env_backed_up": bool(root_artifacts.get("env") and not root_artifacts["env"].get("error")),
+        "root_artifacts": [a.get("path") for a in root_artifacts.get("artifacts", [])],
+        "offsite": offsite,
     }
     logger.info(
         "[universal-backup] complete: %d DBs, %d asset groups, %.1f MB, %.1fs, pruned %d",

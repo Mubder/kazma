@@ -262,18 +262,26 @@ def _tool_read_file(root: Path, args: dict[str, Any]) -> str:
 
 
 def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
-    """Write content to a file via IdeService (HITL-gated)."""
+    """Write content to a file via IdeService (HITL-gated).
+
+    The path is resolved against *root* with escape prevention (_resolve).
+    Previously the raw path went straight to IdeService, so relative paths
+    resolved against the process CWD and the documented root confinement
+    (including the ../../ traversal block) never fired (2026-08-15 audit).
+    """
     import asyncio
 
     from kazma_core.ide import get_ide_service
 
+    target = _resolve(root, args["path"])
+
     async def _run() -> str:
         svc = get_ide_service()
         svc.refresh_root()
-        res = await svc.write_file(args["path"], args["content"])
+        res = await svc.write_file(str(target), args["content"])
         if not res["ok"]:
             return res.get("error", "Write failed (approval may be required)")
-        return res.get("output", f"Wrote {args['path']}")
+        return res.get("output", f"Wrote {target}")
 
     return asyncio.get_event_loop().run_until_complete(_run())
 
@@ -284,10 +292,11 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
 
     from kazma_core.ide import get_ide_service
 
+    test_path = str(_resolve(root, args.get("path", "tests/")))
+
     async def _run() -> str:
         svc = get_ide_service()
         svc.refresh_root()
-        test_path = args.get("path", "tests/")
         cmd = f"{sys.executable} -m pytest {test_path}"
         if args.get("keyword"):
             cmd += f" -k {args['keyword']}"

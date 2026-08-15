@@ -61,11 +61,12 @@ jobs:
       - name: Install deps
         run: pip install -e ".[test]"
       - name: Run tests (GATE — failures fail CI)
-        # Bare pytest = ALL testpaths (root tests/ + the five package
-        # suites — kazma-core/tests was previously orphaned from CI).
-        # --timeout converts a hung test into a failure instead of
-        # burning runner minutes.
-        run: python -m pytest -q --tb=line -m "not slow" --timeout=300
+        # Crash-tolerant chunked runner (scripts/fast_test.py): the bare
+        # monolithic pytest run takes 20+ min and intermittently segfaults
+        # (native lib), killing the run with no results. The chunked runner
+        # executes file-chunks as independent serial pytest processes,
+        # retries crashed chunks per-file, and still gates on every failure.
+        run: python scripts/fast_test.py --chunks 4 --chunk-timeout 1500
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: Metrics check
