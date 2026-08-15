@@ -1,8 +1,10 @@
 """Document generate handler — all mutations via tool_executor.execute().
 
 Implements §13 of KAZMA_INTENT_ENGINE.md (Phase 1). The handler NEVER
-calls file_write / generate_pdf / send_file_message directly — every
-mutation goes through execute() so HITL + commitment stay wired.
+calls file_write / generate_pdf / send_file directly — every mutation goes
+through execute() so HITL + commitment stay wired. Delivery uses the
+registered send_file tool (execute path), which resolves the active-chat
+target and honors the outbound gate.
 
 HITL rule: if the graph interrupt cannot fire from inside a handler
 (because we're in supervisor_node, not tool_worker), the handler MUST
@@ -32,8 +34,12 @@ logger = logging.getLogger(__name__)
 def _can_auto_execute(tool_executor: Any) -> bool:
     """Check whether we're in a context where execute() is safe.
 
-    Safe when: HITL is off, YOLO is on, or the graph HITL gate ContextVar
-    is set (we're inside tool_worker_node).
+    Safe when: HITL is off, the mutating tools are not approval-gated, or
+    the graph HITL gate ContextVar is set (we're inside tool_worker_node).
+    Otherwise escalate so the supervisor loop performs the writes with the
+    HITL card. YOLO is intentionally not checked here — it requires a
+    thread_id that supervisor_node does not carry; the loop handles YOLO
+    via tool_worker_node instead.
     """
     try:
         from kazma_core.safety.hitl import get_hitl_config
@@ -53,16 +59,6 @@ def _can_auto_execute(tool_executor: Any) -> bool:
                 return True
         except Exception:
             pass
-
-        # Check YOLO
-        try:
-            from kazma_core.safety.yolo import is_yolo_active
-
-            # We don't have thread_id here; YOLO check requires it.
-            # Conservative: if YOLO is not obviously on, escalate.
-            return False
-        except Exception:
-            return False
 
         return False
     except Exception:
@@ -244,18 +240,20 @@ async def run_document(decision: TurnDecision, state: dict[str, Any], **ctx: Any
     steps_log.append(f"Quality gate passed ({op.stat().st_size} bytes)")
 
     # ── Step 6: DELIVER (optional) ───────────────────────────────────
+    # F8: route delivery through the send_file tool (execute path) so the
+    # HITL/commitment wiring applies — never call send_file_message directly.
     if deliver_to:
         target = _resolve_delivery_target(deliver_to)
         if target:
             try:
-                from kazma_core.tools.send_message import send_file_message
-
-                send_result = await send_file_message(
-                    target_id=target,
-                    text=f"📎 {title}",
-                    file_path=output_path,
+                send_out = await tool_executor.execute(
+                    "send_file",
+                    {"file_path": output_path, "caption": f"📎 {title}"},
                 )
-                steps_log.append(f"Delivered via {deliver_to}: {send_result[:100]}")
+                if send_out.get("is_error") or str(send_out.get("content", "")).startswith("Error:"):
+                    steps_log.append(f"Delivery failed: {str(send_out.get('content', ''))[:120]} — file saved locally")
+                else:
+                    steps_log.append(f"Delivered via {deliver_to}: {str(send_out.get('content', ''))[:100]}")
             except Exception as exc:
                 steps_log.append(f"Delivery failed: {exc} — file saved locally")
         else:

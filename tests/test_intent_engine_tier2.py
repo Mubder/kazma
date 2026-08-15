@@ -29,15 +29,29 @@ class FakeLLM:
 class TestTier2GrayZone:
     @pytest.mark.asyncio
     async def test_gray_zone_calls_llm(self):
-        """A long general question (no heuristic match) should call the LLM."""
+        """A low-confidence detected act (positive signal) should call the LLM.
+
+        F5 positive-signal gate: a GENERAL-only turn (no detected act) skips
+        the LLM; refinement only fires when the heuristics found an act.
+        """
         llm = FakeLLM(
             response_content='{"acts": [{"kind": "research", "confidence": 0.7, "slots": {}}]}'
         )
-        text = "I have been thinking about whether artificial intelligence will fundamentally change how small businesses operate in the Gulf region over the next decade"
+        # 'research' triggers a 0.70 act → gray zone (conf < 0.80) → LLM called.
+        text = "please research whether artificial intelligence will fundamentally change how small businesses operate in the Gulf region over the next decade"
         d = await classify_turn(text, llm=llm)
-        assert llm.called, "Gray-zone utterance must call the LLM"
+        assert llm.called, "Gray-zone utterance with a positive signal must call the LLM"
         # LLM returned research → should be in acts
         assert any(a.kind == ActKind.RESEARCH for a in d.acts) or d.route == RouteKind.LOOP
+
+    @pytest.mark.asyncio
+    async def test_general_only_skips_llm(self):
+        """F5: a GENERAL-only turn (plain chat) does NOT call the LLM."""
+        llm = FakeLLM(response_content='{"acts": []}')
+        text = "I have been thinking about whether the weather will be nice this weekend and if I should plan a trip"
+        d = await classify_turn(text, llm=llm)
+        assert not llm.called, "GENERAL-only turn must skip Tier-2 refinement"
+        assert d.route in (RouteKind.LOOP, RouteKind.CONSTRAIN)
 
     @pytest.mark.asyncio
     async def test_high_precision_no_llm(self):

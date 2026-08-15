@@ -1132,7 +1132,11 @@ def create_graph_handler(
             from kazma_core.cultural_context import CulturalContext
 
             intent = detect_intent(msg.text)
-            if intent in (Intent.GREETING, Intent.FAREWELL):
+            # F7: only short-circuit when the message is ONLY a greeting/farewell.
+            # A greeting followed by a real request ("صباح الخير، ابحث لي عن ...")
+            # must reach the graph, not be swallowed by the canned reply.
+            _fast_path_len = len((msg.text or "").strip())
+            if intent in (Intent.GREETING, Intent.FAREWELL) and _fast_path_len <= 60:
                 cc = CulturalContext()
                 if intent == Intent.GREETING:
                     greeting = get_greeting_response(

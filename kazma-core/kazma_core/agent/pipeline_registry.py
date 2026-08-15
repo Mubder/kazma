@@ -1,8 +1,13 @@
 """Pipeline Registry — extensible structured workflows.
 
 Each pipeline is a deterministic step sequence for a class of tasks.
-Pipelines self-register on import; the intent router matches user intents
-to pipelines. Structured tasks never enter the free-form agent loop.
+Pipelines self-register on import.
+
+NOTE (audit 2026-08-15): this registry is compat-only and superseded by the
+intent engine handlers (kazma_core.agent.intent.handlers.*). The supervisor
+dispatches intent handlers directly and never queries this registry; the
+registered document pipeline has no live caller. Kept so old imports/tests
+compile — removal is a follow-up once callers are confirmed gone.
 """
 
 from __future__ import annotations

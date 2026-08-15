@@ -57,6 +57,16 @@ class IntentRegistry:
     def get_composer(self, kinds: frozenset[str]) -> IntentHandler | None:
         return self._composers.get(kinds)
 
+    def resolve(self, name: str) -> IntentHandler | None:
+        """Look up a handler OR composer by name (single dispatch lookup)."""
+        h = self._handlers.get(name)
+        if h is not None:
+            return h
+        for c in self._composers.values():
+            if c.name == name:
+                return c
+        return None
+
 
 _registry: IntentRegistry | None = None
 

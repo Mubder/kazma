@@ -1,7 +1,12 @@
-"""Policy — the ONLY place that sets route=execute. Phase 0: allowlist empty."""
+"""Policy — the ONLY place that sets route=execute.
+
+Phase 2+: execute allowlist = {document_generate, research_deep}; a
+multi-act turn whose kind-set matches a registered composer dispatches it.
+"""
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from kazma_core.agent.intent.types import (
     EXECUTE_MIN,
@@ -144,12 +149,41 @@ def decide(
     if not non_general:
         return RouteKind.LOOP, None, "no_act", ""
 
-    # 4. Multi-act without composer → constrain
+    # 4. Multi-act: dispatch a registered composer, else constrain
     if len(non_general) > 1:
         kinds = frozenset(a.kind for a in non_general)
         composer = registry.get_composer(kinds)
         if composer is None:
             return RouteKind.CONSTRAIN, None, "multi_act", _multi_act_plan_note(non_general)
+
+        # Composer found — run it through the same safety gates as a
+        # single-act handler before dispatching.
+        if not intent_execute_enabled():
+            return RouteKind.CONSTRAIN, None, "execute_disabled", _multi_act_plan_note(non_general)
+
+        # Every participating act must be allowlisted and confident enough.
+        for a in non_general:
+            if a.kind not in _PHASE_EXECUTE_ALLOWLIST:
+                return RouteKind.CONSTRAIN, None, "phase_allowlist", _multi_act_plan_note(non_general)
+            if a.confidence < EXECUTE_MIN:
+                return RouteKind.CONSTRAIN, None, "low_confidence", _multi_act_plan_note(non_general)
+
+        # Merge slots across all non-general acts for the composer's
+        # required_slots (topic comes from research, format from document).
+        merged_slots: dict[str, Any] = {}
+        for a in non_general:
+            merged_slots.update(a.slots)
+        slot_sources = {**merged_slots}
+        if entities.files:
+            slot_sources["source_file"] = entities.files[0].path
+        for req in composer.required_slots:
+            if req not in slot_sources:
+                return RouteKind.CONSTRAIN, None, "missing_slot", _multi_act_plan_note(non_general)
+
+        if composer.mutating and not composer.uses_execute:
+            return RouteKind.LOOP, None, "handler_unsafe", ""
+
+        return RouteKind.EXECUTE, composer.name, "checklist_passed", ""
 
     # 5. Unresolved/ambiguous entities → constrain
     if entities.unresolved or entities.ambiguous:
@@ -192,7 +226,7 @@ def decide(
     if handler.mutating and not handler.uses_execute:
         return RouteKind.LOOP, None, "handler_unsafe", ""
 
-    # 12. Phase execute allowlist (Phase 0: EMPTY — always constrains)
+    # 12. Phase execute allowlist ({document_generate, research_deep})
     if primary.kind not in _PHASE_EXECUTE_ALLOWLIST:
         if primary.kind in _SOFT_KINDS:
             return RouteKind.CONSTRAIN, None, "phase_allowlist", _plan_note_for(primary.kind, primary.slots, entities)

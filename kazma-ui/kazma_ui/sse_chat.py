@@ -1051,20 +1051,16 @@ def create_sse_chat_router(
                             {"content": f"⚠️ Research failed to start: {err}"},
                         )
                 except Exception as exc:
+                    err_text = f"⚠️ Research error: {exc}"
                     yield _sse_frame(
                         "token",
-                        {"content": f"⚠️ Research error: {exc}"},
+                        {"content": err_text},
                     )
                     try:
-                        session.add_message("assistant", out)
+                        session.add_message("assistant", err_text)
                         _get_store().put(session)
                     except Exception:
                         pass
-                except Exception as exc:
-                    yield _sse_frame(
-                        "token",
-                        {"content": f"\nResearch failed: {exc}"},
-                    )
                 yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 0})
 
             return StreamingResponse(

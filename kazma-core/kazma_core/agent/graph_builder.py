@@ -807,7 +807,8 @@ async def supervisor_node(
         # ── Intent Engine (§14 of KAZMA_INTENT_ENGINE.md) ─────────────
         # Classify every turn (focus + acts + entities) and write the
         # decision onto SupervisorState. Route is execute/constrain/loop.
-        # Phase 0: execute allowlist is EMPTY — constrains only.
+        # Phase 2+: execute allowlist = {document_generate, research_deep};
+        # multi-act research+document dispatches the composer.
         _decision = None
         if iteration == 0:
             try:
@@ -833,6 +834,7 @@ async def supervisor_node(
                         task_goal_summary=_prev_goal,
                         llm=llm,
                         use_embedding_drift=(iteration == 0),
+                        focus=_intent_mode,
                     )
                     _intent_mode = _decision.focus
                     intent_patch["intent_mode"] = _decision.focus
@@ -843,22 +845,23 @@ async def supervisor_node(
                     ]
                     intent_patch["intent_reason"] = _decision.reason
                     logger.info(
-                        "[Supervisor] Intent Engine: focus=%s route=%s acts=%s reason=%s",
+                        "[Supervisor] Intent Engine: focus=%s route=%s acts=%s reason=%s source=%s",
                         _decision.focus,
                         _decision.route,
-                        [a.kind for a in _decision.acts],
+                        [(a.kind, round(a.confidence, 2)) for a in _decision.acts],
                         _decision.reason,
+                        _decision.source,
                     )
             except Exception:
                 logger.debug("[Supervisor] Intent engine failed (non-fatal)", exc_info=True)
                 _decision = None
 
-        # Execute (Phase 0: allowlist empty — this branch is dormant)
+        # Execute (Phase 2+: document_generate / research_deep / composer)
         if _decision is not None and _decision.route.value == "execute" and _decision.handler:
             try:
                 from kazma_core.agent.intent.registry import get_registry as _get_intent_registry
 
-                _h = _get_intent_registry().get(_decision.handler)
+                _h = _get_intent_registry().resolve(_decision.handler)
                 if _h is not None:
                     _res = await asyncio.wait_for(
                         _h.run(_decision, {**state, "messages": messages}, llm=llm, tool_executor=tool_executor),

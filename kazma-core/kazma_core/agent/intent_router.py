@@ -1,8 +1,10 @@
 """Compat façade — delegates to the intent engine (kazma_core.agent.intent).
 
-Keeps `classify_task`, `TaskIntent`, `IntentCategory`, `CONFIDENCE_THRESHOLD`
-so old tests compile during migration. `should_route` follows the engine's
-route decision, not a confidence threshold.
+SUPERSEDED by the intent engine (kazma_core.agent.intent.*). Kept only so old
+tests/callers compile during migration; the supervisor dispatches the engine
+directly and never calls this module. `classify_task_async` has no production
+callers. `should_route` follows the engine's route decision, not a confidence
+threshold.
 """
 from __future__ import annotations
 

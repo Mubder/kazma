@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Unreleased — Intent Router audit fixes (2026-08-15)
+
+Full read-only audit of the intent routing system (15 findings, F1–F15), all
+fixed:
+- F1 Composer now actually dispatches: policy routes multi-act research+document
+  turns through the registered composer (gated on execute/allowlist/confidence/
+  slots); supervisor looks up handlers+composers via registry.resolve().
+- F2 Tier-2 LLM hardening: user text wrapped in an untrusted data fence and
+  LLM-returned slots validated against a per-act allowlist before use.
+- F3 Intent decision metrics now recorded on the async classify_turn path too
+  (was sync-only, so production decisions were uncounted).
+- F5 Tier-2 positive-signal gate: a GENERAL-only turn (plain chat) no longer
+  spends an LLM refinement call — only turns with a detected act refine.
+- F6 SSE /research error path fixed (undefined `out` → real error text; dropped
+  the unreachable duplicate except).
+- F7 Majlis greeting fast-path only short-circuits short pure greetings, so
+  greeting+task messages reach the graph.
+- F8 Document handler delivery now routes through the send_file tool (execute
+  path) instead of calling send_file_message directly.
+- F10 Focus is computed once per turn and passed into classify_turn (was
+  classified twice, embedding twice).
+- F11 Tier-2 prompt taxonomy now includes document_intel.
+- F12 Entities re-resolved after Tier-2 changes the act set.
+- F13 Removed dead YOLO branch in _can_auto_execute; docstring matches behavior.
+- F14 Topic-drift user-text moved out of INFO logs; intent decision log gains
+  per-act confidence + source; entity ambiguity logged at debug.
+- F4/F15 Stale Phase-0 comments corrected; compat façade noted as superseded.
+- F9 Test suite modernized: positive EXECUTE reachable, confidence boundary,
+  composer dispatch, injection corpus, sync/async parity, metrics, plain-chat
+  no-LLM gate.
+
 ## Unreleased — Intent Engine Phase 0 (2026-08-15)
 
 ## Unreleased — Intent Engine Phases 2-4 (2026-08-15)
@@ -17,7 +48,8 @@ analysis, remind, document_intel, swarm, research, research_deep, document_gener
 Phase 4 (hardening): Arabic isolated-form scan on generated PDFs (detects
 bidi rendering issues); TUI intent classify (display-only: shows route/acts
 in the TUI chat log); metrics kazma_intent_decisions_total{route,act}
-Prometheus counter wired into classify_turn.
+Prometheus counter (wired into classify_turn_sync here; extended to the async
+classify_turn path in the audit-fixes entry above).
 
 202 total tests green (129 intent engine + 73 regression).
 

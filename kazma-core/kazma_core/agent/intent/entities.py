@@ -129,6 +129,13 @@ def resolve_entities(
                     ambiguous.append("source_file")
 
     files_tuple = tuple(all_files)
+    if unresolved or ambiguous:
+        logger.debug(
+            "[intent_entities] unresolved=%s ambiguous=%s resolved=%d file(s)",
+            tuple(unresolved),
+            tuple(ambiguous),
+            len(files_tuple),
+        )
     return EntitySet(
         files=files_tuple,
         unresolved=tuple(unresolved),

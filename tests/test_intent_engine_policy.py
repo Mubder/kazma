@@ -1,4 +1,10 @@
-"""Intent engine policy tests — execute allowlist empty in Phase 0."""
+"""Intent engine policy tests.
+
+These use an EMPTY IntentRegistry (no registered handlers), so document /
+research utterances must not reach EXECUTE — without a handler the policy
+constrains. Positive EXECUTE reachability (with handlers registered) is
+covered in test_intent_audit_fixes.py.
+"""
 from __future__ import annotations
 
 import pytest

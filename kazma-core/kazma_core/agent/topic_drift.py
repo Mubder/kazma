@@ -136,9 +136,12 @@ def semantic_topic_drift(
         drifted = dist >= float(threshold)
         if drifted:
             logger.info(
-                "[topic_drift] semantic shift dist=%.3f threshold=%.3f cur=%r ref=%r",
+                "[topic_drift] semantic shift dist=%.3f threshold=%.3f",
                 dist,
                 threshold,
+            )
+            logger.debug(
+                "[topic_drift] shift detail cur=%r ref=%r",
                 cur[:60],
                 ref[:60],
             )
