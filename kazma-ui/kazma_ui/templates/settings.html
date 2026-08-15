@@ -2421,6 +2421,120 @@
                 </div>
             </template>
         </div>
+        <!-- Offsite Backup -->
+        <div class="settings-group">
+            <h3>{{ t('settings.offsite_heading') }}</h3>
+            <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.offsite_desc') }}</p>
+
+            <!-- rclone not installed warning -->
+            <div x-show="offsiteConfig && !offsiteConfig.rclone_available" x-cloak
+                 style="padding:12px 16px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.3);border-radius:var(--radius-card);margin-bottom:1rem;font-size:0.85rem">
+                <strong>⚠️ rclone is not installed.</strong>
+                <p style="margin:6px 0 0 0;color:var(--text-muted)">
+                    Install it first, then configure your cloud remote:
+                </p>
+                <code style="display:block;margin-top:8px;padding:8px 12px;background:rgba(0,0,0,0.2);border-radius:6px;font-size:0.8rem;user-select:all">
+                    winget install Rclone.Rclone
+                </code>
+                <p style="margin:8px 0 0 0;color:var(--text-muted);font-size:0.8rem">
+                    Then run <code>rclone config</code> to connect your cloud (OneDrive, Google Drive, Dropbox, S3, B2).
+                </p>
+            </div>
+
+            <div class="two-col-grid">
+                <!-- Cloud provider guide -->
+                <div>
+                    <label class="settings-label">{{ t('settings.offsite_provider') }}</label>
+                    <select class="settings-input" @change="offsiteProvider = $event.target.value" :value="offsiteProvider">
+                        <option value="">— {{ t('settings.offsite_provider_select') }} —</option>
+                        <option value="onedrive">OneDrive (Microsoft 365)</option>
+                        <option value="gdrive">Google Drive</option>
+                        <option value="dropbox">Dropbox</option>
+                        <option value="s3">Amazon S3</option>
+                        <option value="b2">Backblaze B2</option>
+                    </select>
+                    <!-- Setup instructions per provider -->
+                    <div x-show="offsiteProvider" x-cloak style="margin-top:10px;padding:12px;background:rgba(79,140,255,0.05);border:1px solid var(--border);border-radius:var(--radius-card);font-size:0.8rem">
+                        <template x-if="offsiteProvider === 'onedrive'">
+                            <div>
+                                <strong>OneDrive setup:</strong>
+                                <code style="display:block;margin:6px 0;padding:6px 10px;background:rgba(0,0,0,0.15);border-radius:4px;user-select:all">rclone config create kazma-backup onedrive</code>
+                                <p style="margin:4px 0 0 0;color:var(--text-muted)">Opens a browser to sign in to your Microsoft account. Remote name: <code>kazma-backup</code></p>
+                            </div>
+                        </template>
+                        <template x-if="offsiteProvider === 'gdrive'">
+                            <div>
+                                <strong>Google Drive setup:</strong>
+                                <code style="display:block;margin:6px 0;padding:6px 10px;background:rgba(0,0,0,0.15);border-radius:4px;user-select:all">rclone config create kazma-backup drive</code>
+                                <p style="margin:4px 0 0 0;color:var(--text-muted)">Opens a browser to authorize Google Drive access. Remote name: <code>kazma-backup</code></p>
+                            </div>
+                        </template>
+                        <template x-if="offsiteProvider === 'dropbox'">
+                            <div>
+                                <strong>Dropbox setup:</strong>
+                                <code style="display:block;margin:6px 0;padding:6px 10px;background:rgba(0,0,0,0.15);border-radius:4px;user-select:all">rclone config create kazma-backup dropbox</code>
+                                <p style="margin:4px 0 0 0;color:var(--text-muted)">Opens a browser to authorize Dropbox. Remote name: <code>kazma-backup</code></p>
+                            </div>
+                        </template>
+                        <template x-if="offsiteProvider === 's3'">
+                            <div>
+                                <strong>Amazon S3 setup:</strong>
+                                <code style="display:block;margin:6px 0;padding:6px 10px;background:rgba(0,0,0,0.15);border-radius:4px;user-select:all">rclone config create kazma-backup s3</code>
+                                <p style="margin:4px 0 0 0;color:var(--text-muted)">Requires AWS access key + secret. Remote name: <code>kazma-backup</code></p>
+                            </div>
+                        </template>
+                        <template x-if="offsiteProvider === 'b2'">
+                            <div>
+                                <strong>Backblaze B2 setup:</strong>
+                                <code style="display:block;margin:6px 0;padding:6px 10px;background:rgba(0,0,0,0.15);border-radius:4px;user-select:all">rclone config create kazma-backup b2</code>
+                                <p style="margin:4px 0 0 0;color:var(--text-muted)">Requires B2 account ID + key. Cheapest option for backups. Remote name: <code>kazma-backup</code></p>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <!-- Remote path config -->
+                <div>
+                    <label class="settings-label">{{ t('settings.offsite_remote') }}</label>
+                    <input type="text" class="settings-input" x-model="offsiteRemote"
+                           :placeholder="offsiteProvider ? 'kazma-backup:kazma-backups' : 'kazma-backup:kazma-backups'"
+                           style="width:100%">
+                    <p style="margin:4px 0 8px 0;font-size:0.75rem;color:var(--text-muted)">
+                        {{ t('settings.offsite_remote_hint') }}
+                    </p>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">
+                            <input type="checkbox" x-model="offsiteEnabled" style="accent-color:var(--primary,#4f8cff)">
+                            {{ t('settings.offsite_enabled') }}
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div style="display:flex;gap:10px;margin-top:1rem">
+                <button class="btn btn-secondary" @click="testOffsite()" :disabled="offsiteTesting || !offsiteRemote">
+                    <span x-show="!offsiteTesting">{{ t('settings.offsite_test') }}</span>
+                    <span x-show="offsiteTesting">…</span>
+                </button>
+                <button class="btn btn-primary" @click="saveOffsite()" :disabled="!offsiteRemote">
+                    {{ t('settings.offsite_save') }}
+                </button>
+            </div>
+
+            <!-- Test result -->
+            <div x-show="offsiteTestResult" x-cloak style="margin-top:10px;padding:10px 14px;border-radius:var(--radius-card);font-size:0.85rem"
+                 :style="offsiteTestResult?.ok
+                     ? 'background:rgba(46,213,115,0.08);border:1px solid rgba(46,213,115,0.3)'
+                     : 'background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.3)'">
+                <span :class="offsiteTestResult?.ok ? 'text-success' : 'text-error'"
+                      x-text="offsiteTestResult?.ok ? '✓ ' + (offsiteTestResult.message || 'Connected') : '✗ ' + (offsiteTestResult.error || 'Failed')"></span>
+            </div>
+
+            <!-- Save confirmation -->
+            <div x-show="offsiteSaved" x-cloak style="margin-top:8px;font-size:0.85rem" class="text-success">
+                ✓ {{ t('settings.offsite_saved') }}
+            </div>
+        </div>
     </div>
 
 </div>

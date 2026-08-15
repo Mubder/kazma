@@ -252,6 +252,15 @@ function settingsApp() {
         backupList: [],
         _backupPollId: null,
 
+        // ── Offsite Backup ──
+        offsiteConfig: null,
+        offsiteProvider: '',
+        offsiteRemote: '',
+        offsiteEnabled: true,
+        offsiteTesting: false,
+        offsiteTestResult: null,
+        offsiteSaved: false,
+
         // ── Voice Tab ──
         voiceForm: {
             enabled: false,
@@ -3023,7 +3032,7 @@ function settingsApp() {
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
-                case 'backup': await this.loadBackupList(); break;
+                case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
                 case 'voice':
@@ -3420,6 +3429,55 @@ function settingsApp() {
         },
 
         // ── Backup Tab ──
+        async loadOffsiteConfig() {
+            try {
+                const resp = await fetch('/api/settings/backup/offsite');
+                if (resp.ok) {
+                    this.offsiteConfig = await resp.json();
+                    this.offsiteRemote = this.offsiteConfig.rclone_remote || '';
+                    this.offsiteEnabled = this.offsiteConfig.enabled;
+                }
+            } catch (e) { /* fail silently */ }
+        },
+
+        async saveOffsite() {
+            this.offsiteSaved = false;
+            try {
+                const resp = await fetch('/api/settings/backup/offsite', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rclone_remote: this.offsiteRemote,
+                        enabled: this.offsiteEnabled,
+                    }),
+                });
+                if (resp.ok) {
+                    this.offsiteSaved = true;
+                    setTimeout(() => { this.offsiteSaved = false; }, 3000);
+                }
+            } catch (e) {
+                console.error('saveOffsite failed:', e);
+            }
+        },
+
+        async testOffsite() {
+            if (!this.offsiteRemote) return;
+            this.offsiteTesting = true;
+            this.offsiteTestResult = null;
+            try {
+                const resp = await fetch('/api/settings/backup/offsite/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rclone_remote: this.offsiteRemote }),
+                });
+                this.offsiteTestResult = await resp.json();
+            } catch (e) {
+                this.offsiteTestResult = { ok: false, error: String(e) };
+            } finally {
+                this.offsiteTesting = false;
+            }
+        },
+
         async runBackup() {
             this.backupRunning = true;
             this.backupResult = null;

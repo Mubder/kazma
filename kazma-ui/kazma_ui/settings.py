@@ -216,6 +216,61 @@ class SettingsRouterBuilder:
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 
+        @router.get("/api/settings/backup/offsite")
+        async def api_get_offsite_config() -> dict[str, Any]:
+            """Get the current offsite backup configuration."""
+            from kazma_core.config_store import get_config_store as _gcs
+            store = _gcs()
+            remote = str(store.get("backups.offsite.rclone_remote") or "")
+            enabled = store.get("backups.offsite.enabled")
+            if enabled is None:
+                enabled = bool(remote)  # default: on when a remote is set
+            # Detect rclone on PATH
+            import shutil as _shutil
+            rclone_path = _shutil.which("rclone")
+            return {
+                "rclone_remote": remote,
+                "enabled": bool(enabled),
+                "rclone_available": rclone_path is not None,
+            }
+
+        @router.put("/api/settings/backup/offsite")
+        async def api_set_offsite_config(req: dict[str, Any]) -> dict[str, str]:
+            """Configure the offsite backup destination."""
+            from kazma_core.config_store import get_config_store as _gcs
+            store = _gcs()
+            remote = str(req.get("rclone_remote") or "").strip()
+            enabled = req.get("enabled")
+            store.set("backups.offsite.rclone_remote", remote, category="backups")
+            if enabled is not None:
+                store.set("backups.offsite.enabled", bool(enabled), category="backups")
+            return {"status": "ok"}
+
+        @router.post("/api/settings/backup/offsite/test")
+        async def api_test_offsite_remote(req: dict[str, Any]) -> dict[str, Any]:
+            """Test the rclone remote connection (about:ls)."""
+            import asyncio as _aio
+            import shutil as _shutil
+            remote = str(req.get("rclone_remote") or "").strip()
+            if not remote:
+                return {"ok": False, "error": "No remote specified"}
+            rclone = _shutil.which("rclone")
+            if not rclone:
+                return {"ok": False, "error": "rclone is not installed. Install it from https://rclone.org/install/ or run: winget install Rclone.Rclone"}
+            try:
+                import subprocess as _sp
+                proc = await _aio.to_thread(
+                    _sp.run,
+                    [rclone, "lsd", remote, "--max-depth", "1"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if proc.returncode == 0:
+                    return {"ok": True, "message": "Connection successful"}
+                err = (proc.stderr or proc.stdout or "").strip()[:300]
+                return {"ok": False, "error": f"rclone error: {err}"}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+
         @router.get("/api/settings/agent")
         async def api_get_agent() -> dict[str, Any]:
             """Get agent configuration (name, language, max tool rounds, …)."""
