@@ -280,17 +280,24 @@ async def dispatch_worker(
 
         # Index successful worker output as a V2 swarm_result episode under
         # this worker's name so swarm memory is not only "default".
+        # Fire-and-forget: the memory index (embedder encode → potential
+        # SentenceTransformer cold-start) must NOT delay the dispatch return
+        # or the pipeline's per-step timeout. The task runs in the background.
         if worker_result.status == "success" and (worker_result.output or prompt):
             try:
-                await _index_worker_l4_memory(
-                    worker_name=getattr(worker, "name", "") or "default",
-                    prompt=prompt or "",
-                    output=str(worker_result.output or ""),
-                    task_id=getattr(context, "task_id", "") if context is not None else "",
+                import asyncio as _aio_create
+
+                _aio_create.create_task(
+                    _index_worker_l4_memory(
+                        worker_name=getattr(worker, "name", "") or "default",
+                        prompt=prompt or "",
+                        output=str(worker_result.output or ""),
+                        task_id=getattr(context, "task_id", "") if context is not None else "",
+                    )
                 )
             except Exception:
                 logger.debug(
-                    "[SwarmEngine] worker memory index skipped for %s",
+                    "[SwarmEngine] worker memory index spawn failed for %s",
                     getattr(worker, "name", "?"),
                     exc_info=True,
                 )
