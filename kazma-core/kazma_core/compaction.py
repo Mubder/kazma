@@ -333,7 +333,10 @@ class CompactionEngine:
             from kazma_core.memory.recall import search as v2_search
             from kazma_core.memory.config import resolve_tenant_id
 
-            _tenant = resolve_tenant_id(prefer_context=True)
+            # resolve_tenant_id requires a platform arg; compaction has no
+            # request platform, so use the "system" convention. Without it the
+            # call raised TypeError and V2 memory retrieval was silently skipped.
+            _tenant = resolve_tenant_id("system", prefer_context=True)
             hits = v2_search(query, limit=limit, tenant_id=_tenant)
             logger.info("Retrieved %d V2 memories for compaction", len(hits))
             return hits

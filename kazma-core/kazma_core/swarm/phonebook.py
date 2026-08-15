@@ -83,7 +83,11 @@ class WorkerPhonebook:
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
             # recall.search is sync; call both directly (fast local SQLite).
-            _tenant = resolve_tenant_id(prefer_context=True)
+            # resolve_tenant_id requires a platform arg; swarm dispatch has no
+            # request platform, so use the "system" convention (mirrors
+            # self_improvement). Without it the call raised TypeError and
+            # enrichment was silently skipped (workers dispatched unfenced).
+            _tenant = resolve_tenant_id("system", prefer_context=True)
             strategies_hits = search(task, limit=3, tenant_id=_tenant)
             evo_hits = search(f"{worker_name} evolution learning", limit=2, tenant_id=_tenant)
 
