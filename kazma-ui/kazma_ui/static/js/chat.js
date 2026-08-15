@@ -23,10 +23,19 @@
   var messageReactions = {};
   var searchQuery = '';
   var showArchived = false;
+  // Cumulative session usage (tokens/cost). Preferred source: the server's
+  // session_tokens/session_cost payload keys; falls back to local accumulation
+  // when only per-turn values arrive (old backends).
+  var _sessionTotals = { tokens: 0, cost: 0 };
+  // Per-turn usage captured from done/turn_complete — powers the turn
+  // summary bar rendered by finalizeProgress().
+  var _lastTurnStats = null;
+  // Tool rows logged in the current turn's workbench (summary bar count).
+  var _progressToolCount = 0;
 
   // DOM refs
   var messagesEl, inputEl, sendBtn, typingEl, sessionListEl, searchInputEl;
-  var costBadge, tokensBadge;
+  var costBadge, tokensBadge, contextBadge, charBadge;
   var modelSelectorEl;
 
   // Currently selected model (persisted in localStorage)
@@ -78,6 +87,8 @@
     searchInputEl = $('session-search');
     costBadge = $('session-cost');
     tokensBadge = $('session-tokens');
+    contextBadge = $('context-size');
+    charBadge = $('composer-chars');
     modelSelectorEl = $('model-selector');
 
     if (!messagesEl) return; // not on chat page
@@ -549,6 +560,16 @@
     }
     // Per-content bidi: Arabic in an English UI needs rtl base + Arabic font
     syncInputBidi();
+    // Composer character counter (live; reset on send)
+    updateComposerCharCount();
+  }
+
+  /** Live character counter on the composer footer badge. */
+  function updateComposerCharCount() {
+    if (!charBadge || !inputEl) return;
+    var n = (inputEl.value || '').length;
+    charBadge.textContent = String(n);
+    charBadge.classList.toggle('is-empty', n === 0);
   }
 
   /**
@@ -697,8 +718,10 @@
     }
     _progressEl = null;
     _progressStepCount = 0;
+    _progressToolCount = 0;
     _planItems = [];
     _planParsedFromText = false;
+    _lastTurnStats = null;
     logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     if (inputEl) {
       inputEl.disabled = false;
@@ -1390,7 +1413,7 @@
           '<h2>Kazma</h2>' +
           '<p>How can I help you today?</p>' +
         '</div>';
-      updateSessionStats(0, 0);
+      resetSessionStats();
       currentMsgEl = null;
       tokenAccum = '';
       if (activeStream) { activeStream.abort(); activeStream = null; }
@@ -1430,6 +1453,7 @@
     inputEl.style.height = 'auto';
     inputEl.placeholder = _defaultPlaceholder();
     syncInputBidi();
+    updateComposerCharCount();
 
     // Show typing indicator (tracked so abortGeneration can clear it)
     activeTypingEl = typingEl;
@@ -1590,7 +1614,13 @@
           }
         }
         if (data) {
-          updateSessionStats(data.tokens, data.cost);
+          updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
+          // Capture per-turn usage for the workbench summary bar (finalizeProgress).
+          _lastTurnStats = {
+            tokens: Number(data.tokens) || 0,
+            cost: Number(data.cost) || 0,
+            durationMs: Number(data.duration_ms) || 0,
+          };
           if (currentMsgEl) {
             var meta = currentMsgEl.querySelector('.message-meta');
             if (meta) {
@@ -1601,6 +1631,7 @@
               meta.setAttribute('dir', 'auto');
             }
           }
+          updateContextBadgeSoon();
         }
         // Play TTS for the assistant's response
         if (tokenAccum && window.KazmaVoice && !interrupted) {
@@ -1695,6 +1726,11 @@
   var _progressTimerId = null;
   var _lastMemoryExplain = null;
   var TOOL_DETAIL_MAX = 900;
+  // Detail length over which tool results render clamped with a "show more"
+  // toggle instead of a 14em scroll box (B).
+  var STEP_DETAIL_CLAMP_AT = 600;
+  // Unique-id sequence for aria-controls on workbench panel bodies.
+  var _panelSeq = 0;
 
   var _TOOL_FRIENDLY = {
     web_search: 'Search',
@@ -1872,15 +1908,18 @@
       panel.setAttribute('dir', 'rtl');
       panel.classList.add('is-rtl');
     }
+    _panelSeq += 1;
+    var bodyId = 'agent-progress-body-' + _panelSeq;
     panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench">' +
+      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench"' +
+        ' aria-expanded="true" aria-controls="' + bodyId + '">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
         '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
         '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
         '<span class="agent-progress-count">0 ' + escapeHtml(ti('steps', 'steps')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
       '</div>' +
-      '<div class="agent-progress-body">' +
+      '<div class="agent-progress-body" id="' + bodyId + '">' +
         '<div class="agent-plan' + (pageRtl ? ' is-rtl' : '') + '"' +
           (pageRtl ? ' dir="rtl"' : '') + ' hidden>' +
           '<div class="agent-plan-head">' +
@@ -1899,7 +1938,7 @@
           '<div class="agent-memory-explain-body"></div>' +
         '</div>' +
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
-        '<ul class="agent-progress-steps"></ul>' +
+        '<ul class="agent-progress-steps" role="log" aria-live="polite"></ul>' +
       '</div>';
     var textEl = content.querySelector('.message-text');
     if (textEl) content.insertBefore(panel, textEl);
@@ -1907,8 +1946,10 @@
     var header = panel.querySelector('.agent-progress-header');
     function toggle() {
       panel.classList.toggle('is-collapsed');
+      var collapsed = panel.classList.contains('is-collapsed');
       var chev = panel.querySelector('.agent-progress-chevron');
-      if (chev) chev.textContent = panel.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
+      if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
+      if (header) header.setAttribute('aria-expanded', String(!collapsed));
     }
     if (header) {
       header.addEventListener('click', toggle);
@@ -2113,6 +2154,107 @@
     return s;
   }
 
+  /** Localized state label for tool rows (Done / Failed / Running…). */
+  function _stepStateLabel(state) {
+    return state === 'running'
+      ? ti('running', 'Running\u2026')
+      : (state === 'done'
+        ? ti('step_done', ti('done', 'Done'))
+        : (state === 'failed' ? ti('step_failed', 'Failed') : state));
+  }
+
+  /**
+   * Detail block for a workbench row: clamped with a "show more" toggle when
+   * the (truncated) result is long, expanded otherwise. Shared by the live
+   * logProgress path and the restored-CoT renderer so both clamp identically.
+   */
+  function _detailHtml(detail, forceExpanded) {
+    if (!detail) return '';
+    var t = truncateStr(String(detail), TOOL_DETAIL_MAX);
+    if (forceExpanded || t.length <= STEP_DETAIL_CLAMP_AT) {
+      return '<div class="step-detail is-expanded">' + escapeHtml(t) + '</div>';
+    }
+    return '<div class="step-detail is-clamped">' + escapeHtml(t) + '</div>' +
+      '<button type="button" class="step-show-more" data-open="0">' +
+      escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>';
+  }
+
+  /**
+   * Shared <li> inner-HTML builder for workbench step rows — THE single row
+   * template used by both the live panel (logProgress) and the restored panel
+   * (_activityRowsHtml), so a reloaded turn renders identically to the live
+   * one: icons, state labels, per-row timestamps, file-diff chips, detail
+   * clamping, and the animated running-status icon.
+   */
+  function _stepRowHtml(o) {
+    var kind = o.kind || 'status';
+    var state = o.state || 'info';
+    var rawTitle = String(o.rawTitle || o.title || '').trim() || '\u2026';
+    var title = o.title != null ? String(o.title) : rawTitle;
+    var icon = kind === 'tool' ? '\u2699'
+      : (kind === 'thought' ? '\u25C8'
+        : (kind === 'error' ? '\u26A0'
+          : (kind === 'file' ? '\u2398' : '\u2022')));
+    var animIcon = (kind === 'status' && state === 'running') ? ' is-animated' : '';
+
+    // File-diff chips for write/delete tools (one-line target path)
+    var fileChip = '';
+    if (kind === 'tool' || kind === 'file') {
+      var pathGuess = _extractPathFromTool(rawTitle, o.detail);
+      if (pathGuess) {
+        fileChip =
+          '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
+            '<span class="file-diff-op">' +
+              (state === 'failed' ? 'failed'
+                : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
+            '</span> ' +
+            '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
+          '</div>';
+      }
+    }
+
+    // tsIso: ISO string → formatted time; null → no time (legacy rows
+    // persisted before per-row timestamps); undefined → live "now".
+    var timeText = o.tsIso ? formatMsgTime(o.tsIso) : (o.tsIso === null ? '' : formatMsgTime());
+    return (
+      '<span class="step-icon' + animIcon + '" aria-hidden="true">' + icon + '</span>' +
+      '<div class="step-body">' +
+        '<div class="step-line">' +
+          '<span class="step-title">' + escapeHtml(title) + '</span>' +
+          (kind === 'tool'
+            ? ' <span class="step-state">' + escapeHtml(_stepStateLabel(state)) + '</span>'
+            : '') +
+          '<span class="step-time">' + escapeHtml(timeText) + '</span>' +
+        '</div>' +
+        fileChip +
+        _detailHtml(o.detail, o.forceExpanded) +
+      '</div>'
+    );
+  }
+
+  /**
+   * Delegated "show more / less" toggles for one steps list (one listener
+   * per list, works for rows appended later).
+   */
+  function _wireStepToggles(list) {
+    if (!list || list._kazmaStepToggles) return;
+    list._kazmaStepToggles = true;
+    list.addEventListener('click', function(e) {
+      var btn = e.target.closest('.step-show-more');
+      if (!btn || !list.contains(btn)) return;
+      var step = btn.closest('.agent-progress-step');
+      var det = step && step.querySelector('.step-detail');
+      if (!det) return;
+      var open = btn.getAttribute('data-open') === '1';
+      btn.setAttribute('data-open', open ? '0' : '1');
+      det.classList.toggle('is-clamped', open);
+      det.classList.toggle('is-expanded', !open);
+      btn.textContent = open
+        ? ti('show_more', 'Show more \u25BE')
+        : ti('show_less', 'Show less \u25B4');
+    });
+  }
+
   function logProgress(step) {
     if (!step) return;
     var panel = ensureProgressPanel();
@@ -2201,14 +2343,14 @@
       var titleNode = last.querySelector('.step-title');
       if (titleNode) titleNode.textContent = title;
       if (detail) {
-        var det = last.querySelector('.step-detail');
-        if (!det) {
-          det = document.createElement('div');
-          det.className = 'step-detail is-expanded';
-          last.querySelector('.step-body').appendChild(det);
-        }
-        det.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
-        det.classList.add('is-expanded');
+        // Rebuild the detail block through the shared template so long
+        // results clamp with a "show more" toggle like freshly-appended rows.
+        var oldDet = last.querySelector('.step-detail');
+        if (oldDet) oldDet.remove();
+        var oldBtn = last.querySelector('.step-show-more');
+        if (oldBtn) oldBtn.remove();
+        var bodyEl = last.querySelector('.step-body');
+        if (bodyEl) bodyEl.insertAdjacentHTML('beforeend', _detailHtml(detail));
         // Surface search backend / recovery source when present
         _maybeAddSourceChip(last, detail);
       }
@@ -2221,6 +2363,7 @@
     }
 
     _progressStepCount += 1;
+    if (kind === 'tool') _progressToolCount += 1;
     var li = document.createElement('li');
     li.className = 'agent-progress-step step-' + kind + ' state-' + state +
       (kind === 'tool' ? ' is-expanded' : '');
@@ -2229,47 +2372,14 @@
     li.dataset.rawTitle = rawTitle;
     li.dataset.state = state;
 
-    var icon = kind === 'tool' ? '\u2699'
-      : (kind === 'thought' ? '\u25C8'
-        : (kind === 'error' ? '\u26A0'
-          : (kind === 'file' ? '\u2398' : '\u2022')));
-
-    // File-diff chips for write/delete tools
-    var fileChip = '';
-    if (kind === 'tool' || kind === 'file') {
-      var pathGuess = _extractPathFromTool(rawTitle, detail);
-      if (pathGuess) {
-        fileChip =
-          '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
-            '<span class="file-diff-op">' +
-              (state === 'failed' ? 'failed' : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
-            '</span> ' +
-            '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
-          '</div>';
-      }
-    }
-
-    li.innerHTML =
-      '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
-      '<div class="step-body">' +
-        '<div class="step-line">' +
-          '<span class="step-title">' + escapeHtml(title) + '</span>' +
-          (kind === 'tool'
-            ? ' <span class="step-state">' + escapeHtml(
-                state === 'running'
-                  ? ti('running', 'Running\u2026')
-                  : (state === 'done'
-                      ? ti('step_done', ti('done', 'Done'))
-                      : (state === 'failed' ? ti('step_failed', 'Failed') : state))
-              ) + '</span>'
-            : '') +
-          '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
-        '</div>' +
-        fileChip +
-        (detail
-          ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
-          : '') +
-      '</div>';
+    li.innerHTML = _stepRowHtml({
+      kind: kind,
+      state: state,
+      title: title,
+      rawTitle: rawTitle,
+      detail: detail,
+    });
+    _wireStepToggles(list);
 
     list.appendChild(li);
     if (detail) _maybeAddSourceChip(li, detail);
@@ -2331,16 +2441,29 @@
     var titleEl = panel.querySelector('.agent-progress-title');
     var elapsed = _progressStartedAt ? _formatElapsed(Date.now() - _progressStartedAt) : '';
     if (titleEl) {
-      var donePlan = _planItems.filter(function(p) { return p.done; }).length;
-      var base = ok === false
-        ? ti('stopped', 'Stopped')
-        : (_planItems.length
-          ? ti('done', 'Done') + ' \u00B7 ' + tiFmt('plan_progress', 'plan {done}/{total}', {
-              done: donePlan,
-              total: _planItems.length,
-            })
-          : ti('done', 'Done'));
-      titleEl.textContent = elapsed ? base + ' \u00B7 ' + elapsed : base;
+      if (ok === false) {
+        titleEl.textContent = ti('stopped', 'Stopped');
+      } else {
+        // Turn summary bar: "Done · N tools · M steps · Xs · $cost · tokens"
+        // One line that stays readable when the panel is collapsed.
+        var parts = [ti('done', 'Done')];
+        if (_progressToolCount > 0) {
+          parts.push(_progressToolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: _progressToolCount }));
+        }
+        if (_progressStepCount > 0) {
+          parts.push(_progressStepCount + ' ' + (_progressStepCount === 1
+            ? ti('step', 'step') : ti('steps', 'steps')));
+        }
+        if (elapsed) parts.push(elapsed);
+        if (_lastTurnStats) {
+          if (_lastTurnStats.cost) parts.push(KS.formatCost(_lastTurnStats.cost));
+          if (_lastTurnStats.tokens) {
+            parts.push(KS.formatTokens(_lastTurnStats.tokens) + ' ' + ti('tokens', 'tokens'));
+          }
+        }
+        titleEl.textContent = parts.join(' \u00B7 ');
+        titleEl.title = titleEl.textContent;
+      }
     }
     if (_progressEl) _renderPlanList(_progressEl);
     var pulse = panel.querySelector('.agent-progress-pulse');
@@ -2354,40 +2477,55 @@
   // After a refresh / tab switch the live progress panel is gone. The server
   // persists a compact activity log with each assistant message (see
   // sse_chat / ws_chat), so returning to a session restores the "Thinking &
-  // Activity" accordion instead of a blank transcript.
+  // Activity" accordion instead of a blank transcript. Rows go through the
+  // SAME template as the live panel (_stepRowHtml) so both render identically:
+  // per-row timestamps (row.ts, persisted server-side), file-diff chips,
+  // source chips, clamped details with show-more, localized titles, and
+  // heartbeat coalescing for servers that persisted repeated status rows.
   function _activityRowsHtml(activity) {
     if (!Array.isArray(activity)) return '';
-    return activity.map(function(row) {
-      var kind = row && row.kind === 'tool' ? 'tool'
-        : (row && row.kind === 'thought' ? 'thought' : 'status');
-      var state = (row && row.state) || 'done';
-      var rawTitle = String((row && row.title) || '').trim() || '\u2026';
+    var html = '';
+    var lastKey = '';
+    activity.forEach(function(row) {
+      if (!row) return;
+      var kind = row.kind === 'tool' ? 'tool'
+        : (row.kind === 'thought' ? 'thought'
+          : (row.kind === 'error' ? 'error' : 'status'));
+      var state = row.state === 'running' ? 'running'
+        : (row.state === 'failed' ? 'failed'
+          : (row.state === 'done' ? 'done' : (kind === 'status' ? 'running' : 'done')));
+      var rawTitle = String(row.title || '').trim() || '\u2026';
       var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
-      var detail = row && row.detail != null ? String(row.detail) : '';
-      var icon = kind === 'tool' ? '\u2699'
-        : (kind === 'thought' ? '\u25C8' : '\u2022');
-      return '<li class="agent-progress-step step-' + kind + ' state-' + state + ' is-expanded">' +
-        '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
-        '<div class="step-body">' +
-          '<div class="step-line">' +
-            '<span class="step-title">' + escapeHtml(title) + '</span>' +
-            (kind === 'tool'
-              ? ' <span class="step-state">' + escapeHtml(
-                  state === 'done' ? ti('step_done', 'Done')
-                    : (state === 'failed' ? ti('step_failed', 'Failed') : state)
-                ) + '</span>'
-              : '') +
-            '<span class="step-time"></span>' +
-          '</div>' +
-          (detail
-            ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
-            : '') +
-        '</div>' +
+      // Same canonicalization as the live path: thinking heartbeats localized,
+      // leftover English CoT/HITL titles mapped to CHAT_I18N.
+      if (kind === 'status' && _isThinkingStatus(title)) {
+        title = ti('thinking', 'Kazma is thinking\u2026');
+      }
+      if (kind !== 'tool') title = _localizeCotTitle(title);
+      var detail = row.detail != null ? String(row.detail) : '';
+
+      // Coalesce consecutive identical status rows (persisted heartbeats).
+      var key = kind + '|' + _normalizeStatusTitle(title) + '|' + (detail || '');
+      if (kind === 'status' && key === lastKey) return;
+      lastKey = key;
+
+      html += '<li class="agent-progress-step step-' + kind + ' state-' + state +
+        (kind === 'tool' ? ' is-expanded' : '') + '" data-kind="' + escapeHtml(kind) + '">' +
+        _stepRowHtml({
+          kind: kind,
+          state: state,
+          title: title,
+          rawTitle: rawTitle,
+          detail: detail,
+          tsIso: row.ts || null,
+        }) +
       '</li>';
-    }).join('');
+    });
+    return html;
   }
 
   function _buildRestoredWorkbench(activity) {
+    if (!Array.isArray(activity) || !activity.length) return null;
     var rows = _activityRowsHtml(activity);
     if (!rows) return null;
     var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
@@ -2397,34 +2535,87 @@
       panel.setAttribute('dir', 'rtl');
       panel.classList.add('is-rtl');
     }
-    var n = Array.isArray(activity) ? activity.length : 0;
-    var stepWord = n === 1 ? ti('step', 'step') : ti('steps', 'steps');
+    var stepCount = (rows.match(/<li /g) || []).length;
+    var toolCount = (rows.match(/data-kind="tool"/g) || []).length;
+    var stepWord = stepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
+    _panelSeq += 1;
+    var bodyId = 'agent-progress-body-' + _panelSeq;
+    // Header mirrors the live summary bar shape: "N tools · M steps" (+usage
+    // when the server stamped per-turn tokens/cost on the message).
+    var headBits = [];
+    if (toolCount) headBits.push(toolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: toolCount }));
+    headBits.push(stepCount + ' ' + stepWord);
     panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '">' +
+      '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '"' +
+        ' aria-expanded="false" aria-controls="' + bodyId + '">' +
         '<span class="agent-progress-pulse is-off" aria-hidden="true"></span>' +
         '<span class="agent-progress-title">' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '</span>' +
-        '<span class="agent-progress-count">' + n + ' ' + escapeHtml(stepWord) + '</span>' +
+        '<span class="agent-progress-count">' + escapeHtml(headBits.join(' \u00B7 ')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25B8</span>' +
       '</div>' +
-      '<div class="agent-progress-body">' +
+      '<div class="agent-progress-body" id="' + bodyId + '">' +
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
-        '<ul class="agent-progress-steps">' + rows + '</ul>' +
+        '<ul class="agent-progress-steps" role="log">' + rows + '</ul>' +
       '</div>';
     var header = panel.querySelector('.agent-progress-header');
     if (header) {
-      header.addEventListener('click', function() {
+      function toggle() {
         panel.classList.toggle('is-collapsed');
+        var collapsed = panel.classList.contains('is-collapsed');
         var chev = panel.querySelector('.agent-progress-chevron');
-        if (chev) chev.textContent = panel.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
-      });
+        if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
+        header.setAttribute('aria-expanded', String(!collapsed));
+      }
+      header.addEventListener('click', toggle);
       header.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); header.click(); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
       });
     }
+    _wireStepToggles(panel.querySelector('.agent-progress-steps'));
     return panel;
   }
 
   // ── Message rendering ─────────────────────────────────
+  /**
+   * Render user text into the bubble. Single-line input keeps the exact
+   * legacy escape-only path; multi-line / pasted text (headings, bullets,
+   * numbered lists) is parsed line-by-line into real HTML structure so a
+   * long paste doesn't collapse into one justified block. Everything is
+   * escaped BEFORE structure is built — no raw HTML ever enters from input.
+   */
+  function renderUserContentHtml(text) {
+    var s = String(text || '');
+    if (s.indexOf('\n') < 0 && !/^\s*(?:#{1,4}\s|[-*\u2022]\s|\d+[.)]\s)/.test(s)) {
+      return escapeHtml(s);
+    }
+    var html = '';
+    var list = null;
+    function closeList() {
+      if (list) { html += '</' + list + '>'; list = null; }
+    }
+    s.split(/\r?\n/).forEach(function (ln) {
+      var t = ln.trim();
+      var m;
+      if (!t) { closeList(); return; }
+      if ((m = t.match(/^(#{1,4})\s+(.*)$/))) {
+        closeList();
+        var lvl = Math.min(m[1].length + 2, 4);   // # → h3, ## → h4
+        html += '<h' + lvl + '>' + escapeHtml(m[2]) + '</h' + lvl + '>';
+      } else if ((m = t.match(/^[-*\u2022]\s+(.*)$/))) {
+        if (list !== 'ul') { closeList(); html += '<ul>'; list = 'ul'; }
+        html += '<li>' + escapeHtml(m[1]) + '</li>';
+      } else if ((m = t.match(/^(\d+)[.)]\s+(.*)$/))) {
+        if (list !== 'ol') { closeList(); html += '<ol>'; list = 'ol'; }
+        html += '<li>' + escapeHtml(m[2]) + '</li>';
+      } else {
+        closeList();
+        html += '<p>' + escapeHtml(t) + '</p>';
+      }
+    });
+    closeList();
+    return html;
+  }
+
   function appendMessage(role, content, attachmentName, ts, opts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
@@ -2447,7 +2638,9 @@
     wrapper.innerHTML =
       avatarHtml +
       '<div class="message-content">' +
-        '<div class="message-text" dir="auto">' + (role === 'user' ? escapeHtml(content) : KS.markdown(content)) + '</div>' +
+        '<div class="message-text" dir="auto">' +
+          (role === 'user' ? renderUserContentHtml(content) : KS.markdown(content)) +
+        '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
@@ -2520,6 +2713,7 @@
     if (welcome) welcome.remove();
 
     messagesEl.appendChild(wrapper);
+    updateContextBadgeSoon();
     return wrapper;
   }
 
@@ -3303,17 +3497,26 @@
         '<p>Loading messages\u2026</p>' +
       '</div>';
     renderSessionList();
-    updateSessionStats(0, 0);
+    resetSessionStats();
 
-    // Fetch the session messages from the API and render them
-    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
+    // Fetch the session messages from the API and render them.
+    // ?stats=1 opts into the envelope {messages, total_tokens, total_cost}
+    // so cumulative badges are correct after refresh; the legacy bare-list
+    // shape is still handled for old servers.
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages?stats=1')
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
-      .then(function(messages) {
+      .then(function(payload) {
         // Guard against race: user switched sessions while fetch was in flight
         if (chatSessionId !== sessionId) return;
+
+        var messages = payload;
+        if (payload && !Array.isArray(payload) && Array.isArray(payload.messages)) {
+          messages = payload.messages;
+          updateSessionStats(null, null, payload.total_tokens, payload.total_cost);
+        }
 
         messagesEl.innerHTML = '';
 
@@ -3411,6 +3614,7 @@
 
         scrollToBottom();
         checkPendingApprovals();
+        updateContextBadge();
       })
       .catch(function(err) {
         if (chatSessionId !== sessionId) return;
@@ -3709,7 +3913,7 @@
         '<h2>Kazma</h2>' +
         '<p>How can I help you today?</p>' +
       '</div>';
-    updateSessionStats(0, 0);
+    resetSessionStats();
     currentMsgEl = null;
     tokenAccum = '';
     lastSentUserText = '';
@@ -3762,16 +3966,95 @@
       });
   }
 
-  function updateSessionStats(tokens, cost) {
-    if (costBadge) costBadge.textContent = KS.formatCost(cost);
-    if (tokensBadge) tokensBadge.textContent = KS.formatTokens(tokens) + ' tokens';
+  /**
+   * Update the header cost/token badges.
+   *
+   * Cumulative semantics: when sessionTokens/sessionCost are provided
+   * (server-persisted totals in done/turn_complete payloads and the
+   * messages-envelope) they are authoritative. Legacy payloads that only
+   * carry per-turn values accumulate locally so multi-turn sessions still
+   * show a growing total on old backends. Missing usage renders as 0 —
+   * never undefined (the dead-badge regression).
+   */
+  function updateSessionStats(tokens, cost, sessionTokens, sessionCost) {
+    if (sessionTokens != null || sessionCost != null) {
+      _sessionTotals.tokens = Math.max(0, Number(sessionTokens) || 0);
+      _sessionTotals.cost = Math.max(0, Number(sessionCost) || 0);
+    } else if (tokens != null) {
+      _sessionTotals.tokens += Math.max(0, Number(tokens) || 0);
+      _sessionTotals.cost += Math.max(0, Number(cost) || 0);
+    }
+    if (costBadge) costBadge.textContent = KS.formatCost(_sessionTotals.cost);
+    if (tokensBadge) {
+      tokensBadge.textContent = KS.formatTokens(_sessionTotals.tokens) + ' ' + ti('tokens', 'tokens');
+    }
+  }
+
+  /** Zero the badges + running totals (new session / /reset / session load). */
+  function resetSessionStats() {
+    _sessionTotals.tokens = 0;
+    _sessionTotals.cost = 0;
+    if (costBadge) costBadge.textContent = KS.formatCost(0);
+    if (tokensBadge) tokensBadge.textContent = KS.formatTokens(0) + ' ' + ti('tokens', 'tokens');
+  }
+
+  // ── Context conversation badge (chars → estimated tokens) ──
+  /**
+   * Token heuristic with no dependencies: ~4 chars/token for Latin script,
+   * ~2 chars/token for Arabic script (per-string detection). Matches the
+   * server-side estimate_tokens spirit (kazma_core/summarizer.py).
+   */
+  function estimateTokens(str) {
+    var s = String(str || '');
+    if (!s) return 0;
+    var ar = (s.match(/[\u0600-\u06FF]/g) || []).length;
+    var other = s.length - ar;
+    return Math.ceil(other / 4 + ar / 2);
+  }
+
+  var _ctxBadgeTimer = null;
+  function updateContextBadgeSoon() {
+    if (_ctxBadgeTimer) clearTimeout(_ctxBadgeTimer);
+    _ctxBadgeTimer = setTimeout(function() {
+      _ctxBadgeTimer = null;
+      updateContextBadge();
+    }, 350);
+  }
+
+  /**
+   * Recompute "N chars ≈ M tokens" from the RENDERED transcript (DOM), so it
+   * is accurate after live turns, session switches, restores and edits.
+   * textContent reads only — must never trigger layout work per message.
+   */
+  function updateContextBadge() {
+    if (!contextBadge || !messagesEl) return;
+    var totalChars = 0;
+    var totalTokens = 0;
+    try {
+      var nodes = messagesEl.querySelectorAll('.message-text');
+      for (var i = 0; i < nodes.length; i++) {
+        var t = nodes[i].textContent || '';
+        totalChars += t.length;
+        totalTokens += estimateTokens(t);   // per-message: preserves script mix
+      }
+    } catch (e) { return; }
+    contextBadge.textContent = tiFmt('context_size', '{chars} chars \u2248 {tokens} tokens', {
+      chars: totalChars.toLocaleString(),
+      tokens: totalTokens.toLocaleString(),
+    });
   }
 
   // ── Utils ─────────────────────────────────────────────
+  // rAF-coalesced: rapid row appends during streaming trigger one scroll
+  // per frame instead of a forced layout per row (no jank / layout jumps).
+  var _scrollRafPending = false;
   function scrollToBottom() {
-    if (messagesEl) {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
+    if (!messagesEl || _scrollRafPending) return;
+    _scrollRafPending = true;
+    requestAnimationFrame(function() {
+      _scrollRafPending = false;
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
   }
 
   function escapeHtml(str) {
@@ -3821,6 +4104,24 @@
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,
     pauseForApproval: pauseForApproval,
+    /**
+     * Turn usage bridge for the WS path (agentStore done/turn_complete):
+     * updates cumulative badges, captures per-turn stats for the workbench
+     * summary bar, and refreshes the context badge. Payload keys: tokens,
+     * cost, session_tokens, session_cost, duration_ms.
+     */
+    applyTurnStats: function(data) {
+      if (!data) return;
+      updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
+      if (data.tokens != null || data.duration_ms != null) {
+        _lastTurnStats = {
+          tokens: Number(data.tokens) || 0,
+          cost: Number(data.cost) || 0,
+          durationMs: Number(data.duration_ms) || 0,
+        };
+      }
+      updateContextBadgeSoon();
+    },
     isGenerating: function() { return _isGenerating; },
     refreshSessions: loadSessions,
     refreshSessionsSoon: refreshSessionsSoon,

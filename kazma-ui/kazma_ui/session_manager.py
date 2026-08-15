@@ -664,6 +664,31 @@ class SessionManager:
             yield session
             self.put(session)
 
+    def add_usage(self, session_id: str, tokens: int, cost: float) -> tuple[int, float]:
+        """Increment cumulative session usage totals (T4-serialized).
+
+        Called by both transports at end-of-turn so the header cost/token
+        badges survive page refreshes: ``ChatSession.total_tokens`` /
+        ``total_cost`` are the cumulative source of truth (per-turn usage
+        lives on the assistant message dict). Returns the new
+        ``(total_tokens, total_cost)``; falls back to the increment values
+        when the session is missing or the write fails so callers can still
+        emit sane payloads.
+        """
+        tokens = int(tokens or 0)
+        cost = float(cost or 0.0)
+        totals: tuple[int, float] = (tokens, cost)
+        try:
+            with self.transact(session_id) as sess:
+                sess.total_tokens += tokens
+                sess.total_cost = round(sess.total_cost + cost, 6)
+                totals = (sess.total_tokens, sess.total_cost)
+        except Exception as exc:
+            logger.debug(
+                "[SessionManager] add_usage skipped for %s: %s", session_id, exc
+            )
+        return totals
+
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if not found."""
         with self._lock:

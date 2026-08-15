@@ -226,6 +226,80 @@ class TestCrossTransportVisibility:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Cumulative usage totals (cost/token badges)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestCumulativeUsage:
+    """add_usage + the ?stats=1 messages envelope behind the header badges."""
+
+    def test_add_usage_accumulates_and_returns_totals(self):
+        store = get_session_manager()
+        store.get_or_create("usage-1")
+
+        t1, c1 = store.add_usage("usage-1", 890, 0.0042)
+        assert (t1, c1) == (890, pytest.approx(0.0042, abs=1e-9))
+
+        # Second turn accumulates on the same session
+        t2, c2 = store.add_usage("usage-1", 1204, 0.0063)
+        assert t2 == 890 + 1204
+        assert c2 == pytest.approx(0.0042 + 0.0063, abs=1e-9)
+
+        # Persisted on the session row (survives reload from DB)
+        sess = store.get("usage-1")
+        assert sess.total_tokens == t2
+        assert sess.total_cost == pytest.approx(c2, abs=1e-9)
+
+    def test_add_usage_missing_session_is_noop(self):
+        store = get_session_manager()
+        # Must not raise; returns the increment as a best-effort total
+        t, c = store.add_usage("no-such-session", 10, 0.001)
+        assert t == 10
+        assert c == pytest.approx(0.001, abs=1e-9)
+        assert store.get("no-such-session") is None
+
+    def test_messages_stats_envelope_carries_totals(self):
+        from kazma_ui.chat import get_or_create_session
+
+        sess = get_or_create_session("usage-env")
+        sess.messages.append({"role": "user", "content": "hello"})
+        store = get_session_manager()
+        store.add_usage("usage-env", 500, 0.01)
+
+        sse_app = _make_sse_app()
+        client = TestClient(sse_app)
+
+        # ?stats=1 → envelope with cumulative totals
+        env = client.get("/api/chat/sessions/usage-env/messages?stats=1").json()
+        assert isinstance(env, dict)
+        assert env["session_id"] == "usage-env"
+        assert isinstance(env["messages"], list)
+        assert env["messages"][0]["content"] == "hello"
+        assert env["total_tokens"] == 500
+        assert env["total_cost"] == pytest.approx(0.01, abs=1e-9)
+
+        # No param → legacy bare list (old clients keep working)
+        legacy = client.get("/api/chat/sessions/usage-env/messages").json()
+        assert isinstance(legacy, list)
+        assert legacy[0]["content"] == "hello"
+
+    def test_session_list_summary_reflects_totals(self):
+        from kazma_ui.chat import get_or_create_session
+
+        sess = get_or_create_session("usage-sum")
+        sess.messages.append({"role": "user", "content": "hi"})  # non-empty → listed
+        store = get_session_manager()
+        store.add_usage("usage-sum", 42, 0.02)
+
+        sse_app = _make_sse_app()
+        client = TestClient(sse_app)
+        sessions = client.get("/api/chat/sessions").json()
+        match = [s for s in sessions if s["session_id"] == "usage-sum"]
+        assert match and match[0]["total_tokens"] == 42
+        assert match[0]["total_cost"] == pytest.approx(0.02, abs=1e-9)
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Unified app integration
 # ═══════════════════════════════════════════════════════════════════
 

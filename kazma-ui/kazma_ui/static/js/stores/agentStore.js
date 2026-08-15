@@ -883,6 +883,12 @@ document.addEventListener('alpine:init', () => {
               window.KazmaChat.appendLiveToken(finalText, { full: true });
             }
           }
+          // Usage stats (tokens/cost + cumulative session totals) → badges +
+          // workbench summary bar. Runs BEFORE _endTurn so finalizeProgress
+          // sees the turn's usage when it renders the summary line.
+          if (window.KazmaChat && typeof window.KazmaChat.applyTurnStats === 'function') {
+            try { window.KazmaChat.applyTurnStats(data || {}); } catch (e) { /* stats must never break the turn */ }
+          }
           if (!this.pendingApproval) {
             this._endTurn();
           }

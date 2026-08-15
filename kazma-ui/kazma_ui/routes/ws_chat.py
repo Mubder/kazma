@@ -13,6 +13,7 @@ import logging
 import time
 import traceback
 import uuid
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -139,6 +140,7 @@ def _record_ws_activity(
                 "title": str(data.get("tool_name") or "tool"),
                 "detail": detail[:1000],
                 "state": state,
+                "ts": datetime.now(UTC).isoformat(),
             })
         elif ev.type == "status_update":
             status = str((ev.data or {}).get("status") or "").strip()
@@ -148,12 +150,14 @@ def _record_ws_activity(
                     "kind": "status",
                     "title": "thinking",
                     "state": "running",
+                    "ts": datetime.now(UTC).isoformat(),
                 })
             elif status in ("routing_node",):
                 activity_log.append({
                     "kind": "status",
                     "title": status,
                     "state": "running",
+                    "ts": datetime.now(UTC).isoformat(),
                 })
             elif status == "paused_for_approval":
                 activity_log.append({
@@ -161,9 +165,46 @@ def _record_ws_activity(
                     "title": "Waiting for approval",
                     "detail": str((ev.data or {}).get("tool") or ""),
                     "state": "info",
+                    "ts": datetime.now(UTC).isoformat(),
                 })
     except Exception:
         logger.debug("[WS-Chat] activity capture failed", exc_info=True)
+
+
+async def _read_turn_usage(graph_inst: Any, config: dict[str, Any]) -> tuple[int, float]:
+    """Per-turn ``(tokens, cost_usd)`` from the graph state snapshot.
+
+    ``last_tokens`` / ``last_cost_usd`` are set by every supervisor return
+    (graph_builder), so the post-stream checkpoint snapshot is the
+    authoritative per-turn value even when no ``on_chat_model_end`` events
+    fired (Kazma's custom LLMProvider is not a BaseChatModel). Mirrors the
+    SSE terminal-state extraction so both transports report identical
+    values for the same turn. Fails open to ``(0, 0.0)`` — the client must
+    never receive undefined usage (dead-badge regression).
+    """
+    try:
+        snap = await graph_inst.aget_state(config)
+        vals = getattr(snap, "values", None) or {}
+        if isinstance(vals, dict):
+            tokens = int(vals.get("last_tokens") or 0)
+            cost = float(vals.get("last_cost_usd") or 0.0)
+            if tokens or cost:
+                return tokens, cost
+        logger.info("[WS-Chat] turn usage missing from graph state — reporting 0")
+    except Exception as exc:
+        logger.debug("[WS-Chat] turn usage read failed: %s", exc)
+    return 0, 0.0
+
+
+def _session_usage_totals(session_id: str) -> tuple[int, float]:
+    """Cumulative ``(total_tokens, total_cost)`` for a session (0s if unknown)."""
+    try:
+        sess = get_session_manager().get(session_id)
+        if sess is not None:
+            return int(sess.total_tokens or 0), round(float(sess.total_cost or 0.0), 6)
+    except Exception as exc:
+        logger.debug("[WS-Chat] session usage totals read failed: %s", exc)
+    return 0, 0.0
 
 
 def _friendly_graph_error(exc: BaseException) -> str:
@@ -437,6 +478,8 @@ def create_ws_chat_router(
         prefer_text: str = "",
         activity: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        tokens: int | None = None,
+        cost: float | None = None,
     ) -> str:
         """Persist the latest *new* assistant text to SessionStore.
 
@@ -446,7 +489,8 @@ def create_ws_chat_router(
         *pre_msg_count* from the checkpoint (avoids re-appending older turns).
         When *activity* (the CoT / workbench log for this turn) is given it is
         stored on the assistant message so a later reload restores it.
-        *model* stamps which LLM produced the reply.
+        *model* stamps which LLM produced the reply; *tokens*/*cost* stamp the
+        per-turn usage so reloads can show per-turn stats.
         """
         text = (prefer_text or "").strip()
         model_id = (model or "").strip() or _resolve_active_model()
@@ -504,6 +548,10 @@ def create_ws_chat_router(
                         sess.messages[-1]["activity"] = activity_rows
                     if model_id:
                         sess.messages[-1]["model"] = model_id
+                    if tokens is not None:
+                        sess.messages[-1]["tokens"] = int(tokens)
+                    if cost is not None:
+                        sess.messages[-1]["cost"] = round(float(cost), 6)
                 else:
                     from datetime import UTC, datetime
 
@@ -516,6 +564,10 @@ def create_ws_chat_router(
                         msg["activity"] = activity_rows
                     if model_id:
                         msg["model"] = model_id
+                    if tokens is not None:
+                        msg["tokens"] = int(tokens)
+                    if cost is not None:
+                        msg["cost"] = round(float(cost), 6)
                     sess.messages.append(msg)
 
                 # Collapse accidental identical consecutive assistant rows
@@ -632,6 +684,9 @@ def create_ws_chat_router(
                                         "model": last.get("model") or "",
                                         "session_id": session_id,
                                         "replay": True,
+                                        # Cumulative badges survive tab switches.
+                                        "session_tokens": int(sess.total_tokens or 0),
+                                        "session_cost": round(float(sess.total_cost or 0.0), 6),
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()
@@ -1496,6 +1551,18 @@ def create_ws_chat_router(
                                 graph_inst, config, websocket, thread_id
                             )
 
+                            # Per-turn usage from graph state (SSE-parity) +
+                            # cumulative session totals for the header badges.
+                            turn_tokens, turn_cost = await _read_turn_usage(
+                                graph_inst, config
+                            )
+                            try:
+                                sess_tokens, sess_cost = get_session_manager().add_usage(
+                                    session_id, turn_tokens, turn_cost
+                                )
+                            except Exception:
+                                sess_tokens, sess_cost = _session_usage_totals(session_id)
+
                             _active_model = _resolve_active_model()
                             final_text = await _persist_final_assistant_message(
                                 graph_inst,
@@ -1505,6 +1572,8 @@ def create_ws_chat_router(
                                 prefer_text=assistant_content_acc,
                                 activity=activity_log,
                                 model=_active_model,
+                                tokens=turn_tokens,
+                                cost=turn_cost,
                             )
                             if interrupted:
                                 # Paused for approval — the approval card takes
@@ -1545,6 +1614,8 @@ def create_ws_chat_router(
                                     prefer_text=recovery,
                                     activity=activity_log,
                                     model=_active_model,
+                                    tokens=turn_tokens,
+                                    cost=turn_cost,
                                 )
                             # Always release the UI turn lock. HITL pause is
                             # signalled via pendingApproval; idle still ends
@@ -1561,6 +1632,10 @@ def create_ws_chat_router(
                                         "model": _active_model,
                                         "session_id": session_id,
                                         "duration_ms": int((time.monotonic() - turn_started_at) * 1000),
+                                        "tokens": turn_tokens,
+                                        "cost": round(turn_cost, 6),
+                                        "session_tokens": sess_tokens,
+                                        "session_cost": round(sess_cost, 6),
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()
@@ -1647,6 +1722,11 @@ def create_ws_chat_router(
                                     thread_id=thread_id,
                                 ).to_dict()
                             )
+                            # Backfill guard: explicit 0s + store totals — the UI
+                            # must never see undefined usage keys (dead badge).
+                            _err_sess_tokens, _err_sess_cost = _session_usage_totals(
+                                session_id
+                            )
                             await send(
                                 TelemetryEvent(
                                     type="turn_complete",
@@ -1657,6 +1737,10 @@ def create_ws_chat_router(
                                         "error": True,
                                         "model": _resolve_active_model(),
                                         "session_id": session_id,
+                                        "tokens": 0,
+                                        "cost": 0.0,
+                                        "session_tokens": _err_sess_tokens,
+                                        "session_cost": _err_sess_cost,
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()
@@ -2047,6 +2131,18 @@ def create_ws_chat_router(
                                 graph_inst, approve_config, websocket, target_thread_id
                             )
 
+                            # Resume ran via ainvoke — no event stream, so the
+                            # post-run state snapshot is the only usage source.
+                            turn_tokens, turn_cost = await _read_turn_usage(
+                                graph_inst, approve_config
+                            )
+                            try:
+                                sess_tokens, sess_cost = get_session_manager().add_usage(
+                                    session_id, turn_tokens, turn_cost
+                                )
+                            except Exception:
+                                sess_tokens, sess_cost = _session_usage_totals(session_id)
+
                             duration_ms = (time.monotonic() - approval_start_time) * 1000
                             # Authoritative client paint — same contract as prompt path.
                             # Without this the UI stayed on "Still working after approval"
@@ -2062,6 +2158,10 @@ def create_ws_chat_router(
                                         "session_id": session_id,
                                         "duration_ms": int(duration_ms),
                                         "source": "hitl_resume",
+                                        "tokens": turn_tokens,
+                                        "cost": round(turn_cost, 6),
+                                        "session_tokens": sess_tokens,
+                                        "session_cost": round(sess_cost, 6),
                                     },
                                     thread_id=target_thread_id,
                                 ).to_dict()

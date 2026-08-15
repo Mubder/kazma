@@ -160,7 +160,9 @@
       <div class="input-footer">
         <span id="session-cost" class="cost-badge">$0.0000</span>
         <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
-        <span class="chat-input-footer-hint" style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
+        <span id="context-size" class="context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
+        <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}">0</span>
+        <span class="chat-input-footer-hint" style="margin-inline-start:auto;font-size:0.7rem;color:var(--text-muted);">
           <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> / <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Enter</kbd> {{ t('chat.send_shortcut') }} ·
           <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
         </span>
@@ -214,6 +216,10 @@
     approval_complete: {{ t('chat.approval_complete') | tojson }},
     step_done: {{ t('chat.step_done') | tojson }},
     step_failed: {{ t('chat.step_failed') | tojson }},
+    show_more: {{ t('chat.show_more') | tojson }},
+    show_less: {{ t('chat.show_less') | tojson }},
+    summary_tools: {{ t('chat.summary_tools') | tojson }},
+    context_size: {{ t('chat.context_size') | tojson }},
     placeholder: {{ t('chat.placeholder') | tojson }},
     pinned: {{ t('chat.pinned') | tojson }},
     pin: {{ t('chat.pin') | tojson }},

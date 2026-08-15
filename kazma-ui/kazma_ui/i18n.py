@@ -338,6 +338,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "chat.step_done": {"en": "Done", "ar": "تم"},
     "chat.step_failed": {"en": "Failed", "ar": "فشل"},
+    "chat.show_more": {"en": "Show more ▾", "ar": "عرض المزيد ▾"},
+    "chat.show_less": {"en": "Show less ▴", "ar": "عرض أقل ▴"},
+    "chat.summary_tools": {"en": "{n} tools", "ar": "{n} أدوات"},
+    "chat.context_size": {
+        "en": "{chars} chars ≈ {tokens} tokens",
+        "ar": "{chars} حرفًا ≈ {tokens} رمزًا",
+    },
+    "chat.context_size_hint": {
+        "en": "Conversation context estimate",
+        "ar": "تقدير حجم سياق المحادثة",
+    },
+    "chat.composer_chars": {
+        "en": "Characters typed",
+        "ar": "عدد الأحرف",
+    },
     "chat.placeholder": {
         "en": "Type a message or /yolo … (Enter to send, / for commands)",
         "ar": "اكتب رسالة أو /yolo … (Enter للإرسال، / للأوامر)",

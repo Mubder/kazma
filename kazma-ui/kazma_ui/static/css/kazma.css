@@ -2399,6 +2399,77 @@ tbody tr:last-child td {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Workbench enhancements: parity, richer rows, polish ────────── */
+/* Animated thinking-row icon (running status rows). Killed globally by
+   the prefers-reduced-motion block (§a11y). */
+@keyframes stepIconPulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.3; }
+}
+.agent-progress-step.state-running .step-icon.is-animated {
+  animation: stepIconPulse 1.2s ease-in-out infinite;
+}
+/* Reserve height while the panel is active so appended rows don't make
+   the transcript jump (streaming polish). */
+.agent-progress.is-active .agent-progress-body { min-height: 42px; }
+
+/* Inline error text on failed tool rows */
+.agent-progress-step.state-failed .step-detail {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-subtle);
+}
+
+/* Long tool results clamp with a "show more" toggle (shared builder
+   renders .is-clamped + button when detail exceeds the JS threshold). */
+.agent-progress-step .step-detail.is-clamped { max-height: 3.6em; overflow: hidden; }
+.step-show-more {
+  margin-top: 2px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  font: 600 0.68rem var(--font-sans, inherit);
+  cursor: pointer;
+}
+.step-show-more:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* RTL: mirror the workbench chevron */
+[dir="rtl"] .agent-progress-chevron { transform: scaleX(-1); }
+
+/* Context + composer badges — same pill family as cost/token badges */
+.context-badge,
+.char-badge {
+  padding: 2px 8px;
+  background: var(--tint);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+}
+.context-badge { color: var(--text-secondary); }
+.char-badge.is-empty { opacity: 0.5; }
+
+/* Turn summary bar density: the done title carries
+   "Done · N tools · M steps · Xs · $cost · tokens" — keep it one line */
+.agent-progress.is-done .agent-progress-title { white-space: nowrap; }
+
+/* Chat transcript: stretchable column with wide side margins (approved
+   mockup look). Mobile (≤768px) rules below still clamp to --sp-3. */
+.chat-messages { padding: var(--sp-6) clamp(64px, 12vw, 180px); }
+.message { max-width: none; }
+
+/* ── ≤520px: usable single-hand layout (AC#7) ── */
+@media (max-width: 520px) {
+  .chat-messages { padding: var(--sp-3); }
+  .input-footer { gap: 6px; }
+  .message { gap: var(--sp-2); }
+  .message-avatar { width: 28px; height: 28px; }
+  .agent-progress-steps { max-height: 240px; }
+  .agent-progress-header { min-height: 36px; }  /* ≥36px tap target */
+}
+
 /* ── 14. Skills & MCP Cards ─────────────────────────────────────── */
 .skills-grid {
   display: grid;

@@ -752,6 +752,19 @@ async def _stream_langgraph_events(
             except Exception:
                 pass
             # Enriched done + turn_complete (content+model) for reliable delivery
+            # Cumulative session totals mirror the WS turn_complete keys so both
+            # transports render identical badge values (AC#3) and a page refresh
+            # restores correct totals instead of the last turn's numbers.
+            sess_tokens, sess_cost = int(total_tokens or 0), round(float(total_cost or 0.0), 6)
+            if session_id:
+                try:
+                    from kazma_ui.session_manager import get_session_manager as _gsm
+
+                    sess_tokens, sess_cost = _gsm().add_usage(
+                        session_id, int(total_tokens or 0), float(total_cost or 0.0)
+                    )
+                except Exception:
+                    logger.debug("[SSE] add_usage skipped for %s", session_id, exc_info=True)
             _done_payload = {
                 "tokens": total_tokens,
                 "cost": round(total_cost, 6),
@@ -761,6 +774,8 @@ async def _stream_langgraph_events(
                 "content": content_acc or "",
                 "model": _done_model,
                 "turn_id": current_turn_id(),
+                "session_tokens": sess_tokens,
+                "session_cost": round(float(sess_cost or 0.0), 6),
             }
             yield _sse_frame("done", _done_payload)
             yield _sse_frame("turn_complete", _done_payload)
@@ -1727,6 +1742,7 @@ def create_sse_chat_router(
                             "title": str(data.get("tool_name") or "tool"),
                             "detail": str(data.get("inputs") or ""),
                             "state": "running",
+                            "ts": _dt.now(UTC).isoformat(),
                         })
                     elif ev_type == "tool_result":
                         activity_log.append({
@@ -1734,6 +1750,7 @@ def create_sse_chat_router(
                             "title": str(data.get("tool_name") or "tool"),
                             "detail": str(data.get("result") or ""),
                             "state": "done",
+                            "ts": _dt.now(UTC).isoformat(),
                         })
                     elif ev_type == "status_update":
                         status = str(data.get("status") or "").strip()
@@ -1744,6 +1761,7 @@ def create_sse_chat_router(
                                 "kind": "status",
                                 "title": status,
                                 "state": "running",
+                                "ts": _dt.now(UTC).isoformat(),
                             })
                 except Exception:
                     logger.debug("[SSE] activity capture failed", exc_info=True)
@@ -1780,6 +1798,10 @@ def create_sse_chat_router(
                         session_id,
                     )
 
+            # Per-turn usage captured from the done/turn_complete frame so the
+            # final persist can stamp it on the assistant message (reload stats).
+            turn_usage: dict[str, Any] = {}
+
             try:
                 async for frame in _stream_langgraph_events(
                     graph=current_graph,
@@ -1807,6 +1829,11 @@ def create_sse_chat_router(
                             _persist_now()
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
                         _record_activity(ev_type, data)
+                    elif ev_type in ("done", "turn_complete"):
+                        if data.get("tokens") is not None:
+                            turn_usage["tokens"] = data.get("tokens")
+                        if data.get("cost") is not None:
+                            turn_usage["cost"] = data.get("cost")
 
                     yield frame
 
@@ -1818,6 +1845,12 @@ def create_sse_chat_router(
                             session.messages[-1]["content"] = content_acc
                             _attach_activity(session.messages[-1])
                             session.messages[-1].setdefault("ts", _ats)
+                            if "tokens" in turn_usage:
+                                session.messages[-1]["tokens"] = int(turn_usage["tokens"] or 0)
+                            if "cost" in turn_usage:
+                                session.messages[-1]["cost"] = round(
+                                    float(turn_usage["cost"] or 0.0), 6
+                                )
                     else:
                         final_msg: dict[str, Any] = {
                             "role": "assistant",
@@ -1825,6 +1858,10 @@ def create_sse_chat_router(
                             "ts": _ats,
                         }
                         _attach_activity(final_msg)
+                        if "tokens" in turn_usage:
+                            final_msg["tokens"] = int(turn_usage["tokens"] or 0)
+                        if "cost" in turn_usage:
+                            final_msg["cost"] = round(float(turn_usage["cost"] or 0.0), 6)
                         session.messages.append(final_msg)
                 try:
                     _get_store().put(session)
@@ -2027,8 +2064,18 @@ def create_sse_chat_router(
             return []
 
     @r.get("/api/chat/sessions/{session_id}/messages")
-    async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
-        """Return the current tenant's message history for a chat session."""
+    async def get_session_messages(
+        session_id: str, stats: bool = False
+    ) -> Any:
+        """Return the current tenant's message history for a chat session.
+
+        Default response is the legacy bare ``list[message]`` (old clients +
+        tests depend on it). Pass ``?stats=1`` to get an envelope
+        ``{"session_id", "messages", "total_tokens", "total_cost"}`` — the
+        cumulative usage totals power the header cost/token badges after a
+        page refresh (``ChatSession.total_*`` are incremented per turn via
+        ``SessionManager.add_usage``).
+        """
         if session_id.startswith("gw-"):
             _get_store()._refresh_from_db(session_id)
 
@@ -2124,7 +2171,7 @@ def create_sse_chat_router(
                 return False
             return True
 
-        return [
+        payload: list[dict[str, Any]] = [
             {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
@@ -2139,6 +2186,14 @@ def create_sse_chat_router(
             for msg in messages
             if _visible(msg)
         ]
+        if stats:
+            return {
+                "session_id": session.session_id or session_id,
+                "messages": payload,
+                "total_tokens": int(session.total_tokens or 0),
+                "total_cost": round(float(session.total_cost or 0.0), 6),
+            }
+        return payload
 
     # ── Provider profile management (continued) ───────────────────
 
