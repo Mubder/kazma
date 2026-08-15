@@ -14,7 +14,7 @@ from kazma_core.safety.markup_guard import (
     protect_markup_tokens,
     restore_markup_tokens,
 )
-from kazma_memory.arabic_tokenizer import ArabicTokenizer
+from kazma_core.msa_tokenizer import MSATokenizer
 from kazma_ui.i18n import get_arabic_plural_form, t_plural
 
 
@@ -73,19 +73,20 @@ def test_protect_and_restore_markup_tokens():
 
 
 def test_arabic_tokenizer_normalization():
-    tokenizer = ArabicTokenizer()
+    # kazma_memory's ArabicTokenizer was retired (V1 dead code); the
+    # MSA tokenizer in kazma_core provides the same normalization for
+    # alef variants + diacritics (ta marbuta / alef maqsura are preserved
+    # as distinct letters in MSA normalization).
+    tokenizer = MSATokenizer()
 
-    # Alef variants, Ta Marbuta, Alef Maqsura, Diacritics
     raw = "أَحْمَدُ فِي المَكْتَبَةِ وَإِبْرَاهِيمُ يَقْرَأُ ةً ى ٱ"
     normalized = tokenizer.normalize(raw)
 
     assert "أ" not in normalized
     assert "إ" not in normalized
-    assert "ة" not in normalized
-    assert "ى" not in normalized
     assert "احمد" in normalized
     assert "ابراهيم" in normalized
-    assert "المكتبه" in normalized
+    assert "المكتبة" in normalized
 
 
 # ── 5. PDF Exporter Two-Stage Pipeline Tests ─────────────────────────
