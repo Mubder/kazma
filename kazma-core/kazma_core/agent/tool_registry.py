@@ -682,8 +682,15 @@ class LocalToolRegistry:
                 else:
                     content = str(result)
 
-                _record_procedural_outcome(tool_name, arguments, success=True)
-                return {"content": content, "is_error": False}
+                # Plain-string tools report failures by returning an
+                # "Error: …" string (database_client, file tools, …). Flag
+                # those as errors so downstream consumers (supervisor retry
+                # logic, tool-result accounting) see the failure. Prefix check
+                # only — "Error" as a substring in successful content (e.g. a
+                # file named document_error_handling.md) must NOT trip this.
+                _is_err = content.startswith("Error:") or content.startswith("⚠️")
+                _record_procedural_outcome(tool_name, arguments, success=not _is_err)
+                return {"content": content, "is_error": _is_err}
 
             except retryable_exc as exc:
                 last_exc = exc

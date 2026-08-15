@@ -495,6 +495,8 @@ async def web_search(query: str, max_results: int = 8) -> str:
         logger.warning(
             "[web_search] All backends empty for %r attempts=%s", q, attempts
         )
+        # Actionable empty-result guidance (rephrase / read_url / local SearXNG).
+        return _format_empty(q, attempts)
     res_text = _format_results(q, results, backend=backend, attempts=attempts)
     try:
         from kazma_core.tools.research_session import record_chat_research

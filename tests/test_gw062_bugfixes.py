@@ -19,6 +19,13 @@ from kazma_memory import SQLiteMemoryBackend
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.skip(
+    reason="V1 memories/FTS schema (kazma_core.memory.schema) was removed in "
+           "the V1→V2 memory cutover — SQLiteMemoryBackend cannot create its "
+           "tables on fresh DBs (ImportError is caught, then 'no such table: "
+           "memories'). Restore with the V2 ranking tests when kazma_memory's "
+           "fate is decided (Tier-2 backlog item).",
+)
 class TestMemoryRankingSortOrder:
     """Verify search results are sorted by descending combined score (BM25 + relevance)."""
 

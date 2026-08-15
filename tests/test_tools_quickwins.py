@@ -111,11 +111,12 @@ class TestWebSearch:
 
             result = await web_search("nonexistent query xyz")
 
-        # All rungs disabled/empty: markdown header with NO winning backend
-        # (empty `_Source: _`) — the current "no results" contract.
+        # All rungs disabled/empty: the actionable empty message (restored
+        # 2026-08-15 — _format_empty was dead code; empty results again get
+        # the rephrase/read_url/SearXNG guidance instead of an empty header).
+        assert "No web results" in result
         assert "nonexistent query xyz" in result
-        assert "_Source: _" in result
-        assert "##" not in result  # no result entries rendered
+        assert "read_url" in result
 
 
 # ══════════════════════════════════════════════════════════════════════════

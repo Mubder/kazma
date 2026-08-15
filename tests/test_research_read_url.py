@@ -10,6 +10,7 @@ import pytest
 import importlib
 
 from kazma_core.agent.graph_builder import (
+    TOOL_RESULT_MAX_CHARS,
     TOOL_RESULT_RESEARCH_MAX_CHARS,
     truncate_tool_result,
 )
@@ -18,15 +19,19 @@ ru = importlib.import_module("kazma_core.tools.read_url")
 
 
 def test_research_tools_get_higher_truncate_cap() -> None:
-    big = "Z" * 20_000
+    # Caps were raised: default tools 100k, research/file/read tools 200k.
+    # A 150k input sits BETWEEN them — it truncates for a default tool but
+    # passes through unchanged for a research tool, proving the differential.
+    big = "Z" * 150_000
     cut = truncate_tool_result(big, tool_name="read_url")
-    assert len(cut) > 4000
-    assert len(cut) <= TOOL_RESULT_RESEARCH_MAX_CHARS + 80  # marker overhead
-    assert "[truncated" in cut
+    assert len(cut) == 150_000  # under the 200k research cap — unchanged
+    assert "[truncated" not in cut
 
-    short_tool = truncate_tool_result(big, tool_name="shell_exec")
-    # Default tool cap still ~4k
-    assert len(short_tool) < 5000
+    # NOTE: shell_exec IS in _RESEARCH_TOOL_NAMES (execution output gets the
+    # higher cap too) — use a non-research tool to see the default cap.
+    short_tool = truncate_tool_result(big, tool_name="schedule_task")
+    assert len(short_tool) <= TOOL_RESULT_MAX_CHARS + 80  # marker overhead
+    assert len(short_tool) > 4000  # the default cap is 100k, not the old 4k
     assert "[truncated" in short_tool
 
 
