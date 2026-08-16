@@ -1818,6 +1818,71 @@
     return n.replace(/_/g, ' ');
   }
 
+  function _toolFamily(rawTitle) {
+    var n = String(rawTitle || '').toLowerCase();
+    if (/browser_|playwright/.test(n)) return 'browse';
+    if (/memory|recall|belief|episode/.test(n)) return 'memory';
+    if (/web_search|read_url|crawl|search|rank_url/.test(n)) return 'search';
+    if (/shell_exec|python_exec|code_exec|install|runtime/.test(n)) return 'exec';
+    if (/file_write|file_delete|write_file|delete_file/.test(n)) return 'write';
+    if (/file_read|file_list|file_search|read_file/.test(n)) return 'read';
+    return 'tool';
+  }
+
+  function _stepGlyph(kind, family) {
+    var d;
+    if (kind === 'error') {
+      d = '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h16.9a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>';
+    } else if (kind === 'thought') {
+      d = '<path d="M12 3a7 7 0 00-4 12.8V18h8v-2.2A7 7 0 0012 3z"/><path d="M9 21h6"/>';
+    } else if (kind === 'file' || family === 'read') {
+      d = '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/>';
+    } else if (family === 'write') {
+      d = '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>';
+    } else if (family === 'exec') {
+      d = '<path d="M4 17l6-5-6-5"/><path d="M12 19h8"/>';
+    } else if (family === 'search') {
+      d = '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>';
+    } else if (family === 'browse') {
+      d = '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/>';
+    } else if (family === 'memory') {
+      d = '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>';
+    } else if (kind === 'tool') {
+      d = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.2a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.2a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.2a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9c.3.6.9 1 1.5 1.1H21a2 2 0 110 4h-.2a1.7 1.7 0 00-1.4 1z"/>';
+    } else {
+      d = '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M5 5l1.5 1.5M17.5 17.5L19 19M3 12h2M19 12h2M5 19l1.5-1.5M17.5 6.5L19 5"/>';
+    }
+    return '<svg class="step-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  }
+
+  function _cotPhasesHtml(active) {
+    function chip(id, label) {
+      var on = active === id ? ' is-on' : '';
+      return '<span class="cot-phase' + on + '" data-phase="' + id + '">' +
+        escapeHtml(label) + '</span>';
+    }
+    return '<div class="cot-phases" aria-hidden="true">' +
+      chip('think', ti('phase_think', 'Think')) +
+      chip('act', ti('phase_act', 'Act')) +
+      chip('write', ti('phase_write', 'Write')) +
+      '</div>';
+  }
+
+  function _setCotPhase(phase) {
+    var panel = _progressEl;
+    if (!panel || !phase) return;
+    panel.setAttribute('data-phase', phase);
+    var order = { think: 1, act: 2, write: 3 };
+    var cur = order[phase] || 1;
+    var nodes = panel.querySelectorAll('.cot-phase');
+    for (var i = 0; i < nodes.length; i++) {
+      var p = nodes[i].getAttribute('data-phase');
+      var n = order[p] || 0;
+      nodes[i].classList.toggle('is-on', p === phase);
+      nodes[i].classList.toggle('is-done', n < cur);
+    }
+  }
+
   function _srcChipHtml(srcs) {
     var arr = Array.isArray(srcs) ? srcs : (srcs ? [srcs] : []);
     if (!arr.length) return '';
@@ -1966,7 +2031,11 @@
       '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench"' +
         ' aria-expanded="true" aria-controls="' + bodyId + '">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
-        '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
+        '<div class="agent-progress-heading">' +
+          '<span class="agent-progress-kicker">' + escapeHtml(ti('reasoning', 'Reasoning')) + '</span>' +
+          '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
+        '</div>' +
+        _cotPhasesHtml('think') +
         '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
         '<span class="agent-progress-count">0 ' + escapeHtml(ti('steps', 'steps')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
@@ -2243,11 +2312,8 @@
     var state = o.state || 'info';
     var rawTitle = String(o.rawTitle || o.title || '').trim() || '\u2026';
     var title = o.title != null ? String(o.title) : rawTitle;
-    var icon = kind === 'tool' ? '\u2699'
-      : (kind === 'thought' ? '\u25C8'
-        : (kind === 'error' ? '\u26A0'
-          : (kind === 'file' ? '\u2398' : '\u2022')));
-    var animIcon = (kind === 'status' && state === 'running') ? ' is-animated' : '';
+    var family = (kind === 'tool' || kind === 'file') ? _toolFamily(rawTitle) : (kind === 'thought' ? 'think' : (kind === 'error' ? 'error' : 'think'));
+    var animIcon = ((kind === 'status' || kind === 'tool') && state === 'running') ? ' is-animated' : '';
 
     // File-diff chips for write/delete tools (one-line target path)
     var fileChip = '';
@@ -2269,7 +2335,9 @@
     // persisted before per-row timestamps); undefined → live "now".
     var timeText = o.tsIso ? formatMsgTime(o.tsIso) : (o.tsIso === null ? '' : formatMsgTime());
     return (
-      '<span class="step-icon' + animIcon + '" aria-hidden="true">' + icon + '</span>' +
+      '<span class="step-icon fam-' + family + animIcon + '" aria-hidden="true">' +
+        _stepGlyph(kind, family) +
+      '</span>' +
       '<div class="step-body">' +
         '<div class="step-line">' +
           '<span class="step-title">' + escapeHtml(title) + '</span>' +
@@ -2348,6 +2416,10 @@
       }
       return;
     }
+
+    if (kind === 'tool') _setCotPhase('act');
+    else if (/synth|compos|writing reply/i.test(rawTitle + ' ' + title)) _setCotPhase('write');
+    else _setCotPhase('think');
 
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
@@ -2601,7 +2673,10 @@
       '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '"' +
         ' aria-expanded="false" aria-controls="' + bodyId + '">' +
         '<span class="agent-progress-pulse is-off" aria-hidden="true"></span>' +
-        '<span class="agent-progress-title">' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '</span>' +
+        '<div class="agent-progress-heading">' +
+          '<span class="agent-progress-kicker">' + escapeHtml(ti('reasoning', 'Reasoning')) + '</span>' +
+          '<span class="agent-progress-title">' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '</span>' +
+        '</div>' +
         '<span class="agent-progress-count">' + escapeHtml(headBits.join(' \u00B7 ')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25B8</span>' +
       '</div>' +
