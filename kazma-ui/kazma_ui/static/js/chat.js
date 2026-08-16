@@ -213,6 +213,8 @@
 
     // Load sessions after models are loaded
     loadSessions();
+    bindCapacityBar();
+    refreshCapacity();
 
     // Refresh the sidebar + reconcile delivery whenever the tab is shown.
     // Browser throttling freezes timers/streams while hidden; the durable
@@ -453,6 +455,13 @@
     { cmd: '/yolo', desc: 'Skip danger-tool approvals for this session (TTL)' },
     { cmd: '/yolo off', desc: 'Restore HITL approvals + clear tool grants' },
     { cmd: '/yolo status', desc: 'Show YOLO / grant status for this session' },
+    { cmd: '/long', desc: 'Show iteration budget + HITL status' },
+    { cmd: '/long on', desc: 'Research budget (40 rounds) — HITL still on' },
+    { cmd: '/long mission', desc: 'Run until done (hard wall ~500 rounds)' },
+    { cmd: '/long yolo', desc: 'Research budget AND skip danger-tool approvals' },
+    { cmd: '/unrestricted', desc: 'Mission + YOLO — finish this job, don’t ask' },
+    { cmd: '/unrestricted off', desc: 'Restore Settings budget + HITL' },
+    { cmd: '/long off', desc: 'Budget only off (HITL unchanged)' },
     { cmd: '/new', desc: 'Start a new chat session' },
     { cmd: '/reset', desc: 'Clear this conversation history' },
     { cmd: '/steer <text>', desc: 'Add context to the running task (applies next step)' },
@@ -806,8 +815,8 @@
   }
 
   function pauseForApproval(data) {
-    // HITL: turn is paused, not generating. Stop must not pulse; input locked
-    // until the user picks Approve / YOLO / Deny.
+    // HITL: turn is paused. Keep the composer usable for /steer, /abort,
+    // /long, /yolo — locking it was why steers vanished (incident 2026-08-16).
     _clearTurnTimers();
     _isGenerating = false;
     _awaitingApproval = true;
@@ -815,13 +824,13 @@
     activeTypingEl = null;
     if (typingEl && KS.hideTyping) KS.hideTyping(typingEl);
     if (inputEl) {
-      inputEl.disabled = true;
-      inputEl.placeholder = 'Please approve or deny the pending action to continue.';
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
     }
     if (sendBtn) {
-      sendBtn.disabled = true;
+      sendBtn.disabled = false;
       sendBtn.classList.remove('stop-mode');
-      sendBtn.title = 'Awaiting approval';
+      sendBtn.title = 'Send steer or command';
       sendBtn.innerHTML = _SEND_SVG;
     }
     void data;
@@ -1363,11 +1372,12 @@
     var _steerHard = _cmdLow === '/steer!' || _cmdLow.startsWith('/steer! ');
     var _steerSoft = !_steerHard && (_cmdLow === '/steer' || _cmdLow.startsWith('/steer '));
     var _abortCmd = _cmdLow === '/abort';
+    var _turnActive = !!_isGenerating || !!_awaitingApproval ||
+      !!(window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive);
     if (_steerHard || _steerSoft || _abortCmd) {
-      inputEl.value = '';
-      inputEl.style.height = 'auto';
-
       if (_abortCmd) {
+        inputEl.value = '';
+        inputEl.style.height = 'auto';
         if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
         fetch('/api/chat/abort', {
@@ -1385,13 +1395,15 @@
           'Usage: /steer <context>  or  /steer! <requirement>', 'info', 3500);
         return;
       }
-      var _turnActive = !!_isGenerating ||
-        !!(window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive);
       if (!_turnActive) {
         if (window.showToast) window.showToast(
           'No active task to steer — send a message first.', 'info', 3000);
         return;
       }
+      // Visible + editable: keep a user bubble, then clear the composer.
+      appendMessage('user', text);
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
       if (window.showToast) window.showToast(
         _steerHard ? '⏸️ Pausing task to apply your steer…' : '🧭 Steer noted — applying on the next step.',
         'info', 3000);
@@ -1399,6 +1411,46 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: chatSessionId || '', text: _steerText, mode: _steerHard ? 'hard' : 'soft',
+        }),
+        credentials: 'same-origin',
+      }).then(function(r) { return r.ok ? r.json() : { ok: false }; }).then(function(body) {
+        if (body && body.ok === false && body.reason === 'no_active_task' && window.showToast) {
+          window.showToast('No active task to steer.', 'info', 3000);
+        }
+      }).catch(function() { /* best-effort */ });
+      return;
+    }
+
+    // /long /mission /unrestricted — WS intercepts; skip Stop-lock on the live bus.
+    var _capFirst = _cmdLow.split(/\s+/)[0];
+    if (_capFirst === '/long' || _capFirst === '/mission' || _capFirst === '/unrestricted'
+        || _capFirst === '/yolo') {
+      var _capStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
+      if (_capStore && _capStore.connectionStatus === 'connected') {
+        appendMessage('user', text);
+        inputEl.value = '';
+        inputEl.style.height = 'auto';
+        if (!chatSessionId) {
+          chatSessionId = generateSessionId();
+          persistSessionId();
+        }
+        _capStore.sendPrompt(text, selectedModel || '', []);
+        return;
+      }
+      // SSE fallback: fall through to the normal send path.
+    }
+
+    // During HITL, a normal message is a soft steer — don't start a new turn.
+    if (_awaitingApproval && text && text.charAt(0) !== '/') {
+      appendMessage('user', '/steer ' + text);
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      if (window.showToast) window.showToast(
+        '🧭 Steering the paused task with your note.', 'info', 3000);
+      fetch('/api/chat/steer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: chatSessionId || '', text: text, mode: 'soft',
         }),
         credentials: 'same-origin',
       }).catch(function() { /* best-effort */ });
@@ -2761,6 +2813,13 @@
     // one lower). The store fields submitApproval needs are set by the inline
     // card's own handlers.
     _clearStoreApproval();
+    // Replace stale/disabled cards instead of stacking another YOLO view
+    // after reconnect (hasInlineApprovalCard ignores disabled buttons).
+    if (messagesEl) {
+      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(old) {
+        old.remove();
+      });
+    }
     var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
@@ -3645,6 +3704,7 @@
         scrollToBottom();
         checkPendingApprovals();
         updateContextBadge();
+        refreshCapacity();
       })
       .catch(function(err) {
         if (chatSessionId !== sessionId) return;
@@ -3881,6 +3941,69 @@
     }
 
     _schedule(800);
+  }
+
+  function bindCapacityBar() {
+    var area = document.getElementById('chat-input-area');
+    var footer = area ? area.querySelector('.input-footer') : null;
+    var bar = document.getElementById('capacity-bar');
+    if (!bar && area) {
+      bar = document.createElement('div');
+      bar.id = 'capacity-bar';
+      bar.className = 'capacity-bar';
+      bar.setAttribute('role', 'toolbar');
+      bar.setAttribute('aria-label', 'Turn budget and HITL');
+      bar.innerHTML =
+        '<span id="capacity-status" class="capacity-status">Mode</span>' +
+        '<button type="button" class="capacity-pill" data-cap="/long on" title="Research budget, HITL stays on">Long</button>' +
+        '<button type="button" class="capacity-pill" data-cap="/long mission" title="Run until done (~500 rounds)">Mission</button>' +
+        '<button type="button" class="capacity-pill" data-cap="/yolo" title="Skip danger-tool approvals">YOLO</button>' +
+        '<button type="button" class="capacity-pill capacity-pill-power" data-cap="/unrestricted" title="Mission + YOLO — finish this job">Unrestricted</button>' +
+        '<button type="button" class="capacity-pill capacity-pill-off" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>';
+    }
+    if (bar && footer && bar.nextElementSibling !== footer) {
+      footer.parentNode.insertBefore(bar, footer);
+    }
+    if (!bar || bar.getAttribute('data-bound')) return;
+    bar.setAttribute('data-bound', '1');
+    bar.addEventListener('click', function(e) {
+      var btn = e.target.closest('[data-cap]');
+      if (!btn || !inputEl) return;
+      inputEl.value = btn.getAttribute('data-cap') || '';
+      sendMessage();
+    });
+  }
+
+  function refreshCapacity() {
+    if (!chatSessionId) return;
+    fetch('/api/chat/capacity?session_id=' + encodeURIComponent(chatSessionId), {
+      credentials: 'same-origin',
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(snap) {
+      if (!snap || !snap.ok) return;
+      var status = document.getElementById('capacity-status');
+      if (status) {
+        var bits = [];
+        if (snap.long_active) {
+          bits.push((snap.mode === 'mission' ? 'Mission ' : 'Long ') + snap.max_iterations);
+        } else {
+          bits.push('Chat ' + snap.max_iterations);
+        }
+        bits.push(snap.yolo_active ? 'YOLO' : 'HITL');
+        if (snap.iteration != null) bits.push(snap.iteration + '/' + snap.max_iterations);
+        status.textContent = bits.join(' · ');
+      }
+      var bar = document.getElementById('capacity-bar');
+      if (!bar) return;
+      bar.querySelectorAll('[data-cap]').forEach(function(btn) {
+        var cap = btn.getAttribute('data-cap') || '';
+        var on = false;
+        if (cap === '/long on') on = !!snap.long_active && snap.mode !== 'mission';
+        if (cap === '/long mission') on = snap.mode === 'mission' && !!snap.long_active;
+        if (cap === '/yolo') on = !!snap.yolo_active;
+        if (cap === '/unrestricted') on = !!snap.long_active && snap.mode === 'mission' && !!snap.yolo_active;
+        btn.classList.toggle('is-on', on);
+      });
+    }).catch(function() {});
   }
 
   function checkPendingApprovals() {
@@ -4155,6 +4278,7 @@
       return chatSessionId;
     },
 
+    refreshCapacity: refreshCapacity,
     // Telemetry WS hooks — called by agentStore
     logProgress: logProgress,
     finalizeProgress: finalizeProgress,

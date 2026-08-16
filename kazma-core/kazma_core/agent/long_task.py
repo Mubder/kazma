@@ -160,6 +160,7 @@ def enable_long_task(
     preset: str = "research",
     max_iterations: int | None = None,
     mode: str = "budget",
+    remaining_turns: int | None = None,
 ) -> dict[str, Any]:
     """Enable long-task mode for *thread_id*. Returns status dict.
 
@@ -216,6 +217,14 @@ def enable_long_task(
 
     now = time.time()
     ttl = _ttl_seconds()
+    if remaining_turns is None:
+        # Mission is a multi-follow-up job; budget /long is one task turn.
+        turns = 3 if mode_key == "mission" else 1
+    else:
+        try:
+            turns = max(1, min(20, int(remaining_turns)))
+        except (TypeError, ValueError):
+            turns = 1
     payload = {
         "enabled": True,
         "mode": mode_key,
@@ -227,7 +236,11 @@ def enable_long_task(
         "actor": actor,
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
-        "remaining_turns": 1,  # consumed after the next user message resolves
+        # Slots for upcoming user turns. consume() decrements at the START of
+        # a real prompt; expire when a new turn finds remaining <= 0. Do NOT
+        # expire in long_task_status() on 0 — that used to kill the budget
+        # on the first task after /long (the turn that should benefit).
+        "remaining_turns": turns,
     }
     get_config_store().set(f"long_task.{thread_id}", payload, category="agent")
     record_long_task_event("enable_mission" if mode_key == "mission" else "enable")
@@ -275,15 +288,22 @@ def consume_long_task_turn(thread_id: str | None) -> None:
         if not raw or not isinstance(raw, dict) or not raw.get("enabled"):
             return
         remaining = int(raw.get("remaining_turns", 1))
-        # Don't decrement on the turn that ENABLED it (the enabling turn is
-        # the one that should benefit). Decrement starts on the NEXT turn.
-        if remaining > 0:
-            raw["remaining_turns"] = remaining - 1
-            cs.set(f"long_task.{thread_id}", raw, category="agent")
+        # Enabling /long is intercepted (no consume). The first real prompt
+        # after enable must still receive the raised budget. Expire only when
+        # a *new* turn arrives and no slots remain.
+        if remaining <= 0:
+            cs.delete(f"long_task.{thread_id}")
             logger.info(
-                "[long_task] turn consumed thread=%s remaining_turns=%d",
-                thread_id, remaining - 1,
+                "[long_task] EXPIRED thread=%s (turn-count exhausted at consume)",
+                thread_id[:12],
             )
+            return
+        raw["remaining_turns"] = remaining - 1
+        cs.set(f"long_task.{thread_id}", raw, category="agent")
+        logger.info(
+            "[long_task] turn consumed thread=%s remaining_turns=%d",
+            thread_id[:12], remaining - 1,
+        )
     except Exception:
         logger.debug("[long_task] consume_long_task_turn failed", exc_info=True)
 
@@ -324,25 +344,10 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
         except (TypeError, ValueError):
             pass
 
-    # Turn-count guard: a /long applies to the turn it was set for + a small
-    # carry-over, NOT every subsequent conversation on the thread forever.
-    # Default: 1 turn (the long_task is consumed after the next user message
-    # resolves, unless the user re-runs /long).
+    # Turn-count is owned by consume_long_task_turn() (expire at the *next*
+    # prompt when remaining already hit 0). Status must stay active for the
+    # turn that just consumed the last slot, or /long never applies.
     remaining_turns = int(raw.get("remaining_turns", 1))
-    if remaining_turns <= 0:
-        cs.delete(f"long_task.{thread_id}")
-        logger.info(
-            "[long_task] EXPIRED thread=%s (turn-count exhausted — reset to baseline)",
-            thread_id,
-        )
-        return {
-            "active": False,
-            "thread_id": thread_id,
-            "expired": True,
-            "expire_reason": "turn_count",
-            "max_iterations": _baseline_iterations(),
-            "recursion_limit": derive_recursion_limit(_baseline_iterations()),
-        }
 
     remaining = None
     if expires is not None:
@@ -394,6 +399,7 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
         "ttl_seconds": raw.get("ttl_seconds"),
         "expires_at": expires,
         "remaining_seconds": remaining,
+        "remaining_turns": remaining_turns,
     }
 
 
@@ -463,7 +469,8 @@ def format_status_message(thread_id: str) -> str:
             "  `/long on` · `/long deep` · `/long research`\n"
             "**Mission mode** (auto-continues until done or hard safety wall):\n"
             "  `/long mission`  or  `/mission on`\n"
-            "HITL is separate — use `/yolo` for danger-tool auto-approve."
+            "**Both** (budget + skip HITL): `/long yolo` · `/unrestricted`\n"
+            "HITL is a separate knob — `/yolo` alone does not raise the round cap."
         )
     rem = st.get("remaining_seconds")
     ttl_note = f"Expires in ~{rem // 60}m." if rem is not None else "No auto-expiry."
@@ -486,7 +493,7 @@ def format_status_message(thread_id: str) -> str:
         f"(may say PARTIAL).\n"
         f"{ttl_note}\n"
         "For real long runs without the soft stop: `/long mission`\n"
-        "HITL separate (`/yolo`). Disable: `/long off`"
+        "Budget + YOLO: `/long yolo`. Disable budget: `/long off`"
     )
 
 

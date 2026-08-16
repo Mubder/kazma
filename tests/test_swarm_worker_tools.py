@@ -405,9 +405,11 @@ class TestMaxIterations:
                 result = await worker.dispatch("start looping")
 
         assert result["status"] == "success"
-        # MAX_ITERATIONS (20) loop calls + 1 forced no-tools finalization
-        # call (worker.py: "iteration limit exhausted — one final LLM call")
-        assert mock_provider.chat.call_count == 21
+        from kazma_core.swarm.worker import worker_iteration_budget
+
+        cap = worker_iteration_budget()
+        # cap loop calls + 1 forced no-tools finalization
+        assert mock_provider.chat.call_count == cap + 1
         assert "Max tool-use iterations" in result["output"] or result["output"]
 
 

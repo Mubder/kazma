@@ -95,6 +95,30 @@ def test_empty_result_not_hard() -> None:
     assert state.consecutive_hard_rounds == 0
 
 
+def test_notimplemented_is_hard() -> None:
+    r = {
+        "name": "browser_navigate",
+        "content": "Future exception was never retrieved\nNotImplementedError",
+        "is_error": False,
+        "duration_ms": 0,
+    }
+    assert classify_tool_result(r) == ToolOutcome.HARD
+
+
+def test_browser_zero_ms_noop_is_hard() -> None:
+    r = {
+        "name": "browser_extract_text",
+        "content": "",
+        "is_error": False,
+        "duration_ms": 0,
+    }
+    assert classify_tool_result(r) == ToolOutcome.HARD
+    s1, _ = update_breaker(0, [r])
+    s2, _ = update_breaker(s1.consecutive_hard_rounds, [r])
+    s3, _ = update_breaker(s2.consecutive_hard_rounds, [r])
+    assert s3.tripped is True
+
+
 # ── Graph integration ───────────────────────────────────────────────────
 
 

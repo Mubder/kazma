@@ -964,6 +964,13 @@ def create_ws_chat_router(
                         )
                         await websocket.send_json(
                             TelemetryEvent(
+                                type="capacity",
+                                data={"action": "yolo"},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
                                 type="stream_end",
                                 data={},
                                 thread_id=thread_id,
@@ -977,6 +984,49 @@ def create_ws_chat_router(
                         except Exception:
                             logger.debug("[WS-Chat] Failed persisting YOLO message")
                         continue  # ← CRITICAL: do NOT fall through to the LLM
+
+                    # ── /long /mission /unrestricted /long yolo (parity) ─
+                    from kazma_core.agent.capacity_commands import (
+                        apply_capacity_command,
+                        is_capacity_command,
+                    )
+
+                    if is_capacity_command(text, require_slash=True):
+                        _cap = apply_capacity_command(
+                            thread_id, text, actor=f"ws:{session_id[:12]}",
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="llm_delta",
+                                data={"content": _cap.reply, "full": True},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="capacity",
+                                data={
+                                    "long_active": _cap.long_active,
+                                    "yolo_active": _cap.yolo_active,
+                                    "action": _cap.action,
+                                },
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="stream_end",
+                                data={},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        session.messages.append({"role": "user", "content": text})
+                        session.messages.append({"role": "assistant", "content": _cap.reply})
+                        try:
+                            get_session_manager().put(session)
+                        except Exception:
+                            logger.debug("[WS-Chat] Failed persisting /long message")
+                        continue
 
                     # ── /research deep (parity with SSE + gateway) ─────
                     if text.lower().startswith("/research"):
@@ -1836,6 +1886,70 @@ def create_ws_chat_router(
                         tools_to_grant.append(str(explicit_tool))
                     tools_to_grant = list(dict.fromkeys(t for t in tools_to_grant if t))
 
+                    # Duplicate-resume guard MUST run before enable_yolo and
+                    # before any `send` helper that only exists inside
+                    # _run_approve_stream (NameError crashed the socket —
+                    # incident 2026-08-16). A finished-but-still-registered
+                    # task does not count (is_turn_running checks task.done()).
+                    if is_turn_running(target_thread_id):
+                        if approved and scope == "yolo":
+                            try:
+                                from kazma_core.safety.yolo import (
+                                    YoloDisabledError,
+                                    enable_yolo,
+                                )
+
+                                enable_yolo(target_thread_id, actor=actor)
+                                logger.warning(
+                                    "[WS-Chat] YOLO enabled (turn already running) "
+                                    "thread=%s actor=%s",
+                                    target_thread_id,
+                                    actor,
+                                )
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="status_update",
+                                        data={
+                                            "status": "thinking",
+                                            "message": (
+                                                "YOLO on — the current turn keeps "
+                                                "running; further danger tools "
+                                                "auto-approve."
+                                            ),
+                                        },
+                                        thread_id=target_thread_id,
+                                    ).to_dict()
+                                )
+                            except YoloDisabledError as yde:
+                                await websocket.send_json(
+                                    ApprovalEventBridge.create_approval_error_event(
+                                        target_thread_id,
+                                        error=str(yde),
+                                        code="YOLO_DISABLED",
+                                        tool=tool_name,
+                                        scope=scope,
+                                    )
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "[WS-Chat] YOLO-on-busy failed: %s", exc
+                                )
+                        else:
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "code": "TURN_BUSY",
+                                    "thread_id": target_thread_id,
+                                    "message": (
+                                        "A turn is already running for this thread"
+                                    ),
+                                }
+                            )
+                        await websocket.send_json(
+                            EventBridge.create_idle_event(target_thread_id).to_dict()
+                        )
+                        continue
+
                     # Apply scope grants *before* resume so later danger tools
                     # in the same ainvoke skip interrupt (mirrors HTTP path).
                     if approved and scope == "yolo":
@@ -2271,17 +2385,8 @@ def create_ws_chat_router(
                         finally:
                             reset_current_thread_id(tid_token)
 
-                    # Guard against a cross-transport duplicate resume: if an
-                    # HTTP/SSE approve (or another WS approve) already resumed
-                    # this thread, starting a second ainvoke(resume) on the same
-                    # checkpoint would double-execute the tool + interleave
-                    # checkpoint writes. SSE guards this; the WS path did not
-                    # (audit finding).
-                    if is_turn_running(target_thread_id):
-                        await send({"type": "error", "code": "TURN_BUSY",
-                                    "thread_id": target_thread_id,
-                                    "message": "A turn is already running for this thread"})
-                        continue
+                    # TURN_BUSY is checked above (before enable_yolo) so a
+                    # live turn never reaches this second ainvoke.
                     if active_task and not active_task.done():
                         active_task.cancel()
                     active_task = asyncio.create_task(_run_approve_stream())

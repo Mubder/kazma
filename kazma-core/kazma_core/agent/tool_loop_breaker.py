@@ -36,6 +36,16 @@ HARD_FAILURE_THRESHOLD = 3
 STAGNATION_WINDOW = 8
 STAGNATION_REPEAT_THRESHOLD = 3
 
+# Silent Windows SelectorEventLoop / Playwright deaths (AGENTS.md §23).
+# These used to return is_error=False in 0ms and never trip the breaker.
+_SILENT_DEATH = re.compile(
+    r"NotImplementedError|"
+    r"Future exception was never retrieved|"
+    r"event loop (does not|cannot) implement|"
+    r"SelectorEventLoop",
+    re.IGNORECASE,
+)
+
 # Content patterns that indicate policy / sandbox (not tool death)
 _POLICY_PATTERNS = re.compile(
     r"(outside\s+(the\s+)?(allowed|workspace)|"
@@ -122,9 +132,31 @@ def classify_tool_result(result: dict[str, Any]) -> ToolOutcome:
 
     content = str(result.get("content", "") or "")
     is_error = bool(result.get("is_error", False))
+    name = str(result.get("name") or result.get("tool_name") or "")
+    try:
+        duration_ms = float(result.get("duration_ms")) if result.get("duration_ms") is not None else None
+    except (TypeError, ValueError):
+        duration_ms = None
 
     if _USER_DENY_PATTERNS.search(content) or "denied by user" in content.lower():
         return ToolOutcome.USER_DENY
+
+    if _SILENT_DEATH.search(content):
+        return ToolOutcome.HARD
+
+    # Browser tools that no-op in 0ms (Playwright never spawned) used to
+    # classify EMPTY and reset the breaker — a 70-round probe loop.
+    if (
+        name.startswith("browser_")
+        and duration_ms is not None
+        and duration_ms < 1.0
+        and (
+            is_error
+            or not content.strip()
+            or content.strip().lower() in ("none", "ok", "null")
+        )
+    ):
+        return ToolOutcome.HARD
 
     if is_error:
         return classify_mcp_error(content, is_error=True)

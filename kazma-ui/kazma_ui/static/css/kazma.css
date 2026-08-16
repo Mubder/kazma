@@ -1805,6 +1805,45 @@ tbody tr:last-child td {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
 }
+.capacity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+.capacity-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-inline-end: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.capacity-pill {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.capacity-pill:hover { border-color: var(--accent); color: var(--text-primary); }
+.capacity-pill.is-on {
+  border-color: var(--warning, #facc15);
+  color: #040815;
+  background: var(--warning, #facc15);
+}
+.capacity-pill-power {
+  border-color: var(--warning, #facc15);
+  background: var(--warning, #facc15);
+  color: #040815;
+}
+.capacity-pill-power:hover { filter: brightness(1.08); }
+.capacity-pill-off { opacity: 1; }
 /* Pending attachments — chips ABOVE the composer, never in the placeholder */
 .chat-attachments {
   display: flex;
@@ -1973,17 +2012,33 @@ tbody tr:last-child td {
 
 .input-footer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
 }
 .cost-badge,
 .token-badge {
   padding: 2px 8px;
-  background: var(--tint);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  color: var(--text-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-input-footer-hint {
+  margin-inline-start: auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.chat-input-footer-hint kbd {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text-primary);
 }
 
 /* Thinking indicator */
@@ -2447,15 +2502,16 @@ tbody tr:last-child td {
 .context-badge,
 .char-badge {
   padding: 2px 8px;
-  background: var(--tint);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  color: var(--text-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   unicode-bidi: isolate;
 }
-.context-badge { color: var(--text-secondary); }
-.char-badge.is-empty { opacity: 0.5; }
+.context-badge { color: var(--text-primary); }
+.char-badge.is-empty { opacity: 0.85; }
 
 /* Turn summary bar density: the done title carries
    "Done · N tools · M steps · Xs · $cost · tokens" — keep it one line */

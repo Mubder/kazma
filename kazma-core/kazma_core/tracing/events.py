@@ -15,6 +15,24 @@ from typing import Any, AsyncGenerator, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _budget_fields(data: Any) -> dict[str, Any]:
+    """Pull iteration / max_iterations off a LangGraph event payload if present."""
+    if not isinstance(data, dict):
+        return {}
+    inp = data.get("input")
+    if not isinstance(inp, dict):
+        inp = data
+    out: dict[str, Any] = {}
+    try:
+        if inp.get("iteration") is not None:
+            out["iteration"] = int(inp["iteration"])
+        if inp.get("max_iterations") is not None:
+            out["max_iterations"] = int(inp["max_iterations"])
+    except (TypeError, ValueError):
+        return {}
+    return out
+
+
 @dataclass
 class TelemetryEvent:
     """Standardized event frame for agent state, tool, LLM, and error telemetry."""
@@ -67,7 +85,11 @@ class EventBridge:
                     if ev_name in ("Supervisor", "ToolWorker", "tool_worker_node", "agent"):
                         yield TelemetryEvent(
                             type="status_update",
-                            data={"status": "routing_node", "active_node": ev_name},
+                            data={
+                                "status": "routing_node",
+                                "active_node": ev_name,
+                                **_budget_fields(data),
+                            },
                             thread_id=thread_id,
                         )
 

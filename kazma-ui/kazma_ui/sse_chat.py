@@ -1084,6 +1084,39 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
+        from kazma_core.agent.capacity_commands import (
+            apply_capacity_command,
+            is_capacity_command,
+        )
+
+        if is_capacity_command(raw_msg, require_slash=True):
+            _cap = apply_capacity_command(
+                thread_id, raw_msg, actor=f"web:{session_id[:12]}",
+            )
+            session.messages.append({"role": "user", "content": raw_msg})
+            session.messages.append({"role": "assistant", "content": _cap.reply})
+            try:
+                _get_store().put(session)
+            except Exception:
+                logger.exception("[SSE] failed to persist /long message")
+
+            async def _long_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": _cap.reply})
+                yield _sse_frame("capacity", {
+                    "long_active": _cap.long_active,
+                    "yolo_active": _cap.yolo_active,
+                    "action": _cap.action,
+                })
+                yield _sse_frame("done", {
+                    "tokens": 1, "cost": 0.0, "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _long_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
             from kazma_core.safety.yolo import (
                 YoloDisabledError,
@@ -2315,6 +2348,26 @@ def create_sse_chat_router(
         )
         return {"cancelled": task is not None}
 
+    @r.get("/api/chat/capacity")
+    async def chat_capacity(session_id: str = "", thread_id: str = "") -> dict[str, Any]:
+        """Live budget + YOLO snapshot for the composer capacity bar."""
+        tid = (thread_id or "").strip()
+        sid = (session_id or "").strip()
+        if not tid and sid:
+            try:
+                sess = _get_store().get(sid)
+                tid = (sess.thread_id if sess else "") or sid
+            except Exception:
+                tid = sid
+        if not tid:
+            return {"ok": False, "reason": "missing_session"}
+        from kazma_core.agent.capacity_commands import snapshot_capacity
+
+        snap = snapshot_capacity(tid)
+        snap["ok"] = True
+        snap["session_id"] = sid
+        return snap
+
     # ── Steer: inject info into a RUNNING turn (/steer, /steer!) ──────
     @r.post("/api/chat/steer")
     async def steer_chat_turn(request: Request) -> Any:
@@ -2352,8 +2405,26 @@ def create_sse_chat_router(
             mode = "soft"
         if not thread_id or not text:
             return {"ok": False, "reason": "missing_session_or_text"}
+
+        graph_inst = _get_graph()
+        _paused = False
         if not is_turn_running(thread_id):
-            return {"ok": False, "reason": "no_active_task"}
+            # HITL / hard-steer interrupt: the prompt stream has finished but
+            # the task is still the user's — allow steer instead of "no task".
+            try:
+                from kazma_core.agent.long_task import resolve_turn_budgets
+
+                _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+                _cfg = {
+                    "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+                    "recursion_limit": _rec,
+                }
+                _snap = await graph_inst.aget_state(_cfg)
+                _paused = bool(getattr(_snap, "next", None))
+            except Exception:
+                _paused = False
+            if not _paused:
+                return {"ok": False, "reason": "no_active_task"}
 
         from kazma_core.agent.steer import (
             clear_all_steers,
@@ -2362,10 +2433,31 @@ def create_sse_chat_router(
             push_soft_steer,
         )
 
-        if mode == "soft":
+        # Durable transcript so the user can see / edit the steer after refresh.
+        try:
+            if session_id:
+                _sess = _get_store().get(session_id)
+                if _sess is not None:
+                    _label = "/steer! " if mode == "hard" else "/steer "
+                    _sess.messages.append({
+                        "role": "user",
+                        "content": _label + text,
+                    })
+                    _get_store().put(_sess)
+        except Exception:
+            logger.debug("[SSE] persist steer transcript failed", exc_info=True)
+
+        if mode == "soft" or (_paused and not is_turn_running(thread_id)):
             push_soft_steer(thread_id, text)
-            logger.info("[SSE] soft steer queued thread=%s", thread_id[:12])
-            return {"ok": True, "mode": "soft"}
+            logger.info(
+                "[SSE] soft steer queued thread=%s paused=%s demoted=%s",
+                thread_id[:12], _paused, mode == "hard",
+            )
+            return {
+                "ok": True,
+                "mode": "soft",
+                "demoted": mode == "hard",
+            }
 
         # ── hard steer: queue, wait for the interrupt, then resume ──
         push_hard_steer(thread_id, text)

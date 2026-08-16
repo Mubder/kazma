@@ -563,24 +563,26 @@ async def supervisor_node(
     # strategy-change hint at milestones so the model course-corrects
     # BEFORE hitting the hard iteration wall.
     _ITER_NUDGE_MARKERS = (20, 40, 60, 80)
+    _budget_nudge: dict[str, Any] | None = None
     if iteration in _ITER_NUDGE_MARKERS:
-        _remaining = int(state.get("max_iterations") or 15) - iteration
-        messages = list(messages) + [
-            {
-                "role": "system",
-                "content": (
-                    f"SYSTEM BUDGET CHECK: You have used {iteration} iterations "
-                    f"({_remaining} remaining). If you are making steady progress, "
-                    "continue. If you are LOOPING (re-reading files you already read, "
-                    "writing debug scripts, retrying similar code):\n"
-                    "- BATCH tool calls: issue MULTIPLE reads/writes in ONE response\n"
-                    "- Use structured tools (generate_pdf, file_write) not python_exec\n"
-                    "- Summarize what you have so far and produce the final output NOW"
-                ),
-            }
-        ]
+        _max_iter_now = int(state.get("max_iterations") or 15)
+        _remaining = max(0, _max_iter_now - iteration)
+        _budget_nudge = {
+            "role": "system",
+            "content": (
+                f"SYSTEM BUDGET CHECK: You have used {iteration} iterations "
+                f"({_remaining} remaining of {_max_iter_now}). If you are making "
+                "steady progress, continue. If you are LOOPING (re-reading files "
+                "you already read, writing debug scripts, retrying similar code):\n"
+                "- BATCH tool calls: issue MULTIPLE reads/writes in ONE response\n"
+                "- Use structured tools (generate_pdf, file_write) not python_exec\n"
+                "- Summarize what you have so far and produce the final output NOW"
+            ),
+        }
         logger.info(
-            "[Supervisor] iteration-efficiency nudge injected at iteration=%d", iteration
+            "[Supervisor] iteration-efficiency nudge injected at iteration=%d "
+            "(ephemeral — not checkpointed)",
+            iteration,
         )
 
     # ── Mission mode: auto-extend past soft max_iterations ─────────
@@ -1589,6 +1591,7 @@ async def supervisor_node(
 
         _llm_attempts = 0
         _served_by: list[str] = []  # failover bookkeeping: [model] when a chain model answered
+        _llm_messages = list(messages) + ([_budget_nudge] if _budget_nudge else [])
 
         async def _call_llm_with_retry() -> Any:
             nonlocal _llm_attempts
@@ -1602,7 +1605,7 @@ async def supervisor_node(
             for attempt in range(1, cfg["max_attempts"] + 1):
                 try:
                     return await llm.chat(
-                        messages=messages,
+                        messages=_llm_messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
                         max_tokens=_call_max_tokens,
@@ -1704,7 +1707,7 @@ async def supervisor_node(
                         fb_model,
                     )
                     response = await client.chat(
-                        messages=messages,
+                        messages=_llm_messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=fb_model,
                     )

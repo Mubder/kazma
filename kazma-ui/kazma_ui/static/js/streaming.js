@@ -113,6 +113,12 @@ var KazmaStream = (function() {
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;
+          case 'capacity':
+            if (window.KazmaChat && typeof window.KazmaChat.refreshCapacity === 'function') {
+              try { window.KazmaChat.refreshCapacity(); } catch (e) { /* ignore */ }
+            }
+            if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'error':
             if (callbacks.onError) callbacks.onError(data ? data.content : 'Unknown error');
             break;
