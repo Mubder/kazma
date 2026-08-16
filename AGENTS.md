@@ -79,6 +79,24 @@ All packages are in scope. The four main packages:
   `[Attached: … — use file_read to open: …]` stub instead of `image_url`
   (text-only providers like DeepSeek reject `image_url` with a 400).
 
+**Strict local chat templates — system messages MUST stay at the head:**
+- Local OpenAI-compatible servers with strict Jinja templates (LM Studio /
+  llama.cpp Qwen3) return HTTP 400 `System message must be at the beginning`
+  when any `role: system`/`developer` message appears AFTER the first user
+  message. Kazma injects such notes mid-stream (INTENT ENGINE plan notes,
+  iteration budget nudges, mission patches), so checkpointed history
+  naturally contains them — a plain reload+send 400s on every turn.
+- `hoist_system_messages()` (`llm_provider.py`) is applied to the messages
+  payload inside `LLMProvider.chat()` — the single OpenAI-compatible path
+  (LM Studio, Ollama, OpenAI, DeepSeek, …) shared by all transports. It
+  moves system/developer messages to the head (order preserved, no-op when
+  already ordered) and keeps assistant/tool adjacency intact. NEVER remove
+  this call from `chat()`.
+- New mid-stream system-note injection sites are covered by the hoist — but
+  never add a second LLM-call path that bypasses `LLMProvider.chat()`.
+- Anthropic/Gemini/Azure/Bedrock have their own `chat()` implementations
+  that handle system messages natively — do NOT hoist there.
+
 ### 4. Swarm Handoff Cycle Detection (`kazma-core/kazma_core/swarm/engine.py`)
 - `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`

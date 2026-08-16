@@ -6,7 +6,14 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
+from kazma_core.llm_provider import (
+    LLMConfig,
+    LLMError,
+    LLMProvider,
+    LLMResponse,
+    ToolCall,
+    hoist_system_messages,
+)
 
 
 class TestLLMConfig:
@@ -193,6 +200,64 @@ class TestLLMProvider:
         provider._http = mock_client
         with pytest.raises(LLMError, match="LLM call failed"):
             await provider.chat([{"role": "user", "content": "hi"}])
+
+    def test_hoist_system_messages(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "system", "content": "mid-stream note"},
+            {"role": "tool", "content": "result"},
+            {"role": "developer", "content": "dev note"},
+        ]
+        hoisted = hoist_system_messages(msgs)
+        assert [m["role"] for m in hoisted] == ["system", "developer", "user", "assistant", "tool"]
+        # Relative order within each group is preserved.
+        assert hoisted[0]["content"] == "mid-stream note"
+        assert hoisted[1]["content"] == "dev note"
+        # Already-ordered lists are unchanged.
+        ordered = [
+            {"role": "system", "content": "base"},
+            {"role": "user", "content": "hi"},
+        ]
+        assert hoist_system_messages(ordered) == ordered
+
+    @pytest.mark.asyncio
+    async def test_chat_hoists_mid_stream_system_messages(self) -> None:
+        """Mid-stream system messages (INTENT ENGINE notes, budget nudges)
+        break strict local chat templates (LM Studio Qwen3 raises
+        'System message must be at the beginning') — the payload must
+        hoist them to the head.
+        """
+        provider = LLMProvider(LLMConfig(base_url="http://fake.api/v1", api_key="test"))
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "Hi!"}, "finish_reason": "stop"}],
+            "model": "test",
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.is_closed = False
+        provider._http = mock_client
+
+        await provider.chat(
+            [
+                {"role": "system", "content": "base prompt"},
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "system", "content": "mid-stream note"},
+                {"role": "user", "content": "again"},
+            ]
+        )
+
+        sent = mock_client.post.call_args.kwargs["json"]["messages"]
+        assert [m["role"] for m in sent] == ["system", "system", "user", "assistant", "user"]
+        assert sent[0]["content"] == "base prompt"
+        assert sent[1]["content"] == "mid-stream note"
 
     @pytest.mark.asyncio
     async def test_close(self) -> None:
