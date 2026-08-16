@@ -44,6 +44,27 @@ def test_yolo_bypasses_semantic_gate(ops_db):
     assert d.commitment_id is None        # audit-only, nothing persisted
 
 
+def test_active_security_yolo_bypasses_semantic_gate(ops_db, monkeypatch):
+    """Incident 2026-08-16 ("YOLO keeps asking"): an active per-thread security
+    YOLO bypasses the semantic gate even under the default balanced commitment
+    mode. Without this, the user approves once and the next semantic check
+    interrupts again. A thread without active YOLO still clarifies."""
+    import kazma_core.safety.yolo as yolo_mod
+
+    monkeypatch.setattr(yolo_mod, "is_yolo_active", lambda tid: tid == "th-1")
+    d = authorize_effect("schedule_task", {"timing": "2d"}, user_text=AMBIG,
+                         request_at=REQUEST_AT, memory_beliefs=GROK_NEARBY,
+                         thread_id="th-1")  # balanced (no cfg)
+    assert d.decision == "allow"
+    assert "yolo" in (d.reason or "").lower()
+    assert d.commitment_id is None
+
+    d2 = authorize_effect("schedule_task", {"timing": "2d"}, user_text=AMBIG,
+                          request_at=REQUEST_AT, memory_beliefs=GROK_NEARBY,
+                          thread_id="th-2")
+    assert d2.decision == "clarify"
+
+
 def test_autonomous_allows_with_candidate(ops_db):
     """autonomous: a nearby-event clarify is downgraded to allow with the
     from-now candidate (less friction). The memory overwrite is still guarded

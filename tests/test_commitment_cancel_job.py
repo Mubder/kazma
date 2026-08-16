@@ -1,7 +1,8 @@
 """Phase 4 — cancel_job act resolver (Commitment §3.5).
 
-cancel_scheduled takes a job_id. The resolver verifies that id is a REAL PENDING
-job on this thread before allowing — catches hallucinated / wrong-thread /
+cancel_scheduled takes a job_id. The resolver verifies that id is a REAL
+PENDING job (same thread first, then any thread of the same tenant — jobs are
+booked from one interface and cancelled from another) — catches hallucinated /
 already-terminal ids — and clarifies WITH the actual pending list otherwise.
 """
 
@@ -67,12 +68,59 @@ def test_hallucinated_job_id_clarifies_with_real_list(cron):
     assert "FAKE-9999" in d.clarify_question
 
 
-def test_wrong_thread_job_id_clarifies(cron):
-    """A job_id that belongs to a different thread is not cancellable here."""
+def test_cross_thread_job_id_allows(cron):
+    """Incident 2026-08-16: reminders are scheduled from one interface
+    (Telegram) and cancelled from another (Web), and legacy jobs carried an
+    empty thread_id. The old thread-scoped lookup never matched those, so a
+    VALID cancel clarified forever. Matching the exact job_id against ALL
+    pending jobs (still tenant-scoped) is the hallucination guard now."""
     _seed(cron, [{"job_id": "j1", "prompt": "standup", "thread_id": "t2"}])
     d = authorize_effect("cancel_scheduled", {"job_id": "j1"}, thread_id="t1")
-    assert d.decision == "clarify"  # j1 isn't pending on t1
-    assert "no pending jobs" in d.clarify_question  # t1 has none
+    assert d.decision == "allow"
+    assert "cross-thread" in (d.reason or "")
+
+
+def test_empty_thread_id_job_allows_from_any_thread(cron):
+    """The exact incident shape: a job stored with thread_id='' (schedule_task
+    did not capture threads before the fix) cancelled from a web thread."""
+    _seed(cron, [{"job_id": "cron-38094e61", "prompt": "grok reset", "thread_id": ""}])
+    d = authorize_effect("cancel_scheduled", {"job_id": "cron-38094e61"},
+                         thread_id="web-801c4508")
+    assert d.decision == "allow"
+
+
+def test_clarify_options_never_make_approve_a_cancel(cron):
+    """An option-less clarify maps Approve → 'cancel' in build_resume_value,
+    which turned every approval into "cancelled by the user". The clarify must
+    carry real pending jobs as options so Approve picks an actual job."""
+    _seed(cron, [{"job_id": "j1", "prompt": "standup", "thread_id": "t1"}])
+    d = authorize_effect("cancel_scheduled", {"job_id": "FAKE-9999"}, thread_id="t1")
+    assert d.decision == "clarify"
+    assert d.options, "cancel_job clarify must carry discrete options"
+    ids = [o["id"] for o in d.options]
+    assert any(i != "cancel" for i in ids), "must offer at least one real job"
+    # Approve (first non-cancel option) must NOT resolve to 'cancel'.
+    from kazma_core.safety.commitment.resume import build_resume_value
+    payload = {"kind": "semantic_clarify", "items": [
+        {"tool_call_id": "tc1", "tool": "cancel_scheduled", "options": d.options},
+    ]}
+    rv = build_resume_value(payload, approved=True)
+    assert rv.get("tc1") != "cancel"
+
+
+def test_other_tenant_job_id_clarifies(cron):
+    """Tenant isolation preserved: a job in a different tenant is invisible."""
+    _seed(cron, [])  # ensure the schema exists
+    conn = sqlite3.connect(str(cron))
+    conn.execute(
+        "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, "
+        "status, tenant_id) VALUES (?,?,?,?,?,?,?)",
+        ("jX", "5m", "other tenant", "telegram", "", "pending", "tenantB"),
+    )
+    conn.commit(); conn.close()
+    d = authorize_effect("cancel_scheduled", {"job_id": "jX"}, thread_id="t1",
+                         tenant_id="default")
+    assert d.decision == "clarify"  # jX belongs to tenantB, not visible here
 
 
 def test_terminal_job_id_clarifies(cron):
@@ -106,3 +154,54 @@ def test_yolo_mode_bypasses_cancel_gate(cron):
                          cfg={"mode": "yolo"})
     assert d.decision == "allow"
     assert d.commitment_id is None  # bypassed, audit-only
+
+
+def test_active_security_yolo_bypasses_cancel_gate(cron, monkeypatch):
+    """Incident 2026-08-16 ("YOLO keeps asking"): an ACTIVE per-thread security
+    YOLO must bypass the semantic gate even when the commitment mode is the
+    default 'balanced'. Otherwise the user approves once and the next semantic
+    check interrupts again."""
+    import kazma_core.safety.yolo as yolo_mod
+
+    _seed(cron, [{"job_id": "j1", "prompt": "standup", "thread_id": "t1"}])
+    monkeypatch.setattr(yolo_mod, "is_yolo_active", lambda tid: tid == "t1")
+    d = authorize_effect("cancel_scheduled", {"job_id": "FAKE"}, thread_id="t1")
+    assert d.decision == "allow"
+    assert "yolo" in (d.reason or "").lower()
+    assert d.commitment_id is None  # bypassed, audit-only
+
+
+def test_inactive_security_yolo_still_enforces(cron, monkeypatch):
+    """With no active security YOLO the balanced gate still verifies."""
+    import kazma_core.safety.yolo as yolo_mod
+
+    _seed(cron, [{"job_id": "j1", "prompt": "standup", "thread_id": "t1"}])
+    monkeypatch.setattr(yolo_mod, "is_yolo_active", lambda tid: False)
+    d = authorize_effect("cancel_scheduled", {"job_id": "FAKE"}, thread_id="t1")
+    assert d.decision == "clarify"
+
+
+def test_security_yolo_active_bypasses_cancel_gate(cron, monkeypatch):
+    """Incident 2026-08-16 (YOLO keeps asking): an ACTIVE per-thread security
+    YOLO must silence the commitment gate too, even when the commitment mode is
+    the default 'balanced'. Otherwise the user approves once and the next
+    semantic check interrupts again."""
+    import kazma_core.safety.yolo as yolo_mod
+
+    _seed(cron, [{"job_id": "j1", "prompt": "standup", "thread_id": "t1"}])
+    monkeypatch.setattr(yolo_mod, "is_yolo_active", lambda tid: tid == "t1")
+    # No cfg mode → 'balanced'; the active security YOLO still bypasses.
+    d = authorize_effect("cancel_scheduled", {"job_id": "FAKE"}, thread_id="t1")
+    assert d.decision == "allow"
+    assert "yolo" in (d.reason or "").lower()
+    assert d.commitment_id is None
+
+
+def test_security_yolo_inactive_still_enforces(cron, monkeypatch):
+    """Without an active security YOLO the balanced gate still verifies."""
+    import kazma_core.safety.yolo as yolo_mod
+
+    _seed(cron, [{"job_id": "j1", "prompt": "standup", "thread_id": "t1"}])
+    monkeypatch.setattr(yolo_mod, "is_yolo_active", lambda tid: False)
+    d = authorize_effect("cancel_scheduled", {"job_id": "FAKE"}, thread_id="t1")
+    assert d.decision == "clarify"

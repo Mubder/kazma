@@ -233,6 +233,35 @@ def authorize_effect(
     )
 
 
+def _effective_mode(cfg: dict[str, Any] | None, thread_id: str | None) -> str:
+    """Resolve the commitment mode, honoring the per-thread security YOLO.
+
+    Security YOLO ("stop asking me", per-thread + TTL) is the user's explicit
+    opt-out of approval prompts; the commitment gate's clarify/confirm cards
+    ARE approval prompts, so an active YOLO must silence them too — otherwise
+    the user approves once and the next semantic check interrupts again
+    (incident 2026-08-16: "YOLO keeps asking for permission").
+
+    Scope of the bypass: only the mode-aware resolvers (remind / cancel_job).
+    The exec denylist, outbound allowlist and config protected-keys resolvers
+    never read the mode and keep enforcing, and the memory source-trust gate
+    (belief_mutation) is independent — the overwrite class stays blocked.
+    """
+    from .config import get_commitment_config
+
+    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
+        get_commitment_config().get("mode", "balanced"))
+    if mode != "yolo" and thread_id:
+        try:
+            from kazma_core.safety.yolo import is_yolo_active
+
+            if is_yolo_active(thread_id):
+                return "yolo"
+        except Exception:
+            logger.debug("[commitment] yolo bridge check failed", exc_info=True)
+    return mode
+
+
 def _build_remind_clarify_options(res) -> list[dict[str, Any]]:
     """Build the discrete options for a remind clarify card (plan §4.3).
 
@@ -282,14 +311,14 @@ def _resolve_remind_act(
                       still blocked at the memory gate).
       * balanced    — resolve_remind's decision stands (default).
     """
-    # Lazy imports (store → paths; relative_time is standalone; config → ConfigStore).
-    from .config import get_commitment_config
+    # Lazy imports (store → paths; relative_time is standalone).
     from .relative_time import parse_absolute_timing, resolve_remind as _resolve
     from .relative_time import validate_timing_against_memory
     from .store import Commitment, create_commitment
 
-    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
-        get_commitment_config().get("mode", "balanced"))
+    # Security YOLO active on this thread → semantic bypass too (see
+    # _effective_mode; incident 2026-08-16 "YOLO keeps asking").
+    mode = _effective_mode(cfg, thread_id)
 
     if mode == "yolo":
         logger.info("[commitment] yolo mode — semantic bypass for %s source=%s",
@@ -449,12 +478,12 @@ def _resolve_cancel_job_act(
     WITH THE ACTUAL pending list so the user/model can pick the right one,
     instead of confidently "canceling" something that doesn't cancel.
     """
-    from .config import get_commitment_config
     from .constraints import cron_pending_jobs
     from .store import Commitment, create_commitment
 
-    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
-        get_commitment_config().get("mode", "balanced"))
+    # Security YOLO active on this thread → semantic bypass too (see
+    # _effective_mode; incident 2026-08-16 "YOLO keeps asking").
+    mode = _effective_mode(cfg, thread_id)
     if mode == "yolo":
         logger.info("[commitment] yolo — semantic bypass for %s source=%s", tool_name, source)
         return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
@@ -488,19 +517,52 @@ def _resolve_cancel_job_act(
             profile=profile, audit=audit, commitment_id=cid,
         )
 
-    # not found / not pending / wrong thread / hallucinated → clarify with list
+    # Cross-thread / legacy fallback (incident 2026-08-16): jobs scheduled
+    # before thread capture carry thread_id='' and reminders get cancelled
+    # from a different interface than they were booked on (Telegram → Web).
+    # The thread-scoped lookup never matched those, so a VALID cancel
+    # clarified forever. The exact job_id match against ALL pending jobs is
+    # still the hallucination guard — a invented id matches nothing.
+    all_pending = cron_pending_jobs(thread_id=None, tenant_id=tenant_id)
+    if job_id and all_pending and any(j["job_id"] == job_id for j in all_pending):
+        commitment.status = "ready"
+        commitment.policy_decision = "allow"
+        cid = create_commitment(commitment, cfg=cfg)
+        logger.info(
+            "[commitment] allow cancel_job %s cid=%s (cross-thread match) source=%s",
+            job_id, cid, source,
+        )
+        return EffectDecision(
+            decision="allow",
+            reason=f"cancel_job: {job_id} is a pending job (cross-thread)",
+            profile=profile, audit=audit, commitment_id=cid,
+        )
+
+    # not found / not pending / hallucinated → clarify WITH the actual pending
+    # jobs as discrete options. Options are required here: an option-less
+    # clarify maps Approve → "cancel" in build_resume_value, which turned
+    # every approval into "cancelled by the user" (incident 2026-08-16).
     commitment.status = "needs_clarify"
     commitment.policy_decision = "clarify"
     commitment.confidence = 0.3
     cid = create_commitment(commitment, cfg=cfg)
-    listing = "; ".join(f"{j['job_id']} ({(j['prompt'] or '')[:40]})" for j in pending[:5]
+    listing_src = all_pending if all_pending else pending
+    listing = "; ".join(f"{j['job_id']} ({(j['prompt'] or '')[:40]})" for j in listing_src[:5]
                         ) or "(no pending jobs)"
-    q = (f"job_id {job_id!r} is not a pending job on this thread. "
+    q = (f"job_id {job_id!r} is not a pending job. "
          f"Current pending jobs: {listing}. Provide the correct job_id.")
+    options: list[dict[str, Any]] = []
+    for j in (listing_src or [])[:5]:
+        options.append({
+            "id": f"job_{j['job_id']}",
+            "label": f"Cancel {j['job_id']} — {(j['prompt'] or '')[:40]}",
+            "slots_patch": {"job_id": j["job_id"]},
+        })
+    options.append({"id": "cancel", "label": "Don't cancel anything", "slots_patch": None})
     logger.info("[commitment] clarify cancel_job %s cid=%s — not pending/matched", job_id, cid)
     return EffectDecision(
         decision="clarify", reason=q, profile=profile, audit=audit,
-        commitment_id=cid, clarify_question=q,
+        commitment_id=cid, clarify_question=q, options=options,
     )
 
 
