@@ -8,6 +8,7 @@ Providers:
     google_drive — reuses Gmail OAuth tokens (adds drive.file scope)
     onedrive     — reuses Microsoft OAuth tokens (adds Files.ReadWrite scope)
     webdav       — WD MyCloud OS5 / any WebDAV server (username+password)
+    ftp          — WD MyCloud OS3 (EX4100) / any FTP server (username+password)
     s3           — Amazon S3 / Backblaze B2 / any S3-compatible endpoint
 
 Contract (matches _offsite_sync in backup/universal.py):
@@ -39,6 +40,7 @@ __all__ = [
     "GoogleDriveSync",
     "OneDriveSync",
     "WebDAVSync",
+    "FTPSync",
     "S3Sync",
 ]
 
@@ -54,6 +56,7 @@ def get_sync_provider() -> "CloudSyncProvider | None":
         "google_drive": GoogleDriveSync,
         "onedrive": OneDriveSync,
         "webdav": WebDAVSync,
+        "ftp": FTPSync,
         "s3": S3Sync,
     }
     cls = providers.get(provider_name)
@@ -651,6 +654,170 @@ class WebDAVSync:
             "provider": "webdav",
             "connected": bool(url and username),
             "remote": f"webdav:{url}" if url else "",
+        }
+
+
+# ─── FTP (WD MyCloud OS3 / any FTP server) ──────────────────────────────
+
+
+class FTPSync:
+    """FTP backup via stdlib ftplib — no SDK, no extra dependencies.
+
+    For WD MyCloud OS3 devices (EX4100 & co.) and any plain FTP server.
+    FTP is blocking socket I/O, so every call runs in ``asyncio.to_thread``
+    (the Windows SelectorEventLoop constraint applies here too).
+
+    Config: backups.offsite.ftp.host, .port (default 21), .username,
+    .password (vault), .path (optional base dir on the server, relative to
+    the FTP login directory).
+    """
+
+    _ROOT_FOLDER = "kazma-backups"
+
+    def _get_config(self) -> dict[str, Any]:
+        try:
+            port = int(_read_config("backups.offsite.ftp.port", "21") or 21)
+        except (TypeError, ValueError):
+            port = 21
+        path = _read_config("backups.offsite.ftp.path", "").strip("/")
+        return {
+            "host": _read_config("backups.offsite.ftp.host", "").strip(),
+            "port": port,
+            "username": _read_config("backups.offsite.ftp.username", "").strip(),
+            "password": _read_vault("backups.offsite.ftp.password"),
+            "path": path,
+        }
+
+    def _connect(self, cfg: dict[str, Any]) -> Any:
+        import ftplib
+
+        ftp = ftplib.FTP()
+        ftp.connect(cfg["host"], cfg["port"], timeout=15)
+        ftp.login(cfg["username"] or "anonymous", cfg["password"] or "kazma@")
+        ftp.set_pasv(True)
+        return ftp
+
+    @staticmethod
+    def _ensure_dir(ftp: Any, path: str) -> None:
+        """cwd into ``path`` (relative to the login dir), creating missing dirs."""
+        import ftplib
+
+        parts = [p for p in path.split("/") if p]
+        if not parts:
+            return
+        try:
+            ftp.cwd(path)
+            return
+        except ftplib.error_perm:
+            pass
+        for part in parts:
+            try:
+                ftp.cwd(part)
+            except ftplib.error_perm:
+                ftp.mkd(part)
+                ftp.cwd(part)
+
+    async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
+        cfg = self._get_config()
+        if not cfg["host"]:
+            return {"ok": False, "remote": "ftp", "error": "FTP host not configured"}
+        display = f"ftp:{cfg['host']}/{self._ROOT_FOLDER}/{remote_name}"
+        root = f"{cfg['path']}/{self._ROOT_FOLDER}" if cfg["path"] else self._ROOT_FOLDER
+
+        def _run() -> None:
+            ftp = self._connect(cfg)
+            try:
+                self._ensure_dir(ftp, root)
+                with open(local, "rb") as f:
+                    ftp.storbinary(f"STOR {remote_name}", f)
+            finally:
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
+
+        try:
+            await asyncio.to_thread(_run)
+            return {"ok": True, "remote": display, "files": 1}
+        except Exception as exc:
+            return {"ok": False, "remote": display, "error": f"FTP error: {exc}"}
+
+    async def upload_directory(self, dest: Path, remote_path: str) -> dict[str, Any]:
+        cfg = self._get_config()
+        if not cfg["host"]:
+            return {"ok": False, "remote": "ftp", "error": "FTP host not configured"}
+        display = f"ftp:{cfg['host']}/{self._ROOT_FOLDER}/{remote_path}"
+        base_root = f"{cfg['path']}/{self._ROOT_FOLDER}" if cfg["path"] else self._ROOT_FOLDER
+        root = f"{base_root}/{remote_path}"
+        files = [f for f in dest.rglob("*") if f.is_file()]
+
+        def _run() -> tuple[int, list[str]]:
+            ftp = self._connect(cfg)
+            home = ftp.pwd()
+            uploaded = 0
+            failed: list[str] = []
+            try:
+                self._ensure_dir(ftp, root)
+                for f in files:
+                    rel = f.relative_to(dest).as_posix()
+                    try:
+                        ftp.cwd(home)  # back to the login dir (absolute — always legal)
+                        self._ensure_dir(ftp, root)
+                        parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
+                        if parent:
+                            self._ensure_dir(ftp, parent)
+                        with open(f, "rb") as fh:
+                            ftp.storbinary(f"STOR {rel.rsplit('/', 1)[-1]}", fh)
+                        uploaded += 1
+                    except Exception:
+                        failed.append(rel)
+            finally:
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
+            return uploaded, failed
+
+        try:
+            uploaded, failed = await asyncio.to_thread(_run)
+        except Exception as exc:
+            return {"ok": False, "remote": display, "error": f"FTP error: {exc}"}
+        if failed:
+            return {
+                "ok": uploaded > 0,
+                "remote": display,
+                "error": f"{len(failed)}/{len(files)} files failed: {failed[:3]}",
+            }
+        return {"ok": True, "remote": display, "files": uploaded}
+
+    async def test_connection(self) -> dict[str, Any]:
+        cfg = self._get_config()
+        if not cfg["host"]:
+            return {"ok": False, "error": "FTP host not configured"}
+
+        def _run() -> str:
+            ftp = self._connect(cfg)
+            try:
+                return cfg["host"]
+            finally:
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
+
+        try:
+            host = await asyncio.to_thread(_run)
+            return {"ok": True, "message": f"FTP: {host}"}
+        except Exception as exc:
+            return {"ok": False, "error": f"FTP error: {exc}"}
+
+    def status(self) -> dict[str, Any]:
+        cfg = self._get_config()
+        connected = bool(cfg["host"] and cfg["username"])
+        return {
+            "provider": "ftp",
+            "connected": connected,
+            "remote": f"ftp:{cfg['host']}" if connected else "",
         }
 
 

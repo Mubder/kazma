@@ -9,6 +9,7 @@ Includes a real WebDAV round-trip against a threaded local HTTP server.
 from __future__ import annotations
 
 import asyncio
+import ftplib
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -104,6 +105,9 @@ def tmp_backup_dir(tmp_path: Path) -> Path:
 def test_get_sync_provider_routes_by_config() -> None:
     cs._read_config = _FakeConfig({"backups.offsite.provider": "webdav"})  # type: ignore[assignment]
     assert isinstance(cs.get_sync_provider(), cs.WebDAVSync)
+
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "ftp"})  # type: ignore[assignment]
+    assert isinstance(cs.get_sync_provider(), cs.FTPSync)
 
     cs._read_config = _FakeConfig({"backups.offsite.provider": "s3"})  # type: ignore[assignment]
     assert isinstance(cs.get_sync_provider(), cs.S3Sync)
@@ -641,6 +645,134 @@ def test_webdav_integration_real_server(tmp_backup_dir: Path) -> None:
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+# ── FTP (WD MyCloud OS3) ─────────────────────────────────────────────────
+
+
+class _FakeFTP:
+    """Stateful fake for ftplib.FTP — enough to exercise _ensure_dir walks."""
+
+    instances: list["_FakeFTP"] = []
+
+    def __init__(self) -> None:
+        self.connect_args: tuple[Any, ...] | None = None
+        self.login_args: tuple[Any, ...] | None = None
+        self.calls: list[tuple[str, str]] = []
+        self.stored: dict[str, bytes] = {}
+        self._dirs: set[str] = set()
+        _FakeFTP.instances.append(self)
+
+    def connect(self, host: str, port: int, timeout: Any = None) -> None:
+        self.connect_args = (host, port, timeout)
+
+    def login(self, user: str = "", passwd: str = "") -> None:
+        self.login_args = (user, passwd)
+
+    def set_pasv(self, on: bool) -> None:
+        self.calls.append(("pasv", str(on)))
+
+    def pwd(self) -> str:
+        return "/shares"
+
+    def cwd(self, path: str) -> None:
+        self.calls.append(("cwd", path))
+        if path == "/shares":
+            return
+        if path in self._dirs:
+            return
+        raise ftplib.error_perm("550 no such dir")
+
+    def mkd(self, path: str) -> None:
+        self.calls.append(("mkd", path))
+        self._dirs.add(path)
+
+    def storbinary(self, cmd: str, fh: Any) -> None:
+        self.calls.append(("stor", cmd))
+        self.stored[cmd.split(" ", 1)[1]] = fh.read()
+
+    def quit(self) -> None:
+        self.calls.append(("quit",))
+
+
+@pytest.fixture
+def fake_ftplib(monkeypatch: pytest.MonkeyPatch):
+    """Route cloud_sync's local `import ftplib` to the fake class."""
+    import ftplib as real_ftplib
+
+    _FakeFTP.instances.clear()
+    monkeypatch.setattr(real_ftplib, "FTP", _FakeFTP)
+    return real_ftplib
+
+
+def test_ftp_upload_file_single_archive(
+    monkeypatch: pytest.MonkeyPatch, fake_ftplib: Any, tmp_path: Path
+) -> None:
+    cs._read_config = _FakeConfig({
+        "backups.offsite.provider": "ftp",
+        "backups.offsite.ftp.host": "192.168.50.45",
+        "backups.offsite.ftp.port": "2121",
+        "backups.offsite.ftp.username": "user",
+        "backups.offsite.ftp.path": "Mubder Alfaris",
+    })  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"backups.offsite.ftp.password": "pw"})  # type: ignore[assignment]
+    local = tmp_path / "backup.zip"
+    local.write_bytes(b"ZIPDATA")
+
+    result = asyncio.run(cs.FTPSync().upload_file(local, "backup.zip"))
+
+    assert result["ok"] is True
+    assert result["remote"] == "ftp:192.168.50.45/kazma-backups/backup.zip"
+    ftp = _FakeFTP.instances[0]
+    assert ftp.connect_args == ("192.168.50.45", 2121, 15)
+    assert ftp.login_args == ("user", "pw")
+    assert ("stor", "STOR backup.zip") in ftp.calls
+    assert ftp.stored["backup.zip"] == b"ZIPDATA"
+    # Directory chain created: base path + kazma-backups root
+    mkds = [c for c in ftp.calls if c[0] == "mkd"]
+    assert ("mkd", "Mubder Alfaris") in mkds
+    assert ("mkd", "kazma-backups") in mkds
+
+
+def test_ftp_test_connection(monkeypatch: pytest.MonkeyPatch, fake_ftplib: Any) -> None:
+    cs._read_config = _FakeConfig({
+        "backups.offsite.provider": "ftp",
+        "backups.offsite.ftp.host": "192.168.50.45",
+        "backups.offsite.ftp.username": "user",
+    })  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"backups.offsite.ftp.password": "pw"})  # type: ignore[assignment]
+
+    result = asyncio.run(cs.FTPSync().test_connection())
+    assert result["ok"] is True
+    assert result["message"] == "FTP: 192.168.50.45"
+
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "ftp"})  # type: ignore[assignment]
+    result = asyncio.run(cs.FTPSync().test_connection())
+    assert result["ok"] is False
+    assert result["error"] == "FTP host not configured"
+
+
+def test_ftp_unconfigured_fails_clear(tmp_path: Path) -> None:
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "ftp"})  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({})  # type: ignore[assignment]
+
+    result = asyncio.run(cs.FTPSync().upload_file(tmp_path / "x.zip", "x.zip"))
+    assert result["ok"] is False
+    assert result["error"] == "FTP host not configured"
+
+
+def test_ftp_status_reports_connection() -> None:
+    cs._read_config = _FakeConfig({
+        "backups.offsite.ftp.host": "192.168.50.45",
+        "backups.offsite.ftp.username": "user",
+    })  # type: ignore[assignment]
+    st = cs.FTPSync().status()
+    assert st["provider"] == "ftp"
+    assert st["connected"] is True
+    assert st["remote"] == "ftp:192.168.50.45"
+
+    cs._read_config = _FakeConfig({})  # type: ignore[assignment]
+    assert cs.FTPSync().status()["connected"] is False
 
 
 # ── S3 ───────────────────────────────────────────────────────────────────

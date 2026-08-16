@@ -2527,6 +2527,31 @@
                     </p>
                 </div>
 
+                <!-- FTP (WD MyCloud OS3 / any FTP server) -->
+                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
+                     :style="offsiteProvider === 'ftp' ? 'border-color:#1abc9c;background:rgba(26,188,156,0.06)' : ''"
+                     @click="selectOffsiteProvider('ftp')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" @click.stop style="accent-color:#1abc9c">
+                        <span style="font-size:1.4em">📡</span>
+                        <strong>FTP / NAS</strong>
+                        <span x-show="offsiteProviderStatus('ftp')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'ftp'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(26,188,156,0.15);color:#1abc9c">active</span>
+                    </div>
+                    <div x-show="offsiteProvider === 'ftp'" x-cloak style="margin-top:6px" @click.stop>
+                        <div style="display:flex;gap:6px;margin-bottom:6px">
+                            <input type="text" class="form-input" x-model="offsiteFtpHost" placeholder="192.168.50.45" style="flex:1;font-size:0.8rem">
+                            <input type="text" class="form-input" x-model="offsiteFtpPort" placeholder="21" style="width:64px;font-size:0.8rem">
+                        </div>
+                        <input type="text" class="form-input" x-model="offsiteFtpUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteFtpPass" placeholder="Password" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteFtpPath" placeholder="Base path on the server (optional, e.g. Mubder Alfaris)" style="width:100%;font-size:0.8rem">
+                    </div>
+                    <p x-show="offsiteProvider !== 'ftp'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                        Plain FTP — works with WD MyCloud OS3 (EX4100) and any FTP server.
+                    </p>
+                </div>
+
                 <!-- S3 / B2 -->
                 <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
                      :style="offsiteProvider === 's3' ? 'border-color:#ff9900;background:rgba(255,153,0,0.06)' : ''"

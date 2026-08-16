@@ -264,6 +264,12 @@ function settingsApp() {
         offsiteWebdavUrl: '',
         offsiteWebdavUser: '',
         offsiteWebdavPass: '',
+        // FTP (WD MyCloud OS3 / NAS) credentials
+        offsiteFtpHost: '',
+        offsiteFtpPort: '21',
+        offsiteFtpUser: '',
+        offsiteFtpPass: '',
+        offsiteFtpPath: '',
         // S3 / B2 credentials
         offsiteS3Key: '',
         offsiteS3Secret: '',
@@ -3454,6 +3460,7 @@ function settingsApp() {
                 google_drive: 'Google Drive',
                 onedrive: 'OneDrive',
                 webdav: 'WD MyCloud / NAS',
+                ftp: 'FTP / NAS',
                 s3: 'S3 / B2',
             };
             return labels[this.offsiteProvider] || '';
@@ -3493,6 +3500,12 @@ function settingsApp() {
                     this.offsiteWebdavUrl = w.url || '';
                     this.offsiteWebdavUser = w.username || '';
                     this.offsiteWebdavPass = w.password_set ? '••••••••' : '';
+                    const ftp = this.offsiteConfig.ftp || {};
+                    this.offsiteFtpHost = ftp.host || '';
+                    this.offsiteFtpPort = ftp.port || '21';
+                    this.offsiteFtpUser = ftp.username || '';
+                    this.offsiteFtpPass = ftp.password_set ? '••••••••' : '';
+                    this.offsiteFtpPath = ftp.path || '';
                     const s = this.offsiteConfig.s3 || {};
                     this.offsiteS3Key = s.access_key || '';
                     this.offsiteS3Secret = s.secret_key_set ? '••••••••' : '';
@@ -3567,6 +3580,11 @@ function settingsApp() {
                 webdav_url: this.offsiteWebdavUrl,
                 webdav_username: this.offsiteWebdavUser,
                 webdav_password: this.offsiteWebdavPass === '••••••••' ? '' : this.offsiteWebdavPass,
+                ftp_host: this.offsiteFtpHost,
+                ftp_port: this.offsiteFtpPort,
+                ftp_username: this.offsiteFtpUser,
+                ftp_password: this.offsiteFtpPass === '••••••••' ? '' : this.offsiteFtpPass,
+                ftp_path: this.offsiteFtpPath,
                 s3_access_key: this.offsiteS3Key,
                 s3_secret_key: this.offsiteS3Secret === '••••••••' ? '' : this.offsiteS3Secret,
                 s3_bucket: this.offsiteS3Bucket,

@@ -231,12 +231,13 @@ class SettingsRouterBuilder:
             providers_status: list[dict[str, Any]] = []
             try:
                 from kazma_core.backup.cloud_sync import (
+                    FTPSync,
                     GoogleDriveSync,
                     OneDriveSync,
                     S3Sync,
                     WebDAVSync,
                 )
-                for cls in (GoogleDriveSync, OneDriveSync, WebDAVSync, S3Sync):
+                for cls in (GoogleDriveSync, OneDriveSync, WebDAVSync, FTPSync, S3Sync):
                     try:
                         providers_status.append(cls().status())
                     except Exception:
@@ -266,6 +267,13 @@ class SettingsRouterBuilder:
                     "username": str(store.get("backups.offsite.webdav.username") or ""),
                     "password_set": _vault_has("backups.offsite.webdav.password"),
                 },
+                "ftp": {
+                    "host": str(store.get("backups.offsite.ftp.host") or ""),
+                    "port": str(store.get("backups.offsite.ftp.port") or "21"),
+                    "username": str(store.get("backups.offsite.ftp.username") or ""),
+                    "path": str(store.get("backups.offsite.ftp.path") or ""),
+                    "password_set": _vault_has("backups.offsite.ftp.password"),
+                },
                 "s3": {
                     "access_key": str(store.get("backups.offsite.s3.access_key") or ""),
                     "bucket": str(store.get("backups.offsite.s3.bucket") or ""),
@@ -276,6 +284,30 @@ class SettingsRouterBuilder:
                 # Legacy rclone fields kept for backward compat
                 "rclone_remote": remote,
             }
+
+        def _store_vault_global(key: str, value: str, category: str = "backups") -> None:
+            """Store a NAS password in the vault's GLOBAL scope.
+
+            The backup sync path (server background) reads the global scope,
+            but this endpoint runs inside a web request with tenant 'default'
+            active — without the pin the password lands in a scope the backup
+            can never read (same class of split that broke Gmail token
+            refresh, incident 2026-08-16).
+            """
+            from kazma_core.tenant_context import (
+                reset_current_tenant_id,
+                set_current_tenant_id,
+            )
+
+            token = set_current_tenant_id(None)
+            try:
+                from kazma_core.security.vault import get_vault as _gv
+
+                _v = _gv()
+                if _v is not None:
+                    _v.store(key, value, category=category)
+            finally:
+                reset_current_tenant_id(token)
 
         def _apply_offsite_payload(req: dict[str, Any]) -> None:
             """Persist provider + credentials from the offsite settings form."""
@@ -298,10 +330,27 @@ class SettingsRouterBuilder:
             webdav_pass = str(req.get("webdav_password") or "")
             if webdav_pass:
                 try:
-                    from kazma_core.security.vault import get_vault as _gv
-                    _v = _gv()
-                    if _v is not None:
-                        _v.store("backups.offsite.webdav.password", webdav_pass, category="backups")
+                    _store_vault_global("backups.offsite.webdav.password", webdav_pass)
+                except Exception:
+                    pass
+
+            # FTP credentials (password to vault; blank keeps the old value)
+            ftp_host = str(req.get("ftp_host") or "").strip()
+            if ftp_host:
+                store.set("backups.offsite.ftp.host", ftp_host, category="backups")
+            ftp_port = str(req.get("ftp_port") or "").strip()
+            if ftp_port:
+                store.set("backups.offsite.ftp.port", ftp_port, category="backups")
+            ftp_user = str(req.get("ftp_username") or "").strip()
+            if ftp_user:
+                store.set("backups.offsite.ftp.username", ftp_user, category="backups")
+            ftp_path = str(req.get("ftp_path") or "").strip()
+            if ftp_path:
+                store.set("backups.offsite.ftp.path", ftp_path, category="backups")
+            ftp_pass = str(req.get("ftp_password") or "")
+            if ftp_pass:
+                try:
+                    _store_vault_global("backups.offsite.ftp.password", ftp_pass)
                 except Exception:
                     pass
 
@@ -321,10 +370,7 @@ class SettingsRouterBuilder:
             s3_secret = str(req.get("s3_secret_key") or "")
             if s3_secret:
                 try:
-                    from kazma_core.security.vault import get_vault as _gv
-                    _v = _gv()
-                    if _v is not None:
-                        _v.store("backups.offsite.s3.secret_key", s3_secret, category="backups")
+                    _store_vault_global("backups.offsite.s3.secret_key", s3_secret)
                 except Exception:
                     pass
 
