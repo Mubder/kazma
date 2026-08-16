@@ -3010,6 +3010,40 @@ tbody tr:last-child td {
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.2);
 }
+.provider-card .model-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+.provider-card .model-item-row.selected {
+  background: rgba(99, 102, 241, 0.15);
+}
+.provider-card .model-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.provider-card .model-check-label input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #6366f1);
+}
+.provider-card .model-check-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Input with icon */
 .input-with-icon { position: relative; }

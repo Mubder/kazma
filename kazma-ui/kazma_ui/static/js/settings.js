@@ -1771,18 +1771,27 @@ function settingsApp() {
                     method: 'DELETE',
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
-                if (resp.ok) {
+                const result = resp.ok ? await resp.json() : null;
+                if (result && result.status === 'ok') {
                     showToast(`Removed ${model}`, 'success');
-                    await this.loadHubProviders();
+                } else if (result && result.status === 'not_found') {
+                    showToast(`${model} is not in the list`, 'info');
                 } else {
                     showToast('Failed to remove model', 'error');
                 }
+                await this.loadHubProviders();
             } catch (e) {
                 showToast('Failed to remove model: ' + e.message, 'error');
             }
         },
 
         async clearHubDiscovered(providerName) {
+            if (!(await window.kazmaConfirm({
+                title: 'Clear discovered models',
+                message: `Clear discovered models for "${providerName}"? Your selected models for this provider will also be cleared.`,
+                confirmText: 'Clear',
+                danger: true,
+            }))) return;
             try {
                 const resp = await fetch(`/api/providers/${encodeURIComponent(providerName)}/clear-discovered`, {
                     method: 'POST',

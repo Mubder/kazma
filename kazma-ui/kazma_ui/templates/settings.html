@@ -94,7 +94,7 @@
                                 </div>
                                 <div style="display:flex;align-items:center;gap:4px">
                                     <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
-                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px;color:var(--text-muted)" @click="clearHubDiscovered(p.name)" title="Clear discovered models cache">Clear</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="clearHubDiscovered(p.name)" :title="t('settings.clear_discovered')" x-text="t('settings.clear_discovered')"></button>
                                 </div>
                             </div>
                             <div class="input-with-icon" style="margin-bottom:6px">
@@ -109,19 +109,15 @@
                             <div class="discovered-models-list">
                                 <template x-for="m in filteredDiscoveredModels(p)" :key="String(m)">
                                     <div class="model-item-row"
-                                         style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:6px;transition:background 0.15s ease"
-                                         :style="(p.selected_models || []).includes(m) ? 'background:rgba(99,102,241,0.15)' : ''">
-                                        <label class="model-check-label"
-                                               style="display:flex;align-items:center;gap:8px;font-size:0.72rem;font-family:var(--font-mono);cursor:pointer;flex:1;min-width:0;margin:0">
+                                         :class="{ selected: (p.selected_models || []).includes(m) }">
+                                        <label class="model-check-label">
                                             <input type="checkbox"
                                                 :checked="(p.selected_models || []).includes(m)"
-                                                @change="toggleModelSelection(p.name, m, $event.target.checked)"
-                                                style="width:auto;margin:0;cursor:pointer;accent-color:var(--accent,#6366f1)">
-                                            <span x-text="m" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                                                @change="toggleModelSelection(p.name, m, $event.target.checked)">
+                                            <span x-text="m"></span>
                                         </label>
-                                        <button type="button" class="btn btn-icon btn-sm"
-                                                style="opacity:0.6;font-size:0.8rem;padding:1px 6px;color:var(--text-muted);border:none;background:transparent;cursor:pointer;line-height:1"
-                                                title="Remove model from list"
+                                        <button type="button" class="btn btn-danger btn-xs"
+                                                :title="t('settings.remove_model')"
                                                 @click.stop.prevent="deleteProviderDiscoveredModel(p.name, m)">×</button>
                                     </div>
                                 </template>

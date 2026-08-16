@@ -2492,6 +2492,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.discovered_n": {"en": "Discovered ({n})", "ar": "تم الاكتشاف ({n})"},
     "settings.selected_n": {"en": "({n} selected)", "ar": "({n} محدد)"},
     "settings.all_none": {"en": "All/None", "ar": "الكل/لا شيء"},
+    "settings.clear_discovered": {"en": "Clear", "ar": "مسح"},
+    "settings.remove_model": {"en": "Remove model from list", "ar": "إزالة النموذج من القائمة"},
     "settings.checked_models_hint": {"en": "Only checked models appear in the sidebar & chat dropdowns.", "ar": "النماذج المحددة فقط تظهر في الشريط الجانبي وقوائم المحادثة المنسدلة."},
     "settings.web": {"en": "Web", "ar": "ويب"},
     "settings.system_prompt_placeholder": {"en": "You are a helpful AI assistant...", "ar": "أنت مساعد ذكاء اصطناعي مفيد..."},
