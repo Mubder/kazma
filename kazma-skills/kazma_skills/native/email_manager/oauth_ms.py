@@ -17,6 +17,7 @@ SCOPES = (
     "https://graph.microsoft.com/Mail.Read "
     "https://graph.microsoft.com/Mail.ReadWrite "
     "https://graph.microsoft.com/Mail.Send "
+    "https://graph.microsoft.com/Files.ReadWrite "
     "offline_access "
     "openid "
     "profile"

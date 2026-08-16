@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 # Mail scopes required for list/read/send/modify. gmail.modify covers read+labels;
 # gmail.send is redundant but listed so consent screen shows "Send email".
 # Do NOT rely on openid/email alone — that yields ACCESS_TOKEN_SCOPE_INSUFFICIENT.
+# drive.file is for the offsite backup provider (cloud_sync.py GoogleDriveSync).
 GMAIL_MAIL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/drive.file",
 )
 GMAIL_SCOPES = " ".join(
     [
