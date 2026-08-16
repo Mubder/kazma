@@ -1434,7 +1434,7 @@
           chatSessionId = generateSessionId();
           persistSessionId();
         }
-        _capStore.sendPrompt(text, selectedModel || '', []);
+        _capStore.sendPrompt(text, selectedModel || '', [], { noTurn: true });
         return;
       }
       // SSE fallback: fall through to the normal send path.
@@ -4279,6 +4279,33 @@
     },
 
     refreshCapacity: refreshCapacity,
+    paintCapacityReply: function(reply) {
+      if (!reply || !messagesEl) return;
+      var incoming = String(reply).trim();
+      if (!incoming) return;
+      var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
+      var lastAsst = null;
+      for (var i = 0; i < msgs.length; i++) {
+        if (msgs[i].classList.contains('message-user')) lastAsst = null;
+        else lastAsst = msgs[i];
+      }
+      if (lastAsst) {
+        var te = lastAsst.querySelector('.message-text');
+        if (te && _bubbleShowsContent(te, incoming)) return;
+        if (te && (te.textContent || '').replace(/\s+/g, ' ').trim().length < 8) {
+          try { te.innerHTML = KS.markdown ? KS.markdown(incoming) : incoming; }
+          catch (e) { te.textContent = incoming; }
+          te.setAttribute('data-final-len', String(incoming.length));
+          return;
+        }
+      }
+      var prev = currentMsgEl;
+      currentMsgEl = createAssistantMessage();
+      if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+        window.KazmaChat.applyFinalAssistantText(incoming, '', {});
+      }
+      currentMsgEl = prev;
+    },
     // Telemetry WS hooks — called by agentStore
     logProgress: logProgress,
     finalizeProgress: finalizeProgress,

@@ -371,12 +371,17 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── WebSocket Actions ────────────────────────────────────
-    sendPrompt(text, model, attachments) {
+    sendPrompt(text, model, attachments, opts) {
       if (!text || !text.trim()) return;
       this.pendingApproval = null;
-      this._beginTurn();
-      this.statusMessage = _ti('thinking', 'Kazma is thinking…');
-      this.activeNode = 'Supervisor';
+      const options = opts || {};
+      // Slash capacity/yolo must not open a thinking turn — reconnect
+      // catch-up then painted the confirmation into the next real prompt.
+      if (!options.noTurn) {
+        this._beginTurn();
+        this.statusMessage = _ti('thinking', 'Kazma is thinking…');
+        this.activeNode = 'Supervisor';
+      }
 
       let clientMsgId = '';
       try {
@@ -968,6 +973,10 @@ document.addEventListener('alpine:init', () => {
 
         case 'capacity': {
           try {
+            const reply = (data && data.reply) || frame.reply || '';
+            if (reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
+              window.KazmaChat.paintCapacityReply(reply);
+            }
             if (window.KazmaChat && typeof window.KazmaChat.refreshCapacity === 'function') {
               window.KazmaChat.refreshCapacity();
             }

@@ -673,6 +673,10 @@ def create_ws_chat_router(
                             last.get("role") == "assistant"
                             and (last.get("content") or "").strip()
                             and not last.get("pending")
+                            # Slash confirmations are not a turn answer —
+                            # replaying them into the next prompt duplicated
+                            # "MISSION ON" (incident 2026-08-16).
+                            and last.get("kind") != "capacity"
                         ):
                             await websocket.send_json(
                                 TelemetryEvent(
@@ -954,31 +958,29 @@ def create_ws_chat_router(
                             except YoloDisabledError as yde:
                                 confirmation = f"🛡️ {yde}"
 
-                        # Send confirmation back to the client (NOT to the LLM)
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="llm_delta",
-                                data={"content": confirmation},
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
+                        # Dedicated capacity frame — NOT llm_delta. Reconnect
+                        # catch-up was re-playing the confirmation as the next
+                        # turn's answer (duplicated MISSION ON / YOLO ON).
                         await websocket.send_json(
                             TelemetryEvent(
                                 type="capacity",
-                                data={"action": "yolo"},
+                                data={"action": "yolo", "reply": confirmation},
                                 thread_id=thread_id,
                             ).to_dict()
                         )
                         await websocket.send_json(
                             TelemetryEvent(
                                 type="stream_end",
-                                data={},
+                                data={"capacity": True},
                                 thread_id=thread_id,
                             ).to_dict()
                         )
-                        # Persist to session UI projection (NOT the graph checkpoint)
                         session.messages.append({"role": "user", "content": text})
-                        session.messages.append({"role": "assistant", "content": confirmation})
+                        session.messages.append({
+                            "role": "assistant",
+                            "content": confirmation,
+                            "kind": "capacity",
+                        })
                         try:
                             get_session_manager().put(session)
                         except Exception:
@@ -997,18 +999,12 @@ def create_ws_chat_router(
                         )
                         await websocket.send_json(
                             TelemetryEvent(
-                                type="llm_delta",
-                                data={"content": _cap.reply, "full": True},
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
-                        await websocket.send_json(
-                            TelemetryEvent(
                                 type="capacity",
                                 data={
                                     "long_active": _cap.long_active,
                                     "yolo_active": _cap.yolo_active,
                                     "action": _cap.action,
+                                    "reply": _cap.reply,
                                 },
                                 thread_id=thread_id,
                             ).to_dict()
@@ -1016,12 +1012,16 @@ def create_ws_chat_router(
                         await websocket.send_json(
                             TelemetryEvent(
                                 type="stream_end",
-                                data={},
+                                data={"capacity": True},
                                 thread_id=thread_id,
                             ).to_dict()
                         )
                         session.messages.append({"role": "user", "content": text})
-                        session.messages.append({"role": "assistant", "content": _cap.reply})
+                        session.messages.append({
+                            "role": "assistant",
+                            "content": _cap.reply,
+                            "kind": "capacity",
+                        })
                         try:
                             get_session_manager().put(session)
                         except Exception:
