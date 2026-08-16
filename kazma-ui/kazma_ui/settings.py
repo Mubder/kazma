@@ -218,72 +218,162 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings/backup/offsite")
         async def api_get_offsite_config() -> dict[str, Any]:
-            """Get the current offsite backup configuration."""
+            """Get the current offsite backup configuration + provider statuses."""
             from kazma_core.config_store import get_config_store as _gcs
             store = _gcs()
+            provider = str(store.get("backups.offsite.provider") or "")
             remote = str(store.get("backups.offsite.rclone_remote") or "")
             enabled = store.get("backups.offsite.enabled")
             if enabled is None:
-                enabled = bool(remote)  # default: on when a remote is set
-            # Detect rclone on PATH
-            import shutil as _shutil
-            rclone_path = _shutil.which("rclone")
+                enabled = bool(provider or remote)
+
+            # Collect statuses from all native providers
+            providers_status: list[dict[str, Any]] = []
+            try:
+                from kazma_core.backup.cloud_sync import (
+                    GoogleDriveSync,
+                    OneDriveSync,
+                    S3Sync,
+                    WebDAVSync,
+                )
+                for cls in (GoogleDriveSync, OneDriveSync, WebDAVSync, S3Sync):
+                    try:
+                        providers_status.append(cls().status())
+                    except Exception:
+                        providers_status.append({
+                            "provider": cls.__name__,
+                            "connected": False,
+                            "remote": "",
+                            "error": "status check failed",
+                        })
+            except ImportError:
+                pass
+
+            def _vault_has(key: str) -> bool:
+                try:
+                    from kazma_core.security.vault import get_vault as _gv
+                    _v = _gv()
+                    return bool(_v is not None and _v.retrieve(key))
+                except Exception:
+                    return False
+
             return {
-                "rclone_remote": remote,
+                "provider": provider,
                 "enabled": bool(enabled),
-                "rclone_available": rclone_path is not None,
+                "providers": providers_status,
+                "webdav": {
+                    "url": str(store.get("backups.offsite.webdav.url") or ""),
+                    "username": str(store.get("backups.offsite.webdav.username") or ""),
+                    "password_set": _vault_has("backups.offsite.webdav.password"),
+                },
+                "s3": {
+                    "access_key": str(store.get("backups.offsite.s3.access_key") or ""),
+                    "bucket": str(store.get("backups.offsite.s3.bucket") or ""),
+                    "endpoint": str(store.get("backups.offsite.s3.endpoint") or ""),
+                    "region": str(store.get("backups.offsite.s3.region") or "us-east-1"),
+                    "secret_key_set": _vault_has("backups.offsite.s3.secret_key"),
+                },
+                # Legacy rclone fields kept for backward compat
+                "rclone_remote": remote,
             }
+
+        def _apply_offsite_payload(req: dict[str, Any]) -> None:
+            """Persist provider + credentials from the offsite settings form."""
+            from kazma_core.config_store import get_config_store as _gcs
+            store = _gcs()
+
+            provider = str(req.get("provider") or "").strip()
+            store.set("backups.offsite.provider", provider, category="backups")
+            enabled = req.get("enabled")
+            if enabled is not None:
+                store.set("backups.offsite.enabled", bool(enabled), category="backups")
+
+            # WebDAV credentials (password to vault; blank keeps the old value)
+            webdav_url = str(req.get("webdav_url") or "").strip()
+            if webdav_url:
+                store.set("backups.offsite.webdav.url", webdav_url, category="backups")
+            webdav_user = str(req.get("webdav_username") or "").strip()
+            if webdav_user:
+                store.set("backups.offsite.webdav.username", webdav_user, category="backups")
+            webdav_pass = str(req.get("webdav_password") or "")
+            if webdav_pass:
+                try:
+                    from kazma_core.security.vault import get_vault as _gv
+                    _v = _gv()
+                    if _v is not None:
+                        _v.store("backups.offsite.webdav.password", webdav_pass, category="backups")
+                except Exception:
+                    pass
+
+            # S3 credentials (secret to vault)
+            s3_key = str(req.get("s3_access_key") or "").strip()
+            if s3_key:
+                store.set("backups.offsite.s3.access_key", s3_key, category="backups")
+            s3_bucket = str(req.get("s3_bucket") or "").strip()
+            if s3_bucket:
+                store.set("backups.offsite.s3.bucket", s3_bucket, category="backups")
+            s3_endpoint = str(req.get("s3_endpoint") or "").strip()
+            if s3_endpoint:
+                store.set("backups.offsite.s3.endpoint", s3_endpoint, category="backups")
+            s3_region = str(req.get("s3_region") or "").strip()
+            if s3_region:
+                store.set("backups.offsite.s3.region", s3_region, category="backups")
+            s3_secret = str(req.get("s3_secret_key") or "")
+            if s3_secret:
+                try:
+                    from kazma_core.security.vault import get_vault as _gv
+                    _v = _gv()
+                    if _v is not None:
+                        _v.store("backups.offsite.s3.secret_key", s3_secret, category="backups")
+                except Exception:
+                    pass
+
+            # Legacy rclone remote
+            rclone = str(req.get("rclone_remote") or "").strip()
+            if rclone:
+                store.set("backups.offsite.rclone_remote", rclone, category="backups")
 
         @router.put("/api/settings/backup/offsite")
         async def api_set_offsite_config(req: dict[str, Any]) -> dict[str, str]:
-            """Configure the offsite backup destination."""
-            from kazma_core.config_store import get_config_store as _gcs
-            store = _gcs()
-            remote = str(req.get("rclone_remote") or "").strip()
-            enabled = req.get("enabled")
-            store.set("backups.offsite.rclone_remote", remote, category="backups")
-            if enabled is not None:
-                store.set("backups.offsite.enabled", bool(enabled), category="backups")
+            """Configure the offsite backup provider."""
+            _apply_offsite_payload(req)
             return {"status": "ok"}
 
         @router.post("/api/settings/backup/offsite/test")
         async def api_test_offsite_remote(req: dict[str, Any]) -> dict[str, Any]:
-            """Test the rclone remote connection — creates the target dir if missing."""
-            import asyncio as _aio
-            import shutil as _shutil
-            remote = str(req.get("rclone_remote") or "").strip()
-            if not remote:
-                return {"ok": False, "error": "No remote specified"}
-            rclone = _shutil.which("rclone")
-            if not rclone:
-                return {"ok": False, "error": "rclone is not installed. Install it from https://rclone.org/install/ or run: winget install Rclone.Rclone"}
-            try:
+            """Test the cloud provider connection."""
+            provider_name = str(req.get("provider") or "").strip()
+            if not provider_name:
+                # Legacy: test rclone remote
+                remote = str(req.get("rclone_remote") or "").strip()
+                if not remote:
+                    return {"ok": False, "error": "No provider or remote specified"}
+                import shutil as _shutil
+                import asyncio as _aio
+                rclone = _shutil.which("rclone")
+                if not rclone:
+                    return {"ok": False, "error": "rclone is not installed. Use a native provider instead."}
                 import subprocess as _sp
-
-                async def _run(args: list[str]) -> "._sp.CompletedProcess":
-                    return await _aio.to_thread(
-                        _sp.run, [rclone, *args],
+                try:
+                    proc = await _aio.to_thread(
+                        _sp.run, [rclone, "lsd", remote, "--max-depth", "1"],
                         capture_output=True, text=True, timeout=15,
                     )
+                    if proc.returncode == 0:
+                        return {"ok": True, "message": "Connection successful"}
+                    return {"ok": False, "error": f"rclone: {(proc.stderr or '')[:200]}"}
+                except Exception as exc:
+                    return {"ok": False, "error": str(exc)}
 
-                # First try listing — if the directory doesn't exist, create it
-                # (rclone mkdir is idempotent) and try again.
-                proc = await _run(["lsd", remote, "--max-depth", "1"])
-                if proc.returncode == 0:
-                    return {"ok": True, "message": "Connection successful"}
-
-                stderr = (proc.stderr or "").strip()
-                if "directory not found" in stderr.lower() or "not found" in stderr.lower():
-                    # Target folder doesn't exist yet — create it, then re-test
-                    mkdir = await _run(["mkdir", remote])
-                    if mkdir.returncode == 0:
-                        retest = await _run(["lsd", remote, "--max-depth", "1"])
-                        if retest.returncode == 0:
-                            return {"ok": True, "message": "Connected (created target folder)"}
-                    err = (mkdir.stderr or mkdir.stdout or "").strip()[:300]
-                    return {"ok": False, "error": f"Could not create target folder: {err}"}
-
-                return {"ok": False, "error": f"rclone error: {stderr[:300]}"}
+            # Native provider test — persist the form first so freshly-typed
+            # credentials are what gets tested, then call test_connection().
+            try:
+                from kazma_core.backup.cloud_sync import get_sync_provider
+                _apply_offsite_payload(req)
+                provider = get_sync_provider()
+                if provider is None:
+                    return {"ok": False, "error": f"Unknown provider: {provider_name}"}
+                return await provider.test_connection()
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
 

@@ -255,11 +255,20 @@ function settingsApp() {
         // ── Offsite Backup ──
         offsiteConfig: null,
         offsiteProvider: '',
-        offsiteRemote: '',
         offsiteEnabled: true,
         offsiteTesting: false,
         offsiteTestResult: null,
         offsiteSaved: false,
+        // WebDAV (WD MyCloud / NAS) credentials
+        offsiteWebdavUrl: '',
+        offsiteWebdavUser: '',
+        offsiteWebdavPass: '',
+        // S3 / B2 credentials
+        offsiteS3Key: '',
+        offsiteS3Secret: '',
+        offsiteS3Bucket: '',
+        offsiteS3Endpoint: '',
+        offsiteS3Region: 'us-east-1',
 
         // ── Voice Tab ──
         voiceForm: {
@@ -3429,31 +3438,107 @@ function settingsApp() {
         },
 
         // ── Backup Tab ──
+        get offsiteActiveProviderLabel() {
+            const labels = {
+                google_drive: 'Google Drive',
+                onedrive: 'OneDrive',
+                webdav: 'WD MyCloud / NAS',
+                s3: 'S3 / B2',
+            };
+            return labels[this.offsiteProvider] || '';
+        },
+
+        offsiteProviderStatus(name) {
+            if (!this.offsiteConfig || !Array.isArray(this.offsiteConfig.providers)) return null;
+            return this.offsiteConfig.providers.find(p => p.provider === name) || null;
+        },
+
+        selectOffsiteProvider(provider) {
+            this.offsiteProvider = provider;
+            this.offsiteTestResult = null;
+        },
+
+        connectGoogleDrive() {
+            // Reuse the Gmail OAuth flow (now includes the drive.file scope).
+            // After the callback we land back on Settings; loadOffsiteConfig
+            // completes the provider selection.
+            try { localStorage.setItem('kazma_offsite_connect_pending', 'google_drive'); } catch (e) {}
+            window.location.href = '/api/email/oauth/gmail/start';
+        },
+
+        connectOneDrive() {
+            try { localStorage.setItem('kazma_offsite_connect_pending', 'onedrive'); } catch (e) {}
+            window.location.href = '/api/email/oauth/microsoft/start';
+        },
+
         async loadOffsiteConfig() {
             try {
                 const resp = await fetch('/api/settings/backup/offsite');
                 if (resp.ok) {
                     this.offsiteConfig = await resp.json();
-                    this.offsiteRemote = this.offsiteConfig.rclone_remote || '';
+                    this.offsiteProvider = this.offsiteConfig.provider || '';
                     this.offsiteEnabled = this.offsiteConfig.enabled;
+                    // Prefill credential fields from stored config
+                    const w = this.offsiteConfig.webdav || {};
+                    this.offsiteWebdavUrl = w.url || '';
+                    this.offsiteWebdavUser = w.username || '';
+                    this.offsiteWebdavPass = w.password_set ? '••••••••' : '';
+                    const s = this.offsiteConfig.s3 || {};
+                    this.offsiteS3Key = s.access_key || '';
+                    this.offsiteS3Secret = s.secret_key_set ? '••••••••' : '';
+                    this.offsiteS3Bucket = s.bucket || '';
+                    this.offsiteS3Endpoint = s.endpoint || '';
+                    this.offsiteS3Region = s.region || 'us-east-1';
+
+                    // OAuth round-trip: user just connected Google/MS from the
+                    // backup card. Auto-select + save the provider, then toast.
+                    let pending = null;
+                    try { pending = localStorage.getItem('kazma_offsite_connect_pending'); } catch (e) {}
+                    if (pending) {
+                        try { localStorage.removeItem('kazma_offsite_connect_pending'); } catch (e) {}
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.get('email_oauth') === 'ok') {
+                            this.offsiteProvider = pending;
+                            this.offsiteEnabled = true;
+                            await this.saveOffsite();
+                            showToast('☁️ ' + (this.offsiteActiveProviderLabel || pending) + ' connected — offsite backup active', 'success');
+                            // Jump to the backup tab so the user sees the result
+                            this.tab = 'backup';
+                        }
+                    }
                 }
             } catch (e) { /* fail silently */ }
         },
 
+        _offsiteCredsPayload() {
+            return {
+                provider: this.offsiteProvider,
+                enabled: this.offsiteEnabled,
+                webdav_url: this.offsiteWebdavUrl,
+                webdav_username: this.offsiteWebdavUser,
+                webdav_password: this.offsiteWebdavPass === '••••••••' ? '' : this.offsiteWebdavPass,
+                s3_access_key: this.offsiteS3Key,
+                s3_secret_key: this.offsiteS3Secret === '••••••••' ? '' : this.offsiteS3Secret,
+                s3_bucket: this.offsiteS3Bucket,
+                s3_endpoint: this.offsiteS3Endpoint,
+                s3_region: this.offsiteS3Region,
+            };
+        },
+
         async saveOffsite() {
+            if (!this.offsiteProvider) return;
             this.offsiteSaved = false;
             try {
                 const resp = await fetch('/api/settings/backup/offsite', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        rclone_remote: this.offsiteRemote,
-                        enabled: this.offsiteEnabled,
-                    }),
+                    body: JSON.stringify(this._offsiteCredsPayload()),
                 });
                 if (resp.ok) {
                     this.offsiteSaved = true;
                     setTimeout(() => { this.offsiteSaved = false; }, 3000);
+                    // Refresh statuses so the ✓ badge appears
+                    await this.loadOffsiteConfig();
                 }
             } catch (e) {
                 console.error('saveOffsite failed:', e);
@@ -3461,14 +3546,14 @@ function settingsApp() {
         },
 
         async testOffsite() {
-            if (!this.offsiteRemote) return;
+            if (!this.offsiteProvider) return;
             this.offsiteTesting = true;
             this.offsiteTestResult = null;
             try {
                 const resp = await fetch('/api/settings/backup/offsite/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rclone_remote: this.offsiteRemote }),
+                    body: JSON.stringify(this._offsiteCredsPayload()),
                 });
                 this.offsiteTestResult = await resp.json();
             } catch (e) {
