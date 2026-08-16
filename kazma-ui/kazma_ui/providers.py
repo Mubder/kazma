@@ -333,6 +333,33 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         registry.serialize()  # persist discovered models to ConfigStore
         return {"name": name, "models": models, "count": len(models)}
 
+    @router.delete("/api/providers/{name}/models/{model_id:path}")
+    async def delete_provider_model(name: str, model_id: str) -> dict[str, Any]:
+        """Delete a specific model from a provider's discovered, selected, and manual lists."""
+        registry = get_model_registry()
+        deleted = registry.remove_provider_model(name, model_id)
+        return {
+            "status": "ok" if deleted else "not_found",
+            "name": name,
+            "model": model_id,
+            "discovered_models": registry.get_discovered_models(name),
+            "selected_models": registry.get_selected_models(name),
+            "visible_models": registry.get_visible_models(name),
+        }
+
+    @router.post("/api/providers/{name}/clear-discovered")
+    async def clear_discovered_provider_models(name: str) -> dict[str, Any]:
+        """Clear cached discovered models and selection for a provider."""
+        registry = get_model_registry()
+        registry.clear_discovered_models(name)
+        return {
+            "status": "ok",
+            "name": name,
+            "discovered_models": registry.get_discovered_models(name),
+            "selected_models": registry.get_selected_models(name),
+            "visible_models": registry.get_visible_models(name),
+        }
+
     @router.post("/api/providers/{name}/select-models")
     async def set_selected_models(name: str, req: dict[str, Any]) -> dict[str, Any]:
         """Set which discovered models should appear in dropdowns.

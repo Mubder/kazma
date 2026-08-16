@@ -634,7 +634,8 @@ class ModelRegistry:
                                     elif full_name:
                                         model_ids.append(full_name)
                                 if model_ids:
-                                    self._discovered_models[clean_name] = sorted(model_ids)
+                                    self._discovered_models[clean_name] = sorted(set(model_ids))
+                                    self._prune_stale_selected_models(clean_name, self._discovered_models[clean_name])
                                     return self._discovered_models[clean_name]
                     except Exception as exc:
                         logger.warning("discover_models: Google AI Studio dynamic discovery failed: %s", exc)
@@ -693,15 +694,61 @@ class ModelRegistry:
             for item in data.get("data", []):
                 model_id = item.get("id", "")
                 if model_id:
+                    # Strip :latest suffix for Ollama to prevent duplicate/stale tags
+                    if clean_name == "ollama" and str(model_id).endswith(":latest"):
+                        model_id = str(model_id)[:-7]
                     model_ids.append(str(model_id))
 
-            model_ids.sort()
+            model_ids = sorted(set(model_ids))
             self._discovered_models[clean_name] = model_ids
+            self._prune_stale_selected_models(clean_name, model_ids)
             return model_ids
 
         except Exception as exc:
             logger.error("discover_models failed for %r: %s", clean_name, exc)
             return self._discovered_models.get(clean_name, [])
+
+    def _prune_stale_selected_models(self, provider_name: str, discovered_ids: list[str]) -> None:
+        """Prune any models in selected_models that are no longer discovered or manual."""
+        clean = (provider_name or "").strip()
+        if not clean:
+            return
+        raw = self._config_store.get(f"providers.{clean}.selected_models", None)
+        if raw is None:
+            return
+        current_selected = self.get_selected_models(clean)
+        if not current_selected:
+            return
+
+        provider = self.get_provider(clean)
+        manual_set = set(self._normalize_models(provider.get("models", []))) if provider else set()
+        valid_set = set(discovered_ids) | manual_set
+
+        # Build lookup set supporting prefix matching and :latest variations
+        valid_lookups = set()
+        for m in valid_set:
+            valid_lookups.add(m)
+            valid_lookups.add(f"{clean}/{m}")
+            if m.startswith(f"{clean}/"):
+                valid_lookups.add(m[len(clean)+1:])
+            if m.endswith(":latest"):
+                valid_lookups.add(m[:-7])
+                valid_lookups.add(f"{clean}/{m[:-7]}")
+            else:
+                valid_lookups.add(f"{m}:latest")
+                valid_lookups.add(f"{clean}/{m}:latest")
+
+        pruned = [
+            m for m in current_selected
+            if m in valid_lookups or (m.startswith(f"{clean}/") and m[len(clean)+1:] in valid_lookups)
+        ]
+        if len(pruned) != len(current_selected):
+            logger.info(
+                "Pruned %d stale models from providers.%s.selected_models",
+                len(current_selected) - len(pruned),
+                clean,
+            )
+            self.set_selected_models(clean, pruned)
 
     async def discover_all(self) -> dict[str, list[str]]:
         """Discover models for all enabled providers."""
@@ -725,6 +772,77 @@ class ModelRegistry:
         for models in self._discovered_models.values():
             all_models.extend(models)
         return sorted(set(all_models))
+
+    def remove_provider_model(self, provider_name: str, model_id: str) -> bool:
+        """Remove a specific model from a provider's discovered, selected, and manual lists.
+
+        Returns True if the model was found and removed from at least one list.
+        """
+        clean_name = (provider_name or "").strip()
+        clean_model = (model_id or "").strip()
+        if not clean_name or not clean_model:
+            return False
+
+        targets = {clean_model}
+        targets.add(f"{clean_name}/{clean_model}")
+        if clean_model.startswith(f"{clean_name}/"):
+            targets.add(clean_model[len(clean_name)+1:])
+        if clean_model.endswith(":latest"):
+            targets.add(clean_model[:-7])
+            targets.add(f"{clean_name}/{clean_model[:-7]}")
+        else:
+            targets.add(f"{clean_model}:latest")
+            targets.add(f"{clean_name}/{clean_model}:latest")
+
+        changed = False
+
+        # 1. Remove from _discovered_models
+        if clean_name in self._discovered_models:
+            orig = self._discovered_models[clean_name]
+            filtered = [m for m in orig if m not in targets]
+            if len(filtered) != len(orig):
+                self._discovered_models[clean_name] = filtered
+                changed = True
+
+        # 2. Remove from selected_models
+        selected = self.get_selected_models(clean_name)
+        if selected:
+            filtered_selected = [m for m in selected if m not in targets]
+            if len(filtered_selected) != len(selected):
+                self.set_selected_models(clean_name, filtered_selected)
+                changed = True
+
+        # 3. Remove from provider entry in providers.list (manual models)
+        providers = self.list_providers()
+        for provider in providers:
+            if provider.get("name") == clean_name:
+                manual_models = provider.get("models", [])
+                if isinstance(manual_models, list):
+                    filtered_manual = [m for m in manual_models if str(m) not in targets]
+                    if len(filtered_manual) != len(manual_models):
+                        provider["models"] = filtered_manual
+                        self._save_providers(providers)
+                        changed = True
+                break
+
+        if changed:
+            self.serialize()
+        return changed
+
+    def clear_discovered_models(self, provider_name: str | None = None) -> None:
+        """Clear cached discovered models and selection for a specific provider or all providers."""
+        if provider_name:
+            clean_name = provider_name.strip()
+            if clean_name in self._discovered_models:
+                del self._discovered_models[clean_name]
+            self._config_store.delete(f"providers.{clean_name}.selected_models")
+        else:
+            self._discovered_models.clear()
+            for provider in self.list_providers():
+                p_name = provider.get("name", "")
+                if p_name:
+                    self._config_store.delete(f"providers.{p_name}.selected_models")
+        self.serialize()
 
     # ── Persistence ────────────────────────────────────────────────
 

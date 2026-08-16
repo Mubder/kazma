@@ -955,3 +955,41 @@ class TestUnifiedProvidersRouterAPI:
         data = resp.json()
         assert data["success"] is False
         assert "No token" in data["error"] or "token" in data["error"].lower()
+
+    def test_providers_delete_model(self, client):
+        """DELETE /api/providers/{name}/models/{model_id} deletes a model from provider."""
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        reg.upsert_provider({
+            "name": "ollama-test",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "models": ["deleted-model-1", "active-model"],
+        })
+        reg._discovered_models = {"ollama-test": ["deleted-model-1", "active-model"]}
+        reg.set_selected_models("ollama-test", ["deleted-model-1", "active-model"])
+
+        resp = client.delete("/api/providers/ollama-test/models/deleted-model-1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "deleted-model-1" not in data["discovered_models"]
+        assert "deleted-model-1" not in data["selected_models"]
+        assert "active-model" in data["discovered_models"]
+
+    def test_providers_clear_discovered(self, client):
+        """POST /api/providers/{name}/clear-discovered clears discovered models and selection."""
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        reg.upsert_provider({
+            "name": "ollama-clear",
+            "base_url": "http://127.0.0.1:11434/v1",
+        })
+        reg._discovered_models = {"ollama-clear": ["model-a", "model-b"]}
+        reg.set_selected_models("ollama-clear", ["model-a"])
+
+        resp = client.post("/api/providers/ollama-clear/clear-discovered")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["discovered_models"] == []
+        assert data["selected_models"] == []

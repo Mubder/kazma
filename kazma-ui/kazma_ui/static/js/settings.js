@@ -1765,6 +1765,40 @@ function settingsApp() {
             }
         },
 
+        async deleteProviderDiscoveredModel(providerName, model) {
+            try {
+                const resp = await fetch(`/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(model)}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (resp.ok) {
+                    showToast(`Removed ${model}`, 'success');
+                    await this.loadHubProviders();
+                } else {
+                    showToast('Failed to remove model', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to remove model: ' + e.message, 'error');
+            }
+        },
+
+        async clearHubDiscovered(providerName) {
+            try {
+                const resp = await fetch(`/api/providers/${encodeURIComponent(providerName)}/clear-discovered`, {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (resp.ok) {
+                    showToast('Cleared discovered models', 'success');
+                    await this.loadHubProviders();
+                } else {
+                    showToast('Failed to clear models', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to clear models: ' + e.message, 'error');
+            }
+        },
+
         openHubConnectorModal(name) {
             this.hubConnectorTested = false;
             this.hubShowConnectorToken = false;

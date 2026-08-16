@@ -591,3 +591,112 @@ class TestSerialization:
         assert registry._active_provider == ""
         assert registry._active_model == ""
         assert registry._discovered_models == {}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Model Pruning and Removal
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestModelPruningAndRemoval:
+    """Tests for remove_provider_model, clear_discovered_models, and auto-pruning."""
+
+    def test_remove_provider_model_from_discovered_and_selected(self, config_store):
+        from kazma_core.model_registry import initialize_model_registry
+
+        registry = initialize_model_registry(config_store)
+        registry.upsert_provider({
+            "name": "ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "models": ["llama3.2", "deleted-model-1"],
+        })
+        registry._discovered_models = {
+            "ollama": ["llama3.2", "deleted-model-1", "qwen2.5-coder"],
+        }
+        registry.set_selected_models("ollama", ["deleted-model-1", "qwen2.5-coder"])
+
+        # Remove deleted model
+        removed = registry.remove_provider_model("ollama", "deleted-model-1")
+        assert removed is True
+
+        # Verify it is removed from discovered_models
+        assert "deleted-model-1" not in registry.get_discovered_models("ollama")
+        assert "llama3.2" in registry.get_discovered_models("ollama")
+
+        # Verify it is removed from selected_models
+        assert "deleted-model-1" not in registry.get_selected_models("ollama")
+        assert "qwen2.5-coder" in registry.get_selected_models("ollama")
+
+        # Verify it is removed from provider models (manual list)
+        provider = registry.get_provider("ollama")
+        assert "deleted-model-1" not in provider.get("models", [])
+
+    def test_remove_provider_model_with_prefix_and_tag(self, config_store):
+        from kazma_core.model_registry import initialize_model_registry
+
+        registry = initialize_model_registry(config_store)
+        registry._discovered_models = {
+            "ollama": ["llama3.2", "ollama/stale-model"],
+        }
+        registry.set_selected_models("ollama", ["stale-model"])
+
+        # Removing "stale-model" matches "ollama/stale-model"
+        removed = registry.remove_provider_model("ollama", "stale-model")
+        assert removed is True
+        assert registry.get_discovered_models("ollama") == ["llama3.2"]
+        assert registry.get_selected_models("ollama") == []
+
+    def test_clear_discovered_models_specific_provider(self, config_store):
+        from kazma_core.model_registry import initialize_model_registry
+
+        registry = initialize_model_registry(config_store)
+        registry._discovered_models = {
+            "ollama": ["m1", "m2"],
+            "openai": ["gpt-4o"],
+        }
+        registry.set_selected_models("ollama", ["m1"])
+
+        registry.clear_discovered_models("ollama")
+
+        assert registry.get_discovered_models("ollama") == []
+        assert registry.get_selected_models("ollama") == []
+        assert registry.get_discovered_models("openai") == ["gpt-4o"]
+
+    @pytest.mark.asyncio
+    async def test_discover_models_auto_prunes_stale_selected(self, config_store):
+        from kazma_core.model_registry import initialize_model_registry
+
+        registry = initialize_model_registry(config_store)
+        registry.upsert_provider({
+            "name": "ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "models": [],
+        })
+        # Stale selection containing a model that was deleted from Ollama
+        registry.set_selected_models("ollama", ["active-model", "deleted-model-3"])
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "active-model"},
+                {"id": "new-model:latest"},  # Should be normalized to new-model
+            ]
+        }
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch("kazma_core.model_registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+            models = await registry.discover_models("ollama")
+
+        assert "deleted-model-3" not in models
+        assert "new-model" in models  # :latest stripped
+        assert "active-model" in models
+
+        # Verify selected_models was pruned automatically
+        selected = registry.get_selected_models("ollama")
+        assert "deleted-model-3" not in selected
+        assert "active-model" in selected
