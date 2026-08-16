@@ -3514,7 +3514,13 @@ function settingsApp() {
                             this.offsiteProvider = pending;
                             this.offsiteEnabled = true;
                             await this.saveOffsite();
-                            showToast('☁️ ' + (this.offsiteActiveProviderLabel || pending) + ' connected — offsite backup active', 'success');
+                            if (pending === 'google_drive' && status.drive_ok === false) {
+                                // OAuth succeeded but Drive itself is blocked —
+                                // say exactly why instead of the green toast.
+                                showToast('Google connected, but Drive access failed: ' + (status.drive_error || 'run Test to diagnose') + '. Test the card for the fix steps.', 'error');
+                            } else {
+                                showToast('☁️ ' + (this.offsiteActiveProviderLabel || pending) + ' connected — offsite backup active', 'success');
+                            }
                         } else {
                             showToast('Cloud connect did not complete — open the provider card and try again', 'error');
                         }

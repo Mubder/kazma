@@ -125,7 +125,91 @@ def test_status_reports_connection() -> None:
     assert cs.GoogleDriveSync().status()["connected"] is False
 
 
+def test_status_reports_drive_health() -> None:
+    cs._read_vault = _FakeVault({  # type: ignore[assignment]
+        "email.gmail.refresh_token": "rt",
+        "email.gmail.drive_ok": "ok",
+    })
+    st = cs.GoogleDriveSync().status()
+    assert st["drive_ok"] is True
+    assert st["drive_error"] == ""
+
+    # Drive blocked at connect time (e.g. consent screen stripped the scope)
+    cs._read_vault = _FakeVault({  # type: ignore[assignment]
+        "email.gmail.refresh_token": "rt",
+        "email.gmail.drive_ok": "accessNotConfigured",
+    })
+    st = cs.GoogleDriveSync().status()
+    assert st["drive_ok"] is False
+    assert st["drive_error"] == "accessNotConfigured"
+
+    # Legacy token connected before the drive probe existed — unknown, not broken
+    cs._read_vault = _FakeVault({"email.gmail.refresh_token": "rt"})  # type: ignore[assignment]
+    st = cs.GoogleDriveSync().status()
+    assert st["drive_ok"] is None
+    assert st["drive_error"] == ""
+
+
 # ── Google Drive ─────────────────────────────────────────────────────────
+
+
+def test_google_drive_test_connection_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/drive/v3/about":
+            return _json_response(200, {"user": {"emailAddress": "backup@corp.com"}})
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.GoogleDriveSync().test_connection())
+    assert result["ok"] is True
+    assert "backup@corp.com" in result["message"]
+
+
+@pytest.mark.parametrize(
+    "reason,expected_hint",
+    [
+        ("accessNotConfigured", "Google Drive API is not enabled"),
+        ("insufficientPermissions", "drive.file"),
+    ],
+)
+def test_google_drive_test_connection_403_is_actionable(
+    monkeypatch: pytest.MonkeyPatch, reason: str, expected_hint: str
+) -> None:
+    """A 403 after a fresh grant must say WHY — not a bare status code.
+
+    The two causes are indistinguishable without the error body: Drive API
+    disabled in the Cloud project vs. the token lacking the drive.file scope.
+    """
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({  # type: ignore[assignment]
+        "email.gmail.access_token": "tok",
+        "email.gmail.refresh_token": "rt",
+        "email.gmail.client_id": "cid",
+        "email.gmail.client_secret": "csec",
+    })
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/token":
+            return _json_response(200, {"access_token": "fresh"})
+        if req.url.path == "/drive/v3/about":
+            return _json_response(
+                403,
+                {"error": {"code": 403, "message": "nope", "errors": [{"reason": reason}]}},
+            )
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.GoogleDriveSync().test_connection())
+    assert result["ok"] is False
+    assert "Drive API error: 403" in result["error"]
+    assert expected_hint in result["error"]
 
 
 def test_google_drive_upload_and_folder_creation(

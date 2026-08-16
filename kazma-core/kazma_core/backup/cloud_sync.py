@@ -90,9 +90,16 @@ def _write_vault(key: str, value: str, category: str = "backups") -> None:
 
 
 def _offsite_enabled() -> bool:
-    enabled = _read_config("backups.offsite.enabled", "")
-    if enabled:
-        return enabled.strip().lower() not in ("0", "false", "no", "off")
+    try:
+        from kazma_core.config_store import get_config_store
+
+        val = get_config_store().get("backups.offsite.enabled")
+        if isinstance(val, bool):
+            return val
+        if val is not None and str(val).strip() != "":
+            return str(val).strip().lower() not in ("0", "false", "no", "off")
+    except Exception:
+        pass
     return bool(_read_config("backups.offsite.provider", ""))
 
 
@@ -153,6 +160,58 @@ _GDRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 _GDRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 _GDRIVE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GDRIVE_ROOT_FOLDER = "kazma-backups"
+
+# Google error reasons mapped to actionable guidance. A 403 on Drive is almost
+# always one of the first two: the API is off in the Cloud project, or the
+# token predates / never received the drive.file scope (Google never adds
+# scopes to existing grants).
+_GDRIVE_403_GUIDANCE: dict[str, str] = {
+    "accessNotConfigured": (
+        "the Google Drive API is not enabled for this Google Cloud project — open "
+        "console.cloud.google.com → APIs & Services → Library, enable "
+        "'Google Drive API', then run the test again"
+    ),
+    "insufficientPermissions": (
+        "the Google token lacks Drive access (scope drive.file) — in the Google "
+        "Cloud Console OAuth consent screen add …/auth/drive.file, then reconnect: "
+        "Settings → Email → Disconnect → Connect with Google, or the Connect button "
+        "on this card. Existing tokens never gain new scopes"
+    ),
+    "dailyLimitExceeded": "the Drive API quota is exhausted — wait a few minutes and retry",
+    "rateLimitExceeded": "the Drive API rate limit was hit — wait a few seconds and retry",
+    "userRateLimitExceeded": "the Drive API rate limit was hit — wait a few seconds and retry",
+}
+
+
+def google_error_reason(resp: Any) -> str:
+    """Extract the primary Google API error reason/message from a response."""
+    try:
+        data = resp.json() or {}
+        err = data.get("error") or {}
+        errs = err.get("errors") or []
+        if errs:
+            return str(errs[0].get("reason") or "")
+        return str(err.get("message") or "")
+    except Exception:
+        return ""
+
+
+def _google_drive_error(resp: Any) -> str:
+    """Human-readable Drive API failure with actionable guidance where known."""
+    base = f"Drive API error: {resp.status_code}"
+    reason = google_error_reason(resp)
+    guidance = _GDRIVE_403_GUIDANCE.get(reason)
+    if guidance:
+        return f"{base} — {guidance}"
+    if reason:
+        return f"{base} — {reason}"
+    try:
+        snip = (resp.text or "").strip()[:200]
+        if snip:
+            return f"{base} — {snip}"
+    except Exception:
+        pass
+    return base
 
 
 class GoogleDriveSync:
@@ -294,7 +353,7 @@ class GoogleDriveSync:
                     user = resp.json().get("user", {})
                     email = user.get("emailAddress", "connected")
                     return {"ok": True, "message": f"Google Drive: {email}"}
-                return {"ok": False, "error": f"Drive API error: {resp.status_code}"}
+                return {"ok": False, "error": _google_drive_error(resp)}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -303,9 +362,21 @@ class GoogleDriveSync:
             _read_vault("email.gmail.refresh_token")
             or os.environ.get("EMAIL_GMAIL_REFRESH_TOKEN")
         )
+        # Recorded by the Gmail OAuth flow (oauth_gmail.py) at connect time:
+        # "ok", a Google error reason, or "" for tokens connected before the
+        # Drive probe existed (unknown — treat as healthy).
+        drive_state = _read_vault("email.gmail.drive_ok")
+        if drive_state == "ok":
+            drive_ok, drive_error = True, ""
+        elif drive_state:
+            drive_ok, drive_error = False, drive_state
+        else:
+            drive_ok, drive_error = None, ""
         return {
             "provider": "google_drive",
             "connected": has_token,
+            "drive_ok": drive_ok,
+            "drive_error": drive_error,
             "remote": f"google_drive:{_GDRIVE_ROOT_FOLDER}",
         }
 

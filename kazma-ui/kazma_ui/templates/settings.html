@@ -2460,7 +2460,10 @@
                         <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:#4285f4">
                         <span style="font-size:1.4em">📁</span>
                         <strong>Google Drive</strong>
-                        <span x-show="offsiteProviderStatus('google_drive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok !== false" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false"
+                              style="font-size:0.8rem;color:#ffa502"
+                              :title="offsiteProviderStatus('google_drive')?.drive_error || 'Drive access blocked'">⚠ Drive</span>
                         <span x-show="offsiteConfig?.provider === 'google_drive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(66,133,244,0.15);color:#4285f4">active</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
@@ -2468,8 +2471,13 @@
                     </p>
                     <button class="btn btn-secondary btn-sm" style="width:100%"
                             @click.stop="connectGoogleDrive()"
-                            x-text="offsiteProviderStatus('google_drive')?.connected ? '✓ Connected' : 'Connect'">
+                            x-text="offsiteProviderStatus('google_drive')?.connected
+                                ? (offsiteProviderStatus('google_drive')?.drive_ok === false ? '⚠ Reconnect' : '✓ Connected')
+                                : 'Connect'">
                     </button>
+                    <p x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false" x-cloak
+                       style="font-size:0.72rem;color:#ffa502;margin:6px 0 0 0"
+                       x-text="'Drive blocked: ' + (offsiteProviderStatus('google_drive')?.drive_error || 'unknown reason') + '. Test the card for the fix steps.'"></p>
                 </div>
 
                 <!-- OneDrive -->
@@ -2539,7 +2547,7 @@
             <!-- Enable toggle + actions -->
             <div style="display:flex;gap:12px;align-items:center;margin-top:0.5rem">
                 <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem" :style="!offsiteProvider ? 'cursor:not-allowed;opacity:0.5' : 'cursor:pointer'" :title="!offsiteProvider ? 'Select a provider first to enable/disable offsite sync' : ''">
-                    <input type="checkbox" x-model="offsiteEnabled" :disabled="!offsiteProvider" style="accent-color:var(--primary,#4f8cff)">
+                    <input type="checkbox" x-model="offsiteEnabled" :disabled="!offsiteProvider" @change="saveOffsite()" style="accent-color:var(--primary,#4f8cff)">
                     {{ t('settings.offsite_enabled') }}
                 </label>
                 <span style="flex:1"></span>
