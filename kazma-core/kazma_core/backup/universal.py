@@ -167,13 +167,43 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
     return result
 
 
+def _zip_backup_dir(dest: Path) -> Path:
+    """Compress the finished backup directory into a single .zip archive.
+
+    One file instead of a folder tree: the cloud copy becomes atomic (a
+    partial upload can't masquerade as a complete backup), uploads are a
+    handful of API calls instead of hundreds, and SQLite DBs compress 5-10x.
+    """
+    import zipfile
+
+    files = [f for f in dest.rglob("*") if f.is_file()]
+    if not files:
+        raise RuntimeError("backup directory is empty — nothing to archive")
+    zip_path = dest.parent / f"{dest.name}.zip"
+    tmp_path = dest.parent / f".{dest.name}.zip.tmp"
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for f in files:
+                zf.write(f, f.relative_to(dest).as_posix())
+        tmp_path.replace(zip_path)
+        return zip_path
+    finally:
+        # Never leave a half-written archive behind (e.g. crash mid-zip).
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 def _offsite_sync(dest: Path) -> dict[str, Any]:
     """Upload the finished backup to the configured cloud provider (fail-open).
 
-    The ONLY protection against disk death. Uses the native cloud_sync
-    providers (Google Drive / OneDrive / WebDAV / S3) — no rclone needed.
-    Falls back to the legacy rclone path if only ``rclone_remote`` is set.
-    Never raises — any error logs and skips.
+    The ONLY protection against disk death. The backup directory is zipped
+    into ONE archive (manifest included) and uploaded as a single file via the
+    native cloud_sync providers (Google Drive / OneDrive / WebDAV / S3).
+    Falls back to the legacy rclone folder copy if only ``rclone_remote`` is
+    set. Never raises — any error logs and skips.
     """
     import asyncio
 
@@ -188,20 +218,33 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
                 from kazma_core.backup.cloud_sync import get_sync_provider
 
                 provider = get_sync_provider()
-                if provider is not None:
-                    result = await provider.upload_directory(dest, dest.name)
-                    if result.get("ok"):
-                        logger.info(
-                            "[universal-backup] offsite sync complete: %s",
-                            result.get("remote"),
-                        )
-                    else:
-                        logger.warning(
-                            "[universal-backup] offsite sync failed: %s",
-                            result.get("error"),
-                        )
-                    return result
-                return {"skipped": f"unknown provider: {cfg['provider']}"}
+                if provider is None:
+                    return {"skipped": f"unknown provider: {cfg['provider']}"}
+                try:
+                    zip_path = _zip_backup_dir(dest)
+                except Exception as exc:
+                    logger.warning("[universal-backup] zipping backup failed: %s", exc)
+                    return {"ok": False, "error": f"zip failed: {exc}"}
+                try:
+                    result = await provider.upload_file(zip_path, zip_path.name)
+                finally:
+                    # The archive is a transient upload artifact — the local
+                    # backup dir stays authoritative.
+                    try:
+                        zip_path.unlink()
+                    except OSError:
+                        pass
+                if result.get("ok"):
+                    logger.info(
+                        "[universal-backup] offsite sync complete: %s",
+                        result.get("remote"),
+                    )
+                else:
+                    logger.warning(
+                        "[universal-backup] offsite sync failed: %s",
+                        result.get("error"),
+                    )
+                return result
             except Exception as exc:
                 logger.warning("[universal-backup] native offsite sync error: %s", exc)
                 return {"ok": False, "error": str(exc)}
@@ -483,14 +526,13 @@ def perform_universal_backup(
     _set_progress("manifest", detail="Writing manifest…")
     pg_result = {"ok": True, "note": "handled by native_pg_backup task"}
 
-    # 4. Offsite sync FIRST (backup-audit gap #2): copy the finished backup
-    # to a configured rclone remote. Fail-open — local backup stays
-    # authoritative. Runs BEFORE the manifest write so the manifest records
-    # the cloud sync result (the UI reads it to badge backups as ☁ Cloud).
-    _set_progress("offsite", detail="Syncing to cloud…" if _offsite_config()["enabled"] else "Skipping offsite…")
-    offsite = _offsite_sync(dest)
-
-    # 5. Manifest — written AFTER the offsite sync so it records the result.
+    # 4. Offsite sync (backup-audit gap #2): the finished backup is zipped
+    # into ONE archive and uploaded as a single file. Fail-open — the local
+    # backup stays authoritative. The manifest is written first (with a
+    # placeholder offsite entry) so the archive contains it; the local
+    # manifest is then rewritten with the real cloud result, which the UI
+    # reads to badge backups as ☁ Cloud.
+    _set_progress("offsite", detail="Zipping + uploading to cloud…" if _offsite_config()["enabled"] else "Skipping offsite…")
     elapsed = round(time.time() - started, 1)
     manifest: dict[str, Any] = {
         "timestamp": ts,
@@ -501,9 +543,13 @@ def perform_universal_backup(
         "assets": asset_results,
         "root_artifacts": root_artifacts,
         "postgres": pg_result,
-        "offsite": offsite,
+        "offsite": {"status": "pending", "note": "cloud upload in flight at archive time"},
     }
-    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    manifest_path = dest / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    offsite = _offsite_sync(dest)
+    manifest["offsite"] = offsite
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     # 6. Prune old backups.
     pruned = _prune(max(1, retention))

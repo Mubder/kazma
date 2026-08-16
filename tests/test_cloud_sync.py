@@ -292,6 +292,67 @@ def test_google_drive_without_tokens_fails_clear(
         asyncio.run(cs.GoogleDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
 
 
+def test_google_drive_upload_file_single_archive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    local = tmp_path / "backup_20260816_120000.zip"
+    local.write_bytes(b"ZIPDATA")
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/drive/v3/about":
+            return _json_response(200, {"user": {}})
+        if req.url.path == "/drive/v3/files" and req.method == "GET":
+            # The kazma-backups root folder already exists
+            return _json_response(200, {"files": [{"id": "root1"}]})
+        if req.url.path == "/upload/drive/v3/files":
+            return _json_response(200, {"id": "file-1"})
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.GoogleDriveSync().upload_file(local, local.name))
+    assert result["ok"] is True
+    assert result["remote"] == "google_drive:kazma-backups/backup_20260816_120000.zip"
+    uploads = [r for r in captured if "/upload/drive/v3/files" in r.url.path]
+    assert len(uploads) == 1
+    assert uploads[0].headers.get("authorization") == "Bearer tok"
+    # Single multipart body: metadata names the file + root parent, payload is the zip
+    body = uploads[0].content
+    assert b'"parents": ["root1"]' in body
+    assert b"ZIPDATA" in body
+
+
+def test_google_drive_upload_file_reports_actionable_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    local = tmp_path / "b.zip"
+    local.write_bytes(b"x")
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/drive/v3/about":
+            return _json_response(200, {"user": {}})
+        if req.url.path == "/drive/v3/files" and req.method == "GET":
+            return _json_response(200, {"files": [{"id": "root1"}]})
+        if req.url.path == "/upload/drive/v3/files":
+            return _json_response(
+                403,
+                {"error": {"code": 403, "message": "nope", "errors": [{"reason": "accessNotConfigured"}]}},
+            )
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.GoogleDriveSync().upload_file(local, "b.zip"))
+    assert result["ok"] is False
+    assert "Google Drive API is not enabled" in result["error"]
+
+
 # ── OneDrive ─────────────────────────────────────────────────────────────
 
 
@@ -349,6 +410,34 @@ def test_onedrive_refreshes_and_rotates_token(
     assert result["ok"] is True
     assert vault.values["email.microsoft.access_token"] == "ms-fresh"
     assert vault.values["email.microsoft.refresh_token"] == "rt-new"
+
+
+def test_onedrive_upload_file_single_archive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "onedrive"})  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"email.microsoft.access_token": "mstok"})  # type: ignore[assignment]
+    local = tmp_path / "backup.zip"
+    local.write_bytes(b"ZIP")
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/v1.0/me":
+            return _json_response(200, {})
+        if req.method == "PUT":
+            assert req.url.path == "/v1.0/me/drive/root:/kazma-backups/backup.zip:/content"
+            assert req.headers.get("authorization") == "Bearer mstok"
+            return httpx.Response(201)
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.OneDriveSync().upload_file(local, "backup.zip"))
+    assert result["ok"] is True
+    assert result["remote"] == "onedrive:kazma-backups/backup.zip"
+    puts = [r for r in captured if r.method == "PUT"]
+    assert len(puts) == 1
+    assert puts[0].content == b"ZIP"
 
 
 def _onedrive_token_capture(monkeypatch: pytest.MonkeyPatch, vault: "_FakeVault"):
@@ -474,6 +563,36 @@ def test_webdav_partial_failure_reports_count(
     assert "1/2 files failed" in result["error"]
 
 
+def test_webdav_upload_file_single_archive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cs._read_config = _FakeConfig({
+        "backups.offsite.provider": "webdav",
+        "backups.offsite.webdav.url": "https://nas.local/backups",
+        "backups.offsite.webdav.username": "user",
+    })  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"backups.offsite.webdav.password": "pw"})  # type: ignore[assignment]
+    local = tmp_path / "backup.zip"
+    local.write_bytes(b"ZIP")
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "MKCOL":
+            assert req.url.path == "/backups/kazma-backups"
+            return httpx.Response(201)
+        if req.method == "PUT":
+            assert req.url.path == "/backups/kazma-backups/backup.zip"
+            return httpx.Response(201)
+        return httpx.Response(405)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.WebDAVSync().upload_file(local, "backup.zip"))
+    assert result["ok"] is True
+    assert result["remote"] == "webdav:nas.local/backups/kazma-backups/backup.zip"
+    assert all(r.headers.get("authorization", "").startswith("Basic ") for r in captured)
+
+
 def test_webdav_integration_real_server(tmp_backup_dir: Path) -> None:
     """End-to-end WebDAV upload against a real threaded local HTTP server."""
     stored: dict[str, bytes] = {}
@@ -568,6 +687,36 @@ def test_s3_unconfigured_fails_clear(tmp_backup_dir: Path) -> None:
     result = asyncio.run(cs.S3Sync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
     assert result["ok"] is False
     assert "not configured" in result["error"]
+
+
+def test_s3_upload_file_single_archive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cs._read_config = _FakeConfig({
+        "backups.offsite.provider": "s3",
+        "backups.offsite.s3.access_key": "AKID",
+        "backups.offsite.s3.bucket": "kazma-bucket",
+        "backups.offsite.s3.endpoint": "https://s3.example.com",
+    })  # type: ignore[assignment]
+    cs._read_vault = _FakeVault({"backups.offsite.s3.secret_key": "s3secret"})  # type: ignore[assignment]
+    local = tmp_path / "backup.zip"
+    local.write_bytes(b"ZIP")
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.S3Sync().upload_file(local, "backup.zip"))
+    assert result["ok"] is True
+    assert result["remote"] == "s3:kazma-bucket/kazma-backups/backup.zip"
+    puts = [r for r in captured if r.method == "PUT"]
+    assert len(puts) == 1
+    # Endpoint-style URL: {endpoint}/{bucket}/{key}
+    assert puts[0].url.path == "/kazma-bucket/kazma-backups/backup.zip"
+    assert puts[0].headers["authorization"].startswith("AWS4-HMAC-SHA256")
+    assert puts[0].content == b"ZIP"
 
 
 def test_s3_signs_head_request() -> None:
