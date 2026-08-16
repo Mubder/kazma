@@ -2530,11 +2530,11 @@
                     {{ t('settings.offsite_enabled') }}
                 </label>
                 <span style="flex:1"></span>
-                <button class="btn btn-secondary" @click="testOffsite()" :disabled="offsiteTesting || !offsiteConfig?.provider">
+                <button class="btn btn-secondary" @click="testOffsite()" :disabled="offsiteTesting || !offsiteProvider">
                     <span x-show="!offsiteTesting">{{ t('settings.offsite_test') }}</span>
                     <span x-show="offsiteTesting">…</span>
                 </button>
-                <button class="btn btn-primary" @click="saveOffsite()" :disabled="!offsiteConfig?.provider">
+                <button class="btn btn-primary" @click="saveOffsite()" :disabled="!offsiteProvider">
                     {{ t('settings.offsite_save') }}
                 </button>
             </div>

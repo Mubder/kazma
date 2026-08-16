@@ -475,7 +475,17 @@ function settingsApp() {
             // Deep-link: /settings?tab=packages (or any valid tab id)
             try {
                 const params = new URLSearchParams(window.location.search);
-                const requested = params.get('tab');
+                let requested = params.get('tab');
+                // OAuth round-trip from Backup → Offsite (flag set by
+                // connectGoogleDrive/connectOneDrive): the email callback
+                // always returns to ?tab=email, but the user was connecting a
+                // backup provider — land on the backup tab so the pending
+                // auto-select/save in loadOffsiteConfig runs.
+                try {
+                    if (localStorage.getItem('kazma_offsite_connect_pending')) {
+                        requested = 'backup';
+                    }
+                } catch (e) { /* storage unavailable */ }
                 if (requested && requested !== this.tab) {
                     await this.onTabChange(requested);
                 }
@@ -3041,7 +3051,7 @@ function settingsApp() {
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadProxy(); break;
-                case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig()]); break;
+                case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
                 case 'voice':
@@ -3492,18 +3502,21 @@ function settingsApp() {
 
                     // OAuth round-trip: user just connected Google/MS from the
                     // backup card. Auto-select + save the provider, then toast.
+                    // Based on the provider's live connection status (the
+                    // email tab's callback handler strips email_oauth from the
+                    // URL before we run, so the URL param can't be used).
                     let pending = null;
                     try { pending = localStorage.getItem('kazma_offsite_connect_pending'); } catch (e) {}
                     if (pending) {
                         try { localStorage.removeItem('kazma_offsite_connect_pending'); } catch (e) {}
-                        const urlParams = new URLSearchParams(window.location.search);
-                        if (urlParams.get('email_oauth') === 'ok') {
+                        const status = this.offsiteProviderStatus(pending);
+                        if (status && status.connected) {
                             this.offsiteProvider = pending;
                             this.offsiteEnabled = true;
                             await this.saveOffsite();
                             showToast('☁️ ' + (this.offsiteActiveProviderLabel || pending) + ' connected — offsite backup active', 'success');
-                            // Jump to the backup tab so the user sees the result
-                            this.tab = 'backup';
+                        } else {
+                            showToast('Cloud connect did not complete — open the provider card and try again', 'error');
                         }
                     }
                 }
@@ -3572,6 +3585,18 @@ function settingsApp() {
                 const resp = await fetch('/api/backup/now', { method: 'POST' });
                 const data = await resp.json();
                 if (!data.ok) {
+                    const p = data.progress || {};
+                    if (p.phase && !['idle', 'done', 'error'].includes(p.phase)) {
+                        // A backup started elsewhere (24h scheduler, another
+                        // tab) is genuinely running — attach to its progress
+                        // instead of leaving the user with a bare rejection.
+                        this.backupProgressPhase = p.phase;
+                        this.backupProgressText = p.detail || p.phase;
+                        if (!this._backupPollId) {
+                            this._backupPollId = setInterval(() => this._pollBackup(), 2000);
+                        }
+                        return;
+                    }
                     this.backupResult = { ok: false, error: data.error || 'Failed to start' };
                     this.backupRunning = false;
                     return;
@@ -3584,6 +3609,26 @@ function settingsApp() {
                 this.backupResult = { ok: false, error: e.message };
                 this.backupRunning = false;
             }
+        },
+
+        async syncBackupState() {
+            // Detect a backup already in flight when the tab is opened (started
+            // by the 24h scheduler or another session) so the progress bar
+            // reflects reality instead of a later "already running" surprise.
+            try {
+                const resp = await fetch('/api/backup/status');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data.phase && !['idle', 'done', 'error'].includes(data.phase)) {
+                    this.backupRunning = true;
+                    this.backupResult = null;
+                    this.backupProgressPhase = data.phase;
+                    this.backupProgressText = data.detail || data.phase;
+                    if (!this._backupPollId) {
+                        this._backupPollId = setInterval(() => this._pollBackup(), 2000);
+                    }
+                }
+            } catch (e) { /* status endpoint unavailable */ }
         },
 
         async _pollBackup() {

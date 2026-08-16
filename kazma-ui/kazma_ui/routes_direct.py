@@ -3282,9 +3282,18 @@ def register_direct_routes(self: Any) -> None:
         """Trigger a universal backup in the background. Returns immediately."""
         import asyncio
 
-        from kazma_core.backup.universal import _backup_progress, get_backup_progress
+        from kazma_core.backup.universal import (
+            _backup_progress,
+            backup_progress_is_stale,
+            get_backup_progress,
+        )
 
-        if _backup_progress.get("phase") not in ("idle", "done", "error"):
+        # A genuinely running backup blocks a new one — but a mid phase older
+        # than the stale threshold is a crashed/hung run; let it through so the
+        # button can't be bricked (perform_universal_backup's own lock applies
+        # the same crash detection and starts fresh).
+        if (_backup_progress.get("phase") not in ("idle", "done", "error")
+                and not backup_progress_is_stale()):
             return {"ok": False, "error": "A backup is already running", "progress": get_backup_progress()}
 
         async def _run():

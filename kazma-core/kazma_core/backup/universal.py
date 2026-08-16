@@ -32,6 +32,28 @@ _backup_progress: dict[str, Any] = {"phase": "idle", "detail": "", "error": ""}
 # Serializes the concurrent-backup guard (check + phase flip must be atomic
 # across the 24h loop thread and a manual UI trigger).
 _backup_lock = threading.Lock()
+# A run stuck in a mid phase longer than this is treated as crashed (process
+# kill / hung thread) so the cadence and the manual button can never be bricked
+# by a stale progress flag. Shared by the in-process lock and the API gate.
+_STALE_AFTER_SECONDS = 1800
+
+
+def backup_progress_is_stale(progress: dict[str, Any] | None = None) -> bool:
+    """True when progress shows a mid phase older than _STALE_AFTER_SECONDS.
+
+    Used by both ``perform_universal_backup``'s lock and the ``/api/backup/now``
+    gate so they agree a hung run is treated as crashed instead of blocking
+    every future backup forever (incident 2026-08-16: the manual button kept
+    returning "A backup is already running" long after the run had died).
+    """
+    p = progress if progress is not None else _backup_progress
+    phase = p.get("phase")
+    started_ts = p.get("started_ts")
+    return (
+        phase not in ("idle", "done", "error")
+        and isinstance(started_ts, (int, float))
+        and time.time() - started_ts > _STALE_AFTER_SECONDS
+    )
 
 
 def get_backup_progress() -> dict[str, Any]:
@@ -397,11 +419,7 @@ def perform_universal_backup(
         # A run that died mid-backup (process kill) leaves a mid phase
         # forever; anything older than 30 min is treated as crashed so the
         # cadence can never brick.
-        _crashed = (
-            _phase not in ("idle", "done", "error")
-            and isinstance(_started_ts, (int, float))
-            and time.time() - _started_ts > 1800
-        )
+        _crashed = backup_progress_is_stale(_backup_progress)
         if _phase not in ("idle", "done", "error") and not _crashed:
             logger.info(
                 "[universal-backup] already running (phase=%s) — skipping",
