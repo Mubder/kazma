@@ -7,12 +7,13 @@ subsequent tools reuse the live page.
 Runs on Playwright's **sync API inside ``asyncio.to_thread`` worker threads**.
 Kazma's server runs a Windows ``SelectorEventLoop`` (forced by psycopg — see
 ``kazma_core/eventloop.py``), on which ``asyncio.create_subprocess_exec``
-raises ``NotImplementedError``. The async Playwright transport needs exactly
-that call to spawn its Node driver, so the whole browser session died with a
-background "Task exception was never retrieved" and the tools silently
-returned nothing. The sync API spawns the driver with plain blocking
-subprocess calls from a worker thread, which works under any event loop.
-All page operations are serialized by a module lock (one page = one actor).
+raises ``NotImplementedError``. Playwright's transport needs exactly that call
+to spawn its Node driver — even the sync API creates its own loop via
+``asyncio.new_event_loop()``, which would inherit the selector policy. So the
+boot temporarily installs a Proactor policy (``_proactor_policy_for_boot``)
+while ``sync_playwright().start()`` creates its loop; the loop survives the
+policy restore and drives all later page operations. All page operations are
+serialized by a module lock (one page = one actor).
 
 Requires ``playwright`` (``pip install playwright && playwright install``).
 All tool functions return a friendly install-hint string if Playwright is
@@ -23,8 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -38,12 +41,40 @@ _state_lock = threading.Lock()
 MAX_TEXT_CHARS = 8000
 SCREENSHOT_DIR = Path("kazma-data/images")
 
+_IS_WINDOWS = sys.platform.startswith("win")
+
 
 def _install_hint() -> str:
     return (
         "Error: Playwright not installed. Run: "
         "pip install playwright && playwright install chromium"
     )
+
+
+@contextmanager
+def _proactor_policy_for_boot():
+    """Boot Playwright under a Proactor event-loop policy (Windows).
+
+    Playwright's sync API creates its own loop via ``asyncio.new_event_loop()``
+    on start. Kazma forces a GLOBAL ``WindowsSelectorEventLoopPolicy`` (see
+    ``kazma_core/eventloop.py`` — psycopg refuses Proactor), and the selector
+    loop does not implement subprocess transports, so the Node-driver spawn
+    (``create_subprocess_exec`` in Playwright's transport) raised
+    ``NotImplementedError`` and every browser tool silently returned nothing
+    (incident 2026-08-16). Installing the Proactor policy for the boot makes
+    the loop Playwright creates able to spawn its driver. Held only for the
+    boot under ``_state_lock`` (single-flight); the already-created loop keeps
+    running after the policy is restored. Non-Windows is a pass-through.
+    """
+    if not _IS_WINDOWS:
+        yield
+        return
+    prev = asyncio.get_event_loop_policy()
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
+        yield
+    finally:
+        asyncio.set_event_loop_policy(prev)
 
 
 async def _run_sync(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -64,9 +95,18 @@ def _ensure_page_sync() -> Any:
             from playwright.sync_api import sync_playwright
         except ImportError:
             raise RuntimeError(_install_hint()) from None
-        pw = sync_playwright().start()
-        browser = pw.chromium.launch(headless=True)
-        page = browser.new_page()
+        with _proactor_policy_for_boot():
+            pw = sync_playwright().start()
+            try:
+                browser = pw.chromium.launch(headless=True)
+                page = browser.new_page()
+            except Exception:
+                # Don't leak a half-booted driver if launch/new_page fails.
+                try:
+                    pw.stop()
+                except Exception:
+                    logger.debug("[browser] stop after failed launch", exc_info=True)
+                raise
         _state.update(playwright=pw, browser=browser, page=page)
         return page
 
