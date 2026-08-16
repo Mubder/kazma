@@ -67,17 +67,24 @@ def _universal_dir() -> Path:
 def _offsite_config() -> dict[str, Any]:
     """Live-read offsite sync config (mirrors pg_backup's reader; never raises).
 
-    Keys: ``backups.offsite.rclone_remote`` (e.g. ``"onedrive:kazma-backups"``)
-    and ``backups.offsite.enabled`` (default true when a remote is set).
+    Keys: ``backups.offsite.provider`` (google_drive|onedrive|webdav|s3),
+    ``backups.offsite.enabled``, and legacy ``backups.offsite.rclone_remote``
+    (kept for backward compatibility — if only rclone_remote is set, rclone
+    is used as before).
     """
-    cfg: dict[str, Any] = {"enabled": False, "rclone_remote": ""}
+    cfg: dict[str, Any] = {"enabled": False, "provider": "", "rclone_remote": ""}
     try:
         from kazma_core.config_store import get_config_store
 
         store = get_config_store()
+        cfg["provider"] = str(store.get("backups.offsite.provider") or "").strip()
         cfg["rclone_remote"] = str(store.get("backups.offsite.rclone_remote") or "").strip()
         enabled = store.get("backups.offsite.enabled")
-        cfg["enabled"] = bool(enabled) if enabled is not None else bool(cfg["rclone_remote"])
+        cfg["enabled"] = (
+            bool(enabled)
+            if enabled is not None
+            else bool(cfg["provider"] or cfg["rclone_remote"])
+        )
     except Exception:
         logger.debug("[universal-backup] offsite config read failed", exc_info=True)
     return cfg
@@ -91,7 +98,7 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
     deliverables that live outside kazma-data/ and outside git. The .env is
     copied verbatim: it is the recovery key for the encrypted vault inside
     settings.db, so an encrypted copy keyed BY it would be circular. Protect
-    the offsite copy instead (encrypted remote / rclone crypt).
+    the offsite copy instead (a cloud provider via cloud_sync).
     """
     result: dict[str, Any] = {"env": None, "artifacts": []}
     root = _data_dir().parent
@@ -139,27 +146,49 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
 
 
 def _offsite_sync(dest: Path) -> dict[str, Any]:
-    """Copy the finished backup dir to a configured rclone remote (fail-open).
+    """Upload the finished backup to the configured cloud provider (fail-open).
 
-    The ONLY protection against disk death — without it, data and all backup
-    generations share one drive. Gated on ``backups.offsite.rclone_remote``
-    being configured; runs ``rclone copy <dest> <remote>/<timestamp>`` via a
-    worker thread (Windows SelectorEventLoop cannot host subprocesses, §23).
-    Never raises — a missing rclone/bad remote logs and skips.
+    The ONLY protection against disk death. Uses the native cloud_sync
+    providers (Google Drive / OneDrive / WebDAV / S3) — no rclone needed.
+    Falls back to the legacy rclone path if only ``rclone_remote`` is set.
+    Never raises — any error logs and skips.
     """
-    cfg = _offsite_config()
-    if not cfg["enabled"] or not cfg["rclone_remote"]:
-        return {"skipped": "no offsite remote configured"}
-    if shutil.which("rclone") is None:
-        logger.warning(
-            "[universal-backup] offsite remote configured (%s) but rclone is not on PATH — skipping",
-            cfg["rclone_remote"],
-        )
-        return {"skipped": "rclone not found on PATH"}
-
     import asyncio
 
+    cfg = _offsite_config()
+    if not cfg["enabled"]:
+        return {"skipped": "offsite sync disabled"}
+
     async def _run() -> dict[str, Any]:
+        # Native providers take priority
+        if cfg["provider"]:
+            try:
+                from kazma_core.backup.cloud_sync import get_sync_provider
+
+                provider = get_sync_provider()
+                if provider is not None:
+                    result = await provider.upload_directory(dest, dest.name)
+                    if result.get("ok"):
+                        logger.info(
+                            "[universal-backup] offsite sync complete: %s",
+                            result.get("remote"),
+                        )
+                    else:
+                        logger.warning(
+                            "[universal-backup] offsite sync failed: %s",
+                            result.get("error"),
+                        )
+                    return result
+                return {"skipped": f"unknown provider: {cfg['provider']}"}
+            except Exception as exc:
+                logger.warning("[universal-backup] native offsite sync error: %s", exc)
+                return {"ok": False, "error": str(exc)}
+
+        # Legacy rclone fallback (only when rclone_remote is set)
+        if not cfg["rclone_remote"]:
+            return {"skipped": "no offsite provider configured"}
+        if shutil.which("rclone") is None:
+            return {"skipped": "rclone not found on PATH (configure a native provider instead)"}
         import subprocess
 
         remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
@@ -173,10 +202,6 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
         if proc.returncode == 0:
             logger.info("[universal-backup] offsite sync complete: %s", remote)
             return {"ok": True, "remote": remote}
-        logger.warning(
-            "[universal-backup] offsite sync failed (rc=%d): %s",
-            proc.returncode, (proc.stderr or "")[:300],
-        )
         return {"ok": False, "remote": remote, "error": (proc.stderr or "")[:300]}
 
     try:
