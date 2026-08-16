@@ -132,10 +132,10 @@
                 </div>
 
                 <div x-show="hubTestResult && hubTestResult.type === 'provider'" class="validation-result" style="margin-top:12px">
-                    <template x-if="hubTestResult.success">
+                    <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
-                    <template x-if="!hubTestResult.success">
+                    <template x-if="!hubTestResult?.success">
                         <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
@@ -208,10 +208,10 @@
                 </div>
 
                 <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px">
-                    <template x-if="hubTestResult.success">
+                    <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                     </template>
-                    <template x-if="!hubTestResult.success">
+                    <template x-if="!hubTestResult?.success">
                         <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
@@ -1046,8 +1046,10 @@
             </div>
             <div style="margin-top:12px">
                 <button class="btn btn-danger" @click="rebuildEmbeddings()" :disabled="embedderRebuilding || embedderRebuildStatus.state === 'running'">
-                    <template x-if="embedderRebuildStatus.state !== 'running'">{{ t('settings.embedder_rebuild_btn') }}</template>
-                    <template x-if="embedderRebuildStatus.state === 'running'">{{ t('settings.embedder_rebuild_running') }}</template>
+                    {# x-show spans, NOT <template x-if> — Alpine can't clone
+                       template content inside <button> (cloneNode/_x_dataStack). #}
+                    <span x-show="embedderRebuildStatus.state !== 'running'">{{ t('settings.embedder_rebuild_btn') }}</span>
+                    <span x-show="embedderRebuildStatus.state === 'running'">{{ t('settings.embedder_rebuild_running') }}</span>
                 </button>
                 <div x-show="embedderRebuildStatus.state !== 'idle'" x-cloak style="margin-top:10px">
                     <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">
@@ -2439,9 +2441,9 @@
                  style="padding:10px 16px;background:rgba(155,89,182,0.06);border:1px solid rgba(155,89,182,0.2);border-radius:var(--radius-card);margin-bottom:1rem;font-size:0.85rem;display:flex;align-items:center;gap:8px">
                 <span style="font-size:1.1em">☁️</span>
                 <div>
-                    <strong x-text="offsiteConfig.enabled ? 'Offsite sync active' : 'Offsite sync disabled'"></strong>
+                    <strong x-text="offsiteConfig?.enabled ? 'Offsite sync active' : 'Offsite sync disabled'"></strong>
                     <span style="color:var(--text-muted);margin-left:8px"
-                          x-text="'→ ' + (offsiteActiveProviderLabel || offsiteConfig.provider)"></span>
+                          x-text="'→ ' + (offsiteActiveProviderLabel || offsiteConfig?.provider)"></span>
                 </div>
             </div>
 
@@ -2552,7 +2554,7 @@
                      ? 'background:rgba(46,213,115,0.08);border:1px solid rgba(46,213,115,0.3)'
                      : 'background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.3)'">
                 <span :class="offsiteTestResult?.ok ? 'text-success' : 'text-error'"
-                      x-text="offsiteTestResult?.ok ? '✓ ' + (offsiteTestResult.message || 'Connected') : '✗ ' + (offsiteTestResult.error || 'Failed')"></span>
+                      x-text="offsiteTestResult?.ok ? '✓ ' + (offsiteTestResult.message || 'Connected') : '✗ ' + (offsiteTestResult?.error || 'Failed')"></span>
             </div>
 
             <!-- Save confirmation -->
