@@ -2376,7 +2376,7 @@
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.backup_desc') }}</p>
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:1rem">
                 <label style="font-size:0.85rem">{{ t('settings.backup_retention') }}</label>
-                <input type="number" class="settings-input" x-model.number="backupRetention" min="1" max="3650" step="1" style="max-width:110px">
+                <input type="number" class="form-input" x-model.number="backupRetention" min="1" max="3650" step="1" style="max-width:110px">
                 <button class="btn btn-secondary btn-sm" @click="saveBackupRetention()">{{ t('settings.save') }}</button>
             </div>
             <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.backup_retention_hint') }}</div>
@@ -2518,9 +2518,9 @@
                         <span x-show="offsiteConfig?.provider === 'webdav'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(46,213,115,0.15);color:#2ed573">active</span>
                     </div>
                     <div x-show="offsiteProvider === 'webdav'" x-cloak style="margin-top:6px" @click.stop>
-                        <input type="text" class="settings-input" x-model="offsiteWebdavUrl" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="settings-input" x-model="offsiteWebdavUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="password" class="settings-input" x-model="offsiteWebdavPass" placeholder="Password" style="width:100%;font-size:0.8rem">
+                        <input type="text" class="form-input" x-model="offsiteWebdavUrl" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteWebdavUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteWebdavPass" placeholder="Password" style="width:100%;font-size:0.8rem">
                     </div>
                     <p x-show="offsiteProvider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         WebDAV — works with WD MyCloud OS5 and any NAS.
@@ -2539,10 +2539,10 @@
                         <span x-show="offsiteConfig?.provider === 's3'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(255,153,0,0.15);color:#ff9900">active</span>
                     </div>
                     <div x-show="offsiteProvider === 's3'" x-cloak style="margin-top:6px" @click.stop>
-                        <input type="text" class="settings-input" x-model="offsiteS3Key" placeholder="Access Key ID" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="password" class="settings-input" x-model="offsiteS3Secret" placeholder="Secret Access Key" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="settings-input" x-model="offsiteS3Bucket" placeholder="Bucket name" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="settings-input" x-model="offsiteS3Endpoint" placeholder="Endpoint (optional, for B2/MinIO)" style="width:100%;font-size:0.8rem">
+                        <input type="text" class="form-input" x-model="offsiteS3Key" placeholder="Access Key ID" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteS3Secret" placeholder="Secret Access Key" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteS3Bucket" placeholder="Bucket name" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteS3Endpoint" placeholder="Endpoint (optional, for B2/MinIO)" style="width:100%;font-size:0.8rem">
                     </div>
                     <p x-show="offsiteProvider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         Amazon S3 or any S3-compatible storage. Cheapest for backups.
