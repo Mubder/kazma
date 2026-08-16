@@ -39,11 +39,15 @@
   /* Grid texture */
   --grid: rgba(59, 130, 246, 0.04);
 
-  /* Text — cool ice blue-grays */
+  /* Text — cool ice blue-grays.
+     Dark tertiary/muted used to sit at #5d6f8a / #4a5b78 — unreadable on
+     #16223a panels (chat footer, hints, badges). Lifted to the same
+     family as --text-secondary so labels stay visible. Light theme
+     ([data-theme=light] / prefers-color-scheme) is unchanged. */
   --text-primary: #eef3fb;
-  --text-secondary: #9fb0c9;
-  --text-tertiary: #5d6f8a;
-  --text-muted: #4a5b78;
+  --text-secondary: #c5d0e0;
+  --text-tertiary: #9fb0c9;
+  --text-muted: #8b9bb3;
   --text-inverse: #040815;
 
   /* Accent — royal blue */
@@ -1833,14 +1837,14 @@ tbody tr:last-child td {
 }
 .capacity-pill:hover { border-color: var(--accent); color: var(--text-primary); }
 .capacity-pill.is-on {
-  border-color: var(--warning, #facc15);
-  color: #040815;
-  background: var(--warning, #facc15);
+  border-color: #ca8a04;
+  color: #fff8e1;
+  background: #a16207;
 }
 .capacity-pill-power {
-  border-color: var(--warning, #facc15);
-  background: var(--warning, #facc15);
-  color: #040815;
+  border-color: #ca8a04;
+  background: #a16207;
+  color: #fff8e1;
 }
 .capacity-pill-power:hover { filter: brightness(1.08); }
 .capacity-pill-off { opacity: 1; }
