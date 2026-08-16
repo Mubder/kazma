@@ -2437,13 +2437,13 @@
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.offsite_desc') }}</p>
 
             <!-- Active provider status banner -->
-            <div x-show="offsiteConfig && offsiteConfig.provider" x-cloak
+            <div x-show="offsiteProvider" x-cloak
                  style="padding:10px 16px;background:rgba(155,89,182,0.06);border:1px solid rgba(155,89,182,0.2);border-radius:var(--radius-card);margin-bottom:1rem;font-size:0.85rem;display:flex;align-items:center;gap:8px">
                 <span style="font-size:1.1em">☁️</span>
                 <div>
-                    <strong x-text="offsiteConfig?.enabled ? 'Offsite sync active' : 'Offsite sync disabled'"></strong>
+                    <strong x-text="offsiteEnabled ? 'Offsite sync active' : 'Offsite sync disabled'"></strong>
                     <span style="color:var(--text-muted);margin-left:8px"
-                          x-text="'→ ' + (offsiteActiveProviderLabel || offsiteConfig?.provider)"></span>
+                          x-text="'→ ' + offsiteActiveProviderLabel"></span>
                 </div>
             </div>
 
@@ -2457,7 +2457,7 @@
                      :style="offsiteProvider === 'google_drive' ? 'border-color:#4285f4;background:rgba(66,133,244,0.06)' : ''"
                      @click="selectOffsiteProvider('google_drive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="checkbox" :checked="offsiteProvider === 'google_drive'" @click="selectOffsiteProvider('google_drive'); $event.stopPropagation()" style="accent-color:#4285f4">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:#4285f4">
                         <span style="font-size:1.4em">📁</span>
                         <strong>Google Drive</strong>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
@@ -2477,7 +2477,7 @@
                      :style="offsiteProvider === 'onedrive' ? 'border-color:#0078d4;background:rgba(0,120,212,0.06)' : ''"
                      @click="selectOffsiteProvider('onedrive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="checkbox" :checked="offsiteProvider === 'onedrive'" @click="selectOffsiteProvider('onedrive'); $event.stopPropagation()" style="accent-color:#0078d4">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" @click.stop style="accent-color:#0078d4">
                         <span style="font-size:1.4em">☁️</span>
                         <strong>OneDrive</strong>
                         <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
@@ -2497,7 +2497,7 @@
                      :style="offsiteProvider === 'webdav' ? 'border-color:#2ed573;background:rgba(46,213,115,0.06)' : ''"
                      @click="selectOffsiteProvider('webdav')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="checkbox" :checked="offsiteProvider === 'webdav'" @click="selectOffsiteProvider('webdav'); $event.stopPropagation()" style="accent-color:#2ed573">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" @click.stop style="accent-color:#2ed573">
                         <span style="font-size:1.4em">🏠</span>
                         <strong>WD MyCloud / NAS</strong>
                         <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
@@ -2518,7 +2518,7 @@
                      :style="offsiteProvider === 's3' ? 'border-color:#ff9900;background:rgba(255,153,0,0.06)' : ''"
                      @click="selectOffsiteProvider('s3')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="checkbox" :checked="offsiteProvider === 's3'" @click="selectOffsiteProvider('s3'); $event.stopPropagation()" style="accent-color:#ff9900">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" @click.stop style="accent-color:#ff9900">
                         <span style="font-size:1.4em">🪣</span>
                         <strong>S3 / Backblaze B2</strong>
                         <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
