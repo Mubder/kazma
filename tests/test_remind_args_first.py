@@ -135,3 +135,105 @@ def test_relative_timing_falls_through_to_chat(ops_db):
     )
     assert d.decision == "allow"  # from-now, no nearby event → allow
     assert d.rewritten_args is not None
+
+
+# ── 2026-08-16 incident: tz-qualified belief dates + compact shorthand ──
+#
+# The user's reset beliefs are stored as free text WITH timezone qualifiers
+# ("2026-08-17 02:48 Kuwait (UTC+3)"). parse_belief_date returned None for
+# all of them, so the gate could only see far-away beliefs (Sep/Oct), judged
+# every correct fire time a "conflict", then fell through to chat text which
+# had no time words → "no time expression found" loop. The scheduler's own
+# compact shorthand ("1386m", the format the schedule_task docstring
+# advertises) was also unrecognized by the gate.
+
+from kazma_core.safety.commitment.relative_time import (  # noqa: E402
+    parse_belief_date,
+    parse_time_expressions,
+)
+
+TZ_BELIEFS = [
+    {"predicate": "grok_personal_next_reset",
+     "object": "2026-08-17 02:48 Kuwait (UTC+3)"},
+    {"predicate": "admin_grok_next_reset",
+     "object": "2026-08-18 14:36 Kuwait (UTC+3)"},
+    {"predicate": "zcode_next_reset", "object": "2026-08-19 13:47 (+8)"},
+    {"predicate": "copilot_next_reset", "object": "2026-09-01"},
+]
+
+REQUEST_AT_0816 = datetime(2026, 8, 16, 0, 13, 0, tzinfo=timezone.utc)
+
+
+def test_parse_belief_date_handles_tz_qualifiers():
+    assert parse_belief_date("2026-08-17 02:48 Kuwait (UTC+3)") is not None
+    assert parse_belief_date("2026-08-19 13:47 (+8)") is not None
+    assert parse_belief_date("Aug 17 02:18 Asia/Kuwait") is not None
+    # plain ISO + plain dates unaffected
+    assert parse_belief_date("2026-09-01") is not None
+    assert parse_belief_date("2026-08-17T02:48:00") is not None
+
+
+def test_validate_consistent_with_tz_qualified_belief():
+    """Incident regression: a fire time anchored to a tz-qualified reset
+    belief must be 'consistent'. Before the fix the belief was unparseable,
+    only far-away beliefs were visible, and this returned 'conflict'."""
+    consistency, matched = validate_timing_against_memory(
+        "2026-08-17T02:18:00", TZ_BELIEFS,
+    )
+    assert consistency == "consistent"
+    assert matched is not None and matched["predicate"] == "grok_personal_next_reset"
+
+
+def test_iso_reminder_anchored_to_tz_belief_allows(ops_db):
+    """The full incident: agent retry with ISO timing, chat text has no time
+    words. Must allow+rewrite — not loop on 'no time expression found'."""
+    d = authorize_effect(
+        "schedule_task",
+        {"timing": "2026-08-17T02:18:00",
+         "prompt": "Grok personal reset in 30 minutes"},
+        user_text="recompute exact fire times and re-submit all 3 reminders",
+        request_at=REQUEST_AT_0816, memory_beliefs=TZ_BELIEFS,
+        thread_id="t-0816-1", turn_id="turn1",
+    )
+    assert d.decision == "allow", f"expected allow, got {d.decision}: {d.reason}"
+    assert d.rewritten_args is not None
+    assert d.rewritten_args["timing"].startswith("2026-08-17")
+
+
+def test_compact_shorthand_parses():
+    """The cron scheduler's native '5m'/'24h' shorthand (advertised in the
+    schedule_task docstring) must be a recognized time expression."""
+    for text, lead_min in [("1386m", 1386), ("24h", 24 * 60),
+                           ("in 20m", 20), ("5m", 5)]:
+        exprs = parse_time_expressions(text, request_at=REQUEST_AT_0816)
+        assert exprs, f"{text!r} produced no time expression"
+        assert exprs[0].lead == timedelta(minutes=lead_min), text
+
+
+def test_compact_timing_arg_resolves_without_chat_time_words(ops_db):
+    """'1386m' as args.timing with no time words in chat: the gate falls back
+    to the timing arg. A nearby tz-qualified belief makes it an actionable
+    clarify (options) rather than 'no time expression found'."""
+    d = authorize_effect(
+        "schedule_task",
+        {"timing": "1386m", "prompt": "grok reset ping"},
+        user_text="try again",
+        request_at=REQUEST_AT_0816, memory_beliefs=TZ_BELIEFS,
+        thread_id="t-0816-2", turn_id="turn1",
+    )
+    assert d.decision == "clarify"
+    assert "no time expression" not in (d.reason or "")
+    assert d.options, "clarify must carry actionable options"
+
+
+def test_conflicting_absolute_timing_still_guarded(ops_db):
+    """CoPilot guard preserved after the fallback: an absolute timing far from
+    every belief must NOT be auto-allowed via the timing-arg fallback."""
+    d = authorize_effect(
+        "schedule_task",
+        {"timing": "2026-11-01T09:00:00+00:00", "prompt": "x"},
+        user_text="try again",
+        request_at=REQUEST_AT_0816, memory_beliefs=TZ_BELIEFS,
+        thread_id="t-0816-3", turn_id="turn1",
+    )
+    assert d.decision == "clarify", "conflicting absolute timing must clarify"

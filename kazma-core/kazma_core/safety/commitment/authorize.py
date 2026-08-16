@@ -303,6 +303,7 @@ def _resolve_remind_act(
     # over-clarify loop (incident 2026-08-12). Only relative/absent timing
     # falls through to chat-text resolution.
     _timing_arg = str((args or {}).get("timing") or "").strip()
+    _consistency = "not_absolute"
     if _timing_arg and mode != "strict":
         _consistency, _matched = validate_timing_against_memory(_timing_arg, memory_beliefs)
         _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
@@ -339,6 +340,30 @@ def _resolve_remind_act(
     window = timedelta(days=30) if mode == "strict" else None
     res = _resolve(user_text, request_at=request_at, memory_beliefs=memory_beliefs,
                    relevance_window=window)
+
+    # Chat text often has no time words on agent-initiated retries (the time
+    # lives in args.timing) — fall back to resolving the timing arg itself
+    # before reporting "no time expression found" (incident 2026-08-16).
+    if res.decision == "clarify" and _timing_arg:
+        _res_t = _resolve(_timing_arg, request_at=request_at,
+                          memory_beliefs=memory_beliefs, relevance_window=window)
+        _adopt = False
+        if _res_t.decision == "allow" and _res_t.fire_at is not None:
+            _has_abs = any(e.kind == "absolute" for e in _res_t.time_expressions)
+            if _has_abs and _consistency not in ("consistent", "no_memory"):
+                # Unvalidated absolute timing (PR4 judged conflict, or strict
+                # mode skipped PR4) — validate against memory before allowing;
+                # this is the CoPilot overwrite guard.
+                _cons_t, _ = validate_timing_against_memory(_timing_arg, memory_beliefs)
+                _adopt = _cons_t in ("consistent", "no_memory")
+            else:
+                _adopt = True
+        elif _res_t.decision == "clarify" and _res_t.time_expressions:
+            # A clarify with parsed expressions is more actionable than
+            # "no time expression found" (it carries option_fire_ats).
+            _adopt = True
+        if _adopt:
+            res = _res_t
 
     # autonomous: a nearby-event clarify with a from-now candidate → allow it.
     if (mode == "autonomous" and res.decision == "clarify"

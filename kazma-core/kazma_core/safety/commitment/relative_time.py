@@ -129,6 +129,11 @@ _RE_CALENDAR_EN = re.compile(
     r"\b(tomorrow|next\s+week|next\s+month|in\s+a\s+week|in\s+a\s+day)\b",
     re.IGNORECASE,
 )
+# Scheduler-native compact shorthand: "5m", "24h", "1386m" (mirrors
+# cron.scheduler.parse_timing's ^(\d+)(m|h)$). Without this the commitment
+# gate rejects the exact format the schedule_task docstring advertises
+# (incident 2026-08-16: "1386m" → "no time expression found").
+_RE_COMPACT_EN = re.compile(r"\b(\d+)\s*(m|h)\b", re.IGNORECASE)
 
 # Capture an optional digit + an Arabic unit form anywhere in text. Direction
 # is bound separately (nearest قبل/بعد) so both adjacent and بـ-prefix
@@ -226,12 +231,33 @@ def event_aliases(predicate: str, lang: str = "en") -> list[str]:
 # Date parsing for belief objects
 # ──────────────────────────────────────────────────────────────────────────
 
+# Trailing timezone qualifiers the model appends to belief dates, e.g.
+# "2026-08-17 02:48 Kuwait (UTC+3)" or "2026-08-19 13:47 (+8)". Stripped so
+# the numeric core parses; the wall-clock time is what matters for anchoring
+# (incident 2026-08-16: these suffixes made the gate blind to the real reset
+# dates, so a correct fire time was rejected as a "conflict").
+_RE_TZ_QUALIFIER = re.compile(
+    r"\s+(?:kuwait|asia/kuwait|gmt|utc|local|local time)\s*"
+    r"(\((?:utc\s*)?[+-]\d{1,2}(?::\d{2})?\))?$",
+    re.IGNORECASE,
+)
+_RE_TZ_PAREN_ONLY = re.compile(r"\s*\((?:utc\s*)?[+-]\d{1,2}(?::\d{2})?\)\s*$", re.IGNORECASE)
+
+
+def _strip_tz_qualifier(text: str) -> str:
+    """Strip trailing timezone qualifiers (names, '(UTC+3)', '(+8)')."""
+    out = _RE_TZ_QUALIFIER.sub("", text).strip()
+    out = _RE_TZ_PAREN_ONLY.sub("", out).strip()
+    return out
+
+
 def parse_belief_date(obj: str, *, default_year: int | None = None) -> datetime | None:
     """Leniently parse a belief object into a UTC datetime.
 
     Belief objects are free text: "2026-09-01", "August 10, 2026 02:48",
-    "Sep 1". Tries ISO, then dateutil, then a few common formats. Returns
-    None if unparseable (the caller treats an unparseable event date as
+    "Sep 1", "2026-08-17 02:48 Kuwait (UTC+3)". Tries ISO, then a tz-qualifier
+    strip + retry, then dateutil, then a few common formats. Returns None if
+    unparseable (the caller treats an unparseable event date as
     "event referenced but date unknown" → clarify, never invent).
     """
     raw = normalize_digits((obj or "").strip())
@@ -239,6 +265,7 @@ def parse_belief_date(obj: str, *, default_year: int | None = None) -> datetime 
         return None
     # Strip trailing timezone-ish noise / local qualifiers the model appends.
     raw_clean = re.sub(r"\s+(local|local time|utc|gmt)$", "", raw, flags=re.I)
+    raw_clean = _strip_tz_qualifier(raw_clean) or raw_clean
 
     # 1. ISO 8601 (with or without time/tz)
     iso_candidates = [raw_clean]
@@ -460,6 +487,17 @@ def parse_time_expressions(
                 phrase=m.group(0), kind="relative_from_now",
                 lead=timedelta(seconds=secs), direction="after",
             ))
+
+    # --- Compact scheduler shorthand ("5m", "24h", "1386m") ---
+    for m in _RE_COMPACT_EN.finditer(norm):
+        if m.group(0) in {e.phrase for e in exprs}:
+            continue
+        unit = m.group(2).lower()
+        secs = 60 if unit == "m" else 3600
+        exprs.append(TimeExpression(
+            phrase=m.group(0), kind="relative_from_now",
+            lead=timedelta(seconds=int(m.group(1)) * secs), direction="after",
+        ))
 
     # --- bare calendar relatives (tomorrow, next week) ---
     for m in _RE_CALENDAR_EN.finditer(norm):
