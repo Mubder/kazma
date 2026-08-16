@@ -397,18 +397,6 @@ def perform_universal_backup(
     data = _data_dir()
     dest = _universal_dir() / str(ts)
 
-    # Clean up incomplete backups from interrupted runs (server restart while
-    # a backup was in progress). Any dir without a manifest.json is incomplete.
-    try:
-        base = _universal_dir()
-        if base.is_dir():
-            for old in base.iterdir():
-                if old.is_dir() and not (old / "manifest.json").is_file():
-                    logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
-                    _rmtree_force(old)
-    except Exception:
-        logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
-
     # Guard against concurrent universal backups — the 24h auto loop and a
     # manual "Back Up Now" click can fire within seconds of each other.
     # Lock held across check + phase flip: the old check-then-act let both
@@ -416,6 +404,19 @@ def perform_universal_backup(
     with _backup_lock:
         _phase = _backup_progress.get("phase")
         _started_ts = _backup_progress.get("started_ts")
+        
+        # Clean up incomplete backups from interrupted runs (server restart while
+        # a backup was in progress). Any dir without a manifest.json is incomplete.
+        # Must be INSIDE the lock to prevent race with concurrent backup runs.
+        try:
+            base = _universal_dir()
+            if base.is_dir():
+                for old in base.iterdir():
+                    if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
+                        logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
+                        _rmtree_force(old)
+        except Exception:
+            logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
         # A run that died mid-backup (process kill) leaves a mid phase
         # forever; anything older than 30 min is treated as crashed so the
         # cadence can never brick.
