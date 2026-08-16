@@ -571,6 +571,10 @@ def perform_universal_backup(
     manifest_path = dest / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     offsite = _offsite_sync(dest)
+    # Final elapsed includes the cloud upload; the zip's embedded manifest
+    # keeps the local-build elapsed it was written with.
+    elapsed = round(time.time() - started, 1)
+    manifest["elapsed_seconds"] = elapsed
     manifest["offsite"] = offsite
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
