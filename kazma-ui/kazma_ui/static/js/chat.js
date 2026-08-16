@@ -2728,9 +2728,39 @@
    *  - YOLO (all danger tools for this session)
    *  - Deny
    */
+  /** True when an ACTIVE inline approval card (enabled buttons) is rendered.
+      Resolved cards keep the class but their buttons are disabled/removed, so
+      a stale card from an earlier approval doesn't suppress a new one. */
+  function hasInlineApprovalCard() {
+    if (!messagesEl) return false;
+    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
+    for (var i = 0; i < cards.length; i++) {
+      var btns = cards[i].querySelectorAll('button');
+      for (var j = 0; j < btns.length; j++) {
+        if (!btns[j].disabled) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Hide the chat.html bottom Alpine approval card (driven by the store). */
+  function _clearStoreApproval() {
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        Alpine.store('agent').pendingApproval = null;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function renderHitlCard(data) {
     if (!data) return;
     pauseForApproval(data);
+    // The inline card is the primary approval UI. Hide the bottom Alpine card
+    // (driven by $store.agent.pendingApproval) so the same approval is never
+    // rendered twice — incident 2026-08-16: duplicated YOLO card (one inline,
+    // one lower). The store fields submitApproval needs are set by the inline
+    // card's own handlers.
+    _clearStoreApproval();
     var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
@@ -2864,7 +2894,7 @@
       // Prefer the live WebSocket bus when connected (same graph + grants path).
       var agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
       if (agentStore && agentStore.connectionStatus === 'connected') {
-        agentStore.submitApproval(action === 'approve', scope, data.thread_id || targetThreadId);
+        agentStore.submitApproval(action === 'approve', scope, data.thread_id || targetThreadId, data.tool || '');
         if (scope === 'yolo' && KS.toast) {
           KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
         }
@@ -3874,22 +3904,13 @@
             item.session_id === chatSessionId ||
             (threadId && item.thread_id === threadId);
           if (match) {
-            if (!messagesEl.querySelector('.hitl-approval-card')) {
+            if (!hasInlineApprovalCard()) {
               item.tool = item.tool || item.tool_name;
               item.args = item.args || item.arguments;
+              // renderHitlCard clears $store.agent.pendingApproval so the
+              // bottom Alpine card can't duplicate the inline one.
               renderHitlCard(item);
             }
-            try {
-              if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-                Alpine.store('agent').pendingApproval = {
-                  thread_id: item.thread_id || threadId || chatSessionId,
-                  tool: item.tool || '',
-                  args: item.args || {},
-                  tools: item.tools || [],
-                  message: item.message || '',
-                };
-              }
-            } catch (e2) {}
             break;
           }
         }
@@ -4100,6 +4121,7 @@
     retry: retry,
     toggleArchivedView: toggleArchivedView,
     _hitlApproval: renderHitlCard,
+    hasInlineApprovalCard: hasInlineApprovalCard,
     beginTurn: beginTurn,
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,

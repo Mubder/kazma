@@ -142,26 +142,41 @@ document.addEventListener('alpine:init', () => {
       this.activeNode = '';
       this.activeTool = null;
       // Server always emits idle after a graph pause so the thinking spinner
-      // clears — but if HITL is still waiting, keep the approval lock.
-      if (this.pendingApproval) {
+      // clears — but if HITL is still waiting, keep the approval lock. Check
+      // BOTH the store card (pendingApproval) and an active inline card in the
+      // message stream: renderHitlCard clears pendingApproval to hide the
+      // bottom card, so pendingApproval alone no longer signals a pending
+      // approval (incident 2026-08-16 dedup).
+      const chat = this._chat();
+      const inlineApproval = !!(
+        chat && typeof chat.hasInlineApprovalCard === 'function' &&
+        chat.hasInlineApprovalCard()
+      );
+      if (this.pendingApproval || inlineApproval) {
         this._turnActive = false;
-        const chat = this._chat();
         if (chat && typeof chat.pauseForApproval === 'function') {
           chat.pauseForApproval(this.pendingApproval);
         }
         return;
       }
       this._turnActive = false;
-      const chat = this._chat();
       if (chat && typeof chat.endTurn === 'function') chat.endTurn();
     },
     _pauseForApproval(approval) {
       this.isThinking = false;
       this.activeTool = null;
       this._turnActive = false;
-      this.pendingApproval = approval;
-      // Stop must not pulse; input locked until Approve / YOLO / Deny.
       const chat = this._chat();
+      // If an inline approval card is already in the message stream (SSE path /
+      // pending-approvals poll), do NOT also surface the bottom Alpine card —
+      // that duplicated the YOLO card (incident 2026-08-16). The inline card
+      // owns approve/deny; still lock the input either way.
+      const inlineVisible = !!(
+        chat && typeof chat.hasInlineApprovalCard === 'function' &&
+        chat.hasInlineApprovalCard()
+      );
+      this.pendingApproval = inlineVisible ? null : approval;
+      // Stop must not pulse; input locked until Approve / YOLO / Deny.
       if (chat && typeof chat.pauseForApproval === 'function') {
         chat.pauseForApproval(approval);
       }
@@ -382,7 +397,7 @@ document.addEventListener('alpine:init', () => {
       this._enqueueSend(payload, { expectAck: true, clientMsgId: clientMsgId });
     },
 
-    submitApproval(approved = true, scope = 'once', threadId = null) {
+    submitApproval(approved = true, scope = 'once', threadId = null, tool = null) {
       const pending = this.pendingApproval;
       const targetThreadId =
         threadId ||
@@ -394,8 +409,10 @@ document.addEventListener('alpine:init', () => {
         thread_id: targetThreadId,
         approved: !!approved,
         scope: scope || 'once',
-        // Required for tool-scope grants when interrupt payload is unavailable
-        tool: (pending && pending.tool) || '',
+        // Required for tool-scope grants when interrupt payload is unavailable.
+        // Explicit tool wins: the inline card clears pendingApproval to hide the
+        // bottom card, so its own data.tool must be passed through.
+        tool: tool || (pending && pending.tool) || '',
       };
 
       this.pendingApproval = null;
