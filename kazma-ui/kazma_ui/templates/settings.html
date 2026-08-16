@@ -2445,16 +2445,20 @@
                 </div>
             </div>
 
-            <!-- Provider cards -->
+            <!-- Provider cards — click a card to choose where backups are saved -->
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px">
+                Click a provider card to select it as the backup destination, then Test + Save.
+            </p>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
                 <!-- Google Drive -->
                 <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteConfig?.provider === 'google_drive' ? 'border-color:#4285f4' : ''"
+                     :style="offsiteProvider === 'google_drive' ? 'border-color:#4285f4;background:rgba(66,133,244,0.06)' : ''"
                      @click="selectOffsiteProvider('google_drive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:1.4em">📁</span>
                         <strong>Google Drive</strong>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'google_drive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(66,133,244,0.15);color:#4285f4">active</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         Uses your Gmail OAuth — click Connect to authorize Drive access.
@@ -2467,12 +2471,13 @@
 
                 <!-- OneDrive -->
                 <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteConfig?.provider === 'onedrive' ? 'border-color:#0078d4' : ''"
+                     :style="offsiteProvider === 'onedrive' ? 'border-color:#0078d4;background:rgba(0,120,212,0.06)' : ''"
                      @click="selectOffsiteProvider('onedrive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:1.4em">☁️</span>
                         <strong>OneDrive</strong>
                         <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'onedrive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(0,120,212,0.15);color:#0078d4">active</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         Uses your Microsoft account — click Connect to authorize Files access.
@@ -2485,39 +2490,41 @@
 
                 <!-- WD MyCloud / WebDAV -->
                 <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteConfig?.provider === 'webdav' ? 'border-color:#2ed573' : ''"
+                     :style="offsiteProvider === 'webdav' ? 'border-color:#2ed573;background:rgba(46,213,115,0.06)' : ''"
                      @click="selectOffsiteProvider('webdav')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:1.4em">🏠</span>
                         <strong>WD MyCloud / NAS</strong>
                         <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'webdav'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(46,213,115,0.15);color:#2ed573">active</span>
                     </div>
-                    <div x-show="offsiteConfig?.provider === 'webdav'" x-cloak style="margin-top:6px">
+                    <div x-show="offsiteProvider === 'webdav'" x-cloak style="margin-top:6px" @click.stop>
                         <input type="text" class="settings-input" x-model="offsiteWebdavUrl" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="text" class="settings-input" x-model="offsiteWebdavUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="password" class="settings-input" x-model="offsiteWebdavPass" placeholder="Password" style="width:100%;font-size:0.8rem">
                     </div>
-                    <p x-show="offsiteConfig?.provider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                    <p x-show="offsiteProvider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         WebDAV — works with WD MyCloud OS5 and any NAS.
                     </p>
                 </div>
 
                 <!-- S3 / B2 -->
                 <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteConfig?.provider === 's3' ? 'border-color:#ff9900' : ''"
+                     :style="offsiteProvider === 's3' ? 'border-color:#ff9900;background:rgba(255,153,0,0.06)' : ''"
                      @click="selectOffsiteProvider('s3')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:1.4em">🪣</span>
                         <strong>S3 / Backblaze B2</strong>
                         <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 's3'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(255,153,0,0.15);color:#ff9900">active</span>
                     </div>
-                    <div x-show="offsiteConfig?.provider === 's3'" x-cloak style="margin-top:6px">
+                    <div x-show="offsiteProvider === 's3'" x-cloak style="margin-top:6px" @click.stop>
                         <input type="text" class="settings-input" x-model="offsiteS3Key" placeholder="Access Key ID" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="password" class="settings-input" x-model="offsiteS3Secret" placeholder="Secret Access Key" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="text" class="settings-input" x-model="offsiteS3Bucket" placeholder="Bucket name" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="text" class="settings-input" x-model="offsiteS3Endpoint" placeholder="Endpoint (optional, for B2/MinIO)" style="width:100%;font-size:0.8rem">
                     </div>
-                    <p x-show="offsiteConfig?.provider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                    <p x-show="offsiteProvider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         Amazon S3 or any S3-compatible storage. Cheapest for backups.
                     </p>
                 </div>

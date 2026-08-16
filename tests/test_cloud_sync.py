@@ -52,6 +52,13 @@ def _isolated_stores(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(cs, "_write_vault", _write)
 
+    # The providers fall back to EMAIL_* env vars when the vault is empty; a
+    # token written into os.environ by one test would leak into the next and
+    # silently skip the refresh path under test. Clear them per test.
+    for _var in ("EMAIL_GMAIL_ACCESS_TOKEN", "EMAIL_GMAIL_REFRESH_TOKEN",
+                 "EMAIL_MS_ACCESS_TOKEN", "EMAIL_MS_REFRESH_TOKEN"):
+        monkeypatch.delenv(_var, raising=False)
+
 
 def _install_mock_transport(
     monkeypatch: pytest.MonkeyPatch,
@@ -258,6 +265,61 @@ def test_onedrive_refreshes_and_rotates_token(
     assert result["ok"] is True
     assert vault.values["email.microsoft.access_token"] == "ms-fresh"
     assert vault.values["email.microsoft.refresh_token"] == "rt-new"
+
+
+def _onedrive_token_capture(monkeypatch: pytest.MonkeyPatch, vault: "_FakeVault"):
+    """Install a mock transport that captures the MS token-grant form body."""
+    cs._read_config = _FakeConfig({"backups.offsite.provider": "onedrive"})  # type: ignore[assignment]
+    cs._read_vault = vault  # type: ignore[assignment]
+    captured: list[httpx.Request] = []
+    token_body: dict[str, str] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "login.microsoftonline.com" in req.url.host:
+            from urllib.parse import parse_qsl
+
+            token_body.update(dict(parse_qsl(req.content.decode())))
+            return _json_response(200, {"access_token": "t"})
+        if req.url.path == "/v1.0/me":
+            return _json_response(200, {})
+        if req.method == "PUT":
+            return httpx.Response(201)
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+    return token_body
+
+
+def test_onedrive_refresh_sends_client_secret_when_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+) -> None:
+    """Incident 2026-08-16: a confidential Azure app rejects the refresh grant
+    with AADSTS70002 unless the client_secret is included."""
+    vault = _FakeVault({
+        "email.microsoft.refresh_token": "rt",
+        "email.microsoft.client_id": "cid",
+        "email.microsoft.client_secret": "shh",
+    })
+    token_body = _onedrive_token_capture(monkeypatch, vault)
+    result = asyncio.run(cs.OneDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    assert result["ok"] is True
+    assert token_body.get("client_secret") == "shh"
+    assert token_body.get("grant_type") == "refresh_token"
+
+
+def test_onedrive_refresh_omits_client_secret_for_public_client(
+    monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
+) -> None:
+    """Public-client Azure apps store no secret → the grant must omit it."""
+    vault = _FakeVault({
+        "email.microsoft.refresh_token": "rt",
+        "email.microsoft.client_id": "cid",
+    })
+    token_body = _onedrive_token_capture(monkeypatch, vault)
+    result = asyncio.run(cs.OneDriveSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
+    assert result["ok"] is True
+    assert "client_secret" not in token_body
+    assert token_body.get("grant_type") == "refresh_token"
 
 
 # ── WebDAV (unit + local-server integration) ────────────────────────────

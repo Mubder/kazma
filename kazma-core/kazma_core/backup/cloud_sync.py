@@ -347,17 +347,28 @@ class OneDriveSync:
         )
         if not client_id:
             raise RuntimeError("OneDrive not configured — missing Microsoft OAuth client")
+        # Confidential Azure apps (a client_secret was registered) REQUIRE the
+        # secret on the refresh grant — without it AAD rejects with
+        # AADSTS70002 "must include a 'client_secret' input parameter"
+        # (incident 2026-08-16). Public-client apps have no secret → omit it.
+        client_secret = _read_vault("email.microsoft.client_secret") or os.environ.get(
+            "EMAIL_MS_CLIENT_SECRET", ""
+        )
+        tenant = os.environ.get("EMAIL_MS_TENANT_ID") or "common"
 
-        tenant = os.environ.get("EMAIL_MS_TENANT_ID", "common")
+        payload = {
+            "client_id": client_id,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+            "scope": "https://graph.microsoft.com/.default offline_access",
+        }
+        if client_secret:
+            payload["client_secret"] = client_secret
+
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 _MS_TOKEN_URL_TEMPLATE.format(tenant=tenant),
-                data={
-                    "client_id": client_id,
-                    "refresh_token": refresh_token,
-                    "grant_type": "refresh_token",
-                    "scope": "https://graph.microsoft.com/.default offline_access",
-                },
+                data=payload,
             )
             if resp.status_code != 200:
                 raise RuntimeError(f"Token refresh failed: {resp.text[:200]}")
