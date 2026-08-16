@@ -595,6 +595,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.backup_failed": {"en": "Failed:", "ar": "فشل:"},
     "settings.backup_history": {"en": "Backup History", "ar": "سجل النسخ الاحتياطي"},
     "settings.backup_none": {"en": "No backups yet.", "ar": "لا توجد نسخ بعد."},
+    "settings.backup_retention": {"en": "Keep backups", "ar": "الاحتفاظ بالنسخ"},
+    "settings.backup_retention_hint": {"en": "How many local backups to keep. After every run, backups older than this are permanently deleted. Cloud copies are never pruned.", "ar": "عدد النسخ المحلية المطلوب الاحتفاظ بها. بعد كل تشغيل تُحذف النسخ الأقدم من هذا العدد نهائياً. النسخ السحابية لا تُحذف أبداً."},
     "settings.offsite_heading": {"en": "Offsite Backup (Cloud Sync)", "ar": "نسخ احتياطي خارجي (مزامنة سحابية)"},
     "settings.offsite_desc": {"en": "Sync every backup to your cloud storage — Google Drive, OneDrive, WD MyCloud/NAS, or S3/B2. Protects against disk failure: without this, data and backups share one drive.", "ar": "مزامنة كل نسخة احتياطية مع التخزين السحابي — Google Drive أو OneDrive أو WD MyCloud/NAS أو S3/B2. يحمي من فشل القرص: بدون هذا، البيانات والنسخ على قرص واحد."},
     "settings.offsite_provider": {"en": "Cloud Provider", "ar": "مزود الخدمة السحابية"},

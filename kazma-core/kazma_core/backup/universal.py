@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import threading
@@ -421,8 +422,28 @@ def _prune(retention: int) -> int:
     return deleted
 
 
+def _read_retention() -> int:
+    """Live-read the backup retention (env override → ``backups.retention``).
+
+    Mirrors pg_backup's reader: ``KAZMA_BACKUP_RETENTION`` wins, then the
+    ConfigStore key, then the default of 7. Clamped to >= 1, never raises.
+    """
+    try:
+        env = (os.environ.get("KAZMA_BACKUP_RETENTION") or "").strip()
+        if env:
+            return max(1, int(env))
+        from kazma_core.config_store import get_config_store
+
+        val = get_config_store().get("backups.retention")
+        if val is not None:
+            return max(1, int(val))
+    except Exception:
+        logger.debug("[universal-backup] retention read failed", exc_info=True)
+    return _DEFAULT_RETENTION
+
+
 def perform_universal_backup(
-    *, retention: int = _DEFAULT_RETENTION, trigger: str = "auto"
+    *, retention: int | None = None, trigger: str = "auto"
 ) -> dict[str, Any]:
     """Back up EVERYTHING: all kazma-data SQLite DBs + assets + Postgres dump.
 
@@ -433,7 +454,9 @@ def perform_universal_backup(
     - ``postgres.dump`` — Postgres shared-state tables (when configured)
     - ``manifest.json`` — itemised listing with sizes
 
-    Returns a summary dict. Never raises — the 24h loop depends on this.
+    ``retention`` defaults to the live ``backups.retention`` config
+    (env ``KAZMA_BACKUP_RETENTION``), falling back to 7. Returns a summary
+    dict. Never raises — the 24h loop depends on this.
     """
     started = time.time()
     ts = int(time.time())
@@ -551,8 +574,9 @@ def perform_universal_backup(
     manifest["offsite"] = offsite
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    # 6. Prune old backups.
-    pruned = _prune(max(1, retention))
+    # 6. Prune old backups (live-configured retention, env override, >= 1).
+    keep = max(1, retention if retention is not None else _read_retention())
+    pruned = _prune(keep)
 
     total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
     size_mb = round(total_size / (1024 * 1024), 1)

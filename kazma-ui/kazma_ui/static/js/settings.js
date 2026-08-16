@@ -250,6 +250,7 @@ function settingsApp() {
         backupProgressText: '',
         backupProgressPhase: '',
         backupList: [],
+        backupRetention: 7,
         _backupPollId: null,
 
         // ── Offsite Backup ──
@@ -3487,8 +3488,7 @@ function settingsApp() {
                 if (resp.ok) {
                     this.offsiteConfig = await resp.json();
                     this.offsiteProvider = this.offsiteConfig.provider || '';
-                    this.offsiteEnabled = this.offsiteConfig.enabled;
-                    // Prefill credential fields from stored config
+                    this.offsiteEnabled = this.offsiteConfig.enabled;                    // Prefill credential fields from stored config
                     const w = this.offsiteConfig.webdav || {};
                     this.offsiteWebdavUrl = w.url || '';
                     this.offsiteWebdavUser = w.username || '';
@@ -3527,6 +3527,37 @@ function settingsApp() {
                     }
                 }
             } catch (e) { /* fail silently */ }
+            // Backup retention (live effective value — env override wins server-side)
+            try {
+                const r = await fetch('/api/settings/backup/retention');
+                if (r.ok) {
+                    const d = await r.json();
+                    this.backupRetention = Number(d.retention) || 7;
+                }
+            } catch (e) { /* fail silently */ }
+        },
+
+        async saveBackupRetention() {
+            const n = Number(this.backupRetention);
+            if (!n || n < 1) {
+                showToast('Backup retention must be at least 1', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/settings/backup/retention', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ retention: n }),
+                });
+                const data = await resp.json();
+                if (data.status === 'error') {
+                    showToast(data.error || 'Save failed', 'error');
+                } else {
+                    showToast('Backup retention saved — keeping the newest ' + n + ' backups', 'success');
+                }
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
         },
 
         _offsiteCredsPayload() {

@@ -106,3 +106,45 @@ def test_offsite_sync_zip_failure_is_fail_open(
     assert result["ok"] is False
     assert "zip failed" in result["error"]
     assert fake.uploaded == []
+
+
+# ── retention configuration ────────────────────────────────────────────────
+
+
+def test_read_retention_env_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAZMA_BACKUP_RETENTION", "30")
+    assert ub._read_retention() == 30
+
+
+def test_read_retention_config_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KAZMA_BACKUP_RETENTION", raising=False)
+
+    class _FakeStore:
+        def get(self, key: str, default: Any = None) -> Any:
+            assert key == "backups.retention"
+            return 15
+
+    from kazma_core import config_store as cs_mod
+
+    monkeypatch.setattr(cs_mod, "get_config_store", lambda: _FakeStore())
+    assert ub._read_retention() == 15
+
+
+def test_read_retention_defaults_to_7(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KAZMA_BACKUP_RETENTION", raising=False)
+
+    class _FakeStore:
+        def get(self, key: str, default: Any = None) -> Any:
+            return None
+
+    from kazma_core import config_store as cs_mod
+
+    monkeypatch.setattr(cs_mod, "get_config_store", lambda: _FakeStore())
+    assert ub._read_retention() == 7
+
+
+def test_read_retention_clamps_to_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAZMA_BACKUP_RETENTION", "0")
+    assert ub._read_retention() == 1
+    monkeypatch.setenv("KAZMA_BACKUP_RETENTION", "abc")
+    assert ub._read_retention() == 7  # unparsable → default

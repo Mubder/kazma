@@ -2374,6 +2374,12 @@
         <div class="settings-group">
             <h3>{{ t('settings.backup_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.backup_desc') }}</p>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:1rem">
+                <label style="font-size:0.85rem">{{ t('settings.backup_retention') }}</label>
+                <input type="number" class="settings-input" x-model.number="backupRetention" min="1" max="3650" step="1" style="max-width:110px">
+                <button class="btn btn-secondary btn-sm" @click="saveBackupRetention()">{{ t('settings.save') }}</button>
+            </div>
+            <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.backup_retention_hint') }}</div>
             <div style="display:flex;gap:12px;align-items:center;margin-bottom:1.25rem">
                 <button class="btn btn-primary" @click="runBackup()" :disabled="backupRunning">
                     <span x-show="!backupRunning">{{ t('settings.backup_now') }}</span>

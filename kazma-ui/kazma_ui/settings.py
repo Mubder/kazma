@@ -377,6 +377,25 @@ class SettingsRouterBuilder:
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
 
+        @router.get("/api/settings/backup/retention")
+        async def api_get_backup_retention() -> dict[str, Any]:
+            """Effective universal-backup retention (env override wins)."""
+            from kazma_core.backup.universal import _read_retention
+
+            return {"retention": _read_retention()}
+
+        @router.put("/api/settings/backup/retention")
+        async def api_set_backup_retention(req: dict[str, Any]) -> dict[str, str]:
+            """Persist backups.retention (number of local backups to keep)."""
+            from kazma_core.config_store import get_config_store as _gcs
+
+            try:
+                value = max(1, int(req.get("retention")))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return {"status": "error", "error": "retention must be a number >= 1"}
+            _gcs().set("backups.retention", value, category="backups")
+            return {"status": "ok"}
+
         @router.get("/api/settings/agent")
         async def api_get_agent() -> dict[str, Any]:
             """Get agent configuration (name, language, max tool rounds, …)."""
