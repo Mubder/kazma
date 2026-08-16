@@ -2457,6 +2457,7 @@
                      :style="offsiteProvider === 'google_drive' ? 'border-color:#4285f4;background:rgba(66,133,244,0.06)' : ''"
                      @click="selectOffsiteProvider('google_drive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="checkbox" :checked="offsiteProvider === 'google_drive'" @click="selectOffsiteProvider('google_drive'); $event.stopPropagation()" style="accent-color:#4285f4">
                         <span style="font-size:1.4em">📁</span>
                         <strong>Google Drive</strong>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
@@ -2476,6 +2477,7 @@
                      :style="offsiteProvider === 'onedrive' ? 'border-color:#0078d4;background:rgba(0,120,212,0.06)' : ''"
                      @click="selectOffsiteProvider('onedrive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="checkbox" :checked="offsiteProvider === 'onedrive'" @click="selectOffsiteProvider('onedrive'); $event.stopPropagation()" style="accent-color:#0078d4">
                         <span style="font-size:1.4em">☁️</span>
                         <strong>OneDrive</strong>
                         <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
@@ -2495,6 +2497,7 @@
                      :style="offsiteProvider === 'webdav' ? 'border-color:#2ed573;background:rgba(46,213,115,0.06)' : ''"
                      @click="selectOffsiteProvider('webdav')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="checkbox" :checked="offsiteProvider === 'webdav'" @click="selectOffsiteProvider('webdav'); $event.stopPropagation()" style="accent-color:#2ed573">
                         <span style="font-size:1.4em">🏠</span>
                         <strong>WD MyCloud / NAS</strong>
                         <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
@@ -2515,6 +2518,7 @@
                      :style="offsiteProvider === 's3' ? 'border-color:#ff9900;background:rgba(255,153,0,0.06)' : ''"
                      @click="selectOffsiteProvider('s3')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="checkbox" :checked="offsiteProvider === 's3'" @click="selectOffsiteProvider('s3'); $event.stopPropagation()" style="accent-color:#ff9900">
                         <span style="font-size:1.4em">🪣</span>
                         <strong>S3 / Backblaze B2</strong>
                         <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
