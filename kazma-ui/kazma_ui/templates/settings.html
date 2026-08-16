@@ -2534,8 +2534,8 @@
 
             <!-- Enable toggle + actions -->
             <div style="display:flex;gap:12px;align-items:center;margin-top:0.5rem">
-                <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">
-                    <input type="checkbox" x-model="offsiteEnabled" style="accent-color:var(--primary,#4f8cff)">
+                <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem" :style="!offsiteProvider ? 'cursor:not-allowed;opacity:0.5' : 'cursor:pointer'" :title="!offsiteProvider ? 'Select a provider first to enable/disable offsite sync' : ''">
+                    <input type="checkbox" x-model="offsiteEnabled" :disabled="!offsiteProvider" style="accent-color:var(--primary,#4f8cff)">
                     {{ t('settings.offsite_enabled') }}
                 </label>
                 <span style="flex:1"></span>
