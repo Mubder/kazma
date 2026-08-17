@@ -424,6 +424,11 @@
   // ── System Resources (via Telemetry SSE) ──────────────
   function startResourceMonitor() {
     var eventSource = new EventSource('/api/telemetry/stream');
+    window.__kazmaEventSources = window.__kazmaEventSources || [];
+    window.__kazmaEventSources.push(eventSource);
+    window.kazmaOnSoftNavLeave = function () {
+      try { eventSource.close(); } catch (e) {}
+    };
     eventSource.onmessage = function(event) {
       try {
         var data = JSON.parse(event.data);

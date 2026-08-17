@@ -12,13 +12,22 @@ def test_soft_nav_does_not_hard_reload_inspectors():
     nav = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "modules" / "nav.js").read_text(
         encoding="utf-8"
     )
-    # SSE / Alpine-app shells stay hard. Inspectors go through soft-nav.
-    assert "'/chat'" in nav
-    assert "'/ide'" in nav
-    assert "'/memory'" not in nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
-    assert "'/documents'" not in nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
-    assert "'/replay'" not in nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
+    # SSE / editor shells stay hard. Alpine settings shells now soft-nav.
+    hard = nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
+    assert "'/chat'" in hard
+    assert "'/ide'" in hard
+    assert "'/swarm'" in hard
+    assert "'/settings'" not in hard
+    assert "'/dashboard'" not in hard
+    assert "'/agents'" not in hard
+    assert "'/skills'" not in hard
+    assert "'/mcp'" not in hard
+    assert "'/memory'" not in hard
+    assert "'/documents'" not in hard
+    assert "'/replay'" not in hard
     assert "documents" in nav  # PAGE_SCRIPT_RE
+    assert "runInlinePageScripts" in nav
+    assert "teardownLiveSockets" in nav
 
 
 def test_tui_documents_and_dashboard_are_mouths():

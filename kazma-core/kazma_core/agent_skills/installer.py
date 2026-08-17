@@ -439,14 +439,51 @@ async def install_from_any(
     # Local path?
     p = Path(raw).expanduser()
     if p.exists():
-        return install_from_source(p, target_dir=target_dir)
+        result = install_from_source(p, target_dir=target_dir)
+        return await _attach_basic_certification(result)
 
     # file:// URL
     if raw.startswith("file:"):
         parsed = urlparse(raw)
-        return install_from_source(parsed.path, target_dir=target_dir)
+        result = install_from_source(parsed.path, target_dir=target_dir)
+        return await _attach_basic_certification(result)
 
-    return await install_from_github(raw, target_dir=target_dir, scope=scope)
+    result = await install_from_github(raw, target_dir=target_dir, scope=scope)
+    return await _attach_basic_certification(result)
+
+
+async def _attach_basic_certification(result: InstallResult) -> InstallResult:
+    """Best-effort linter + basic certification after a successful install."""
+    if not result.success or not result.installed:
+        return result
+    try:
+        from kazma_core.security.certification import KazmaCertification
+        from kazma_core.security.linter import SecurityLinter
+
+        cert = KazmaCertification()
+        linter = SecurityLinter()
+    except Exception:
+        logger.debug("[agent_skills] certification stack unavailable", exc_info=True)
+        return result
+    for item in result.installed:
+        path = Path(item.get("path") or "")
+        if not path.is_dir():
+            continue
+        try:
+            lint = await linter.lint_skill(path)
+            item["lint_ok"] = int(getattr(lint, "critical", 0) or 0) == 0
+        except Exception:
+            logger.debug("[agent_skills] lint skipped for %s", path, exc_info=True)
+        try:
+            report = await cert.certify(path, "basic")
+            item["certification"] = {
+                "certified": bool(report.certified),
+                "level": report.level,
+                "badge": report.badge,
+            }
+        except Exception:
+            logger.debug("[agent_skills] certify skipped for %s", path, exc_info=True)
+    return result
 
 
 def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResult:

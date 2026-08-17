@@ -1117,6 +1117,51 @@ class SettingsRouterBuilder:
             """Get system diagnostics."""
             return _get_sm().get_diagnostics()
 
+        @router.get("/api/security/hardening")
+        async def api_security_hardening() -> dict[str, Any]:
+            """Run the offline hardening suite (operator report, not a gate)."""
+            from pathlib import Path
+
+            from kazma_core.security.hardening import SecurityHardeningRunner
+
+            report = await SecurityHardeningRunner(Path.cwd()).run_all_checks()
+            return {
+                "total": report.total,
+                "passed": report.passed,
+                "failed": report.failed,
+                "critical_failures": report.critical_failures,
+                "timestamp": report.timestamp,
+                "checks": [
+                    {
+                        "name": c.name,
+                        "passed": c.passed,
+                        "severity": c.severity,
+                        "message": c.message,
+                        "recommendation": c.recommendation,
+                    }
+                    for c in report.checks
+                ],
+            }
+
+        @router.get("/api/security/deps")
+        async def api_security_deps() -> dict[str, Any]:
+            """Scan installed skill manifests (local; no NVD/OSV required)."""
+            from kazma_core.security.dependency_scanner import DependabotStyleScanner
+
+            scanner = DependabotStyleScanner()
+            try:
+                hits = await scanner.scan_skill_manifests()
+            except Exception as exc:
+                logger.debug("[security] skill dep scan failed", exc_info=True)
+                return {"status": "error", "error": str(exc), "results": []}
+            out = []
+            for h in hits or []:
+                if hasattr(h, "__dict__"):
+                    out.append({k: v for k, v in vars(h).items() if not k.startswith("_")})
+                else:
+                    out.append(str(h))
+            return {"status": "ok", "results": out}
+
         @router.get("/api/settings/system/updates")
         async def api_check_updates() -> dict[str, Any]:
             """Check for updates."""

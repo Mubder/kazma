@@ -16,15 +16,13 @@ export function initSoftNav() {
     // /dashboard uses large inline init (sessions + memory board); soft-nav
     // reinjects dashboard.js but historically skipped that inline block →
     // Session Management stuck on skeleton until F5.
+    // SSE chat, the IDE editor, and swarm task streams still hard-reload.
+    // Settings / dashboard / agents / skills / MCP now soft-nav: page
+    // bundles + inline scripts re-run, EventSources close on leave.
     const HARD_RELOAD_ALWAYS = new Set([
         '/chat',
         '/ide',
         '/swarm',
-        '/settings',
-        '/dashboard',
-        '/agents',
-        '/skills',
-        '/mcp',
     ]);
 
     const GLOBAL_LIBS = [
@@ -316,9 +314,50 @@ export function initSoftNav() {
         }
     }
 
+    function teardownLiveSockets() {
+        try {
+            if (typeof window.kazmaOnSoftNavLeave === 'function') {
+                window.kazmaOnSoftNavLeave();
+            }
+        } catch (e) { /* ignore */ }
+        const held = window.__kazmaEventSources;
+        if (Array.isArray(held)) {
+            held.forEach((src) => {
+                try { src.close(); } catch (e) { /* ignore */ }
+            });
+            window.__kazmaEventSources = [];
+        }
+    }
+
+    function runInlinePageScripts(root) {
+        if (!root) return;
+        const scripts = Array.from(root.querySelectorAll('script')).filter((s) => {
+            if (s.getAttribute('src')) return false;
+            const type = (s.getAttribute('type') || '').toLowerCase();
+            if (type && type !== 'text/javascript' && type !== 'application/javascript') {
+                return false;
+            }
+            const text = (s.textContent || '').trim();
+            if (!text) return false;
+            if (text.includes('window.KAZMA_I18N')) return false;
+            return true;
+        });
+        for (const s of scripts) {
+            try {
+                const ns = document.createElement('script');
+                ns.textContent = s.textContent;
+                ns.setAttribute('data-kazma-inline-rerun', '1');
+                s.replaceWith(ns);
+            } catch (e) {
+                console.warn('[soft-nav] inline script re-run failed:', e);
+            }
+        }
+    }
+
     async function softNav(url) {
         const gen = ++softNavGeneration;
         setNavigating(true);
+        teardownLiveSockets();
         try {
             const res = await fetch(url, {
                 headers: { 'Kazma-Soft-Nav': 'true', 'Accept': 'text/html' },
@@ -360,6 +399,7 @@ export function initSoftNav() {
                 if (doc.title) document.title = doc.title;
                 window.scrollTo(0, 0);
                 await reinjectPageScripts(doc);
+                runInlinePageScripts(oldMain);
                 if (gen !== softNavGeneration) return;
                 await bindPageAlpine(oldMain, gen);
             } else {
@@ -369,6 +409,7 @@ export function initSoftNav() {
                 window.scrollTo(0, 0);
 
                 await reinjectPageScripts(doc);
+                runInlinePageScripts(oldBody);
                 if (gen !== softNavGeneration) return;
 
                 await bindPageAlpine(oldBody, gen);

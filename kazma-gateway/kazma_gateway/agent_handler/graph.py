@@ -249,39 +249,19 @@ def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
 _MAJLIS_FAST_PATH_MAX_LEN = 60
 
 
-def _majlis_fast_path_reply(text: str) -> str | None:
+async def _majlis_fast_path_reply(text: str, *, sender_id: str = "") -> str | None:
     """Return a canned cultural reply iff *text* is a SHORT pure greeting/farewell.
 
-    F7: only short-circuit when the message is ONLY a greeting/farewell. A
-    greeting followed by a real request ("صباح الخير، ابحث لي عن ...") must
-    reach the graph, so this returns None for long messages. Returns None to
-    fall through to the normal agent path. Fail-open: any error returns None.
-
-    Note: detect_intent/get_greeting_response are methods on ConversationPacing
-    (not module functions); the prior inline import of them as module symbols
-    raised ImportError and silently disabled this fast-path entirely.
+    Uses the live :class:`MajlisProtocol` orchestrator (per-sender phase
+    machine). F7: only short-circuit when the message is ONLY a
+    greeting/farewell. Fail-open: any error returns None.
     """
+    if len((text or "").strip()) > _MAJLIS_FAST_PATH_MAX_LEN:
+        return None
     try:
-        from kazma_core.cultural_context import CulturalContext
-        from kazma_core.pacing import ConversationPacing, Intent
+        from kazma_core.majlis_runtime import maybe_majlis_short_circuit
 
-        pacing = ConversationPacing()
-        intent = pacing.detect_intent(text)
-        if intent not in (Intent.GREETING, Intent.FAREWELL):
-            return None
-        if len((text or "").strip()) > _MAJLIS_FAST_PATH_MAX_LEN:
-            return None
-        if intent == Intent.FAREWELL:
-            return "في أمان الله 👋"
-        cc = CulturalContext()
-        # Type-matched reply (2026-08-15): وعليكم السلام for السلام عليكم,
-        # صباح النور for صباح الخير, هلا والله for مرحبا — the old single
-        # pool answered "how are you" to every greeting.
-        return pacing.get_greeting_reply(
-            text,
-            is_ramadan=cc.state.is_ramadan,
-            is_eid=cc.state.is_eid,
-        )
+        return await maybe_majlis_short_circuit(text, sender_id=sender_id)
     except Exception:
         return None
 
@@ -1085,7 +1065,7 @@ def create_graph_handler(
         # Detect pure greetings/farewells before invoking the LLM.
         # Instant (< 50ms), zero token cost, culturally aware. F7: only
         # short pure greetings short-circuit (see _majlis_fast_path_reply).
-        _majlis_reply = _majlis_fast_path_reply(msg.text)
+        _majlis_reply = await _majlis_fast_path_reply(msg.text, sender_id=msg.sender_id)
         if _majlis_reply is not None:
             ctx = msg.context_metadata
             tg_text, tg_ctx = _prepare_tg_outbound(msg, _majlis_reply, ctx)

@@ -45,6 +45,30 @@ def test_permission_manager_called_from_execute():
     assert "KAZMA_PERMISSIONS_ENFORCE" in text
 
 
+def test_remaining_non_g_seams():
+    nav = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "modules" / "nav.js").read_text(
+        encoding="utf-8"
+    )
+    hard = nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
+    assert "'/settings'" not in hard
+    assert "'/chat'" in hard
+    retention = (
+        _ROOT / "kazma-core" / "kazma_core" / "documents" / "retention.py"
+    ).read_text(encoding="utf-8")
+    assert "gc_postgres_metadata_sql_port_pending" not in retention
+    graph = (
+        _ROOT / "kazma-gateway" / "kazma_gateway" / "agent_handler" / "graph.py"
+    ).read_text(encoding="utf-8")
+    assert "maybe_majlis_short_circuit" in graph
+    installer = (
+        _ROOT / "kazma-core" / "kazma_core" / "agent_skills" / "installer.py"
+    ).read_text(encoding="utf-8")
+    assert "_attach_basic_certification" in installer
+    settings = (_ROOT / "kazma-ui" / "kazma_ui" / "settings.py").read_text(encoding="utf-8")
+    assert "/api/security/hardening" in settings
+    assert "/api/security/deps" in settings
+
+
 def test_twin_prune_is_wired():
     directory = (
         _ROOT / "kazma-core" / "kazma_core" / "sessions" / "directory.py"

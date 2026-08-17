@@ -1147,6 +1147,177 @@ class PostgresDocumentRepository:
             conn.commit()
         return row is not None
 
+    def _jobs_table_exists(self, cur: Any) -> bool:
+        try:
+            cur.execute("SELECT to_regclass('public.document_jobs')")
+            row = cur.fetchone()
+            return bool(row and row[0])
+        except Exception:
+            return False
+
+    def gc_mark(
+        self,
+        *,
+        tombstone_cutoff: str,
+        rejected_cutoff: str,
+        dead_cutoff: str,
+    ) -> dict[str, Any]:
+        """Authoritative live reference sets (Postgres metadata)."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                has_jobs = self._jobs_table_exists(cur)
+                if has_jobs:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        FROM document_versions v
+                        JOIN documents d
+                          ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                        WHERE (d.deleted_at IS NULL OR d.deleted_at >= %s::timestamptz)
+                          AND NOT (
+                            v.id <> COALESCE(d.current_version_id, '')
+                            AND EXISTS (
+                              SELECT 1 FROM document_jobs j
+                              WHERE j.tenant_id = v.tenant_id AND j.version_id = v.id
+                            )
+                            AND NOT EXISTS (
+                              SELECT 1 FROM document_jobs j
+                              WHERE j.tenant_id = v.tenant_id AND j.version_id = v.id
+                                AND (
+                                  j.state NOT IN ('rejected', 'dead_letter', 'cancelled')
+                                  OR (j.state = 'rejected' AND j.updated_at >= %s::timestamptz)
+                                  OR (j.state = 'dead_letter' AND j.updated_at >= %s::timestamptz)
+                                )
+                            )
+                          )
+                        """,
+                        (tombstone_cutoff, rejected_cutoff, dead_cutoff),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        FROM document_versions v
+                        JOIN documents d
+                          ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                        WHERE (d.deleted_at IS NULL OR d.deleted_at >= %s::timestamptz)
+                        """,
+                        (tombstone_cutoff,),
+                    )
+                keep_source = {r[0] for r in cur.fetchall() if r and r[0]}
+                cur.execute(
+                    """
+                    SELECT DISTINCT b.sha256 AS sha256
+                    FROM document_artifacts a
+                    JOIN document_blobs b
+                      ON b.id = a.blob_id AND b.tenant_id = a.tenant_id
+                    JOIN documents d
+                      ON d.id = a.document_id AND d.tenant_id = a.tenant_id
+                    WHERE (d.deleted_at IS NULL OR d.deleted_at >= %s::timestamptz)
+                    """,
+                    (tombstone_cutoff,),
+                )
+                keep_artifacts = {r[0] for r in cur.fetchall() if r and r[0]}
+                cur.execute(
+                    """
+                    SELECT v.id AS id, v.document_id AS document_id
+                    FROM document_versions v
+                    JOIN documents d
+                      ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                    WHERE (d.deleted_at IS NULL OR d.deleted_at >= %s::timestamptz)
+                    """,
+                    (tombstone_cutoff,),
+                )
+                keep_versions = {(r[1], r[0]) for r in cur.fetchall() if r}
+                cur.execute(
+                    """
+                    SELECT source_blob_id AS blob_id FROM document_versions
+                    UNION
+                    SELECT blob_id AS blob_id FROM document_artifacts
+                    """
+                )
+                referenced_blob_ids = {r[0] for r in cur.fetchall() if r and r[0]}
+        return {
+            "keep_source": keep_source,
+            "keep_artifacts": keep_artifacts,
+            "keep_versions": keep_versions,
+            "referenced_blob_ids": referenced_blob_ids,
+        }
+
+    def gc_is_live_reference(self, *, kind: str, sha: str) -> bool:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                if kind == "artifacts":
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM document_artifacts a
+                        JOIN document_blobs b
+                          ON b.id = a.blob_id AND b.tenant_id = a.tenant_id
+                        JOIN documents d
+                          ON d.id = a.document_id AND d.tenant_id = a.tenant_id
+                        WHERE b.sha256 = %s AND b.storage_kind = 'artifacts'
+                          AND d.deleted_at IS NULL
+                        LIMIT 1
+                        """,
+                        (sha,),
+                    )
+                    return cur.fetchone() is not None
+                if kind == "originals":
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM document_versions v
+                        JOIN document_blobs b
+                          ON b.id = v.source_blob_id AND b.tenant_id = v.tenant_id
+                        JOIN documents d
+                          ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                        WHERE b.sha256 = %s AND d.deleted_at IS NULL
+                        LIMIT 1
+                        """,
+                        (sha,),
+                    )
+                    return cur.fetchone() is not None
+        return False
+
+    def gc_old_unreferenced_blob_ids(
+        self, *, cutoff_iso: str, referenced: set[Any], limit: int
+    ) -> list[str]:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id FROM document_blobs
+                    WHERE created_at < %s::timestamptz
+                    ORDER BY created_at ASC
+                    """,
+                    (cutoff_iso,),
+                )
+                rows = cur.fetchall()
+        out: list[str] = []
+        for r in rows:
+            bid = r[0]
+            if bid not in referenced:
+                out.append(bid)
+            if len(out) >= max(0, int(limit)):
+                break
+        return out
+
+    def gc_delete_blob_ids(self, ids: list[str]) -> int:
+        if not ids:
+            return 0
+        deleted = 0
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                for blob_id in ids:
+                    try:
+                        cur.execute("DELETE FROM document_blobs WHERE id = %s", (blob_id,))
+                        deleted += int(cur.rowcount or 0)
+                    except Exception:
+                        logger.debug("[documents.repository_pg] blob row delete failed", exc_info=True)
+            conn.commit()
+        return deleted
+
 
 def document_metadata_backend_name() -> str:
     from .jobs_pg import document_metadata_backend
