@@ -61,7 +61,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }} # write back to framework main
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
