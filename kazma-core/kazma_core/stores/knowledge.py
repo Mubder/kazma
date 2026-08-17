@@ -840,6 +840,17 @@ class KnowledgeStore:
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+        try:
+            from kazma_core.memory.unified_index import upsert_unified
+
+            upsert_unified(
+                item_id=f"kb:{chunk_id}",
+                kind="kb",
+                text=str(content or "")[:4000],
+                tenant_id=str(chunk.get("tenant_id") or "default"),
+            )
+        except Exception:
+            logger.debug("[knowledge] unified index skipped", exc_info=True)
         return True
 
     def list_chunks(

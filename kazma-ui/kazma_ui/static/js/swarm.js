@@ -2747,6 +2747,21 @@
   // BOOT
   // ══════════════════════════════════════════════════════
 
+  function destroySwarmMouth() {
+    try { if (pollInterval) clearInterval(pollInterval); } catch (e) {}
+    pollInterval = null;
+    try { if (playgroundSSE && playgroundSSE.close) playgroundSSE.close(); } catch (e) {}
+    playgroundSSE = null;
+    try { if (playgroundTimer) clearInterval(playgroundTimer); } catch (e) {}
+    playgroundTimer = null;
+    Object.keys(activeTasks).forEach(function (id) {
+      var t = activeTasks[id];
+      try { if (t && t.sse && t.sse.close) t.sse.close(); } catch (e) {}
+    });
+    activeTasks = {};
+  }
+  window.kazmaOnSoftNavLeave = destroySwarmMouth;
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

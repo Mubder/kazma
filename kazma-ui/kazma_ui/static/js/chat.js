@@ -4346,11 +4346,23 @@
     init();
   }
 
+  function destroyChatMouth() {
+    try { if (activeStream) activeStream.abort(); } catch (e) {}
+    activeStream = null;
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent').disconnect) {
+        Alpine.store('agent').disconnect();
+      }
+    } catch (e) {}
+  }
+  window.kazmaOnSoftNavLeave = destroyChatMouth;
+
   // Expose for inline handlers + agentStore turn lifecycle bridge
   window.KazmaChat = {
     sendMessage: sendMessage,
     newSession: newSession,
     retry: retry,
+    destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
     _hitlApproval: renderHitlCard,
     hasInlineApprovalCard: hasInlineApprovalCard,

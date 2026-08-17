@@ -12,11 +12,11 @@ def test_soft_nav_does_not_hard_reload_inspectors():
     nav = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "modules" / "nav.js").read_text(
         encoding="utf-8"
     )
-    # SSE / editor shells stay hard. Alpine settings shells now soft-nav.
+    # Every page soft-navs; chat/ide/swarm teardown is in page scripts.
     hard = nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
-    assert "'/chat'" in hard
-    assert "'/ide'" in hard
-    assert "'/swarm'" in hard
+    assert "'/chat'" not in hard
+    assert "'/ide'" not in hard
+    assert "'/swarm'" not in hard
     assert "'/settings'" not in hard
     assert "'/dashboard'" not in hard
     assert "'/agents'" not in hard

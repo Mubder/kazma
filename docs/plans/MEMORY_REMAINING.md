@@ -73,7 +73,7 @@ User turn
 | Hosted embed-only fleet defaults | [#78](https://github.com/Mubder/kazma/issues/78) |
 | Huge-corpus reconsolidation partition | **Done** — subject-hash shards + worker chain |
 | Neo4j install default (env/compose) | **Done** — `KAZMA_NEO4J_DEFAULT` / URL env; fail-open SQLite; `deploy/docker-compose.neo4j.yml` |
-| Physical KB+beliefs one-table merge | **Wontfix** — unified chat via inject/federated only ([#79](https://github.com/Mubder/kazma/issues/79)) |
+| Physical KB+beliefs one-table merge | **Index shipped** — `memory/unified_index.py` dual-writes beliefs + KB chunks into one `unified_items` table; source stores stay SoT ([#79](https://github.com/Mubder/kazma/issues/79)) |
 
 ### Architecture boundaries (updated)
 

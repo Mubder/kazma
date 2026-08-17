@@ -1507,6 +1507,15 @@ class UnifiedToolExecutor:
         resource = arguments.pop("resource", arguments.pop("_resource", None))
         action = arguments.pop("action", arguments.pop("_action", None))
 
+        try:
+            from kazma_core.division_runtime import check_division_tool
+
+            _div_err = await check_division_tool(tool_name)
+            if _div_err:
+                return {"content": _div_err, "is_error": True}
+        except Exception:
+            logger.debug("[Unified] division check skipped", exc_info=True)
+
         if user_id:
             resolved_div = division or "general_trading"
             resolved_res = resource or tool_name

@@ -422,6 +422,17 @@ def mutate_belief(
                 )
             except Exception:
                 logger.debug("[belief_mutate] dual-write backends failed", exc_info=True)
+            try:
+                from kazma_core.memory.unified_index import upsert_unified
+
+                upsert_unified(
+                    item_id=str(result["belief_id"]),
+                    kind="belief",
+                    text=f"{sub} {pred} {obj}".strip(),
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                logger.debug("[belief_mutate] unified index skipped", exc_info=True)
 
         # Phase 3: keep the materialized entity belief_count / graph_degree
         # columns in sync. Recompute the affected subject + object so the

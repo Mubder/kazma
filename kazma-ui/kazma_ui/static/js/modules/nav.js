@@ -3,11 +3,9 @@
 // Alpine factories + page init, then initTree.
 // Failures always fall back to a full page load.
 //
-// Full navigation (not soft) for:
-//   - SSE / heavy editors: /chat, /ide, /swarm
-//   - Pages with dedicated Alpine apps + external JS: /settings, /agents,
-//     /skills, /mcp — soft-nav left these stuck on "Loading…" / empty shells
-//     because script reinject + x-init races. Full load is reliable.
+// Soft-nav is on for every page. Failures fall back to a full load.
+// Chat / IDE / Swarm register window.kazmaOnSoftNavLeave to abort SSE
+// and destroy the editor before the next page binds.
 
 export function initSoftNav() {
     const SOFT_NAV_ENABLED = true;
@@ -19,11 +17,7 @@ export function initSoftNav() {
     // SSE chat, the IDE editor, and swarm task streams still hard-reload.
     // Settings / dashboard / agents / skills / MCP now soft-nav: page
     // bundles + inline scripts re-run, EventSources close on leave.
-    const HARD_RELOAD_ALWAYS = new Set([
-        '/chat',
-        '/ide',
-        '/swarm',
-    ]);
+    const HARD_RELOAD_ALWAYS = new Set([]);
 
     const GLOBAL_LIBS = [
         '/static/js/app.js',
@@ -34,7 +28,7 @@ export function initSoftNav() {
 
     // Only these classic page bundles are re-injected on soft-nav.
     // (Keeps importmap / module / alpine out of the reinject loop.)
-    const PAGE_SCRIPT_RE = /\/static\/js\/(?:providers|models|settings|agents|skills|mcp|dashboard|workspace|streaming|hitl_approval|replay|research|memory|kb|documents)\.js(?:\?|$)/i;
+    const PAGE_SCRIPT_RE = /\/static\/js\/(?:providers|models|settings|agents|skills|mcp|dashboard|workspace|streaming|hitl_approval|replay|research|memory|kb|documents|chat|ide|swarm)\.js(?:\?|$)/i;
 
     let navInFlight = null;
     let softNavGeneration = 0;

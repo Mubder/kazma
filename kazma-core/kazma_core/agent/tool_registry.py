@@ -595,6 +595,16 @@ class LocalToolRegistry:
                 }
             logger.debug("[ToolRegistry] permissions check skipped: %s", exc)
 
+        # ── Division sandbox / MCP allowlist (fail-open if unset) ──
+        try:
+            from kazma_core.division_runtime import check_division_tool
+
+            _div_err = await check_division_tool(tool_name)
+            if _div_err:
+                return {"content": _div_err, "is_error": True}
+        except Exception as exc:
+            logger.debug("[ToolRegistry] division check skipped: %s", exc)
+
         # ── Safety check — gate danger-tier tools (HITL) ───────────
         # Use the async check() so a real bus adapter can post an approval
         # request and await the operator's response. check_sync() only

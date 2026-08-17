@@ -1143,6 +1143,94 @@ class SettingsRouterBuilder:
                 ],
             }
 
+        @router.get("/api/divisions/status")
+        async def api_division_status() -> dict[str, Any]:
+            from kazma_core.division_runtime import (
+                current_division_context,
+                division_enforcement_on,
+                list_auth_requests,
+            )
+
+            ctx = current_division_context()
+            return {
+                "enforced": division_enforcement_on(),
+                "user": ctx[0] if ctx else None,
+                "division": ctx[1] if ctx else None,
+                "pending_requests": [
+                    r for r in list_auth_requests() if r.get("status") == "pending"
+                ],
+            }
+
+        @router.get("/api/divisions/requests")
+        async def api_division_requests() -> list[dict[str, Any]]:
+            from kazma_core.division_runtime import list_auth_requests
+
+            return list_auth_requests()
+
+        @router.post("/api/divisions/requests/{request_id}/approve")
+        async def api_division_approve(request_id: str) -> dict[str, Any]:
+            from kazma_core.division_runtime import current_division_context, get_authorization_flow
+
+            ctx = current_division_context()
+            approver = ctx[0] if ctx else "default"
+            result = await get_authorization_flow().approve_request(request_id, approver)
+            return {
+                "success": result.success,
+                "request_id": result.request_id,
+                "message": result.message,
+                "expires_at": result.expires_at,
+            }
+
+        @router.post("/api/divisions/requests/{request_id}/deny")
+        async def api_division_deny(request_id: str, req: dict[str, Any] | None = None) -> dict[str, Any]:
+            from kazma_core.division_runtime import current_division_context, get_authorization_flow
+
+            ctx = current_division_context()
+            approver = ctx[0] if ctx else "default"
+            reason = str((req or {}).get("reason") or "denied")
+            result = await get_authorization_flow().deny_request(request_id, approver, reason)
+            return {
+                "success": result.success,
+                "request_id": result.request_id,
+                "message": result.message,
+            }
+
+        @router.get("/api/security/disclosure")
+        async def api_list_disclosure(status: str | None = None) -> list[dict[str, Any]]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            return await VulnerabilityDisclosure().list_reports(status=status)
+
+        @router.post("/api/security/disclosure")
+        async def api_submit_disclosure(req: dict[str, Any]) -> dict[str, Any]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            rid = await VulnerabilityDisclosure().submit_report(req or {})
+            return {"status": "ok", "id": rid}
+
+        @router.post("/api/security/disclosure/{report_id}/acknowledge")
+        async def api_ack_disclosure(report_id: str) -> dict[str, Any]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            try:
+                return await VulnerabilityDisclosure().acknowledge(report_id)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+
+        @router.post("/api/security/disclosure/{report_id}/status")
+        async def api_disclosure_status(report_id: str, req: dict[str, Any]) -> dict[str, Any]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            try:
+                await VulnerabilityDisclosure().update_status(
+                    report_id,
+                    str(req.get("status") or ""),
+                    notes=str(req.get("notes") or ""),
+                )
+                return {"status": "ok"}
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+
         @router.get("/api/security/deps")
         async def api_security_deps() -> dict[str, Any]:
             """Scan installed skill manifests (local; no NVD/OSV required)."""

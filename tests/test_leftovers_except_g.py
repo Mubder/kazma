@@ -51,7 +51,7 @@ def test_remaining_non_g_seams():
     )
     hard = nav.split("HARD_RELOAD_ALWAYS")[1].split("]")[0]
     assert "'/settings'" not in hard
-    assert "'/chat'" in hard
+    assert "'/chat'" not in hard
     retention = (
         _ROOT / "kazma-core" / "kazma_core" / "documents" / "retention.py"
     ).read_text(encoding="utf-8")

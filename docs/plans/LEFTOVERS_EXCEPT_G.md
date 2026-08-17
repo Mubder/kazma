@@ -1,7 +1,7 @@
 # Plan: Leftovers except G
 
 **Date:** 2026-08-17  
-**Status:** implemented 2026-08-17 (P0–P3; P4 inspectors already soft-nav). Follow-up 2026-08-17: Settings/Dashboard/Agents/Skills/MCP soft-nav, document GC on Postgres metadata, Majlis orchestrator on greetings, skill cert+lint on install, `/api/security/hardening` + `/api/security/deps`. Chat/IDE/Swarm stay hard. KB+beliefs one-table merge still wontfix.  
+**Status:** implemented 2026-08-17 (P0–P3; P4 inspectors already soft-nav). Follow-up 2026-08-17: Settings/Dashboard/Agents/Skills/MCP soft-nav, document GC on Postgres metadata, Majlis orchestrator on greetings, skill cert+lint on install, `/api/security/hardening` + `/api/security/deps`. Chat/IDE/Swarm soft-nav with teardown. Disclosure + division APIs live. Unified index dual-writes beliefs+KB (stores stay SoT).  
 **Not this plan:** G (WhatsApp, BrightData/Oxylabs, soak, Windows/Postgres CI gates, Ruff/Bandit as gates, phone sign-off, hosted embed fleet #78, Gmail `pageToken`)
 
 ## Context
