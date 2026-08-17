@@ -294,6 +294,9 @@ export function initSoftNav() {
             }
         }
 
+        // Walk the container so x-init / x-cloak children bind (Settings).
+        initAlpineOn(pageBody);
+        await nextFrame();
         await nextFrame();
         if (gen !== softNavGeneration) return;
 
@@ -316,7 +319,7 @@ export function initSoftNav() {
         }
 
         // Wait for async x-init (settings loading flag) or hard-fail
-        const pageReady = await waitForPageReady(pageBody, 3500);
+        const pageReady = await waitForPageReady(pageBody, 8000);
         if (!pageReady) {
             throw new Error('page component init stuck (loading)');
         }

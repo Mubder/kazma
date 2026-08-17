@@ -798,3 +798,4 @@ function ideApp() {
     },
   };
 }
+if (typeof window !== "undefined") window.ideApp = ideApp;

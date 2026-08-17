@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Split settings.js; first-click Settings binds (2026-08-17)
+
+``settings.js`` is a thin composer. Tabs live in ``settings_core``,
+``settings_hub``, ``settings_agent``, ``settings_integrations``,
+``settings_ops``. ``window.settingsApp`` is set so Alpine can bind on
+the first soft-nav click (same hole as Memory: empty until a full reload).
+
 ## Unreleased — Soft-nav first click loads the real page (2026-08-17)
 
 Sidebar first-click on Memory (and IDE / Dashboard / Swarm / Chat)

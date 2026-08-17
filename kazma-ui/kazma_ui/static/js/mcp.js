@@ -537,6 +537,7 @@ function mcpApp() {
         }
     };
 }
+if (typeof window !== "undefined") window.mcpApp = mcpApp;
 
 // Expose the parser/rewriter for unit testing (kazma-cli tests import via Node).
 if (typeof module !== 'undefined' && module.exports) {

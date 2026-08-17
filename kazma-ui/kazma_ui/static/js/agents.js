@@ -162,3 +162,4 @@ function agentsPage() {
     },
   };
 }
+if (typeof window !== "undefined") window.agentsPage = agentsPage;
