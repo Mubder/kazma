@@ -298,9 +298,8 @@
 
         async loadHubProviders() {
             try {
-                const resp = await fetch('/api/providers');
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const raw = await resp.json();
+                const raw = await this._fetch('/api/providers');
+                if (!raw) throw new Error('providers unavailable');
                 // Normalize so Alpine x-for always gets string arrays
                 this.hubProviders = (Array.isArray(raw) ? raw : []).map(function (p) {
                     var disc = p.discovered_models;
@@ -321,9 +320,9 @@
 
         async loadHubConnectors() {
             try {
-                const resp = await fetch('/api/connectors');
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                this.hubConnectors = await resp.json();
+                const data = await this._fetch('/api/connectors');
+                if (!data) throw new Error('connectors unavailable');
+                this.hubConnectors = data;
             } catch (e) {
                 console.error('[Hub] Failed to load connectors:', e);
                 this.hubConnectors = [];
@@ -332,9 +331,9 @@
 
         async loadHubProfiles() {
             try {
-                const resp = await fetch('/api/models/profiles');
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                this.hubProfiles = await resp.json();
+                const data = await this._fetch('/api/models/profiles');
+                if (!data) throw new Error('profiles unavailable');
+                this.hubProfiles = data;
             } catch (e) {
                 console.error('[Hub] Failed to load profiles:', e);
                 this.hubProfiles = [];

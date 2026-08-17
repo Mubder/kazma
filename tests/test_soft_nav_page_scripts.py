@@ -102,3 +102,27 @@ def test_soft_nav_calls_head_merge_and_body_inlines() -> None:
     assert "function runIncomingBodyScripts(" in nav
     assert "isSoftNavPageScript(src)" in nav
     assert "PAGE_SCRIPT_RE" not in nav
+
+
+def test_soft_nav_pauses_alpine_mutations_across_swap() -> None:
+    """<html x-data> makes Alpine init swapped nodes before page scripts.
+
+    That binds settingsApp() as {} and stamps _x_marker, so a later
+    initTree is a no-op — first click stuck on "Loading settings…",
+    second click (full document load) works.
+    """
+    nav = _NAV.read_text(encoding="utf-8")
+    assert "function pauseAlpineMutations(" in nav
+    assert "Alpine.stopObservingMutations" in nav
+    assert "Alpine.startObservingMutations" in nav
+    assert "function rebindAlpineRoot(" in nav
+    assert "function isEmptyAlpineBind(" in nav
+    # Call sites (trailing ;) — not the function declarations.
+    pause_at = nav.index("pauseAlpineMutations();")
+    swap_at = nav.index("oldBody.innerHTML = newBody.innerHTML")
+    bind_at = nav.index("await bindPageAlpine(oldBody, gen)")
+    resume_at = nav.index("resumeAlpineMutations();")
+    assert pause_at < swap_at < bind_at
+    assert pause_at < resume_at
+    assert "rebindAlpineRoot(root)" in nav
+    assert "HARD_RELOAD_ALWAYS" in nav

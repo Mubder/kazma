@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Settings first click: Alpine was binding an empty shell (2026-08-17)
+
+``<html x-data="kazmaApp()">`` means Alpine's MutationObserver owns
+every soft-nav ``innerHTML`` swap. On the first Settings click the
+observer ran *before* ``settingsApp`` existed, bound ``{}``, stamped
+``_x_marker``, and later ``initTree`` skipped the tree — spinner
+stuck until a full reload (second click). Soft-nav now pauses Alpine
+mutations across the swap, loads page scripts, then destroy+rebinds.
+Hub lists use the 8s ``_fetch`` so a hung ``/api/providers`` cannot
+hold the spinner.
+
 ## Unreleased — Settings first click no longer sticks on Loading (2026-08-17)
 
 ``init()`` awaited voice/STT provider lists before clearing

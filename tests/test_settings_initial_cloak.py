@@ -24,3 +24,4 @@ def test_settings_tab_panels_are_cloaked_before_alpine_initializes() -> None:
     assert missing_cloak == []
     assert ':class="{ hidden: tab !== \'providers_connectors\' }" x-cloak' in html
     assert ':class="{ hidden: hubSubtab !== \'connectors\' }" x-cloak' in html
+    assert ':class="{ hidden: !loading }" x-cloak' in html

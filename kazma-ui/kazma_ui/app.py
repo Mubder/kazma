@@ -537,6 +537,11 @@ class KazmaAppBuilder:
             # Settings page scripts — must bust cache or the Embedder tab etc.
             # runs stale JS against fresh HTML (empty status cards symptom).
             _STATIC_DIR / "js" / "settings.js",
+            _STATIC_DIR / "js" / "settings_core.js",
+            _STATIC_DIR / "js" / "settings_hub.js",
+            _STATIC_DIR / "js" / "settings_agent.js",
+            _STATIC_DIR / "js" / "settings_integrations.js",
+            _STATIC_DIR / "js" / "settings_ops.js",
             _STATIC_DIR / "js" / "providers.js",
             _STATIC_DIR / "js" / "models.js",
             # MCP lifecycle controls run in a standalone page script; include

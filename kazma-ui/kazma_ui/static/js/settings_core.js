@@ -5,7 +5,7 @@
     root.KazmaSettingsMixins.core = function () {
         return {
         tab: 'providers_connectors',
-        loading: false,
+        loading: true,
         saving: false,
 
         // ── Providers Tab ──

@@ -11,6 +11,13 @@
 // (memory_console.js, dash_lists.js, voice.js, mermaid, CodeMirror).
 // Second click on the same nav item is a full reload, so it looked
 // "fixed". isSoftNavPageScript() is the single gate now.
+//
+// Settings (and any page whose factory is not already on window) has a
+// second trap: <html> is x-data="kazmaApp()", so Alpine's MutationObserver
+// inits the swapped .page-body BEFORE page scripts run. settingsApp() is
+// still undefined → Alpine binds {} and stamps _x_marker → later initTree
+// skips the tree. Pause the observer across the swap, then bind after
+// scripts. Destroy+rebind clears a stale empty marker if one landed.
 
 const GLOBAL_LIB_PATHS = [
     '/static/js/app.js',
@@ -134,13 +141,51 @@ export function initSoftNav() {
         return false;
     }
 
+    function isEmptyAlpineBind(el) {
+        const stack = el && el._x_dataStack;
+        if (!stack || !stack[0]) return true;
+        try {
+            return Object.keys(stack[0]).length === 0;
+        } catch (e) {
+            return true;
+        }
+    }
+
     function isAlpineBound(el) {
-        return !!(el && (el._x_dataStack || el.__x));
+        if (!el || !(el._x_dataStack || el.__x)) return false;
+        // Alpine treats a missing factory as x-data="{}" and still marks the
+        // node initialized. That empty stack is not a real page bind.
+        return !isEmptyAlpineBind(el);
+    }
+
+    function pageLevelXDataRoots(root) {
+        if (!root) return [];
+        return Array.from(root.querySelectorAll('[x-data]')).filter((el) => {
+            const ancestor = el.parentElement && el.parentElement.closest('[x-data]');
+            return !ancestor || !root.contains(ancestor);
+        });
     }
 
     function unboundAlpineRoots(root) {
         if (!root) return [];
-        return Array.from(root.querySelectorAll('[x-data]')).filter((n) => !isAlpineBound(n));
+        return pageLevelXDataRoots(root).filter((n) => !isAlpineBound(n));
+    }
+
+    function pauseAlpineMutations() {
+        if (window.Alpine && typeof Alpine.stopObservingMutations === 'function') {
+            Alpine.stopObservingMutations();
+        }
+    }
+
+    function resumeAlpineMutations() {
+        if (window.Alpine && typeof Alpine.startObservingMutations === 'function') {
+            Alpine.startObservingMutations();
+        }
+    }
+
+    function rebindAlpineRoot(el) {
+        destroyAlpineOn(el);
+        initAlpineOn(el);
     }
 
     /**
@@ -240,12 +285,12 @@ export function initSoftNav() {
         const start = Date.now();
         let sawLoading = false;
         while (Date.now() - start < timeoutMs) {
-            const roots = Array.from(pageBody.querySelectorAll('[x-data]'));
+            const roots = pageLevelXDataRoots(pageBody);
             if (!roots.length) return true;
 
             let allReady = true;
             for (const el of roots) {
-                if (!isAlpineBound(el)) {
+                if (!isAlpineBound(el) || isEmptyAlpineBind(el)) {
                     allReady = false;
                     break;
                 }
@@ -290,22 +335,22 @@ export function initSoftNav() {
         }
         if (gen !== softNavGeneration) return;
 
-        // Bind each x-data root explicitly (more reliable than only walking the container)
-        const roots = Array.from(pageBody.querySelectorAll('[x-data]'));
+        // Always destroy+init. A MutationObserver pass that ran before
+        // page scripts may have bound {} and stamped _x_marker — initTree
+        // alone would skip those nodes.
+        const roots = pageLevelXDataRoots(pageBody);
         if (roots.length === 0) {
             initAlpineOn(pageBody);
         } else {
             for (const root of roots) {
-                if (!isAlpineBound(root)) {
-                    initAlpineOn(root);
-                }
+                rebindAlpineRoot(root);
             }
         }
 
         await nextFrame();
         if (gen !== softNavGeneration) return;
 
-        // Retry unbound roots
+        // Retry unbound / empty-{} roots
         for (let attempt = 0; attempt < 5; attempt++) {
             if (gen !== softNavGeneration) return;
             const unbound = unboundAlpineRoots(pageBody);
@@ -313,7 +358,7 @@ export function initSoftNav() {
             await sleep(40 + attempt * 30);
             await waitForFactories(factories, 500);
             for (const root of unbound) {
-                initAlpineOn(root);
+                rebindAlpineRoot(root);
             }
         }
 
@@ -427,6 +472,7 @@ export function initSoftNav() {
         const gen = ++softNavGeneration;
         setNavigating(true);
         teardownLiveSockets();
+        let alpinePaused = false;
         try {
             const res = await fetch(url, {
                 headers: { 'Kazma-Soft-Nav': 'true', 'Accept': 'text/html' },
@@ -462,36 +508,48 @@ export function initSoftNav() {
             const oldMain = document.querySelector('#main-content');
             if (!newMain || !oldMain) throw new Error('missing #main-content');
 
-            if (!newBody || !oldBody) {
-                destroyAlpineOn(oldMain);
-                oldMain.innerHTML = newMain.innerHTML;
-                if (doc.title) document.title = doc.title;
-                window.scrollTo(0, 0);
-                mergePageHead(doc);
-                await reinjectPageScripts(doc);
-                runInlinePageScripts(oldMain);
-                runIncomingBodyScripts(doc);
-                if (gen !== softNavGeneration) return;
-                await bindPageAlpine(oldMain, gen);
-            } else {
-                destroyAlpineOn(oldBody);
-                oldBody.innerHTML = newBody.innerHTML;
-                syncChrome(doc);
-                window.scrollTo(0, 0);
+            // Pause Alpine BEFORE the innerHTML swap. <html> is x-data, so
+            // the document MutationObserver would otherwise init the new
+            // tree on the first await (script load) while factories are
+            // still missing, bind {}, and stamp _x_marker.
+            pauseAlpineMutations();
+            alpinePaused = true;
+            try {
+                if (!newBody || !oldBody) {
+                    destroyAlpineOn(oldMain);
+                    oldMain.innerHTML = newMain.innerHTML;
+                    if (doc.title) document.title = doc.title;
+                    window.scrollTo(0, 0);
+                    mergePageHead(doc);
+                    await reinjectPageScripts(doc);
+                    runInlinePageScripts(oldMain);
+                    runIncomingBodyScripts(doc);
+                    if (gen !== softNavGeneration) return;
+                    await bindPageAlpine(oldMain, gen);
+                } else {
+                    destroyAlpineOn(oldBody);
+                    oldBody.innerHTML = newBody.innerHTML;
+                    syncChrome(doc);
+                    window.scrollTo(0, 0);
 
-                mergePageHead(doc);
-                await reinjectPageScripts(doc);
-                runInlinePageScripts(oldBody);
-                runIncomingBodyScripts(doc);
-                if (gen !== softNavGeneration) return;
+                    mergePageHead(doc);
+                    await reinjectPageScripts(doc);
+                    runInlinePageScripts(oldBody);
+                    runIncomingBodyScripts(doc);
+                    if (gen !== softNavGeneration) return;
 
-                await bindPageAlpine(oldBody, gen);
+                    await bindPageAlpine(oldBody, gen);
+                }
+            } finally {
+                resumeAlpineMutations();
+                alpinePaused = false;
             }
 
             if (gen !== softNavGeneration) return;
             history.pushState({ kazmaSoft: true }, '', url);
             updateActiveNav();
         } finally {
+            if (alpinePaused) resumeAlpineMutations();
             if (gen === softNavGeneration) setNavigating(false);
         }
     }

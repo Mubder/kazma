@@ -89,3 +89,14 @@ def test_settings_init_does_not_await_voice_before_clearing_loading() -> None:
     assert "loadVoiceModels" not in init
     assert "_loadSecondarySettings" in init
     assert "self.loading = false" in init
+    # Spinner is the initial state so a late x-init cannot leave a blank shell.
+    assert "loading: true" in core.split("return {", 1)[1][:200]
+
+
+def test_hub_loads_use_timed_fetch() -> None:
+    hub = (_JS / "settings_hub.js").read_text(encoding="utf-8")
+    for name in ("loadHubProviders", "loadHubConnectors", "loadHubProfiles"):
+        start = hub.index(f"async {name}()")
+        chunk = hub[start : start + 350]
+        assert "this._fetch(" in chunk, name
+        assert "await fetch(" not in chunk, name
