@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Settings first click no longer sticks on Loading (2026-08-17)
+
+``init()`` awaited voice/STT provider lists before clearing
+``loading``, so a slow or hanging voice API left the shell on
+"Loading settings…". Core + hub load first; voice/docs run after
+the spinner clears. ``_fetch`` aborts at 8s. Alpine ``this`` after
+``await`` is captured as ``self``.
+
 ## Unreleased — Split settings.js; first-click Settings binds (2026-08-17)
 
 ``settings.js`` is a thin composer. Tabs live in ``settings_core``,

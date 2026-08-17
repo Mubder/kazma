@@ -238,6 +238,7 @@ export function initSoftNav() {
      */
     async function waitForPageReady(pageBody, timeoutMs = 3000) {
         const start = Date.now();
+        let sawLoading = false;
         while (Date.now() - start < timeoutMs) {
             const roots = Array.from(pageBody.querySelectorAll('[x-data]'));
             if (!roots.length) return true;
@@ -250,8 +251,15 @@ export function initSoftNav() {
                 }
                 try {
                     const data = Alpine.$data(el);
-                    // settingsApp uses loading=true during init()
                     if (data && data.loading === true) {
+                        sawLoading = true;
+                        allReady = false;
+                        break;
+                    }
+                    // Don't treat "loading never started" as ready for 300ms —
+                    // Settings x-init sets loading=true after the first tick.
+                    if (data && 'loading' in data && data.loading !== true && !sawLoading
+                            && (Date.now() - start) < 300) {
                         allReady = false;
                         break;
                     }
@@ -294,9 +302,6 @@ export function initSoftNav() {
             }
         }
 
-        // Walk the container so x-init / x-cloak children bind (Settings).
-        initAlpineOn(pageBody);
-        await nextFrame();
         await nextFrame();
         if (gen !== softNavGeneration) return;
 

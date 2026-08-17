@@ -319,33 +319,35 @@
         emailSaving: false,
 
         async init() {
-            this.loading = true;
+            const self = this;
+            self.loading = true;
             try {
                 // Load all settings in parallel
                 const [settings, providers, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg, nonstopCfg] = await Promise.all([
-                    this._fetch('/api/settings'),
-                    this._fetch('/api/settings/providers'),
-                    this._fetch('/api/settings/agent/personalities'),
-                    this._fetch('/api/settings/shortcuts'),
-                    this._fetch('/api/settings/agent'),
-                    this._fetch('/api/settings/agent/context'),
-                    this._fetch('/api/settings/agent/safety'),
-                    this._fetch('/api/settings/appearance'),
-                    this._fetch('/api/settings/agent/nonstop'),
+                    self._fetch('/api/settings'),
+                    self._fetch('/api/settings/providers'),
+                    self._fetch('/api/settings/agent/personalities'),
+                    self._fetch('/api/settings/shortcuts'),
+                    self._fetch('/api/settings/agent'),
+                    self._fetch('/api/settings/agent/context'),
+                    self._fetch('/api/settings/agent/safety'),
+                    self._fetch('/api/settings/appearance'),
+                    self._fetch('/api/settings/agent/nonstop'),
                 ]);
 
                 if (settings) {
-                    if (settings.model) Object.assign(this.currentModel, settings.model);
-                    // Prefer dedicated agent endpoint (clean keys); fall back to category bag
+                    if (settings.model) Object.assign(self.currentModel, settings.model);
                     if (agentCfg && typeof agentCfg === 'object') {
-                        Object.assign(this.agent, agentCfg);
+                        Object.assign(self.agent, agentCfg);
                     } else if (settings.agent) {
-                        Object.assign(this.agent, settings.agent);
+                        Object.assign(self.agent, settings.agent);
                     }
-                    if (settings.connectors) Object.assign(this.connectors, settings.connectors);
+                    if (settings.connectors) Object.assign(self.connectors, settings.connectors);
                     if (appearanceCfg) {
-                        Object.assign(this.appearance, appearanceCfg);
-                        this._applyAccentColor(this.appearance.accent_color);
+                        Object.assign(self.appearance, appearanceCfg);
+                        if (typeof self._applyAccentColor === 'function') {
+                            self._applyAccentColor(self.appearance.accent_color);
+                        }
                         if (appearanceCfg.font_size) {
                             try {
                                 const rootEl = document.documentElement;
@@ -356,115 +358,84 @@
                             } catch (e) { /* ignore font sync */ }
                         }
                     }
-                    if (safetyCfg) Object.assign(this.safety, safetyCfg);
-                    if (contextCfg) Object.assign(this.context, contextCfg);
-                    if (nonstopCfg) Object.assign(this.nonstop, nonstopCfg);
-                    // Load memory tenant mode from ConfigStore (stored under the
-                    // "memory" category as key "memory.tenant_mode").
+                    if (safetyCfg) Object.assign(self.safety, safetyCfg);
+                    if (contextCfg) Object.assign(self.context, contextCfg);
+                    if (nonstopCfg) Object.assign(self.nonstop, nonstopCfg);
                     const memTenant = settings.memory && settings.memory['memory.tenant_mode'];
-                    if (memTenant) this.memoryTenantMode = memTenant;
+                    if (memTenant) self.memoryTenantMode = memTenant;
                 }
-                if (Array.isArray(providers)) this.providers = providers;
-                if (Array.isArray(personalities)) this.personalities = personalities;
-                if (shortcuts && typeof shortcuts === 'object') this.shortcuts = shortcuts;
+                if (Array.isArray(providers)) self.providers = providers;
+                if (Array.isArray(personalities)) self.personalities = personalities;
+                if (shortcuts && typeof shortcuts === 'object') self.shortcuts = shortcuts;
 
-                // Load model defaults
-                const defaults = await this._fetch('/api/settings/models/defaults');
-                if (defaults) Object.assign(this.modelDefaults, defaults);
+                const defaults = await self._fetch('/api/settings/models/defaults');
+                if (defaults) Object.assign(self.modelDefaults, defaults);
 
-                // Load saved model profiles
-                const saved = await this._fetch('/api/models/saved');
-                if (Array.isArray(saved)) this.savedModels = saved;
+                const saved = await self._fetch('/api/models/saved');
+                if (Array.isArray(saved)) self.savedModels = saved;
 
-                // Load provider presets (guard: soft-nav may load settings.js before providers.js)
                 if (window.ProvidersManager && typeof ProvidersManager.getPresetKeys === 'function') {
-                    this.providerPresets = ProvidersManager.getPresetKeys();
+                    self.providerPresets = ProvidersManager.getPresetKeys();
                 } else {
-                    this.providerPresets = [];
+                    self.providerPresets = [];
                 }
 
-                // Knowledge merge toggles
                 try {
-                    const mm = await this._fetch('/api/settings');
-                    // settings bag may nest memory.v2 keys
-                } catch (e) { /* optional */ }
-                try {
-                    const cfg = await this._fetch('/api/settings/memory/merge-kb');
+                    const cfg = await self._fetch('/api/settings/memory/merge-kb');
                     if (cfg) {
-                        if (cfg.merge_knowledge_into_chat != null) this.memoryMergeKb = !!cfg.merge_knowledge_into_chat;
-                        if (cfg.promote_kb_to_episodes != null) this.memoryPromoteKb = !!cfg.promote_kb_to_episodes;
-                        if (cfg.smart_search != null) this.memorySmartSearch = !!cfg.smart_search;
-                        if (cfg.explain_recall != null) this.memoryExplainRecall = !!cfg.explain_recall;
+                        if (cfg.merge_knowledge_into_chat != null) self.memoryMergeKb = !!cfg.merge_knowledge_into_chat;
+                        if (cfg.promote_kb_to_episodes != null) self.memoryPromoteKb = !!cfg.promote_kb_to_episodes;
+                        if (cfg.smart_search != null) self.memorySmartSearch = !!cfg.smart_search;
+                        if (cfg.explain_recall != null) self.memoryExplainRecall = !!cfg.explain_recall;
                     }
                 } catch (e) { /* optional */ }
 
-                // Phase D: memory backends profile
                 try {
-                    const mb = await this._fetch('/api/settings/memory/backends');
+                    const mb = await self._fetch('/api/settings/memory/backends');
                     if (mb && mb.backends) {
                         const b = mb.backends;
-                        this.memoryBackends = {
+                        self.memoryBackends = {
                             mode: b.mode || 'local',
-                            embedder: Object.assign({}, this.memoryBackends.embedder, b.embedder || {}),
-                            vector: Object.assign({}, this.memoryBackends.vector, b.vector || {}),
-                            graph: Object.assign({}, this.memoryBackends.graph, b.graph || {}),
-                            state: Object.assign({}, this.memoryBackends.state, b.state || {}),
-                            failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
+                            embedder: Object.assign({}, self.memoryBackends.embedder, b.embedder || {}),
+                            vector: Object.assign({}, self.memoryBackends.vector, b.vector || {}),
+                            graph: Object.assign({}, self.memoryBackends.graph, b.graph || {}),
+                            state: Object.assign({}, self.memoryBackends.state, b.state || {}),
+                            failover: Object.assign({}, self.memoryBackends.failover, b.failover || {}),
                         };
                     }
                     if (mb && mb.capability) {
-                        this.memoryBackendsCapability = Object.assign(
-                            {}, this.memoryBackendsCapability, mb.capability
+                        self.memoryBackendsCapability = Object.assign(
+                            {}, self.memoryBackendsCapability, mb.capability
                         );
                     }
                     if (mb && mb.state_capability) {
-                        this.memoryBackendsStateCap = mb.state_capability;
+                        self.memoryBackendsStateCap = mb.state_capability;
                     }
                     if (mb && mb.graph_capability) {
-                        this.memoryBackendsGraphCap = mb.graph_capability;
+                        self.memoryBackendsGraphCap = mb.graph_capability;
                     }
                 } catch (e) { /* optional */ }
 
-                // Load unified hub data
-                await Promise.all([
-                    this.loadHubProviders(),
-                    this.loadHubConnectors(),
-                    this.loadHubProfiles(),
-                ]);
-
-                // Load Document Intelligence settings
-                try {
-                    const docSettings = await this._fetch('/api/settings/documents');
-                    if (docSettings && !docSettings.error) {
-                        Object.assign(this.documents, docSettings);
-                    }
-                } catch (e) {
-                    console.error('[Settings] Failed to load document config:', e);
-                }
-
-                // Load Voice Subsystem Settings
-                try {
-                    const voiceSettings = await this._fetch('/api/settings/voice');
-                    if (voiceSettings) {
-                        Object.assign(this.voiceForm, voiceSettings);
-                    }
-                    const voiceProvs = await this._fetch('/api/voice/providers');
-                    if (voiceProvs) {
-                        if (Array.isArray(voiceProvs.stt)) this.voiceProviders.stt = voiceProvs.stt;
-                        if (Array.isArray(voiceProvs.tts)) this.voiceProviders.tts = voiceProvs.tts;
-                    }
+                // Load unified hub data (the first tab). Do not await
+                // voice/STT provider lists here — those can hang and leave
+                // the shell on "Loading settings…".
+                if (typeof self.loadHubProviders === 'function') {
                     await Promise.all([
-                        this.loadVoiceModels(),
-                        this.loadSttModels()
+                        self.loadHubProviders(),
+                        self.loadHubConnectors(),
+                        self.loadHubProfiles(),
                     ]);
-                } catch (e) {
-                    console.error('[Settings] Failed to load voice config:', e);
                 }
             } catch (e) {
                 console.error('[Settings] Init failed:', e);
             } finally {
-                // Always clear loading — never leave the Settings shell stuck
-                this.loading = false;
+                self.loading = false;
+            }
+            var later = self._loadSecondarySettings;
+            if (typeof later === 'function') {
+                Promise.resolve(later.call(self)).catch(function (err) {
+                    console.error('[Settings] Secondary load failed:', err);
+                });
             }
 
             // Deep-link: /settings?tab=packages (or any valid tab id)
@@ -481,8 +452,8 @@
                         requested = 'backup';
                     }
                 } catch (e) { /* storage unavailable */ }
-                if (requested && requested !== this.tab) {
-                    await this.onTabChange(requested);
+                if (requested && requested !== self.tab) {
+                    await self.onTabChange(requested);
                 }
             } catch (e) {
                 /* ignore bad query strings */
@@ -539,7 +510,13 @@
 
         async _fetch(url) {
             try {
-                const resp = await fetch(url, { credentials: 'same-origin' });
+                var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+                var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) { /* ignore */ } }, 8000) : null;
+                const resp = await fetch(url, {
+                    credentials: 'same-origin',
+                    signal: ctrl ? ctrl.signal : undefined,
+                });
+                if (timer) clearTimeout(timer);
                 // NOTE: the global fetch wrapper (auth-guard.js) now owns the
                 // session-expired → /login redirect for 401/403.
                 if (resp.status === 401 || resp.status === 403) return null;
@@ -547,6 +524,33 @@
                 return await resp.json();
             } catch (e) {
                 return null;
+            }
+        },
+
+        async _loadSecondarySettings() {
+            try {
+                const docSettings = await this._fetch('/api/settings/documents');
+                if (docSettings && !docSettings.error) {
+                    Object.assign(this.documents, docSettings);
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load document config:', e);
+            }
+            try {
+                const voiceSettings = await this._fetch('/api/settings/voice');
+                if (voiceSettings) {
+                    Object.assign(this.voiceForm, voiceSettings);
+                }
+                const voiceProvs = await this._fetch('/api/voice/providers');
+                if (voiceProvs) {
+                    if (Array.isArray(voiceProvs.stt)) this.voiceProviders.stt = voiceProvs.stt;
+                    if (Array.isArray(voiceProvs.tts)) this.voiceProviders.tts = voiceProvs.tts;
+                }
+                if (typeof this.loadVoiceModels === 'function') {
+                    await Promise.all([this.loadVoiceModels(), this.loadSttModels()]);
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load voice config:', e);
             }
         },
 

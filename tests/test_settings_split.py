@@ -32,7 +32,7 @@ vm.createContext(ctx);
 for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx);
 if (typeof ctx.settingsApp !== 'function') process.exit(2);
 const app = ctx.settingsApp();
-const need = ['init', '_fetch', 'onTabChange', 'loadHubProviders',
+const need = ['init', '_fetch', '_loadSecondarySettings', 'onTabChange', 'loadHubProviders',
   'saveAgent', 'loadMcpServers', 'saveVoiceSettings', 'archiveBackup', 'restartServer'];
 const missing = need.filter((k) => typeof app[k] !== 'function');
 process.stdout.write(JSON.stringify({
@@ -77,3 +77,15 @@ def test_settings_js_is_no_longer_a_god_file() -> None:
     text = (_JS / "settings.js").read_text(encoding="utf-8")
     assert text.count("\n") < 40
     assert "KazmaSettingsMixins" in text
+    assert "self.loading = false" in text or "loading = false" in (
+        _JS / "settings.js"
+    ).read_text(encoding="utf-8")
+
+
+def test_settings_init_does_not_await_voice_before_clearing_loading() -> None:
+    core = (_JS / "settings_core.js").read_text(encoding="utf-8")
+    # First paint must not wait on STT/TTS provider lists.
+    init = core.split("async init()")[1].split("async restartServer")[0]
+    assert "loadVoiceModels" not in init
+    assert "_loadSecondarySettings" in init
+    assert "self.loading = false" in init
