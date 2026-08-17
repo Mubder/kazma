@@ -338,15 +338,18 @@ Output ONLY the delta text, no preamble."""
                 worker_name,
             )
             return False
-        # Commitment Layer Phase 7 (§R2.5): when soul_requires_confirm is ON and
-        # a commitment_id was provided, the worker delta applies only once that
-        # commitment is 'committed'. Same gate as apply_agent_mutation.
-        if commitment_id and _soul_requires_confirm() and not _soul_commitment_confirmed(commitment_id):
-            logger.info(
-                "[SelfImprovement] worker '%s' soul delta held — commitment %s not confirmed",
-                worker_name, commitment_id,
-            )
-            return False
+        # Same soul-confirm gate as apply_agent_mutation (mint + hold if needed).
+        if _soul_requires_confirm():
+            if not commitment_id:
+                commitment_id = mint_soul_commitment(
+                    delta, worker_name=worker_name,
+                )
+            if not commitment_id or not _soul_commitment_confirmed(commitment_id):
+                logger.info(
+                    "[SelfImprovement] worker '%s' soul delta held — commitment %s not confirmed",
+                    worker_name, commitment_id,
+                )
+                return False
 
         from kazma_core.swarm.registry import get_worker_registry
 
@@ -643,7 +646,8 @@ def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
 
 def _soul_requires_confirm() -> bool:
     """Commitment Layer Phase 7 flag (live): must a soul delta be confirmed
-    before it applies? Default OFF — safe rollout (mirrors swarm_scope_enforce)."""
+    before it applies? Default OFF for single-operator labs; ON in
+    production / multi-user unless the operator set the env/ConfigStore."""
     try:
         from kazma_core.safety.commitment.config import get_commitment_config
 
@@ -729,16 +733,18 @@ def apply_agent_mutation(agent_id: str, delta: str, *, commitment_id: str | None
         )
         return False
     # Commitment Layer Phase 7 (§R2.5): behavior mutation is a critical act.
-    # When soul_requires_confirm is ON and a commitment_id was provided, the
-    # delta applies ONLY once that commitment is 'committed' (confirmed via the
-    # HITL bus). An unconfirmed delta is skipped — it stays pending until the
-    # confirm handler re-applies. Gated OFF by default (safe rollout).
-    if commitment_id and _soul_requires_confirm() and not _soul_commitment_confirmed(commitment_id):
-        logger.info(
-            "[SelfImprovement] agent '%s' soul delta held — commitment %s not confirmed",
-            agent_id, commitment_id,
-        )
-        return False
+    # When soul_requires_confirm is ON the delta applies ONLY once a
+    # commitment is 'committed'. Missing commitment_id is minted and held
+    # (no loophole via a legacy caller).
+    if _soul_requires_confirm():
+        if not commitment_id:
+            commitment_id = mint_soul_commitment(delta, agent_id=agent_id)
+        if not commitment_id or not _soul_commitment_confirmed(commitment_id):
+            logger.info(
+                "[SelfImprovement] agent '%s' soul delta held — commitment %s not confirmed",
+                agent_id, commitment_id,
+            )
+            return False
     import time as _time
 
     # Serialize the read-modify-write: ConfigStore's lock only protects

@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — Audit C remaining (2026-08-17)
+
+Soul confirm auto-ON in production / multi-user (env still wins). A Soul
+delta without a commitment id is minted and held — no legacy apply
+loophole. ``cancel_scheduled`` clarifies when the scheduler is down.
+Swarm scope check errors deny. Strict mode with an empty outbound
+allowlist clarifies. Memory tenant isolation follows multi-user /
+production and fail-closes to ``__unscoped__`` instead of the shared
+``default`` tenant.
+
 ## Unreleased — Audit B remaining (2026-08-17)
 
 Login and auto-cookie never write the raw ``KAZMA_SECRET`` into

@@ -130,9 +130,8 @@ def test_terminal_job_id_clarifies(cron):
     assert d.decision == "clarify"  # done jobs aren't cancellable
 
 
-def test_no_scheduler_degrades_audit_only(tmp_path, monkeypatch):
-    """If get_cron_scheduler() is None, the resolver can't check → audit-only
-    (the gate never errors the turn)."""
+def test_no_scheduler_clarifies_not_allow(tmp_path, monkeypatch):
+    """If get_cron_scheduler() is None, the resolver cannot verify — clarify."""
     from kazma_core.cron.scheduler import get_cron_scheduler, set_cron_scheduler
 
     monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(tmp_path / "ops.db"))
@@ -140,10 +139,8 @@ def test_no_scheduler_degrades_audit_only(tmp_path, monkeypatch):
     set_cron_scheduler(None)
     try:
         d = authorize_effect("cancel_scheduled", {"job_id": "j1"}, thread_id="t1")
-        # No pending jobs readable (no scheduler) → clarify with empty list is
-        # wrong here; the resolver degrades to audit-only allow instead.
-        assert d.decision == "allow"
-        assert d.commitment_id is None  # audit-only, nothing persisted
+        assert d.decision == "clarify"
+        assert "scheduler unavailable" in (d.reason or "")
     finally:
         set_cron_scheduler(prev)
 

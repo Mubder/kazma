@@ -1,7 +1,7 @@
 # Kazma — Architecture & System Map
 
 **Single source of truth for system architecture**  
-**Version:** 0.9.x (one-brain mouths + audit B remaining: no raw-secret cookie, RBAC fail-closed)  
+**Version:** 0.9.x (one-brain mouths + audit C remaining: soul confirm, fail-closed commitment)  
 **Date:** 2026-08-17 (July 21 production audit is historical, not current SoT)  
 **Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
 `docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/REMEDIATION_PLAN_2026-07-21.md`,  

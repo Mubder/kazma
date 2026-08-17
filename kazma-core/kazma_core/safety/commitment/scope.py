@@ -124,8 +124,8 @@ def default_worker_scope(workspace_id: str | None = None) -> ScopeToken | None:
     """The default scope assigned to a dispatched worker when enforcement is on
     and no explicit scope was provided.
 
-    Returns None when ``agent.commitment.swarm_scope_enforce`` is OFF (the
-    default — safe rollout). When ON, returns a token capped at semantic_tier
+    Returns None when ``agent.commitment.swarm_scope_enforce`` is OFF.
+    When ON (the default), returns a token capped at semantic_tier
     HIGH (allows coding/fs/research; denies exec/outbound/config/identity
     CRITICAL) and explicitly denying the critical-retention acts a spawned worker
     must never self-perform (soul_delta/identity/config_change). Callers

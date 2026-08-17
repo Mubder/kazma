@@ -157,7 +157,7 @@ def authorize_effect(
     # Phase 5 swarm scope-token (§3.11): a worker mutator outside its inherited
     # scope is denied — the privilege-escalation guard. Only active when a
     # worker scope is bound (current_scope() is None for the main agent) AND
-    # agent.commitment.swarm_scope_enforce is on (default off — safe rollout).
+    # agent.commitment.swarm_scope_enforce is on (default ON since 2026-08-15).
     from .scope import current_scope, is_act_within_scope
     _scope = current_scope()
     if _scope is not None:
@@ -174,7 +174,16 @@ def authorize_effect(
                         profile=profile, audit=audit,
                     )
         except Exception:
-            logger.debug("[commitment] swarm scope check skipped", exc_info=True)
+            logger.warning(
+                "[commitment] swarm scope check failed — deny (not fail-open)",
+                exc_info=True,
+            )
+            return EffectDecision(
+                decision="deny",
+                reason="worker scope: verification failed closed",
+                profile=profile,
+                audit=audit,
+            )
 
     # Phase 2: act-specific resolution. Remind is the reference impl (§3.7);
     # resolve_remind was measured at 0 false-allow on held-out goldens (G2).
@@ -242,10 +251,10 @@ def _effective_mode(cfg: dict[str, Any] | None, thread_id: str | None) -> str:
     the user approves once and the next semantic check interrupts again
     (incident 2026-08-16: "YOLO keeps asking for permission").
 
-    Scope of the bypass: only the mode-aware resolvers (remind / cancel_job).
-    The exec denylist, outbound allowlist and config protected-keys resolvers
-    never read the mode and keep enforcing, and the memory source-trust gate
-    (belief_mutation) is independent — the overwrite class stays blocked.
+    Scope of the bypass: remind / cancel_job, and the empty-outbound
+    allowlist path. The exec denylist, a *populated* outbound allowlist,
+    and config protected-keys keep enforcing. The memory source-trust
+    gate (belief_mutation) is independent — the overwrite class stays blocked.
     """
     from .config import get_commitment_config
 
@@ -492,12 +501,17 @@ def _resolve_cancel_job_act(
     pending = cron_pending_jobs(thread_id=thread_id, tenant_id=tenant_id)
 
     if pending is None:
-        # Couldn't verify (no scheduler / DB read failed). Fail OPEN — don't
-        # block every cancel when verification is unavailable; the gate is
-        # defense, not a hard dependency.
-        logger.info("[commitment] cancel_job %s — verification unavailable, audit-only", job_id)
-        return EffectDecision("allow", "cancel_job: verification unavailable (audit-only)",
-                              profile, audit)
+        logger.info(
+            "[commitment] cancel_job %s — verification unavailable, clarify",
+            job_id,
+        )
+        return EffectDecision(
+            "clarify",
+            "cancel_job: cannot verify pending jobs (scheduler unavailable)",
+            profile,
+            audit,
+            clarify_question="Could not list pending jobs. Cancel anyway?",
+        )
 
     commitment = Commitment(
         thread_id=thread_id or "", act="cancel_job", tool_name=tool_name,
@@ -713,8 +727,34 @@ def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, te
 
     target = str(args.get("to") or args.get("target") or args.get("recipient") or "")
     allowlist = (get_commitment_config().get("outbound_allowed_targets") or [])
-    # If no allowlist configured → allow (audit; the HITL security card still applies).
+    # Empty allowlist: balanced/autonomous stay HITL-permissive. Strict
+    # refuses to send until the operator names at least one target.
     if not allowlist:
+        mode = _effective_mode(cfg, thread_id)
+        if mode == "strict":
+            q = "No outbound allowlist is configured. Name an approved target or send anyway?"
+            c = Commitment(
+                thread_id=thread_id or "",
+                act="send_outbound",
+                tool_name=tool_name,
+                goal_text=f"send to {target[:100]}",
+                args_digest=_args_digest(args),
+                request_at=time.time(),
+                tenant_id=tenant_id,
+                slots={"target": target[:500]},
+                confidence=0.2,
+            )
+            c.status = "needs_clarify"
+            c.policy_decision = "clarify"
+            cid = create_commitment(c, cfg=cfg)
+            return EffectDecision(
+                "clarify",
+                q,
+                profile,
+                audit,
+                commitment_id=cid,
+                clarify_question=q,
+            )
         logger.info(
             "[commitment] allow outbound %s (no allowlist configured; HITL applies) source=%s",
             tool_name, source,
