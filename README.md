@@ -145,7 +145,10 @@ Kazma's architecture reflects those foundational principles:
 
 ---
 
-## 📸 Interface Showcase
+## 📸 Interface Showcase *(Legacy Previews — Updating Soon)*
+
+> [!NOTE]
+> The screenshots below reflect earlier UI builds. Updated high-resolution previews for the IDE, Swarm Builder, and Skills consoles matching the latest V2 Control Plane design system are currently being refreshed.
 
 | Observability Dashboard | Integrated Web IDE | Real-Time Chat & HITL |
 |---|---|---|
