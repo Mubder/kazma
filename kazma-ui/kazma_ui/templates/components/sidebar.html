@@ -75,6 +75,15 @@
             <span class="nav-label">{{ t('nav.memory') }}</span>
         </a>
 
+        <a href="/dashboard" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.dashboard') }}</span>
+        </a>
+
         <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.activity') }}</span>
 
         <a href="/research" class="nav-link {{ 'active' if active_page == 'research' else '' }}" @click="closeMobileNav()">
@@ -153,15 +162,6 @@
                 </svg>
             </span>
             <span class="nav-label">{{ t('nav.mcp') }}</span>
-        </a>
-
-        <a href="/dashboard" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.dashboard') }}</span>
         </a>
 
         <a href="/agents" class="nav-link {{ 'active' if active_page == 'agents' else '' }}" @click="closeMobileNav()">

@@ -3839,8 +3839,22 @@ tbody tr:last-child td {
   .skills-grid { grid-template-columns: 1fr; }
   .mcp-grid { grid-template-columns: 1fr; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  .metrics-grid { grid-template-columns: 1fr; }
+  /* Two-up metrics — six stacked cards on a phone is a long scroll */
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
   .charts-row { grid-template-columns: 1fr; }
+  .dash-pro-split { grid-template-columns: 1fr; }
+  .dash-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .feature-cards-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .hitl-panel-desc { display: none; }
+  .hitl-approval-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+    justify-content: center;
+  }
+  .dash-pro-title { font-size: 1.2rem; }
+  .dash-pro-toolbar { width: 100%; }
+  .dash-pro-toolbar .range-selector { flex: 1 1 auto; }
+  .dash-pro-toolbar .range-btn { flex: 1; text-align: center; }
   .workspace-grid { grid-template-columns: 1fr; }
   .swarm-container .workspace-grid { grid-template-columns: 1fr; }
   .swarm-metrics-grid { grid-template-columns: 1fr !important; }
@@ -3889,12 +3903,14 @@ tbody tr:last-child td {
   .hitl-card { flex-wrap: wrap; }
   .hitl-actions { margin-left: 0; width: 100%; }
   .header-right .hide-sm { display: none; }
+  .hitl-panel-head { padding: 12px 14px; }
+  .dash-pro .metric-card { min-height: 0; padding: 12px; }
 }
 
 @media (max-width: 480px) {
   .header-title { font-size: 0.95rem; }
   .metrics-row { grid-template-columns: 1fr; }
-  .metrics-grid { grid-template-columns: 1fr; }
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
   .header-right .hide-xs { display: none; }
   /* Toasts must fit narrow phones (was right:20px + max-width:380px → overflow). */
   .toast {
@@ -3907,6 +3923,7 @@ tbody tr:last-child td {
 /* ── Tier 5: Small phone ── */
 @media (max-width: 380px) {
   .metrics-grid { grid-template-columns: 1fr; }
+  .hitl-approval-actions .btn { flex: 1 1 100%; }
   /* Longhand — preserve the Tier 2 dock clearance (see Tier 3 note). */
   .page-body {
     padding-top: var(--sp-3);
@@ -4355,6 +4372,78 @@ canvas { display: block; border-radius: 4px; }
 
 /* Dashboard */
 .dashboard-container { max-width: 1400px; margin: 0 auto; }
+.dashboard-container.dash-pro {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 0.25rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.dash-pro-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dash-pro-kicker {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.dash-pro-title {
+  font-size: 1.45rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  margin: 0;
+}
+.dash-pro-sub {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  max-width: 36rem;
+  line-height: 1.4;
+}
+.dash-pro-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.dash-pro-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 16px;
+  margin-bottom: 1.25rem;
+}
+.feature-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.hitl-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.hitl-panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hitl-panel-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
 .trace-row { transition: background 0.15s; }
 .trace-row:hover { background: var(--bg-hover); }
 
@@ -4526,6 +4615,7 @@ canvas { display: block; border-radius: 4px; }
 .hitl-approval-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .btn-success {

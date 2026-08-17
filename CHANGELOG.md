@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Dashboard moves to Work; mobile dashboard layout (2026-08-17)
+
+Sidebar **Dashboard** now sits in the Work group (with Chat / Workspace /
+IDE / Memory), not Settings. Phone layout keeps a two-up metric grid,
+stacks the memory/resources split, wraps HITL buttons, and hides the
+verbose HITL hint so the card toolbar fits.
+
 ## Unreleased — Telegram HITL example cards are real buttons (2026-08-17)
 
 ``send_approval_request`` drew ``[ APPROVE ]`` / ``[ DENY ]`` as plain
