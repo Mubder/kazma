@@ -239,13 +239,14 @@ def format_session_list(
         meta = f"{e.platform} · {e.message_count} msgs"
         if when:
             meta += f" · {when}"
-        lines.append(f"{i}. [{e.short_id}] {e.title} ({meta}){mark}")
+        # Avoid [id] / [name] — Rich markup and some chat clients eat those.
+        lines.append(f"{i}. #{e.short_id}  {e.title} ({meta}){mark}")
     lines.extend(
         [
             "",
-            "`/session 2` — continue that season here (take over)",
-            "`/session new [name]` — start a fresh season",
-            "Web: open `/chat?s=<id>` or pick it in the sidebar.",
+            "/session 2 — continue that season here (take over)",
+            "/session new <name> — start a fresh season",
+            "Web: open /chat?s=<id> or pick it in the sidebar.",
         ]
     )
     return "\n".join(lines)

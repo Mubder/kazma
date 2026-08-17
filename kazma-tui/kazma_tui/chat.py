@@ -493,34 +493,93 @@ class ChatPanel(Vertical):
 
             self._session_id = str(uuid.uuid4())
             self._messages = []
-            self.write("system", f"New TUI season `{self._session_id[-8:]}` — same brain as Web.")
+            self._reset_chat_log()
+            self.write("system", f"New TUI season #{self._session_id[-8:]} — same brain as Web.")
             return
-        hit = resolve_session(rest)
+        hit = resolve_session(rest, current_thread_id=self._session_id or None)
         if hit is None:
             self.write("system", f"No season matches {rest!r}. Try /sessions.")
             return
         self._session_id = hit.session_id
-        self._load_season_messages(hit.session_id)
+        n = self._load_season_messages(hit.session_id, thread_id=hit.thread_id)
+        self._replay_season_log()
         self.write(
             "system",
-            f"TUI is now on **{hit.title}** (`{hit.short_id}`). "
-            f"Next messages go through the same supervisor as Web / Telegram.",
+            f"Loaded #{hit.short_id}  {hit.title}  ({n} msgs). "
+            "Next messages continue this season on the same supervisor.",
         )
 
-    def _load_season_messages(self, session_id: str) -> None:
+    def _reset_chat_log(self) -> None:
         try:
-            from kazma_ui.session_manager import get_session_manager
+            log = self.query_one("#chat-log", RichLog)
+            log.clear()
+        except Exception:
+            logger.debug("TUI chat log clear failed", exc_info=True)
 
-            sess = get_session_manager().get(session_id)
-            if sess is None:
-                return
-            self._messages = [
+    def _replay_season_log(self) -> None:
+        """Paint loaded history into the visible log (cap so huge threads fit)."""
+        self._reset_chat_log()
+        tail = self._messages[-40:]
+        skipped = max(0, len(self._messages) - len(tail))
+        if skipped:
+            self.write("system", f"Showing last {len(tail)} of {len(self._messages)} messages.")
+        for m in tail:
+            role = str(m.get("role") or "assistant")
+            content = str(m.get("content") or "")
+            if len(content) > 4000:
+                content = content[:4000] + "…"
+            self.write(role, content)
+
+    def _fetch_season_messages_http(self, session_id: str) -> list[dict[str, Any]]:
+        import httpx
+
+        from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
+
+        headers = dict(auth_headers())
+        for base in candidate_api_bases():
+            url = f"{base}/api/chat/sessions/{session_id}/messages"
+            try:
+                resp = httpx.get(url, headers=headers, timeout=5.0)
+            except Exception:
+                continue
+            if resp.status_code >= 400:
+                continue
+            data = resp.json()
+            if isinstance(data, dict):
+                data = data.get("messages") or []
+            if not isinstance(data, list):
+                continue
+            return [
                 {"role": m.get("role"), "content": m.get("content")}
-                for m in (sess.messages or [])
+                for m in data
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant")
             ]
-        except Exception:
-            logger.debug("TUI season history load failed", exc_info=True)
+        return []
+
+    def _load_season_messages(
+        self, session_id: str, *, thread_id: str = ""
+    ) -> int:
+        rows = self._fetch_season_messages_http(session_id)
+        if not rows and thread_id and thread_id != session_id:
+            rows = self._fetch_season_messages_http(thread_id)
+        if not rows:
+            try:
+                from kazma_ui.session_manager import get_session_manager
+
+                sm = get_session_manager()
+                sess = sm.get(session_id) or (
+                    sm.get_by_thread_id(thread_id) if thread_id else None
+                )
+                if sess is not None:
+                    rows = [
+                        {"role": m.get("role"), "content": m.get("content")}
+                        for m in (sess.messages or [])
+                        if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+                    ]
+            except Exception:
+                logger.debug("TUI season history load failed", exc_info=True)
+        self._messages = rows
+        return len(rows)
 
     def _cmd_memory(self) -> None:
         try:
