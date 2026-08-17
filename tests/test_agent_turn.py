@@ -75,10 +75,19 @@ def test_candidate_api_bases_honor_env(monkeypatch):
     assert bases.count("http://127.0.0.1:9090") == 1
 
 
-def test_candidate_api_bases_prefer_loopback_over_public_url(monkeypatch):
+def test_candidate_api_bases_ignore_public_url(monkeypatch):
     monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://my.kazma.ai")
     monkeypatch.delenv("KAZMA_BASE_URL", raising=False)
     monkeypatch.delenv("KAZMA_PORT", raising=False)
     bases = candidate_api_bases()
     assert bases[0] == "http://127.0.0.1:9090"
-    assert bases[-1] == "https://my.kazma.ai"
+    assert "https://my.kazma.ai" not in bases
+
+
+def test_candidate_api_bases_honor_explicit_base_url(monkeypatch):
+    monkeypatch.setenv("KAZMA_BASE_URL", "http://127.0.0.1:9191")
+    monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("KAZMA_PORT", raising=False)
+    bases = candidate_api_bases()
+    assert bases[0] == "http://127.0.0.1:9090"
+    assert "http://127.0.0.1:9191" in bases

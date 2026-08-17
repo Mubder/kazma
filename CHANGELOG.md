@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — TUI: don't call my.kazma.ai for chat (2026-08-17)
+
+When the local server is down, the TUI used to fall through to
+`KAZMA_PUBLIC_URL` and report that host's 302 login page as "not
+reachable". Chat mouths only talk to loopback (or explicit
+`KAZMA_BASE_URL`). A down server now says nothing is listening on
+`:9090` / `:8000`.
+
 ## Unreleased — TUI empty reply on `Hey` (2026-08-17)
 
 The TUI posted `POST /api/chat/stream` to `KAZMA_PUBLIC_URL` first

@@ -121,7 +121,7 @@ async def stream_chat_turn(
 
     headers = {"Accept": "text/event-stream", **auth_headers()}
     body = {"message": text, "session_id": session_id}
-    last_err = "no API candidates"
+    errors: list[str] = []
 
     for base in candidate_api_bases():
         url = f"{base}/api/chat/stream"
@@ -131,14 +131,13 @@ async def stream_chat_turn(
             async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=2.0)) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
                     if resp.status_code in (401, 403):
-                        last_err = (
+                        raise RuntimeError(
                             f"{url} returned {resp.status_code} — set KAZMA_SECRET "
-                            "to the same secret the server is using."
+                            "to the same secret the server is using (cwd .env)."
                         )
-                        continue
                     ctype = (resp.headers.get("content-type") or "").lower()
                     if resp.status_code != 200 or "text/event-stream" not in ctype:
-                        last_err = (
+                        errors.append(
                             f"{url} returned {resp.status_code} "
                             f"({ctype or 'no content-type'})"
                         )
@@ -179,16 +178,18 @@ async def stream_chat_turn(
                     if buf:
                         _ingest(iter_sse_frames(buf))
                     if not saw_sse:
-                        last_err = f"{url} returned 200 without SSE frames"
+                        errors.append(f"{url} returned 200 without SSE frames")
                         continue
                     return "".join(assembled)
         except httpx.ConnectError:
-            last_err = f"nothing listening at {base}"
+            errors.append(f"nothing listening at {base}")
             continue
         except httpx.TimeoutException:
-            last_err = f"timeout talking to {base}"
+            errors.append(f"timeout talking to {base}")
             continue
+    detail = "; ".join(errors) if errors else "no API candidates"
     raise RuntimeError(
-        "Kazma server is not reachable. Start it with `kazma serve` "
-        f"(tried {', '.join(candidate_api_bases())}). Last error: {last_err}"
+        "Kazma server is not running on this machine "
+        f"(tried {', '.join(candidate_api_bases())}). {detail} "
+        "Start it yourself, then send again — the TUI is only a mouth."
     )
