@@ -1197,6 +1197,19 @@ async def supervisor_node(
                 model_spec.model,
             )
 
+    # Per-turn pin from the mouth (SSE/WS body.model) wins over the router
+    # and does NOT mutate the process-wide active profile.
+    turn_llm = llm
+    try:
+        from kazma_core.runtime.turn_model import resolve_turn_client
+
+        turn_llm, _pinned = resolve_turn_client(llm)
+        if _pinned:
+            routed_model = _pinned
+            logger.info("[Supervisor] turn-model pin=%s", _pinned)
+    except Exception:
+        turn_llm = llm
+
     # ── Per-turn memory retrieval (RAG) ──────────────────────────
     # Retrieve relevant memories for the current user message and inject
     # them as a system message before the LLM call. Gated on iteration==0
@@ -1604,7 +1617,7 @@ async def supervisor_node(
             _call_max_tokens = 8192 if effective_tool_definitions else None
             for attempt in range(1, cfg["max_attempts"] + 1):
                 try:
-                    return await llm.chat(
+                    return await turn_llm.chat(
                         messages=_llm_messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
@@ -1863,7 +1876,7 @@ async def supervisor_node(
                 )},
             ]
             try:
-                nudge_response = await llm.chat(
+                nudge_response = await turn_llm.chat(
                     messages=pruned_nudge_msgs,
                     tools=[],
                     model=routed_model,
@@ -3036,6 +3049,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     if _needs_synthesis:
         _llm = llm or state.get("_llm")
         if _llm is not None:
+            try:
+                from kazma_core.runtime.turn_model import resolve_turn_client
+
+                _llm, _ = resolve_turn_client(_llm)
+            except Exception:
+                pass
             try:
                 from kazma_core.summarizer import prune_tool_outputs
                 pruned_for_synth = prune_tool_outputs(messages, max_tokens=18000)

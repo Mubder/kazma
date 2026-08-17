@@ -113,20 +113,20 @@ class CompactionEngine:
             import time
             safe_summary = summary
             try:
-                from kazma_core.safety.prompt_fence import is_override_delta
+                from kazma_core.safety.prompt_fence import filter_injection
 
-                if is_override_delta(summary):
+                safe_summary = filter_injection(summary)
+                if safe_summary is None:
                     logger.warning(
                         "[Compaction] summary matched an injection marker — "
                         "NOT auto-storing to memory (would poison future prompts)"
                     )
-                    safe_summary = None
             except Exception:
                 pass
             if safe_summary is not None:
                 # V2-native: store the summary as a V2 episode. The
-                # is_override_delta guard above MUST run first (audit
-                # AC4 — unsanitized summaries poison future prompts).
+                # filter_injection guard above MUST run first (audit
+                # AC4 / A9 — unsanitized summaries poison future prompts).
                 from kazma_core.memory.swarm_bridge import store_compaction_summary
 
                 store_compaction_summary(
@@ -369,19 +369,19 @@ class CompactionEngine:
             # entries dropped, mirroring graph_builder._format_retrieved_memories.
             try:
                 from kazma_core.safety.prompt_fence import (
+                    filter_injection,
                     format_untrusted_block,
-                    is_override_delta,
                 )
             except Exception:  # safety module unavailable → degrade to no filter
                 format_untrusted_block = None  # type: ignore[assignment]
-                is_override_delta = None  # type: ignore[assignment]
+                filter_injection = None  # type: ignore[assignment]
 
             lines: list[str] = []
             for memory in memories:
                 content = str(memory.get("content", memory.get("text", ""))).strip()
                 if not content:
                     continue
-                if is_override_delta is not None and is_override_delta(content):
+                if filter_injection is not None and filter_injection(content) is None:
                     logger.warning(
                         "[Compaction] dropped override-laden memory from system prompt"
                     )

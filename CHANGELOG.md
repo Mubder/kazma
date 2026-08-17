@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Audit A remaining (2026-08-17)
+
+Docs no longer claim "Production-Grade" or blanket "multi-replica ready"
+(document metadata is still SQLite unless the Postgres metadata backend is
+on). TUI `/replay <n>` rewinds the live graph via `POST /api/replay/restore`.
+`/swarm status|list`, `/memory`, `/status`, and `/cost` read the live server
+API. Chat turns pin `model` and `workspace_id` per request — they no longer
+call `ensure_active_model` (process-wide). Compaction uses
+`filter_injection()` (broader than override phrases) before storing
+summaries.
+
 ## Unreleased — Audit A–F follow-through (2026-08-17)
 
 TUI file-open no longer crashes on Textual 8.2 `hatch: right $panel`.

@@ -395,6 +395,7 @@ document.addEventListener('alpine:init', () => {
         action: 'send_prompt',
         text: text.trim(),
         model: model || '',
+        workspace_id: (typeof window !== 'undefined' && window.__kazmaWorkspaceId) || '',
         client_msg_id: clientMsgId,
       };
 

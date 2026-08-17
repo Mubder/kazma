@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from typing import Any
 
-__all__ = ["auth_headers", "candidate_api_bases"]
+__all__ = [
+    "auth_headers",
+    "candidate_api_bases",
+    "request_json",
+    "request_json_async",
+]
 
 
 def _is_loopback(url: str) -> bool:
@@ -83,3 +89,107 @@ def auth_headers() -> dict[str, str]:
 def first_reachable(bases: Iterable[str] | None = None) -> list[str]:
     """Return candidate list (reachability is checked by the caller)."""
     return list(bases) if bases is not None else candidate_api_bases()
+
+
+def _json_url(base: str, path: str) -> str:
+    p = path if path.startswith("/") else f"/{path}"
+    return f"{base.rstrip('/')}{p}"
+
+
+def request_json(
+    method: str,
+    path: str,
+    *,
+    payload: Any | None = None,
+    timeout: float = 8.0,
+) -> Any:
+    """GET/POST JSON against the first reachable loopback API.
+
+    Raises ``RuntimeError`` when no candidate accepts a JSON response.
+    """
+    import httpx
+
+    headers = {"Accept": "application/json", **auth_headers()}
+    errors: list[str] = []
+    for base in candidate_api_bases():
+        url = _json_url(base, path)
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout, connect=2.0)) as client:
+                resp = client.request(method.upper(), url, json=payload, headers=headers)
+            if resp.status_code in (401, 403):
+                raise RuntimeError(
+                    f"{url} returned {resp.status_code} — set KAZMA_SECRET "
+                    "to the same secret the server is using (cwd .env)."
+                )
+            if resp.status_code >= 400:
+                errors.append(f"{url} -> {resp.status_code}")
+                continue
+            ctype = (resp.headers.get("content-type") or "").lower()
+            if "json" not in ctype:
+                errors.append(f"{url} returned {resp.status_code} ({ctype or 'no content-type'})")
+                continue
+            return resp.json()
+        except httpx.ConnectError:
+            errors.append(f"nothing listening at {base}")
+            continue
+        except httpx.TimeoutException:
+            errors.append(f"timeout talking to {base}")
+            continue
+    detail = "; ".join(errors) if errors else "no API candidates"
+    raise RuntimeError(
+        "Kazma server is not running on this machine "
+        f"(tried {', '.join(candidate_api_bases())}). {detail} "
+        "Start it yourself — the TUI is only a mouth."
+    )
+
+
+async def request_json_async(
+    method: str,
+    path: str,
+    *,
+    payload: Any | None = None,
+    timeout: float = 8.0,
+) -> Any:
+    """Async variant of :func:`request_json` for TUI inspector commands."""
+    import httpx
+
+    headers = {"Accept": "application/json", **auth_headers()}
+    errors: list[str] = []
+    for base in candidate_api_bases():
+        url = _json_url(base, path)
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=2.0)) as client:
+                resp = await client.request(
+                    method.upper(), url, json=payload, headers=headers
+                )
+            if resp.status_code in (401, 403):
+                raise RuntimeError(
+                    f"{url} returned {resp.status_code} — set KAZMA_SECRET "
+                    "to the same secret the server is using (cwd .env)."
+                )
+            if resp.status_code >= 400:
+                snippet = ""
+                try:
+                    body = resp.json()
+                    snippet = str(body.get("error") or body.get("detail") or "")[:160]
+                except Exception:
+                    snippet = (resp.text or "")[:160]
+                errors.append(f"{url} -> {resp.status_code}" + (f" {snippet}" if snippet else ""))
+                continue
+            ctype = (resp.headers.get("content-type") or "").lower()
+            if "json" not in ctype:
+                errors.append(f"{url} returned {resp.status_code} ({ctype or 'no content-type'})")
+                continue
+            return resp.json()
+        except httpx.ConnectError:
+            errors.append(f"nothing listening at {base}")
+            continue
+        except httpx.TimeoutException:
+            errors.append(f"timeout talking to {base}")
+            continue
+    detail = "; ".join(errors) if errors else "no API candidates"
+    raise RuntimeError(
+        "Kazma server is not running on this machine "
+        f"(tried {', '.join(candidate_api_bases())}). {detail} "
+        "Start it yourself — the TUI is only a mouth."
+    )

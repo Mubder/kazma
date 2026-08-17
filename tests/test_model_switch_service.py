@@ -152,12 +152,14 @@ class TestSourceContracts:
     def test_sse_has_llm_provider_getter(self):
         src = _SSE.read_text(encoding="utf-8")
         assert "llm_provider_getter" in src
-        assert "ensure_active_model" in src
+        assert "pin_turn_model" in src
+        assert "ensure_active_model" not in src
         assert "turn_complete" in src
 
     def test_ws_ensure_active_model(self):
         src = _WS.read_text(encoding="utf-8")
-        assert "ensure_active_model" in src
+        assert "pin_turn_model" in src
+        assert "ensure_active_model" not in src
         assert "turn_complete" in src
         assert 'payload.get("model")' in src or "payload.get('model')" in src
 

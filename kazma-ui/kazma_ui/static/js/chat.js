@@ -41,6 +41,17 @@
   // Currently selected model (persisted in localStorage)
   var selectedModel = '';
   var MODEL_LS_KEY = 'kazma.selectedModel';
+  var _activeWorkspaceId = '';
+
+  function refreshWorkspaceId() {
+    fetch('/api/workspaces')
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(data) {
+        _activeWorkspaceId = (data && data.active_workspace_id) || '';
+        try { window.__kazmaWorkspaceId = _activeWorkspaceId; } catch (e) { /* ignore */ }
+      })
+      .catch(function() { _activeWorkspaceId = ''; });
+  }
 
   // Active chat session (persisted so a page refresh resumes the same session)
   var SESSION_LS_KEY = 'kazma.chatSessionId';
@@ -210,6 +221,7 @@
 
     // Load available models for the model selector
     loadModels();
+    refreshWorkspaceId();
 
     // Load sessions after models are loaded
     loadSessions();
@@ -1174,8 +1186,9 @@
       })
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(active) {
-        // Backend is authoritative — always prefer it over cached localStorage
-        if (active && active.model) {
+        // Per-session pick (localStorage) wins. Process-wide /api/provider/active
+        // is only the default when this mouth has not chosen a model.
+        if (!selectedModel && active && active.model) {
           selectedModel = active.model;
           try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
         }
@@ -1543,6 +1556,7 @@
       message: content,
       session_id: chatSessionId,
       model: selectedModel || '',
+      workspace_id: _activeWorkspaceId || '',
       attachments: attachmentsPayload,
     }, {
       onToken: function(data) {

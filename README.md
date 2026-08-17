@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/Mubder/kazma/main/kazma-ui/kazma_ui/static/img/kazma-logo.png" alt="Kazma" height="80">
 </p>
 
-**Production-Grade Autonomous Agents with Deep Multilingual Intelligence**
+**Self-hosted multi-platform agents with deep multilingual intelligence**
 
 Kazma is the reliable multi-agent framework built for real deployment. Cryptographic skill signing, triple-wired human-in-the-loop safety, durable execution, and native Arabic dialect support — all in one full-stack system with live Web UI, TUI, CLI, and multi-platform gateways.
 
@@ -77,7 +77,7 @@ Production document pipeline: streamed intake → content-addressed quarantine �
 | TUI | Documents tab |
 
 - **Hostile-by-default** — XXE/macro/polyglot/encryption rejection, prompt fences (`<kazma:data untrusted>`), optional **ClamAV** malware scan (`auto`/`on`/`off`)
-- **Multi-replica ready** — Postgres job claims (`SKIP LOCKED`) + optional Postgres metadata; content tree stays CAS on disk
+- **Jobs can multi-replica** — Postgres job claims (`SKIP LOCKED`); document **metadata** is still single-replica SQLite unless `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres`
 - **Canary rollout** — `enabled` / `shadow` / `default_authoritative` live ConfigStore flags
 - **Certification** — `python scripts/certify_documents.py` (+ hostile corpus, soak)
 

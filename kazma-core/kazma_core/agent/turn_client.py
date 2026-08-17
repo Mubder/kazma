@@ -110,6 +110,8 @@ async def stream_chat_turn(
     text: str,
     session_id: str,
     on_event: Callable[[ChatStreamEvent], Any] | None = None,
+    model: str = "",
+    workspace_id: str = "",
 ) -> str:
     """POST one user turn to the live Kazma server. Returns assembled text.
 
@@ -120,7 +122,11 @@ async def stream_chat_turn(
     from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
 
     headers = {"Accept": "text/event-stream", **auth_headers()}
-    body = {"message": text, "session_id": session_id}
+    body: dict[str, Any] = {"message": text, "session_id": session_id}
+    if (model or "").strip():
+        body["model"] = model.strip()
+    if (workspace_id or "").strip():
+        body["workspace_id"] = workspace_id.strip()
     errors: list[str] = []
 
     for base in candidate_api_bases():

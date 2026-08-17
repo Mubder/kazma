@@ -64,10 +64,10 @@ def _make_app(
 
 
 class TestChatStreamReadsModel:
-    """VAL-UI-005: chat_stream reads body.get('model') and ensure-active switch.
+    """VAL-UI-005: chat_stream reads body.get('model') as a per-turn pin.
 
-    Post reliability sprint: body model goes through ensure_active_model /
-    switch service — not orphan llm_provider.reconfigure().
+    Body model is pinned via pin_turn_model (ContextVar) — it must not
+    call llm_provider.reconfigure() or mutate the process-wide registry.
     """
 
     def test_model_in_body_accepted(self):

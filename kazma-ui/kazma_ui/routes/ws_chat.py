@@ -875,33 +875,9 @@ def create_ws_chat_router(
                     if not text:
                         continue
 
-                    # Ensure active model matches the UI selection (same as SSE).
+                    # Per-turn pin (same as SSE) — do not mutate the process-wide registry.
                     requested_model = str(payload.get("model") or "").strip()
-                    if requested_model:
-                        try:
-                            from kazma_core.runtime.model_switch import ensure_active_model
-
-                            _agent = None
-                            if agent_getter is not None:
-                                try:
-                                    _agent = agent_getter()
-                                except Exception:
-                                    _agent = None
-                            _sw = ensure_active_model(requested_model, agent=_agent)
-                            if _sw.ok:
-                                logger.info(
-                                    "[WS-Chat] ensure-active model=%s provider=%s",
-                                    _sw.model,
-                                    _sw.provider,
-                                )
-                            else:
-                                logger.warning(
-                                    "[WS-Chat] ensure-active model %s failed: %s",
-                                    requested_model,
-                                    _sw.error,
-                                )
-                        except Exception as model_exc:
-                            logger.warning("[WS-Chat] model ensure failed: %s", model_exc)
+                    ws_workspace_id = str(payload.get("workspace_id") or "").strip()
 
                     # Record user interaction on cost circuit breaker to un-halt budget
                     try:
@@ -1398,6 +1374,26 @@ def create_ws_chat_router(
                         activity_log: list[dict[str, Any]] = []
                         thought_recorded: list[bool] = [False]
                         tid_token = set_current_thread_id(thread_id)
+                        _ws_pin = None
+                        _model_pin = None
+                        if ws_workspace_id:
+                            try:
+                                from kazma_core.ide.workspace_scope import pin_workspace
+
+                                _ws_pin = pin_workspace(ws_workspace_id)
+                            except Exception:
+                                logger.debug("[WS-Chat] workspace pin skipped", exc_info=True)
+                        if requested_model:
+                            try:
+                                from kazma_core.runtime.turn_model import pin_turn_model
+
+                                _model_pin = pin_turn_model(requested_model)
+                                logger.info(
+                                    "[WS-Chat] turn-model pin=%s (not process-wide)",
+                                    requested_model,
+                                )
+                            except Exception:
+                                logger.debug("[WS-Chat] turn-model pin skipped", exc_info=True)
                         try:
                             pre_msg_count = 0
                             try:
@@ -1768,6 +1764,20 @@ def create_ws_chat_router(
                             )
                         finally:
                             reset_current_thread_id(tid_token)
+                            if _ws_pin is not None:
+                                try:
+                                    from kazma_core.ide.workspace_scope import reset_workspace
+
+                                    reset_workspace(_ws_pin)
+                                except Exception:
+                                    pass
+                            if _model_pin is not None:
+                                try:
+                                    from kazma_core.runtime.turn_model import reset_turn_model
+
+                                    reset_turn_model(_model_pin)
+                                except Exception:
+                                    pass
 
                     if active_task and not active_task.done():
                         active_task.cancel()

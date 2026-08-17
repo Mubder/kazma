@@ -1004,6 +1004,7 @@ def create_sse_chat_router(
         session_id = body.get("session_id") or str(uuid.uuid4())
         workspace_id = str(body.get("workspace_id") or "").strip()
         _ws_token = None
+        _model_token = None
         if workspace_id:
             try:
                 from kazma_core.ide.workspace_scope import pin_workspace
@@ -1284,37 +1285,35 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        # ── Apply model from request body ──────────────────────────
-        # Ensure the process-wide active model matches the UI selection
-        # (single-operator). Uses the switch service so the graph holder
-        # and agent.llm rebind together — never orphan reconfigure.
+        # ── Per-turn model pin (does NOT mutate the process-wide registry)
         requested_model = (body.get("model") or "").strip()
+        if not requested_model:
+            try:
+                for _m in reversed(session.messages or []):
+                    if isinstance(_m, dict) and _m.get("role") == "assistant" and _m.get("model"):
+                        requested_model = str(_m.get("model") or "").strip()
+                        if requested_model:
+                            break
+            except Exception:
+                pass
         if requested_model:
             try:
-                from kazma_core.runtime.model_switch import ensure_active_model
+                from kazma_core.runtime.turn_model import pin_turn_model
 
-                _sw = ensure_active_model(
-                    requested_model,
-                    agent=_get_agent(),
-                    registry=registry,
-                )
-                if _sw.ok:
-                    logger.info(
-                        "SSE chat: ensure-active model=%s provider=%s",
-                        _sw.model,
-                        _sw.provider,
-                    )
-                else:
-                    logger.warning(
-                        "SSE chat: ensure-active model %s failed: %s",
-                        requested_model,
-                        _sw.error,
-                    )
+                _model_token = pin_turn_model(requested_model)
+                logger.info("SSE chat: turn-model pin=%s (not process-wide)", requested_model)
             except Exception as exc:
-                logger.warning("SSE chat: model ensure failed: %s", exc)
+                logger.warning("SSE chat: turn-model pin failed: %s", exc)
 
         # Live LLM for key validation (getter, not mount snapshot).
         llm_provider = _get_llm()
+        if requested_model:
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                llm_provider = get_model_registry().get_client(requested_model)
+            except Exception:
+                pass
 
         # ── Pre-stream API key validation (Bug 4 fix) ───────────────
         # If the provider is a real cloud API but the API key is the
@@ -1606,15 +1605,23 @@ def create_sse_chat_router(
             # Track if we've started persisting assistant messages
             assistant_message_started = False
             # Stamp active model on the assistant bubble for reload / meta.
-            _turn_model = ""
-            try:
-                from kazma_core.model_registry import get_model_registry
+            _turn_model = requested_model
+            if not _turn_model:
+                try:
+                    from kazma_core.runtime.turn_model import current_turn_model
 
-                _turn_model = str(
-                    get_model_registry().get_active_profile().get("model") or ""
-                )
-            except Exception:
-                _turn_model = ""
+                    _turn_model = current_turn_model() or ""
+                except Exception:
+                    _turn_model = ""
+            if not _turn_model:
+                try:
+                    from kazma_core.model_registry import get_model_registry
+
+                    _turn_model = str(
+                        get_model_registry().get_active_profile().get("model") or ""
+                    )
+                except Exception:
+                    _turn_model = ""
             # Temporary message dict for incremental persistence
             temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
             if _turn_model:
@@ -1844,6 +1851,13 @@ def create_sse_chat_router(
                         from kazma_core.ide.workspace_scope import reset_workspace
 
                         reset_workspace(_ws_token)
+                    except Exception:
+                        pass
+                if _model_token is not None:
+                    try:
+                        from kazma_core.runtime.turn_model import reset_turn_model
+
+                        reset_turn_model(_model_token)
                     except Exception:
                         pass
 

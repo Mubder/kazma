@@ -381,6 +381,18 @@ class ModelRegistry:
         *model* is None (using the active model) and when it is passed
         as an override.
         """
+        # Per-turn pin (SSE/WS body.model) is an implicit override — same
+        # as passing model= — so we never persist it onto the active profile.
+        if model is None:
+            try:
+                from kazma_core.runtime.turn_model import current_turn_model
+
+                pinned = current_turn_model()
+                if pinned:
+                    model = pinned
+            except Exception:
+                pass
+
         with self._lock:
             provider_name = self._active_provider or "custom"
             effective_model = model or self._active_model
