@@ -66,28 +66,11 @@ ROUTER_DEFAULT_TOP_K = 3
 ROUTER_MIN_CONFIDENCE = 0.3
 
 # ─── Safety / HITL ─────────────────────────────────────────────────────
-# Danger tools requiring graph interrupt() approval (Mechanism A)
-GRAPH_HITL_DANGER_TOOLS = frozenset({
-    "file_write",
-    "file_delete",
-    "shell_exec",
-    "code_exec",
-    "python_exec",
-})
+# Aliases of CANONICAL_DANGER_TOOLS — never a shorter list (audit A8).
+from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS as _CANONICAL_DANGER
 
-# Extended danger tools for Swarm Message Bus (Mechanism B)
-# Includes spawn/schedule tools in addition to graph danger tools
-SWARM_BUS_DANGER_TOOLS = frozenset({
-    "file_write",
-    "file_delete",
-    "shell_exec",
-    "code_exec",
-    "python_exec",
-    "spawn_agent",
-    "spawn_agents",
-    "schedule_task",
-    "cancel_scheduled",
-})
+GRAPH_HITL_DANGER_TOOLS = frozenset(_CANONICAL_DANGER)
+SWARM_BUS_DANGER_TOOLS = frozenset(_CANONICAL_DANGER)
 
 # MCP tool classification patterns
 MCP_DANGER_PATTERNS = frozenset({

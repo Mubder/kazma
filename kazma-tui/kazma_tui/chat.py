@@ -39,7 +39,7 @@ class ChatPanel(Vertical):
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
         ("/sessions", "List seasons (same list as Web/Telegram/Discord)"),
-        ("/session", "Switch onto a season (n, id, or name)"),
+        ("/session", "Switch onto a season (#short_id, n, or name)"),
         ("/model [set <name>]", "Show/switch active model (interactive picker)"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
@@ -140,7 +140,9 @@ class ChatPanel(Vertical):
             classes="chat-banner",
         )
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
-        yield ProgressBar(id="chat-progress", total=100, show_eta=False)
+        bar = ProgressBar(id="chat-progress", total=100, show_eta=False)
+        bar.display = False
+        yield bar
         yield Input(placeholder="Message  ·  / for commands  ·  Ctrl+P palette", id="chat-input")
         yield ListView(id="autocomplete")
 
@@ -281,14 +283,14 @@ class ChatPanel(Vertical):
 
     # ── Message display ────────────────────────────────────────────
 
-    def write(self, role: str, text: str) -> None:
+    def write(self, role: str, text: str, *, ts: str | None = None) -> None:
         """Write a message to the chat log with role prefix."""
         log = self.query_one("#chat-log", RichLog)
-        ts = datetime.now().strftime("%H:%M")
+        stamp = ts or datetime.now().strftime("%H:%M")
         c = ROLE_HEX.get(role, "#8b949e")
         # Escape Rich markup in user/LLM text to prevent injection
         from rich.text import Text
-        log.write(Text.from_markup(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] ") + Text(text))
+        log.write(Text.from_markup(f"[dim]{stamp}[/] [{c}]▌ {role.upper()}[/] ") + Text(text))
 
     def add_message(self, role: str, text: str) -> None:
         """Alias for write() - adds a message to the chat log."""
@@ -541,6 +543,10 @@ class ChatPanel(Vertical):
                 " History was empty here — send a message to continue, "
                 "or check KAZMA_SECRET if this season has turns on Web."
             )
+        try:
+            self.show_progress(False)
+        except Exception:
+            pass
         self.write("system", hint)
 
     def _reset_chat_log(self) -> None:
@@ -564,7 +570,14 @@ class ChatPanel(Vertical):
                 continue
             if len(content) > 4000:
                 content = content[:4000] + "…"
-            self.write(role, content)
+            raw_ts = str(m.get("ts") or m.get("timestamp") or "")
+            stamp = None
+            if raw_ts:
+                try:
+                    stamp = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).strftime("%H:%M")
+                except Exception:
+                    stamp = raw_ts[11:16] if len(raw_ts) >= 16 else None
+            self.write(role, content, ts=stamp)
 
     def _load_season_messages(
         self, session_id: str, *, thread_id: str = ""
@@ -697,7 +710,7 @@ class ChatPanel(Vertical):
                 self.write("system", "No snapshots available (snapshot DB not found).")
                 return
             store = SnapshotStore(str(db_path))
-            thread_id = "tui-session"
+            thread_id = self._session_id or "tui-session"
 
             if sub == "list":
                 records = store.list_for_thread(thread_id)

@@ -27,7 +27,7 @@ _DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "mode": "balanced",
     "high_confidence": 0.85,
-    "enforce_unknown_mutators": False,
+    "enforce_unknown_mutators": True,
     # Default ON (2026-08-15): the intent engine can now auto-dispatch
     # (execute route), so dispatched workers get the HIGH-tier cap unless
     # explicitly disabled via env/ConfigStore. Kill-switch still wins.

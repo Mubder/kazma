@@ -52,7 +52,11 @@ def coerce_visible_messages(raw: Any) -> list[dict[str, Any]]:
         text = message_text(msg)
         if not str(text).strip():
             continue
-        out.append({"role": role, "content": text})
+        row = {"role": role, "content": text}
+        ts = msg.get("ts") or msg.get("timestamp")
+        if ts:
+            row["ts"] = ts
+        out.append(row)
     return out
 
 

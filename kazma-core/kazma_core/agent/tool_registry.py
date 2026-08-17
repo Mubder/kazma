@@ -464,24 +464,32 @@ class LocalToolRegistry:
                 "is_error": True,
             }
 
-        # Commitment Layer Phase 1 (plan §R2.6): authorize_effect audit choke.
-        # Audit-only here in Phase 1 (enforce_unknown_mutators=False) — extends
-        # observability to the IDE/swarm registry path (the §13 "IDE/registry
-        # free-fire" residual). The memory-corruption half is already blocked
-        # at mutate_belief; the schedule/fs/outbound semantic gate + live
-        # enforcement arrive in Phase 2 via this same call point. The try/except
-        # keeps the audit choke from ever breaking tool execution.
+        # Commitment gate on the IDE/swarm path. Live-reads
+        # enforce_unknown_mutators (default on). Deny is honored. Exceptions
+        # fail-closed when enforcement is on so a broken gate cannot free-fire.
         try:
             from kazma_core.safety.commitment import authorize_effect as _authorize
+            from kazma_core.safety.commitment.config import get_commitment_config
 
+            _enforce = bool(get_commitment_config().get("enforce_unknown_mutators"))
             _dec = _authorize(
-                tool_name, arguments, enforce_unknown_mutators=False,
+                tool_name, arguments, enforce_unknown_mutators=_enforce,
                 context={"source": "registry"},
             )
             if _dec.decision == "deny":
                 return {"content": f"[commitment] blocked: {_dec.reason}", "is_error": True}
         except Exception:
-            logger.debug("[ToolRegistry] authorize_effect choke skipped", exc_info=True)
+            logger.debug("[ToolRegistry] authorize_effect choke failed", exc_info=True)
+            try:
+                from kazma_core.safety.commitment.config import get_commitment_config
+
+                if bool(get_commitment_config().get("enforce_unknown_mutators")):
+                    return {
+                        "content": "[commitment] blocked: authorization failed closed",
+                        "is_error": True,
+                    }
+            except Exception:
+                pass
 
         # ── Retryable exception types (network/timeout only) ──────
         retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, asyncio.TimeoutError)

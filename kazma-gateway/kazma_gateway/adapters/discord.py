@@ -383,7 +383,11 @@ class DiscordAdapter(BaseAdapter):
                     return
                 msg = IncomingMessage(
                     platform="discord",
-                    sender_id=f"discord:{channel_id}",
+                    sender_id=(
+                        f"discord:{user_id}:{channel_id}"
+                        if user_id
+                        else f"discord:{channel_id}"
+                    ),
                     text=action.text,
                     context_metadata={
                         "channel_id": channel_id,

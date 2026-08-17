@@ -1,8 +1,8 @@
 # Kazma — Architecture & System Map
 
 **Single source of truth for system architecture**  
-**Version:** 0.6.1+ (post production-readiness remediation)  
-**Date:** 2026-07-21 (multi-path diagnosis map added 2026-07-27)  
+**Version:** 0.9.x (one-brain mouths + audit A–F follow-through)  
+**Date:** 2026-08-17 (July 21 production audit is historical, not current SoT)  
 **Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
 `docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/REMEDIATION_PLAN_2026-07-21.md`,  
 `docs/ops/*`, `AGENTS.md`

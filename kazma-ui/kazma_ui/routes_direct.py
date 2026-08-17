@@ -2884,7 +2884,11 @@ def register_direct_routes(self: Any) -> None:
                 "adapters_count": 0,
                 "adapters_running": 0,
                 "adapters": [],
-                "init_errors": self._init_errors,
+                "init_errors": [
+                    {"subsystem": e.get("subsystem", "?")}
+                    for e in (self._init_errors or [])
+                    if isinstance(e, dict)
+                ],
             }
         adapters = [_a for _a in self.gateway.adapters] if hasattr(self.gateway, 'adapters') else []
         queue = getattr(self.gateway, 'queue', None)
@@ -2903,7 +2907,11 @@ def register_direct_routes(self: Any) -> None:
                 }
                 for a in adapters
             ],
-            "init_errors": self._init_errors,
+            "init_errors": [
+                {"subsystem": e.get("subsystem", "?")}
+                for e in (self._init_errors or [])
+                if isinstance(e, dict)
+            ],
         }
 
     def _resolve_hitl_graph() -> Any:
@@ -2912,7 +2920,10 @@ def register_direct_routes(self: Any) -> None:
     def _resolve_hitl_checkpointer() -> Any:
         return self._hitl_state.get("checkpointer")
 
-    @self.app.post("/api/approve/{thread_id}")
+    @self.app.post(
+        "/api/approve/{thread_id}",
+        dependencies=[Depends(rate_limit("approve", 20))],
+    )
     async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
         # Use shared auth: KAZMA_SECRET *or* Account API token.
         from kazma_ui.auth import get_kazma_secret, is_authenticated
@@ -3273,7 +3284,11 @@ def register_direct_routes(self: Any) -> None:
     async def get_status() -> dict[str, Any]:
         return {
             "status": "degraded" if self._init_errors else "ok",
-            "init_errors": self._init_errors,
+            "init_errors": [
+                {"subsystem": e.get("subsystem", "?")}
+                for e in (self._init_errors or [])
+                if isinstance(e, dict)
+            ],
         }
 
     # ── Universal Backup ────────────────────────────────────────────────

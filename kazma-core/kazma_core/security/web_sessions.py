@@ -61,6 +61,7 @@ def create_session(
     username: str | None = None,
     role: str | None = None,
     user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> str:
     """Mint a new opaque session id and persist its hash. Returns raw id for cookie."""
     from kazma_core.config_store import get_config_store
@@ -68,6 +69,7 @@ def create_session(
     sid = secrets.token_urlsafe(32)
     now = time.time()
     ttl = _ttl()
+    tenant = (tenant_id or "").strip() or "default"
     payload: dict[str, Any] = {
         "created_at": now,
         "expires_at": now + ttl,
@@ -75,6 +77,7 @@ def create_session(
         "username": username,
         "role": role or "admin",  # legacy single-operator = full admin
         "user_id": user_id,
+        "tenant_id": tenant,
     }
     get_config_store().set(
         f"web_session.{_hash(sid)}",

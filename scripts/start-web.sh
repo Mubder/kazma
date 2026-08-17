@@ -42,8 +42,8 @@ else
 fi
 
 if [[ -z "${KAZMA_SECRET:-}" && "$KAZMA_HOST" != "127.0.0.1" && "$KAZMA_HOST" != "localhost" && "$KAZMA_HOST" != "::1" ]]; then
-  echo "warning: KAZMA_HOST=$KAZMA_HOST with empty KAZMA_SECRET — CLI will require a secret or refuse non-loopback." >&2
-  echo "         Set KAZMA_SECRET in .env (recommended) or export it before starting." >&2
+  echo "error: KAZMA_HOST=$KAZMA_HOST requires KAZMA_SECRET. Set it in .env or export it." >&2
+  exit 1
 fi
 
 echo "Starting Kazma Web UI"

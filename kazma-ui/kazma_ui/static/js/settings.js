@@ -358,6 +358,7 @@ function settingsApp() {
                     if (settings.connectors) Object.assign(this.connectors, settings.connectors);
                     if (appearanceCfg) {
                         Object.assign(this.appearance, appearanceCfg);
+                        this._applyAccentColor(this.appearance.accent_color);
                         if (appearanceCfg.font_size) {
                             try {
                                 const rootEl = document.documentElement;
@@ -2177,6 +2178,7 @@ function settingsApp() {
                         document.documentElement.setAttribute('data-theme', resolved);
                     }
                 }
+                this._applyAccentColor(this.appearance.accent_color);
                 showToast('Appearance saved', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
@@ -2215,6 +2217,18 @@ function settingsApp() {
             this.appearance.font_size = size;
             const root = Alpine.$data(document.querySelector('[x-data]'));
             if (root) root.fontSize = size;
+        },
+
+        _applyAccentColor(hex) {
+            if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            const root = document.documentElement;
+            root.style.setProperty('--accent', hex);
+            root.style.setProperty('--accent-rgb', r + ', ' + g + ', ' + b);
+            root.style.setProperty('--accent-subtle', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.12)');
+            root.style.setProperty('--accent-glow', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.28)');
         },
 
         /* ══════════════════════════════════════════════════════════════════

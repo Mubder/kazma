@@ -76,8 +76,9 @@ async def test_referer_mismatch_rejected():
 
 
 @pytest.mark.asyncio
-async def test_forwarded_host_accepted():
-    """Proxied deployments: X-Forwarded-Host values count as allowed."""
+async def test_forwarded_host_accepted(monkeypatch):
+    """Proxied deployments: X-Forwarded-Host is allowed only if it matches PUBLIC_URL."""
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://kazma.example.com")
     mw = create_csrf_middleware()
     req = _make_request(
         headers={
@@ -87,6 +88,20 @@ async def test_forwarded_host_accepted():
     )
     resp = await mw(req, _call_next)
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_spoofed_forwarded_host_rejected(monkeypatch):
+    monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
+    mw = create_csrf_middleware()
+    req = _make_request(
+        headers={
+            "origin": "https://evil.example",
+            "x-forwarded-host": "evil.example",
+        }
+    )
+    resp = await mw(req, _call_next)
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

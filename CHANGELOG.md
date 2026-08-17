@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — Audit A–F follow-through (2026-08-17)
+
+TUI file-open no longer crashes on Textual 8.2 `hatch: right $panel`.
+Danger-list aliases match CANONICAL. GitHub PAT is not written to `.env`.
+CORS `*` + credentials is rejected. CSRF only trusts `X-Forwarded-Host`
+when it matches `KAZMA_PUBLIC_URL`. `/health` and `/api/status` no longer
+leak init-error strings or workspace paths. `/api/approve` is rate-limited.
+`kazma-web` refuses a non-loopback bind without `KAZMA_SECRET`. Discord
+sender is per-user. Belief extractor rejects assistant-prose predicates.
+Soul pending queue is ConfigStore-backed. Accent color is applied to CSS
+variables. Session list prefers `#short_id`. TUI replay uses real timestamps
+and hides the progress bar after load.
+
 ## Unreleased — one turn, one season (2026-08-17)
 
 After Telegram take-over, ``123 Hey`` showed up on both ``/yolo`` and
@@ -73,7 +86,7 @@ take over on Telegram — same LangGraph `thread_id`, same sidebar list.
 - **Web:** session list shows last mouth; Copy ID (+ `/chat?s=` link). New Web
   seasons use `session_id == thread_id` so the id you copy is the id you switch.
 - **TUI:** `/sessions` lists the same directory (continue the live agent on
-  Web/Telegram — TUI chat is still not the supervisor).
+  Web/Telegram — TUI chat posts to the same supervisor).
 
 ## Unreleased — Intent Router audit fixes (2026-08-15)
 

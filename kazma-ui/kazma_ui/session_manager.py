@@ -346,6 +346,24 @@ class SessionManager:
             )
             self._sessions[f"{session.tenant_id}:{session_id}"] = session
 
+    def _merge_missing_from_db(self, limit: int | None = None) -> None:
+        """Pull newest DB rows that are not already in the process cache.
+
+        Must not clobber dirty in-memory sessions (a WS path may append
+        messages before ``put()``).
+        """
+        before = set(self._sessions.keys())
+        scratch: dict[str, ChatSession] = {}
+        saved = self._sessions
+        try:
+            self._sessions = scratch  # type: ignore[assignment]
+            self._load_all_from_db(limit=limit)
+        finally:
+            self._sessions = saved
+        for key, sess in scratch.items():
+            if key not in before:
+                self._sessions[key] = sess
+
     def _evict_if_needed(self, tenant_id: str) -> None:
         """Evict the oldest session for this tenant if we exceed max_sessions."""
         tenant_keys = [key for key in self._sessions.keys() if key.startswith(f"{tenant_id}:")]
@@ -866,6 +884,11 @@ class SessionManager:
                     "[SessionManager] prune_empty_web_sessions raised",
                     exc_info=True,
                 )
+
+        try:
+            self._merge_missing_from_db(limit=min(self._max_sessions, 200))
+        except Exception:
+            logger.debug("[SessionManager] list_all db refresh skipped", exc_info=True)
 
         with self._lock:
             tenant_id = get_current_tenant_id() or "default"

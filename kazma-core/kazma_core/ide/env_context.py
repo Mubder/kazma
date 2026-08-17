@@ -256,7 +256,9 @@ def build_env_context(workspace_id: str | None = None) -> str:
         f"- Default local URL: `http://127.0.0.1:{port_hint}` (and `http://localhost:{port_hint}`).",
     ]
     if listen_hint:
-        lines.append(f"- Public / configured base URL: `{listen_hint}`")
+        lines.append(
+            f"- Public / configured base URL: `{_sanitize_env_field(listen_hint, max_len=200)}`"
+        )
     lines.extend(
         [
             "- Do **not** conclude the server is down just because `browser_navigate` "
@@ -266,7 +268,7 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "",
             "## Active Workspace (BINDING — not optional)",
             f"- **Workspace name:** {_sanitize_env_field(ws_name)}",
-            f"- **Workspace root:** `{root}`",
+            f"- **Workspace root:** `{_sanitize_env_field(str(root), max_len=240)}`",
             "- Native `file_*` / shell / git tools use this root (and per-task "
             "`workspace_scope` when a swarm task targets another workspace).",
             "- MCP `filesystem` tools rebind to the **global active** workspace on "

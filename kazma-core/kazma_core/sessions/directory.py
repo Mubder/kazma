@@ -347,7 +347,8 @@ def format_session_list(
     lines.extend(
         [
             "",
-            "/session 2 — continue that season here (take over)",
+            "/session #short_id — continue that season here (take over)",
+            "/session 2 — same, by list number (numbers move as you chat)",
             "/session new <name> — start a fresh season",
             "Web: open /chat?s=<id> or pick it in the sidebar.",
         ]

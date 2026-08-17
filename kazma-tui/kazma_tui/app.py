@@ -306,22 +306,8 @@ class KazmaTUI(App[None]):
         except Exception as e:
             logger.warning("[TUI] SwarmEngine init failed: %s", e)
 
-        # ── V2 embedder pre-warm ────────────────────────────────────
-        # V2 recall() uses the shared embedder for dense retrieval; warm it
-        # so the first TUI chat turn isn't stalled on the MiniLM load. The
-        # legacy VectorMemory/ChromaDB boot was removed with the V1 stack.
-        try:
-            import os
-            _demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
-            if not _demo:
-                from kazma_core.memory.embedder import get_embedder
-
-                emb = get_embedder()
-                if emb is not None:
-                    emb.encode("kazma tui warmup")
-                    logger.info("[TUI] V2 embedder ready (%s)", type(emb).__name__)
-        except Exception as e:
-            logger.debug("[TUI] V2 embedder pre-warm skipped: %s", e)
+        # Embedder warmup belongs on the server. Doing it here blocked the
+        # UI thread (mouse tracking dumped raw CSI and the TUI would not exit).
 
         # ── Update status bar with active model info ──────────────────
         try:

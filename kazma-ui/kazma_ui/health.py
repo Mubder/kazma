@@ -353,7 +353,7 @@ def _check_workspace_binding() -> dict[str, Any]:
         return {
             "status": "ok",
             "component": "workspace_binding",
-            "root": str(root),
+            "root_ok": True,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
     except Exception as e:

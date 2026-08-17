@@ -1002,6 +1002,15 @@ def create_sse_chat_router(
             )
 
         session_id = body.get("session_id") or str(uuid.uuid4())
+        workspace_id = str(body.get("workspace_id") or "").strip()
+        _ws_token = None
+        if workspace_id:
+            try:
+                from kazma_core.ide.workspace_scope import pin_workspace
+
+                _ws_token = pin_workspace(workspace_id)
+            except Exception:
+                logger.debug("[SSE] workspace pin skipped", exc_info=True)
 
         # ── Optional IDE context (Phase: IDE chat box) ───────────────
         # When the IDE chat sends the currently-open file as context, we
@@ -1825,8 +1834,21 @@ def create_sse_chat_router(
                     pass
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
+        async def _guarded_events() -> AsyncGenerator[str, None]:
+            try:
+                async for frame in _event_generator():
+                    yield frame
+            finally:
+                if _ws_token is not None:
+                    try:
+                        from kazma_core.ide.workspace_scope import reset_workspace
+
+                        reset_workspace(_ws_token)
+                    except Exception:
+                        pass
+
         return StreamingResponse(
-            _event_generator(),
+            _guarded_events(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
