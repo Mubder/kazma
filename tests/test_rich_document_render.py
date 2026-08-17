@@ -163,7 +163,7 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     )
     assert out.is_file()
     doc = Document(str(out))
-    # Title/headings live in filled single-cell tables (PDF-parity bars)
+    # Title/headings are editorial paragraphs (navy + brass rule), not filled bars
     all_text = " ".join(p.text for p in doc.paragraphs)
     for table in doc.tables:
         for row in table.rows:
@@ -171,8 +171,15 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
                 all_text += " " + cell.text
     assert "وثيقة" in all_text
     assert "واحد" in all_text or "اثنان" in all_text
-    assert len(doc.tables) >= 2  # title bar + section/heading bars
     from docx.oxml.ns import qn
+
+    has_rule = False
+    for p in doc.paragraphs:
+        p_pr = p._p.pPr
+        if p_pr is not None and p_pr.find(qn("w:pBdr")) is not None:
+            has_rule = True
+            break
+    assert has_rule, "editorial heading rule (w:pBdr) missing"
 
     has_bidi = False
     for p in doc.paragraphs:
@@ -197,9 +204,7 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     tfl = doc.settings.element.find(qn("w:themeFontLang"))
     assert tfl is not None and tfl.get(qn("w:bidi")) == "ar-SA"
     assert tfl.get(qn("w:val")) == "ar-SA"  # not en-US shell
-    for table in doc.tables:
-        assert table._tbl.tblPr is not None
-        assert table._tbl.tblPr.find(qn("w:bidiVisual")) is not None
+    # Content tables (if any) stay bidiVisual; headings are no longer tables.
     # Run-level w:rtl is what Word uses for text direction (not only pPr bidi)
     run_rtl = 0
     for p in doc.paragraphs:
@@ -250,8 +255,8 @@ def test_markdown_table_and_docx_justify_shading(tmp_path: Path) -> None:
     _generate_docx(docx, payload)
     assert pdf.is_file() and pdf.stat().st_size > 500
     doc = Document(str(docx))
-    # title bar + section bar + markdown table + payload table (+ heading bars)
-    assert len(doc.tables) >= 3
+    # markdown table + payload table (headings are paragraphs now)
+    assert len(doc.tables) >= 2
     found_jc = False
     found_bar_fill = False
     for p in doc.paragraphs:
@@ -494,7 +499,7 @@ def test_toc_items_align_per_language(tmp_path: Path) -> None:
     assert en_toc, "EN TOC entry not left-aligned"
 
 def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
-    """DOCX must mirror the PDF/THEME styling: Calibri (not Arial) on every run,
+    """DOCX must mirror the PDF/THEME styling: Calibri Latin + Arabic cs font,
     heading point sizes synced to THEME, and Arabic runs carry w:rtl + the
     paragraph w:bidi so Word opens RTL (regression: 'AR is LTR + no font set'
     and 'EN bigger font size not synced')."""
@@ -525,8 +530,9 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     assert 'w:ascii="Arial"' not in ar_xml, "Arial leaked into AR DOCX run font"
     assert 'w:ascii="Arial"' not in en_xml, "Arial leaked into EN DOCX run font"
     assert 'w:ascii="Calibri"' in en_xml, "EN DOCX missing Calibri run font"
-    # AR complex-script runs use Calibri cs + rtl + paragraph bidi
-    assert 'w:cs="Calibri"' in ar_xml, "AR DOCX runs missing Calibri complex-script font"
+    # AR complex-script runs use the theme Arabic face + rtl + paragraph bidi
+    ar_cs = THEME.get("font_arabic") or "Sakkal Majalla"
+    assert f'w:cs="{ar_cs}"' in ar_xml, "AR DOCX runs missing Arabic complex-script font"
     assert "w:rtl" in ar_xml, "AR DOCX runs missing w:rtl"
     assert "w:bidi" in ar_xml, "AR DOCX paragraphs missing w:bidi"
     # EN heading sizes (half-points) synced to THEME

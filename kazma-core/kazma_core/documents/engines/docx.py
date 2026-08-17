@@ -98,14 +98,41 @@ class DocxEngine:
             section.left_margin = Cm(1.8)
             section.right_margin = Cm(1.8)
 
-        # Normal style: Calibri body, justified, theme spacing.
+        # Normal style: Latin + Arabic typefaces, justified, theme spacing.
         try:
+            from kazma_core.documents.style_theme import theme_fonts
+
+            fonts = theme_fonts(rtl=self.profile.rtl)
             normal = document.styles["Normal"]
-            normal.font.name = "Calibri"
-            normal.font.size = Pt(float(self.theme["body_size"]))
+            normal.font.name = fonts["latin"]
+            body_pt = (
+                float(self.theme.get("body_size_ar", 12))
+                if self.profile.rtl
+                else float(self.theme["body_size"])
+            )
+            normal.font.size = Pt(body_pt)
+            try:
+                from docx.oxml import OxmlElement
+                from docx.oxml.ns import qn
+
+                r_pr = document.styles["Normal"].element.get_or_add_rPr()
+                r_fonts = r_pr.find(qn("w:rFonts"))
+                if r_fonts is None:
+                    r_fonts = OxmlElement("w:rFonts")
+                    r_pr.insert(0, r_fonts)
+                r_fonts.set(qn("w:ascii"), fonts["latin"])
+                r_fonts.set(qn("w:hAnsi"), fonts["latin"])
+                r_fonts.set(qn("w:cs"), fonts["cs"])
+            except Exception:
+                logger.debug("[docx] Normal rFonts failed", exc_info=True)
             normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             normal.paragraph_format.space_after = Pt(8)
-            normal.paragraph_format.line_spacing = float(self.theme["line_height"])
+            leading = (
+                float(self.theme.get("line_height_ar", 1.85))
+                if self.profile.rtl
+                else float(self.theme["line_height"])
+            )
+            normal.paragraph_format.line_spacing = leading
         except Exception:
             logger.debug("[docx] Normal style setup failed", exc_info=True)
 
@@ -287,9 +314,15 @@ class DocxEngine:
         if r_fonts is None:
             r_fonts = OxmlElement("w:rFonts")
             r_pr.insert(0, r_fonts)
-        for attr, val in (("w:ascii", "Calibri"), ("w:hAnsi", "Calibri"), ("w:cs", "Calibri")):
-            if not r_fonts.get(qn(attr)):
-                r_fonts.set(qn(attr), val)
+        from kazma_core.documents.style_theme import theme_fonts
+
+        fonts = theme_fonts(rtl=True)
+        for attr, val in (
+            ("w:ascii", fonts["latin"]),
+            ("w:hAnsi", fonts["latin"]),
+            ("w:cs", fonts["arabic"]),
+        ):
+            r_fonts.set(qn(attr), val)
         lang = r_pr.find(qn("w:lang"))
         if lang is None:
             lang = OxmlElement("w:lang")
@@ -484,7 +517,9 @@ class DocxEngine:
         from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
 
-        fill = (fill_hex or self.theme["heading_fill"]).lstrip("#").upper()
+        from kazma_core.documents.style_theme import theme_fonts
+
+        fonts = theme_fonts(rtl=self.profile.rtl)
         sizes = {
             0: float(self.theme["title_size"]),
             1: float(self.theme["h1_size"]),
@@ -492,45 +527,43 @@ class DocxEngine:
             3: float(self.theme["h3_size"]),
         }
         size = sizes.get(int(level), 12.0)
+        ink = (self.theme.get("heading") or "#1e3a5f").lstrip("#")
+        gold = (self.theme.get("gold") or "#b0892e").lstrip("#").upper()
 
-        table = document.add_table(rows=1, cols=1)
-        table.autofit = True
-        cell = table.rows[0].cells[0]
-
-        # Cell background fill (tcPr/shd is the correct, schema-valid element).
-        tc_pr = cell._tc.get_or_add_tcPr()
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:fill"), fill)
-        shd.set(qn("w:val"), "clear")
-        shd.set(qn("w:color"), "auto")
-        tc_pr.append(shd)
-        # NOTE: no w:jc under tcPr — that is schema-invalid (CT_TcPr has no
-        # w:jc child) and Word ignores it. Cell text alignment comes from the
-        # paragraph's w:jc inside the cell, set below via _set_paragraph.
-
-        p = cell.paragraphs[0]
+        p = document.add_paragraph()
         run = p.add_run(text or "")
         run.bold = True
         run.font.size = Pt(size)
-        run.font.name = "Calibri"
-        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        run.font.name = fonts["latin"]
+        run.font.color.rgb = RGBColor(int(ink[0:2], 16), int(ink[2:4], 16), int(ink[4:6], 16))
 
-        # Title/section bars are start-aligned: reading-start edge.
-        # Under RTL the profile maps "start" → w:jc="start" → physical RIGHT.
+        # Editorial: navy type + brass rule (no inverted white-on-navy bar).
+        # Title gets a bottom rule; section headings also get a start-edge bar.
+        p_pr = p._p.get_or_add_pPr()
+        p_bdr = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "16" if int(level) == 0 else "8")
+        bottom.set(qn("w:space"), "6")
+        bottom.set(qn("w:color"), gold)
+        p_bdr.append(bottom)
+        if int(level) in (1, 2):
+            edge = "right" if self.profile.rtl else "left"
+            side = OxmlElement(f"w:{edge}")
+            side.set(qn("w:val"), "single")
+            side.set(qn("w:sz"), "18")
+            side.set(qn("w:space"), "8")
+            side.set(qn("w:color"), gold)
+            p_bdr.append(side)
+        p_pr.append(p_bdr)
+
         self._set_paragraph(p, "start")
-        # Outline level on section headings (indexable) so a TOC field can index
-        # them. outlineLvl is appended AFTER jc (schema order: ... jc, ...,
-        # outlineLvl ...). Only content headings are indexable — NOT the title,
-        # TOC, references, or table heading bars (they must not self-list).
         if indexable and level >= 1:
             p_pr = p._p.get_or_add_pPr()
             outline = OxmlElement("w:outlineLvl")
-            outline.set(qn("w:val"), str(min(level, 3) - 1))  # 1->0, 2->1, 3->2
+            outline.set(qn("w:val"), str(min(level, 3) - 1))
             p_pr.append(outline)
-        if self.profile.rtl:
-            self._mark_table_rtl(table)
 
-        # Spacer paragraph after the bar.
         sp = document.add_paragraph("")
         self._set_paragraph(sp, "start")
 
@@ -578,6 +611,8 @@ class DocxEngine:
         from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
 
+        from kazma_core.documents.style_theme import theme_fonts
+
         if not headers:
             return
         ncols = len(headers)
@@ -598,7 +633,7 @@ class DocxEngine:
             p = cell.paragraphs[0]
             run = p.add_run(str(text))
             run.font.size = Pt(10)
-            run.font.name = "Calibri"
+            run.font.name = theme_fonts(rtl=self.profile.rtl)["latin"]
             if header:
                 run.bold = True
                 run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)

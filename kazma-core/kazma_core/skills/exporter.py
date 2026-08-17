@@ -100,32 +100,32 @@ def _css(*, rtl: bool, brand: str) -> str:
     *, *::before, *::after {{ box-sizing: border-box; }}
 
     body {{
-      font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans Arabic', 'Sakkal Majalla', 'IBM Plex Sans', -apple-system, sans-serif;
       direction: {direction};
       text-align: justify;
       text-align-last: {text_align_last};
-      line-height: 1.65;
+      line-height: {t.get("line_height_ar", 1.85) if rtl else t.get("line_height", 1.65)};
       color: {t["body"]};
-      font-size: 10.5pt;
+      font-size: {t.get("body_size_ar", 12) if rtl else t.get("body_size", 11)}pt;
     }}
 
     .header-card {{
-      background: {t["accent"]};
-      color: #fff;
-      padding: 14px 16px;
-      margin: 0 0 20px 0;
-      border-radius: 4px;
+      background: none;
+      color: {t["heading"]};
+      padding: 0 0 14px 0;
+      margin: 0 0 22px 0;
+      border-bottom: 2px solid {t.get("gold", "#b0892e")};
     }}
 
     .header-card h1 {{
-      font-size: 18pt;
+      font-size: 20pt;
       margin: 0 0 8px 0;
-      color: #fff;
+      color: {t["heading"]};
     }}
 
     .metadata-grid {{
       font-size: 8.5pt;
-      color: #e2e8f0;
+      color: {t["muted"]};
       display: table;
       width: 100%;
     }}
@@ -136,17 +136,18 @@ def _css(*, rtl: bool, brand: str) -> str:
     }}
 
     h1, h2 {{
-      background: {t["heading_fill"]};
-      color: #fff !important;
-      padding: 8px 12px;
-      margin: 18px 0 10px 0;
-      border-radius: 3px;
+      background: none;
+      color: {t["heading_fill"]} !important;
+      padding: 0 0 6px 0;
+      margin: 20px 0 10px 0;
+      border-inline-start: 3px solid {t.get("gold", "#b0892e")};
+      padding-inline-start: 12px;
       font-size: 14pt;
     }}
 
     h3 {{
       color: {t["heading"]};
-      border-bottom: 2px solid {t["border"]};
+      border-bottom: 1px solid {t.get("gold", "#b0892e")};
       padding-bottom: 4px;
       margin: 14px 0 8px 0;
     }}

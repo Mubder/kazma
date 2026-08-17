@@ -90,7 +90,7 @@ class HtmlEngine:
         chrome = self.profile.chrome
         title_esc = esc(title) if title else ""
         header = (
-            f'  <div class="header-card"><h1>{title_esc}</h1></div>\n'
+            f'  <header class="doc-title"><h1>{title_esc}</h1></header>\n'
             if (header_card and title_esc) else ""
         )
         return (
@@ -108,46 +108,60 @@ class HtmlEngine:
         )
 
     def _css(self) -> str:
-        """Themed stylesheet. EN/AR differ only by direction (from the profile)."""
+        """Themed stylesheet. EN/AR differ by direction + typeface + measure."""
+        from kazma_core.documents.style_theme import theme_fonts
+
         t = self.theme
         direction = self.profile.html_dir
         text_align_last = "right" if self.profile.rtl else "left"
+        fonts = theme_fonts(rtl=self.profile.rtl)
+        body_pt = t.get("body_size_ar", 12) if self.profile.rtl else t.get("body_size", 11)
+        leading = t.get("line_height_ar", 1.85) if self.profile.rtl else t.get("line_height", 1.65)
+        gold = t.get("gold", "#b0892e")
         return f"""
     *, *::before, *::after {{ box-sizing: border-box; }}
     body {{
-      font-family: 'Segoe UI', 'IBM Plex Sans Arabic', 'IBM Plex Sans', -apple-system, sans-serif;
+      font-family: {fonts["html"]};
       direction: {direction};
       text-align: justify;
       text-align-last: {text_align_last};
-      line-height: 1.65;
+      line-height: {leading};
       color: {t["body"]};
-      font-size: 11pt;
+      font-size: {body_pt}pt;
       max-width: 820px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 28px 32px 40px;
       background: #fff;
     }}
-    .header-card {{
-      background: {t["accent"]};
-      color: #fff;
-      padding: 16px 20px;
-      margin: 0 0 22px 0;
-      border-radius: 6px;
+    .doc-title {{
+      margin: 0 0 28px 0;
+      padding: 0 0 14px 0;
+      border-bottom: 2px solid {gold};
     }}
-    .header-card h1 {{ font-size: 20pt; margin: 0; color: #fff; }}
+    .doc-title h1 {{
+      font-size: {t.get("title_size", 22)}pt;
+      font-weight: 650;
+      margin: 0;
+      color: {t["heading"]};
+      letter-spacing: {('-0.01em' if self.profile.rtl else '-0.02em')};
+      line-height: 1.25;
+    }}
     .content-body h1, .content-body h2 {{
-      background: {t["heading_fill"]};
-      color: #fff !important;
-      padding: 8px 14px;
-      margin: 22px 0 12px 0;
-      border-radius: 4px;
+      background: none;
+      color: {t["heading_fill"]} !important;
+      padding: 0 0 6px 0;
+      margin: 26px 0 12px 0;
+      border: none;
+      border-inline-start: 3px solid {gold};
+      padding-inline-start: 12px;
       font-size: 15pt;
+      font-weight: 650;
     }}
     .content-body h3 {{
       color: {t["heading"]};
-      border-bottom: 2px solid {t["border"]};
+      border-bottom: 1px solid {gold};
       padding-bottom: 4px;
-      margin: 16px 0 8px 0;
+      margin: 18px 0 8px 0;
     }}
     p {{ text-align: justify; margin: 0 0 0.8em 0; }}
     table {{
@@ -219,7 +233,10 @@ class HtmlEngine:
             return f"    <h3>{esc(block.text)}</h3>"
         if isinstance(block, HeadingBlock):
             slug = self._slugify(block.text)
-            return f'    <h2 id="{slug}" style="background:{self.theme["heading_fill"]}">{esc(block.text)}</h2>'
+            return (
+                f'    <h2 id="{slug}" style="color:{self.theme["heading_fill"]}">'
+                f"{esc(block.text)}</h2>"
+            )
         if isinstance(block, BodyBlock):
             return self._markdown_to_html(block.text, indent="    ")
         if isinstance(block, TOCBlock):

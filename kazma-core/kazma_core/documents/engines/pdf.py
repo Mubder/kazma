@@ -180,16 +180,19 @@ class PdfEngine:
 
         def _bar(text_html: str, para_style: Any, *, fill: Any | None = None) -> Any:
             para = Paragraph(text_html, para_style)
-            fill_c = fill if fill is not None else heading_fill
+            gold = th.get("gold") or colors.HexColor("#b0892e")
             tbl = Table([[para]], colWidths=["*"])
-            tbl.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), fill_c),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            cmds = [
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ]))
+                ("LINEBELOW", (0, 0), (-1, -1), 1.15, gold),
+            ]
+            if fill is not None:
+                cmds.insert(0, ("BACKGROUND", (0, 0), (-1, -1), fill))
+            tbl.setStyle(TableStyle(cmds))
             return tbl
 
         page_margin = float(self.theme.get("page_margin", 54))
@@ -360,8 +363,8 @@ class PdfEngine:
         canvas.saveState()
         canvas.setFont(font, 8)
         canvas.setFillColor(th["muted"])
-        canvas.setStrokeColor(th["border"])
-        canvas.setLineWidth(0.8)
+        canvas.setStrokeColor(th.get("gold") or th["border"])
+        canvas.setLineWidth(0.9)
         canvas.line(document.leftMargin, A4[1] - 30, A4[0] - document.rightMargin, A4[1] - 30)
         canvas.line(document.leftMargin, 36, A4[0] - document.rightMargin, 36)
 
@@ -400,7 +403,7 @@ class PdfEngine:
             if block.level == 0:
                 story.append(_bar(
                     inline_markdown_to_reportlab(block.text, shape_arabic=self.shape_ar),
-                    styles["title"], fill=accent,
+                    styles["title"],
                 ))
                 story.append(Spacer(1, 14))
             else:
