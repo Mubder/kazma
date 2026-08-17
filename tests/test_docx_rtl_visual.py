@@ -219,13 +219,14 @@ def test_arabic_docx_has_no_invalid_tcpr_jc(tmp_path: Path) -> None:
 
 
 def test_arabic_docx_runs_carry_complex_script_size_and_bold(tmp_path: Path) -> None:
-    """Arabic runs must mirror w:sz→w:szCs and w:b→w:bCs (complex-script variants).
+    """Arabic runs must carry w:szCs/w:bCs (complex-script variants).
 
     python-docx writes only the Latin w:sz/w:b. Arabic is a complex script, so
     Word/LibreOffice size and weight it via w:szCs/w:bCs — without those the
     run silently falls back to the default size (11pt) and loses true bold,
     which was the heading-bar "junk letters" symptom (tiny faux-bold Arabic).
-    This guards the fix in DocxEngine._mark_run.
+    Body runs often have no per-run w:sz (they inherit Normal) and still
+    must get an explicit w:szCs or the body stays small.
     """
     from kazma_core.documents.renderer_worker import _generate_docx
 
@@ -239,23 +240,70 @@ def test_arabic_docx_runs_carry_complex_script_size_and_bold(tmp_path: Path) -> 
     })
     xml = _docx_text(docx)
     import re
-    # Every run that has w:rtl (Arabic) must also carry w:szCs; every bold
-    # Arabic run (heading bars) must carry w:bCs.
     rtl_runs = re.findall(r"<w:r>.*?</w:r>", xml, re.S)
     assert rtl_runs, "no runs found"
-    rtl_with_size = [r for r in rtl_runs if "w:rtl" in r and "w:sz " in r]
-    assert rtl_with_size, "no sized Arabic run found"
-    for r in rtl_with_size:
+    rtl_marked = [r for r in rtl_runs if "w:rtl" in r]
+    assert rtl_marked, "no Arabic (w:rtl) run found"
+    for r in rtl_marked:
         assert "w:szCs" in r, (
-            f"Arabic run has w:sz but no w:szCs (complex-script size) — "
-            f"will render at default 11pt: {r[:120]!r}"
+            f"Arabic run missing w:szCs (complex-script size) — "
+            f"body will render at default 11pt: {r[:160]!r}"
         )
-    bold_rtl = [r for r in rtl_runs if "w:rtl" in r and "<w:b/>" in r]
+    bold_rtl = [r for r in rtl_marked if "<w:b/>" in r]
     assert bold_rtl, "no bold Arabic run (heading bar) found"
     for r in bold_rtl:
         assert "<w:bCs/>" in r, (
             f"bold Arabic run missing w:bCs (complex-script bold): {r[:120]!r}"
         )
+
+
+def test_arabic_body_szcs_is_larger_than_latin(tmp_path: Path) -> None:
+    """Arabic body uses body_size_ar via w:szCs; Latin stays at body_size.
+
+    Regression: Normal.font.size was set to body_size_ar (pumping English)
+    and _mark_run copied w:sz→w:szCs, so mixed Latin looked large while
+    Sakkal body stayed optically small.
+    """
+    import re
+    import zipfile
+    from kazma_core.documents.renderer_worker import _generate_docx
+    from kazma_core.documents.style_theme import THEME, theme_cs_size
+
+    docx = tmp_path / "ar.docx"
+    _generate_docx(docx, {
+        "title": "تقرير رئيسي",
+        "lang": "ar",
+        "sections": [{"heading": "القسم", "body": "نص عربي للفقرة مع ISO/IEC 27001."}],
+    })
+    zf = zipfile.ZipFile(docx)
+    xml = zf.read("word/document.xml").decode("utf-8")
+    styles = zf.read("word/styles.xml").decode("utf-8")
+
+    latin_half = int(THEME["body_size"] * 2)
+    ar_half = int(round(theme_cs_size() * 2))
+    assert ar_half > latin_half
+
+    # Normal style: Latin size is body_size, Cs size is body_size_ar.
+    assert f'w:sz w:val="{latin_half}"' in styles, (
+        "AR Normal latin size must stay at body_size, not body_size_ar"
+    )
+    assert f'w:szCs w:val="{ar_half}"' in styles, (
+        "AR Normal style missing independent w:szCs=body_size_ar"
+    )
+
+    cs_vals = [int(v) for v in re.findall(r'w:szCs w:val="(\d+)"', xml)]
+    assert ar_half in cs_vals, (
+        f"no body-level w:szCs={ar_half} on Arabic runs; got {sorted(set(cs_vals))}"
+    )
+    for r in re.findall(r"<w:r>.*?</w:r>", xml, re.S):
+        if "w:rtl" not in r:
+            continue
+        cs_m = re.search(r'w:szCs w:val="(\d+)"', r)
+        sz_m = re.search(r'w:sz w:val="(\d+)"', r)
+        if cs_m and sz_m:
+            assert int(cs_m.group(1)) > int(sz_m.group(1)), (
+                f"szCs must exceed latin sz on Arabic runs: {r[:160]!r}"
+            )
 
 
 @_needs_visual()

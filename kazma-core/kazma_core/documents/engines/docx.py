@@ -105,15 +105,15 @@ class DocxEngine:
             fonts = theme_fonts(rtl=self.profile.rtl)
             normal = document.styles["Normal"]
             normal.font.name = fonts["latin"]
-            body_pt = (
-                float(self.theme.get("body_size_ar", 12))
-                if self.profile.rtl
-                else float(self.theme["body_size"])
-            )
-            normal.font.size = Pt(body_pt)
+            # Latin size stays at body_size even in RTL docs. Arabic is
+            # sized independently via w:szCs (see theme_cs_size) — setting
+            # Normal.font.size to body_size_ar pumped mixed English.
+            latin_pt = float(self.theme["body_size"])
+            normal.font.size = Pt(latin_pt)
             try:
                 from docx.oxml import OxmlElement
                 from docx.oxml.ns import qn
+                from kazma_core.documents.style_theme import theme_cs_size
 
                 r_pr = document.styles["Normal"].element.get_or_add_rPr()
                 r_fonts = r_pr.find(qn("w:rFonts"))
@@ -123,8 +123,9 @@ class DocxEngine:
                 r_fonts.set(qn("w:ascii"), fonts["latin"])
                 r_fonts.set(qn("w:hAnsi"), fonts["latin"])
                 r_fonts.set(qn("w:cs"), fonts["cs"])
+                self._set_sz_cs(r_pr, theme_cs_size(latin_pt))
             except Exception:
-                logger.debug("[docx] Normal rFonts failed", exc_info=True)
+                logger.debug("[docx] Normal rFonts/szCs failed", exc_info=True)
             normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             normal.paragraph_format.space_after = Pt(8)
             leading = (
@@ -329,24 +330,50 @@ class DocxEngine:
             r_pr.append(lang)
         lang.set(qn("w:bidi"), "ar-SA")
         lang.set(qn("w:val"), "ar-SA")
-        # Mirror the Latin size/bold/italic to their complex-script (Cs)
-        # variants. python-docx only writes w:sz/w:b/w:i; Arabic is a complex
-        # script, so Word/LibreOffice size and weight it via w:szCs/w:bCs/w:iCs.
-        # Without these the run silently falls back to the default size and
-        # loses true bold — the heading-bar "junk letters" symptom (bold white
-        # Arabic rendered tiny / faux-bold / distorted). Insert immediately
-        # after the Latin sibling to stay in CT_RPr schema order.
+        # Complex-script size is independent of Latin w:sz. Copying sz→szCs
+        # made Sakkal match Calibri in nominal pt (optically smaller) and
+        # body runs often have no per-run w:sz (they inherit Normal), so
+        # they never got szCs and fell back to ~11pt. Always write szCs.
+        # Bold/italic still need the Cs siblings (python-docx writes only
+        # w:b/w:i). Insert after the Latin sibling for CT_RPr order.
+        from kazma_core.documents.style_theme import theme_cs_size
+
         sz = r_pr.find(qn("w:sz"))
-        if sz is not None and r_pr.find(qn("w:szCs")) is None:
-            szcs = OxmlElement("w:szCs")
-            szcs.set(qn("w:val"), sz.get(qn("w:val")))
-            sz.addnext(szcs)
+        latin_pt: float | None = None
+        if sz is not None:
+            try:
+                half = int(sz.get(qn("w:val")) or 0)
+                if half > 0:
+                    latin_pt = half / 2.0
+            except (TypeError, ValueError):
+                latin_pt = None
+        self._set_sz_cs(r_pr, theme_cs_size(latin_pt), after=sz)
         b = r_pr.find(qn("w:b"))
         if b is not None and r_pr.find(qn("w:bCs")) is None:
             b.addnext(OxmlElement("w:bCs"))
         i = r_pr.find(qn("w:i"))
         if i is not None and r_pr.find(qn("w:iCs")) is None:
             i.addnext(OxmlElement("w:iCs"))
+
+    @staticmethod
+    def _set_sz_cs(r_pr: Any, size_pt: float, *, after: Any = None) -> None:
+        """Set or update ``w:szCs`` (half-points) on a run/style rPr."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        half = max(1, int(round(float(size_pt) * 2)))
+        szcs = r_pr.find(qn("w:szCs"))
+        if szcs is None:
+            szcs = OxmlElement("w:szCs")
+            if after is not None:
+                after.addnext(szcs)
+            else:
+                sz = r_pr.find(qn("w:sz"))
+                if sz is not None:
+                    sz.addnext(szcs)
+                else:
+                    r_pr.append(szcs)
+        szcs.set(qn("w:val"), str(half))
 
     def _mark_table_rtl(self, table: Any) -> None:
         """``w:bidiVisual`` on a table so columns read right→left."""
@@ -537,7 +564,7 @@ class DocxEngine:
         run.font.name = fonts["latin"]
         run.font.color.rgb = RGBColor(int(ink[0:2], 16), int(ink[2:4], 16), int(ink[4:6], 16))
 
-        # Editorial: navy type + brass rule (no inverted white-on-navy bar).
+        # Editorial: navy type + royal accent rule (no inverted bar).
         # Title gets a bottom rule; section headings also get a start-edge bar.
         p_pr = p._p.get_or_add_pPr()
         p_bdr = OxmlElement("w:pBdr")
@@ -632,7 +659,8 @@ class DocxEngine:
         def _fill(cell: Any, text: str, *, header: bool) -> None:
             p = cell.paragraphs[0]
             run = p.add_run(str(text))
-            run.font.size = Pt(12 if self.profile.rtl else 10)
+            # Latin cell size stays 10pt; Arabic is sized via w:szCs in _mark_run.
+            run.font.size = Pt(10)
             run.font.name = theme_fonts(rtl=self.profile.rtl)["latin"]
             if header:
                 run.bold = True

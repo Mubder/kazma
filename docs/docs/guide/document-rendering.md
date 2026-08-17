@@ -77,7 +77,10 @@ These are the non-obvious facts each engine encodes once:
   (`w:bCs`/`w:szCs`); python-docx's `run.bold`/`run.font.size` only write the
   Latin `w:b`/`w:sz`, so Arabic silently falls back to the default size with
   faux bold — the heading-bar "junk letters" symptom. `DocxEngine._mark_run`
-  mirrors them.
+  writes them. **Do not copy `w:sz` onto `w:szCs`:** Sakkal Majalla reads
+  smaller than Calibri at the same nominal pt, and body runs often have no
+  per-run `w:sz` (they inherit Normal). Latin stays at `body_size`; Arabic
+  uses `theme_cs_size()` → `body_size_ar` on `w:szCs` (style + every RTL run).
 - **PDF (Arabic)** — reportlab is a visual LTR engine and cannot correctly shape
   mixed Arabic+Latin+inline-Markdown (tokens jam, Latin splits across lines).
   `PdfEngine` routes RTL content through the DOCX engine (correct bidi) then

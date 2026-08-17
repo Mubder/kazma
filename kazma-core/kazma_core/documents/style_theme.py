@@ -13,6 +13,7 @@ __all__ = [
     "THEME",
     "theme_colors_reportlab",
     "theme_fonts",
+    "theme_cs_size",
     "localized_chrome",
 ]
 
@@ -40,7 +41,9 @@ THEME: dict[str, Any] = {
     "h2_size": 15,
     "h3_size": 13,
     "body_size": 11,
-    "body_size_ar": 14,
+    # Sakkal Majalla reads smaller than Calibri at the same nominal pt.
+    # This is the complex-script size (w:szCs); Latin stays at body_size.
+    "body_size_ar": 16,
     "line_height": 1.65,
     "line_height_ar": 2.0,
     "page_margin": 56,
@@ -48,6 +51,27 @@ THEME: dict[str, Any] = {
     "font_arabic": "Sakkal Majalla",
     "page_size_mm": (210.0, 297.0),
 }
+
+
+def theme_cs_size(latin_pt: float | None = None) -> float:
+    """Point size for complex-script (Arabic) given a Latin size.
+
+    Sakkal Majalla reads smaller than Calibri at the same nominal pt, so
+    Arabic body is ``body_size_ar`` while Latin stays ``body_size``.
+    Headings keep the same delta. Chrome (≤9.5pt headers/footers/captions)
+    gets a modest +2pt so it does not jump to body size.
+    """
+    body = float(THEME.get("body_size") or 11)
+    body_ar = float(THEME.get("body_size_ar") or 16)
+    if latin_pt is None:
+        return body_ar
+    try:
+        pt = float(latin_pt)
+    except (TypeError, ValueError):
+        return body_ar
+    if pt <= 9.5:
+        return pt + 2.0
+    return pt + (body_ar - body)
 
 
 def theme_fonts(*, rtl: bool) -> dict[str, str]:

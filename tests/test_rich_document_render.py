@@ -12,6 +12,18 @@ from kazma_core.documents.rich_render import (
     parse_rich_blocks,
     shape_for_pdf,
 )
+from kazma_core.documents.style_theme import THEME, theme_cs_size
+
+
+def test_theme_cs_size_splits_latin_and_arabic() -> None:
+    """Arabic body is larger than Latin; chrome gets a modest bump only."""
+    assert THEME["body_size_ar"] > THEME["body_size"]
+    assert theme_cs_size() == THEME["body_size_ar"]
+    assert theme_cs_size(THEME["body_size"]) == THEME["body_size_ar"]
+    assert theme_cs_size(8) == 10.0
+    assert theme_cs_size(THEME["h2_size"]) == THEME["h2_size"] + (
+        THEME["body_size_ar"] - THEME["body_size"]
+    )
 
 
 def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
@@ -359,11 +371,12 @@ def test_generate_pdf_arabic_body_rtl_bbox(tmp_path: Path) -> None:
     page = doc[0]
     W = page.rect.width
     H = page.rect.height
-    # Body-paragraph lines: body font (~11pt), right edge in the right ~15% of
-    # the page (right-aligned), AND within the body vertical zone (excludes the
-    # header brand band at the top and the footer band at the bottom, which the
-    # DOCX→LibreOffice route renders at body size). Title/heading bars are
-    # larger so the size window already excludes them.
+    # Body-paragraph lines: Latin body (~11pt) or Arabic cs body
+    # (theme_cs_size / body_size_ar). Right edge in the right ~15% of the
+    # page (right-aligned), AND within the body vertical zone (excludes the
+    # header brand band at the top and the footer band at the bottom).
+    # Title/heading bars are larger so the size window already excludes them.
+    body_hi = theme_cs_size() + 1.5
     body_lines: list[tuple[float, float, float, str]] = []
     for block in page.get_text("dict").get("blocks", []):
         for line in block.get("lines", []):
@@ -371,7 +384,7 @@ def test_generate_pdf_arabic_body_rtl_bbox(tmp_path: Path) -> None:
             spans = line.get("spans", [])
             text = "".join(s.get("text", "") for s in spans)
             size = spans[0]["size"] if spans else 0.0
-            if (10.0 <= size <= 12.0 and lr[2] >= W * 0.85
+            if (10.0 <= size <= body_hi and lr[2] >= W * 0.85
                     and 70.0 < lr[1] < H - 60.0 and len(text.strip()) > 2):
                 body_lines.append((lr[1], lr[0], lr[2], text))
     doc.close()
@@ -421,7 +434,7 @@ def test_subtitle_and_ar_citations_rtl(tmp_path: Path) -> None:
             for block in page.get_text("dict").get("blocks", []):
                 for ln in block.get("lines", []):
                     spans = ln.get("spans", [])
-                    if spans and 8.0 <= spans[0]["size"] <= 13.0:
+                    if spans and 8.0 <= spans[0]["size"] <= theme_cs_size() + 1.5:
                         text = "".join(s.get("text", "") for s in spans)
                         if len(text.strip()) > 2:
                             bb = ln["bbox"]
@@ -477,7 +490,7 @@ def test_toc_items_align_per_language(tmp_path: Path) -> None:
             for b in page.get_text("dict").get("blocks", []):
                 for ln in b.get("lines", []):
                     sp = ln.get("spans", [])
-                    if sp and 8.0 <= sp[0]["size"] <= 13.0:
+                    if sp and 8.0 <= sp[0]["size"] <= theme_cs_size() + 1.5:
                         txt = "".join(s.get("text", "") for s in sp)
                         if len(txt.strip()) > 2:
                             bb = ln["bbox"]
@@ -543,6 +556,15 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     assert int(THEME["h3_size"] * 2) in sz       # h3    -> 25
     # Body paragraph size on the Normal style (styles.xml) synced too
     assert ('w:val="%d"' % int(THEME["body_size"] * 2)) in styles, "EN DOCX body size not synced"
+    # AR body Arabic is independently larger via w:szCs (not a copy of Latin sz)
+    from kazma_core.documents.style_theme import theme_cs_size
+    ar_styles = zipfile.ZipFile(tmp_path / "ar.docx").read("word/styles.xml").decode("utf-8")
+    assert ('w:szCs w:val="%d"' % int(round(theme_cs_size() * 2))) in ar_styles, (
+        "AR Normal style missing independent complex-script body size"
+    )
+    assert ('w:sz w:val="%d"' % int(THEME["body_size"] * 2)) in ar_styles, (
+        "AR Normal latin size must stay at body_size (do not pump English)"
+    )
 
 
 def test_docx_numbering_rtl(tmp_path: Path) -> None:

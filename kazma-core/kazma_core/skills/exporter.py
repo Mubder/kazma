@@ -16,7 +16,7 @@ try:
 except ImportError:
     markdown = None  # type: ignore
 
-from kazma_core.documents.style_theme import THEME
+from kazma_core.documents.style_theme import THEME, theme_cs_size
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,16 @@ def _css(*, rtl: bool, brand: str) -> str:
     t = THEME
     text_align_last = "right" if rtl else "left"
     direction = "rtl" if rtl else "ltr"
+    if rtl:
+        body_pt = theme_cs_size()
+        title_pt = theme_cs_size(20)
+        h_pt = theme_cs_size(14)
+        table_pt = theme_cs_size(10)
+    else:
+        body_pt = t.get("body_size", 11)
+        title_pt = 20
+        h_pt = 14
+        table_pt = 9.5
     return f"""
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
@@ -106,7 +116,7 @@ def _css(*, rtl: bool, brand: str) -> str:
       text-align-last: {text_align_last};
       line-height: {t.get("line_height_ar", 1.85) if rtl else t.get("line_height", 1.65)};
       color: {t["body"]};
-      font-size: {t.get("body_size_ar", 12) if rtl else t.get("body_size", 11)}pt;
+      font-size: {body_pt}pt;
     }}
 
     .header-card {{
@@ -118,7 +128,7 @@ def _css(*, rtl: bool, brand: str) -> str:
     }}
 
     .header-card h1 {{
-      font-size: 20pt;
+      font-size: {title_pt}pt;
       margin: 0 0 8px 0;
       color: {t["heading"]};
     }}
@@ -142,7 +152,7 @@ def _css(*, rtl: bool, brand: str) -> str:
       margin: 20px 0 10px 0;
       border-inline-start: 3px solid {t.get("accent", "#3b82f6")};
       padding-inline-start: 12px;
-      font-size: 14pt;
+      font-size: {h_pt}pt;
     }}
 
     h3 {{
@@ -162,7 +172,7 @@ def _css(*, rtl: bool, brand: str) -> str:
       border-collapse: collapse;
       margin: 16px 0;
       direction: inherit;
-      font-size: 9.5pt;
+      font-size: {table_pt}pt;
     }}
 
     th, td {{

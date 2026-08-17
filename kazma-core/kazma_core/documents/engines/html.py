@@ -109,13 +109,22 @@ class HtmlEngine:
 
     def _css(self) -> str:
         """Themed stylesheet. EN/AR differ by direction + typeface + measure."""
-        from kazma_core.documents.style_theme import theme_fonts
+        from kazma_core.documents.style_theme import theme_cs_size, theme_fonts
 
         t = self.theme
         direction = self.profile.html_dir
         text_align_last = "right" if self.profile.rtl else "left"
         fonts = theme_fonts(rtl=self.profile.rtl)
-        body_pt = t.get("body_size_ar", 12) if self.profile.rtl else t.get("body_size", 11)
+        if self.profile.rtl:
+            body_pt = theme_cs_size()
+            title_pt = theme_cs_size(t.get("title_size", 22))
+            h1_pt = theme_cs_size(t.get("h1_size", 17))
+            table_pt = theme_cs_size(10)
+        else:
+            body_pt = t.get("body_size", 11)
+            title_pt = t.get("title_size", 22)
+            h1_pt = t.get("h2_size", 15)
+            table_pt = 10
         leading = t.get("line_height_ar", 1.85) if self.profile.rtl else t.get("line_height", 1.65)
         rule = t.get("accent", "#3b82f6")
         return f"""
@@ -139,7 +148,7 @@ class HtmlEngine:
       border-bottom: 2px solid {rule};
     }}
     .doc-title h1 {{
-      font-size: {t.get("title_size", 22)}pt;
+      font-size: {title_pt}pt;
       font-weight: 650;
       margin: 0;
       color: {t["heading"]};
@@ -154,7 +163,7 @@ class HtmlEngine:
       border: none;
       border-inline-start: 3px solid {rule};
       padding-inline-start: 12px;
-      font-size: 15pt;
+      font-size: {h1_pt}pt;
       font-weight: 650;
     }}
     .content-body h3 {{
@@ -166,7 +175,7 @@ class HtmlEngine:
     p {{ text-align: justify; margin: 0 0 0.8em 0; }}
     table {{
       width: 100%; border-collapse: collapse; margin: 16px 0;
-      direction: {direction}; font-size: 10pt;
+      direction: {direction}; font-size: {table_pt}pt;
     }}
     th, td {{ border: 1px solid {t["table_grid"]}; padding: 8px 12px; text-align: start; }}
     th {{ background-color: {t["table_header_bg"]}; font-weight: 600; color: {t["table_header_fg"]}; }}

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Arabic body size via w:szCs (2026-08-17)
+
+Arabic body text was still small because Word sizes complex script via
+``w:szCs``, not Latin ``w:sz``. Body runs inherit Normal and had no
+per-run size, so they never got ``szCs`` and fell back to ~11pt; setting
+``Normal.font.size`` to ``body_size_ar`` only pumped mixed English.
+Latin now stays at ``body_size`` (11pt); Arabic uses ``theme_cs_size()``
+→ ``body_size_ar`` (16pt) on ``w:szCs`` (Normal style + every RTL run).
+
 ## Unreleased — Memory graph tools in the commitment registry (2026-08-17)
 
 ``memory_merge_entities``, ``memory_link_entities``, ``memory_delete_entity``,
