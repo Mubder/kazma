@@ -63,6 +63,7 @@ class HtmlEngine:
     # ------------------------------------------------------------------ #
     def render(self, model: ContentModel, *, assets_dir: Any = None) -> str:
         self._assets_dir = assets_dir
+        self._last_heading_text = ""
         title = self._first_title(model)
         body_parts: list[str] = []
         for block in model.blocks:
@@ -172,6 +173,14 @@ class HtmlEngine:
       padding-bottom: 4px;
       margin: 18px 0 8px 0;
     }}
+    .content-body h1, .content-body h2, .content-body h3 {{
+      break-after: avoid;
+      page-break-after: avoid;
+    }}
+    .content-body h1 + *, .content-body h2 + *, .content-body h3 + * {{
+      break-before: avoid;
+      page-break-before: avoid;
+    }}
     p {{ text-align: justify; margin: 0 0 0.8em 0; }}
     table {{
       width: 100%; border-collapse: collapse; margin: 16px 0;
@@ -241,6 +250,12 @@ class HtmlEngine:
                 return ""
             return f"    <h3>{esc(block.text)}</h3>"
         if isinstance(block, HeadingBlock):
+            from kazma_core.documents.heading_text import headings_equivalent
+
+            prev = getattr(self, "_last_heading_text", "") or ""
+            if headings_equivalent(block.text, prev):
+                return ""
+            self._last_heading_text = block.text or ""
             slug = self._slugify(block.text)
             return (
                 f'    <h2 id="{slug}" style="color:{self.theme["heading_fill"]}">'

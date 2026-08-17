@@ -67,6 +67,7 @@ class DocxEngine:
         from docx.shared import Cm, Pt
 
         self._assets_dir = assets_dir
+        self._last_heading_text = ""
         document = Document()
         self._apply_foundation(document)
 
@@ -355,6 +356,26 @@ class DocxEngine:
         if i is not None and r_pr.find(qn("w:iCs")) is None:
             i.addnext(OxmlElement("w:iCs"))
 
+    def _is_repeat_heading(self, text: str) -> bool:
+        from kazma_core.documents.heading_text import headings_equivalent
+
+        prev = getattr(self, "_last_heading_text", "") or ""
+        return bool(text) and headings_equivalent(text, prev)
+
+    @staticmethod
+    def _keep_with_following(p: Any) -> None:
+        """Pin a heading to the next paragraph (orphan-heading guard)."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        p_pr = p._p.get_or_add_pPr()
+        for tag in ("w:keepNext", "w:keepLines", "w:widowControl"):
+            el = p_pr.find(qn(tag))
+            if el is None:
+                el = OxmlElement(tag)
+                p_pr.append(el)
+            el.set(qn("w:val"), "1")
+
     @staticmethod
     def _set_sz_cs(r_pr: Any, size_pt: float, *, after: Any = None) -> None:
         """Set or update ``w:szCs`` (half-points) on a run/style rPr."""
@@ -468,9 +489,9 @@ class DocxEngine:
             hp = section.header.paragraphs[0]
             hp.text = model.header or ""
             if (model.header or "").strip():
-                self._set_paragraph(hp, "start")
                 for r in hp.runs:
                     r.font.size = Pt(8)
+                self._set_paragraph(hp, "start")
             # Footer: brand + an auto-updating PAGE field (page numbers).
             fp = section.footer.paragraphs[0]
             fp.text = ""
@@ -481,6 +502,9 @@ class DocxEngine:
                 sep = fp.add_run("    —    ")
                 sep.font.size = Pt(8)
                 self._append_field(fp, "PAGE", "1")  # updated by Word/LibreOffice
+            for r in fp.runs:
+                if r.font.size is None:
+                    r.font.size = Pt(8)
             if (fp.text or "").strip() or model.page_numbers:
                 self._set_paragraph(fp, "start")
 
@@ -557,6 +581,9 @@ class DocxEngine:
         ink = (self.theme.get("heading") or "#1e3a5f").lstrip("#")
         rule = (self.theme.get("accent") or "#3b82f6").lstrip("#").upper()
 
+        if self._is_repeat_heading(text):
+            return
+
         p = document.add_paragraph()
         run = p.add_run(text or "")
         run.bold = True
@@ -585,14 +612,19 @@ class DocxEngine:
         p_pr.append(p_bdr)
 
         self._set_paragraph(p, "start")
+        # Keep the heading with the following body. Do NOT page-break-before
+        # every heading — only hop to the next page when the heading would
+        # otherwise sit alone at the bottom. An empty spacer paragraph here
+        # would eat keepNext and re-orphan the body.
+        self._keep_with_following(p)
+        p.paragraph_format.space_before = Pt(10 if int(level) else 4)
+        p.paragraph_format.space_after = Pt(8)
         if indexable and level >= 1:
             p_pr = p._p.get_or_add_pPr()
             outline = OxmlElement("w:outlineLvl")
             outline.set(qn("w:val"), str(min(level, 3) - 1))
             p_pr.append(outline)
-
-        sp = document.add_paragraph("")
-        self._set_paragraph(sp, "start")
+        self._last_heading_text = text or ""
 
     # ================================================================== #
     # table of contents

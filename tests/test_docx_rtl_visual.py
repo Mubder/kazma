@@ -306,6 +306,77 @@ def test_arabic_body_szcs_is_larger_than_latin(tmp_path: Path) -> None:
             )
 
 
+def test_heading_keep_with_next_not_page_break(tmp_path: Path) -> None:
+    """A heading at the bottom of a page must stay with its body.
+
+    Word/LibreOffice honour w:keepNext/w:keepLines. We must NOT force
+    page-break-before on every heading.
+    """
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    docx = tmp_path / "keep.docx"
+    _generate_docx(docx, {
+        "title": "Report",
+        "lang": "en",
+        "sections": [
+            {"heading": "Intro", "body": "Body under intro."},
+            {"heading": "Next", "body": "Body under next."},
+        ],
+    })
+    xml = _docx_text(docx)
+    assert "w:keepNext" in xml, "headings missing w:keepNext (orphan heading)"
+    assert "w:keepLines" in xml, "headings missing w:keepLines"
+    assert "w:pageBreakBefore" not in xml, "every heading forced to a new page"
+
+
+def test_duplicate_heading_is_not_rendered_twice(tmp_path: Path) -> None:
+    """Section heading + leading ## in the body must not stack two bars.
+
+    Regression: 'Quick Research Summary' appeared as both the section
+    heading and the first markdown heading in the body.
+    """
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    title = "تقرير فني شامل Cybersecurity Standards"
+    heading = "1. خلاصة البحث السريع (Quick Research Summary)"
+    docx = tmp_path / "dup.docx"
+    _generate_docx(docx, {
+        "title": title,
+        "lang": "ar",
+        "sections": [{
+            "heading": heading,
+            "body": f"## {heading}\n\nأجري بحث موجز عن المعايير.",
+        }],
+    })
+    xml = _docx_text(docx)
+    assert xml.count("خلاصة البحث السريع") == 1, (
+        f"heading rendered more than once: {xml.count('خلاصة البحث السريع')}"
+    )
+
+
+def test_heading_key_equivalence() -> None:
+    from kazma_core.documents.heading_text import (
+        drop_leading_heading,
+        heading_key,
+        headings_equivalent,
+    )
+
+    assert heading_key("1. خلاصة البحث السريع (Quick Research Summary)") == (
+        heading_key("## خلاصة البحث السريع")
+    )
+    assert headings_equivalent(
+        "1. خلاصة البحث السريع (Quick Research Summary)",
+        "خلاصة البحث السريع (Quick Research Summary)",
+    )
+    assert not headings_equivalent("أولاً: الجزء البحثي", "خلاصة البحث السريع")
+    body = "## 1. خلاصة البحث السريع (Quick Research Summary)\n\nأجري بحث."
+    stripped = drop_leading_heading(
+        body, "خلاصة البحث السريع (Quick Research Summary)"
+    )
+    assert stripped.startswith("أجري بحث")
+    assert "خلاصة" not in stripped
+
+
 @_needs_visual()
 def test_arabic_toc_numbers_on_right(tmp_path: Path) -> None:
     """TOC entry numbers ("1. …") must appear on the RIGHT for Arabic.

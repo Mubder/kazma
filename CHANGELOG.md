@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Keep headings with their body; drop stacked duplicates (2026-08-17)
+
+A heading at the bottom of a page no longer sits alone — DOCX sets
+``w:keepNext`` / ``w:keepLines`` (LibreOffice PDF honours this) and the
+reportlab path wraps heading + first body in ``KeepTogether``. Headings
+are not forced onto a new page. A section heading that is repeated as
+the first ``##`` in the body (the stacked "Quick Research Summary" bar)
+is dropped.
+
 ## Unreleased — Arabic body size via w:szCs (2026-08-17)
 
 Arabic body text was still small because Word sizes complex script via

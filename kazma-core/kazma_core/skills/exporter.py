@@ -153,6 +153,12 @@ def _css(*, rtl: bool, brand: str) -> str:
       border-inline-start: 3px solid {t.get("accent", "#3b82f6")};
       padding-inline-start: 12px;
       font-size: {h_pt}pt;
+      break-after: avoid;
+      page-break-after: avoid;
+    }}
+    h1 + *, h2 + *, h3 + * {{
+      break-before: avoid;
+      page-break-before: avoid;
     }}
 
     h3 {{
