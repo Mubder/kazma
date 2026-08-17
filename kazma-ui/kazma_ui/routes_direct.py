@@ -2083,44 +2083,33 @@ def register_direct_routes(self: Any) -> None:
             "username": session_user,
             "role": session_role,
         })
-        # Opaque session cookie preferred (audit H1)
+        # Always mint an opaque session — never put KAZMA_SECRET in a cookie.
         try:
-            from kazma_core.security.web_sessions import (
-                SESSION_COOKIE,
-                create_session,
-                use_opaque_sessions,
-            )
+            from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
 
-            if use_opaque_sessions():
-                sid = create_session(
-                    actor="login",
-                    username=session_user,
-                    role=session_role,
-                    user_id=session_uid,
-                )
-                resp.set_cookie(
-                    key=SESSION_COOKIE,
-                    value=sid,
-                    httponly=True,
-                    samesite="lax",
-                    path="/",
-                    secure=_is_https(request),
-                    max_age=60 * 60 * 24 * 14,
-                )
-                resp.delete_cookie(SECRET_COOKIE, path="/")
-                return resp
+            sid = create_session(
+                actor="login",
+                username=session_user,
+                role=session_role,
+                user_id=session_uid,
+            )
+            resp.set_cookie(
+                key=SESSION_COOKIE,
+                value=sid,
+                httponly=True,
+                samesite="lax",
+                path="/",
+                secure=_is_https(request),
+                max_age=60 * 60 * 24 * 14,
+            )
+            resp.delete_cookie(SECRET_COOKIE, path="/")
+            return resp
         except Exception:
-            logger.debug("[auth] opaque session create failed; legacy cookie", exc_info=True)
-        resp.set_cookie(
-            key=SECRET_COOKIE,
-            value=expected,
-            httponly=True,
-            samesite="lax",  # LAN/IP + form POST login
-            path="/",
-            secure=_is_https(request),
-            max_age=60 * 60 * 24 * 14,  # 14 days
-        )
-        return resp
+            logger.warning("[auth] opaque session create failed — refusing raw secret cookie", exc_info=True)
+            return _JSONResponse(
+                {"error": "session_create_failed", "detail": "Could not mint a login session."},
+                status_code=503,
+            )
 
     @self.app.get("/api/auth/oidc/start")
     async def _oidc_start(request: Request) -> Response:
@@ -2884,7 +2873,11 @@ def register_direct_routes(self: Any) -> None:
                 "adapters_count": 0,
                 "adapters_running": 0,
                 "adapters": [],
-                "init_errors": self._init_errors,
+                "init_errors": [
+                    {"subsystem": e.get("subsystem", "?")}
+                    for e in (self._init_errors or [])
+                    if isinstance(e, dict)
+                ],
             }
         adapters = [_a for _a in self.gateway.adapters] if hasattr(self.gateway, 'adapters') else []
         queue = getattr(self.gateway, 'queue', None)
@@ -2903,7 +2896,11 @@ def register_direct_routes(self: Any) -> None:
                 }
                 for a in adapters
             ],
-            "init_errors": self._init_errors,
+            "init_errors": [
+                {"subsystem": e.get("subsystem", "?")}
+                for e in (self._init_errors or [])
+                if isinstance(e, dict)
+            ],
         }
 
     def _resolve_hitl_graph() -> Any:
@@ -2912,7 +2909,10 @@ def register_direct_routes(self: Any) -> None:
     def _resolve_hitl_checkpointer() -> Any:
         return self._hitl_state.get("checkpointer")
 
-    @self.app.post("/api/approve/{thread_id}")
+    @self.app.post(
+        "/api/approve/{thread_id}",
+        dependencies=[Depends(rate_limit("approve", 20))],
+    )
     async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
         # Use shared auth: KAZMA_SECRET *or* Account API token.
         from kazma_ui.auth import get_kazma_secret, is_authenticated
@@ -3063,20 +3063,12 @@ def register_direct_routes(self: Any) -> None:
             grant_info: dict[str, Any] | None = None
             if approved and scope == "yolo":
                 try:
-                    from kazma_core.safety.yolo import YoloDisabledError, enable_yolo
+                    from kazma_core.safety.yolo import try_enable_yolo
 
-                    grant_info = enable_yolo(thread_id, actor=actor)
-                except YoloDisabledError as yde:
-                    logger.warning("[HITL] YOLO scope blocked: %s", yde)
-                    return _JSONResponse(
-                        {
-                            "error": str(yde),
-                            "status": "yolo_disabled",
-                        },
-                        status_code=403,
-                    )
+                    grant_info = try_enable_yolo(thread_id, actor=actor)
                 except Exception:
                     logger.exception("[HITL] failed to enable YOLO scope")
+                    scope = "once"
             elif approved and scope == "tool":
                 try:
                     from kazma_core.safety.hitl_grants import grant_tool
@@ -3273,7 +3265,11 @@ def register_direct_routes(self: Any) -> None:
     async def get_status() -> dict[str, Any]:
         return {
             "status": "degraded" if self._init_errors else "ok",
-            "init_errors": self._init_errors,
+            "init_errors": [
+                {"subsystem": e.get("subsystem", "?")}
+                for e in (self._init_errors or [])
+                if isinstance(e, dict)
+            ],
         }
 
     # ── Universal Backup ────────────────────────────────────────────────
@@ -3282,9 +3278,18 @@ def register_direct_routes(self: Any) -> None:
         """Trigger a universal backup in the background. Returns immediately."""
         import asyncio
 
-        from kazma_core.backup.universal import _backup_progress, get_backup_progress
+        from kazma_core.backup.universal import (
+            _backup_progress,
+            backup_progress_is_stale,
+            get_backup_progress,
+        )
 
-        if _backup_progress.get("phase") not in ("idle", "done", "error"):
+        # A genuinely running backup blocks a new one — but a mid phase older
+        # than the stale threshold is a crashed/hung run; let it through so the
+        # button can't be bricked (perform_universal_backup's own lock applies
+        # the same crash detection and starts fresh).
+        if (_backup_progress.get("phase") not in ("idle", "done", "error")
+                and not backup_progress_is_stale()):
             return {"ok": False, "error": "A backup is already running", "progress": get_backup_progress()}
 
         async def _run():

@@ -46,19 +46,21 @@ def test_searxng_prefers_cached_good_base(monkeypatch):
         calls.append(url)
         return _Resp()
 
+    # Loopback bases so the code takes the httpx.get path (non-loopback
+    # bases route through the scraping client, bypassing the httpx.get mock).
     monkeypatch.setattr(ws, "_searxng_candidate_bases", lambda: [
-        "http://first:1",
-        "http://second:2",
+        "http://localhost:1",
+        "http://localhost:2",
     ])
-    ws._searxng_cache["base"] = "http://second:2"
+    ws._searxng_cache["base"] = "http://localhost:2"
 
     import httpx
 
     monkeypatch.setattr(httpx, "get", fake_get)
     results, note = ws._searxng_search("q", 3)
     assert results and results[0]["href"] == "https://a.example"
-    assert "second:2" in note
-    assert calls[0].startswith("http://second:2/")
+    assert "localhost:2" in note
+    assert calls[0].startswith("http://localhost:2/")
 
 
 def test_searxng_cooldown_skips_when_all_dead(monkeypatch):

@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 _HEARTBEAT_STALE_SECONDS = 60
 
 
+def _live_json(path: str) -> dict:
+    """GET JSON from the running Kazma server (TUI is a mouth)."""
+    from kazma_core.runtime.local_api import request_json
+
+    data = request_json("GET", path)
+    return data if isinstance(data, dict) else {}
+
+
 def _parse_iso(ts: str | None) -> datetime | None:
     if not ts:
         return None
@@ -65,16 +73,23 @@ class WorkerTable(DataTable):
     def _refresh(self) -> None:
         self.clear()
         try:
-            from kazma_core.swarm import get_swarm_engine
-            engine = get_swarm_engine()
-            if engine is None:
-                self.add_row("(no engine)", "", "", "")
+            data = _live_json("/api/swarm/status")
+            workers = data.get("workers") or []
+            if not workers:
+                self.add_row("(no workers on server)", "", "", "")
                 return
-            for name, worker in engine._workers.items():
-                status = "● online" if _worker_is_online(worker) else "○ offline"
-                self.add_row(name, worker.role, status, worker.model or "?")
+            for w in workers:
+                st = str(w.get("status") or "")
+                online = st in {"online", "busy", "running"} or bool(w.get("_running"))
+                mark = "● online" if online else (st or "○ offline")
+                self.add_row(
+                    str(w.get("name") or "?"),
+                    str(w.get("role") or ""),
+                    mark,
+                    str(w.get("model") or "?"),
+                )
         except Exception:
-            self.add_row("(unavailable)", "", "", "")
+            self.add_row("(server unreachable)", "", "", "")
 
     def on_show(self) -> None:
         self._refresh()
@@ -100,19 +115,21 @@ class SwarmTasksTable(DataTable):
     def _refresh(self) -> None:
         self.clear()
         try:
-            from kazma_core.swarm import get_swarm_engine
-            engine = get_swarm_engine()
-            if engine is None:
-                return
-            tasks = engine.list_tasks()[:20]
+            data = _live_json("/api/swarm/tasks?pageSize=20")
+            tasks = data.get("tasks") or []
             for t in tasks:
-                dur = self._task_duration(t)
+                tid = str(t.get("id") or t.get("task_id") or "")
+                workers = t.get("workers") or []
+                if not isinstance(workers, list):
+                    workers = []
+                dur = t.get("duration_seconds")
+                dur_s = f"{float(dur):.1f}s" if dur is not None else "—"
                 self.add_row(
-                    t.id[:16],
-                    t.type.value if hasattr(t.type, "value") else str(t.type),
-                    t.status.value if hasattr(t.status, "value") else str(t.status),
-                    ", ".join(t.workers[:3]) if t.workers else "",
-                    dur,
+                    tid[:16],
+                    str(t.get("type") or ""),
+                    str(t.get("status") or ""),
+                    ", ".join(str(w) for w in workers[:3]),
+                    dur_s,
                 )
         except Exception as exc:
             logger.debug("Task history refresh failed: %s", exc)
@@ -158,16 +175,17 @@ class ActiveTasksLog(RichLog):
 
     def _refresh(self) -> None:
         try:
-            from kazma_core.swarm import get_swarm_engine
-            engine = get_swarm_engine()
-            if engine is None:
-                return
-            active = engine.list_active_tasks()
+            data = _live_json("/api/swarm/tasks/active")
+            active = data.get("tasks") or []
             if not active:
-                self.write("[dim]No active tasks[/]")
+                self.write("[dim]No active tasks on server[/]")
                 return
             for t in active:
-                self.write(f"[$primary]●[/] {t.id[:12]} [{t.status}] {t.prompt[:60]}")
+                tid = str(t.get("id") or t.get("task_id") or "")
+                prompt = str(t.get("prompt") or "")
+                self.write(
+                    f"[$primary]●[/] {tid[:12]} [{t.get('status')}] {prompt[:60]}"
+                )
         except Exception as exc:
             logger.debug("Active tasks refresh failed: %s", exc)
 
@@ -195,25 +213,27 @@ class WorkerTree(Tree):
         self.show_root = False
         root = self.root
         try:
-            from kazma_core.swarm import get_swarm_engine
-            engine = get_swarm_engine()
-            if engine is None:
-                root.add_leaf("(no engine)")
+            data = _live_json("/api/swarm/status")
+            workers = data.get("workers") or []
+            if not workers:
+                root.add_leaf("(no workers on server)")
                 return
-            for name, worker in engine._workers.items():
+            for w in workers:
+                name = str(w.get("name") or "?")
                 node = root.add(name, expand=True)
-                node.add_leaf(f"Role: {worker.role}")
-                node.add_leaf(f"Model: {worker.model or '?'}")
-                node.add_leaf(f"Status: {'online' if _worker_is_online(worker) else 'offline'}")
-                caps = getattr(worker, "capabilities", None)
-                if caps:
-                    expertise = getattr(caps, "expertise", [])
-                    if expertise:
-                        exp_node = node.add("Expertise", expand=True)
-                        for e in expertise:
-                            exp_node.add_leaf(e)
+                node.add_leaf(f"Role: {w.get('role') or ''}")
+                node.add_leaf(f"Model: {w.get('model') or '?'}")
+                node.add_leaf(f"Status: {w.get('status') or '?'}")
+                caps = w.get("capabilities") or {}
+                expertise = []
+                if isinstance(caps, dict):
+                    expertise = caps.get("expertise") or []
+                if expertise:
+                    exp_node = node.add("Expertise", expand=True)
+                    for e in expertise:
+                        exp_node.add_leaf(str(e))
         except Exception:
-            root.add_leaf("(unavailable)")
+            root.add_leaf("(server unreachable)")
 
     def on_show(self) -> None:
         self.clear()
@@ -356,23 +376,26 @@ class SwarmPanel(VerticalScroll):
         active_n = 0
         recent_n = 0
         try:
-            from kazma_core.swarm import get_swarm_engine
-
-            engine = get_swarm_engine()
-            if engine is not None:
-                workers = getattr(engine, "_workers", {}) or {}
-                workers_total = len(workers)
-                for w in workers.values():
-                    if _worker_is_online(w):
-                        workers_online += 1
-                try:
-                    active_n = len(engine.list_active_tasks() or [])
-                except Exception:
-                    active_n = 0
-                try:
-                    recent_n = len(engine.list_tasks()[:50] or [])
-                except Exception:
-                    recent_n = 0
+            status = _live_json("/api/swarm/status")
+            workers = status.get("workers") or []
+            workers_total = len(workers)
+            workers_online = sum(
+                1
+                for w in workers
+                if str(w.get("status") or "") in {"online", "busy", "running"}
+            )
+            try:
+                active_n = int(
+                    (_live_json("/api/swarm/tasks/active").get("count") or 0)
+                )
+            except Exception:
+                active_n = 0
+            try:
+                recent_n = len(
+                    (_live_json("/api/swarm/tasks?pageSize=50").get("tasks") or [])
+                )
+            except Exception:
+                recent_n = 0
         except Exception as exc:
             logger.debug("swarm metrics failed: %s", exc)
 

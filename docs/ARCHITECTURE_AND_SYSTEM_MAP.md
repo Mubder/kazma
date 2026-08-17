@@ -1,8 +1,8 @@
 # Kazma — Architecture & System Map
 
 **Single source of truth for system architecture**  
-**Version:** 0.6.1+ (post production-readiness remediation)  
-**Date:** 2026-07-21 (multi-path diagnosis map added 2026-07-27)  
+**Version:** 0.9.x (one-brain mouths + audit F remaining: soft-nav inspectors, swarm notify hook)  
+**Date:** 2026-08-17 (July 21 production audit is historical, not current SoT)  
 **Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
 `docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/REMEDIATION_PLAN_2026-07-21.md`,  
 `docs/ops/*`, `AGENTS.md`
@@ -262,7 +262,7 @@ kazma/
 | `stores/sqlite.py` | Gateway session SQLite store |
 | `mcp_server.py` | IDE MCP server bridge |
 | `slash_commands.py` / `suggestions.py` | Command catalog / UX |
-| `swarm_notify.py` | **[LIBRARY]** Optional Telegram notifier |
+| `swarm_notify.py` | Opt-in Telegram notify (`maybe_notify_dispatch` when `SWARM_BOT_TOKEN` is set) |
 | `telegram_format.py` / `typing_keepalive.py` / `rate_feedback.py` | Platform UX helpers |
 
 ### 2.5 Packages: CLI, TUI, skills, memory

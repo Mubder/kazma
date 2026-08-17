@@ -93,6 +93,7 @@ class CheckpointManager(BaseCheckpointSaver):
                     serde = JsonPlusSerializer(
                         allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
                             ("kazma_core.agent.state", "NodeName"),
+                            ("kazma_core.agent.intent.types", "ActKind"),
                         ]
                     )
                 
@@ -452,6 +453,7 @@ async def create_checkpoint_manager(
     serde = JsonPlusSerializer(
         allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
             ("kazma_core.agent.state", "NodeName"),
+            ("kazma_core.agent.intent.types", "ActKind"),
         ]
     )
 

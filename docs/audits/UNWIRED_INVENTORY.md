@@ -34,18 +34,18 @@ These are live; listed only for contrast:
 | Module / package | LOC (approx) | Tests | Why kept |
 |------------------|-------------:|-------|----------|
 | ~~`kazma_core/delegation/*`~~ | — | — | **Archived (removed from tree);** entry stale — do not re-add. |
-| `authorization_flow.py` | ~350 | `test_authorization_flow.py` | Enterprise cross-division approvals |
-| `division_sandbox.py` | ~280 | `test_division_sandbox.py` | Division-scoped execution |
-| `permissions.py` + `kazma-permissions.yaml` | ~200 | `test_permissions.py` | YAML permission manager (not enforced in runtime) |
+| `authorization_flow.py` | ~350 | `test_authorization_flow.py` | **Wired** — `division_runtime` + `/api/divisions/*` when `KAZMA_DIVISION` is set |
+| `division_sandbox.py` | ~280 | `test_division_sandbox.py` | **Wired** — membership ensure + MCP allowlist via `check_division_tool` |
+| `permissions.py` + `kazma-permissions.yaml` | ~200 | `test_permissions.py` | **Wired** into `LocalToolRegistry.execute` when a `users:` list or `KAZMA_PERMISSIONS_ENFORCE=1` |
 | `tool_sandbox.py` | ~120 | `test_sandbox.py` | Alternate tool sandbox (HITL path is live instead) |
-| `majlis.py` | ~350 | `test_majlis.py` | Cultural orchestrator; pieces (pacing/tone) *are* live in gateway |
-| `security/certification.py` | ~340 | `test_certification.py` | Skill cert levels; hub does not call it yet |
-| `security/linter.py` | ~480 | via certification tests | Skill security linter |
-| `security/dependency_scanner.py` | ~880 | `test_dependency_scanner.py` | CVE-style dep scan |
-| `security/disclosure.py` | ~490 | `test_disclosure.py` | Vulnerability disclosure workflow |
-| `security/hardening.py` + `audit_trail.py` | ~890 | `test_hardening.py` | Offline hardening runner |
+| `majlis.py` | ~350 | `test_majlis.py` | **Wired** — `majlis_runtime.maybe_majlis_short_circuit` on gateway greeting/farewell |
+| `security/certification.py` | ~340 | `test_certification.py` | **Wired** — basic certify after `install_from_any` |
+| `security/linter.py` | ~480 | via certification tests | **Wired** — lint on skill install |
+| `security/dependency_scanner.py` | ~880 | `test_dependency_scanner.py` | **Wired** — `GET /api/security/deps` |
+| `security/disclosure.py` | ~490 | `test_disclosure.py` | **Wired** — `GET/POST /api/security/disclosure` (+ ack/status); security.txt still live |
+| `security/hardening.py` + `audit_trail.py` | ~890 | `test_hardening.py` | **Wired** — `GET /api/security/hardening` |
 | `docs/` package | ~400 | `test_doc_generator.py` | Doc generator (Docusaurus is hand-written) |
-| `kazma_gateway/swarm_notify.py` | ~370 | `test_swarm_notify.py` | Optional Telegram progress notifier; not hooked into dispatch |
+| `kazma_gateway/swarm_notify.py` | ~370 | `test_swarm_notify.py` | Opt-in Telegram notify: `maybe_notify_dispatch` on swarm dispatch when `SWARM_BOT_TOKEN` is set |
 
 ### Explicit non-goals for cleanup
 

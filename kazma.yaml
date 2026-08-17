@@ -260,3 +260,11 @@ pipelines:
     system_prompt: You are a Builder. Implement based on the research above.
     depends_on:
     - researcher
+backups:
+  pg:
+    enabled: true
+    retention: 7
+  offsite:
+    enabled: true
+    rclone_remote: ''
+  extra_paths: research

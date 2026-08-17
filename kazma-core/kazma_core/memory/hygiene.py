@@ -84,14 +84,32 @@ def is_blocked_belief_subject(subject: str) -> bool:
 
 
 def is_blocked_belief_triple(subject: str, predicate: str = "", obj: str = "") -> bool:
-    """Reject triples whose subject is blocked.
+    """Reject triples whose subject is blocked, or that look like assistant prose.
 
     Boolean *objects* (``… → true``) are allowed as fact payloads — they are
     not blocked here. Graph emission must use :func:`is_junk_entity_token` so
     those objects never become stand-alone entity nodes.
     """
-    del predicate, obj
-    return is_blocked_belief_subject(subject)
+    if is_blocked_belief_subject(subject):
+        return True
+    pred = (predicate or "").strip()
+    blob = f"{pred} {obj or ''}"
+    # Assistant narration ingested as a predicate (``Here's the honest read…``).
+    if len(pred) > 48 or " " in pred.replace("_", ""):
+        return True
+    low = blob.lower()
+    if any(
+        marker in low
+        for marker in (
+            "here's the honest",
+            "here is the honest",
+            "as an ai",
+            "i'm kazma",
+            "i am kazma",
+        )
+    ):
+        return True
+    return False
 
 
 def rebuild_beliefs_fts(conn: sqlite3.Connection) -> bool:

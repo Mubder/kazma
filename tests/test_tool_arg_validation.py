@@ -58,19 +58,26 @@ async def test_partial_args_name_whats_missing(registry, graph_gate) -> None:
 
 @pytest.mark.asyncio
 async def test_valid_args_still_execute(registry, graph_gate, tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("KAZMA_WORKSPACE", str(tmp_path))
-    from kazma_core.tools.file_write import configure_workspace
+    # Hermetic: absolute tmp_path target + permissive access stub. This test
+    # is about ARGUMENT validation, not path policy — and without this, a
+    # relative "hello.html" resolves against the process CWD and leaves an
+    # artifact in the repo root (the live workspace outranks env pins).
+    import importlib
 
-    configure_workspace(str(tmp_path))
+    _fw_mod = importlib.import_module("kazma_core.tools.file_write")
+
+    class _Allow:
+        allowed = True
+
+    monkeypatch.setattr(_fw_mod, "check_path_access", lambda p, mode: _Allow())
     result = await registry.execute(
         "file_write",
-        {"path": "hello.html", "content": "<html>hi</html>"},
+        {"path": str(tmp_path / "hello.html"), "content": "<html>hi</html>"},
     )
     assert result["is_error"] is False
-    # Workspace resolution prefers a persisted active workspace over the env
-    # pin, so don't assert the exact location — only that the write succeeded
-    # and named the file.
     assert "hello.html" in result["content"]
+    # The write landed inside tmp_path, not the repo.
+    assert (tmp_path / "hello.html").exists()
 
 
 @pytest.mark.asyncio

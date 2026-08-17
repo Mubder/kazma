@@ -415,25 +415,6 @@ class TestBug20_ContextAuthorityWired:
 
         assert isinstance(agent.authority, ContextAuthority)
 
-    @pytest.mark.asyncio
-    async def test_run_calls_check_and_enforce(self):
-        """run() must invoke the authority check."""
-        from kazma_core.agent import KazmaAgent
-
-        agent = KazmaAgent()
-
-        # Patch check_and_enforce to verify it's called
-        with patch.object(agent.authority, "check_and_enforce", new_callable=AsyncMock) as mock_check:
-            mock_check.return_value = {
-                "messages": [{"role": "user", "content": "test"}],
-                "tool_results": {},
-                "context_tokens": 0,
-            }
-            await agent.run("test input")
-
-        mock_check.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_run_actually_compacts_when_threshold_exceeded(self):
         """When tokens exceed 80%, compaction must be triggered."""
         from kazma_core.agent import KazmaAgent

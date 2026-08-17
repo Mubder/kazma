@@ -19,6 +19,7 @@ async def schedule_task(timing: str, prompt: str) -> str:
         JSON response with the scheduled job info.
     """
     from kazma_core.cron.scheduler import get_cron_scheduler
+    from kazma_core.safety.hitl import get_current_thread_id
     from kazma_core.tools.send_message import get_current_delivery_target
 
     scheduler = get_cron_scheduler()
@@ -32,12 +33,18 @@ async def schedule_task(timing: str, prompt: str) -> str:
     # headlessly (no active conversation) — _deliver then falls back gracefully.
     delivery_target = get_current_delivery_target() or ""
     platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
+    # Capture the booking thread too (bound in tool_worker_node). The
+    # commitment cancel_job resolver verifies against pending jobs; jobs
+    # stored with an empty thread_id only matched via the cross-thread
+    # fallback (incident 2026-08-16). Same-thread cancels are exact with this.
+    thread_id = get_current_thread_id() or ""
 
     try:
         result = await scheduler.schedule(
             timing=timing,
             prompt=prompt,
             platform=platform,
+            thread_id=thread_id,
             delivery_target=delivery_target,
         )
         return _json.dumps(result, ensure_ascii=False, indent=2)

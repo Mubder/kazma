@@ -1,5 +1,5 @@
 name: document-generator
-version: 0.2.0
+version: 0.3.0
 description: Generate verified PDF, DOCX, XLSX, and Markdown artifacts in isolated workers.
 author: Kazma Team
 license: MIT
@@ -9,23 +9,30 @@ tools:
     arabic_name: "إنشاء PDF"
     description: >
       Generate a styled PDF (headings, bullets, bold/italic, justified body).
-      Put real markdown in each section body (# ##, - lists, **bold**).
-      Arabic is auto-shaped (reshape+bidi); pass lang=ar or rtl=true if needed.
-      Requires reportlab + arabic-reshaper + python-bidi for correct Arabic.
+      LARGE DOCUMENTS (>5 sections or >2000 words): first write the content
+      to a .md file via file_write (chunked), then pass markdown_path="file.md"
+      — inline sections that exceed the model's output token limit get
+      truncated into unparseable JSON. Small docs: inline sections with
+      markdown bodies (# ##, - lists, **bold**). Arabic is auto-shaped
+      (reshape+bidi); pass lang=ar or rtl=true if needed.
     category: document
     prompt_chain:
       - "أنشئ مستند PDF منسّق (عناوين، نقاط، تبرير) مع أقسام body بصيغة markdown"
-      - "للعربية استخدم lang=ar — الحروف تُشكَّل وترتيب bidi تلقائياً"
+      - "للمستندات الكبيرة: اكتب المحتوى في ملف .md أولاً ثم استخدم markdown_path"
+      - "للعربية استخدم lang=ar — الحروف تُشكَّل وترتيب bidi تلقائياً"
       - "احفظ الملف وأعد المسار"
   generate_docx:
     arabic_name: "إنشاء DOCX"
     description: >
       Generate a styled Word document with Heading styles, bullet/number lists,
       justified paragraphs, and RTL (w:bidi) when Arabic is detected.
-      Use markdown in section bodies the same way as generate_pdf.
+      LARGE DOCUMENTS: write content to a .md file first, then pass
+      markdown_path="file.md" (same as generate_pdf). Small docs: inline
+      sections with markdown bodies.
     category: document
     prompt_chain:
       - "أنشئ مستند Word منسّق (أنماط عناوين، قوائم، تبرير، RTL للعربية)"
+      - "للمستندات الكبيرة استخدم markdown_path بعد كتابة الملف"
   generate_xlsx:
     arabic_name: "إنشاء XLSX"
     description: >

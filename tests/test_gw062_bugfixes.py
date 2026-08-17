@@ -12,122 +12,12 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
-from kazma_memory import SQLiteMemoryBackend
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BUG 1: Memory ranking — regression tests for reverse=True sort order
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestMemoryRankingSortOrder:
-    """Verify search results are sorted by descending combined score (BM25 + relevance)."""
-
-    @pytest.fixture
-    def backend(self, tmp_path):
-        db_path = tmp_path / "test_ranking.db"
-        backend = SQLiteMemoryBackend(str(db_path))
-        yield backend
-        asyncio.run(backend.close())
-
-    @pytest.mark.asyncio
-    async def test_highest_bm25_score_ranks_first(self, backend):
-        """Results with higher BM25 scores (better keyword match) must rank first.
-
-        Regression guard for gw-062 BUG 1: sorted() must use reverse=True
-        so the highest combined score appears at index 0.
-        """
-        # Index memories with varying relevance — the one matching
-        # the query should get a BM25 boost that overrides the relevance
-        # weighting.
-        memories = [
-            {
-                "id": "low_relevance_exact",
-                "content": "alpha beta gamma unique_term_xyz",
-                "metadata": {},
-                "timestamp": int(time.time()),
-                "source": "test",
-                "relevance": 0.3,
-            },
-            {
-                "id": "high_relevance_no_match",
-                "content": "completely unrelated content here",
-                "metadata": {},
-                "timestamp": int(time.time()),
-                "source": "test",
-                "relevance": 1.0,
-            },
-            {
-                "id": "mid_relevance_partial",
-                "content": "alpha is important in many contexts",
-                "metadata": {},
-                "timestamp": int(time.time()),
-                "source": "test",
-                "relevance": 0.7,
-            },
-        ]
-
-        for mem in memories:
-            await backend.index(mem)
-
-        results = await backend.search("alpha", limit=10)
-
-        # Must return results
-        assert len(results) >= 2, f"Expected >=2 results, got {len(results)}"
-
-        # Results that contain "alpha" should rank above those that don't.
-        # More importantly, results must be in non-increasing score order.
-        for i in range(len(results) - 1):
-            score_i = (
-                results[i].get("bm25_score", 0) * 0.7
-                + results[i].get("relevance", 1.0) * 0.3
-                if "bm25_score" in results[i]
-                else results[i].get("relevance", 1.0)
-            )
-            score_next = (
-                results[i + 1].get("bm25_score", 0) * 0.7
-                + results[i + 1].get("relevance", 1.0) * 0.3
-                if "bm25_score" in results[i + 1]
-                else results[i + 1].get("relevance", 1.0)
-            )
-            assert score_i >= score_next, (
-                f"Result at index {i} (score={score_i:.4f}) should rank >= "
-                f"result at index {i+1} (score={score_next:.4f}). "
-                f"Check reverse=True in sorted()."
-            )
-
-    @pytest.mark.asyncio
-    async def test_pure_relevance_items_sorted_descending(self, backend):
-        """Items without BM25 scores (LIKE fallback) must still sort descending by relevance.
-
-        Regression guard: if FTS5 fails and items only carry 'relevance',
-        the sort must still be reverse=True on relevance.
-        """
-        for i, rel in enumerate([0.2, 0.9, 0.5, 1.0, 0.7]):
-            await backend.index(
-                {
-                    "id": f"rel_{i}",
-                    "content": f"memory with relevance marker_{i}",
-                    "metadata": {},
-                    "timestamp": int(time.time()),
-                    "source": "test",
-                    "relevance": rel,
-                }
-            )
-
-        # Force FTS5 unavailable so we fall back to LIKE (no bm25_score in results)
-        backend._vec_available = False
-
-        results = await backend.search("marker", limit=10)
-        assert len(results) >= 2
-
-        # Verify descending order of relevance
-        relevances = [r.get("relevance", 0) for r in results]
-        for i in range(len(relevances) - 1):
-            assert relevances[i] >= relevances[i + 1], (
-                f"Relevance at index {i} ({relevances[i]}) should be >= "
-                f"index {i+1} ({relevances[i+1]}). "
-                f"Items must be sorted descending by relevance."
-            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

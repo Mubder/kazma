@@ -145,8 +145,14 @@ class TestCompactionEngine:
         assert new_state.get("last_cp_id") == state.get("last_cp_id")
 
     @pytest.mark.asyncio
-    async def test_compact_clears_tool_results(self) -> None:
-        """compact() should clear tool_results since they're in the summary."""
+    async def test_compact_preserves_tool_results(self) -> None:
+        """compact() preserves recent tool_results (bounded), not wipe to {}.
+
+        Audit AC4 / §2.2 changed this deliberately: wiping tool_results to {}
+        mid-ReAct made the agent lose tool context, re-issue the same calls,
+        and re-compact in a loop. Recent entries are kept (bounded by
+        KAZMA_COMPACT_PRESERVE_TOOL_RESULTS, default 12).
+        """
         engine = CompactionEngine()
         state = initial_state()
         state["messages"] = [{"role": "user", "content": "test"}]
@@ -154,7 +160,27 @@ class TestCompactionEngine:
 
         new_state = await engine.compact(state)
 
-        assert new_state["tool_results"] == {}
+        # Small tool_results dict is preserved as-is (under the cap).
+        assert new_state["tool_results"] == {"tool1": "result1"}
+
+    @pytest.mark.asyncio
+    async def test_compact_bounds_large_tool_results(self) -> None:
+        """More than the cap keeps only the most recent entries."""
+        import os
+
+        engine = CompactionEngine()
+        state = initial_state()
+        state["messages"] = [{"role": "user", "content": "test"}]
+        # 20 entries with default cap 12 → keep the last 12.
+        state["tool_results"] = {f"tool{i}": f"result{i}" for i in range(20)}
+
+        new_state = await engine.compact(state)
+
+        cap = int(os.environ.get("KAZMA_COMPACT_PRESERVE_TOOL_RESULTS", "12") or "12")
+        assert len(new_state["tool_results"]) == cap
+        # The most recent entries survive (insertion-ordered dict).
+        assert f"tool{19}" in new_state["tool_results"]
+        assert "tool0" not in new_state["tool_results"]
 
     @pytest.mark.asyncio
     async def test_compact_saves_checkpoint(self) -> None:
@@ -196,20 +222,24 @@ class TestCompactionEngine:
 
     @pytest.mark.asyncio
     async def test_compact_with_memory_store(self) -> None:
-        """compact() should retrieve memories when store is available."""
+        """compact() should retrieve memories via V2 recall when available.
 
-        class MockMemoryStore:
-            async def search(self, query: str, limit: int = 5) -> list[dict]:
-                return [
-                    {"content": "User prefers dark mode"},
-                    {"content": "Project uses Python 3.11"},
-                ]
+        retrieve_memories moved to the V2 recall read path
+        (kazma_core.memory.recall.search) in the V1→V2 memory cutover — it no
+        longer delegates to a memory_store. Mock the recall seam instead.
+        """
+        from unittest.mock import patch
 
-        engine = CompactionEngine(memory_store=MockMemoryStore())
+        v2_hits = [
+            {"content": "User prefers dark mode"},
+            {"content": "Project uses Python 3.11"},
+        ]
+        engine = CompactionEngine()
         state = initial_state()
         state["messages"] = [{"role": "user", "content": "test"}]
 
-        new_state = await engine.compact(state)
+        with patch("kazma_core.memory.recall.search", return_value=v2_hits):
+            new_state = await engine.compact(state)
 
         system_content = new_state["messages"][0]["content"]
         assert "Relevant Memories" in system_content
@@ -240,14 +270,17 @@ class TestCompactionEngine:
 
     @pytest.mark.asyncio
     async def test_retrieve_memories_with_store(self) -> None:
-        """retrieve_memories() should delegate to memory store."""
+        """retrieve_memories() should return V2 recall hits.
 
-        class MockMemoryStore:
-            async def search(self, query: str, limit: int = 5) -> list[dict]:
-                return [{"content": "memory 1"}, {"content": "memory 2"}]
+        V1→V2 cutover: retrieve_memories reads via kazma_core.memory.recall
+        (not a memory_store) — mock the recall seam.
+        """
+        from unittest.mock import patch
 
-        engine = CompactionEngine(memory_store=MockMemoryStore())
-        memories = await engine.retrieve_memories("test query", limit=2)
+        v2_hits = [{"content": "memory 1"}, {"content": "memory 2"}]
+        engine = CompactionEngine()
+        with patch("kazma_core.memory.recall.search", return_value=v2_hits):
+            memories = await engine.retrieve_memories("test query", limit=2)
         assert len(memories) == 2
 
     # ── C1 regression: compaction must fence recalled memories ──────────────

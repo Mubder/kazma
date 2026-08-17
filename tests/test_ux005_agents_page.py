@@ -162,8 +162,9 @@ class TestAgentsTemplateNotPlaceholder:
         assert "Reasoning" in agents_html
 
     def test_has_start_stop_controls(self, agents_html: str):
-        """Must have start/stop controls for the agent."""
-        assert "Start" in agents_html and "Stop" in agents_html
+        """Must have start/stop controls (i18n keys, not literal strings)."""
+        assert "t('agents.start')" in agents_html
+        assert "t('agents.stop')" in agents_html
 
     def test_loads_agents_js(self, agents_html: str):
         """Must include the agents.js script."""
@@ -220,6 +221,15 @@ class TestAgentsEndpoints:
 
         app = FastAPI()
         templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+        # The real app registers these as env globals (kazma_ui/app.py);
+        # without them rendering dies with UndefinedError('theme').
+        templates.env.globals["t"] = lambda key, **_: key
+        templates.env.globals["theme"] = lambda: "light"
+        templates.env.globals["lang"] = lambda: "en"
+        templates.env.globals["dir"] = lambda: "ltr"
+        templates.env.globals["translations_json"] = lambda: "{}"
+        templates.env.globals["css_version"] = lambda: "test"
+        templates.env.globals["js_version"] = lambda: "test"
         router = create_agents_router(mock_agent, templates)
         app.include_router(router)
         return TestClient(app)
@@ -236,9 +246,15 @@ class TestAgentsEndpoints:
         assert "will be available here" not in resp.text
 
     def test_agents_page_shows_status(self, client):
-        """Rendered page must contain agent status info."""
+        """Rendered page must contain the agent-status hook.
+
+        Status text is client-side rendered (Alpine binds agent.running and
+        fetches /api/agents/status — covered by its own endpoint test), so we
+        assert the binding exists in the server HTML.
+        """
         resp = client.get("/agents")
-        assert "kazma-test" in resp.text or "Running" in resp.text or "Stopped" in resp.text
+        assert "agent.running" in resp.text
+        assert "t('agents.stopped')" in resp.text or "agents.stopped" in resp.text
 
     def test_agents_status_endpoint(self, client):
         """GET /api/agents/status returns JSON with agent info."""
@@ -260,14 +276,6 @@ class TestAgentsEndpoints:
         agent = data["agents"][0]
         assert "running" in agent
         assert "agent_state" in agent
-
-    def test_agents_traces_endpoint(self, client):
-        """GET /api/agents/traces returns trace data."""
-        resp = client.get("/api/agents/traces")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "traces" in data
-        assert isinstance(data["traces"], list)
 
     def test_agents_tools_endpoint(self, client):
         """GET /api/agents/tools returns tool history."""

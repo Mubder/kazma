@@ -346,11 +346,9 @@ class TestBuiltinTools:
         assert "git" in result["content"].lower()
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        __import__("os").name == "nt",
-        reason="sleep command not natively available on Windows"
-    )
     async def test_shell_exec_timeout(self):
+        """Timeout test — 'sleep' is in the SAFE_BINARIES allowlist and Git
+        Bash on Windows provides it; the tool's timeout fires before 10s."""
         registry = LocalToolRegistry(include_builtins=True)
         result = await registry.execute("shell_exec", {"command": "sleep 10", "timeout": 1})
         assert "timed out" in result["content"].lower()

@@ -366,3 +366,4 @@ function knowledgePage() {
     },
   };
 }
+if (typeof window !== "undefined") window.knowledgePage = knowledgePage;

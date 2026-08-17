@@ -209,9 +209,12 @@ def test_xlsx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
     assert 'rightToLeft="1"' in sheet_xml(ar), "AR xlsx missing active rightToLeft sheet view"
     assert 'rightToLeft="1"' not in sheet_xml(en), "EN xlsx unexpectedly right-to-left"
 
-    # Shared theme fill present in both (header band colour).
-    assert "1e3a5f" in styles_xml(ar).lower()
-    assert "1e3a5f" in styles_xml(en).lower()
+    # Shared theme fill present in both (header / ink colour).
+    from kazma_core.documents.style_theme import THEME
+
+    ink = str(THEME["heading"]).lstrip("#").lower()
+    assert ink in styles_xml(ar).lower()
+    assert ink in styles_xml(en).lower()
 
     # Branded title row (row 1) merged across columns — the heading-bar motif
     # for spreadsheets, matching DOCX/PDF/HTML/PPTX.
@@ -255,8 +258,14 @@ def test_pptx_engine_is_themed_and_direction_aware(tmp_path: Path) -> None:
     )
 
     # Shared accent/heading colour on the title slide for both.
-    assert ("1e3a5f" in slide_xml(ar, 1).lower() or "0f172a" in slide_xml(ar, 1).lower())
-    assert ("1e3a5f" in slide_xml(en, 1).lower() or "0f172a" in slide_xml(en, 1).lower())
+    from kazma_core.documents.style_theme import THEME
+
+    ink = str(THEME["heading"]).lstrip("#").lower()
+    accent = str(THEME["accent"]).lstrip("#").lower()
+    ar1 = slide_xml(ar, 1).lower()
+    en1 = slide_xml(en, 1).lower()
+    assert ink in ar1 or accent in ar1
+    assert ink in en1 or accent in en1
 
 
 def test_pptx_speaker_notes_attached(tmp_path: Path) -> None:

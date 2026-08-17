@@ -11,7 +11,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -350,3 +350,39 @@ class TestStreamContent:
         assert len(error_frames) == 1
         assert "LLM crashed" not in error_frames[0]
         assert "error" in error_frames[0].lower()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# F6 — /research exception path (audit fix)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestResearchSlashErrorPath:
+    """Work `/research deep` is a supervisor turn, not a side-door start."""
+
+    def _client(self):
+        graph = MagicMock()
+        router = create_sse_chat_router(graph=graph, checkpointer=None)
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app)
+
+    def test_research_deep_does_not_call_start_directly(self):
+        client = self._client()
+        with patch(
+            "kazma_core.tools.research_session.start_deep_research",
+            new_callable=AsyncMock,
+        ) as spy:
+            resp = client.post(
+                "/api/chat/stream",
+                json={"message": "/research deep quantum computing"},
+            )
+        spy.assert_not_called()
+        assert resp.status_code == 200
+
+    def test_research_usage_without_topic(self):
+        """Bare /research with no topic yields the usage hint."""
+        client = self._client()
+        resp = client.post("/api/chat/stream", json={"message": "/research"})
+        assert resp.status_code == 200
+        assert "Usage" in resp.text

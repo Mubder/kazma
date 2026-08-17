@@ -794,3 +794,4 @@ function memoryPage() {
     },
   };
 }
+if (typeof window !== "undefined") window.memoryPage = memoryPage;

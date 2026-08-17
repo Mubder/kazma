@@ -5,8 +5,9 @@ Formal module replacing ad-hoc swarm_dispatch.py. Provides:
 - SwarmTaskTracker: track dispatched tasks, post periodic progress updates,
   and send completion notifications with result summaries
 
-**Status: UNWIRED library** (not hooked into gateway dispatch yet). See
-``docs/audits/UNWIRED_INVENTORY.md``. Safe to import for custom integrations.
+**Status:** opt-in. ``maybe_notify_dispatch`` is called from the swarm
+dispatch wrapper when ``SWARM_BOT_TOKEN`` is set; otherwise this module
+is inert.
 
 Standalone mode: if kazma_core.swarm is unavailable, reads config from env vars:
     SWARM_BOT_TOKEN  — Telegram bot token
@@ -39,6 +40,7 @@ __all__ = [
     "SwarmNotifier",
     "SwarmTaskTracker",
     "TrackedTask",
+    "maybe_notify_dispatch",
 ]
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
@@ -375,6 +377,33 @@ class SwarmTaskTracker:
     def active_tasks(self) -> list[TrackedTask]:
         """Return all tasks with status 'running'."""
         return [t for t in self._tasks.values() if t.status == "running"]
+
+
+async def maybe_notify_dispatch(
+    *,
+    task_id: str = "",
+    prompt: str = "",
+    status: str = "done",
+    summary: str = "",
+) -> bool:
+    """Best-effort Telegram notify after a swarm dispatch.
+
+    No-op (returns False) when ``SWARM_BOT_TOKEN`` is unset. Never raises.
+    """
+    if not (os.environ.get("SWARM_BOT_TOKEN") or "").strip():
+        return False
+    try:
+        notifier = SwarmNotifier.from_env()
+        body = (
+            f"Swarm {status}: `{task_id or 'task'}`\n"
+            f"{(prompt or '')[:200]}\n"
+            f"{(summary or '')[:400]}"
+        ).strip()
+        await notifier.send_message(text=body)
+        return True
+    except Exception:
+        logger.debug("[SwarmNotify] dispatch notify skipped", exc_info=True)
+        return False
 
     def all_tasks(self) -> list[TrackedTask]:
         """Return all tracked tasks."""

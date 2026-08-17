@@ -162,3 +162,4 @@ function skillsApp() {
         }
     };
 }
+if (typeof window !== "undefined") window.skillsApp = skillsApp;

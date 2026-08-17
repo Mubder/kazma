@@ -176,6 +176,29 @@ def federated_search(
         except Exception as exc:
             logger.debug("[federated] knowledge search failed: %s", exc, exc_info=True)
 
+    try:
+        from kazma_core.memory.unified_index import search_unified
+
+        seen = {str(h.get("id") or "") for h in hits}
+        for row in search_unified(q, tenant_id=tenant_id, limit=max(limit_memory, limit_kb)):
+            uid = str(row.get("id") or "")
+            if uid and uid in seen:
+                continue
+            hits.append(
+                {
+                    "store": "unified",
+                    "kind": row.get("kind") or "item",
+                    "id": uid,
+                    "content": (row.get("text") or "")[:500],
+                    "score": 0.4,
+                    "source": "unified_index",
+                }
+            )
+            if uid:
+                seen.add(uid)
+    except Exception:
+        logger.debug("[federated] unified index search skipped", exc_info=True)
+
     def _rank_key(h: dict[str, Any]) -> float:
         return float(h.get("score") or 0)
 

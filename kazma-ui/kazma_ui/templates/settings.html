@@ -27,7 +27,7 @@
     </nav>
 
     <!-- Loading indicator -->
-    <div :class="{ hidden: !loading }" style="padding:40px;text-align:center;color:var(--text-muted)">{{ t('settings.loading') }}</div>
+    <div :class="{ hidden: !loading }" x-cloak style="padding:40px;text-align:center;color:var(--text-muted)">{{ t('settings.loading') }}</div>
 
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 1: PROVIDERS & CONNECTORS (Unified Secrets Hub)
@@ -92,7 +92,10 @@
                                           x-show="(p.selected_models || []).length"
                                           x-text="'(' + (p.selected_models || []).length + ' selected)'"></span>
                                 </div>
-                                <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
+                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="clearHubDiscovered(p.name)" :title="t('settings.clear_discovered')" x-text="t('settings.clear_discovered')"></button>
+                                </div>
                             </div>
                             <div class="input-with-icon" style="margin-bottom:6px">
                                 <input type="search"
@@ -105,15 +108,18 @@
                             </div>
                             <div class="discovered-models-list">
                                 <template x-for="m in filteredDiscoveredModels(p)" :key="String(m)">
-                                    <label class="model-check-label"
-                                           style="display:flex;align-items:center;gap:8px;font-size:0.72rem;font-family:var(--font-mono);cursor:pointer;padding:5px 8px;border-radius:6px"
-                                           :style="(p.selected_models || []).includes(m) ? 'background:rgba(99,102,241,0.15)' : ''">
-                                        <input type="checkbox"
-                                            :checked="(p.selected_models || []).includes(m)"
-                                            @change="toggleModelSelection(p.name, m, $event.target.checked)"
-                                            style="width:auto;margin:0;cursor:pointer;accent-color:var(--accent,#6366f1)">
-                                        <span x-text="m" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-                                    </label>
+                                    <div class="model-item-row"
+                                         :class="{ selected: (p.selected_models || []).includes(m) }">
+                                        <label class="model-check-label">
+                                            <input type="checkbox"
+                                                :checked="(p.selected_models || []).includes(m)"
+                                                @change="toggleModelSelection(p.name, m, $event.target.checked)">
+                                            <span x-text="m"></span>
+                                        </label>
+                                        <button type="button" class="btn btn-danger btn-xs"
+                                                :title="t('settings.remove_model')"
+                                                @click.stop.prevent="deleteProviderDiscoveredModel(p.name, m)">×</button>
+                                    </div>
                                 </template>
                                 <div x-show="filteredDiscoveredModels(p).length === 0"
                                      style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)">
@@ -132,10 +138,10 @@
                 </div>
 
                 <div x-show="hubTestResult && hubTestResult.type === 'provider'" class="validation-result" style="margin-top:12px">
-                    <template x-if="hubTestResult.success">
+                    <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
-                    <template x-if="!hubTestResult.success">
+                    <template x-if="!hubTestResult?.success">
                         <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
@@ -208,10 +214,10 @@
                 </div>
 
                 <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px">
-                    <template x-if="hubTestResult.success">
+                    <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                     </template>
-                    <template x-if="!hubTestResult.success">
+                    <template x-if="!hubTestResult?.success">
                         <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
@@ -1046,8 +1052,10 @@
             </div>
             <div style="margin-top:12px">
                 <button class="btn btn-danger" @click="rebuildEmbeddings()" :disabled="embedderRebuilding || embedderRebuildStatus.state === 'running'">
-                    <template x-if="embedderRebuildStatus.state !== 'running'">{{ t('settings.embedder_rebuild_btn') }}</template>
-                    <template x-if="embedderRebuildStatus.state === 'running'">{{ t('settings.embedder_rebuild_running') }}</template>
+                    {# x-show spans, NOT <template x-if> — Alpine can't clone
+                       template content inside <button> (cloneNode/_x_dataStack). #}
+                    <span x-show="embedderRebuildStatus.state !== 'running'">{{ t('settings.embedder_rebuild_btn') }}</span>
+                    <span x-show="embedderRebuildStatus.state === 'running'">{{ t('settings.embedder_rebuild_running') }}</span>
                 </button>
                 <div x-show="embedderRebuildStatus.state !== 'idle'" x-cloak style="margin-top:10px">
                     <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">
@@ -2372,6 +2380,12 @@
         <div class="settings-group">
             <h3>{{ t('settings.backup_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.backup_desc') }}</p>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:1rem">
+                <label style="font-size:0.85rem">{{ t('settings.backup_retention') }}</label>
+                <input type="number" class="form-input" x-model.number="backupRetention" min="1" max="3650" step="1" style="max-width:110px">
+                <button class="btn btn-secondary btn-sm" @click="saveBackupRetention()">{{ t('settings.save') }}</button>
+            </div>
+            <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.backup_retention_hint') }}</div>
             <div style="display:flex;gap:12px;align-items:center;margin-bottom:1.25rem">
                 <button class="btn btn-primary" @click="runBackup()" :disabled="backupRunning">
                     <span x-show="!backupRunning">{{ t('settings.backup_now') }}</span>
@@ -2394,8 +2408,9 @@
                 <span style="font-size:0.85rem"
                       :class="backupResult?.ok ? 'text-success' : 'text-error'"
                       x-text="backupResult?.ok
-                        ? (t('settings.backup_done') + ' ' + backupResult.databases_ok + ' DBs, ' + backupResult.total_size_mb + ' MB')
-                        : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
+                          ? (t('settings.backup_done') + ' ' + backupResult.databases_ok + ' DBs, ' + backupResult.total_size_mb + ' MB'
+                             + (backupResult?.offsite?.ok ? ' · ☁ Synced to ' + (backupResult.offsite.remote || 'cloud').split(':')[0] : ''))
+                          : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
             </div>
         </div>
         <div class="settings-group">
@@ -2410,6 +2425,13 @@
                         <span class="badge" style="margin-left:8px;font-size:0.7rem;padding:2px 8px;border-radius:10px"
                               :style="b.trigger === 'manual' ? 'background:rgba(46,213,115,0.15);color:#2ed573' : 'background:rgba(79,140,255,0.15);color:#4f8cff'"
                               x-text="b.trigger === 'manual' ? 'Manual' : 'Auto'"></span>
+                        <!-- Cloud sync badge -->
+                        <span x-show="b.cloud_synced" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(155,89,182,0.15);color:#9b59b6"
+                              :title="'Synced to: ' + (b.cloud_remote || 'cloud')"
+                              x-text="'☁ ' + (b.cloud_remote ? b.cloud_remote.split(':')[0] : 'Cloud')"></span>
+                        <span x-show="!b.cloud_synced && b.cloud_skipped_reason" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,193,7,0.12);color:#b8860b"
+                              title="Not synced to cloud"
+                              x-text="' locals only'"></span>
                         <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
                               x-text="b.databases_ok + ' DBs · ' + b.size_mb + ' MB' + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · incomplete' : '')"></span>
                     </div>
@@ -2420,6 +2442,174 @@
                     </div>
                 </div>
             </template>
+        </div>
+        <!-- Offsite Backup — Native Cloud Providers -->
+        <div class="settings-group">
+            <h3>{{ t('settings.offsite_heading') }}</h3>
+            <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.offsite_desc') }}</p>
+
+            <!-- Active provider status banner -->
+            <div x-show="offsiteProvider" x-cloak
+                 style="padding:10px 16px;background:rgba(155,89,182,0.06);border:1px solid rgba(155,89,182,0.2);border-radius:var(--radius-card);margin-bottom:1rem;font-size:0.85rem;display:flex;align-items:center;gap:8px">
+                <span style="font-size:1.1em">☁️</span>
+                <div>
+                    <strong x-text="offsiteEnabled ? 'Offsite sync active' : 'Offsite sync disabled'"></strong>
+                    <span style="color:var(--text-muted);margin-left:8px"
+                          x-text="'→ ' + offsiteActiveProviderLabel"></span>
+                </div>
+            </div>
+
+            <!-- Provider cards — click a card to choose where backups are saved -->
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px">
+                Click a provider card to select it as the backup destination, then Test + Save.
+            </p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
+                <!-- Google Drive -->
+                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
+                     :style="offsiteProvider === 'google_drive' ? 'border-color:#4285f4;background:rgba(66,133,244,0.06)' : ''"
+                     @click="selectOffsiteProvider('google_drive')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:#4285f4">
+                        <span style="font-size:1.4em">📁</span>
+                        <strong>Google Drive</strong>
+                        <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok !== false" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false"
+                              style="font-size:0.8rem;color:#ffa502"
+                              :title="offsiteProviderStatus('google_drive')?.drive_error || 'Drive access blocked'">⚠ Drive</span>
+                        <span x-show="offsiteConfig?.provider === 'google_drive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(66,133,244,0.15);color:#4285f4">active</span>
+                    </div>
+                    <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                        Uses your Gmail OAuth — click Connect to authorize Drive access.
+                    </p>
+                    <button class="btn btn-secondary btn-sm" style="width:100%"
+                            @click.stop="connectGoogleDrive()"
+                            x-text="offsiteProviderStatus('google_drive')?.connected
+                                ? (offsiteProviderStatus('google_drive')?.drive_ok === false ? '⚠ Reconnect' : '✓ Connected')
+                                : 'Connect'">
+                    </button>
+                    <p x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false" x-cloak
+                       style="font-size:0.72rem;color:#ffa502;margin:6px 0 0 0"
+                       x-text="'Drive blocked: ' + (offsiteProviderStatus('google_drive')?.drive_error || 'unknown reason') + '. Test the card for the fix steps.'"></p>
+                </div>
+
+                <!-- OneDrive -->
+                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
+                     :style="offsiteProvider === 'onedrive' ? 'border-color:#0078d4;background:rgba(0,120,212,0.06)' : ''"
+                     @click="selectOffsiteProvider('onedrive')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" @click.stop style="accent-color:#0078d4">
+                        <span style="font-size:1.4em">☁️</span>
+                        <strong>OneDrive</strong>
+                        <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'onedrive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(0,120,212,0.15);color:#0078d4">active</span>
+                    </div>
+                    <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                        Uses your Microsoft account — click Connect to authorize Files access.
+                    </p>
+                    <button class="btn btn-secondary btn-sm" style="width:100%"
+                            @click.stop="connectOneDrive()"
+                            x-text="offsiteProviderStatus('onedrive')?.connected ? '✓ Connected' : 'Connect'">
+                    </button>
+                </div>
+
+                <!-- WD MyCloud / WebDAV -->
+                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
+                     :style="offsiteProvider === 'webdav' ? 'border-color:#2ed573;background:rgba(46,213,115,0.06)' : ''"
+                     @click="selectOffsiteProvider('webdav')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" @click.stop style="accent-color:#2ed573">
+                        <span style="font-size:1.4em">🏠</span>
+                        <strong>WD MyCloud / NAS</strong>
+                        <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'webdav'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(46,213,115,0.15);color:#2ed573">active</span>
+                    </div>
+                    <div x-show="offsiteProvider === 'webdav'" x-cloak style="margin-top:6px" @click.stop>
+                        <input type="text" class="form-input" x-model="offsiteWebdavUrl" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteWebdavUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteWebdavPass" placeholder="Password" style="width:100%;font-size:0.8rem">
+                    </div>
+                    <p x-show="offsiteProvider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                        WebDAV — works with WD MyCloud OS5 and any NAS.
+                    </p>
+                </div>
+
+                <!-- FTP (WD MyCloud OS3 / any FTP server) -->
+                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
+                     :style="offsiteProvider === 'ftp' ? 'border-color:#1abc9c;background:rgba(26,188,156,0.06)' : ''"
+                     @click="selectOffsiteProvider('ftp')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" @click.stop style="accent-color:#1abc9c">
+                        <span style="font-size:1.4em">📡</span>
+                        <strong>FTP / NAS</strong>
+                        <span x-show="offsiteProviderStatus('ftp')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 'ftp'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(26,188,156,0.15);color:#1abc9c">active</span>
+                    </div>
+                    <div x-show="offsiteProvider === 'ftp'" x-cloak style="margin-top:6px" @click.stop>
+                        <div style="display:flex;gap:6px;margin-bottom:6px">
+                            <input type="text" class="form-input" x-model="offsiteFtpHost" placeholder="192.168.50.45" style="flex:1;font-size:0.8rem">
+                            <input type="text" class="form-input" x-model="offsiteFtpPort" placeholder="21" style="width:64px;font-size:0.8rem">
+                        </div>
+                        <input type="text" class="form-input" x-model="offsiteFtpUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteFtpPass" placeholder="Password" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteFtpPath" placeholder="Base path on the server (optional, e.g. Mubder Alfaris)" style="width:100%;font-size:0.8rem">
+                    </div>
+                    <p x-show="offsiteProvider !== 'ftp'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                        Plain FTP — works with WD MyCloud OS3 (EX4100) and any FTP server.
+                    </p>
+                </div>
+
+                <!-- S3 / B2 -->
+                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
+                     :style="offsiteProvider === 's3' ? 'border-color:#ff9900;background:rgba(255,153,0,0.06)' : ''"
+                     @click="selectOffsiteProvider('s3')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" @click.stop style="accent-color:#ff9900">
+                        <span style="font-size:1.4em">🪣</span>
+                        <strong>S3 / Backblaze B2</strong>
+                        <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteConfig?.provider === 's3'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(255,153,0,0.15);color:#ff9900">active</span>
+                    </div>
+                    <div x-show="offsiteProvider === 's3'" x-cloak style="margin-top:6px" @click.stop>
+                        <input type="text" class="form-input" x-model="offsiteS3Key" placeholder="Access Key ID" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteS3Secret" placeholder="Secret Access Key" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteS3Bucket" placeholder="Bucket name" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteS3Endpoint" placeholder="Endpoint (optional, for B2/MinIO)" style="width:100%;font-size:0.8rem">
+                    </div>
+                    <p x-show="offsiteProvider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                        Amazon S3 or any S3-compatible storage. Cheapest for backups.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Enable toggle + actions -->
+            <div style="display:flex;gap:12px;align-items:center;margin-top:0.5rem">
+                <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem" :style="!offsiteProvider ? 'cursor:not-allowed;opacity:0.5' : 'cursor:pointer'" :title="!offsiteProvider ? 'Select a provider first to enable/disable offsite sync' : ''">
+                    <input type="checkbox" x-model="offsiteEnabled" :disabled="!offsiteProvider" @change="saveOffsite()" style="accent-color:var(--primary,#4f8cff)">
+                    {{ t('settings.offsite_enabled') }}
+                </label>
+                <span style="flex:1"></span>
+                <button class="btn btn-secondary" @click="testOffsite()" :disabled="offsiteTesting || !offsiteProvider">
+                    <span x-show="!offsiteTesting">{{ t('settings.offsite_test') }}</span>
+                    <span x-show="offsiteTesting">…</span>
+                </button>
+                <button class="btn btn-primary" @click="saveOffsite()" :disabled="!offsiteProvider">
+                    {{ t('settings.offsite_save') }}
+                </button>
+            </div>
+
+            <!-- Test result -->
+            <div x-show="offsiteTestResult" x-cloak style="margin-top:10px;padding:10px 14px;border-radius:var(--radius-card);font-size:0.85rem"
+                 :style="offsiteTestResult?.ok
+                     ? 'background:rgba(46,213,115,0.08);border:1px solid rgba(46,213,115,0.3)'
+                     : 'background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.3)'">
+                <span :class="offsiteTestResult?.ok ? 'text-success' : 'text-error'"
+                      x-text="offsiteTestResult?.ok ? '✓ ' + (offsiteTestResult.message || 'Connected') : '✗ ' + (offsiteTestResult?.error || 'Failed')"></span>
+            </div>
+
+            <!-- Save confirmation -->
+            <div x-show="offsiteSaved" x-cloak style="margin-top:8px;font-size:0.85rem" class="text-success">
+                ✓ {{ t('settings.offsite_saved') }}
+            </div>
         </div>
     </div>
 
@@ -2433,5 +2623,10 @@
 {% block scripts %}
 <script src="/static/js/providers.js?v={{ js_version() }}"></script>
 <script src="/static/js/models.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_core.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_hub.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_agent.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_integrations.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_ops.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings.js?v={{ js_version() }}"></script>
 {% endblock %}

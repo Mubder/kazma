@@ -43,7 +43,10 @@ class TestAgentRunnerConfig:
         )
         cfg = load_config(p)
         assert cfg.name == "test-agent"
-        assert cfg.version == "9.9.9"
+        # The loader now canonicalizes version from package metadata
+        # (git-describe style), overriding the YAML value.
+        assert cfg.version and cfg.version[0].isdigit()
+        assert cfg.version != ""
         assert cfg.default_model == "gpt-test"
         assert cfg.system_prompt == "You are a test."
 
@@ -62,6 +65,8 @@ class TestAgentRunnerConfig:
         agent.cost_breaker = MagicMock()
         agent.authority = MagicMock()
         agent.tracer = MagicMock()
+        # get_streaming_graph lazily creates the recorder (time-travel §12A)
+        agent._snapshot_recorder = None
 
         fake_graph = object()
         with (
@@ -185,8 +190,11 @@ class TestCompactionHeuristic:
             "provenance": {},
         }
         new_state = await eng.compact(state)  # type: ignore[arg-type]
-        assert len(new_state["messages"]) == 1
+        # Compaction now keeps the summary system message AND the last user
+        # message (so the model can continue the turn).
+        assert len(new_state["messages"]) == 2
         assert new_state["messages"][0]["role"] == "system"
+        assert new_state["messages"][-1]["role"] == "user"
 
 
 # ── gateway smoke ──────────────────────────────────────────────────────

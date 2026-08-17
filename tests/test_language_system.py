@@ -23,7 +23,9 @@ _HEADER_HTML = _UI / "templates" / "components" / "header.html"
 _DASHBOARD_HTML = _UI / "templates" / "dashboard.html"
 _SETTINGS_HTML = _UI / "templates" / "settings.html"
 _BASE_HTML = _UI / "templates" / "base.html"
-_APP_JS = _UI / "static" / "js" / "app.js"
+# The language toggle moved out of app.js into the shared components
+# module during the i18n/JS-modularization refactor.
+_APP_JS = _UI / "static" / "js" / "modules" / "components.js"
 _APP_PY = _UI / "app.py"
 _DASHBOARD_PY = _UI / "dashboard.py"
 

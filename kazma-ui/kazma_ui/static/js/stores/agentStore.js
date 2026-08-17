@@ -18,6 +18,13 @@ document.addEventListener('alpine:init', () => {
     const v = m[key];
     return (v != null && String(v) !== '') ? String(v) : (fallback || key);
   }
+  function _budgetSuffix(data, frame) {
+    const src = Object.assign({}, frame || {}, data || {});
+    const iter = src.iteration;
+    const maxI = src.max_iterations;
+    if (iter == null || maxI == null || maxI === '') return '';
+    return ' · ' + iter + '/' + maxI;
+  }
   function _tiFmt(key, fallback, vars) {
     let s = _ti(key, fallback);
     if (vars) {
@@ -142,26 +149,40 @@ document.addEventListener('alpine:init', () => {
       this.activeNode = '';
       this.activeTool = null;
       // Server always emits idle after a graph pause so the thinking spinner
-      // clears — but if HITL is still waiting, keep the approval lock.
-      if (this.pendingApproval) {
+      // clears — but if HITL is still waiting, keep the approval lock. Check
+      // BOTH the store card (pendingApproval) and an active inline card in the
+      // message stream: renderHitlCard clears pendingApproval to hide the
+      // bottom card, so pendingApproval alone no longer signals a pending
+      // approval (incident 2026-08-16 dedup).
+      const chat = this._chat();
+      const inlineApproval = !!(
+        chat && typeof chat.hasInlineApprovalCard === 'function' &&
+        chat.hasInlineApprovalCard()
+      );
+      if (this.pendingApproval || inlineApproval) {
         this._turnActive = false;
-        const chat = this._chat();
         if (chat && typeof chat.pauseForApproval === 'function') {
           chat.pauseForApproval(this.pendingApproval);
         }
         return;
       }
       this._turnActive = false;
-      const chat = this._chat();
       if (chat && typeof chat.endTurn === 'function') chat.endTurn();
     },
     _pauseForApproval(approval) {
       this.isThinking = false;
       this.activeTool = null;
       this._turnActive = false;
-      this.pendingApproval = approval;
-      // Stop must not pulse; input locked until Approve / YOLO / Deny.
       const chat = this._chat();
+      // Inline card is the only HITL UI. Never set pendingApproval when we
+      // can render inline — that was the duplicated YOLO card (bottom Alpine
+      // + message stream). Keep pendingApproval as fallback only.
+      if (chat && typeof chat._hitlApproval === 'function') {
+        this.pendingApproval = null;
+        chat._hitlApproval(approval);
+        return;
+      }
+      this.pendingApproval = approval;
       if (chat && typeof chat.pauseForApproval === 'function') {
         chat.pauseForApproval(approval);
       }
@@ -350,12 +371,17 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── WebSocket Actions ────────────────────────────────────
-    sendPrompt(text, model, attachments) {
+    sendPrompt(text, model, attachments, opts) {
       if (!text || !text.trim()) return;
       this.pendingApproval = null;
-      this._beginTurn();
-      this.statusMessage = _ti('thinking', 'Kazma is thinking…');
-      this.activeNode = 'Supervisor';
+      const options = opts || {};
+      // Slash capacity/yolo must not open a thinking turn — reconnect
+      // catch-up then painted the confirmation into the next real prompt.
+      if (!options.noTurn) {
+        this._beginTurn();
+        this.statusMessage = _ti('thinking', 'Kazma is thinking…');
+        this.activeNode = 'Supervisor';
+      }
 
       let clientMsgId = '';
       try {
@@ -369,6 +395,7 @@ document.addEventListener('alpine:init', () => {
         action: 'send_prompt',
         text: text.trim(),
         model: model || '',
+        workspace_id: (typeof window !== 'undefined' && window.__kazmaWorkspaceId) || '',
         client_msg_id: clientMsgId,
       };
 
@@ -382,7 +409,7 @@ document.addEventListener('alpine:init', () => {
       this._enqueueSend(payload, { expectAck: true, clientMsgId: clientMsgId });
     },
 
-    submitApproval(approved = true, scope = 'once', threadId = null) {
+    submitApproval(approved = true, scope = 'once', threadId = null, tool = null) {
       const pending = this.pendingApproval;
       const targetThreadId =
         threadId ||
@@ -394,8 +421,10 @@ document.addEventListener('alpine:init', () => {
         thread_id: targetThreadId,
         approved: !!approved,
         scope: scope || 'once',
-        // Required for tool-scope grants when interrupt payload is unavailable
-        tool: (pending && pending.tool) || '',
+        // Required for tool-scope grants when interrupt payload is unavailable.
+        // Explicit tool wins: the inline card clears pendingApproval to hide the
+        // bottom card, so its own data.tool must be passed through.
+        tool: tool || (pending && pending.tool) || '',
       };
 
       this.pendingApproval = null;
@@ -660,6 +689,7 @@ document.addEventListener('alpine:init', () => {
             this.statusMessage = (data && data.message)
               ? String(data.message)
               : _ti('thinking', 'Kazma is thinking…');
+            this.statusMessage += _budgetSuffix(data, frame);
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
             this._progress({
               kind: 'status',
@@ -680,10 +710,12 @@ document.addEventListener('alpine:init', () => {
             this.isThinking = true;
             this._turnActive = true;
             this.activeNode = frame.active_node || data.active_node || 'Supervisor';
-            this.statusMessage = _tiFmt('routing', 'Routing: {node}', { node: this.activeNode });
+            this.statusMessage = _tiFmt('routing', 'Routing: {node}', { node: this.activeNode })
+              + _budgetSuffix(data, frame);
             this._progress({
               kind: 'plan',
-              title: _tiFmt('routing_arrow', 'Routing → {node}', { node: this.activeNode }),
+              title: _tiFmt('routing_arrow', 'Routing → {node}', { node: this.activeNode })
+                + _budgetSuffix(data, frame),
               state: 'running',
             });
             this._syncThinkingBanner();
@@ -883,6 +915,12 @@ document.addEventListener('alpine:init', () => {
               window.KazmaChat.appendLiveToken(finalText, { full: true });
             }
           }
+          // Usage stats (tokens/cost + cumulative session totals) → badges +
+          // workbench summary bar. Runs BEFORE _endTurn so finalizeProgress
+          // sees the turn's usage when it renders the summary line.
+          if (window.KazmaChat && typeof window.KazmaChat.applyTurnStats === 'function') {
+            try { window.KazmaChat.applyTurnStats(data || {}); } catch (e) { /* stats must never break the turn */ }
+          }
           if (!this.pendingApproval) {
             this._endTurn();
           }
@@ -933,6 +971,19 @@ document.addEventListener('alpine:init', () => {
           }
           this._endTurn();
           break;
+
+        case 'capacity': {
+          try {
+            const reply = (data && data.reply) || frame.reply || '';
+            if (reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
+              window.KazmaChat.paintCapacityReply(reply);
+            }
+            if (window.KazmaChat && typeof window.KazmaChat.refreshCapacity === 'function') {
+              window.KazmaChat.refreshCapacity();
+            }
+          } catch (e) { /* ignore */ }
+          break;
+        }
 
         case 'steer': {
           // WS steer ack — previously unhandled, so the "demoted: true"

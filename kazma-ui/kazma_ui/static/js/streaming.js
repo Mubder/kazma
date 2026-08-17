@@ -113,6 +113,17 @@ var KazmaStream = (function() {
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;
+          case 'capacity':
+            try {
+              if (data && data.reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
+                window.KazmaChat.paintCapacityReply(data.reply);
+              }
+              if (window.KazmaChat && typeof window.KazmaChat.refreshCapacity === 'function') {
+                window.KazmaChat.refreshCapacity();
+              }
+            } catch (e) { /* ignore */ }
+            if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'error':
             if (callbacks.onError) callbacks.onError(data ? data.content : 'Unknown error');
             break;

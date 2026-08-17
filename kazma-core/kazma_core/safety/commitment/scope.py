@@ -7,8 +7,10 @@ wraps ``worker.dispatch()``) and read inside ``authorize_effect`` for every
 worker tool call — the same pattern as ``ide.workspace_scope`` / the HITL
 ContextVars.
 
-Enforcement is gated by ``agent.commitment.swarm_scope_enforce`` (default OFF —
-safe rollout; mirrors ``enforce_unknown_mutators``). When ON, a worker tool call
+Enforcement is gated by ``agent.commitment.swarm_scope_enforce`` (default ON
+since 2026-08-15 — the intent engine can auto-dispatch, so workers get the
+cap unless explicitly disabled; the env/ConfigStore kill-switch still wins).
+When ON, a worker tool call
 whose act is outside ``allowed_acts``, in ``denied_acts``, or whose semantic
 tier exceeds ``max_semantic_tier`` is DENIED. The main agent (no active scope)
 is never restricted.
@@ -122,8 +124,8 @@ def default_worker_scope(workspace_id: str | None = None) -> ScopeToken | None:
     """The default scope assigned to a dispatched worker when enforcement is on
     and no explicit scope was provided.
 
-    Returns None when ``agent.commitment.swarm_scope_enforce`` is OFF (the
-    default — safe rollout). When ON, returns a token capped at semantic_tier
+    Returns None when ``agent.commitment.swarm_scope_enforce`` is OFF.
+    When ON (the default), returns a token capped at semantic_tier
     HIGH (allows coding/fs/research; denies exec/outbound/config/identity
     CRITICAL) and explicitly denying the critical-retention acts a spawned worker
     must never self-perform (soul_delta/identity/config_change). Callers

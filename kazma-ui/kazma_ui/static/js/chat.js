@@ -23,15 +23,35 @@
   var messageReactions = {};
   var searchQuery = '';
   var showArchived = false;
+  // Cumulative session usage (tokens/cost). Preferred source: the server's
+  // session_tokens/session_cost payload keys; falls back to local accumulation
+  // when only per-turn values arrive (old backends).
+  var _sessionTotals = { tokens: 0, cost: 0 };
+  // Per-turn usage captured from done/turn_complete — powers the turn
+  // summary bar rendered by finalizeProgress().
+  var _lastTurnStats = null;
+  // Tool rows logged in the current turn's workbench (summary bar count).
+  var _progressToolCount = 0;
 
   // DOM refs
   var messagesEl, inputEl, sendBtn, typingEl, sessionListEl, searchInputEl;
-  var costBadge, tokensBadge;
+  var costBadge, tokensBadge, contextBadge, charBadge;
   var modelSelectorEl;
 
   // Currently selected model (persisted in localStorage)
   var selectedModel = '';
   var MODEL_LS_KEY = 'kazma.selectedModel';
+  var _activeWorkspaceId = '';
+
+  function refreshWorkspaceId() {
+    fetch('/api/workspaces')
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(data) {
+        _activeWorkspaceId = (data && data.active_workspace_id) || '';
+        try { window.__kazmaWorkspaceId = _activeWorkspaceId; } catch (e) { /* ignore */ }
+      })
+      .catch(function() { _activeWorkspaceId = ''; });
+  }
 
   // Active chat session (persisted so a page refresh resumes the same session)
   var SESSION_LS_KEY = 'kazma.chatSessionId';
@@ -78,6 +98,8 @@
     searchInputEl = $('session-search');
     costBadge = $('session-cost');
     tokensBadge = $('session-tokens');
+    contextBadge = $('context-size');
+    charBadge = $('composer-chars');
     modelSelectorEl = $('model-selector');
 
     if (!messagesEl) return; // not on chat page
@@ -199,9 +221,12 @@
 
     // Load available models for the model selector
     loadModels();
+    refreshWorkspaceId();
 
     // Load sessions after models are loaded
     loadSessions();
+    bindCapacityBar();
+    refreshCapacity();
 
     // Refresh the sidebar + reconcile delivery whenever the tab is shown.
     // Browser throttling freezes timers/streams while hidden; the durable
@@ -442,6 +467,13 @@
     { cmd: '/yolo', desc: 'Skip danger-tool approvals for this session (TTL)' },
     { cmd: '/yolo off', desc: 'Restore HITL approvals + clear tool grants' },
     { cmd: '/yolo status', desc: 'Show YOLO / grant status for this session' },
+    { cmd: '/long', desc: 'Show iteration budget + HITL status' },
+    { cmd: '/long on', desc: 'Research budget (40 rounds) — HITL still on' },
+    { cmd: '/long mission', desc: 'Run until done (hard wall ~500 rounds)' },
+    { cmd: '/long yolo', desc: 'Research budget AND skip danger-tool approvals' },
+    { cmd: '/unrestricted', desc: 'Mission + YOLO — finish this job, don’t ask' },
+    { cmd: '/unrestricted off', desc: 'Restore Settings budget + HITL' },
+    { cmd: '/long off', desc: 'Budget only off (HITL unchanged)' },
     { cmd: '/new', desc: 'Start a new chat session' },
     { cmd: '/reset', desc: 'Clear this conversation history' },
     { cmd: '/steer <text>', desc: 'Add context to the running task (applies next step)' },
@@ -549,6 +581,16 @@
     }
     // Per-content bidi: Arabic in an English UI needs rtl base + Arabic font
     syncInputBidi();
+    // Composer character counter (live; reset on send)
+    updateComposerCharCount();
+  }
+
+  /** Live character counter on the composer footer badge. */
+  function updateComposerCharCount() {
+    if (!charBadge || !inputEl) return;
+    var n = (inputEl.value || '').length;
+    charBadge.textContent = String(n);
+    charBadge.classList.toggle('is-empty', n === 0);
   }
 
   /**
@@ -697,8 +739,10 @@
     }
     _progressEl = null;
     _progressStepCount = 0;
+    _progressToolCount = 0;
     _planItems = [];
     _planParsedFromText = false;
+    _lastTurnStats = null;
     logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     if (inputEl) {
       inputEl.disabled = false;
@@ -783,8 +827,8 @@
   }
 
   function pauseForApproval(data) {
-    // HITL: turn is paused, not generating. Stop must not pulse; input locked
-    // until the user picks Approve / YOLO / Deny.
+    // HITL: turn is paused. Keep the composer usable for /steer, /abort,
+    // /long, /yolo — locking it was why steers vanished (incident 2026-08-16).
     _clearTurnTimers();
     _isGenerating = false;
     _awaitingApproval = true;
@@ -792,13 +836,13 @@
     activeTypingEl = null;
     if (typingEl && KS.hideTyping) KS.hideTyping(typingEl);
     if (inputEl) {
-      inputEl.disabled = true;
-      inputEl.placeholder = 'Please approve or deny the pending action to continue.';
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
     }
     if (sendBtn) {
-      sendBtn.disabled = true;
+      sendBtn.disabled = false;
       sendBtn.classList.remove('stop-mode');
-      sendBtn.title = 'Awaiting approval';
+      sendBtn.title = 'Send steer or command';
       sendBtn.innerHTML = _SEND_SVG;
     }
     void data;
@@ -1142,8 +1186,9 @@
       })
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(active) {
-        // Backend is authoritative — always prefer it over cached localStorage
-        if (active && active.model) {
+        // Per-session pick (localStorage) wins. Process-wide /api/provider/active
+        // is only the default when this mouth has not chosen a model.
+        if (!selectedModel && active && active.model) {
           selectedModel = active.model;
           try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
         }
@@ -1340,11 +1385,12 @@
     var _steerHard = _cmdLow === '/steer!' || _cmdLow.startsWith('/steer! ');
     var _steerSoft = !_steerHard && (_cmdLow === '/steer' || _cmdLow.startsWith('/steer '));
     var _abortCmd = _cmdLow === '/abort';
+    var _turnActive = !!_isGenerating || !!_awaitingApproval ||
+      !!(window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive);
     if (_steerHard || _steerSoft || _abortCmd) {
-      inputEl.value = '';
-      inputEl.style.height = 'auto';
-
       if (_abortCmd) {
+        inputEl.value = '';
+        inputEl.style.height = 'auto';
         if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
         fetch('/api/chat/abort', {
@@ -1362,13 +1408,15 @@
           'Usage: /steer <context>  or  /steer! <requirement>', 'info', 3500);
         return;
       }
-      var _turnActive = !!_isGenerating ||
-        !!(window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive);
       if (!_turnActive) {
         if (window.showToast) window.showToast(
           'No active task to steer — send a message first.', 'info', 3000);
         return;
       }
+      // Visible + editable: keep a user bubble, then clear the composer.
+      appendMessage('user', text);
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
       if (window.showToast) window.showToast(
         _steerHard ? '⏸️ Pausing task to apply your steer…' : '🧭 Steer noted — applying on the next step.',
         'info', 3000);
@@ -1376,6 +1424,46 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: chatSessionId || '', text: _steerText, mode: _steerHard ? 'hard' : 'soft',
+        }),
+        credentials: 'same-origin',
+      }).then(function(r) { return r.ok ? r.json() : { ok: false }; }).then(function(body) {
+        if (body && body.ok === false && body.reason === 'no_active_task' && window.showToast) {
+          window.showToast('No active task to steer.', 'info', 3000);
+        }
+      }).catch(function() { /* best-effort */ });
+      return;
+    }
+
+    // /long /mission /unrestricted — WS intercepts; skip Stop-lock on the live bus.
+    var _capFirst = _cmdLow.split(/\s+/)[0];
+    if (_capFirst === '/long' || _capFirst === '/mission' || _capFirst === '/unrestricted'
+        || _capFirst === '/yolo') {
+      var _capStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
+      if (_capStore && _capStore.connectionStatus === 'connected') {
+        appendMessage('user', text);
+        inputEl.value = '';
+        inputEl.style.height = 'auto';
+        if (!chatSessionId) {
+          chatSessionId = generateSessionId();
+          persistSessionId();
+        }
+        _capStore.sendPrompt(text, selectedModel || '', [], { noTurn: true });
+        return;
+      }
+      // SSE fallback: fall through to the normal send path.
+    }
+
+    // During HITL, a normal message is a soft steer — don't start a new turn.
+    if (_awaitingApproval && text && text.charAt(0) !== '/') {
+      appendMessage('user', '/steer ' + text);
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      if (window.showToast) window.showToast(
+        '🧭 Steering the paused task with your note.', 'info', 3000);
+      fetch('/api/chat/steer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: chatSessionId || '', text: text, mode: 'soft',
         }),
         credentials: 'same-origin',
       }).catch(function() { /* best-effort */ });
@@ -1390,7 +1478,7 @@
           '<h2>Kazma</h2>' +
           '<p>How can I help you today?</p>' +
         '</div>';
-      updateSessionStats(0, 0);
+      resetSessionStats();
       currentMsgEl = null;
       tokenAccum = '';
       if (activeStream) { activeStream.abort(); activeStream = null; }
@@ -1430,6 +1518,7 @@
     inputEl.style.height = 'auto';
     inputEl.placeholder = _defaultPlaceholder();
     syncInputBidi();
+    updateComposerCharCount();
 
     // Show typing indicator (tracked so abortGeneration can clear it)
     activeTypingEl = typingEl;
@@ -1467,6 +1556,7 @@
       message: content,
       session_id: chatSessionId,
       model: selectedModel || '',
+      workspace_id: _activeWorkspaceId || '',
       attachments: attachmentsPayload,
     }, {
       onToken: function(data) {
@@ -1590,7 +1680,13 @@
           }
         }
         if (data) {
-          updateSessionStats(data.tokens, data.cost);
+          updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
+          // Capture per-turn usage for the workbench summary bar (finalizeProgress).
+          _lastTurnStats = {
+            tokens: Number(data.tokens) || 0,
+            cost: Number(data.cost) || 0,
+            durationMs: Number(data.duration_ms) || 0,
+          };
           if (currentMsgEl) {
             var meta = currentMsgEl.querySelector('.message-meta');
             if (meta) {
@@ -1601,6 +1697,7 @@
               meta.setAttribute('dir', 'auto');
             }
           }
+          updateContextBadgeSoon();
         }
         // Play TTS for the assistant's response
         if (tokenAccum && window.KazmaVoice && !interrupted) {
@@ -1695,6 +1792,11 @@
   var _progressTimerId = null;
   var _lastMemoryExplain = null;
   var TOOL_DETAIL_MAX = 900;
+  // Detail length over which tool results render clamped with a "show more"
+  // toggle instead of a 14em scroll box (B).
+  var STEP_DETAIL_CLAMP_AT = 600;
+  // Unique-id sequence for aria-controls on workbench panel bodies.
+  var _panelSeq = 0;
 
   var _TOOL_FRIENDLY = {
     web_search: 'Search',
@@ -1728,6 +1830,71 @@
     var low = n.toLowerCase();
     if (_TOOL_FRIENDLY[low]) return _TOOL_FRIENDLY[low];
     return n.replace(/_/g, ' ');
+  }
+
+  function _toolFamily(rawTitle) {
+    var n = String(rawTitle || '').toLowerCase();
+    if (/browser_|playwright/.test(n)) return 'browse';
+    if (/memory|recall|belief|episode/.test(n)) return 'memory';
+    if (/web_search|read_url|crawl|search|rank_url/.test(n)) return 'search';
+    if (/shell_exec|python_exec|code_exec|install|runtime/.test(n)) return 'exec';
+    if (/file_write|file_delete|write_file|delete_file/.test(n)) return 'write';
+    if (/file_read|file_list|file_search|read_file/.test(n)) return 'read';
+    return 'tool';
+  }
+
+  function _stepGlyph(kind, family) {
+    var d;
+    if (kind === 'error') {
+      d = '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h16.9a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>';
+    } else if (kind === 'thought') {
+      d = '<path d="M12 3a7 7 0 00-4 12.8V18h8v-2.2A7 7 0 0012 3z"/><path d="M9 21h6"/>';
+    } else if (kind === 'file' || family === 'read') {
+      d = '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/>';
+    } else if (family === 'write') {
+      d = '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>';
+    } else if (family === 'exec') {
+      d = '<path d="M4 17l6-5-6-5"/><path d="M12 19h8"/>';
+    } else if (family === 'search') {
+      d = '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>';
+    } else if (family === 'browse') {
+      d = '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/>';
+    } else if (family === 'memory') {
+      d = '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>';
+    } else if (kind === 'tool') {
+      d = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.2a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.2a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.2a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9c.3.6.9 1 1.5 1.1H21a2 2 0 110 4h-.2a1.7 1.7 0 00-1.4 1z"/>';
+    } else {
+      d = '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M5 5l1.5 1.5M17.5 17.5L19 19M3 12h2M19 12h2M5 19l1.5-1.5M17.5 6.5L19 5"/>';
+    }
+    return '<svg class="step-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  }
+
+  function _cotPhasesHtml(active) {
+    function chip(id, label) {
+      var on = active === id ? ' is-on' : '';
+      return '<span class="cot-phase' + on + '" data-phase="' + id + '">' +
+        escapeHtml(label) + '</span>';
+    }
+    return '<div class="cot-phases" aria-hidden="true">' +
+      chip('think', ti('phase_think', 'Think')) +
+      chip('act', ti('phase_act', 'Act')) +
+      chip('write', ti('phase_write', 'Write')) +
+      '</div>';
+  }
+
+  function _setCotPhase(phase) {
+    var panel = _progressEl;
+    if (!panel || !phase) return;
+    panel.setAttribute('data-phase', phase);
+    var order = { think: 1, act: 2, write: 3 };
+    var cur = order[phase] || 1;
+    var nodes = panel.querySelectorAll('.cot-phase');
+    for (var i = 0; i < nodes.length; i++) {
+      var p = nodes[i].getAttribute('data-phase');
+      var n = order[p] || 0;
+      nodes[i].classList.toggle('is-on', p === phase);
+      nodes[i].classList.toggle('is-done', n < cur);
+    }
   }
 
   function _srcChipHtml(srcs) {
@@ -1872,15 +2039,22 @@
       panel.setAttribute('dir', 'rtl');
       panel.classList.add('is-rtl');
     }
+    _panelSeq += 1;
+    var bodyId = 'agent-progress-body-' + _panelSeq;
     panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench">' +
+      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench"' +
+        ' aria-expanded="true" aria-controls="' + bodyId + '">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
-        '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
+        '<div class="agent-progress-heading">' +
+          '<span class="agent-progress-kicker">' + escapeHtml(ti('reasoning', 'Reasoning')) + '</span>' +
+          '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
+        '</div>' +
+        _cotPhasesHtml('think') +
         '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
         '<span class="agent-progress-count">0 ' + escapeHtml(ti('steps', 'steps')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
       '</div>' +
-      '<div class="agent-progress-body">' +
+      '<div class="agent-progress-body" id="' + bodyId + '">' +
         '<div class="agent-plan' + (pageRtl ? ' is-rtl' : '') + '"' +
           (pageRtl ? ' dir="rtl"' : '') + ' hidden>' +
           '<div class="agent-plan-head">' +
@@ -1899,7 +2073,7 @@
           '<div class="agent-memory-explain-body"></div>' +
         '</div>' +
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
-        '<ul class="agent-progress-steps"></ul>' +
+        '<ul class="agent-progress-steps" role="log" aria-live="polite"></ul>' +
       '</div>';
     var textEl = content.querySelector('.message-text');
     if (textEl) content.insertBefore(panel, textEl);
@@ -1907,8 +2081,10 @@
     var header = panel.querySelector('.agent-progress-header');
     function toggle() {
       panel.classList.toggle('is-collapsed');
+      var collapsed = panel.classList.contains('is-collapsed');
       var chev = panel.querySelector('.agent-progress-chevron');
-      if (chev) chev.textContent = panel.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
+      if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
+      if (header) header.setAttribute('aria-expanded', String(!collapsed));
     }
     if (header) {
       header.addEventListener('click', toggle);
@@ -2113,6 +2289,106 @@
     return s;
   }
 
+  /** Localized state label for tool rows (Done / Failed / Running…). */
+  function _stepStateLabel(state) {
+    return state === 'running'
+      ? ti('running', 'Running\u2026')
+      : (state === 'done'
+        ? ti('step_done', ti('done', 'Done'))
+        : (state === 'failed' ? ti('step_failed', 'Failed') : state));
+  }
+
+  /**
+   * Detail block for a workbench row: clamped with a "show more" toggle when
+   * the (truncated) result is long, expanded otherwise. Shared by the live
+   * logProgress path and the restored-CoT renderer so both clamp identically.
+   */
+  function _detailHtml(detail, forceExpanded) {
+    if (!detail) return '';
+    var t = truncateStr(String(detail), TOOL_DETAIL_MAX);
+    if (forceExpanded || t.length <= STEP_DETAIL_CLAMP_AT) {
+      return '<div class="step-detail is-expanded">' + escapeHtml(t) + '</div>';
+    }
+    return '<div class="step-detail is-clamped">' + escapeHtml(t) + '</div>' +
+      '<button type="button" class="step-show-more" data-open="0">' +
+      escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>';
+  }
+
+  /**
+   * Shared <li> inner-HTML builder for workbench step rows — THE single row
+   * template used by both the live panel (logProgress) and the restored panel
+   * (_activityRowsHtml), so a reloaded turn renders identically to the live
+   * one: icons, state labels, per-row timestamps, file-diff chips, detail
+   * clamping, and the animated running-status icon.
+   */
+  function _stepRowHtml(o) {
+    var kind = o.kind || 'status';
+    var state = o.state || 'info';
+    var rawTitle = String(o.rawTitle || o.title || '').trim() || '\u2026';
+    var title = o.title != null ? String(o.title) : rawTitle;
+    var family = (kind === 'tool' || kind === 'file') ? _toolFamily(rawTitle) : (kind === 'thought' ? 'think' : (kind === 'error' ? 'error' : 'think'));
+    var animIcon = ((kind === 'status' || kind === 'tool') && state === 'running') ? ' is-animated' : '';
+
+    // File-diff chips for write/delete tools (one-line target path)
+    var fileChip = '';
+    if (kind === 'tool' || kind === 'file') {
+      var pathGuess = _extractPathFromTool(rawTitle, o.detail);
+      if (pathGuess) {
+        fileChip =
+          '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
+            '<span class="file-diff-op">' +
+              (state === 'failed' ? 'failed'
+                : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
+            '</span> ' +
+            '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
+          '</div>';
+      }
+    }
+
+    // tsIso: ISO string → formatted time; null → no time (legacy rows
+    // persisted before per-row timestamps); undefined → live "now".
+    var timeText = o.tsIso ? formatMsgTime(o.tsIso) : (o.tsIso === null ? '' : formatMsgTime());
+    return (
+      '<span class="step-icon fam-' + family + animIcon + '" aria-hidden="true">' +
+        _stepGlyph(kind, family) +
+      '</span>' +
+      '<div class="step-body">' +
+        '<div class="step-line">' +
+          '<span class="step-title">' + escapeHtml(title) + '</span>' +
+          (kind === 'tool'
+            ? ' <span class="step-state">' + escapeHtml(_stepStateLabel(state)) + '</span>'
+            : '') +
+          '<span class="step-time">' + escapeHtml(timeText) + '</span>' +
+        '</div>' +
+        fileChip +
+        _detailHtml(o.detail, o.forceExpanded) +
+      '</div>'
+    );
+  }
+
+  /**
+   * Delegated "show more / less" toggles for one steps list (one listener
+   * per list, works for rows appended later).
+   */
+  function _wireStepToggles(list) {
+    if (!list || list._kazmaStepToggles) return;
+    list._kazmaStepToggles = true;
+    list.addEventListener('click', function(e) {
+      var btn = e.target.closest('.step-show-more');
+      if (!btn || !list.contains(btn)) return;
+      var step = btn.closest('.agent-progress-step');
+      var det = step && step.querySelector('.step-detail');
+      if (!det) return;
+      var open = btn.getAttribute('data-open') === '1';
+      btn.setAttribute('data-open', open ? '0' : '1');
+      det.classList.toggle('is-clamped', open);
+      det.classList.toggle('is-expanded', !open);
+      btn.textContent = open
+        ? ti('show_more', 'Show more \u25BE')
+        : ti('show_less', 'Show less \u25B4');
+    });
+  }
+
   function logProgress(step) {
     if (!step) return;
     var panel = ensureProgressPanel();
@@ -2154,6 +2430,10 @@
       }
       return;
     }
+
+    if (kind === 'tool') _setCotPhase('act');
+    else if (/synth|compos|writing reply/i.test(rawTitle + ' ' + title)) _setCotPhase('write');
+    else _setCotPhase('think');
 
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
@@ -2201,14 +2481,14 @@
       var titleNode = last.querySelector('.step-title');
       if (titleNode) titleNode.textContent = title;
       if (detail) {
-        var det = last.querySelector('.step-detail');
-        if (!det) {
-          det = document.createElement('div');
-          det.className = 'step-detail is-expanded';
-          last.querySelector('.step-body').appendChild(det);
-        }
-        det.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
-        det.classList.add('is-expanded');
+        // Rebuild the detail block through the shared template so long
+        // results clamp with a "show more" toggle like freshly-appended rows.
+        var oldDet = last.querySelector('.step-detail');
+        if (oldDet) oldDet.remove();
+        var oldBtn = last.querySelector('.step-show-more');
+        if (oldBtn) oldBtn.remove();
+        var bodyEl = last.querySelector('.step-body');
+        if (bodyEl) bodyEl.insertAdjacentHTML('beforeend', _detailHtml(detail));
         // Surface search backend / recovery source when present
         _maybeAddSourceChip(last, detail);
       }
@@ -2221,6 +2501,7 @@
     }
 
     _progressStepCount += 1;
+    if (kind === 'tool') _progressToolCount += 1;
     var li = document.createElement('li');
     li.className = 'agent-progress-step step-' + kind + ' state-' + state +
       (kind === 'tool' ? ' is-expanded' : '');
@@ -2229,47 +2510,14 @@
     li.dataset.rawTitle = rawTitle;
     li.dataset.state = state;
 
-    var icon = kind === 'tool' ? '\u2699'
-      : (kind === 'thought' ? '\u25C8'
-        : (kind === 'error' ? '\u26A0'
-          : (kind === 'file' ? '\u2398' : '\u2022')));
-
-    // File-diff chips for write/delete tools
-    var fileChip = '';
-    if (kind === 'tool' || kind === 'file') {
-      var pathGuess = _extractPathFromTool(rawTitle, detail);
-      if (pathGuess) {
-        fileChip =
-          '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
-            '<span class="file-diff-op">' +
-              (state === 'failed' ? 'failed' : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
-            '</span> ' +
-            '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
-          '</div>';
-      }
-    }
-
-    li.innerHTML =
-      '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
-      '<div class="step-body">' +
-        '<div class="step-line">' +
-          '<span class="step-title">' + escapeHtml(title) + '</span>' +
-          (kind === 'tool'
-            ? ' <span class="step-state">' + escapeHtml(
-                state === 'running'
-                  ? ti('running', 'Running\u2026')
-                  : (state === 'done'
-                      ? ti('step_done', ti('done', 'Done'))
-                      : (state === 'failed' ? ti('step_failed', 'Failed') : state))
-              ) + '</span>'
-            : '') +
-          '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
-        '</div>' +
-        fileChip +
-        (detail
-          ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
-          : '') +
-      '</div>';
+    li.innerHTML = _stepRowHtml({
+      kind: kind,
+      state: state,
+      title: title,
+      rawTitle: rawTitle,
+      detail: detail,
+    });
+    _wireStepToggles(list);
 
     list.appendChild(li);
     if (detail) _maybeAddSourceChip(li, detail);
@@ -2331,16 +2579,29 @@
     var titleEl = panel.querySelector('.agent-progress-title');
     var elapsed = _progressStartedAt ? _formatElapsed(Date.now() - _progressStartedAt) : '';
     if (titleEl) {
-      var donePlan = _planItems.filter(function(p) { return p.done; }).length;
-      var base = ok === false
-        ? ti('stopped', 'Stopped')
-        : (_planItems.length
-          ? ti('done', 'Done') + ' \u00B7 ' + tiFmt('plan_progress', 'plan {done}/{total}', {
-              done: donePlan,
-              total: _planItems.length,
-            })
-          : ti('done', 'Done'));
-      titleEl.textContent = elapsed ? base + ' \u00B7 ' + elapsed : base;
+      if (ok === false) {
+        titleEl.textContent = ti('stopped', 'Stopped');
+      } else {
+        // Turn summary bar: "Done · N tools · M steps · Xs · $cost · tokens"
+        // One line that stays readable when the panel is collapsed.
+        var parts = [ti('done', 'Done')];
+        if (_progressToolCount > 0) {
+          parts.push(_progressToolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: _progressToolCount }));
+        }
+        if (_progressStepCount > 0) {
+          parts.push(_progressStepCount + ' ' + (_progressStepCount === 1
+            ? ti('step', 'step') : ti('steps', 'steps')));
+        }
+        if (elapsed) parts.push(elapsed);
+        if (_lastTurnStats) {
+          if (_lastTurnStats.cost) parts.push(KS.formatCost(_lastTurnStats.cost));
+          if (_lastTurnStats.tokens) {
+            parts.push(KS.formatTokens(_lastTurnStats.tokens) + ' ' + ti('tokens', 'tokens'));
+          }
+        }
+        titleEl.textContent = parts.join(' \u00B7 ');
+        titleEl.title = titleEl.textContent;
+      }
     }
     if (_progressEl) _renderPlanList(_progressEl);
     var pulse = panel.querySelector('.agent-progress-pulse');
@@ -2354,40 +2615,55 @@
   // After a refresh / tab switch the live progress panel is gone. The server
   // persists a compact activity log with each assistant message (see
   // sse_chat / ws_chat), so returning to a session restores the "Thinking &
-  // Activity" accordion instead of a blank transcript.
+  // Activity" accordion instead of a blank transcript. Rows go through the
+  // SAME template as the live panel (_stepRowHtml) so both render identically:
+  // per-row timestamps (row.ts, persisted server-side), file-diff chips,
+  // source chips, clamped details with show-more, localized titles, and
+  // heartbeat coalescing for servers that persisted repeated status rows.
   function _activityRowsHtml(activity) {
     if (!Array.isArray(activity)) return '';
-    return activity.map(function(row) {
-      var kind = row && row.kind === 'tool' ? 'tool'
-        : (row && row.kind === 'thought' ? 'thought' : 'status');
-      var state = (row && row.state) || 'done';
-      var rawTitle = String((row && row.title) || '').trim() || '\u2026';
+    var html = '';
+    var lastKey = '';
+    activity.forEach(function(row) {
+      if (!row) return;
+      var kind = row.kind === 'tool' ? 'tool'
+        : (row.kind === 'thought' ? 'thought'
+          : (row.kind === 'error' ? 'error' : 'status'));
+      var state = row.state === 'running' ? 'running'
+        : (row.state === 'failed' ? 'failed'
+          : (row.state === 'done' ? 'done' : (kind === 'status' ? 'running' : 'done')));
+      var rawTitle = String(row.title || '').trim() || '\u2026';
       var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
-      var detail = row && row.detail != null ? String(row.detail) : '';
-      var icon = kind === 'tool' ? '\u2699'
-        : (kind === 'thought' ? '\u25C8' : '\u2022');
-      return '<li class="agent-progress-step step-' + kind + ' state-' + state + ' is-expanded">' +
-        '<span class="step-icon" aria-hidden="true">' + icon + '</span>' +
-        '<div class="step-body">' +
-          '<div class="step-line">' +
-            '<span class="step-title">' + escapeHtml(title) + '</span>' +
-            (kind === 'tool'
-              ? ' <span class="step-state">' + escapeHtml(
-                  state === 'done' ? ti('step_done', 'Done')
-                    : (state === 'failed' ? ti('step_failed', 'Failed') : state)
-                ) + '</span>'
-              : '') +
-            '<span class="step-time"></span>' +
-          '</div>' +
-          (detail
-            ? '<div class="step-detail is-expanded">' + escapeHtml(truncateStr(detail, TOOL_DETAIL_MAX)) + '</div>'
-            : '') +
-        '</div>' +
+      // Same canonicalization as the live path: thinking heartbeats localized,
+      // leftover English CoT/HITL titles mapped to CHAT_I18N.
+      if (kind === 'status' && _isThinkingStatus(title)) {
+        title = ti('thinking', 'Kazma is thinking\u2026');
+      }
+      if (kind !== 'tool') title = _localizeCotTitle(title);
+      var detail = row.detail != null ? String(row.detail) : '';
+
+      // Coalesce consecutive identical status rows (persisted heartbeats).
+      var key = kind + '|' + _normalizeStatusTitle(title) + '|' + (detail || '');
+      if (kind === 'status' && key === lastKey) return;
+      lastKey = key;
+
+      html += '<li class="agent-progress-step step-' + kind + ' state-' + state +
+        (kind === 'tool' ? ' is-expanded' : '') + '" data-kind="' + escapeHtml(kind) + '">' +
+        _stepRowHtml({
+          kind: kind,
+          state: state,
+          title: title,
+          rawTitle: rawTitle,
+          detail: detail,
+          tsIso: row.ts || null,
+        }) +
       '</li>';
-    }).join('');
+    });
+    return html;
   }
 
   function _buildRestoredWorkbench(activity) {
+    if (!Array.isArray(activity) || !activity.length) return null;
     var rows = _activityRowsHtml(activity);
     if (!rows) return null;
     var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
@@ -2397,34 +2673,90 @@
       panel.setAttribute('dir', 'rtl');
       panel.classList.add('is-rtl');
     }
-    var n = Array.isArray(activity) ? activity.length : 0;
-    var stepWord = n === 1 ? ti('step', 'step') : ti('steps', 'steps');
+    var stepCount = (rows.match(/<li /g) || []).length;
+    var toolCount = (rows.match(/data-kind="tool"/g) || []).length;
+    var stepWord = stepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
+    _panelSeq += 1;
+    var bodyId = 'agent-progress-body-' + _panelSeq;
+    // Header mirrors the live summary bar shape: "N tools · M steps" (+usage
+    // when the server stamped per-turn tokens/cost on the message).
+    var headBits = [];
+    if (toolCount) headBits.push(toolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: toolCount }));
+    headBits.push(stepCount + ' ' + stepWord);
     panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '">' +
+      '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '"' +
+        ' aria-expanded="false" aria-controls="' + bodyId + '">' +
         '<span class="agent-progress-pulse is-off" aria-hidden="true"></span>' +
-        '<span class="agent-progress-title">' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '</span>' +
-        '<span class="agent-progress-count">' + n + ' ' + escapeHtml(stepWord) + '</span>' +
+        '<div class="agent-progress-heading">' +
+          '<span class="agent-progress-kicker">' + escapeHtml(ti('reasoning', 'Reasoning')) + '</span>' +
+          '<span class="agent-progress-title">' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '</span>' +
+        '</div>' +
+        '<span class="agent-progress-count">' + escapeHtml(headBits.join(' \u00B7 ')) + '</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25B8</span>' +
       '</div>' +
-      '<div class="agent-progress-body">' +
+      '<div class="agent-progress-body" id="' + bodyId + '">' +
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
-        '<ul class="agent-progress-steps">' + rows + '</ul>' +
+        '<ul class="agent-progress-steps" role="log">' + rows + '</ul>' +
       '</div>';
     var header = panel.querySelector('.agent-progress-header');
     if (header) {
-      header.addEventListener('click', function() {
+      function toggle() {
         panel.classList.toggle('is-collapsed');
+        var collapsed = panel.classList.contains('is-collapsed');
         var chev = panel.querySelector('.agent-progress-chevron');
-        if (chev) chev.textContent = panel.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
-      });
+        if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
+        header.setAttribute('aria-expanded', String(!collapsed));
+      }
+      header.addEventListener('click', toggle);
       header.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); header.click(); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
       });
     }
+    _wireStepToggles(panel.querySelector('.agent-progress-steps'));
     return panel;
   }
 
   // ── Message rendering ─────────────────────────────────
+  /**
+   * Render user text into the bubble. Single-line input keeps the exact
+   * legacy escape-only path; multi-line / pasted text (headings, bullets,
+   * numbered lists) is parsed line-by-line into real HTML structure so a
+   * long paste doesn't collapse into one justified block. Everything is
+   * escaped BEFORE structure is built — no raw HTML ever enters from input.
+   */
+  function renderUserContentHtml(text) {
+    var s = String(text || '');
+    if (s.indexOf('\n') < 0 && !/^\s*(?:#{1,4}\s|[-*\u2022]\s|\d+[.)]\s)/.test(s)) {
+      return escapeHtml(s);
+    }
+    var html = '';
+    var list = null;
+    function closeList() {
+      if (list) { html += '</' + list + '>'; list = null; }
+    }
+    s.split(/\r?\n/).forEach(function (ln) {
+      var t = ln.trim();
+      var m;
+      if (!t) { closeList(); return; }
+      if ((m = t.match(/^(#{1,4})\s+(.*)$/))) {
+        closeList();
+        var lvl = Math.min(m[1].length + 2, 4);   // # → h3, ## → h4
+        html += '<h' + lvl + '>' + escapeHtml(m[2]) + '</h' + lvl + '>';
+      } else if ((m = t.match(/^[-*\u2022]\s+(.*)$/))) {
+        if (list !== 'ul') { closeList(); html += '<ul>'; list = 'ul'; }
+        html += '<li>' + escapeHtml(m[1]) + '</li>';
+      } else if ((m = t.match(/^(\d+)[.)]\s+(.*)$/))) {
+        if (list !== 'ol') { closeList(); html += '<ol>'; list = 'ol'; }
+        html += '<li>' + escapeHtml(m[2]) + '</li>';
+      } else {
+        closeList();
+        html += '<p>' + escapeHtml(t) + '</p>';
+      }
+    });
+    closeList();
+    return html;
+  }
+
   function appendMessage(role, content, attachmentName, ts, opts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
@@ -2447,7 +2779,9 @@
     wrapper.innerHTML =
       avatarHtml +
       '<div class="message-content">' +
-        '<div class="message-text" dir="auto">' + (role === 'user' ? escapeHtml(content) : KS.markdown(content)) + '</div>' +
+        '<div class="message-text" dir="auto">' +
+          (role === 'user' ? renderUserContentHtml(content) : KS.markdown(content)) +
+        '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
@@ -2520,6 +2854,7 @@
     if (welcome) welcome.remove();
 
     messagesEl.appendChild(wrapper);
+    updateContextBadgeSoon();
     return wrapper;
   }
 
@@ -2534,9 +2869,46 @@
    *  - YOLO (all danger tools for this session)
    *  - Deny
    */
+  /** True when an ACTIVE inline approval card (enabled buttons) is rendered.
+      Resolved cards keep the class but their buttons are disabled/removed, so
+      a stale card from an earlier approval doesn't suppress a new one. */
+  function hasInlineApprovalCard() {
+    if (!messagesEl) return false;
+    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
+    for (var i = 0; i < cards.length; i++) {
+      var btns = cards[i].querySelectorAll('button');
+      for (var j = 0; j < btns.length; j++) {
+        if (!btns[j].disabled) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Hide the chat.html bottom Alpine approval card (driven by the store). */
+  function _clearStoreApproval() {
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        Alpine.store('agent').pendingApproval = null;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function renderHitlCard(data) {
     if (!data) return;
     pauseForApproval(data);
+    // The inline card is the primary approval UI. Hide the bottom Alpine card
+    // (driven by $store.agent.pendingApproval) so the same approval is never
+    // rendered twice — incident 2026-08-16: duplicated YOLO card (one inline,
+    // one lower). The store fields submitApproval needs are set by the inline
+    // card's own handlers.
+    _clearStoreApproval();
+    // Replace stale/disabled cards instead of stacking another YOLO view
+    // after reconnect (hasInlineApprovalCard ignores disabled buttons).
+    if (messagesEl) {
+      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(old) {
+        old.remove();
+      });
+    }
     var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
@@ -2617,7 +2989,7 @@
         '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
-          '<strong>YOLO</strong> skips all danger tools (TTL). Or type <code>/yolo</code> anytime.' +
+          '<strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.' +
         '</p>' +
       '</div>' +
       '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
@@ -2670,7 +3042,7 @@
       // Prefer the live WebSocket bus when connected (same graph + grants path).
       var agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
       if (agentStore && agentStore.connectionStatus === 'connected') {
-        agentStore.submitApproval(action === 'approve', scope, data.thread_id || targetThreadId);
+        agentStore.submitApproval(action === 'approve', scope, data.thread_id || targetThreadId, data.tool || '');
         if (scope === 'yolo' && KS.toast) {
           KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
         }
@@ -3035,7 +3407,8 @@
     var plat = s.platform || 'web';
     var absTime = '';
     try { absTime = new Date(s.updated_at || s.created_at).toLocaleString(); } catch (e) {}
-    var meta = s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+    var lastPlat = s.last_platform || s.platform || 'web';
+    var meta = lastPlat + ' \u00B7 ' + s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
     var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
       '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(plat) + '"></span>' +
       '<div class="session-info">' +
@@ -3055,6 +3428,8 @@
             escapeHtml(ti(s.pinned ? 'unpin' : 'pin', s.pinned ? 'Unpin' : 'Pin')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="rename" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('rename', 'Rename')) + '</button>' +
+          '<button class="session-menu-item" data-menu-action="copyid" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti('copy_id', 'Copy ID')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="archive" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('archive', 'Archive')) + '</button>' +
           '<button class="session-menu-item danger" data-menu-action="delete" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
@@ -3164,6 +3539,7 @@
         if (action === 'pin') pinSession(sid, true);
         else if (action === 'unpin') pinSession(sid, false);
         else if (action === 'rename') renameSession(sid);
+        else if (action === 'copyid') copySessionId(sid);
         else if (action === 'archive') archiveSession(sid);
         else if (action === 'delete') deleteSession(sid);
       });
@@ -3245,6 +3621,22 @@
     }
   }
 
+  function copySessionId(sessionId) {
+    var text = String(sessionId || '');
+    var link = window.location.origin + '/chat?s=' + encodeURIComponent(text);
+    var payload = text + '\n' + link;
+    var done = function() {
+      if (window.KS && KS.toast) KS.toast('Copied ID — /session ' + text.slice(-8) + ' on Telegram/Discord', 'success', 3500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(payload).then(done).catch(function() {
+        window.prompt('Session ID', text);
+      });
+    } else {
+      window.prompt('Session ID', text);
+    }
+  }
+
   async function renameSession(sessionId) {
     var s = sessions.find(function(x) { return x.session_id === sessionId; });
     var current = s ? (s.title || sessionId.slice(0, 8)) : '';
@@ -3303,17 +3695,26 @@
         '<p>Loading messages\u2026</p>' +
       '</div>';
     renderSessionList();
-    updateSessionStats(0, 0);
+    resetSessionStats();
 
-    // Fetch the session messages from the API and render them
-    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
+    // Fetch the session messages from the API and render them.
+    // ?stats=1 opts into the envelope {messages, total_tokens, total_cost}
+    // so cumulative badges are correct after refresh; the legacy bare-list
+    // shape is still handled for old servers.
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages?stats=1')
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
-      .then(function(messages) {
+      .then(function(payload) {
         // Guard against race: user switched sessions while fetch was in flight
         if (chatSessionId !== sessionId) return;
+
+        var messages = payload;
+        if (payload && !Array.isArray(payload) && Array.isArray(payload.messages)) {
+          messages = payload.messages;
+          updateSessionStats(null, null, payload.total_tokens, payload.total_cost);
+        }
 
         messagesEl.innerHTML = '';
 
@@ -3411,6 +3812,8 @@
 
         scrollToBottom();
         checkPendingApprovals();
+        updateContextBadge();
+        refreshCapacity();
       })
       .catch(function(err) {
         if (chatSessionId !== sessionId) return;
@@ -3649,6 +4052,69 @@
     _schedule(800);
   }
 
+  function bindCapacityBar() {
+    var area = document.getElementById('chat-input-area');
+    var footer = area ? area.querySelector('.input-footer') : null;
+    var bar = document.getElementById('capacity-bar');
+    if (!bar && area) {
+      bar = document.createElement('div');
+      bar.id = 'capacity-bar';
+      bar.className = 'capacity-bar';
+      bar.setAttribute('role', 'toolbar');
+      bar.setAttribute('aria-label', 'Turn budget and HITL');
+      bar.innerHTML =
+        '<span id="capacity-status" class="capacity-status">Mode</span>' +
+        '<button type="button" class="capacity-pill" data-cap="/long on" title="Research budget, HITL stays on">Long</button>' +
+        '<button type="button" class="capacity-pill" data-cap="/long mission" title="Run until done (~500 rounds)">Mission</button>' +
+        '<button type="button" class="capacity-pill" data-cap="/yolo" title="Skip danger-tool approvals">YOLO</button>' +
+        '<button type="button" class="capacity-pill capacity-pill-power" data-cap="/unrestricted" title="Mission + YOLO — finish this job">Unrestricted</button>' +
+        '<button type="button" class="capacity-pill capacity-pill-off" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>';
+    }
+    if (bar && footer && bar.nextElementSibling !== footer) {
+      footer.parentNode.insertBefore(bar, footer);
+    }
+    if (!bar || bar.getAttribute('data-bound')) return;
+    bar.setAttribute('data-bound', '1');
+    bar.addEventListener('click', function(e) {
+      var btn = e.target.closest('[data-cap]');
+      if (!btn || !inputEl) return;
+      inputEl.value = btn.getAttribute('data-cap') || '';
+      sendMessage();
+    });
+  }
+
+  function refreshCapacity() {
+    if (!chatSessionId) return;
+    fetch('/api/chat/capacity?session_id=' + encodeURIComponent(chatSessionId), {
+      credentials: 'same-origin',
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(snap) {
+      if (!snap || !snap.ok) return;
+      var status = document.getElementById('capacity-status');
+      if (status) {
+        var bits = [];
+        if (snap.long_active) {
+          bits.push((snap.mode === 'mission' ? 'Mission ' : 'Long ') + snap.max_iterations);
+        } else {
+          bits.push('Chat ' + snap.max_iterations);
+        }
+        bits.push(snap.yolo_active ? 'YOLO' : 'HITL');
+        if (snap.iteration != null) bits.push(snap.iteration + '/' + snap.max_iterations);
+        status.textContent = bits.join(' · ');
+      }
+      var bar = document.getElementById('capacity-bar');
+      if (!bar) return;
+      bar.querySelectorAll('[data-cap]').forEach(function(btn) {
+        var cap = btn.getAttribute('data-cap') || '';
+        var on = false;
+        if (cap === '/long on') on = !!snap.long_active && snap.mode !== 'mission';
+        if (cap === '/long mission') on = snap.mode === 'mission' && !!snap.long_active;
+        if (cap === '/yolo') on = !!snap.yolo_active;
+        if (cap === '/unrestricted') on = !!snap.long_active && snap.mode === 'mission' && !!snap.yolo_active;
+        btn.classList.toggle('is-on', on);
+      });
+    }).catch(function() {});
+  }
+
   function checkPendingApprovals() {
     if (!chatSessionId) return;
     // Resolve LangGraph thread_id from the sidebar session list (web sessions
@@ -3670,22 +4136,13 @@
             item.session_id === chatSessionId ||
             (threadId && item.thread_id === threadId);
           if (match) {
-            if (!messagesEl.querySelector('.hitl-approval-card')) {
+            if (!hasInlineApprovalCard()) {
               item.tool = item.tool || item.tool_name;
               item.args = item.args || item.arguments;
+              // renderHitlCard clears $store.agent.pendingApproval so the
+              // bottom Alpine card can't duplicate the inline one.
               renderHitlCard(item);
             }
-            try {
-              if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-                Alpine.store('agent').pendingApproval = {
-                  thread_id: item.thread_id || threadId || chatSessionId,
-                  tool: item.tool || '',
-                  args: item.args || {},
-                  tools: item.tools || [],
-                  message: item.message || '',
-                };
-              }
-            } catch (e2) {}
             break;
           }
         }
@@ -3709,7 +4166,7 @@
         '<h2>Kazma</h2>' +
         '<p>How can I help you today?</p>' +
       '</div>';
-    updateSessionStats(0, 0);
+    resetSessionStats();
     currentMsgEl = null;
     tokenAccum = '';
     lastSentUserText = '';
@@ -3762,16 +4219,95 @@
       });
   }
 
-  function updateSessionStats(tokens, cost) {
-    if (costBadge) costBadge.textContent = KS.formatCost(cost);
-    if (tokensBadge) tokensBadge.textContent = KS.formatTokens(tokens) + ' tokens';
+  /**
+   * Update the header cost/token badges.
+   *
+   * Cumulative semantics: when sessionTokens/sessionCost are provided
+   * (server-persisted totals in done/turn_complete payloads and the
+   * messages-envelope) they are authoritative. Legacy payloads that only
+   * carry per-turn values accumulate locally so multi-turn sessions still
+   * show a growing total on old backends. Missing usage renders as 0 —
+   * never undefined (the dead-badge regression).
+   */
+  function updateSessionStats(tokens, cost, sessionTokens, sessionCost) {
+    if (sessionTokens != null || sessionCost != null) {
+      _sessionTotals.tokens = Math.max(0, Number(sessionTokens) || 0);
+      _sessionTotals.cost = Math.max(0, Number(sessionCost) || 0);
+    } else if (tokens != null) {
+      _sessionTotals.tokens += Math.max(0, Number(tokens) || 0);
+      _sessionTotals.cost += Math.max(0, Number(cost) || 0);
+    }
+    if (costBadge) costBadge.textContent = KS.formatCost(_sessionTotals.cost);
+    if (tokensBadge) {
+      tokensBadge.textContent = KS.formatTokens(_sessionTotals.tokens) + ' ' + ti('tokens', 'tokens');
+    }
+  }
+
+  /** Zero the badges + running totals (new session / /reset / session load). */
+  function resetSessionStats() {
+    _sessionTotals.tokens = 0;
+    _sessionTotals.cost = 0;
+    if (costBadge) costBadge.textContent = KS.formatCost(0);
+    if (tokensBadge) tokensBadge.textContent = KS.formatTokens(0) + ' ' + ti('tokens', 'tokens');
+  }
+
+  // ── Context conversation badge (chars → estimated tokens) ──
+  /**
+   * Token heuristic with no dependencies: ~4 chars/token for Latin script,
+   * ~2 chars/token for Arabic script (per-string detection). Matches the
+   * server-side estimate_tokens spirit (kazma_core/summarizer.py).
+   */
+  function estimateTokens(str) {
+    var s = String(str || '');
+    if (!s) return 0;
+    var ar = (s.match(/[\u0600-\u06FF]/g) || []).length;
+    var other = s.length - ar;
+    return Math.ceil(other / 4 + ar / 2);
+  }
+
+  var _ctxBadgeTimer = null;
+  function updateContextBadgeSoon() {
+    if (_ctxBadgeTimer) clearTimeout(_ctxBadgeTimer);
+    _ctxBadgeTimer = setTimeout(function() {
+      _ctxBadgeTimer = null;
+      updateContextBadge();
+    }, 350);
+  }
+
+  /**
+   * Recompute "N chars ≈ M tokens" from the RENDERED transcript (DOM), so it
+   * is accurate after live turns, session switches, restores and edits.
+   * textContent reads only — must never trigger layout work per message.
+   */
+  function updateContextBadge() {
+    if (!contextBadge || !messagesEl) return;
+    var totalChars = 0;
+    var totalTokens = 0;
+    try {
+      var nodes = messagesEl.querySelectorAll('.message-text');
+      for (var i = 0; i < nodes.length; i++) {
+        var t = nodes[i].textContent || '';
+        totalChars += t.length;
+        totalTokens += estimateTokens(t);   // per-message: preserves script mix
+      }
+    } catch (e) { return; }
+    contextBadge.textContent = tiFmt('context_size', '{chars} chars \u2248 {tokens} tokens', {
+      chars: totalChars.toLocaleString(),
+      tokens: totalTokens.toLocaleString(),
+    });
   }
 
   // ── Utils ─────────────────────────────────────────────
+  // rAF-coalesced: rapid row appends during streaming trigger one scroll
+  // per frame instead of a forced layout per row (no jank / layout jumps).
+  var _scrollRafPending = false;
   function scrollToBottom() {
-    if (messagesEl) {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
+    if (!messagesEl || _scrollRafPending) return;
+    _scrollRafPending = true;
+    requestAnimationFrame(function() {
+      _scrollRafPending = false;
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
   }
 
   function escapeHtml(str) {
@@ -3810,17 +4346,48 @@
     init();
   }
 
+  function destroyChatMouth() {
+    try { if (activeStream) activeStream.abort(); } catch (e) {}
+    activeStream = null;
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent').disconnect) {
+        Alpine.store('agent').disconnect();
+      }
+    } catch (e) {}
+  }
+  window.kazmaOnSoftNavLeave = destroyChatMouth;
+
   // Expose for inline handlers + agentStore turn lifecycle bridge
   window.KazmaChat = {
     sendMessage: sendMessage,
     newSession: newSession,
     retry: retry,
+    destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
     _hitlApproval: renderHitlCard,
+    hasInlineApprovalCard: hasInlineApprovalCard,
     beginTurn: beginTurn,
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,
     pauseForApproval: pauseForApproval,
+    /**
+     * Turn usage bridge for the WS path (agentStore done/turn_complete):
+     * updates cumulative badges, captures per-turn stats for the workbench
+     * summary bar, and refreshes the context badge. Payload keys: tokens,
+     * cost, session_tokens, session_cost, duration_ms.
+     */
+    applyTurnStats: function(data) {
+      if (!data) return;
+      updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
+      if (data.tokens != null || data.duration_ms != null) {
+        _lastTurnStats = {
+          tokens: Number(data.tokens) || 0,
+          cost: Number(data.cost) || 0,
+          durationMs: Number(data.duration_ms) || 0,
+        };
+      }
+      updateContextBadgeSoon();
+    },
     isGenerating: function() { return _isGenerating; },
     refreshSessions: loadSessions,
     refreshSessionsSoon: refreshSessionsSoon,
@@ -3832,6 +4399,34 @@
       return chatSessionId;
     },
 
+    refreshCapacity: refreshCapacity,
+    paintCapacityReply: function(reply) {
+      if (!reply || !messagesEl) return;
+      var incoming = String(reply).trim();
+      if (!incoming) return;
+      var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
+      var lastAsst = null;
+      for (var i = 0; i < msgs.length; i++) {
+        if (msgs[i].classList.contains('message-user')) lastAsst = null;
+        else lastAsst = msgs[i];
+      }
+      if (lastAsst) {
+        var te = lastAsst.querySelector('.message-text');
+        if (te && _bubbleShowsContent(te, incoming)) return;
+        if (te && (te.textContent || '').replace(/\s+/g, ' ').trim().length < 8) {
+          try { te.innerHTML = KS.markdown ? KS.markdown(incoming) : incoming; }
+          catch (e) { te.textContent = incoming; }
+          te.setAttribute('data-final-len', String(incoming.length));
+          return;
+        }
+      }
+      var prev = currentMsgEl;
+      currentMsgEl = createAssistantMessage();
+      if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+        window.KazmaChat.applyFinalAssistantText(incoming, '', {});
+      }
+      currentMsgEl = prev;
+    },
     // Telemetry WS hooks — called by agentStore
     logProgress: logProgress,
     finalizeProgress: finalizeProgress,

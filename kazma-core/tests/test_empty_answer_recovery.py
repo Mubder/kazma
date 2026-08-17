@@ -62,7 +62,7 @@ class _ScriptedLLM:
         self._responses = list(responses)
         self.chat_calls: list[dict] = []
 
-    async def chat(self, messages=None, tools=None, model=None):
+    async def chat(self, messages=None, tools=None, model=None, **kwargs):
         self.chat_calls.append({"messages": list(messages or []), "tools": tools, "model": model})
         if self._responses:
             return self._responses.pop(0)
@@ -140,7 +140,7 @@ async def test_respond_node_empty_final_attempts_synthesis(monkeypatch):
     )
 
     class _LLM:
-        async def chat(self, messages, tools=None):
+        async def chat(self, messages, tools=None, **kwargs):
             return _Response(content="SYNTHESIZED: here is a complete final answer.")
 
     state = {
@@ -182,7 +182,7 @@ async def test_respond_node_turn_failed_skips_synthesis(monkeypatch):
         def __init__(self):
             self.calls = 0
 
-        async def chat(self, messages, tools=None):
+        async def chat(self, messages, tools=None, **kwargs):
             self.calls += 1
             return _Response(content="FABRICATED")
 
@@ -222,7 +222,7 @@ async def test_respond_node_no_fallback_when_final_text_present(monkeypatch):
     )
 
     class _LLM:
-        async def chat(self, messages, tools=None):
+        async def chat(self, messages, tools=None, **kwargs):
             return _Response(content="SHOULD NOT BE USED")
 
     state = {

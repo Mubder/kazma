@@ -12,6 +12,39 @@ from kazma_core.documents.rich_render import (
     parse_rich_blocks,
     shape_for_pdf,
 )
+from kazma_core.documents.style_theme import THEME, theme_cs_size
+
+
+def test_latex_to_unicode_common_forms() -> None:
+    from kazma_core.documents.math_text import (
+        latex_to_unicode,
+        looks_like_currency,
+        split_inline_math,
+    )
+    from kazma_core.documents.rich_render import parse_rich_blocks
+
+    assert latex_to_unicode(r"R = P \cdot I") == "R = P · I"
+    out = latex_to_unicode(r"S(x) = \frac{1}{1 + e^{-x}}")
+    assert "⁄" in out
+    assert "⁻" in out or "−" in out or "-x" in out or "ˣ" in out
+    assert looks_like_currency("0.0035")
+    assert not looks_like_currency(r"R = P \\cdot I")
+    kinds = [k for k, _ in split_inline_math(r"cost $0.0035$ and $R = P \\cdot I$")]
+    assert "money" in kinds
+    assert "math" in kinds
+    blocks = parse_rich_blocks("intro\n\n$$S(x) = \\frac{1}{1+e^{-x}}$$\n\nmore")
+    assert any(b.get("type") == "math" for b in blocks)
+
+
+def test_theme_cs_size_splits_latin_and_arabic() -> None:
+    """Arabic body is larger than Latin; chrome gets a modest bump only."""
+    assert THEME["body_size_ar"] > THEME["body_size"]
+    assert theme_cs_size() == THEME["body_size_ar"]
+    assert theme_cs_size(THEME["body_size"]) == THEME["body_size_ar"]
+    assert theme_cs_size(8) == 10.0
+    assert theme_cs_size(THEME["h2_size"]) == THEME["h2_size"] + (
+        THEME["body_size_ar"] - THEME["body_size"]
+    )
 
 
 def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
@@ -163,7 +196,7 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     )
     assert out.is_file()
     doc = Document(str(out))
-    # Title/headings live in filled single-cell tables (PDF-parity bars)
+    # Title/headings are editorial paragraphs (navy + brass rule), not filled bars
     all_text = " ".join(p.text for p in doc.paragraphs)
     for table in doc.tables:
         for row in table.rows:
@@ -171,8 +204,15 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
                 all_text += " " + cell.text
     assert "وثيقة" in all_text
     assert "واحد" in all_text or "اثنان" in all_text
-    assert len(doc.tables) >= 2  # title bar + section/heading bars
     from docx.oxml.ns import qn
+
+    has_rule = False
+    for p in doc.paragraphs:
+        p_pr = p._p.pPr
+        if p_pr is not None and p_pr.find(qn("w:pBdr")) is not None:
+            has_rule = True
+            break
+    assert has_rule, "editorial heading rule (w:pBdr) missing"
 
     has_bidi = False
     for p in doc.paragraphs:
@@ -197,9 +237,7 @@ def test_generate_docx_arabic_rtl(tmp_path: Path) -> None:
     tfl = doc.settings.element.find(qn("w:themeFontLang"))
     assert tfl is not None and tfl.get(qn("w:bidi")) == "ar-SA"
     assert tfl.get(qn("w:val")) == "ar-SA"  # not en-US shell
-    for table in doc.tables:
-        assert table._tbl.tblPr is not None
-        assert table._tbl.tblPr.find(qn("w:bidiVisual")) is not None
+    # Content tables (if any) stay bidiVisual; headings are no longer tables.
     # Run-level w:rtl is what Word uses for text direction (not only pPr bidi)
     run_rtl = 0
     for p in doc.paragraphs:
@@ -250,8 +288,8 @@ def test_markdown_table_and_docx_justify_shading(tmp_path: Path) -> None:
     _generate_docx(docx, payload)
     assert pdf.is_file() and pdf.stat().st_size > 500
     doc = Document(str(docx))
-    # title bar + section bar + markdown table + payload table (+ heading bars)
-    assert len(doc.tables) >= 3
+    # markdown table + payload table (headings are paragraphs now)
+    assert len(doc.tables) >= 2
     found_jc = False
     found_bar_fill = False
     for p in doc.paragraphs:
@@ -354,11 +392,12 @@ def test_generate_pdf_arabic_body_rtl_bbox(tmp_path: Path) -> None:
     page = doc[0]
     W = page.rect.width
     H = page.rect.height
-    # Body-paragraph lines: body font (~11pt), right edge in the right ~15% of
-    # the page (right-aligned), AND within the body vertical zone (excludes the
-    # header brand band at the top and the footer band at the bottom, which the
-    # DOCX→LibreOffice route renders at body size). Title/heading bars are
-    # larger so the size window already excludes them.
+    # Body-paragraph lines: Latin body (~11pt) or Arabic cs body
+    # (theme_cs_size / body_size_ar). Right edge in the right ~15% of the
+    # page (right-aligned), AND within the body vertical zone (excludes the
+    # header brand band at the top and the footer band at the bottom).
+    # Title/heading bars are larger so the size window already excludes them.
+    body_hi = theme_cs_size() + 1.5
     body_lines: list[tuple[float, float, float, str]] = []
     for block in page.get_text("dict").get("blocks", []):
         for line in block.get("lines", []):
@@ -366,7 +405,7 @@ def test_generate_pdf_arabic_body_rtl_bbox(tmp_path: Path) -> None:
             spans = line.get("spans", [])
             text = "".join(s.get("text", "") for s in spans)
             size = spans[0]["size"] if spans else 0.0
-            if (10.0 <= size <= 12.0 and lr[2] >= W * 0.85
+            if (10.0 <= size <= body_hi and lr[2] >= W * 0.85
                     and 70.0 < lr[1] < H - 60.0 and len(text.strip()) > 2):
                 body_lines.append((lr[1], lr[0], lr[2], text))
     doc.close()
@@ -416,7 +455,7 @@ def test_subtitle_and_ar_citations_rtl(tmp_path: Path) -> None:
             for block in page.get_text("dict").get("blocks", []):
                 for ln in block.get("lines", []):
                     spans = ln.get("spans", [])
-                    if spans and 8.0 <= spans[0]["size"] <= 13.0:
+                    if spans and 8.0 <= spans[0]["size"] <= theme_cs_size() + 1.5:
                         text = "".join(s.get("text", "") for s in spans)
                         if len(text.strip()) > 2:
                             bb = ln["bbox"]
@@ -472,7 +511,7 @@ def test_toc_items_align_per_language(tmp_path: Path) -> None:
             for b in page.get_text("dict").get("blocks", []):
                 for ln in b.get("lines", []):
                     sp = ln.get("spans", [])
-                    if sp and 8.0 <= sp[0]["size"] <= 13.0:
+                    if sp and 8.0 <= sp[0]["size"] <= theme_cs_size() + 1.5:
                         txt = "".join(s.get("text", "") for s in sp)
                         if len(txt.strip()) > 2:
                             bb = ln["bbox"]
@@ -494,7 +533,7 @@ def test_toc_items_align_per_language(tmp_path: Path) -> None:
     assert en_toc, "EN TOC entry not left-aligned"
 
 def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
-    """DOCX must mirror the PDF/THEME styling: Calibri (not Arial) on every run,
+    """DOCX must mirror the PDF/THEME styling: Calibri Latin + Arabic cs font,
     heading point sizes synced to THEME, and Arabic runs carry w:rtl + the
     paragraph w:bidi so Word opens RTL (regression: 'AR is LTR + no font set'
     and 'EN bigger font size not synced')."""
@@ -525,8 +564,9 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     assert 'w:ascii="Arial"' not in ar_xml, "Arial leaked into AR DOCX run font"
     assert 'w:ascii="Arial"' not in en_xml, "Arial leaked into EN DOCX run font"
     assert 'w:ascii="Calibri"' in en_xml, "EN DOCX missing Calibri run font"
-    # AR complex-script runs use Calibri cs + rtl + paragraph bidi
-    assert 'w:cs="Calibri"' in ar_xml, "AR DOCX runs missing Calibri complex-script font"
+    # AR complex-script runs use the theme Arabic face + rtl + paragraph bidi
+    ar_cs = THEME.get("font_arabic") or "Sakkal Majalla"
+    assert f'w:cs="{ar_cs}"' in ar_xml, "AR DOCX runs missing Arabic complex-script font"
     assert "w:rtl" in ar_xml, "AR DOCX runs missing w:rtl"
     assert "w:bidi" in ar_xml, "AR DOCX paragraphs missing w:bidi"
     # EN heading sizes (half-points) synced to THEME
@@ -537,6 +577,15 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     assert int(THEME["h3_size"] * 2) in sz       # h3    -> 25
     # Body paragraph size on the Normal style (styles.xml) synced too
     assert ('w:val="%d"' % int(THEME["body_size"] * 2)) in styles, "EN DOCX body size not synced"
+    # AR body Arabic is independently larger via w:szCs (not a copy of Latin sz)
+    from kazma_core.documents.style_theme import theme_cs_size
+    ar_styles = zipfile.ZipFile(tmp_path / "ar.docx").read("word/styles.xml").decode("utf-8")
+    assert ('w:szCs w:val="%d"' % int(round(theme_cs_size() * 2))) in ar_styles, (
+        "AR Normal style missing independent complex-script body size"
+    )
+    assert ('w:sz w:val="%d"' % int(THEME["body_size"] * 2)) in ar_styles, (
+        "AR Normal latin size must stay at body_size (do not pump English)"
+    )
 
 
 def test_docx_numbering_rtl(tmp_path: Path) -> None:

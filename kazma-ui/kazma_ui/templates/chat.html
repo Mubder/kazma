@@ -81,6 +81,7 @@
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('nav.swarm') }}</button>
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()"><span class="ki" data-icon="code" aria-hidden="true"></span> Python</button>
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='/yolo';KazmaChat.sendMessage()" title="Skip danger-tool approvals for this session"><span class="ki" data-icon="rocket" aria-hidden="true"></span> /yolo</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/unrestricted';KazmaChat.sendMessage()" title="Mission + YOLO — finish this job without asking"><span class="ki" data-icon="rocket" aria-hidden="true"></span> Unrestricted</button>
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='/help';KazmaChat.sendMessage()">/? help</button>
         </div>
       </div>
@@ -157,12 +158,22 @@
         </button>
       </div>
       <div class="chat-drop-hint" id="chat-drop-hint" hidden aria-hidden="true">{{ t('chat.drop_files') }}</div>
+      <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="Turn budget and HITL">
+        <span id="capacity-status" class="capacity-status">Mode</span>
+        <button type="button" class="capacity-pill" data-cap="/long on" title="Research budget, HITL stays on">Long</button>
+        <button type="button" class="capacity-pill" data-cap="/long mission" title="Run until done (~500 rounds)">Mission</button>
+        <button type="button" class="capacity-pill" data-cap="/yolo" title="Skip danger-tool approvals">YOLO</button>
+        <button type="button" class="capacity-pill capacity-pill-power" data-cap="/unrestricted" title="Mission + YOLO — finish this job">Unrestricted</button>
+        <button type="button" class="capacity-pill capacity-pill-off" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>
+      </div>
       <div class="input-footer">
         <span id="session-cost" class="cost-badge">$0.0000</span>
         <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
-        <span class="chat-input-footer-hint" style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
-          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> / <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Enter</kbd> {{ t('chat.send_shortcut') }} ·
-          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
+        <span id="context-size" class="context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
+        <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}">0</span>
+        <span class="chat-input-footer-hint">
+          <kbd>Enter</kbd> / <kbd>Ctrl+Enter</kbd> {{ t('chat.send_shortcut') }} ·
+          <kbd>Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
         </span>
       </div>
     </div>
@@ -178,6 +189,10 @@
     writing_reply: {{ t('chat.writing_reply') | tojson }},
     activity: {{ t('chat.activity') | tojson }},
     cot_title: {{ t('chat.cot_title') | tojson }},
+    reasoning: {{ t('chat.reasoning') | tojson }},
+    phase_think: {{ t('chat.phase_think') | tojson }},
+    phase_act: {{ t('chat.phase_act') | tojson }},
+    phase_write: {{ t('chat.phase_write') | tojson }},
     working: {{ t('chat.working') | tojson }},
     plan: {{ t('chat.plan') | tojson }},
     step: {{ t('chat.step') | tojson }},
@@ -214,6 +229,10 @@
     approval_complete: {{ t('chat.approval_complete') | tojson }},
     step_done: {{ t('chat.step_done') | tojson }},
     step_failed: {{ t('chat.step_failed') | tojson }},
+    show_more: {{ t('chat.show_more') | tojson }},
+    show_less: {{ t('chat.show_less') | tojson }},
+    summary_tools: {{ t('chat.summary_tools') | tojson }},
+    context_size: {{ t('chat.context_size') | tojson }},
     placeholder: {{ t('chat.placeholder') | tojson }},
     pinned: {{ t('chat.pinned') | tojson }},
     pin: {{ t('chat.pin') | tojson }},

@@ -44,7 +44,20 @@ SECRET_HEADER = "X-Kazma-Secret"
 #: entire auth layer is bypassed (backward-compatible open mode).
 SECRET_ENV_VAR = "KAZMA_SECRET"
 
-#: Cookie name used to pass the secret in browser sessions (HttpOnly).
+def _accept_legacy_secret_cookie() -> bool:
+    """True only when the operator opted out of opaque sessions.
+
+    Default-on opaque sessions must not treat a ``kazma-secret`` cookie
+    (the raw ``KAZMA_SECRET``) as a credential.
+    """
+    try:
+        from kazma_core.security.web_sessions import use_opaque_sessions
+
+        return not use_opaque_sessions()
+    except Exception:
+        return False
+
+
 #: Prefer opaque sessions (``SESSION_COOKIE``) — raw secret cookie is legacy.
 SECRET_COOKIE = "kazma-secret"
 
@@ -425,7 +438,7 @@ def extract_provided_credential(request: Request) -> str:
       2. ``X-Api-Token`` / ``X-Kazma-Token``
       3. ``Authorization: Bearer …``
       4. ``kazma-session`` opaque cookie (preferred)
-      5. ``kazma-secret`` cookie (legacy shared-secret cookie)
+      5. ``kazma-secret`` cookie — only when opaque sessions are off
     """
     provided = (request.headers.get(SECRET_HEADER) or "").strip()
     if provided:
@@ -443,7 +456,9 @@ def extract_provided_credential(request: Request) -> str:
     sess = (request.cookies.get(SESSION_COOKIE) or "").strip()
     if sess:
         return f"session:{sess}"
-    return (request.cookies.get(SECRET_COOKIE) or "").strip()
+    if _accept_legacy_secret_cookie():
+        return (request.cookies.get(SECRET_COOKIE) or "").strip()
+    return ""
 
 
 def is_authenticated(request: Request, expected_secret: str = "") -> bool:
@@ -475,7 +490,7 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
       3. ``?token=…`` query parameter — accepts a **per-session WS token**
          (NOT the raw KAZMA_SECRET). See ``generate_ws_session_token()``.
       4. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
-      5. ``kazma-secret`` legacy cookie
+      5. ``kazma-secret`` legacy cookie — only when opaque sessions are off
       6. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
       7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only — blocked in production)
     """
@@ -508,11 +523,8 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     if _is_private_lan_client(websocket) and _trust_lan_enabled():
         return True
 
-    # Query parameter token (browser WebSocket can't set headers).
-    # Accepts BOTH the per-session WS token (from generate_ws_session_token,
-    # NOT the raw KAZMA_SECRET) AND the raw secret for backward compat with
-    # API clients. The browser JS uses the session token; the raw secret
-    # path is for programmatic WS clients.
+    # Query parameter: per-session WS token only — never the raw KAZMA_SECRET
+    # (URL query lands in access logs / Referer).
     provided = ""
     try:
         query_params = websocket.query_params
@@ -521,9 +533,10 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     except Exception:
         pass
 
-    # Check per-session WS token first (security: don't leak raw secret via query param)
     if provided and verify_ws_session_token(provided):
         return True
+    # Ignore leftover query tokens that are not session tokens (incl. raw secret).
+    provided = ""
 
     if not provided:
         provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
@@ -541,7 +554,7 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
                     return True
             except Exception:
                 pass
-    if not provided:
+    if not provided and _accept_legacy_secret_cookie():
         provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
     if not provided:
         return False
@@ -622,18 +635,11 @@ def _mint_auth_cookie(response: Response, request: Request, expected: str) -> No
                 response.delete_cookie(SECRET_COOKIE, path="/")
             return
     except Exception as exc:
-        logger.debug("[auth] opaque session mint failed: %s", exc)
+        logger.warning("[auth] opaque session mint failed — not writing raw secret cookie: %s", exc)
 
-    # Legacy: cookie = shared secret
-    if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
-        response.set_cookie(
-            key=SECRET_COOKIE,
-            value=expected,
-            httponly=True,
-            samesite="lax",
-            path="/",
-            secure=_is_https(request),
-        )
+    # Never put KAZMA_SECRET in a cookie. Drop any leftover legacy cookie.
+    if request.cookies.get(SECRET_COOKIE):
+        response.delete_cookie(SECRET_COOKIE, path="/")
 
 
 # ── FastAPI Dependency (for manual application) ─────────────────────────
@@ -749,11 +755,28 @@ def create_auth_middleware(
         if not is_authenticated(request, expected):
             return _unauthorized_response(request)
 
-        # 4b. Platform RBAC (Phase 4.4) when multi-user is enabled
+        # 4b. Platform RBAC (Phase 4.4) when multi-user is enabled.
+        # Fail-closed: if we know multi-user is on and the check errors, deny.
+        _multi_user = False
         try:
-            from kazma_core.security.platform_rbac import multi_user_enabled, role_allows
+            from kazma_core.security.platform_rbac import multi_user_enabled
 
-            if multi_user_enabled():
+            _multi_user = bool(multi_user_enabled())
+        except Exception as exc:
+            if (os.environ.get("KAZMA_MULTI_USER") or "").strip().lower() in (
+                "1", "true", "on", "yes",
+            ):
+                logger.warning("[RBAC] multi-user check failed — denying: %s", exc)
+                return Response(
+                    content='{"detail":"Forbidden (RBAC unavailable)"}',
+                    status_code=403,
+                    media_type="application/json",
+                )
+            logger.debug("[RBAC] multi-user check skipped: %s", exc)
+        if _multi_user:
+            try:
+                from kazma_core.security.platform_rbac import role_allows
+
                 principal = get_request_principal(request)
                 role = (principal or {}).get("role") or "viewer"
                 # Shared-secret and admin still full access
@@ -770,8 +793,13 @@ def create_auth_middleware(
                             status_code=403,
                             media_type="application/json",
                         )
-        except Exception as exc:
-            logger.debug("[RBAC] check skipped: %s", exc)
+            except Exception as exc:
+                logger.warning("[RBAC] check failed — denying: %s", exc)
+                return Response(
+                    content='{"detail":"Forbidden (RBAC unavailable)"}',
+                    status_code=403,
+                    media_type="application/json",
+                )
 
         response = await call_next(request)
         # Refresh cookie only for secret-header auth (not API tokens)

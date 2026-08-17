@@ -117,7 +117,7 @@ class _FakeLLM:
     def __init__(self):
         self.chat_calls: list[dict] = []
 
-    async def chat(self, messages=None, tools=None, model=None):
+    async def chat(self, messages=None, tools=None, model=None, **kwargs):
         self.chat_calls.append({"messages": list(messages or []), "model": model})
         return _FakeLLMResponse()
 
@@ -136,25 +136,38 @@ class _FakeTracer:
 
 
 async def test_retrieval_injects_at_iteration_0(monkeypatch):
-    """At iteration 0, retrieved memories are injected as a system message.
+    """At iteration 0, V2-recalled memories are injected as a system message.
 
-    Exercises the LEGACY per-turn RAG path (retrieve_memories). With V2 now
-    the default stack, force ``use_new_stack=False`` here so the legacy branch
-    runs and the mocked authority's memories are injected.
+    The V1 4-layer RRF path was removed in the V1→V2 cutover, so this now
+    exercises the V2 recall path: force ``memory_v2_enabled`` True and mock
+    ``recall`` + ``format_recall_block`` to return a block containing the
+    memory, then assert it lands in the LLM's system messages.
     """
-    # Force the legacy V1 path so the mocked _FakeAuthority is exercised.
-    monkeypatch.setenv("KAZMA_TEST_FORCE_V1_RAG", "1")
     import kazma_core.memory.config as _mcfg
+    import kazma_core.memory.recall as _recall_mod
 
-    monkeypatch.setattr(_mcfg, "memory_v2_enabled", lambda cfg=None: False)
+    monkeypatch.setattr(_mcfg, "memory_v2_enabled", lambda cfg=None: True)
+
+    class _FakeRecallResult:
+        empty = False
+        beliefs = [{"content": "User likes dark mode."}]
+        episodes = []
+
+    captured_queries: list[str] = []
+
+    def _fake_recall(query, limit=5, session_id=None, tenant_id=None, explain=False):
+        captured_queries.append(query)
+        return _FakeRecallResult()
+
+    def _fake_format(result, explain=False):
+        return "## Recalled memories\n- User likes dark mode."
+
+    monkeypatch.setattr(_recall_mod, "recall", _fake_recall)
+    monkeypatch.setattr(_recall_mod, "format_recall_block", _fake_format)
 
     from kazma_core.agent.graph_builder import supervisor_node
-    from kazma_core.agent.state import NodeName
 
-    mems = [{"content": "User likes dark mode."}]
-    authority = _FakeAuthority(mems)
     llm = _FakeLLM()
-
     state = {
         "messages": [
             {"role": "system", "content": "You are Kazma."},
@@ -170,7 +183,7 @@ async def test_retrieval_injects_at_iteration_0(monkeypatch):
         tool_definitions=[],
         tool_executor=None,
         cost_breaker=_FakeCostBreaker(),
-        authority=authority,
+        authority=_FakeAuthority([]),
         tracer=_FakeTracer(),
     )
 
@@ -180,9 +193,9 @@ async def test_retrieval_injects_at_iteration_0(monkeypatch):
     system_msgs = [m for m in sent if m.get("role") == "system"]
     assert any("dark mode" in m.get("content", "") for m in system_msgs), \
         "Memory block not injected into LLM messages"
-    # retrieve_memories was called with the user's message as query.
-    assert authority.compactor.called_with
-    assert "theme" in authority.compactor.called_with[0][0]
+    # recall was invoked with the user's message as the query.
+    assert captured_queries
+    assert "theme" in captured_queries[0]
 
 
 async def test_retrieval_skipped_at_iteration_1():

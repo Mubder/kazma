@@ -30,7 +30,8 @@ fi
 
 # Defaults tuned for WSL → Windows browser via portproxy / WSL eth IP
 export KAZMA_HOST="${KAZMA_HOST:-0.0.0.0}"
-export KAZMA_TRUST_LAN="${KAZMA_TRUST_LAN:-1}"
+# Do not auto-trust private LAN. Set KAZMA_TRUST_LAN=1 in .env for WSL labs.
+export KAZMA_TRUST_LAN="${KAZMA_TRUST_LAN:-0}"
 
 if [[ -x "$ROOT/.venv/bin/kazma" ]]; then
   KAZMA_BIN="$ROOT/.venv/bin/kazma"
@@ -42,8 +43,8 @@ else
 fi
 
 if [[ -z "${KAZMA_SECRET:-}" && "$KAZMA_HOST" != "127.0.0.1" && "$KAZMA_HOST" != "localhost" && "$KAZMA_HOST" != "::1" ]]; then
-  echo "warning: KAZMA_HOST=$KAZMA_HOST with empty KAZMA_SECRET — CLI will require a secret or refuse non-loopback." >&2
-  echo "         Set KAZMA_SECRET in .env (recommended) or export it before starting." >&2
+  echo "error: KAZMA_HOST=$KAZMA_HOST requires KAZMA_SECRET. Set it in .env or export it." >&2
+  exit 1
 fi
 
 echo "Starting Kazma Web UI"

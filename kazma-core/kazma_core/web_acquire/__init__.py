@@ -21,6 +21,7 @@ from kazma_core.web_acquire.profiles import (
     CRAWL_PROFILES,
     CrawlProfile,
     get_crawl_profile,
+    profile_to_crawl_kwargs,
 )
 from kazma_core.web_acquire.rank import RankedUrl, rank_urls, score_url
 from kazma_core.web_acquire.search import SearchResult, extract_urls_from_search, search
@@ -34,6 +35,7 @@ __all__ = [
     "extract_urls_from_search",
     "fetch_text",
     "get_crawl_profile",
+    "profile_to_crawl_kwargs",
     "rank_urls",
     "score_url",
     "search",

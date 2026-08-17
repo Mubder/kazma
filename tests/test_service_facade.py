@@ -20,20 +20,33 @@ from kazma_core.agent import AgentConfig, KazmaAgent
 
 
 @pytest.fixture
-def agent_config() -> AgentConfig:
-    """Return a minimal agent config for facade testing."""
-    return AgentConfig(
+def agent_config(tmp_path) -> AgentConfig:
+    """Minimal agent config, with config_path pointed at a TMP kazma.yaml.
+
+    add_mcp_server() dual-writes ConfigStore + kazma.yaml; without this the
+    fixture wrote test servers into the REAL repo kazma.yaml on every run.
+    """
+    cfg = AgentConfig(
         name="test-kazma",
         version="0.0.0-test",
         language="en",
         rtl=False,
     )
+    cfg.config_path = str(tmp_path / "kazma.yaml")
+    return cfg
 
 
 @pytest.fixture
-def agent(agent_config: AgentConfig) -> KazmaAgent:
-    """Return a KazmaAgent instance for facade testing."""
-    return KazmaAgent(config=agent_config)
+def agent(agent_config: AgentConfig, tmp_path, monkeypatch) -> KazmaAgent:
+    """Return a KazmaAgent instance with an ISOLATED ConfigStore."""
+    from kazma_core.config_store import ConfigStore, reset_config_store, set_config_store
+
+    reset_config_store()
+    set_config_store(ConfigStore(db_path=str(tmp_path / "test_settings.db")))
+    try:
+        yield KazmaAgent(config=agent_config)
+    finally:
+        reset_config_store()
 
 
 # ═══════════════════════════════════════════════════════════════════

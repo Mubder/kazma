@@ -169,7 +169,8 @@ def _build_model_and_profile(
     model.keywords = str(payload.get("keywords") or "")
 
     # Title (+ optional subtitle).
-    model.add(TitleBlock(text=str(payload.get("title", "Document")),
+    title_txt = str(payload.get("title", "Document")).strip()
+    model.add(TitleBlock(text=title_txt or "Document",
                          level=0, fill=fill_title))
     if payload.get("subtitle"):
         model.add(TitleBlock(text=str(payload["subtitle"]), level=3, fill=fill_h))
@@ -180,12 +181,24 @@ def _build_model_and_profile(
             entries=[it["heading"] for it in sections if it.get("heading")]
         ))
 
-    # Sections: heading bar + rich Markdown body.
+    # Sections: heading + rich Markdown body. Skip a heading that repeats
+    # the title or the previous heading, and strip a leading ``##`` in the
+    # body that restates the same heading (stacked "Quick Research Summary").
+    from kazma_core.documents.heading_text import (
+        drop_leading_heading,
+        headings_equivalent,
+    )
+
+    last_heading = title_txt
     for item in sections:
-        if item.get("heading"):
-            model.add(HeadingBlock(text=item["heading"].lstrip("#").strip(),
-                                   level=1, fill=fill_h))
+        heading = (item.get("heading") or "").lstrip("#").strip()
         body = item.get("body") or ""
+        if heading:
+            body = drop_leading_heading(body, heading)
+            body = drop_leading_heading(body, last_heading)
+            if not headings_equivalent(heading, last_heading):
+                model.add(HeadingBlock(text=heading, level=1, fill=fill_h))
+                last_heading = heading
         if body.strip():
             model.add(BodyBlock(text=body))
 

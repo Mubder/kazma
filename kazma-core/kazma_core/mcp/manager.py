@@ -1507,6 +1507,15 @@ class UnifiedToolExecutor:
         resource = arguments.pop("resource", arguments.pop("_resource", None))
         action = arguments.pop("action", arguments.pop("_action", None))
 
+        try:
+            from kazma_core.division_runtime import check_division_tool
+
+            _div_err = await check_division_tool(tool_name)
+            if _div_err:
+                return {"content": _div_err, "is_error": True}
+        except Exception:
+            logger.debug("[Unified] division check skipped", exc_info=True)
+
         if user_id:
             resolved_div = division or "general_trading"
             resolved_res = resource or tool_name
@@ -1546,6 +1555,16 @@ class UnifiedToolExecutor:
                 from kazma_core.agent.tool_registry import _hitl_approved_ctx
 
                 _hitl_already_approved = _hitl_approved_ctx.get()
+                if not _hitl_already_approved:
+                    try:
+                        from kazma_core.safety.hitl import get_current_thread_id
+                        from kazma_core.safety.yolo import is_yolo_active
+
+                        _tid = get_current_thread_id()
+                        if _tid and is_yolo_active(_tid):
+                            _hitl_already_approved = True
+                    except Exception:
+                        logger.debug("[Unified] YOLO check skipped", exc_info=True)
                 _server_trusted = (
                     self._mcp.get_server_trust(server_name) == "trusted"
                 )

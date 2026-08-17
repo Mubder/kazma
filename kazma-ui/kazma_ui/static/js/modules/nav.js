@@ -3,45 +3,49 @@
 // Alpine factories + page init, then initTree.
 // Failures always fall back to a full page load.
 //
-// Full navigation (not soft) for:
-//   - SSE / heavy editors: /chat, /ide, /swarm
-//   - Pages with dedicated Alpine apps + external JS: /settings, /agents,
-//     /skills, /mcp — soft-nav left these stuck on "Loading…" / empty shells
-//     because script reinject + x-init races. Full load is reliable.
+// Soft-nav is on for every page. Failures fall back to a full load.
+// Chat / IDE / Swarm register window.kazmaOnSoftNavLeave to abort SSE
+// and destroy the editor before the next page binds.
+//
+// First-click empty pages: a whitelist used to skip companions
+// (memory_console.js, dash_lists.js, voice.js, mermaid, CodeMirror).
+// Second click on the same nav item is a full reload, so it looked
+// "fixed". isSoftNavPageScript() is the single gate now.
+//
+// Settings (and any page whose factory is not already on window) has a
+// second trap: <html> is x-data="kazmaApp()", so Alpine's MutationObserver
+// inits the swapped .page-body BEFORE page scripts run. settingsApp() is
+// still undefined → Alpine binds {} and stamps _x_marker → later initTree
+// skips the tree. Pause the observer across the swap, then bind after
+// scripts. Destroy+rebind clears a stale empty marker if one landed.
+
+const GLOBAL_LIB_PATHS = [
+    '/static/js/app.js',
+    '/static/js/htmx.min.js',
+    '/static/js/alpine.min.js',
+    '/static/js/icons.js',
+    '/static/js/auth-guard.js',
+    '/static/js/bidi.js',
+];
+
+/** True for a script the incoming page owns and soft-nav must re-run. */
+export function isSoftNavPageScript(src) {
+    if (!src) return false;
+    const path = String(src).split('?')[0];
+    if (GLOBAL_LIB_PATHS.some((g) => path.endsWith(g))) return false;
+    if (path.includes('/static/js/modules/')) return false;
+    // documents.js, memory_console.js, dash_lists.js, voice.js, mermaid, …
+    if (path.includes('/static/js/')) return true;
+    if (/codemirror/i.test(path)) return true;
+    return false;
+}
 
 export function initSoftNav() {
     const SOFT_NAV_ENABLED = true;
 
-    // Always full document navigation (enter OR leave).
-    // /dashboard uses large inline init (sessions + memory board); soft-nav
-    // reinjects dashboard.js but historically skipped that inline block →
-    // Session Management stuck on skeleton until F5.
-    const HARD_RELOAD_ALWAYS = new Set([
-        '/chat',
-        '/ide',
-        '/swarm',
-        '/settings',
-        '/dashboard',
-        '/agents',
-        '/skills',
-        '/mcp',
-        '/replay',
-        '/research',
-        '/memory',
-        '/knowledge',
-        '/documents',
-    ]);
+    const HARD_RELOAD_ALWAYS = new Set([]);
 
-    const GLOBAL_LIBS = [
-        '/static/js/app.js',
-        '/static/js/htmx.min.js',
-        '/static/js/alpine.min.js',
-        '/static/js/icons.js',
-    ];
-
-    // Only these classic page bundles are re-injected on soft-nav.
-    // (Keeps importmap / module / alpine out of the reinject loop.)
-    const PAGE_SCRIPT_RE = /\/static\/js\/(?:providers|models|settings|agents|skills|mcp|dashboard|workspace|streaming|hitl_approval|replay|research|memory|kb)\.js(?:\?|$)/i;
+    const GLOBAL_LIBS = GLOBAL_LIB_PATHS;
 
     let navInFlight = null;
     let softNavGeneration = 0;
@@ -137,13 +141,51 @@ export function initSoftNav() {
         return false;
     }
 
+    function isEmptyAlpineBind(el) {
+        const stack = el && el._x_dataStack;
+        if (!stack || !stack[0]) return true;
+        try {
+            return Object.keys(stack[0]).length === 0;
+        } catch (e) {
+            return true;
+        }
+    }
+
     function isAlpineBound(el) {
-        return !!(el && (el._x_dataStack || el.__x));
+        if (!el || !(el._x_dataStack || el.__x)) return false;
+        // Alpine treats a missing factory as x-data="{}" and still marks the
+        // node initialized. That empty stack is not a real page bind.
+        return !isEmptyAlpineBind(el);
+    }
+
+    function pageLevelXDataRoots(root) {
+        if (!root) return [];
+        return Array.from(root.querySelectorAll('[x-data]')).filter((el) => {
+            const ancestor = el.parentElement && el.parentElement.closest('[x-data]');
+            return !ancestor || !root.contains(ancestor);
+        });
     }
 
     function unboundAlpineRoots(root) {
         if (!root) return [];
-        return Array.from(root.querySelectorAll('[x-data]')).filter((n) => !isAlpineBound(n));
+        return pageLevelXDataRoots(root).filter((n) => !isAlpineBound(n));
+    }
+
+    function pauseAlpineMutations() {
+        if (window.Alpine && typeof Alpine.stopObservingMutations === 'function') {
+            Alpine.stopObservingMutations();
+        }
+    }
+
+    function resumeAlpineMutations() {
+        if (window.Alpine && typeof Alpine.startObservingMutations === 'function') {
+            Alpine.startObservingMutations();
+        }
+    }
+
+    function rebindAlpineRoot(el) {
+        destroyAlpineOn(el);
+        initAlpineOn(el);
     }
 
     /**
@@ -182,11 +224,15 @@ export function initSoftNav() {
             if (type === 'module' || type === 'importmap') return false;
             if (isGlobalLib(src)) return false;
             if (s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script')) return true;
-            return PAGE_SCRIPT_RE.test(src);
+            return isSoftNavPageScript(src);
         });
 
         for (const s of pageScripts) {
             const src = s.getAttribute('src') || '';
+            // CodeMirror / mermaid are sticky globals — reloading them mid-session
+            // resets the constructor. Skip if the previous page already loaded them.
+            if (/codemirror/i.test(src) && window.CodeMirror) continue;
+            if (/mermaid\.min/i.test(src) && window.mermaid) continue;
             const fullSrc = src.includes('?')
                 ? src + '&_sn=' + Date.now()
                 : src + '?_sn=' + Date.now();
@@ -237,20 +283,28 @@ export function initSoftNav() {
      */
     async function waitForPageReady(pageBody, timeoutMs = 3000) {
         const start = Date.now();
+        let sawLoading = false;
         while (Date.now() - start < timeoutMs) {
-            const roots = Array.from(pageBody.querySelectorAll('[x-data]'));
+            const roots = pageLevelXDataRoots(pageBody);
             if (!roots.length) return true;
 
             let allReady = true;
             for (const el of roots) {
-                if (!isAlpineBound(el)) {
+                if (!isAlpineBound(el) || isEmptyAlpineBind(el)) {
                     allReady = false;
                     break;
                 }
                 try {
                     const data = Alpine.$data(el);
-                    // settingsApp uses loading=true during init()
                     if (data && data.loading === true) {
+                        sawLoading = true;
+                        allReady = false;
+                        break;
+                    }
+                    // Don't treat "loading never started" as ready for 300ms —
+                    // Settings x-init sets loading=true after the first tick.
+                    if (data && 'loading' in data && data.loading !== true && !sawLoading
+                            && (Date.now() - start) < 300) {
                         allReady = false;
                         break;
                     }
@@ -281,22 +335,22 @@ export function initSoftNav() {
         }
         if (gen !== softNavGeneration) return;
 
-        // Bind each x-data root explicitly (more reliable than only walking the container)
-        const roots = Array.from(pageBody.querySelectorAll('[x-data]'));
+        // Always destroy+init. A MutationObserver pass that ran before
+        // page scripts may have bound {} and stamped _x_marker — initTree
+        // alone would skip those nodes.
+        const roots = pageLevelXDataRoots(pageBody);
         if (roots.length === 0) {
             initAlpineOn(pageBody);
         } else {
             for (const root of roots) {
-                if (!isAlpineBound(root)) {
-                    initAlpineOn(root);
-                }
+                rebindAlpineRoot(root);
             }
         }
 
         await nextFrame();
         if (gen !== softNavGeneration) return;
 
-        // Retry unbound roots
+        // Retry unbound / empty-{} roots
         for (let attempt = 0; attempt < 5; attempt++) {
             if (gen !== softNavGeneration) return;
             const unbound = unboundAlpineRoots(pageBody);
@@ -304,7 +358,7 @@ export function initSoftNav() {
             await sleep(40 + attempt * 30);
             await waitForFactories(factories, 500);
             for (const root of unbound) {
-                initAlpineOn(root);
+                rebindAlpineRoot(root);
             }
         }
 
@@ -315,15 +369,110 @@ export function initSoftNav() {
         }
 
         // Wait for async x-init (settings loading flag) or hard-fail
-        const pageReady = await waitForPageReady(pageBody, 3500);
+        const pageReady = await waitForPageReady(pageBody, 8000);
         if (!pageReady) {
             throw new Error('page component init stuck (loading)');
+        }
+    }
+
+    function teardownLiveSockets() {
+        try {
+            if (typeof window.kazmaOnSoftNavLeave === 'function') {
+                window.kazmaOnSoftNavLeave();
+            }
+        } catch (e) { /* ignore */ }
+        const held = window.__kazmaEventSources;
+        if (Array.isArray(held)) {
+            held.forEach((src) => {
+                try { src.close(); } catch (e) { /* ignore */ }
+            });
+            window.__kazmaEventSources = [];
+        }
+    }
+
+    function mergePageHead(doc) {
+        document.querySelectorAll('[data-kazma-soft-head]').forEach((el) => el.remove());
+        if (!doc.head) return;
+        Array.from(doc.head.children).forEach((el) => {
+            const tag = (el.tagName || '').toLowerCase();
+            if (tag === 'style') {
+                const clone = el.cloneNode(true);
+                clone.setAttribute('data-kazma-soft-head', '1');
+                document.head.appendChild(clone);
+                return;
+            }
+            if (tag === 'link' && (el.getAttribute('rel') || '') === 'stylesheet') {
+                const href = el.getAttribute('href') || '';
+                if (!href || /kazma(\.v5)?\.css/i.test(href)) return;
+                const exists = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(
+                    (l) => (l.getAttribute('href') || '').split('?')[0] === href.split('?')[0],
+                );
+                if (exists) return;
+                const clone = el.cloneNode(true);
+                clone.setAttribute('data-kazma-soft-head', '1');
+                document.head.appendChild(clone);
+            }
+        });
+    }
+
+    function runIncomingBodyScripts(doc) {
+        // {% block scripts %} lives after .page-body. Re-run those inlines
+        // (hash deep-links, page I18N) that runInlinePageScripts never sees.
+        if (!doc.body) return;
+        const scripts = Array.from(doc.body.querySelectorAll('script')).filter((s) => {
+            if (s.getAttribute('src')) return false;
+            if (s.closest('.page-body')) return false;
+            const type = (s.getAttribute('type') || '').toLowerCase();
+            if (type && type !== 'text/javascript' && type !== 'application/javascript') {
+                return false;
+            }
+            const text = (s.textContent || '').trim();
+            if (!text) return false;
+            if (text.includes('window.KAZMA_I18N')) return false;
+            return true;
+        });
+        for (const s of scripts) {
+            try {
+                const ns = document.createElement('script');
+                ns.textContent = s.textContent;
+                ns.setAttribute('data-kazma-inline-rerun', '1');
+                document.body.appendChild(ns);
+            } catch (e) {
+                console.warn('[soft-nav] body inline script re-run failed:', e);
+            }
+        }
+    }
+
+    function runInlinePageScripts(root) {
+        if (!root) return;
+        const scripts = Array.from(root.querySelectorAll('script')).filter((s) => {
+            if (s.getAttribute('src')) return false;
+            const type = (s.getAttribute('type') || '').toLowerCase();
+            if (type && type !== 'text/javascript' && type !== 'application/javascript') {
+                return false;
+            }
+            const text = (s.textContent || '').trim();
+            if (!text) return false;
+            if (text.includes('window.KAZMA_I18N')) return false;
+            return true;
+        });
+        for (const s of scripts) {
+            try {
+                const ns = document.createElement('script');
+                ns.textContent = s.textContent;
+                ns.setAttribute('data-kazma-inline-rerun', '1');
+                s.replaceWith(ns);
+            } catch (e) {
+                console.warn('[soft-nav] inline script re-run failed:', e);
+            }
         }
     }
 
     async function softNav(url) {
         const gen = ++softNavGeneration;
         setNavigating(true);
+        teardownLiveSockets();
+        let alpinePaused = false;
         try {
             const res = await fetch(url, {
                 headers: { 'Kazma-Soft-Nav': 'true', 'Accept': 'text/html' },
@@ -359,30 +508,48 @@ export function initSoftNav() {
             const oldMain = document.querySelector('#main-content');
             if (!newMain || !oldMain) throw new Error('missing #main-content');
 
-            if (!newBody || !oldBody) {
-                destroyAlpineOn(oldMain);
-                oldMain.innerHTML = newMain.innerHTML;
-                if (doc.title) document.title = doc.title;
-                window.scrollTo(0, 0);
-                await reinjectPageScripts(doc);
-                if (gen !== softNavGeneration) return;
-                await bindPageAlpine(oldMain, gen);
-            } else {
-                destroyAlpineOn(oldBody);
-                oldBody.innerHTML = newBody.innerHTML;
-                syncChrome(doc);
-                window.scrollTo(0, 0);
+            // Pause Alpine BEFORE the innerHTML swap. <html> is x-data, so
+            // the document MutationObserver would otherwise init the new
+            // tree on the first await (script load) while factories are
+            // still missing, bind {}, and stamp _x_marker.
+            pauseAlpineMutations();
+            alpinePaused = true;
+            try {
+                if (!newBody || !oldBody) {
+                    destroyAlpineOn(oldMain);
+                    oldMain.innerHTML = newMain.innerHTML;
+                    if (doc.title) document.title = doc.title;
+                    window.scrollTo(0, 0);
+                    mergePageHead(doc);
+                    await reinjectPageScripts(doc);
+                    runInlinePageScripts(oldMain);
+                    runIncomingBodyScripts(doc);
+                    if (gen !== softNavGeneration) return;
+                    await bindPageAlpine(oldMain, gen);
+                } else {
+                    destroyAlpineOn(oldBody);
+                    oldBody.innerHTML = newBody.innerHTML;
+                    syncChrome(doc);
+                    window.scrollTo(0, 0);
 
-                await reinjectPageScripts(doc);
-                if (gen !== softNavGeneration) return;
+                    mergePageHead(doc);
+                    await reinjectPageScripts(doc);
+                    runInlinePageScripts(oldBody);
+                    runIncomingBodyScripts(doc);
+                    if (gen !== softNavGeneration) return;
 
-                await bindPageAlpine(oldBody, gen);
+                    await bindPageAlpine(oldBody, gen);
+                }
+            } finally {
+                resumeAlpineMutations();
+                alpinePaused = false;
             }
 
             if (gen !== softNavGeneration) return;
             history.pushState({ kazmaSoft: true }, '', url);
             updateActiveNav();
         } finally {
+            if (alpinePaused) resumeAlpineMutations();
             if (gen === softNavGeneration) setNavigating(false);
         }
     }

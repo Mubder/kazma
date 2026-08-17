@@ -111,6 +111,9 @@ async def test_gmail_finish_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
     assert r.get("email") == "user@company.com"
     assert stored.get("email.gmail.access_token") == "at"
     assert stored.get("email.gmail.refresh_token") == "rt"
+    # The fake client answers 200 to the Drive about probe → drive_ok recorded
+    assert r.get("drive_ok") is True
+    assert stored.get("email.gmail.drive_ok") == "ok"
 
 
 @pytest.mark.asyncio
@@ -170,6 +173,77 @@ async def test_gmail_finish_rejects_insufficient_scopes(monkeypatch: pytest.Monk
         r = await og.finish_gmail_oauth("code123", state)
     assert r["ok"] is False
     assert r.get("code") == "insufficient_scopes"
+
+
+@pytest.mark.asyncio
+async def test_gmail_finish_records_drive_block_without_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drive blocked (API off / scope stripped) must NOT fail Gmail connect,
+    but must be recorded so the backup card can warn instead of lying '✓'."""
+    from kazma_skills.native.email_manager.oauth_common import new_state
+    from kazma_skills.native.email_manager import oauth_gmail as og
+
+    monkeypatch.setenv("EMAIL_GMAIL_CLIENT_ID", "cid")
+    monkeypatch.setenv("EMAIL_GMAIL_CLIENT_SECRET", "sec")
+    state = new_state("gmail", redirect_uri="http://127.0.0.1:9090/api/email/oauth/gmail/callback")
+    stored: dict[str, str] = {}
+
+    def fake_store(name: str, value: str, category: str = "email") -> bool:
+        stored[name] = value
+        return True
+
+    monkeypatch.setattr(og, "vault_store", fake_store)
+
+    class FakeResp:
+        def __init__(self, status: int, data: dict, text: str = ""):
+            self.status_code = status
+            self.content = b"1"
+            self.text = text or "{}"
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            return FakeResp(
+                200,
+                {
+                    "access_token": "at",
+                    "refresh_token": "rt",
+                    "scope": "https://www.googleapis.com/auth/gmail.modify openid",
+                },
+            )
+
+        async def get(self, url, *a, **k):
+            u = str(url)
+            if "drive/v3/about" in u:
+                return FakeResp(
+                    403,
+                    {"error": {"code": 403, "message": "not enabled", "errors": [{"reason": "accessNotConfigured"}]}},
+                )
+            if "gmail.googleapis.com" in u:
+                return FakeResp(200, {"emailAddress": "user@company.com"})
+            if "tokeninfo" in u:
+                return FakeResp(
+                    200,
+                    {"scope": "https://www.googleapis.com/auth/gmail.modify openid"},
+                )
+            return FakeResp(200, {"email": "user@company.com"})
+
+    with patch("httpx.AsyncClient", return_value=FakeClient()):
+        r = await og.finish_gmail_oauth("code123", state)
+    assert r["ok"] is True  # Gmail works — Drive trouble must not fail connect
+    assert r.get("drive_ok") is False
+    assert r.get("drive_error") == "accessNotConfigured"
+    assert stored.get("email.gmail.drive_ok") == "accessNotConfigured"
 
 
 def test_scopes_include_gmail_mail() -> None:

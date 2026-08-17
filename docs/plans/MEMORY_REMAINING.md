@@ -68,12 +68,12 @@ User turn
 
 | Item | Tracking |
 |------|----------|
-| Full Postgres-primary recall | [#76](https://github.com/Mubder/kazma/issues/76) |
-| Multi-region + conflict policy | [#77](https://github.com/Mubder/kazma/issues/77) |
+| Full Postgres-primary recall | [#76](https://github.com/Mubder/kazma/issues/76) — **Done** (`state.role=primary` / `KAZMA_MEMORY_STATE_ROLE=primary`; StateBackend ILIKE is the seam; down = fail-closed, no silent SQLite) |
+| Multi-region + conflict policy | [#77](https://github.com/Mubder/kazma/issues/77) — **Done** (`state.region` + `state.conflict_policy` = last_write_wins \| origin_wins \| fail_closed) |
 | Hosted embed-only fleet defaults | [#78](https://github.com/Mubder/kazma/issues/78) |
 | Huge-corpus reconsolidation partition | **Done** — subject-hash shards + worker chain |
 | Neo4j install default (env/compose) | **Done** — `KAZMA_NEO4J_DEFAULT` / URL env; fail-open SQLite; `deploy/docker-compose.neo4j.yml` |
-| Physical KB+beliefs one-table merge | **Wontfix** — unified chat via inject/federated only ([#79](https://github.com/Mubder/kazma/issues/79)) |
+| Physical KB+beliefs one-table merge | **Index shipped** — `memory/unified_index.py` dual-writes beliefs + KB chunks into one `unified_items` table; source stores stay SoT ([#79](https://github.com/Mubder/kazma/issues/79)) |
 
 ### Architecture boundaries (updated)
 

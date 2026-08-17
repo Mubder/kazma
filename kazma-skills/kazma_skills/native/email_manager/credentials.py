@@ -13,6 +13,23 @@ def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
 
+def _force_global_scope() -> tuple[Any, Any]:
+    """Pin the vault scope to global for one read/write.
+
+    Email/OAuth credentials are installation-level (one Google/Microsoft
+    client for the whole install), NOT per-tenant data. Without this pin,
+    a save from the Web UI lands in the request's tenant scope ('default')
+    while background paths (backup refresh, cron) read the global scope —
+    producing duplicate rows where a stale rotated secret keeps shadowing
+    the current one (incident 2026-08-16: invalid_client on every refresh).
+    Returns (token, reset) for try/finally use.
+    """
+    from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
+
+    token = set_current_tenant_id(None)
+    return token, reset_current_tenant_id
+
+
 def vault_retrieve(name: str) -> str:
     """Decrypt a vault secret by name; empty if vault disabled/missing."""
     try:
@@ -25,7 +42,11 @@ def vault_retrieve(name: str) -> str:
                 v = SecretVault(db_path=vault_db_path())
             except Exception:
                 return ""
-        val = v.retrieve(name)
+        token, reset = _force_global_scope()
+        try:
+            val = v.retrieve(name)
+        finally:
+            reset(token)
         return str(val) if val else ""
     except Exception as exc:
         logger.debug("[email.creds] vault retrieve %s: %s", name, exc)
@@ -43,7 +64,11 @@ def vault_store(name: str, value: str, category: str = "email") -> bool:
         v = get_vault()
         if v is None:
             v = SecretVault(db_path=vault_db_path())
-        v.store(name, value, category=category)
+        token, reset = _force_global_scope()
+        try:
+            v.store(name, value, category=category)
+        finally:
+            reset(token)
         return True
     except Exception as exc:
         logger.warning("[email.creds] vault store %s failed: %s", name, exc)

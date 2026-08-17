@@ -39,7 +39,7 @@ echo "--- pytest (with coverage gate) ---"
 # against regressions without flakiness.
 COV_MIN=70
 $PY -m pytest tests/ -q -p no:cacheprovider -o addopts="" --tb=short \
-    --cov=kazma_core --cov=kazma_gateway --cov=kazma_ui --cov=kazma_memory \
+    --cov=kazma_core --cov=kazma_gateway --cov=kazma_ui \
     --cov=kazma_skills \
     --cov-report=term-missing --cov-fail-under=$COV_MIN \
     2>&1 | tee "$ART/pytest_output.txt"

@@ -94,9 +94,14 @@ def test_registry_marks_healthy_native_ready_and_missing_dependency_unavailable(
 
 def test_legacy_office_readiness_tracks_libreoffice_probe() -> None:
     registry = ParserRegistry()
-    expected = bool(shutil.which("soffice") or shutil.which("libreoffice"))
+    # The registry's own probe is the SoT for LibreOffice presence (it checks
+    # more paths than shutil.which — e.g. Windows Program Files). Assert the
+    # parsers' availability MATCHES the probe, not a specific environment.
+    probe = registry.capability("legacy-doc")
     for parser_id in ("legacy-doc", "legacy-xls", "legacy-ppt"):
-        assert registry.capability(parser_id).available is expected
+        cap = registry.capability(parser_id)
+        assert cap.available is probe.available
+        assert cap.readiness in (ParserReadiness.READY, ParserReadiness.UNAVAILABLE)
 
 
 def test_mime_mismatch_and_unknown_format_reject(

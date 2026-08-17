@@ -38,7 +38,9 @@ class StubLLM:
         self.calls = 0
         self.last_tool_output: str | None = None
 
-    async def chat(self, *, messages, tools=None, model=None) -> LLMResponse:
+    async def chat(self, *, messages, tools=None, model=None, **kwargs) -> LLMResponse:
+        # **kwargs: the supervisor passes max_tokens (and may pass more) via
+        # resilient_chat — accept and ignore extras so the scripted stub works.
         self.calls += 1
         if self.calls == 1:
             return LLMResponse(

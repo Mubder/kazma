@@ -90,6 +90,12 @@ _CONTINUATION_PHRASES = frozenset(
         "finish it",
         "pick up",
         "resume",
+        # Arabic short-continuations (exact phrases only — NOT أنجز which
+        # is a generate verb). "أكمل هذا المستند PDF" is too long and has
+        # substance → focus=normal, acts=document_generate (§16).
+        "أكمل",
+        "استمر",
+        "تابع",
     }
 )
 

@@ -1252,3 +1252,170 @@ class DocumentRepository:
         }[permission]
         if granted not in allowed:
             raise DocumentAccessError("actor does not have the required document permission")
+
+    def gc_mark(
+        self,
+        *,
+        tombstone_cutoff: str,
+        rejected_cutoff: str,
+        dead_cutoff: str,
+    ) -> dict[str, Any]:
+        """Authoritative live reference sets for garbage collection."""
+        with self._lock:
+            has_jobs = (
+                self._conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='document_jobs'"
+                ).fetchone()
+                is not None
+            )
+            if has_jobs:
+                keep_source = {
+                    row["source_sha256"]
+                    for row in self._conn.execute(
+                        """
+                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        FROM document_versions v
+                        JOIN documents d
+                          ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                        WHERE (d.deleted_at IS NULL OR d.deleted_at >= ?)
+                          AND NOT (
+                            v.id <> COALESCE(d.current_version_id, '')
+                            AND EXISTS (
+                              SELECT 1 FROM document_jobs j
+                              WHERE j.tenant_id = v.tenant_id AND j.version_id = v.id
+                            )
+                            AND NOT EXISTS (
+                              SELECT 1 FROM document_jobs j
+                              WHERE j.tenant_id = v.tenant_id AND j.version_id = v.id
+                                AND (
+                                  j.state NOT IN ('rejected', 'dead_letter', 'cancelled')
+                                  OR (j.state = 'rejected' AND j.updated_at >= ?)
+                                  OR (j.state = 'dead_letter' AND j.updated_at >= ?)
+                                )
+                            )
+                          )
+                        """,
+                        (tombstone_cutoff, rejected_cutoff, dead_cutoff),
+                    ).fetchall()
+                }
+            else:
+                keep_source = {
+                    row["source_sha256"]
+                    for row in self._conn.execute(
+                        """
+                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        FROM document_versions v
+                        JOIN documents d
+                          ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                        WHERE (d.deleted_at IS NULL OR d.deleted_at >= ?)
+                        """,
+                        (tombstone_cutoff,),
+                    ).fetchall()
+                }
+            keep_artifacts = {
+                row["sha256"]
+                for row in self._conn.execute(
+                    """
+                    SELECT DISTINCT b.sha256 AS sha256
+                    FROM document_artifacts a
+                    JOIN document_blobs b
+                      ON b.id = a.blob_id AND b.tenant_id = a.tenant_id
+                    JOIN documents d
+                      ON d.id = a.document_id AND d.tenant_id = a.tenant_id
+                    WHERE (d.deleted_at IS NULL OR d.deleted_at >= ?)
+                    """,
+                    (tombstone_cutoff,),
+                ).fetchall()
+            }
+            keep_versions = {
+                (row["document_id"], row["id"])
+                for row in self._conn.execute(
+                    """
+                    SELECT v.id AS id, v.document_id AS document_id
+                    FROM document_versions v
+                    JOIN documents d
+                      ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                    WHERE (d.deleted_at IS NULL OR d.deleted_at >= ?)
+                    """,
+                    (tombstone_cutoff,),
+                ).fetchall()
+            }
+            referenced_blob_ids = {
+                row["blob_id"]
+                for row in self._conn.execute(
+                    """
+                    SELECT source_blob_id AS blob_id FROM document_versions
+                    UNION
+                    SELECT blob_id AS blob_id FROM document_artifacts
+                    """
+                ).fetchall()
+            }
+        return {
+            "keep_source": keep_source,
+            "keep_artifacts": keep_artifacts,
+            "keep_versions": keep_versions,
+            "referenced_blob_ids": referenced_blob_ids,
+        }
+
+    def gc_is_live_reference(self, *, kind: str, sha: str) -> bool:
+        with self._lock:
+            if kind == "artifacts":
+                row = self._conn.execute(
+                    """
+                    SELECT 1
+                    FROM document_artifacts a
+                    JOIN document_blobs b
+                      ON b.id = a.blob_id AND b.tenant_id = a.tenant_id
+                    JOIN documents d
+                      ON d.id = a.document_id AND d.tenant_id = a.tenant_id
+                    WHERE b.sha256 = ? AND b.storage_kind = 'artifacts'
+                      AND d.deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    (sha,),
+                ).fetchone()
+                return row is not None
+            if kind == "originals":
+                row = self._conn.execute(
+                    """
+                    SELECT 1
+                    FROM document_versions v
+                    JOIN document_blobs b
+                      ON b.id = v.source_blob_id AND b.tenant_id = v.tenant_id
+                    JOIN documents d
+                      ON d.id = v.document_id AND d.tenant_id = v.tenant_id
+                    WHERE b.sha256 = ? AND d.deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    (sha,),
+                ).fetchone()
+                return row is not None
+        return False
+
+    def gc_old_unreferenced_blob_ids(
+        self, *, cutoff_iso: str, referenced: set[Any], limit: int
+    ) -> list[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM document_blobs WHERE created_at < ? ORDER BY created_at ASC",
+                (cutoff_iso,),
+            ).fetchall()
+        out: list[str] = []
+        for r in rows:
+            bid = r["id"]
+            if bid not in referenced:
+                out.append(bid)
+            if len(out) >= max(0, int(limit)):
+                break
+        return out
+
+    def gc_delete_blob_ids(self, ids: list[str]) -> int:
+        deleted = 0
+        with self._lock:
+            for blob_id in ids:
+                try:
+                    self._conn.execute("DELETE FROM document_blobs WHERE id = ?", (blob_id,))
+                    deleted += 1
+                except Exception:
+                    logger.debug("[documents.repository] blob row delete failed", exc_info=True)
+        return deleted

@@ -51,8 +51,10 @@ class XlsxEngine:
         accent_fill = PatternFill(fill_type="solid", fgColor=accent_hex)
         header_fill = PatternFill(fill_type="solid", fgColor=header_hex)
         alt_fill = PatternFill(fill_type="solid", fgColor=alt_row_hex)
+        header_fg = str(t.get("table_header_fg") or "#16223a").lstrip("#")
         title_font = Font(bold=True, color="FFFFFF", name=font_name, size=14)
-        header_font = Font(bold=True, color="FFFFFF", name=font_name, size=11)
+        header_font = Font(bold=True, color=header_fg, name=font_name, size=11)
+        ink_fill = PatternFill(fill_type="solid", fgColor=str(t.get("heading") or "16223A").lstrip("#"))
         body_font = Font(name=font_name, color=body_color_hex, size=11)
         thin = Side(style="thin", color=grid_hex)
         cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -90,7 +92,7 @@ class XlsxEngine:
             title_text = str(value.get("title") or name)
             sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
             tcell = sheet.cell(row=1, column=1, value=title_text)
-            tcell.fill = accent_fill
+            tcell.fill = ink_fill
             tcell.font = title_font
             tcell.alignment = title_align
             sheet.row_dimensions[1].height = 28

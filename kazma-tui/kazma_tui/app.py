@@ -219,11 +219,9 @@ class KazmaTUI(App[None]):
             pass
 
     def _initialize_core(self) -> None:
-        """Initialize ModelRegistry and SwarmEngine if not already done.
+        """Initialize ConfigStore + ModelRegistry if not already done.
 
-        Mirrors the startup sequence from kazma_ui.app:create_app() but
-        trimmed to the essentials the TUI needs: ConfigStore, ModelRegistry,
-        and an empty SwarmEngine (loaded from kazma.yaml if present).
+        Swarm lives on the server. The TUI reads it over HTTP.
         """
         # ── ConfigStore ─────────────────────────────────────────────
         try:
@@ -257,71 +255,13 @@ class KazmaTUI(App[None]):
         except Exception as e:
             logger.warning("[TUI] ModelRegistry init failed: %s", e)
 
-        # ── SwarmEngine ─────────────────────────────────────────────
-        try:
-            from kazma_core.swarm import get_swarm_engine, set_swarm_engine
-            from kazma_core.swarm.config import SwarmConfig
-            from kazma_core.swarm.engine import SwarmEngine
-            from kazma_core.swarm.task_store import TaskStore
+        # SwarmEngine is the *server's* brain. The TUI is only a mouth —
+        # the Swarm tab and /swarm inspectors read GET /api/swarm/*.
+        # Spinning up a second engine here blocked the UI thread (raw CSI
+        # mouse dump / hung exit) and showed a stale local worker set.
 
-            if get_swarm_engine() is None:
-                swarm_cfg = SwarmConfig.from_yaml("kazma.yaml")
-                if swarm_cfg is not None and swarm_cfg.enabled:
-                    task_store = TaskStore()
-                    engine = SwarmEngine(swarm_cfg, task_store=task_store)
-                    # Register workers from config
-                    for wc in swarm_cfg.workers:
-                        engine.add_worker(wc)
-                else:
-                    engine = SwarmEngine(
-                        SwarmConfig(enabled=True, workers=[]),
-                        task_store=TaskStore(),
-                    )
-                set_swarm_engine(engine)
-
-                # Load persisted workers from WorkerRegistry (swarm_registry.json).
-                # The Web UI saves workers here when users add them via the
-                # Swarm panel; the TUI must read the same file to see them.
-                try:
-                    from kazma_core.swarm.registry import get_worker_registry
-                    from kazma_core.swarm.config import WorkerConfig as _WC
-                    reg = get_worker_registry()
-                    for entry in reg.list_all():
-                        if entry.name not in engine._workers:
-                            engine.add_worker(_WC(
-                                name=entry.name,
-                                type=entry.worker_type or "in_process",
-                                model=entry.model,
-                                provider=entry.provider,
-                                role=entry.roles[0] if entry.roles else "",
-                                system_prompt=entry.system_prompt,
-                            ))
-                    logger.info(
-                        "[TUI] SwarmEngine initialized — %d worker(s) from YAML + %d from registry",
-                        len(swarm_cfg.workers) if swarm_cfg else 0,
-                        len(engine._workers) - len(swarm_cfg.workers if swarm_cfg else []),
-                    )
-                except Exception as exc:
-                    logger.warning("[TUI] Failed to load workers from registry: %s", exc)
-        except Exception as e:
-            logger.warning("[TUI] SwarmEngine init failed: %s", e)
-
-        # ── V2 embedder pre-warm ────────────────────────────────────
-        # V2 recall() uses the shared embedder for dense retrieval; warm it
-        # so the first TUI chat turn isn't stalled on the MiniLM load. The
-        # legacy VectorMemory/ChromaDB boot was removed with the V1 stack.
-        try:
-            import os
-            _demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
-            if not _demo:
-                from kazma_core.memory.embedder import get_embedder
-
-                emb = get_embedder()
-                if emb is not None:
-                    emb.encode("kazma tui warmup")
-                    logger.info("[TUI] V2 embedder ready (%s)", type(emb).__name__)
-        except Exception as e:
-            logger.debug("[TUI] V2 embedder pre-warm skipped: %s", e)
+        # Embedder warmup belongs on the server. Doing it here blocked the
+        # UI thread (mouse tracking dumped raw CSI and the TUI would not exit).
 
         # ── Update status bar with active model info ──────────────────
         try:
@@ -546,14 +486,23 @@ class KazmaTUI(App[None]):
         import httpx
         try:
             headers = {}
-            secret = os.environ.get("KAZMA_SECRET", "")
-            if secret:
-                headers["X-Kazma-Secret"] = secret
+            from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
 
-            _port = os.environ.get("KAZMA_PORT", "8000")
+            headers = dict(auth_headers())
             if self._hitl_http is None:
                 self._hitl_http = httpx.AsyncClient(timeout=2.0)
-            response = await self._hitl_http.get(f"http://127.0.0.1:{_port}/api/pending-approvals", headers=headers)
+            response = None
+            for _base in candidate_api_bases():
+                try:
+                    response = await self._hitl_http.get(
+                        f"{_base}/api/pending-approvals", headers=headers
+                    )
+                    if response.status_code < 500:
+                        break
+                except Exception:
+                    response = None
+            if response is None:
+                return
             if response.status_code == 200:
                 data = response.json()
                 pending_list = data.get("pending", [])
@@ -596,22 +545,28 @@ class KazmaTUI(App[None]):
 
         decision = "approve" if approved else "deny"
         try:
-            headers = {}
-            secret = os.environ.get("KAZMA_SECRET", "")
-            if secret:
-                headers["X-Kazma-Secret"] = secret
+            from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
 
-            _port = os.environ.get("KAZMA_PORT", "8000")
+            headers = dict(auth_headers())
+            response = None
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(
-                    f"http://127.0.0.1:{_port}/api/approve/{thread_id}",
-                    json={"action": decision},
-                    headers=headers,
-                )
-                if response.status_code in (200, 202):
-                    self.push_screen(Toast(f"HITL task {decision}d successfully", "success"))
-                else:
-                    self.push_screen(Toast(f"Error submitting decision: {response.text}", "error"))
+                for _base in candidate_api_bases():
+                    try:
+                        response = await client.post(
+                            f"{_base}/api/approve/{thread_id}",
+                            json={"action": decision},
+                            headers=headers,
+                        )
+                        if response.status_code < 500:
+                            break
+                    except Exception:
+                        response = None
+            if response is None:
+                raise RuntimeError("Kazma server not reachable")
+            if response.status_code in (200, 202):
+                self.push_screen(Toast(f"HITL task {decision}d successfully", "success"))
+            else:
+                self.push_screen(Toast(f"Error submitting decision: {response.text}", "error"))
         except Exception as exc:
             logger.exception("Failed to submit HITL decision")
             self.push_screen(Toast(f"Failed to submit decision: {exc}", "error"))
@@ -672,7 +627,25 @@ class KazmaTUI(App[None]):
             logger.debug("Failed to update header localization: %s", exc)
 
 
+def _load_local_env() -> None:
+    """Pick up cwd `.env` so TUI mouths send the same KAZMA_SECRET as the server.
+
+    Does not override variables already in the process environment.
+    """
+    try:
+        from pathlib import Path
+
+        from dotenv import load_dotenv
+
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.is_file():
+            load_dotenv(dotenv_path=cwd_env, override=False)
+    except Exception:
+        logger.debug("TUI .env load skipped", exc_info=True)
+
+
 def main() -> None:
+    _load_local_env()
     try:
         KazmaTUI().run()
     except Exception:

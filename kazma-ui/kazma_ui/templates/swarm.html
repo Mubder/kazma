@@ -15,7 +15,7 @@
   </div>
 
   <!-- ── Metrics Bar ── -->
-  <div class="metrics-grid swarm-metrics-grid" style="margin-bottom:1.5rem;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+  <div class="metrics-grid swarm-metrics-grid" style="margin-bottom:1.5rem;display:grid;gap:12px;">
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="swarm" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('swarm.workers') }}</div>
@@ -44,7 +44,7 @@
 
   <!-- ── Controls ── -->
   <div class="card" style="margin-bottom:1.5rem;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="swarm-controls-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
       <div>
         <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="dot" aria-hidden="true"></span> {{ t('swarm.loading_status') }}</span>
       </div>

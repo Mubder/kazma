@@ -8,8 +8,6 @@ from the Web UI / chat / tools; the TUI never parses bytes itself.
 
 from __future__ import annotations
 
-import asyncio
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, DataTable, Static
@@ -89,28 +87,19 @@ class DocumentsPanel(VerticalScroll):
         if doc_id:
             self.run_worker(self._preview(doc_id), exclusive=True)
 
-    def _tenant(self) -> str:
-        try:
-            from kazma_core.tenant_context import get_current_tenant_id
-
-            return (get_current_tenant_id() or "default").strip() or "default"
-        except Exception:
-            return "default"
-
     async def _load(self) -> None:
         table = self.query_one("#docs-table", DataTable)
         table.clear()
         self._rows.clear()
         try:
-            from kazma_core.documents.ingestion import get_ingestion_service
+            from kazma_core.runtime.local_api import request_json_async
 
-            svc = get_ingestion_service()
-            docs = await asyncio.to_thread(
-                svc.list_documents, tenant_id=self._tenant(), actor_id="agent"
-            )
+            payload = await request_json_async("GET", "/api/documents")
+            docs = (payload or {}).get("documents") or []
         except Exception as exc:  # noqa: BLE001
             self.query_one("#docs-preview", Static).update(
-                f"[red]Document platform unavailable ({type(exc).__name__})[/]"
+                f"[red]Document platform unavailable ({type(exc).__name__}). "
+                "Start kazma serve — this tab is a mouth.[/]"
             )
             return
         if not docs:
@@ -135,21 +124,17 @@ class DocumentsPanel(VerticalScroll):
     async def _preview(self, document_id: str) -> None:
         preview = self.query_one("#docs-preview", Static)
         try:
-            from kazma_core.documents.ingestion import (
-                DocumentIngestionError,
-                get_ingestion_service,
-            )
+            from kazma_core.runtime.local_api import request_json_async
 
-            svc = get_ingestion_service()
-            data = await asyncio.to_thread(
-                svc.get_content,
-                tenant_id=self._tenant(),
-                actor_id="agent",
-                document_id=document_id,
-                max_chars=_PREVIEW_MAX_CHARS,
+            payload = await request_json_async(
+                "GET",
+                f"/api/documents/{document_id}/content?max_chars={_PREVIEW_MAX_CHARS}",
             )
-            preview.update(data["text"] or "[dim](empty)[/]")
-        except DocumentIngestionError as exc:
-            preview.update(f"[yellow]{exc.safe_message}[/]")
+            data = (payload or {}).get("content") or payload or {}
+            if isinstance(data, dict):
+                text = str(data.get("text") or "")
+            else:
+                text = str(data)
+            preview.update(text or "[dim](empty)[/]")
         except Exception as exc:  # noqa: BLE001
             preview.update(f"[red]Preview failed ({type(exc).__name__})[/]")

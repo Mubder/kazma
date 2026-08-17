@@ -157,7 +157,7 @@ def authorize_effect(
     # Phase 5 swarm scope-token (§3.11): a worker mutator outside its inherited
     # scope is denied — the privilege-escalation guard. Only active when a
     # worker scope is bound (current_scope() is None for the main agent) AND
-    # agent.commitment.swarm_scope_enforce is on (default off — safe rollout).
+    # agent.commitment.swarm_scope_enforce is on (default ON since 2026-08-15).
     from .scope import current_scope, is_act_within_scope
     _scope = current_scope()
     if _scope is not None:
@@ -174,7 +174,16 @@ def authorize_effect(
                         profile=profile, audit=audit,
                     )
         except Exception:
-            logger.debug("[commitment] swarm scope check skipped", exc_info=True)
+            logger.warning(
+                "[commitment] swarm scope check failed — deny (not fail-open)",
+                exc_info=True,
+            )
+            return EffectDecision(
+                decision="deny",
+                reason="worker scope: verification failed closed",
+                profile=profile,
+                audit=audit,
+            )
 
     # Phase 2: act-specific resolution. Remind is the reference impl (§3.7);
     # resolve_remind was measured at 0 false-allow on held-out goldens (G2).
@@ -233,6 +242,35 @@ def authorize_effect(
     )
 
 
+def _effective_mode(cfg: dict[str, Any] | None, thread_id: str | None) -> str:
+    """Resolve the commitment mode, honoring the per-thread security YOLO.
+
+    Security YOLO ("stop asking me", per-thread + TTL) is the user's explicit
+    opt-out of approval prompts; the commitment gate's clarify/confirm cards
+    ARE approval prompts, so an active YOLO must silence them too — otherwise
+    the user approves once and the next semantic check interrupts again
+    (incident 2026-08-16: "YOLO keeps asking for permission").
+
+    Scope of the bypass: remind / cancel_job, and the empty-outbound
+    allowlist path. The exec denylist, a *populated* outbound allowlist,
+    and config protected-keys keep enforcing. The memory source-trust
+    gate (belief_mutation) is independent — the overwrite class stays blocked.
+    """
+    from .config import get_commitment_config
+
+    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
+        get_commitment_config().get("mode", "balanced"))
+    if mode != "yolo" and thread_id:
+        try:
+            from kazma_core.safety.yolo import is_yolo_active
+
+            if is_yolo_active(thread_id):
+                return "yolo"
+        except Exception:
+            logger.debug("[commitment] yolo bridge check failed", exc_info=True)
+    return mode
+
+
 def _build_remind_clarify_options(res) -> list[dict[str, Any]]:
     """Build the discrete options for a remind clarify card (plan §4.3).
 
@@ -282,14 +320,14 @@ def _resolve_remind_act(
                       still blocked at the memory gate).
       * balanced    — resolve_remind's decision stands (default).
     """
-    # Lazy imports (store → paths; relative_time is standalone; config → ConfigStore).
-    from .config import get_commitment_config
+    # Lazy imports (store → paths; relative_time is standalone).
     from .relative_time import parse_absolute_timing, resolve_remind as _resolve
     from .relative_time import validate_timing_against_memory
     from .store import Commitment, create_commitment
 
-    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
-        get_commitment_config().get("mode", "balanced"))
+    # Security YOLO active on this thread → semantic bypass too (see
+    # _effective_mode; incident 2026-08-16 "YOLO keeps asking").
+    mode = _effective_mode(cfg, thread_id)
 
     if mode == "yolo":
         logger.info("[commitment] yolo mode — semantic bypass for %s source=%s",
@@ -303,6 +341,7 @@ def _resolve_remind_act(
     # over-clarify loop (incident 2026-08-12). Only relative/absent timing
     # falls through to chat-text resolution.
     _timing_arg = str((args or {}).get("timing") or "").strip()
+    _consistency = "not_absolute"
     if _timing_arg and mode != "strict":
         _consistency, _matched = validate_timing_against_memory(_timing_arg, memory_beliefs)
         _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
@@ -339,6 +378,30 @@ def _resolve_remind_act(
     window = timedelta(days=30) if mode == "strict" else None
     res = _resolve(user_text, request_at=request_at, memory_beliefs=memory_beliefs,
                    relevance_window=window)
+
+    # Chat text often has no time words on agent-initiated retries (the time
+    # lives in args.timing) — fall back to resolving the timing arg itself
+    # before reporting "no time expression found" (incident 2026-08-16).
+    if res.decision == "clarify" and _timing_arg:
+        _res_t = _resolve(_timing_arg, request_at=request_at,
+                          memory_beliefs=memory_beliefs, relevance_window=window)
+        _adopt = False
+        if _res_t.decision == "allow" and _res_t.fire_at is not None:
+            _has_abs = any(e.kind == "absolute" for e in _res_t.time_expressions)
+            if _has_abs and _consistency not in ("consistent", "no_memory"):
+                # Unvalidated absolute timing (PR4 judged conflict, or strict
+                # mode skipped PR4) — validate against memory before allowing;
+                # this is the CoPilot overwrite guard.
+                _cons_t, _ = validate_timing_against_memory(_timing_arg, memory_beliefs)
+                _adopt = _cons_t in ("consistent", "no_memory")
+            else:
+                _adopt = True
+        elif _res_t.decision == "clarify" and _res_t.time_expressions:
+            # A clarify with parsed expressions is more actionable than
+            # "no time expression found" (it carries option_fire_ats).
+            _adopt = True
+        if _adopt:
+            res = _res_t
 
     # autonomous: a nearby-event clarify with a from-now candidate → allow it.
     if (mode == "autonomous" and res.decision == "clarify"
@@ -424,12 +487,12 @@ def _resolve_cancel_job_act(
     WITH THE ACTUAL pending list so the user/model can pick the right one,
     instead of confidently "canceling" something that doesn't cancel.
     """
-    from .config import get_commitment_config
     from .constraints import cron_pending_jobs
     from .store import Commitment, create_commitment
 
-    mode = (cfg or {}).get("mode") if isinstance(cfg, dict) and cfg.get("mode") else (
-        get_commitment_config().get("mode", "balanced"))
+    # Security YOLO active on this thread → semantic bypass too (see
+    # _effective_mode; incident 2026-08-16 "YOLO keeps asking").
+    mode = _effective_mode(cfg, thread_id)
     if mode == "yolo":
         logger.info("[commitment] yolo — semantic bypass for %s source=%s", tool_name, source)
         return EffectDecision("allow", "yolo mode (semantic bypassed)", profile, audit)
@@ -438,12 +501,17 @@ def _resolve_cancel_job_act(
     pending = cron_pending_jobs(thread_id=thread_id, tenant_id=tenant_id)
 
     if pending is None:
-        # Couldn't verify (no scheduler / DB read failed). Fail OPEN — don't
-        # block every cancel when verification is unavailable; the gate is
-        # defense, not a hard dependency.
-        logger.info("[commitment] cancel_job %s — verification unavailable, audit-only", job_id)
-        return EffectDecision("allow", "cancel_job: verification unavailable (audit-only)",
-                              profile, audit)
+        logger.info(
+            "[commitment] cancel_job %s — verification unavailable, clarify",
+            job_id,
+        )
+        return EffectDecision(
+            "clarify",
+            "cancel_job: cannot verify pending jobs (scheduler unavailable)",
+            profile,
+            audit,
+            clarify_question="Could not list pending jobs. Cancel anyway?",
+        )
 
     commitment = Commitment(
         thread_id=thread_id or "", act="cancel_job", tool_name=tool_name,
@@ -463,19 +531,52 @@ def _resolve_cancel_job_act(
             profile=profile, audit=audit, commitment_id=cid,
         )
 
-    # not found / not pending / wrong thread / hallucinated → clarify with list
+    # Cross-thread / legacy fallback (incident 2026-08-16): jobs scheduled
+    # before thread capture carry thread_id='' and reminders get cancelled
+    # from a different interface than they were booked on (Telegram → Web).
+    # The thread-scoped lookup never matched those, so a VALID cancel
+    # clarified forever. The exact job_id match against ALL pending jobs is
+    # still the hallucination guard — a invented id matches nothing.
+    all_pending = cron_pending_jobs(thread_id=None, tenant_id=tenant_id)
+    if job_id and all_pending and any(j["job_id"] == job_id for j in all_pending):
+        commitment.status = "ready"
+        commitment.policy_decision = "allow"
+        cid = create_commitment(commitment, cfg=cfg)
+        logger.info(
+            "[commitment] allow cancel_job %s cid=%s (cross-thread match) source=%s",
+            job_id, cid, source,
+        )
+        return EffectDecision(
+            decision="allow",
+            reason=f"cancel_job: {job_id} is a pending job (cross-thread)",
+            profile=profile, audit=audit, commitment_id=cid,
+        )
+
+    # not found / not pending / hallucinated → clarify WITH the actual pending
+    # jobs as discrete options. Options are required here: an option-less
+    # clarify maps Approve → "cancel" in build_resume_value, which turned
+    # every approval into "cancelled by the user" (incident 2026-08-16).
     commitment.status = "needs_clarify"
     commitment.policy_decision = "clarify"
     commitment.confidence = 0.3
     cid = create_commitment(commitment, cfg=cfg)
-    listing = "; ".join(f"{j['job_id']} ({(j['prompt'] or '')[:40]})" for j in pending[:5]
+    listing_src = all_pending if all_pending else pending
+    listing = "; ".join(f"{j['job_id']} ({(j['prompt'] or '')[:40]})" for j in listing_src[:5]
                         ) or "(no pending jobs)"
-    q = (f"job_id {job_id!r} is not a pending job on this thread. "
+    q = (f"job_id {job_id!r} is not a pending job. "
          f"Current pending jobs: {listing}. Provide the correct job_id.")
+    options: list[dict[str, Any]] = []
+    for j in (listing_src or [])[:5]:
+        options.append({
+            "id": f"job_{j['job_id']}",
+            "label": f"Cancel {j['job_id']} — {(j['prompt'] or '')[:40]}",
+            "slots_patch": {"job_id": j["job_id"]},
+        })
+    options.append({"id": "cancel", "label": "Don't cancel anything", "slots_patch": None})
     logger.info("[commitment] clarify cancel_job %s cid=%s — not pending/matched", job_id, cid)
     return EffectDecision(
         decision="clarify", reason=q, profile=profile, audit=audit,
-        commitment_id=cid, clarify_question=q,
+        commitment_id=cid, clarify_question=q, options=options,
     )
 
 
@@ -581,7 +682,33 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
                     return EffectDecision("clarify", q, profile, audit, commitment_id=cid,
                                           clarify_question=q)
         except Exception:
-            pass  # fail-open if workspace resolution fails
+            logger.warning(
+                "[commitment] cwd pin check failed — clarify (not fail-open)",
+                exc_info=True,
+            )
+            c = Commitment(
+                thread_id=thread_id or "",
+                act="exec",
+                tool_name=tool_name,
+                goal_text=command[:200],
+                args_digest=_args_digest(args),
+                request_at=time.time(),
+                tenant_id=tenant_id,
+                slots={"command": command[:500], "cwd": str(cwd)},
+                confidence=0.2,
+            )
+            c.status = "needs_clarify"
+            c.policy_decision = "clarify"
+            cid = create_commitment(c, cfg=cfg)
+            q = "Could not verify cwd is inside the workspace. Run anyway?"
+            return EffectDecision(
+                "clarify",
+                q,
+                profile,
+                audit,
+                commitment_id=cid,
+                clarify_question=q,
+            )
     # 3. Safe command → allow (the HITL security card still applies separately).
     # Audit trail: the exec resolver returns before the generic allow logging,
     # so "silent allows" skipped the audit entirely (§8.2) — log here (audit).
@@ -600,8 +727,34 @@ def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, te
 
     target = str(args.get("to") or args.get("target") or args.get("recipient") or "")
     allowlist = (get_commitment_config().get("outbound_allowed_targets") or [])
-    # If no allowlist configured → allow (audit; the HITL security card still applies).
+    # Empty allowlist: balanced/autonomous stay HITL-permissive. Strict
+    # refuses to send until the operator names at least one target.
     if not allowlist:
+        mode = _effective_mode(cfg, thread_id)
+        if mode == "strict":
+            q = "No outbound allowlist is configured. Name an approved target or send anyway?"
+            c = Commitment(
+                thread_id=thread_id or "",
+                act="send_outbound",
+                tool_name=tool_name,
+                goal_text=f"send to {target[:100]}",
+                args_digest=_args_digest(args),
+                request_at=time.time(),
+                tenant_id=tenant_id,
+                slots={"target": target[:500]},
+                confidence=0.2,
+            )
+            c.status = "needs_clarify"
+            c.policy_decision = "clarify"
+            cid = create_commitment(c, cfg=cfg)
+            return EffectDecision(
+                "clarify",
+                q,
+                profile,
+                audit,
+                commitment_id=cid,
+                clarify_question=q,
+            )
         logger.info(
             "[commitment] allow outbound %s (no allowlist configured; HITL applies) source=%s",
             tool_name, source,

@@ -103,20 +103,27 @@ class LocalSentenceTransformerEmbedder:
         self._model_name = model_name
         self._dim = dim
         self._model: Any = None
+        self._model_lock = threading.Lock()
 
     def _ensure_model(self) -> Any:
         if self._model is not None:
             return self._model
-        try:
-            from sentence_transformers import SentenceTransformer
+        # Double-checked lock: concurrent first .encode() calls (e.g. a
+        # fan-out dispatching workers simultaneously) would each construct
+        # SentenceTransformer and double-load the ~2.3GB model without this.
+        with self._model_lock:
+            if self._model is not None:
+                return self._model
+            try:
+                from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self._model_name)
-            logger.info("[Embedder:local] Loaded %s", self._model_name)
-        except ImportError:
-            logger.warning("[Embedder:local] sentence-transformers not installed")
-        except Exception as exc:
-            logger.warning("[Embedder:local] load failed: %s", exc)
-        return self._model
+                self._model = SentenceTransformer(self._model_name)
+                logger.info("[Embedder:local] Loaded %s", self._model_name)
+            except ImportError:
+                logger.warning("[Embedder:local] sentence-transformers not installed")
+            except Exception as exc:
+                logger.warning("[Embedder:local] load failed: %s", exc)
+            return self._model
 
     @property
     def dim(self) -> int:

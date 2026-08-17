@@ -28,6 +28,22 @@ logger = logging.getLogger(__name__)
 _TRUNCATOR = TruncationMiddleware()
 
 
+def worker_iteration_budget(thread_id: str | None = None) -> int:
+    """Swarm worker ReAct ceiling from Settings / long-task, capped at Research (40).
+
+    Workers must not inherit a 500-round mission wall — that would multiply
+    cost across every dispatched worker. House default (often 15) applies;
+    Research (40) is the hard cap.
+    """
+    try:
+        from kazma_core.agent.long_task import PRESETS, resolve_turn_budgets
+
+        n = int(resolve_turn_budgets(thread_id)["max_iterations"])
+        return max(5, min(int(PRESETS["research"]), n))
+    except Exception:
+        return 20
+
+
 def _utc_now_iso() -> str:
     """Return the current UTC time in ISO-8601 format."""
     return datetime.now(UTC).isoformat()
@@ -191,7 +207,7 @@ class InProcessWorker(SwarmWorker):
         """
         import json as _json
 
-        MAX_ITERATIONS = 20
+        MAX_ITERATIONS = worker_iteration_budget()
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
         

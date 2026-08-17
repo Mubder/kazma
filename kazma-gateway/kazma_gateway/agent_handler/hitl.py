@@ -205,6 +205,48 @@ def _build_approval_prompt(
     return {"text": text, "markup": markup, "platform": plat}
 
 
+def apply_hitl_approval_markup(
+    ctx: dict[str, Any],
+    *,
+    platform: str,
+    hitl_approval: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach platform-native HITL buttons to a ``send_message`` context.
+
+    ``send_approval_request`` used to emit ASCII ``[ APPROVE ]`` / ``[ DENY ]``
+    because the text backend has no keyboard. The tool now passes
+    ``hitl_approval={"request_id": ...}`` and this helper copies the same
+    Approve / Deny / Approve-for-task markup used by graph interrupts.
+    """
+    out = dict(ctx or {})
+    if not isinstance(hitl_approval, dict):
+        return out
+    request_id = str(hitl_approval.get("request_id") or "").strip()
+    if not request_id:
+        return out
+    prompt = _build_approval_prompt(
+        {
+            "type": "hitl_approval",
+            "tool": str(hitl_approval.get("tool") or "approval"),
+            "args": hitl_approval.get("args") if isinstance(hitl_approval.get("args"), dict) else {},
+            "message": str(hitl_approval.get("title") or hitl_approval.get("message") or ""),
+        },
+        request_id,
+        platform=platform,
+    )
+    markup = prompt.get("markup")
+    if not markup:
+        return out
+    plat = (platform or "telegram").lower()
+    if plat == "telegram":
+        out["reply_markup"] = markup
+    elif plat == "discord":
+        out["components"] = markup
+    elif plat == "slack":
+        out["blocks"] = markup
+    return out
+
+
 async def _handle_hitl_resume(
     msg: IncomingMessage,
     graph: Any,

@@ -6,6 +6,7 @@ Enhanced with theme switching and user preferences.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -110,6 +111,52 @@ class SettingsPanel(VerticalScroll):
     def __init__(self) -> None:
         super().__init__()
         self._last_saved: dict[str, bool] = {}
+        self._live_settings: dict[str, Any] | None = None
+        self._settings_source = "local"
+
+    def _fetch_live_settings(self) -> dict[str, Any]:
+        """Flatten GET /api/settings (grouped by category) into dotted keys."""
+        try:
+            from kazma_core.runtime.local_api import request_json
+
+            grouped = request_json("GET", "/api/settings")
+        except Exception:
+            logger.debug("TUI settings live GET failed", exc_info=True)
+            self._settings_source = "local"
+            return {}
+        flat: dict[str, Any] = {}
+        if isinstance(grouped, dict):
+            for keys in grouped.values():
+                if isinstance(keys, dict):
+                    flat.update(keys)
+        self._settings_source = "server" if flat else "local"
+        return flat
+
+    def _live_map(self) -> dict[str, Any]:
+        if self._live_settings is None:
+            self._live_settings = self._fetch_live_settings()
+        return self._live_settings
+
+    def _persist_setting(self, key: str, value: Any, category: str) -> str:
+        """Write via the live server; fall back to this-process ConfigStore."""
+        try:
+            from kazma_core.runtime.local_api import request_json
+
+            request_json(
+                "PUT",
+                "/api/settings/single",
+                {"key": key, "value": value, "category": category},
+            )
+            if self._live_settings is not None:
+                self._live_settings[key] = value
+            self._settings_source = "server"
+            return "server"
+        except Exception:
+            logger.debug("TUI settings live PUT failed", exc_info=True)
+            from kazma_core.config_store import get_config_store
+
+            get_config_store().set(key, value, category=category)
+            return "local"
 
     @property
     def theme_manager(self) -> ThemeManager:
@@ -120,6 +167,9 @@ class SettingsPanel(VerticalScroll):
         return self._theme_manager_fallback
 
     def _read_config(self, key: str, default: bool) -> bool:
+        live = self._live_map()
+        if key in live:
+            return bool(live[key])
         try:
             from kazma_core.config_store import get_config_store
             val = get_config_store().get(key)
@@ -129,6 +179,12 @@ class SettingsPanel(VerticalScroll):
 
     def _read_config_num(self, key: str, cast: type, default: str):
         """Read a numeric V2 tunable, falling back to the default string."""
+        live = self._live_map()
+        if key in live and live[key] is not None:
+            try:
+                return cast(live[key])
+            except (TypeError, ValueError):
+                pass
         try:
             from kazma_core.config_store import get_config_store
             val = get_config_store().get(key)
@@ -156,8 +212,9 @@ class SettingsPanel(VerticalScroll):
         with Container(classes="settings-section"):
             yield Static("Feature & memory toggles", classes="settings-title")
             yield Static(
-                "[dim]Memory flags use ConfigStore (overrides kazma.yaml). "
-                "Consolidator writes facts + graph triples after turns.[/]",
+                "[dim]Toggles persist via PUT /api/settings/single (live server). "
+                "If the server is unreachable they save in this TUI process only. "
+                "Theme below stays local to this TUI.[/]",
                 classes="settings-hint",
             )
             sel: SelectionList = SelectionList(id="settings-toggles")
@@ -168,7 +225,7 @@ class SettingsPanel(VerticalScroll):
 
         # Preferences Section
         with Container(classes="settings-section"):
-            yield Static("Preferences", classes="settings-title")
+            yield Static("Preferences (this TUI only — not the Web theme)", classes="settings-title")
             yield Label(
                 f"Auto-scroll: {'on' if self.theme_manager.auto_scroll else 'off'}",
                 id="auto-scroll-label"
@@ -183,7 +240,7 @@ class SettingsPanel(VerticalScroll):
             yield Static("V2 cognitive engine · tunables", classes="settings-title")
             yield Static(
                 "[dim]Decay λ controls forgetting speed. TTLs control tier "
-                "lifecycle. Edit + Enter to persist (ConfigStore).[/]",
+                "lifecycle. Edit + Enter to persist on the live server.[/]",
                 classes="settings-hint",
             )
             for label, key, cast, default in self.V2_NUMERIC:
@@ -208,9 +265,17 @@ class SettingsPanel(VerticalScroll):
                 "per_user = each sender/session fully isolated.[/]",
                 classes="settings-hint",
             )
-            from kazma_core.config_store import get_config_store
+            _cur_mode = "shared"
+            live = self._live_map()
+            if "memory.tenant_mode" in live:
+                _cur_mode = str(live.get("memory.tenant_mode") or "shared")
+            else:
+                try:
+                    from kazma_core.config_store import get_config_store
 
-            _cur_mode = get_config_store().get("memory.tenant_mode", "shared") or "shared"
+                    _cur_mode = get_config_store().get("memory.tenant_mode", "shared") or "shared"
+                except Exception:
+                    _cur_mode = "shared"
             yield Select(
                 options=[
                     ("Share everything (single-user)", "shared"),
@@ -228,11 +293,10 @@ class SettingsPanel(VerticalScroll):
     def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged) -> None:
         sel = event.selection_list
         try:
-            from kazma_core.config_store import get_config_store
-            cs = get_config_store()
             # Only persist keys whose value actually flipped — avoid the
             # round-trip per hover/move event that SelectedChanged fires on.
             changed = 0
+            via = "server"
             confirm_hitl_disable = False
             for _label, key, _default in self.SETTINGS:
                 new_val = key in sel.selected
@@ -243,13 +307,15 @@ class SettingsPanel(VerticalScroll):
                         # _last_saved as-is so a cancel is a clean no-op.
                         confirm_hitl_disable = True
                         continue
-                    cs.set(key, new_val)
+                    category = key.split(".", 1)[0] if "." in key else "general"
+                    via = self._persist_setting(key, new_val, category)
                     self._last_saved[key] = new_val
                     changed += 1
             if changed:
-                self.notify(f"Settings saved ({changed})", severity="information")
+                where = "live server" if via == "server" else "this TUI process (server unreachable)"
+                self.notify(f"Settings saved ({changed}) on {where}", severity="information")
             if confirm_hitl_disable:
-                self._confirm_hitl_disable(sel, cs)
+                self._confirm_hitl_disable(sel)
         except Exception as e:
             self.notify(f"Failed to save settings: {e}", severity="error")
 
@@ -266,9 +332,9 @@ class SettingsPanel(VerticalScroll):
             self.notify(f"Invalid value for {key}: '{raw}'", severity="error")
             return
         try:
-            from kazma_core.config_store import get_config_store
-            get_config_store().set(key, val, category="memory")
-            self.notify(f"Saved {key} = {val}", severity="information")
+            via = self._persist_setting(key, val, "memory")
+            where = "live server" if via == "server" else "this TUI process"
+            self.notify(f"Saved {key} = {val} ({where})", severity="information")
         except Exception as e:
             self.notify(f"Failed to save {key}: {e}", severity="error")
 
@@ -277,23 +343,23 @@ class SettingsPanel(VerticalScroll):
         if event.select.id != "tenant-mode-select":
             return
         try:
-            from kazma_core.config_store import get_config_store
-
             val = event.value if event.value else "shared"
-            get_config_store().set("memory.tenant_mode", val, category="memory")
-            self.notify(f"Memory isolation: {val} (takes effect next turn)")
+            via = self._persist_setting("memory.tenant_mode", val, "memory")
+            where = "live server" if via == "server" else "this TUI process"
+            self.notify(f"Memory isolation: {val} on {where} (next turn)")
         except Exception as e:
             self.notify(f"Failed to save tenant mode: {e}", severity="error")
 
-    def _confirm_hitl_disable(self, sel: SelectionList, cs) -> None:
+    def _confirm_hitl_disable(self, sel: SelectionList) -> None:
         """Ask for explicit confirmation before disabling HITL approval."""
 
         def on_confirm(confirmed: bool) -> None:
             if confirmed:
-                cs.set(_HITL_KEY, False)
+                via = self._persist_setting(_HITL_KEY, False, "safety")
                 self._last_saved[_HITL_KEY] = False
+                where = "live server" if via == "server" else "this TUI process"
                 self.notify(
-                    "HITL approval disabled — danger tools will run without approval",
+                    f"HITL approval disabled on {where} — danger tools will run without approval",
                     severity="warning",
                 )
             else:
@@ -312,4 +378,5 @@ class SettingsPanel(VerticalScroll):
 
     def action_refresh_settings(self) -> None:
         """Refresh settings display."""
+        self._live_settings = None
         self.notify("Settings refreshed", severity="information")

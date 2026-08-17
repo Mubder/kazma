@@ -25,9 +25,31 @@ import httpx
 
 from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
-__all__ = ["LLMConfig", "LLMError", "LLMProvider", "LLMResponse", "ToolCall"]
+__all__ = ["LLMConfig", "LLMError", "LLMProvider", "LLMResponse", "ToolCall", "hoist_system_messages"]
 
 logger = logging.getLogger(__name__)
+
+
+def hoist_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Move system/developer messages to the head of the message list.
+
+    Kazma injects ``role: system`` notes mid-conversation (INTENT ENGINE plan
+    notes, iteration budget nudges, mission patches). Cloud providers accept
+    them anywhere, but strict local chat templates (LM Studio / llama.cpp
+    Qwen3) raise ``System message must be at the beginning`` when a system
+    message appears after the first user message. Hoisting preserves the
+    relative order within each group, keeps assistant/tool adjacency intact,
+    and is a no-op when the list is already ordered.
+    """
+    head = [
+        m for m in messages
+        if isinstance(m, dict) and m.get("role") in ("system", "developer")
+    ]
+    rest = [
+        m for m in messages
+        if not (isinstance(m, dict) and m.get("role") in ("system", "developer"))
+    ]
+    return head + rest
 
 # ── Configuration ─────────────────────────────────────────────────────
 
@@ -39,10 +61,12 @@ class LLMConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "gpt-4o-mini"
-    # 8192 default: 4096 truncates large tool-call payloads (e.g. file_write
-    # with a full HTML page) mid-JSON, causing unrecoverable parse failures.
-    # Safe ceiling across OpenAI (16k+), DeepSeek (8k), Anthropic (8k+).
-    max_tokens: int = 8192
+    # 16384 default: 8192 truncates content-generation tasks (document
+    # restructuring, research synthesis, long code) mid-stream, forcing
+    # the wasteful auto-retry (doubles inference cost). 16384 is safe
+    # across OpenAI (16k+), DeepSeek (16k+), Anthropic (8k+ with automatic
+    # mapping), Qwen (32k+). Callers can override per-call for short tasks.
+    max_tokens: int = 16384
     temperature: float = 0.7
     timeout: float = 60.0
     # Cost tracking (per 1M tokens, in USD)
@@ -304,7 +328,7 @@ class LLMProvider:
 
         payload: dict[str, Any] = {
             "model": LLMProvider._strip_routing_prefix(model or self.config.model),
-            "messages": messages,
+            "messages": hoist_system_messages(messages),
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,
         }

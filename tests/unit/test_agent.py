@@ -15,7 +15,11 @@ class TestAgentConfig:
     def test_default_values(self) -> None:
         config = AgentConfig()
         assert config.name == "kazma"
-        assert config.version == "0.2.0"
+        # Default version tracks the product version base (agent_runner.py),
+        # not a stale hardcoded string.
+        from kazma_core.version import get_version
+
+        assert config.version == get_version().split("+", 1)[0]
         assert config.language == "ar"
         assert config.rtl is True
         assert config.vector_dim == 384
@@ -41,7 +45,13 @@ class TestLoadConfig:
         monkeypatch.chdir(tmp_path)
         config = load_config(config_file)
         assert config.name == "test-agent"
-        assert config.version == "1.0"
+        # Display version is canonicalized from kazma_core.version (base+gSHA),
+        # NOT the YAML's static string — the YAML version is only a fallback
+        # when get_version() fails (agent_runner: "never trust a stale static
+        # string for banners/API").
+        from kazma_core.version import get_version
+
+        assert config.version == get_version()
 
 
 class TestKazmaAgent:

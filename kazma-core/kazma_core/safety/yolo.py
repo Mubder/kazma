@@ -16,7 +16,9 @@ __all__ = [
     "disable_yolo",
     "enable_yolo",
     "is_yolo_active",
+    "try_enable_yolo",
     "yolo_allowed",
+    "yolo_block_reason",
     "yolo_status",
     "YoloDisabledError",
 ]
@@ -37,12 +39,42 @@ def _truthy(raw: str | None) -> bool:
 def yolo_allowed() -> bool:
     """Return True when YOLO may be enabled.
 
+    Explicit ``KAZMA_ALLOW_YOLO=0`` always wins (lab or prod).
     Production (``KAZMA_PRODUCTION=1``) disables YOLO unless the operator
-    explicitly opts in with ``KAZMA_ALLOW_YOLO=1``.
+    opts in with ``KAZMA_ALLOW_YOLO=1``. Unset + non-production stays allowed.
     """
-    if not _truthy(os.environ.get("KAZMA_PRODUCTION")):
-        return True
-    return _truthy(os.environ.get("KAZMA_ALLOW_YOLO"))
+    raw = os.environ.get("KAZMA_ALLOW_YOLO")
+    if raw is not None and str(raw).strip() != "":
+        return _truthy(str(raw))
+    if _truthy(os.environ.get("KAZMA_PRODUCTION")):
+        return False
+    return True
+
+
+def yolo_block_reason() -> str:
+    """Operator-facing reason when ``yolo_allowed()`` is False."""
+    raw = os.environ.get("KAZMA_ALLOW_YOLO")
+    if raw is not None and str(raw).strip() != "" and not _truthy(str(raw)):
+        return (
+            "YOLO is turned off (KAZMA_ALLOW_YOLO=0). "
+            "This tool can still be approved once."
+        )
+    return (
+        "YOLO is disabled in production. "
+        "Set KAZMA_ALLOW_YOLO=1 to opt in."
+    )
+
+
+def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
+    """Enable session YOLO from a HITL card click.
+
+    The operator is already on an approval card — that is consent for
+    this thread. ``KAZMA_ALLOW_YOLO=0`` still blocks the ``/yolo`` slash
+    command (``enable_yolo`` without ``force``).
+    """
+    st = enable_yolo(thread_id, actor=actor, force=True)
+    st["downgraded"] = False
+    return st
 
 
 def _ttl_seconds() -> int:
@@ -55,24 +87,24 @@ def _ttl_seconds() -> int:
     return _DEFAULT_TTL_SECONDS
 
 
-def enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
+def enable_yolo(
+    thread_id: str, *, actor: str = "unknown", force: bool = False,
+) -> dict[str, Any]:
     """Enable YOLO for *thread_id*. Returns status dict for the user message.
 
     Raises:
-        YoloDisabledError: When production mode blocks YOLO (unless
-            ``KAZMA_ALLOW_YOLO=1``).
+        YoloDisabledError: When ``/yolo`` is blocked by policy, unless
+            *force* (HITL card click).
     """
-    if not yolo_allowed():
+    if not force and not yolo_allowed():
+        reason = yolo_block_reason()
         logger.warning(
-            "[SECURITY] YOLO blocked (KAZMA_PRODUCTION without KAZMA_ALLOW_YOLO) "
-            "thread=%s actor=%s",
+            "[SECURITY] YOLO blocked thread=%s actor=%s reason=%s",
             thread_id,
             actor,
+            reason,
         )
-        raise YoloDisabledError(
-            "YOLO is disabled in production. "
-            "Set KAZMA_ALLOW_YOLO=1 to opt in, or unset KAZMA_PRODUCTION."
-        )
+        raise YoloDisabledError(reason)
 
     from kazma_core.config_store import get_config_store
 
@@ -116,7 +148,12 @@ def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
 
 
 def is_yolo_active(thread_id: str | None) -> bool:
-    """True if YOLO is on and not expired for this thread."""
+    """True if this thread has a live YOLO grant (any danger tool).
+
+    Does not re-check ``yolo_allowed()``. A card-enabled session stays
+    YOLO until ``/yolo off`` or TTL — otherwise MCP/native tools keep
+    prompting after the first card.
+    """
     if not thread_id:
         return False
     st = yolo_status(thread_id)

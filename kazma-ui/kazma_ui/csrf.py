@@ -21,6 +21,7 @@ this middleware extends origin checking to every mutating ``/api/`` route:
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
@@ -70,11 +71,16 @@ def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
         # /api/* request carrying Origin/Referer 500'd). TestClient requests
         # carry no Origin, which is why the test suites never hit it.
         allowed: set[str] = {(request.url.hostname or "").lower()}
+        # Only trust X-Forwarded-Host when it matches the configured public
+        # origin — a client-supplied host must not enlarge the allowlist.
+        public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip()
+        public_host = _host_of(public) if public else None
         forwarded = request.headers.get("x-forwarded-host")
-        if forwarded:
-            allowed.update(
-                h.split(":")[0].strip().lower() for h in forwarded.split(",") if h.strip()
-            )
+        if forwarded and public_host:
+            for raw in forwarded.split(","):
+                cand = raw.split(":")[0].strip().lower()
+                if cand == public_host:
+                    allowed.add(cand)
 
         for candidate in (origin, referer):
             if not candidate:

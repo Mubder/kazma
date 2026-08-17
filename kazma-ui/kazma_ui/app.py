@@ -375,6 +375,14 @@ class KazmaAppBuilder:
             _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
         else:
             _cors_origins = _default_cors_origins
+        if "*" in _cors_origins:
+            logger.warning(
+                "[CORS] rejecting wildcard origin with credentials; "
+                "using default loopback origins"
+            )
+            _cors_origins = [o for o in _cors_origins if o != "*"] or list(
+                _default_cors_origins
+            )
 
         self.app.add_middleware(
             CORSMiddleware,
@@ -529,6 +537,11 @@ class KazmaAppBuilder:
             # Settings page scripts — must bust cache or the Embedder tab etc.
             # runs stale JS against fresh HTML (empty status cards symptom).
             _STATIC_DIR / "js" / "settings.js",
+            _STATIC_DIR / "js" / "settings_core.js",
+            _STATIC_DIR / "js" / "settings_hub.js",
+            _STATIC_DIR / "js" / "settings_agent.js",
+            _STATIC_DIR / "js" / "settings_integrations.js",
+            _STATIC_DIR / "js" / "settings_ops.js",
             _STATIC_DIR / "js" / "providers.js",
             _STATIC_DIR / "js" / "models.js",
             # MCP lifecycle controls run in a standalone page script; include
@@ -2050,12 +2063,11 @@ def main() -> None:
     # Security: default to localhost.  Use KAZMA_HOST env var to
     # explicitly bind to all interfaces (decoupled from KAZMA_SECRET).
     host = _os3.environ.get("KAZMA_HOST", "127.0.0.1")
-    if host == "0.0.0.0" and not _os3.environ.get("KAZMA_SECRET"):
-        logger.warning(
-            "[app] Binding to 0.0.0.0 without KAZMA_SECRET — "
-            "anyone on the network can access the UI. "
-            "Set KAZMA_SECRET to enable authentication. "
-            "Use /login for remote session cookies."
+    _loopback = host in ("127.0.0.1", "localhost", "::1")
+    if not _loopback and not (_os3.environ.get("KAZMA_SECRET") or "").strip():
+        raise SystemExit(
+            "Refusing non-loopback bind without KAZMA_SECRET. "
+            "Set KAZMA_HOST=127.0.0.1 or pin KAZMA_SECRET."
         )
 
     app = create_app()

@@ -13,11 +13,55 @@ from typing import Any
 
 import yaml
 
-__all__ = ["PermissionManager"]
+__all__ = [
+    "PermissionManager",
+    "permissions_enforce_requested",
+    "should_enforce_permissions",
+]
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG = Path(__file__).resolve().parent.parent.parent / "kazma-permissions.yaml"
+
+
+def permissions_enforce_requested() -> bool:
+    """True when the operator opted into fail-closed YAML tool permissions."""
+    import os
+
+    return (os.environ.get("KAZMA_PERMISSIONS_ENFORCE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def should_enforce_permissions(pm: PermissionManager | None = None) -> bool:
+    """Enforce only when a real ``users:`` list exists or the env flag is on.
+
+    The shipped ``kazma-permissions.yaml`` is a divisions template with no
+    ``users`` key — that must not deny every tool on a default install.
+    An auto-created empty ``default`` user (allowed=[], denied=[]) is
+    treated as unconfigured, not as deny-all.
+    """
+    if permissions_enforce_requested():
+        return True
+    try:
+        mgr = pm if pm is not None else PermissionManager()
+        return _has_configured_users(mgr)
+    except Exception:
+        return False
+
+
+def _has_configured_users(pm: PermissionManager) -> bool:
+    for name in pm.users():
+        allowed = [str(x) for x in pm.list_allowed(name)]
+        denied = [str(x) for x in pm.list_denied(name)]
+        if denied:
+            return True
+        if allowed:
+            return True
+    return False
 
 
 class PermissionManager:

@@ -14,9 +14,12 @@ from kazma_gateway.adapters.telegram_keyboards import (
 def test_approval_keyboard():
     kb = build_approval_keyboard("tid-1")
     rows = kb["inline_keyboard"]
-    assert len(rows) == 1
+    # 2 rows: [Approve, Deny] + [Approve for task] (task-scoped auto-approve
+    # added to eliminate approval spam on multi-step danger-tool tasks).
+    assert len(rows) == 2
     assert rows[0][0]["callback_data"] == "hitl:approve:tid-1"
     assert rows[0][1]["callback_data"] == "hitl:deny:tid-1"
+    assert rows[1][0]["callback_data"] == "hitl:approve_task:tid-1"
     # Adapter static methods stay compatible
     assert TelegramAdapter.build_approval_keyboard("x")["inline_keyboard"]
 

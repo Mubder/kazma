@@ -24,7 +24,13 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["OVERRIDE_PHRASE_RE", "is_override_delta", "format_untrusted_block"]
+__all__ = [
+    "OVERRIDE_PHRASE_RE",
+    "INJECTION_RE",
+    "is_override_delta",
+    "filter_injection",
+    "format_untrusted_block",
+]
 
 
 # Classic prompt-injection override markers. Matched case-insensitively.
@@ -50,6 +56,32 @@ _OVERRIDE_PATTERNS = [
 
 OVERRIDE_PHRASE_RE: re.Pattern[str] = re.compile(
     "|".join(_OVERRIDE_PATTERNS), re.IGNORECASE | re.DOTALL
+)
+
+# Broader store-path filter (compaction summaries, recalled memories).
+# is_override_delta stays the Soul-delta denylist; this additionally
+# catches jailbreak frames, role-play takeovers, and chat-template tags
+# that would not always match the override-phrase list.
+_INJECTION_EXTRA = [
+    r"\bdan\s+mode\b",
+    r"\bdeveloper\s+mode\b",
+    r"\bsudo\s+mode\b",
+    r"bypass\s+(?:your|the|all|any)\s+(?:safety|filters?|guardrails?|restrictions?)",
+    r"disable\s+(?:your|the|all|any)\s+(?:safety|filters?|guardrails?|restrictions?)",
+    r"from\s+now\s+on\s+you\s+(?:will|must|are|shall)\b",
+    r"your\s+new\s+(?:persona|role|identity)\s+is\b",
+    r"<\s*(?:instruction|system|prompt)\s*>",
+    r"\[/?INST\]",
+    r"<<\s*SYS\s*>>",
+    r"###\s*(?:system|instruction)\b",
+    r"exfiltrat",
+    r"repeat\s+(?:your|the|all)\s+(?:system|hidden|secret)\s+prompt",
+    r"pretend\s+(?:you\s+have\s+no|there\s+are\s+no)\s+(?:rules?|limits?|restrictions?)",
+]
+
+INJECTION_RE: re.Pattern[str] = re.compile(
+    "|".join(_OVERRIDE_PATTERNS + _INJECTION_EXTRA),
+    re.IGNORECASE | re.DOTALL,
 )
 
 # Tags that could close/open the untrusted-data fence early, letting injected
@@ -83,6 +115,24 @@ def is_override_delta(text: str) -> bool:
     if not text:
         return False
     return OVERRIDE_PHRASE_RE.search(text) is not None
+
+
+def filter_injection(text: str) -> str | None:
+    """Return *text* if it is safe to persist/re-inject, else ``None``.
+
+    Broader than :func:`is_override_delta`. Use this on the compaction
+    store path and any other untrusted summary that will be retrieved
+    into a future system prompt. Empty / whitespace-only input is
+    treated as unsafe (nothing useful to store).
+    """
+    if not text or not str(text).strip():
+        return None
+    body = str(text)
+    if is_override_delta(body):
+        return None
+    if INJECTION_RE.search(body) is not None:
+        return None
+    return body
 
 
 def format_untrusted_block(content: str, *, source: str) -> str:

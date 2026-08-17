@@ -43,9 +43,16 @@ class TestClassify:
         assert ModelRouter.classify("thanks") == TaskProfile.FAST
 
     def test_classify_default(self) -> None:
-        """Test 4: Generic messages → DEFAULT."""
-        assert ModelRouter.classify("tell me about Kuwait") == TaskProfile.DEFAULT
-        assert ModelRouter.classify("what's the weather like today?") == TaskProfile.DEFAULT
+        """Test 4: Generic >3-word messages → GENERAL; short non-fast → DEFAULT.
+
+        classify() returns GENERAL for substantive (>3 word) text and only
+        falls back to DEFAULT for short messages with no FAST keyword
+        (models/router.py).
+        """
+        assert ModelRouter.classify("tell me about Kuwait") == TaskProfile.GENERAL
+        assert ModelRouter.classify("what's the weather like today?") == TaskProfile.GENERAL
+        # 3 words, no FAST keyword → DEFAULT fallback.
+        assert ModelRouter.classify("hmm interesting indeed") == TaskProfile.DEFAULT
 
 
 class TestRoute:

@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 # Mail scopes required for list/read/send/modify. gmail.modify covers read+labels;
 # gmail.send is redundant but listed so consent screen shows "Send email".
 # Do NOT rely on openid/email alone — that yields ACCESS_TOKEN_SCOPE_INSUFFICIENT.
+# drive.file is for the offsite backup provider (cloud_sync.py GoogleDriveSync).
 GMAIL_MAIL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/drive.file",
 )
 GMAIL_SCOPES = " ".join(
     [
@@ -36,7 +38,8 @@ GMAIL_SCOPES = " ".join(
 SCOPE_FIX_HINT = (
     "Gmail token is missing mail scopes. In Google Cloud Console → APIs & Services → "
     "OAuth consent screen → Data access / Scopes, add: "
-    "…/auth/gmail.modify and …/auth/gmail.send (or …/auth/gmail.readonly for read-only). "
+    "…/auth/gmail.modify and …/auth/gmail.send (or …/auth/gmail.readonly for read-only), "
+    "plus …/auth/drive.file if you use Google Drive offsite backups. "
     "Enable Gmail API. Add yourself as a Test user. Then Settings → Email → Disconnect, "
     "Connect with Google again, and approve Gmail access (not only your email address)."
 )
@@ -167,6 +170,32 @@ async def _probe_gmail_api(client: httpx.AsyncClient, access: str) -> dict[str, 
         return {"ok": False, "status_code": 0, "body": str(exc)}
 
 
+async def _probe_drive_api(client: httpx.AsyncClient, access: str) -> tuple[bool, str]:
+    """Soft-probe the Drive API so the backup card can show the real state.
+
+    Drive is optional for Gmail — a failure here must NEVER fail the connect.
+    Returns (ok, reason) where reason is a Google error reason or a short message.
+    """
+    try:
+        r = await client.get(
+            "https://www.googleapis.com/drive/v3/about",
+            params={"fields": "user"},
+            headers={"Authorization": f"Bearer {access}"},
+        )
+        if r.status_code == 200:
+            return True, "ok"
+        reason = ""
+        try:
+            from kazma_core.backup.cloud_sync import google_error_reason
+
+            reason = google_error_reason(r)
+        except Exception:
+            pass
+        return False, reason or f"HTTP {r.status_code}"
+    except Exception as exc:
+        return False, str(exc)
+
+
 async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
     """Exchange code for tokens; store only if Gmail API scopes work."""
     meta = pop_state(state)
@@ -242,12 +271,25 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
         if probe.get("email") and not email_addr:
             email_addr = str(probe["email"])
 
+        # Soft-verify the drive.file scope for the offsite backup provider.
+        # The Gmail probe above proves mail scopes only; a consent screen that
+        # lacks …/auth/drive.file silently strips it, and Google never adds
+        # scopes to existing grants — the backup card needs to know.
+        drive_ok, drive_reason = await _probe_drive_api(client, access)
+        vault_store(
+            "email.gmail.drive_ok",
+            "ok" if drive_ok else drive_reason,
+            category="email",
+        )
+
     persist_gmail_tokens(access, refresh, email_addr, scopes=scope_str)
     return {
         "ok": True,
         "email": email_addr,
         "scopes": scope_str,
         "scopes_ok": True if scope_ok else bool(probe.get("ok")),
+        "drive_ok": drive_ok,
+        "drive_error": None if drive_ok else drive_reason,
         "message": (
             f"Gmail connected via OAuth{f' as {email_addr}' if email_addr else ''}. "
             "Mail scopes verified."
@@ -296,6 +338,7 @@ def clear_gmail_oauth() -> dict[str, Any]:
             "email.gmail.refresh_token",
             "email.gmail.app_password",
             "email.gmail.scopes",
+            "email.gmail.drive_ok",
         ):
             try:
                 v.delete(name)

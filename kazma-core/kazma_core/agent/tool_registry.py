@@ -56,7 +56,13 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any, get_type_hints
 
-__all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "tool"]
+__all__ = [
+    "LocalTool",
+    "LocalToolRegistry",
+    "get_tool_registry",
+    "reset_permission_manager_cache",
+    "tool",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -85,30 +91,61 @@ _PERMISSION_MANAGER: Any = None
 _PERMISSION_MANAGER_RESOLVED = False
 
 
-def _get_permission_manager() -> Any:
-    """Return a PermissionManager when kazma-permissions.yaml defines a
-    ``users:`` map, else ``None`` (feature off — backward compatible).
+class _FailClosedPermissions:
+    """Used when enforce is on and the YAML cannot be loaded."""
 
-    The shipped kazma-permissions.yaml is a *divisions* template with no
-    ``users`` key; enforcing it as an allowlist would deny every tool on a
-    default install. Lazy + cached: the file is read once per process.
+    def is_allowed(self, tool_name: str, user: str = "default") -> bool:
+        return False
+
+
+def reset_permission_manager_cache() -> None:
+    """Drop the process cache (tests / live YAML reload)."""
+    global _PERMISSION_MANAGER, _PERMISSION_MANAGER_RESOLVED
+    _PERMISSION_MANAGER = None
+    _PERMISSION_MANAGER_RESOLVED = False
+
+
+def _get_permission_manager() -> Any:
+    """Return a PermissionManager when enforcement is active, else ``None``.
+
+    Active when ``kazma-permissions.yaml`` has a ``users:`` map **or**
+    ``KAZMA_PERMISSIONS_ENFORCE=1``. The shipped file is a divisions
+    template with no ``users`` key — that stays off. Load errors fail
+    closed only when enforcement was requested.
     """
     global _PERMISSION_MANAGER, _PERMISSION_MANAGER_RESOLVED
     if _PERMISSION_MANAGER_RESOLVED:
         return _PERMISSION_MANAGER
     _PERMISSION_MANAGER_RESOLVED = True
     try:
-        from kazma_core.permissions import PermissionManager
+        from kazma_core.permissions import (
+            PermissionManager,
+            permissions_enforce_requested,
+            should_enforce_permissions,
+        )
 
         pm = PermissionManager()
-        users = pm.users()
-        if users:
+        if should_enforce_permissions(pm):
             _PERMISSION_MANAGER = pm
             logger.info(
-                "[ToolRegistry] permissions allowlist active for users: %s", users
+                "[ToolRegistry] permissions allowlist active for users: %s",
+                pm.users(),
+            )
+        elif permissions_enforce_requested():
+            _PERMISSION_MANAGER = _FailClosedPermissions()
+            logger.warning(
+                "[ToolRegistry] KAZMA_PERMISSIONS_ENFORCE=1 but YAML unusable "
+                "— denying all tools"
             )
     except Exception as exc:
+        from kazma_core.permissions import permissions_enforce_requested
+
         logger.debug("[ToolRegistry] permissions manager unavailable: %s", exc)
+        if permissions_enforce_requested():
+            _PERMISSION_MANAGER = _FailClosedPermissions()
+            logger.warning(
+                "[ToolRegistry] permissions load failed under enforce — deny all"
+            )
     return _PERMISSION_MANAGER
 
 
@@ -464,24 +501,32 @@ class LocalToolRegistry:
                 "is_error": True,
             }
 
-        # Commitment Layer Phase 1 (plan §R2.6): authorize_effect audit choke.
-        # Audit-only here in Phase 1 (enforce_unknown_mutators=False) — extends
-        # observability to the IDE/swarm registry path (the §13 "IDE/registry
-        # free-fire" residual). The memory-corruption half is already blocked
-        # at mutate_belief; the schedule/fs/outbound semantic gate + live
-        # enforcement arrive in Phase 2 via this same call point. The try/except
-        # keeps the audit choke from ever breaking tool execution.
+        # Commitment gate on the IDE/swarm path. Live-reads
+        # enforce_unknown_mutators (default on). Deny is honored. Exceptions
+        # fail-closed when enforcement is on so a broken gate cannot free-fire.
         try:
             from kazma_core.safety.commitment import authorize_effect as _authorize
+            from kazma_core.safety.commitment.config import get_commitment_config
 
+            _enforce = bool(get_commitment_config().get("enforce_unknown_mutators"))
             _dec = _authorize(
-                tool_name, arguments, enforce_unknown_mutators=False,
+                tool_name, arguments, enforce_unknown_mutators=_enforce,
                 context={"source": "registry"},
             )
             if _dec.decision == "deny":
                 return {"content": f"[commitment] blocked: {_dec.reason}", "is_error": True}
         except Exception:
-            logger.debug("[ToolRegistry] authorize_effect choke skipped", exc_info=True)
+            logger.debug("[ToolRegistry] authorize_effect choke failed", exc_info=True)
+            try:
+                from kazma_core.safety.commitment.config import get_commitment_config
+
+                if bool(get_commitment_config().get("enforce_unknown_mutators")):
+                    return {
+                        "content": "[commitment] blocked: authorization failed closed",
+                        "is_error": True,
+                    }
+            except Exception:
+                pass
 
         # ── Retryable exception types (network/timeout only) ──────
         retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, asyncio.TimeoutError)
@@ -520,8 +565,6 @@ class LocalToolRegistry:
         # the shipped file is a divisions template (no users), and enforcing
         # an empty allowlist would deny everything on default installs.
         try:
-            from kazma_core.permissions import PermissionManager
-
             pm = _get_permission_manager()
             if pm is not None and not pm.is_allowed(tool_name, user="default"):
                 logger.warning(
@@ -532,12 +575,35 @@ class LocalToolRegistry:
                     "content": (
                         f"Error: Tool '{tool_name}' is not in the permissions allowlist "
                         "(kazma-permissions.yaml users.default). Add it to `allowed` or "
-                        "remove the allowlist to enable."
+                        "set allowed: ['*'] for the single-operator default."
                     ),
                     "is_error": True,
                 }
         except Exception as exc:
+            from kazma_core.permissions import permissions_enforce_requested
+
+            if permissions_enforce_requested() or _get_permission_manager() is not None:
+                logger.warning(
+                    "[ToolRegistry] permissions check failed closed: %s", exc
+                )
+                return {
+                    "content": (
+                        f"Error: Tool '{tool_name}' blocked — permissions check "
+                        "failed closed (KAZMA_PERMISSIONS_ENFORCE or users: map)."
+                    ),
+                    "is_error": True,
+                }
             logger.debug("[ToolRegistry] permissions check skipped: %s", exc)
+
+        # ── Division sandbox / MCP allowlist (fail-open if unset) ──
+        try:
+            from kazma_core.division_runtime import check_division_tool
+
+            _div_err = await check_division_tool(tool_name)
+            if _div_err:
+                return {"content": _div_err, "is_error": True}
+        except Exception as exc:
+            logger.debug("[ToolRegistry] division check skipped: %s", exc)
 
         # ── Safety check — gate danger-tier tools (HITL) ───────────
         # Use the async check() so a real bus adapter can post an approval
@@ -682,8 +748,15 @@ class LocalToolRegistry:
                 else:
                     content = str(result)
 
-                _record_procedural_outcome(tool_name, arguments, success=True)
-                return {"content": content, "is_error": False}
+                # Plain-string tools report failures by returning an
+                # "Error: …" string (database_client, file tools, …). Flag
+                # those as errors so downstream consumers (supervisor retry
+                # logic, tool-result accounting) see the failure. Prefix check
+                # only — "Error" as a substring in successful content (e.g. a
+                # file named document_error_handling.md) must NOT trip this.
+                _is_err = content.startswith("Error:") or content.startswith("⚠️")
+                _record_procedural_outcome(tool_name, arguments, success=not _is_err)
+                return {"content": content, "is_error": _is_err}
 
             except retryable_exc as exc:
                 last_exc = exc
@@ -1082,9 +1155,17 @@ class LocalToolRegistry:
                     store = get_config_store()
                     tg_id = store.get("connectors.telegram.swarm_chat_id")
                     if not tg_id:
-                        allowed = store.get("connectors.telegram.allowed_users") or []
+                        allowed = store.get("connectors.telegram.allowed_users")
+                        # ConfigStore may return a string ("1804015016" or
+                        # "123,456") or a list — normalize. The old code did
+                        # allowed[0] on a string, taking the FIRST CHARACTER
+                        # ("1") → chat_id 1 → "chat not found" 400.
+                        if isinstance(allowed, str):
+                            allowed = [u.strip() for u in allowed.replace(",", " ").split() if u.strip()]
+                        elif not isinstance(allowed, list):
+                            allowed = []
                         if allowed:
-                            tg_id = allowed[0]
+                            tg_id = str(allowed[0])
                     if tg_id:
                         target_id = f"telegram:{tg_id}"
                 except Exception as exc:

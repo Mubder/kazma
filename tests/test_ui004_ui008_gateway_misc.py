@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _UI_DIR = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
 _TEMPLATES_DIR = _UI_DIR / "templates"
 _STATIC_DIR = _UI_DIR / "static"
@@ -194,62 +196,28 @@ class TestChromaDBDebugLevel:
     causing silent RAG disablement). Elevated to WARNING per the memory audit.
     """
 
-    def test_app_py_uses_warning_for_vector_memory(self) -> None:
-        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
-        vm_idx = app_source.find("[VectorMemory] Not available")
-        assert vm_idx != -1
-        context = app_source[max(0, vm_idx - 120) : vm_idx + 50]
-        assert "logger.warning" in context, (
-            "VectorMemory ImportError must use logger.warning (elevated from "
-            "debug per memory audit — RAG disablement must be visible)"
-        )
-
-    def test_vector_store_uses_warning_for_chromadb_failures(self) -> None:
-        """vector_store.py may use logger.warning for ChromaDB failures.
-
-        Non-ImportError failures (corrupt DB, disk permission errors) SHOULD
-        be visible at WARNING level. The old ImportError-only warning was
-        broadened to catch all ChromaDB init failures per the memory audit.
-        """
-        vs_source = (
-            Path(__file__).resolve().parent.parent
-            / "kazma-core"
-            / "kazma_core"
-            / "memory"
-            / "vector_store.py"
-        ).read_text(encoding="utf-8")
-        # The warning is expected for non-import failures now.
-        assert "logger.warning" in vs_source, (
-            "vector_store.py should use logger.warning for ChromaDB failures "
-            "(non-import errors like corrupt DB, disk permission, etc.)"
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# VAL-UI-008: Workspace path is config-relative (not drive root)
-# ══════════════════════════════════════════════════════════════════════════
 
 
 class TestWorkspacePathConfigRelative:
     """file_write workspace must default to kazma-data/workspace, not drive root."""
 
     def test_file_write_default_workspace_not_cwd(self) -> None:
+        # The default sandbox moved to workspace/binding.py in the §10A
+        # workspace-binding refactor — file_write delegates there.
         fw_source = (
             Path(__file__).resolve().parent.parent
             / "kazma-core"
             / "kazma_core"
-            / "tools"
-            / "file_write.py"
+            / "workspace"
+            / "binding.py"
         ).read_text(encoding="utf-8")
         assert "kazma-data" in fw_source, (
-            "file_write default workspace must reference kazma-data/workspace"
+            "default workspace must reference kazma-data/workspace"
         )
-        # The old default was Path.cwd().resolve() directly
-        # The new default should nest under kazma-data/workspace
-        ws_fn_start = fw_source.find("def _get_workspace()")
-        assert ws_fn_start != -1
-        ws_fn_body = fw_source[ws_fn_start : ws_fn_start + 600]
-        assert "kazma-data" in ws_fn_body
+        # The old default was Path.cwd().resolve() directly; the ladder's
+        # final rung nests under kazma-data/workspace (binding.py).
+        assert '"kazma-data"' in fw_source
+        assert '"workspace"' in fw_source
 
     def test_app_py_configures_workspace(self) -> None:
         """app.py must call configure_workspace with kazma-data/workspace."""

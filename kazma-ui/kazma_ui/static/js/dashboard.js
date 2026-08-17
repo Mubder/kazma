@@ -424,6 +424,11 @@
   // ── System Resources (via Telemetry SSE) ──────────────
   function startResourceMonitor() {
     var eventSource = new EventSource('/api/telemetry/stream');
+    window.__kazmaEventSources = window.__kazmaEventSources || [];
+    window.__kazmaEventSources.push(eventSource);
+    window.kazmaOnSoftNavLeave = function () {
+      try { eventSource.close(); } catch (e) {}
+    };
     eventSource.onmessage = function(event) {
       try {
         var data = JSON.parse(event.data);
@@ -470,6 +475,7 @@
     var emptyEl = $('sessions-empty');
     var tableEl = $('sessions-table');
     var tbody = $('sessions-tbody');
+    var cardsEl = $('sessions-cards');
     var clearBtn = $('clear-all-btn');
     var expandWrap = $('sessions-expand-wrap');
     var expandBtn = $('sessions-expand-btn');
@@ -479,9 +485,11 @@
     function renderSessionRows() {
       if (!tbody) return;
       tbody.innerHTML = '';
+      if (cardsEl) cardsEl.innerHTML = '';
       var list = _sessionsCache || [];
       var showAll = _sessionsExpanded || list.length <= SESSION_PREVIEW;
       var visible = showAll ? list : list.slice(0, SESSION_PREVIEW);
+      var lists = window.KazmaDashLists;
       visible.forEach(function(s) {
         var tr = document.createElement('tr');
         tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
@@ -516,7 +524,17 @@
         delTd.appendChild(btn);
         tr.appendChild(delTd);
         tbody.appendChild(tr);
+        if (cardsEl && lists && lists.buildSessionCard) {
+          cardsEl.insertAdjacentHTML('beforeend', lists.buildSessionCard(s));
+        }
       });
+      if (cardsEl) {
+        cardsEl.querySelectorAll('.dash-session-delete').forEach(function(delBtn) {
+          delBtn.addEventListener('click', function() {
+            window._deleteSession && window._deleteSession(delBtn.getAttribute('data-thread-id'));
+          });
+        });
+      }
       if (expandWrap) {
         if (list.length > SESSION_PREVIEW) {
           expandWrap.style.display = 'block';
@@ -550,6 +568,7 @@
           _sessionsCache = [];
           if (emptyEl) emptyEl.style.display = 'block';
           if (tableEl) tableEl.style.display = 'none';
+          if (cardsEl) cardsEl.innerHTML = '';
           if (expandWrap) expandWrap.style.display = 'none';
           if (summaryEl) summaryEl.textContent = 'No sessions';
           return;

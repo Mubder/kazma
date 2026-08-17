@@ -291,7 +291,7 @@ class WorkerRegistry:
         generalists = self.find_generalists()
         if generalists:
             logger.info(
-                "[WorkerRegistry] No specialist via unified routing — falling back to generalists: %s",
+                "[WorkerRegistry] No specialist via unified routing — falling back to generalists for %r: %s",
                 task_description[:60],
                 [g.name for g in generalists],
             )

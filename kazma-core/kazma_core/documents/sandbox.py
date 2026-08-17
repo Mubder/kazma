@@ -357,7 +357,10 @@ def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
         _, alive = psutil.wait_procs([*descendants, parent], timeout=1.0)
         for item in alive:
             item.kill()
-    except (ImportError, OSError):
+    except (ImportError, OSError, Exception):
+        # NoSuchProcess (child already exited between kill and psutil lookup),
+        # ImportError (psutil not installed), or OSError — fall through to the
+        # stdlib terminate path.
         process.terminate()
         try:
             process.wait(timeout=1.0)

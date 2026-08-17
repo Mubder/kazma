@@ -390,7 +390,24 @@ class SwarmEngine:
         )
 
         try:
-            if task.timeout and float(task.timeout) > 0:
+            # Pattern executors (pipeline/fan_out/consult/conditional) already
+            # apply ``task.timeout`` PER STEP / per worker internally
+            # (patterns.py ``wait_timeout``). Wrapping them here in a whole-task
+            # deadline of the same value wrongly capped the TOTAL runtime at one
+            # step's budget — e.g. a 3-step pipeline with timeout=0.01 was killed
+            # before step 1 finished (2026-08-15 audit). Only single-worker
+            # DISPATCH keeps the whole-task deadline as its safety net.
+            _per_step_patterns = (
+                TaskType.PIPELINE,
+                TaskType.FAN_OUT,
+                TaskType.CONSULT,
+                TaskType.CONDITIONAL,
+            )
+            if (
+                task.timeout
+                and float(task.timeout) > 0
+                and task.type not in _per_step_patterns
+            ):
                 return await asyncio.wait_for(
                     self._dispatch_inner(task, started, task_span),
                     timeout=float(task.timeout),

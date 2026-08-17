@@ -63,6 +63,7 @@ class HtmlEngine:
     # ------------------------------------------------------------------ #
     def render(self, model: ContentModel, *, assets_dir: Any = None) -> str:
         self._assets_dir = assets_dir
+        self._last_heading_text = ""
         title = self._first_title(model)
         body_parts: list[str] = []
         for block in model.blocks:
@@ -90,7 +91,7 @@ class HtmlEngine:
         chrome = self.profile.chrome
         title_esc = esc(title) if title else ""
         header = (
-            f'  <div class="header-card"><h1>{title_esc}</h1></div>\n'
+            f'  <header class="doc-title"><h1>{title_esc}</h1></header>\n'
             if (header_card and title_esc) else ""
         )
         return (
@@ -108,51 +109,93 @@ class HtmlEngine:
         )
 
     def _css(self) -> str:
-        """Themed stylesheet. EN/AR differ only by direction (from the profile)."""
+        """Themed stylesheet. EN/AR differ by direction + typeface + measure."""
+        from kazma_core.documents.style_theme import theme_cs_size, theme_fonts
+
         t = self.theme
         direction = self.profile.html_dir
         text_align_last = "right" if self.profile.rtl else "left"
+        fonts = theme_fonts(rtl=self.profile.rtl)
+        if self.profile.rtl:
+            body_pt = theme_cs_size()
+            title_pt = theme_cs_size(t.get("title_size", 22))
+            h1_pt = theme_cs_size(t.get("h1_size", 17))
+            table_pt = theme_cs_size(10)
+        else:
+            body_pt = t.get("body_size", 11)
+            title_pt = t.get("title_size", 22)
+            h1_pt = t.get("h2_size", 15)
+            table_pt = 10
+        leading = t.get("line_height_ar", 1.85) if self.profile.rtl else t.get("line_height", 1.65)
+        rule = t.get("accent", "#3b82f6")
         return f"""
     *, *::before, *::after {{ box-sizing: border-box; }}
     body {{
-      font-family: 'Segoe UI', 'IBM Plex Sans Arabic', 'IBM Plex Sans', -apple-system, sans-serif;
+      font-family: {fonts["html"]};
       direction: {direction};
       text-align: justify;
       text-align-last: {text_align_last};
-      line-height: 1.65;
+      line-height: {leading};
       color: {t["body"]};
-      font-size: 11pt;
+      font-size: {body_pt}pt;
       max-width: 820px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 28px 32px 40px;
       background: #fff;
     }}
-    .header-card {{
-      background: {t["accent"]};
-      color: #fff;
-      padding: 16px 20px;
-      margin: 0 0 22px 0;
-      border-radius: 6px;
+    .doc-title {{
+      margin: 0 0 28px 0;
+      padding: 0 0 14px 0;
+      border-bottom: 2px solid {rule};
     }}
-    .header-card h1 {{ font-size: 20pt; margin: 0; color: #fff; }}
+    .doc-title h1 {{
+      font-size: {title_pt}pt;
+      font-weight: 650;
+      margin: 0;
+      color: {t["heading"]};
+      letter-spacing: {('-0.01em' if self.profile.rtl else '-0.02em')};
+      line-height: 1.25;
+    }}
     .content-body h1, .content-body h2 {{
-      background: {t["heading_fill"]};
-      color: #fff !important;
-      padding: 8px 14px;
-      margin: 22px 0 12px 0;
-      border-radius: 4px;
-      font-size: 15pt;
+      background: none;
+      color: {t["heading_fill"]} !important;
+      padding: 0 0 6px 0;
+      margin: 26px 0 12px 0;
+      border: none;
+      border-inline-start: 3px solid {rule};
+      padding-inline-start: 12px;
+      font-size: {h1_pt}pt;
+      font-weight: 650;
     }}
     .content-body h3 {{
       color: {t["heading"]};
-      border-bottom: 2px solid {t["border"]};
+      border-bottom: 1px solid {rule};
       padding-bottom: 4px;
-      margin: 16px 0 8px 0;
+      margin: 18px 0 8px 0;
+    }}
+    .content-body h1, .content-body h2, .content-body h3 {{
+      break-after: avoid;
+      page-break-after: avoid;
+    }}
+    .content-body h1 + *, .content-body h2 + *, .content-body h3 + * {{
+      break-before: avoid;
+      page-break-before: avoid;
     }}
     p {{ text-align: justify; margin: 0 0 0.8em 0; }}
     table {{
       width: 100%; border-collapse: collapse; margin: 16px 0;
-      direction: {direction}; font-size: 10pt;
+      direction: {direction}; font-size: {table_pt}pt;
+    }}
+    thead {{ display: table-header-group; }}
+    tr {{ break-inside: avoid; page-break-inside: avoid; }}
+    .math-display {{
+      direction: ltr !important; text-align: center; unicode-bidi: isolate;
+      font-family: 'Cambria Math', 'Consolas', serif; font-size: 13pt;
+      margin: 12px 0;
+    }}
+    .math-inline {{
+      direction: ltr !important; unicode-bidi: isolate;
+      font-family: 'Cambria Math', 'Consolas', serif;
     }}
     th, td {{ border: 1px solid {t["table_grid"]}; padding: 8px 12px; text-align: start; }}
     th {{ background-color: {t["table_header_bg"]}; font-weight: 600; color: {t["table_header_fg"]}; }}
@@ -218,8 +261,17 @@ class HtmlEngine:
                 return ""
             return f"    <h3>{esc(block.text)}</h3>"
         if isinstance(block, HeadingBlock):
+            from kazma_core.documents.heading_text import headings_equivalent
+
+            prev = getattr(self, "_last_heading_text", "") or ""
+            if headings_equivalent(block.text, prev):
+                return ""
+            self._last_heading_text = block.text or ""
             slug = self._slugify(block.text)
-            return f'    <h2 id="{slug}" style="background:{self.theme["heading_fill"]}">{esc(block.text)}</h2>'
+            return (
+                f'    <h2 id="{slug}" style="color:{self.theme["heading_fill"]}">'
+                f"{esc(block.text)}</h2>"
+            )
         if isinstance(block, BodyBlock):
             return self._markdown_to_html(block.text, indent="    ")
         if isinstance(block, TOCBlock):
@@ -302,7 +354,8 @@ class HtmlEngine:
     def _markdown_to_html(self, text: str, *, indent: str = "") -> str:
         """Render markdown to HTML via the ``markdown`` library, with bidi
         isolation of Latin tokens when RTL."""
-        prepared = self._isolate(text) if self.profile.rtl else text
+        prepared, held = self._hold_math(text or "")
+        prepared = self._isolate(prepared) if self.profile.rtl else prepared
         try:
             import markdown
             html_body = markdown.markdown(
@@ -311,9 +364,57 @@ class HtmlEngine:
             )
         except ImportError:
             html_body = "<pre>" + _html_lib.escape(prepared) + "</pre>"
+        for i, frag in enumerate(held):
+            html_body = html_body.replace(f"@@MATH{i}@@", frag)
         if indent:
             html_body = "\n".join(indent + ln if ln.strip() else ln for ln in html_body.splitlines())
         return html_body
+
+    @staticmethod
+    def _hold_math(text: str) -> tuple[str, list[str]]:
+        """Replace ``$`` / ``$$`` math with placeholders the markdown pass won't eat."""
+        from kazma_core.documents.math_text import (
+            latex_to_unicode,
+            split_display_math,
+            split_inline_math,
+        )
+
+        held: list[str] = []
+
+        def park(html_frag: str) -> str:
+            held.append(html_frag)
+            return f"@@MATH{len(held) - 1}@@"
+
+        pieces: list[str] = []
+        for kind, chunk in split_display_math(text):
+            if kind == "math":
+                pieces.append(
+                    park(
+                        f'<p class="math-display" dir="ltr">'
+                        f"{_html_lib.escape(latex_to_unicode(chunk))}</p>"
+                    )
+                )
+                continue
+            inner: list[str] = []
+            for k2, c2 in split_inline_math(chunk):
+                if k2 == "math":
+                    inner.append(
+                        park(
+                            f'<span class="math-inline" dir="ltr">'
+                            f"{_html_lib.escape(latex_to_unicode(c2))}</span>"
+                        )
+                    )
+                elif k2 == "money":
+                    inner.append(
+                        park(
+                            f'<span class="math-inline" dir="ltr">'
+                            f"${_html_lib.escape(c2.strip())}</span>"
+                        )
+                    )
+                else:
+                    inner.append(c2)
+            pieces.append("".join(inner))
+        return "".join(pieces), held
 
     def _isolate(self, text: str) -> str:
         """Wrap URLs and Latin standard tokens in ``<bdi dir="ltr">`` so they

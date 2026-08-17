@@ -60,10 +60,14 @@ async def _index_worker_l4_memory(
     # No worker→produced belief is written — nothing reads it and it flooded
     # the Beliefs UI; per-worker recall is served by the episode's worker
     # metadata + embedding instead of a worker_vectors_<name> table.
+    # to_thread: store_swarm_result → embedder.encode → SentenceTransformer
+    # cold-start (~12s first-use) BLOCKS the event loop if run inline.
     try:
+        import asyncio as _aio
+
         from kazma_core.memory.swarm_bridge import store_swarm_result
 
-        store_swarm_result(name, task_id or "", snippet, meta)
+        await _aio.to_thread(store_swarm_result, name, task_id or "", snippet, meta)
     except Exception:
         logger.debug("[SwarmEngine] V2 swarm_result store failed for %s", name, exc_info=True)
 
@@ -276,17 +280,24 @@ async def dispatch_worker(
 
         # Index successful worker output as a V2 swarm_result episode under
         # this worker's name so swarm memory is not only "default".
+        # Fire-and-forget: the memory index (embedder encode → potential
+        # SentenceTransformer cold-start) must NOT delay the dispatch return
+        # or the pipeline's per-step timeout. The task runs in the background.
         if worker_result.status == "success" and (worker_result.output or prompt):
             try:
-                await _index_worker_l4_memory(
-                    worker_name=getattr(worker, "name", "") or "default",
-                    prompt=prompt or "",
-                    output=str(worker_result.output or ""),
-                    task_id=getattr(context, "task_id", "") if context is not None else "",
+                import asyncio as _aio_create
+
+                _aio_create.create_task(
+                    _index_worker_l4_memory(
+                        worker_name=getattr(worker, "name", "") or "default",
+                        prompt=prompt or "",
+                        output=str(worker_result.output or ""),
+                        task_id=getattr(context, "task_id", "") if context is not None else "",
+                    )
                 )
             except Exception:
                 logger.debug(
-                    "[SwarmEngine] worker memory index skipped for %s",
+                    "[SwarmEngine] worker memory index spawn failed for %s",
                     getattr(worker, "name", "?"),
                     exc_info=True,
                 )

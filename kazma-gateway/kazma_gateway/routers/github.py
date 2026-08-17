@@ -51,40 +51,13 @@ def parse_github_slug(url: str) -> tuple[str, str] | None:
 
 
 def save_github_token_to_env(token: str) -> None:
-    """Save GITHUB_TOKEN to the root .env file securely."""
-    # Resolve .env relative to CWD only (no hardcoded absolute fallback —
-    # that was a portability bug). If absent, mirror to the live env only.
-    env_path = Path.cwd() / ".env"
+    """Bind GITHUB_TOKEN for this process only.
 
-    content = ""
-    if env_path.exists():
-        try:
-            content = env_path.read_text(encoding="utf-8")
-        except Exception:
-            pass
-
-    lines = content.splitlines()
-    updated = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("GITHUB_TOKEN=") or stripped.startswith("GITHUB_PAT="):
-            new_lines.append(f"GITHUB_TOKEN={token}")
-            updated = True
-        elif stripped.startswith("connectors.github.token="):
-            new_lines.append(f"connectors.github.token={token}")
-        else:
-            new_lines.append(line)
-
-    if not updated:
-        new_lines.append(f"GITHUB_TOKEN={token}")
-
-    try:
-        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        os.environ["GITHUB_TOKEN"] = token
-        os.environ["GITHUB_PAT"] = token
-    except Exception as exc:
-        logger.error("[github] Failed to write to .env file: %s", exc)
+    Persistence is ConfigStore (vault-encrypts sensitive keys). Writing the
+    raw PAT into ``.env`` left a plaintext secret on disk (audit B8).
+    """
+    os.environ["GITHUB_TOKEN"] = token
+    os.environ["GITHUB_PAT"] = token
 
 
 class AppConfigSaveRequest(BaseModel):
@@ -110,10 +83,9 @@ async def save_token(body: TokenSaveRequest) -> JSONResponse:
         logger.error("[github/token] Failed to write to ConfigStore: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save token to database.") from exc
 
-    # Save to .env
     save_github_token_to_env(token)
 
-    return JSONResponse({"status": "ok", "message": "GitHub token successfully configured and synchronized."})
+    return JSONResponse({"status": "ok", "message": "GitHub token saved to the vault-backed ConfigStore."})
 
 
 @router.post("/app/config")

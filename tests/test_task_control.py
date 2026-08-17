@@ -30,7 +30,12 @@ def test_cancel_not_active():
     )
 
 
-def test_cancel_active_calls_finalize_and_handle():
+def test_cancel_active_live_handle_defers_finalize():
+    """With a live asyncio handle, only cancel() fires — finalize is DEFERRED.
+
+    Audit H7: dispatch's CancelledError path finalizes once; calling finalize
+    here too double-finalized the task.
+    """
     t = _task("a")
     handle = MagicMock()
     handle.done.return_value = False
@@ -43,6 +48,19 @@ def test_cancel_active_calls_finalize_and_handle():
     )
     assert ok is True
     handle.cancel.assert_called_once()
+    finalize.assert_not_called()  # deferred to the CancelledError path
+
+
+def test_cancel_active_no_handle_finalizes_immediately():
+    t = _task("b")
+    finalize = MagicMock()
+    ok = cancel_active_task(
+        task_id="b",
+        active_tasks={"b": t},
+        task_handles={},
+        finalize=finalize,
+    )
+    assert ok is True
     finalize.assert_called_once()
     assert finalize.call_args.kwargs["status"] == "cancelled"
 

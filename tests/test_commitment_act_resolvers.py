@@ -51,6 +51,17 @@ def test_outbound_no_allowlist_allows(ops_db):
     assert d.decision == "allow"
 
 
+def test_outbound_strict_empty_allowlist_clarifies(ops_db):
+    """Strict mode with no allowlist must not silently send."""
+    d = authorize_effect(
+        "email_send",
+        {"to": "anyone@example.com"},
+        cfg={"mode": "strict"},
+    )
+    assert d.decision == "clarify"
+    assert "allowlist" in (d.clarify_question or "").lower()
+
+
 def test_outbound_allowlisted_target_allows(ops_db, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(ops_db))  # for ConfigStore
     # Set an allowlist via ConfigStore

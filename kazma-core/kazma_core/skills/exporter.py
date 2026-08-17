@@ -16,7 +16,7 @@ try:
 except ImportError:
     markdown = None  # type: ignore
 
-from kazma_core.documents.style_theme import THEME
+from kazma_core.documents.style_theme import THEME, theme_cs_size
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +45,53 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
     )
     text = iso_pattern.sub(r'<bdi dir="ltr">\1</bdi>', text)
 
-    text = re.sub(
-        r"\$\$(.*?)\$\$",
-        r'<div class="math-block" dir="ltr">\1</div>',
-        text,
-        flags=re.DOTALL,
+    from kazma_core.documents.math_text import (
+        latex_to_unicode,
+        looks_like_currency,
+        split_display_math,
+        split_inline_math,
     )
-    text = re.sub(r"\$(.*?)\$", r'<span class="math-inline" dir="ltr">\1</span>', text)
+
+    held: list[str] = []
+
+    def _park(frag: str) -> str:
+        held.append(frag)
+        return f"@@MATH{len(held) - 1}@@"
+
+    rebuilt: list[str] = []
+    for kind, chunk in split_display_math(text):
+        if kind == "math":
+            rebuilt.append(
+                _park(
+                    f'<div class="math-block" dir="ltr">'
+                    f"{html_lib.escape(latex_to_unicode(chunk))}</div>"
+                )
+            )
+            continue
+        inner: list[str] = []
+        for k2, c2 in split_inline_math(chunk):
+            if k2 == "math":
+                inner.append(
+                    _park(
+                        f'<span class="math-inline" dir="ltr">'
+                        f"{html_lib.escape(latex_to_unicode(c2))}</span>"
+                    )
+                )
+            elif k2 == "money" or looks_like_currency(c2):
+                inner.append(
+                    _park(
+                        f'<span class="math-inline" dir="ltr">'
+                        f"${html_lib.escape(c2.strip())}</span>"
+                    )
+                )
+            else:
+                inner.append(c2)
+        rebuilt.append("".join(inner))
+    text = "".join(rebuilt)
 
     if markdown is not None:
         try:
-            return markdown.markdown(
+            html_body = markdown.markdown(
                 text,
                 extensions=[
                     "tables",
@@ -67,9 +103,12 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
             )
         except Exception as exc:
             logger.debug("[exporter] markdown extension compile fallback: %s", exc)
-            return markdown.markdown(text)
-
-    return f"<pre>{html_lib.escape(text)}</pre>"
+            html_body = markdown.markdown(text)
+    else:
+        html_body = f"<pre>{html_lib.escape(text)}</pre>"
+    for i, frag in enumerate(held):
+        html_body = html_body.replace(f"@@MATH{i}@@", frag)
+    return html_body
 
 
 def _css(*, rtl: bool, brand: str) -> str:
@@ -77,6 +116,16 @@ def _css(*, rtl: bool, brand: str) -> str:
     t = THEME
     text_align_last = "right" if rtl else "left"
     direction = "rtl" if rtl else "ltr"
+    if rtl:
+        body_pt = theme_cs_size()
+        title_pt = theme_cs_size(20)
+        h_pt = theme_cs_size(14)
+        table_pt = theme_cs_size(10)
+    else:
+        body_pt = t.get("body_size", 11)
+        title_pt = 20
+        h_pt = 14
+        table_pt = 9.5
     return f"""
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
@@ -100,32 +149,32 @@ def _css(*, rtl: bool, brand: str) -> str:
     *, *::before, *::after {{ box-sizing: border-box; }}
 
     body {{
-      font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans Arabic', 'Sakkal Majalla', 'IBM Plex Sans', -apple-system, sans-serif;
       direction: {direction};
       text-align: justify;
       text-align-last: {text_align_last};
-      line-height: 1.65;
+      line-height: {t.get("line_height_ar", 1.85) if rtl else t.get("line_height", 1.65)};
       color: {t["body"]};
-      font-size: 10.5pt;
+      font-size: {body_pt}pt;
     }}
 
     .header-card {{
-      background: {t["accent"]};
-      color: #fff;
-      padding: 14px 16px;
-      margin: 0 0 20px 0;
-      border-radius: 4px;
+      background: none;
+      color: {t["heading"]};
+      padding: 0 0 14px 0;
+      margin: 0 0 22px 0;
+      border-bottom: 2px solid {t.get("accent", "#3b82f6")};
     }}
 
     .header-card h1 {{
-      font-size: 18pt;
+      font-size: {title_pt}pt;
       margin: 0 0 8px 0;
-      color: #fff;
+      color: {t["heading"]};
     }}
 
     .metadata-grid {{
       font-size: 8.5pt;
-      color: #e2e8f0;
+      color: {t["muted"]};
       display: table;
       width: 100%;
     }}
@@ -136,17 +185,24 @@ def _css(*, rtl: bool, brand: str) -> str:
     }}
 
     h1, h2 {{
-      background: {t["heading_fill"]};
-      color: #fff !important;
-      padding: 8px 12px;
-      margin: 18px 0 10px 0;
-      border-radius: 3px;
-      font-size: 14pt;
+      background: none;
+      color: {t["heading_fill"]} !important;
+      padding: 0 0 6px 0;
+      margin: 20px 0 10px 0;
+      border-inline-start: 3px solid {t.get("accent", "#3b82f6")};
+      padding-inline-start: 12px;
+      font-size: {h_pt}pt;
+      break-after: avoid;
+      page-break-after: avoid;
+    }}
+    h1 + *, h2 + *, h3 + * {{
+      break-before: avoid;
+      page-break-before: avoid;
     }}
 
     h3 {{
       color: {t["heading"]};
-      border-bottom: 2px solid {t["border"]};
+      border-bottom: 1px solid {t.get("accent", "#3b82f6")};
       padding-bottom: 4px;
       margin: 14px 0 8px 0;
     }}
@@ -156,12 +212,19 @@ def _css(*, rtl: bool, brand: str) -> str:
       margin: 0 0 0.75em 0;
     }}
 
+    thead {{ display: table-header-group; }}
+    tr {{ break-inside: avoid; page-break-inside: avoid; }}
+    .math-block, .math-inline {{
+      direction: ltr !important; unicode-bidi: isolate;
+      font-family: 'Cambria Math', 'IBM Plex Mono', Consolas, serif;
+    }}
+    .math-block {{ text-align: center; font-size: 13pt; margin: 12px 0; }}
     table {{
       width: 100%;
       border-collapse: collapse;
       margin: 16px 0;
       direction: inherit;
-      font-size: 9.5pt;
+      font-size: {table_pt}pt;
     }}
 
     th, td {{

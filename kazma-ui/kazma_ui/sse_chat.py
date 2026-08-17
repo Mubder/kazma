@@ -752,6 +752,19 @@ async def _stream_langgraph_events(
             except Exception:
                 pass
             # Enriched done + turn_complete (content+model) for reliable delivery
+            # Cumulative session totals mirror the WS turn_complete keys so both
+            # transports render identical badge values (AC#3) and a page refresh
+            # restores correct totals instead of the last turn's numbers.
+            sess_tokens, sess_cost = int(total_tokens or 0), round(float(total_cost or 0.0), 6)
+            if session_id:
+                try:
+                    from kazma_ui.session_manager import get_session_manager as _gsm
+
+                    sess_tokens, sess_cost = _gsm().add_usage(
+                        session_id, int(total_tokens or 0), float(total_cost or 0.0)
+                    )
+                except Exception:
+                    logger.debug("[SSE] add_usage skipped for %s", session_id, exc_info=True)
             _done_payload = {
                 "tokens": total_tokens,
                 "cost": round(total_cost, 6),
@@ -761,6 +774,8 @@ async def _stream_langgraph_events(
                 "content": content_acc or "",
                 "model": _done_model,
                 "turn_id": current_turn_id(),
+                "session_tokens": sess_tokens,
+                "session_cost": round(float(sess_cost or 0.0), 6),
             }
             yield _sse_frame("done", _done_payload)
             yield _sse_frame("turn_complete", _done_payload)
@@ -934,13 +949,15 @@ def create_sse_chat_router(
         Web and Telegram share one checkpointer season.
         """
         session = _get_store().get_or_create(session_id)
-        # Platform-linked seasons: session_id == thread_id always.
+        # One id everywhere: Web session_id == LangGraph thread_id, same as
+        # gw-* platform seasons. Existing rows keep a previously stored
+        # thread_id so we never orphan a checkpointer chain.
         if session_id.startswith("gw-"):
             if session.thread_id != session_id:
                 session.thread_id = session_id
                 _get_store().put(session)
         elif not session.thread_id:
-            session.thread_id = str(uuid.uuid4())
+            session.thread_id = session_id
             _get_store().put(session)
         return session, session.thread_id
 
@@ -985,6 +1002,16 @@ def create_sse_chat_router(
             )
 
         session_id = body.get("session_id") or str(uuid.uuid4())
+        workspace_id = str(body.get("workspace_id") or "").strip()
+        _ws_token = None
+        _model_token = None
+        if workspace_id:
+            try:
+                from kazma_core.ide.workspace_scope import pin_workspace
+
+                _ws_token = pin_workspace(workspace_id)
+            except Exception:
+                logger.debug("[SSE] workspace pin skipped", exc_info=True)
 
         # ── Optional IDE context (Phase: IDE chat box) ───────────────
         # When the IDE chat sends the currently-open file as context, we
@@ -998,69 +1025,78 @@ def create_sse_chat_router(
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
+        try:
+            from kazma_core.sessions.directory import stamp_last_platform
+
+            stamp_last_platform(thread_id, "web")
+        except Exception:
+            pass
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
-        # Deep research slash (runs pipeline, skips graph)
+        try:
+            from kazma_core.agent.slash_turns import rewrite_work_slash
+
+            _rw = rewrite_work_slash(raw_msg)
+            if _rw:
+                raw_msg = _rw
+                user_message = _rw
+        except Exception:
+            logger.debug("[SSE] slash rewrite skipped", exc_info=True)
+        # Bare /research with no topic — usage only. Work slashes fall through
+        # to the supervisor (same brain as Telegram / TUI).
         if raw_msg.lower().startswith("/research"):
-            from kazma_core.tools.research_pipeline import run_research_pipeline
-
-            parts = raw_msg.split(maxsplit=2)
-            if len(parts) == 1:
-                topic = ""
-                depth = "deep"
-            elif parts[1].lower() in ("deep", "full", "paper", "comprehensive"):
-                topic = parts[2] if len(parts) > 2 else ""
-                depth = "deep"
-            else:
-                topic = raw_msg[len("/research") :].strip()
-                depth = "deep"
-
             async def _research_gen() -> AsyncGenerator[str, None]:
-                if not topic:
-                    yield _sse_frame(
-                        "token",
-                        {"content": "Usage: `/research deep <topic>`"},
-                    )
-                    yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
-                    return
                 yield _sse_frame(
                     "token",
-                    {"content": f"🔬 Deep research starting: **{topic}**…\n\n"},
-                )
-                try:
-                    stages: list[str] = []
-
-                    async def _progress_sse(stage: str, message: str) -> None:
-                        stages.append(f"_{stage}: {message}_\n")
-
-                    out = await run_research_pipeline(
-                        topic,
-                        depth=depth,
-                        max_sources=8,
-                        progress_cb=_progress_sse,
-                        export_docx=True,
-                    )
-                    if stages:
-                        yield _sse_frame(
-                            "token",
-                            {"content": "\n".join(stages[-12:]) + "\n"},
+                    {
+                        "content": (
+                            "Usage: `/research deep <topic>` — runs through "
+                            "the same agent as chat (tools + HITL)."
                         )
-                    yield _sse_frame("token", {"content": out})
-                    try:
-                        session.add_message("assistant", out)
-                        _get_store().put(session)
-                    except Exception:
-                        pass
-                except Exception as exc:
-                    yield _sse_frame(
-                        "token",
-                        {"content": f"\nResearch failed: {exc}"},
-                    )
-                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 0})
+                    },
+                )
+                yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
 
             return StreamingResponse(
                 _research_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        from kazma_core.agent.capacity_commands import (
+            apply_capacity_command,
+            is_capacity_command,
+        )
+
+        if is_capacity_command(raw_msg, require_slash=True):
+            _cap = apply_capacity_command(
+                thread_id, raw_msg, actor=f"web:{session_id[:12]}",
+            )
+            session.messages.append({"role": "user", "content": raw_msg})
+            session.messages.append({
+                "role": "assistant",
+                "content": _cap.reply,
+                "kind": "capacity",
+            })
+            try:
+                _get_store().put(session)
+            except Exception:
+                logger.exception("[SSE] failed to persist /long message")
+
+            async def _long_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("capacity", {
+                    "long_active": _cap.long_active,
+                    "yolo_active": _cap.yolo_active,
+                    "action": _cap.action,
+                    "reply": _cap.reply,
+                })
+                yield _sse_frame("done", {
+                    "tokens": 1, "cost": 0.0, "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _long_generator(),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
@@ -1135,14 +1171,18 @@ def create_sse_chat_router(
                     confirmation = f"🛡️ {yde}"
 
             session.messages.append({"role": "user", "content": raw_msg})
-            session.messages.append({"role": "assistant", "content": confirmation})
+            session.messages.append({
+                "role": "assistant",
+                "content": confirmation,
+                "kind": "capacity",
+            })
             try:
                 _get_store().put(session)
             except Exception:
                 logger.exception("[SSE] failed to persist YOLO message")
 
             async def _yolo_generator() -> AsyncGenerator[str, None]:
-                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("capacity", {"action": "yolo", "reply": confirmation})
                 yield _sse_frame("done", {
                     "tokens": 1,
                     "cost": 0.0,
@@ -1226,169 +1266,54 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        # ── Intercept /swarm <task> and /research <topic> ──────────
-        # These dispatch directly through SwarmEngine — bypassing the LLM's
-        # tool-call decision — so swarm research always works from chat.
-        # Match at start of line OR when embedded in Arabic text (e.g.
-        # "استخدم /research لعمل بحث عن...").
-        _lower = raw_msg.lower().strip()
-        _swarm_cmd = None
-        _swarm_text = ""
-        if _lower.startswith("/swarm ") or _lower == "/swarm":
-            _swarm_cmd = "swarm"
-            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
-        elif _lower.startswith("/research ") or _lower == "/research":
-            _swarm_cmd = "research"
-            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
-        elif "/research" in _lower:
-            # Embedded in Arabic/other text — extract the topic after /research.
-            # Use regex to handle Arabic ligatures/attachments before the command.
-            import re as _re
-            _m = _re.search(r'/research\s+(.*)', raw_msg, _re.DOTALL)
-            if _m:
-                _swarm_cmd = "research"
-                _swarm_text = _m.group(1).strip()
-                # Strip trailing /swarm or other trailing commands.
-                for _trailer in [" /swarm", "/swarm", " /research"]:
-                    if _swarm_text.lower().endswith(_trailer):
-                        _swarm_text = _swarm_text[:-len(_trailer)].strip()
-        elif "/swarm" in _lower and not _lower.startswith("/swarm"):
-            import re as _re
-            _m = _re.search(r'/swarm\s+(.*)', raw_msg, _re.DOTALL)
-            if _m:
-                _swarm_cmd = "swarm"
-                _swarm_text = _m.group(1).strip()
+        # Work /swarm and /research are rewritten above and fall through
+        # to the supervisor. Bare `/swarm` is usage only.
+        if raw_msg.lower().strip() in ("/swarm", "/swarm help"):
+            async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {
+                    "content": (
+                        "🐝 `/swarm <task>` goes through the same agent as chat "
+                        "(tools + HITL). Example: `/swarm analyze competitor pricing`\n"
+                        "`/swarm status` and `/swarm list` still answer instantly."
+                    )
+                })
+                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
 
-        if _swarm_cmd:
-            _is_research = _swarm_cmd == "research"
-            _task_text = _swarm_text
-            if not _task_text:
-                _usage = (
-                    "🔍 *Usage:* `/research <topic>` — dispatches the swarm to research a topic.\n\n"
-                    "Example: `/research latest hair transplant techniques`"
-                ) if _is_research else (
-                    "🐝 *Usage:* `/swarm <task>` — dispatches a task to the swarm.\n\n"
-                    "Example: `/swarm analyze competitor pricing`"
-                )
+            return StreamingResponse(
+                _swarm_usage_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
-                async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
-                    yield _sse_frame("token", {"content": _usage})
-                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-
-                return StreamingResponse(
-                    _swarm_usage_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
-
-            try:
-                import asyncio as _asyncio
-                from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
-
-                _engine = get_swarm_engine()
-                if _engine is None:
-                    raise RuntimeError("Swarm engine not initialized")
-
-                # Auto-register a researcher worker if none exist.
-                if not _engine.worker_names:
-                    from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
-                    _profile = registry.get_active_profile() if registry else {}
-                    _engine.add_worker(WorkerConfig(
-                        name="researcher",
-                        type="in_process",
-                        model=_profile.get("model", ""),
-                        provider=_profile.get("provider", ""),
-                        role="researcher",
-                        system_prompt="You are a Researcher. Use web_search, read_url, and crawl_site to research thoroughly.",
-                        capabilities=WorkerCapabilities(
-                            role="researcher", expertise=["research"],
-                            tools=["web_search", "read_url", "crawl_site"],
-                        ),
-                    ))
-
-                _worker = _engine.worker_names[0]
-                _swarm_task = SwarmTask(
-                    prompt=_task_text,
-                    workers=[_worker],
-                    type=TaskType.DISPATCH,
-                    timeout=300.0,
-                    metadata={"source": "chat", "kind": "research" if _is_research else "swarm"},
-                )
-                logger.info("[SSE] /swarm dispatch: task=%s worker=%s", _swarm_task.id, _worker)
-
-                # Run dispatch in foreground (blocking) and stream the result.
-                async def _swarm_dispatch_gen() -> AsyncGenerator[str, None]:
-                    yield _sse_frame("token", {"content": f"🐝 Dispatching to swarm worker '{_worker}'...\n\n"})
-                    try:
-                        result = await _engine.dispatch(_swarm_task)
-                        _output = ""
-                        if result:
-                            _output = (
-                                result.aggregated_output
-                                or result.synthesized_output
-                                or (result.worker_results[0].output if result.worker_results else "")
-                                or "(no output)"
-                            )
-                            _cost = getattr(result, "total_cost", 0.0)
-                            _dur = getattr(result, "duration_seconds", 0.0)
-                            _output = f"✅ Swarm task complete (cost: ${_cost:.4f}, duration: {_dur:.1f}s)\n\n{_output}"
-                        else:
-                            _output = "⚠️ Swarm task returned no result."
-                    except Exception as exc:
-                        _output = f"⚠️ Swarm task failed: {exc}"
-                        logger.exception("[SSE] /swarm dispatch failed")
-                    yield _sse_frame("token", {"content": _output})
-                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-
-                return StreamingResponse(
-                    _swarm_dispatch_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
-            except Exception as exc:
-                logger.exception("[SSE] /swarm intercept failed")
-
-                async def _swarm_err_gen() -> AsyncGenerator[str, None]:
-                    yield _sse_frame("token", {"content": f"⚠️ Could not dispatch swarm: {exc}"})
-                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-
-                return StreamingResponse(
-                    _swarm_err_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
-
-        # ── Apply model from request body ──────────────────────────
-        # Ensure the process-wide active model matches the UI selection
-        # (single-operator). Uses the switch service so the graph holder
-        # and agent.llm rebind together — never orphan reconfigure.
+        # ── Per-turn model pin (does NOT mutate the process-wide registry)
         requested_model = (body.get("model") or "").strip()
+        if not requested_model:
+            try:
+                for _m in reversed(session.messages or []):
+                    if isinstance(_m, dict) and _m.get("role") == "assistant" and _m.get("model"):
+                        requested_model = str(_m.get("model") or "").strip()
+                        if requested_model:
+                            break
+            except Exception:
+                pass
         if requested_model:
             try:
-                from kazma_core.runtime.model_switch import ensure_active_model
+                from kazma_core.runtime.turn_model import pin_turn_model
 
-                _sw = ensure_active_model(
-                    requested_model,
-                    agent=_get_agent(),
-                    registry=registry,
-                )
-                if _sw.ok:
-                    logger.info(
-                        "SSE chat: ensure-active model=%s provider=%s",
-                        _sw.model,
-                        _sw.provider,
-                    )
-                else:
-                    logger.warning(
-                        "SSE chat: ensure-active model %s failed: %s",
-                        requested_model,
-                        _sw.error,
-                    )
+                _model_token = pin_turn_model(requested_model)
+                logger.info("SSE chat: turn-model pin=%s (not process-wide)", requested_model)
             except Exception as exc:
-                logger.warning("SSE chat: model ensure failed: %s", exc)
+                logger.warning("SSE chat: turn-model pin failed: %s", exc)
 
         # Live LLM for key validation (getter, not mount snapshot).
         llm_provider = _get_llm()
+        if requested_model:
+            try:
+                from kazma_core.model_registry import get_model_registry
+
+                llm_provider = get_model_registry().get_client(requested_model)
+            except Exception:
+                pass
 
         # ── Pre-stream API key validation (Bug 4 fix) ───────────────
         # If the provider is a real cloud API but the API key is the
@@ -1680,15 +1605,23 @@ def create_sse_chat_router(
             # Track if we've started persisting assistant messages
             assistant_message_started = False
             # Stamp active model on the assistant bubble for reload / meta.
-            _turn_model = ""
-            try:
-                from kazma_core.model_registry import get_model_registry
+            _turn_model = requested_model
+            if not _turn_model:
+                try:
+                    from kazma_core.runtime.turn_model import current_turn_model
 
-                _turn_model = str(
-                    get_model_registry().get_active_profile().get("model") or ""
-                )
-            except Exception:
-                _turn_model = ""
+                    _turn_model = current_turn_model() or ""
+                except Exception:
+                    _turn_model = ""
+            if not _turn_model:
+                try:
+                    from kazma_core.model_registry import get_model_registry
+
+                    _turn_model = str(
+                        get_model_registry().get_active_profile().get("model") or ""
+                    )
+                except Exception:
+                    _turn_model = ""
             # Temporary message dict for incremental persistence
             temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
             if _turn_model:
@@ -1723,6 +1656,7 @@ def create_sse_chat_router(
                             "title": str(data.get("tool_name") or "tool"),
                             "detail": str(data.get("inputs") or ""),
                             "state": "running",
+                            "ts": _dt.now(UTC).isoformat(),
                         })
                     elif ev_type == "tool_result":
                         activity_log.append({
@@ -1730,6 +1664,7 @@ def create_sse_chat_router(
                             "title": str(data.get("tool_name") or "tool"),
                             "detail": str(data.get("result") or ""),
                             "state": "done",
+                            "ts": _dt.now(UTC).isoformat(),
                         })
                     elif ev_type == "status_update":
                         status = str(data.get("status") or "").strip()
@@ -1740,6 +1675,7 @@ def create_sse_chat_router(
                                 "kind": "status",
                                 "title": status,
                                 "state": "running",
+                                "ts": _dt.now(UTC).isoformat(),
                             })
                 except Exception:
                     logger.debug("[SSE] activity capture failed", exc_info=True)
@@ -1776,6 +1712,10 @@ def create_sse_chat_router(
                         session_id,
                     )
 
+            # Per-turn usage captured from the done/turn_complete frame so the
+            # final persist can stamp it on the assistant message (reload stats).
+            turn_usage: dict[str, Any] = {}
+
             try:
                 async for frame in _stream_langgraph_events(
                     graph=current_graph,
@@ -1803,6 +1743,11 @@ def create_sse_chat_router(
                             _persist_now()
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
                         _record_activity(ev_type, data)
+                    elif ev_type in ("done", "turn_complete"):
+                        if data.get("tokens") is not None:
+                            turn_usage["tokens"] = data.get("tokens")
+                        if data.get("cost") is not None:
+                            turn_usage["cost"] = data.get("cost")
 
                     yield frame
 
@@ -1814,6 +1759,12 @@ def create_sse_chat_router(
                             session.messages[-1]["content"] = content_acc
                             _attach_activity(session.messages[-1])
                             session.messages[-1].setdefault("ts", _ats)
+                            if "tokens" in turn_usage:
+                                session.messages[-1]["tokens"] = int(turn_usage["tokens"] or 0)
+                            if "cost" in turn_usage:
+                                session.messages[-1]["cost"] = round(
+                                    float(turn_usage["cost"] or 0.0), 6
+                                )
                     else:
                         final_msg: dict[str, Any] = {
                             "role": "assistant",
@@ -1821,6 +1772,10 @@ def create_sse_chat_router(
                             "ts": _ats,
                         }
                         _attach_activity(final_msg)
+                        if "tokens" in turn_usage:
+                            final_msg["tokens"] = int(turn_usage["tokens"] or 0)
+                        if "cost" in turn_usage:
+                            final_msg["cost"] = round(float(turn_usage["cost"] or 0.0), 6)
                         session.messages.append(final_msg)
                 try:
                     _get_store().put(session)
@@ -1886,8 +1841,28 @@ def create_sse_chat_router(
                     pass
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
+        async def _guarded_events() -> AsyncGenerator[str, None]:
+            try:
+                async for frame in _event_generator():
+                    yield frame
+            finally:
+                if _ws_token is not None:
+                    try:
+                        from kazma_core.ide.workspace_scope import reset_workspace
+
+                        reset_workspace(_ws_token)
+                    except Exception:
+                        pass
+                if _model_token is not None:
+                    try:
+                        from kazma_core.runtime.turn_model import reset_turn_model
+
+                        reset_turn_model(_model_token)
+                    except Exception:
+                        pass
+
         return StreamingResponse(
-            _event_generator(),
+            _guarded_events(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -1899,10 +1874,12 @@ def create_sse_chat_router(
     @r.get("/api/chat/sessions")
     async def list_sessions() -> list[dict[str, Any]]:
         """List all active chat sessions (shared store)."""
-        return [
-            s.to_summary()
-            for s in _get_store().list_all()
-        ]
+        try:
+            from kazma_core.sessions.directory import enrich_summary
+
+            return [enrich_summary(s.to_summary()) for s in _get_store().list_all()]
+        except Exception:
+            return [s.to_summary() for s in _get_store().list_all()]
 
     @r.get("/api/chat/sessions/{session_id}/status")
     async def get_session_status(session_id: str) -> dict[str, Any]:
@@ -2014,17 +1991,33 @@ def create_sse_chat_router(
     async def list_archived_sessions() -> list[dict[str, Any]]:
         """List archived chat sessions (for the archive view)."""
         try:
+            from kazma_core.sessions.directory import enrich_summary
+
+            return [
+                enrich_summary(s.to_summary())
+                for s in _get_store().list_all(include_archived=True)
+                if s.archived
+            ]
+        except Exception:
             return [
                 s.to_summary()
                 for s in _get_store().list_all(include_archived=True)
                 if s.archived
             ]
-        except Exception:
-            return []
 
     @r.get("/api/chat/sessions/{session_id}/messages")
-    async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
-        """Return the current tenant's message history for a chat session."""
+    async def get_session_messages(
+        session_id: str, stats: bool = False
+    ) -> Any:
+        """Return the current tenant's message history for a chat session.
+
+        Default response is the legacy bare ``list[message]`` (old clients +
+        tests depend on it). Pass ``?stats=1`` to get an envelope
+        ``{"session_id", "messages", "total_tokens", "total_cost"}`` — the
+        cumulative usage totals power the header cost/token badges after a
+        page refresh (``ChatSession.total_*`` are incremented per turn via
+        ``SessionManager.add_usage``).
+        """
         if session_id.startswith("gw-"):
             _get_store()._refresh_from_db(session_id)
 
@@ -2052,6 +2045,12 @@ def create_sse_chat_router(
                 tid = session.thread_id or (
                     session_id if session_id.startswith("gw-") else ""
                 )
+                # Twin sidebar rows (take-over) must not copy this thread's
+                # transcript onto a different session_id.
+                if tid:
+                    owner = _get_store().get(tid) or _get_store().get_by_thread_id(tid)
+                    if owner is not None and owner.session_id != session.session_id:
+                        tid = ""
                 if live and tid and getattr(live, "checkpointer", None):
                     from kazma_core.agent.turn_input import load_checkpoint_messages
 
@@ -2120,7 +2119,7 @@ def create_sse_chat_router(
                 return False
             return True
 
-        return [
+        payload: list[dict[str, Any]] = [
             {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
@@ -2135,6 +2134,14 @@ def create_sse_chat_router(
             for msg in messages
             if _visible(msg)
         ]
+        if stats:
+            return {
+                "session_id": session.session_id or session_id,
+                "messages": payload,
+                "total_tokens": int(session.total_tokens or 0),
+                "total_cost": round(float(session.total_cost or 0.0), 6),
+            }
+        return payload
 
     # ── Provider profile management (continued) ───────────────────
 
@@ -2256,6 +2263,26 @@ def create_sse_chat_router(
         )
         return {"cancelled": task is not None}
 
+    @r.get("/api/chat/capacity")
+    async def chat_capacity(session_id: str = "", thread_id: str = "") -> dict[str, Any]:
+        """Live budget + YOLO snapshot for the composer capacity bar."""
+        tid = (thread_id or "").strip()
+        sid = (session_id or "").strip()
+        if not tid and sid:
+            try:
+                sess = _get_store().get(sid)
+                tid = (sess.thread_id if sess else "") or sid
+            except Exception:
+                tid = sid
+        if not tid:
+            return {"ok": False, "reason": "missing_session"}
+        from kazma_core.agent.capacity_commands import snapshot_capacity
+
+        snap = snapshot_capacity(tid)
+        snap["ok"] = True
+        snap["session_id"] = sid
+        return snap
+
     # ── Steer: inject info into a RUNNING turn (/steer, /steer!) ──────
     @r.post("/api/chat/steer")
     async def steer_chat_turn(request: Request) -> Any:
@@ -2293,8 +2320,26 @@ def create_sse_chat_router(
             mode = "soft"
         if not thread_id or not text:
             return {"ok": False, "reason": "missing_session_or_text"}
+
+        graph_inst = _get_graph()
+        _paused = False
         if not is_turn_running(thread_id):
-            return {"ok": False, "reason": "no_active_task"}
+            # HITL / hard-steer interrupt: the prompt stream has finished but
+            # the task is still the user's — allow steer instead of "no task".
+            try:
+                from kazma_core.agent.long_task import resolve_turn_budgets
+
+                _rec = int(resolve_turn_budgets(thread_id)["recursion_limit"])
+                _cfg = {
+                    "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+                    "recursion_limit": _rec,
+                }
+                _snap = await graph_inst.aget_state(_cfg)
+                _paused = bool(getattr(_snap, "next", None))
+            except Exception:
+                _paused = False
+            if not _paused:
+                return {"ok": False, "reason": "no_active_task"}
 
         from kazma_core.agent.steer import (
             clear_all_steers,
@@ -2303,10 +2348,31 @@ def create_sse_chat_router(
             push_soft_steer,
         )
 
-        if mode == "soft":
+        # Durable transcript so the user can see / edit the steer after refresh.
+        try:
+            if session_id:
+                _sess = _get_store().get(session_id)
+                if _sess is not None:
+                    _label = "/steer! " if mode == "hard" else "/steer "
+                    _sess.messages.append({
+                        "role": "user",
+                        "content": _label + text,
+                    })
+                    _get_store().put(_sess)
+        except Exception:
+            logger.debug("[SSE] persist steer transcript failed", exc_info=True)
+
+        if mode == "soft" or (_paused and not is_turn_running(thread_id)):
             push_soft_steer(thread_id, text)
-            logger.info("[SSE] soft steer queued thread=%s", thread_id[:12])
-            return {"ok": True, "mode": "soft"}
+            logger.info(
+                "[SSE] soft steer queued thread=%s paused=%s demoted=%s",
+                thread_id[:12], _paused, mode == "hard",
+            )
+            return {
+                "ok": True,
+                "mode": "soft",
+                "demoted": mode == "hard",
+            }
 
         # ── hard steer: queue, wait for the interrupt, then resume ──
         push_hard_steer(thread_id, text)

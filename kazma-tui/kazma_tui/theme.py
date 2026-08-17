@@ -42,6 +42,12 @@ Screen {
     color: $text;
 }
 
+/* Textual 8.2 `hatch: right $panel` expects a percentage. Our $panel is a
+   hex color, so pushing EditorScreen (maximized-view CSS) crashed parse. */
+Screen.-maximized-view {
+    hatch: right 12%;
+}
+
 Header {
     background: $panel;
     color: $text-muted;

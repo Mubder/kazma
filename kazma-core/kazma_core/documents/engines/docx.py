@@ -67,6 +67,7 @@ class DocxEngine:
         from docx.shared import Cm, Pt
 
         self._assets_dir = assets_dir
+        self._last_heading_text = ""
         document = Document()
         self._apply_foundation(document)
 
@@ -98,14 +99,42 @@ class DocxEngine:
             section.left_margin = Cm(1.8)
             section.right_margin = Cm(1.8)
 
-        # Normal style: Calibri body, justified, theme spacing.
+        # Normal style: Latin + Arabic typefaces, justified, theme spacing.
         try:
+            from kazma_core.documents.style_theme import theme_fonts
+
+            fonts = theme_fonts(rtl=self.profile.rtl)
             normal = document.styles["Normal"]
-            normal.font.name = "Calibri"
-            normal.font.size = Pt(float(self.theme["body_size"]))
+            normal.font.name = fonts["latin"]
+            # Latin size stays at body_size even in RTL docs. Arabic is
+            # sized independently via w:szCs (see theme_cs_size) — setting
+            # Normal.font.size to body_size_ar pumped mixed English.
+            latin_pt = float(self.theme["body_size"])
+            normal.font.size = Pt(latin_pt)
+            try:
+                from docx.oxml import OxmlElement
+                from docx.oxml.ns import qn
+                from kazma_core.documents.style_theme import theme_cs_size
+
+                r_pr = document.styles["Normal"].element.get_or_add_rPr()
+                r_fonts = r_pr.find(qn("w:rFonts"))
+                if r_fonts is None:
+                    r_fonts = OxmlElement("w:rFonts")
+                    r_pr.insert(0, r_fonts)
+                r_fonts.set(qn("w:ascii"), fonts["latin"])
+                r_fonts.set(qn("w:hAnsi"), fonts["latin"])
+                r_fonts.set(qn("w:cs"), fonts["cs"])
+                self._set_sz_cs(r_pr, theme_cs_size(latin_pt))
+            except Exception:
+                logger.debug("[docx] Normal rFonts/szCs failed", exc_info=True)
             normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             normal.paragraph_format.space_after = Pt(8)
-            normal.paragraph_format.line_spacing = float(self.theme["line_height"])
+            leading = (
+                float(self.theme.get("line_height_ar", 1.85))
+                if self.profile.rtl
+                else float(self.theme["line_height"])
+            )
+            normal.paragraph_format.line_spacing = leading
         except Exception:
             logger.debug("[docx] Normal style setup failed", exc_info=True)
 
@@ -287,33 +316,213 @@ class DocxEngine:
         if r_fonts is None:
             r_fonts = OxmlElement("w:rFonts")
             r_pr.insert(0, r_fonts)
-        for attr, val in (("w:ascii", "Calibri"), ("w:hAnsi", "Calibri"), ("w:cs", "Calibri")):
-            if not r_fonts.get(qn(attr)):
-                r_fonts.set(qn(attr), val)
+        from kazma_core.documents.style_theme import theme_fonts
+
+        fonts = theme_fonts(rtl=True)
+        for attr, val in (
+            ("w:ascii", fonts["latin"]),
+            ("w:hAnsi", fonts["latin"]),
+            ("w:cs", fonts["arabic"]),
+        ):
+            r_fonts.set(qn(attr), val)
         lang = r_pr.find(qn("w:lang"))
         if lang is None:
             lang = OxmlElement("w:lang")
             r_pr.append(lang)
         lang.set(qn("w:bidi"), "ar-SA")
         lang.set(qn("w:val"), "ar-SA")
-        # Mirror the Latin size/bold/italic to their complex-script (Cs)
-        # variants. python-docx only writes w:sz/w:b/w:i; Arabic is a complex
-        # script, so Word/LibreOffice size and weight it via w:szCs/w:bCs/w:iCs.
-        # Without these the run silently falls back to the default size and
-        # loses true bold — the heading-bar "junk letters" symptom (bold white
-        # Arabic rendered tiny / faux-bold / distorted). Insert immediately
-        # after the Latin sibling to stay in CT_RPr schema order.
+        # Complex-script size is independent of Latin w:sz. Copying sz→szCs
+        # made Sakkal match Calibri in nominal pt (optically smaller) and
+        # body runs often have no per-run w:sz (they inherit Normal), so
+        # they never got szCs and fell back to ~11pt. Always write szCs.
+        # Bold/italic still need the Cs siblings (python-docx writes only
+        # w:b/w:i). Insert after the Latin sibling for CT_RPr order.
+        from kazma_core.documents.style_theme import theme_cs_size
+
         sz = r_pr.find(qn("w:sz"))
-        if sz is not None and r_pr.find(qn("w:szCs")) is None:
-            szcs = OxmlElement("w:szCs")
-            szcs.set(qn("w:val"), sz.get(qn("w:val")))
-            sz.addnext(szcs)
+        latin_pt: float | None = None
+        if sz is not None:
+            try:
+                half = int(sz.get(qn("w:val")) or 0)
+                if half > 0:
+                    latin_pt = half / 2.0
+            except (TypeError, ValueError):
+                latin_pt = None
+        self._set_sz_cs(r_pr, theme_cs_size(latin_pt), after=sz)
         b = r_pr.find(qn("w:b"))
         if b is not None and r_pr.find(qn("w:bCs")) is None:
             b.addnext(OxmlElement("w:bCs"))
         i = r_pr.find(qn("w:i"))
         if i is not None and r_pr.find(qn("w:iCs")) is None:
             i.addnext(OxmlElement("w:iCs"))
+
+    def _is_repeat_heading(self, text: str) -> bool:
+        from kazma_core.documents.heading_text import headings_equivalent
+
+        prev = getattr(self, "_last_heading_text", "") or ""
+        return bool(text) and headings_equivalent(text, prev)
+
+    @staticmethod
+    def _keep_with_following(p: Any) -> None:
+        """Pin a heading to the next paragraph (orphan-heading guard)."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        p_pr = p._p.get_or_add_pPr()
+        for tag in ("w:keepNext", "w:keepLines", "w:widowControl"):
+            el = p_pr.find(qn(tag))
+            if el is None:
+                el = OxmlElement(tag)
+                p_pr.append(el)
+            el.set(qn("w:val"), "1")
+
+    @staticmethod
+    def _force_ltr_paragraph(p: Any) -> None:
+        """Pin a paragraph to LTR (code / math). Do not mark runs RTL."""
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p_pr = p._p.get_or_add_pPr()
+        bidi = p_pr.find(qn("w:bidi"))
+        if bidi is None:
+            bidi = OxmlElement("w:bidi")
+            p_pr.append(bidi)
+        bidi.set(qn("w:val"), "0")
+        jc = p_pr.find(qn("w:jc"))
+        if jc is None:
+            jc = OxmlElement("w:jc")
+            p_pr.append(jc)
+        jc.set(qn("w:val"), "left")
+
+    @staticmethod
+    def _mark_ltr_run(run: Any) -> None:
+        """Force a run to Latin LTR (no w:rtl) so source/math is not reversed."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        r_pr = run._r.get_or_add_rPr()
+        rtl = r_pr.find(qn("w:rtl"))
+        if rtl is not None:
+            r_pr.remove(rtl)
+        r_fonts = r_pr.find(qn("w:rFonts"))
+        if r_fonts is None:
+            r_fonts = OxmlElement("w:rFonts")
+            r_pr.insert(0, r_fonts)
+        face = run.font.name or "Consolas"
+        for attr in ("w:ascii", "w:hAnsi", "w:cs"):
+            r_fonts.set(qn(attr), face)
+
+    def _write_math(self, document: Any, tex: str, *, display: bool) -> None:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
+
+        from kazma_core.documents.math_text import latex_to_unicode
+
+        shown = latex_to_unicode(tex)
+        p = document.add_paragraph()
+        run = p.add_run(shown)
+        run.font.name = "Cambria Math"
+        run.italic = True
+        run.font.size = Pt(13 if display else 11)
+        self._mark_ltr_run(run)
+        self._force_ltr_paragraph(p)
+        if display:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(8)
+
+    def _write_code_block(self, document: Any, text: str) -> None:
+        """LTR isolated code: one line per paragraph inside a single cell.
+
+        An RTL section bidi-reverses a single wrapped run (the 'digest()'
+        / comment-jumble symptom). Per-line LTR paragraphs in a table cell
+        keep source order.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Pt
+
+        table = document.add_table(rows=1, cols=1)
+        cell = table.rows[0].cells[0]
+        fill = (self.theme.get("code_bg") or "#eff6ff").lstrip("#").upper()
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:fill"), fill)
+        shd.set(qn("w:val"), "clear")
+        tc_pr.append(shd)
+        lines = (text or "").splitlines() or [""]
+        for i, line in enumerate(lines):
+            p = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+            run = p.add_run(line if line else " ")
+            run.font.name = "Consolas"
+            run.font.size = Pt(9)
+            self._mark_ltr_run(run)
+            self._force_ltr_paragraph(p)
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = 1.15
+        # Do not mark the table bidiVisual — code stays LTR even in RTL docs.
+        self._decorate_table_paging(table, header=False, keep_together=True)
+        sp = document.add_paragraph("")
+        self._set_paragraph(sp, "start")
+
+    def _decorate_table_paging(
+        self,
+        table: Any,
+        *,
+        header: bool = False,
+        keep_together: bool | None = None,
+    ) -> None:
+        """Don't split rows; optionally repeat the header; keep small tables intact."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        nrows = len(table.rows)
+        if keep_together is None:
+            keep_together = nrows <= 12
+        for i, row in enumerate(table.rows):
+            tr = row._tr
+            tr_pr = tr.find(qn("w:trPr"))
+            if tr_pr is None:
+                tr_pr = OxmlElement("w:trPr")
+                tr.insert(0, tr_pr)
+            cant = tr_pr.find(qn("w:cantSplit"))
+            if cant is None:
+                cant = OxmlElement("w:cantSplit")
+                tr_pr.append(cant)
+            cant.set(qn("w:val"), "1")
+            if header and i == 0:
+                hdr = tr_pr.find(qn("w:tblHeader"))
+                if hdr is None:
+                    hdr = OxmlElement("w:tblHeader")
+                    tr_pr.append(hdr)
+                hdr.set(qn("w:val"), "1")
+            if keep_together and i < nrows - 1:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        self._keep_with_following(p)
+
+    @staticmethod
+    def _set_sz_cs(r_pr: Any, size_pt: float, *, after: Any = None) -> None:
+        """Set or update ``w:szCs`` (half-points) on a run/style rPr."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        half = max(1, int(round(float(size_pt) * 2)))
+        szcs = r_pr.find(qn("w:szCs"))
+        if szcs is None:
+            szcs = OxmlElement("w:szCs")
+            if after is not None:
+                after.addnext(szcs)
+            else:
+                sz = r_pr.find(qn("w:sz"))
+                if sz is not None:
+                    sz.addnext(szcs)
+                else:
+                    r_pr.append(szcs)
+        szcs.set(qn("w:val"), str(half))
 
     def _mark_table_rtl(self, table: Any) -> None:
         """``w:bidiVisual`` on a table so columns read right→left."""
@@ -408,9 +617,9 @@ class DocxEngine:
             hp = section.header.paragraphs[0]
             hp.text = model.header or ""
             if (model.header or "").strip():
-                self._set_paragraph(hp, "start")
                 for r in hp.runs:
                     r.font.size = Pt(8)
+                self._set_paragraph(hp, "start")
             # Footer: brand + an auto-updating PAGE field (page numbers).
             fp = section.footer.paragraphs[0]
             fp.text = ""
@@ -421,6 +630,9 @@ class DocxEngine:
                 sep = fp.add_run("    —    ")
                 sep.font.size = Pt(8)
                 self._append_field(fp, "PAGE", "1")  # updated by Word/LibreOffice
+            for r in fp.runs:
+                if r.font.size is None:
+                    r.font.size = Pt(8)
             if (fp.text or "").strip() or model.page_numbers:
                 self._set_paragraph(fp, "start")
 
@@ -484,7 +696,9 @@ class DocxEngine:
         from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
 
-        fill = (fill_hex or self.theme["heading_fill"]).lstrip("#").upper()
+        from kazma_core.documents.style_theme import theme_fonts
+
+        fonts = theme_fonts(rtl=self.profile.rtl)
         sizes = {
             0: float(self.theme["title_size"]),
             1: float(self.theme["h1_size"]),
@@ -492,47 +706,53 @@ class DocxEngine:
             3: float(self.theme["h3_size"]),
         }
         size = sizes.get(int(level), 12.0)
+        ink = (self.theme.get("heading") or "#1e3a5f").lstrip("#")
+        rule = (self.theme.get("accent") or "#3b82f6").lstrip("#").upper()
 
-        table = document.add_table(rows=1, cols=1)
-        table.autofit = True
-        cell = table.rows[0].cells[0]
+        if self._is_repeat_heading(text):
+            return
 
-        # Cell background fill (tcPr/shd is the correct, schema-valid element).
-        tc_pr = cell._tc.get_or_add_tcPr()
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:fill"), fill)
-        shd.set(qn("w:val"), "clear")
-        shd.set(qn("w:color"), "auto")
-        tc_pr.append(shd)
-        # NOTE: no w:jc under tcPr — that is schema-invalid (CT_TcPr has no
-        # w:jc child) and Word ignores it. Cell text alignment comes from the
-        # paragraph's w:jc inside the cell, set below via _set_paragraph.
-
-        p = cell.paragraphs[0]
+        p = document.add_paragraph()
         run = p.add_run(text or "")
         run.bold = True
         run.font.size = Pt(size)
-        run.font.name = "Calibri"
-        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        run.font.name = fonts["latin"]
+        run.font.color.rgb = RGBColor(int(ink[0:2], 16), int(ink[2:4], 16), int(ink[4:6], 16))
 
-        # Title/section bars are start-aligned: reading-start edge.
-        # Under RTL the profile maps "start" → w:jc="start" → physical RIGHT.
+        # Editorial: navy type + royal accent rule (no inverted bar).
+        # Title gets a bottom rule; section headings also get a start-edge bar.
+        p_pr = p._p.get_or_add_pPr()
+        p_bdr = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "16" if int(level) == 0 else "8")
+        bottom.set(qn("w:space"), "6")
+        bottom.set(qn("w:color"), rule)
+        p_bdr.append(bottom)
+        if int(level) in (1, 2):
+            edge = "right" if self.profile.rtl else "left"
+            side = OxmlElement(f"w:{edge}")
+            side.set(qn("w:val"), "single")
+            side.set(qn("w:sz"), "18")
+            side.set(qn("w:space"), "8")
+            side.set(qn("w:color"), rule)
+            p_bdr.append(side)
+        p_pr.append(p_bdr)
+
         self._set_paragraph(p, "start")
-        # Outline level on section headings (indexable) so a TOC field can index
-        # them. outlineLvl is appended AFTER jc (schema order: ... jc, ...,
-        # outlineLvl ...). Only content headings are indexable — NOT the title,
-        # TOC, references, or table heading bars (they must not self-list).
+        # Keep the heading with the following body. Do NOT page-break-before
+        # every heading — only hop to the next page when the heading would
+        # otherwise sit alone at the bottom. An empty spacer paragraph here
+        # would eat keepNext and re-orphan the body.
+        self._keep_with_following(p)
+        p.paragraph_format.space_before = Pt(10 if int(level) else 4)
+        p.paragraph_format.space_after = Pt(8)
         if indexable and level >= 1:
             p_pr = p._p.get_or_add_pPr()
             outline = OxmlElement("w:outlineLvl")
-            outline.set(qn("w:val"), str(min(level, 3) - 1))  # 1->0, 2->1, 3->2
+            outline.set(qn("w:val"), str(min(level, 3) - 1))
             p_pr.append(outline)
-        if self.profile.rtl:
-            self._mark_table_rtl(table)
-
-        # Spacer paragraph after the bar.
-        sp = document.add_paragraph("")
-        self._set_paragraph(sp, "start")
+        self._last_heading_text = text or ""
 
     # ================================================================== #
     # table of contents
@@ -578,6 +798,8 @@ class DocxEngine:
         from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
 
+        from kazma_core.documents.style_theme import theme_fonts
+
         if not headers:
             return
         ncols = len(headers)
@@ -597,14 +819,16 @@ class DocxEngine:
         def _fill(cell: Any, text: str, *, header: bool) -> None:
             p = cell.paragraphs[0]
             run = p.add_run(str(text))
+            # Latin cell size stays 10pt; Arabic is sized via w:szCs in _mark_run.
             run.font.size = Pt(10)
-            run.font.name = "Calibri"
+            run.font.name = theme_fonts(rtl=self.profile.rtl)["latin"]
             if header:
                 run.bold = True
-                run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                _shade(cell, "1E3A5F")
+                fg = (self.theme.get("table_header_fg") or "#16223a").lstrip("#")
+                run.font.color.rgb = RGBColor(int(fg[0:2], 16), int(fg[2:4], 16), int(fg[4:6], 16))
+                _shade(cell, (self.theme.get("table_header_bg") or "#eff6ff").lstrip("#").upper())
             else:
-                _shade(cell, "F8FAFC")
+                _shade(cell, (self.theme.get("table_row_bg") or "#f8fafc").lstrip("#").upper())
             self._set_paragraph(p, "start")
 
         for ci, h in enumerate(headers):
@@ -616,6 +840,8 @@ class DocxEngine:
 
         if self.profile.rtl:
             self._mark_table_rtl(table)
+
+        self._decorate_table_paging(table, header=True)
 
         # Spacer paragraph after the table.
         sp = document.add_paragraph("")
@@ -657,6 +883,8 @@ class DocxEngine:
                 p = document.add_paragraph()
                 self._add_inline_md_runs(p, block.get("text") or "")
                 self._set_paragraph(p, "justify")
+            elif btype == "math":
+                self._write_math(document, block.get("text") or "", display=True)
             elif btype == "quote":
                 p = document.add_paragraph()
                 run = p.add_run(block.get("text") or "")
@@ -665,13 +893,7 @@ class DocxEngine:
                 self._set_paragraph(p, "justify")
                 p.paragraph_format.left_indent = Pt(18)
             elif btype == "code":
-                # Code blocks are always LTR source; isolate them.
-                p = document.add_paragraph()
-                run = p.add_run(block.get("text") or "")
-                run.font.name = "Consolas"
-                run.font.size = Pt(9)
-                from docx.enum.text import WD_ALIGN_PARAGRAPH
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                self._write_code_block(document, block.get("text") or "")
             elif btype == "list":
                 style = "List Number" if block.get("ordered") else "List Bullet"
                 for item in block.get("items") or []:
@@ -691,30 +913,54 @@ class DocxEngine:
                 from docx.enum.text import WD_ALIGN_PARAGRAPH
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    @staticmethod
-    def _add_inline_md_runs(paragraph: Any, text: str) -> None:
-        """Add bold/italic/code/plain runs for inline Markdown (no shaping)."""
+    def _add_inline_md_runs(self, paragraph: Any, text: str) -> None:
+        """Add bold/italic/code/math/plain runs for inline Markdown."""
+        from kazma_core.documents.math_text import (
+            latex_to_unicode,
+            split_inline_math,
+        )
+
         pattern = re.compile(
             r"\*\*(.+?)\*\*|__(.+?)__|"
             r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|"
             r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)|"
             r"`([^`]+)`"
         )
-        pos = 0
-        for m in pattern.finditer(text):
-            if m.start() > pos:
-                paragraph.add_run(text[pos:m.start()])
-            if m.group(1) is not None or m.group(2) is not None:
-                run = paragraph.add_run(m.group(1) if m.group(1) is not None else m.group(2))
-                run.bold = True
-            elif m.group(3) is not None or m.group(4) is not None:
-                run = paragraph.add_run(m.group(3) if m.group(3) is not None else m.group(4))
+
+        def _md_chunk(chunk: str) -> None:
+            pos = 0
+            for m in pattern.finditer(chunk):
+                if m.start() > pos:
+                    paragraph.add_run(chunk[pos:m.start()])
+                if m.group(1) is not None or m.group(2) is not None:
+                    run = paragraph.add_run(
+                        m.group(1) if m.group(1) is not None else m.group(2)
+                    )
+                    run.bold = True
+                elif m.group(3) is not None or m.group(4) is not None:
+                    run = paragraph.add_run(
+                        m.group(3) if m.group(3) is not None else m.group(4)
+                    )
+                    run.italic = True
+                elif m.group(5) is not None:
+                    run = paragraph.add_run(m.group(5))
+                    run.font.name = "Consolas"
+                    self._mark_ltr_run(run)
+                pos = m.end()
+            if pos < len(chunk):
+                paragraph.add_run(chunk[pos:])
+
+        for kind, chunk in split_inline_math(text or ""):
+            if kind == "math":
+                run = paragraph.add_run(latex_to_unicode(chunk))
+                run.font.name = "Cambria Math"
                 run.italic = True
-            elif m.group(5) is not None:
-                run = paragraph.add_run(m.group(5))
+                self._mark_ltr_run(run)
+            elif kind == "money":
+                run = paragraph.add_run("$" + chunk.strip())
                 run.font.name = "Consolas"
-            pos = m.end()
-        if pos < len(text):
-            paragraph.add_run(text[pos:])
+                self._mark_ltr_run(run)
+            else:
+                _md_chunk(chunk)
         if not text:
             paragraph.add_run("")

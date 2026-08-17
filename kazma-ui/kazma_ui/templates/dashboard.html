@@ -4,20 +4,20 @@
 {% block page_title %}{{ t('dashboard.title') }}{% endblock %}
 
 {% block content %}
-<div class="dashboard-container dash-pro" style="max-width:1440px;margin:0 auto;padding:0 0.25rem 2rem;width:100%;box-sizing:border-box;">
+<div class="dashboard-container dash-pro">
 
   <!-- ── Header ── -->
-  <div class="dash-pro-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.25rem;gap:16px;flex-wrap:wrap;">
+  <div class="dash-pro-header">
     <div>
-      <p style="margin:0 0 4px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);font-weight:600;">Control plane</p>
-      <h1 style="font-size:1.45rem;font-weight:600;letter-spacing:-0.03em;color:var(--text-primary);margin:0;">
+      <p class="dash-pro-kicker">Control plane</p>
+      <h1 class="dash-pro-title">
         {{ t('dashboard.observability') }}
       </h1>
-      <p style="margin:6px 0 0;font-size:0.82rem;color:var(--text-muted);max-width:36rem;line-height:1.4;">
+      <p class="dash-pro-sub">
         Live cost, tokens, sessions, and system health — memory ops live on the Memory page.
       </p>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <div class="dash-pro-toolbar">
       <div class="range-selector">
         <button class="range-btn active" data-range="hour">{{ t('dashboard.range_hour') }}</button>
         <button class="range-btn" data-range="day">{{ t('dashboard.range_day') }}</button>
@@ -29,17 +29,17 @@
   </div>
 
   <!-- ── HITL Pending Approvals Panel ── -->
-  <div id="hitl-approvals-panel" class="card hitl-panel" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
+  <div id="hitl-approvals-panel" class="card hitl-panel dash-pro-card" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
+    <div class="hitl-panel-head">
       <div style="display:flex;align-items:center;gap:8px;">
         <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
           {{ t('dashboard.pending_approvals') }}
         </h2>
         <span class="hitl-approval-count badge badge-premium" style="display:none;font-size:0.7rem;min-width:20px;text-align:center;">0</span>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;">
+      <div class="hitl-panel-tools">
         <button id="hitl-clear-all-btn" class="btn btn-sm btn-danger" style="display:none;font-size:0.75rem;padding:3px 10px;">{{ t('dashboard.clear_all') }}</button>
-        <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('dashboard.hitl_description') }}</span>
+        <span class="hitl-panel-desc">{{ t('dashboard.hitl_description') }}</span>
       </div>
     </div>
     <div class="hitl-approval-list" style="padding:16px 20px;">
@@ -110,13 +110,13 @@
   <!-- ── Feature Cards: Active Skills ── -->
   <div id="feature-cards-section" style="margin-bottom:1.25rem;">
     <h3 class="chart-title" style="margin:0 0 10px 0;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;"><span class="ki" data-icon="zap" aria-hidden="true"></span> {{ t('dashboard.active_capabilities') if t('dashboard.active_capabilities') else 'Active Capabilities' }}</h3>
-    <div id="feature-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">
+    <div id="feature-cards-grid" class="feature-cards-grid">
       <!-- Populated by dashboard.js initFeatureCards() -->
     </div>
   </div>
 
   <!-- ── Two-column: Memory hub + System resources ── -->
-  <div class="dash-pro-split" style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:16px;margin-bottom:1.25rem;">
+  <div class="dash-pro-split two-col-grid">
     <div id="memory-hub-card" class="chart-card dash-pro-card" style="margin:0;padding:18px 20px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
         <div style="flex:1;min-width:200px;">
@@ -207,7 +207,8 @@
         <p>{{ t('dashboard.no_active_sessions') }}</p>
         <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.sessions_hint') }}</p>
       </div>
-      <div style="overflow-x:auto;width:100%;">
+      <div id="sessions-cards" class="dash-card-list"></div>
+      <div class="dash-table-wrap" style="overflow-x:auto;width:100%;">
         <table id="sessions-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;display:none;">
           <thead>
             <tr style="border-bottom:1px solid var(--border-subtle);">
@@ -239,7 +240,19 @@
       </h2>
       <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ traces|length }} {{ t('dashboard.traces_count') }}</span>
     </div>
-    <div style="overflow-x:auto;">
+    <div id="traces-cards" class="dash-card-list">
+      {% for trace in traces %}
+      <article class="dash-mobile-card">
+        <div class="dash-mobile-card-top">
+          <span class="badge badge-basic">{{ trace.trace_type }}</span>
+          <span class="badge {{ trace.badge_class }}">{{ trace.status }}</span>
+        </div>
+        <div class="dash-mobile-card-name">{{ trace.label }}</div>
+        <div class="dash-mobile-card-meta">{{ trace.time }} · {{ trace.duration_ms }}ms · {{ trace.tokens }} tok · {{ trace.cost }}</div>
+      </article>
+      {% endfor %}
+    </div>
+    <div class="dash-table-wrap" style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
         <thead>
           <tr style="border-bottom:1px solid var(--border-subtle);">
@@ -280,6 +293,7 @@
 
 {% block scripts %}
 <script src="/static/js/streaming.js"></script>
+<script src="/static/js/dash_lists.js"></script>
 <script src="/static/js/dashboard.js"></script>
 <script src="/static/js/hitl_approval.js"></script>
 <script>
@@ -412,7 +426,7 @@
     color: var(--text-primary);
   }
   @media (max-width: 900px) {
-    .dash-pro-split { grid-template-columns: 1fr !important; }
+    .dash-pro-split { grid-template-columns: 1fr; }
     .dash-kpi-row { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
   }
 </style>

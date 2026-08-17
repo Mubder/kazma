@@ -1,5 +1,335 @@
 # CHANGELOG
 
+## Unreleased — Telegram / menu lists every slash command (2026-08-18)
+
+Telegram's input-field command picker only shows what `setMyCommands`
+registers. `/sessions`, `/seasons`, `/session`, `/season`, `/switch`,
+and the other gateway intercepts (`/research`, `/documents`, `/kb`,
+`/fork`, `/steer`, `/abort`, …) were missing from that list even though
+they already worked if you typed them. The menu now uses a single
+`BOT_MENU_COMMANDS` catalog in `slash_commands.py`. Restart the server
+so the bot re-registers; Telegram clients may take a moment to refresh.
+
+## Unreleased — Settings first click: Alpine was binding an empty shell (2026-08-17)
+
+``<html x-data="kazmaApp()">`` means Alpine's MutationObserver owns
+every soft-nav ``innerHTML`` swap. On the first Settings click the
+observer ran *before* ``settingsApp`` existed, bound ``{}``, stamped
+``_x_marker``, and later ``initTree`` skipped the tree — spinner
+stuck until a full reload (second click). Soft-nav now pauses Alpine
+mutations across the swap, loads page scripts, then destroy+rebinds.
+Hub lists use the 8s ``_fetch`` so a hung ``/api/providers`` cannot
+hold the spinner.
+
+## Unreleased — Settings first click no longer sticks on Loading (2026-08-17)
+
+``init()`` awaited voice/STT provider lists before clearing
+``loading``, so a slow or hanging voice API left the shell on
+"Loading settings…". Core + hub load first; voice/docs run after
+the spinner clears. ``_fetch`` aborts at 8s. Alpine ``this`` after
+``await`` is captured as ``self``.
+
+## Unreleased — Split settings.js; first-click Settings binds (2026-08-17)
+
+``settings.js`` is a thin composer. Tabs live in ``settings_core``,
+``settings_hub``, ``settings_agent``, ``settings_integrations``,
+``settings_ops``. ``window.settingsApp`` is set so Alpine can bind on
+the first soft-nav click (same hole as Memory: empty until a full reload).
+
+## Unreleased — Soft-nav first click loads the real page (2026-08-17)
+
+Sidebar first-click on Memory (and IDE / Dashboard / Swarm / Chat)
+swapped the shell but skipped companion scripts
+(``memory_console.js``, CodeMirror, mermaid, ``dash_lists.js``).
+The same link clicked again did a full reload, so the page suddenly
+filled. Soft-nav now re-injects every page-owned script and head
+asset, not a name whitelist.
+
+## Unreleased — Memory graph inspect is a compact phone sheet (2026-08-17)
+
+Tapping a node no longer covers the graph with an 88vw blur overlay.
+The inspect card is a bottom sheet (max ~220px), hidden until a node
+or edge is selected, with Link / Cut hub up front and extra actions
+behind More. Idle animation pauses while the sheet is open.
+
+## Unreleased — Six UI follow-ups: nav, phone rails, cards (2026-08-17)
+
+Bottom bar is Chat / Workspace / Dashboard / Settings / More. Agents
+moved into Work; Replay into Activity. Settings and Swarm tabs are a
+horizontal chip rail on phones. Workspace buttons no longer force
+150px. Swarm metrics are two-up; IDE stacks tree → editor → chat.
+Dashboard sessions/traces render as cards under 768px. Ctrl+K labels
+match the sidebar (Dashboard is Dashboard, not Analytics).
+
+## Unreleased — Dashboard moves to Work; mobile dashboard layout (2026-08-17)
+
+Sidebar **Dashboard** now sits in the Work group (with Chat / Workspace /
+IDE / Memory), not Settings. Phone layout keeps a two-up metric grid,
+stacks the memory/resources split, wraps HITL buttons, and hides the
+verbose HITL hint so the card toolbar fits.
+
+## Unreleased — Telegram HITL example cards are real buttons (2026-08-17)
+
+``send_approval_request`` drew ``[ APPROVE ]`` / ``[ DENY ]`` as plain
+text. It now sends the same Telegram inline keyboard as a real graph
+HITL interrupt (Approve / Deny / Approve for task). The send backend
+forwards ``hitl_approval`` as ``reply_markup``.
+
+## Unreleased — HITL YOLO session is real session YOLO (2026-08-17)
+
+Clicking **YOLO session** on a card now enables the thread for every
+danger tool (native ``file_write``, MCP ``edit_file``, …) until
+``/yolo off`` or TTL. ``KAZMA_ALLOW_YOLO=0`` still blocks the ``/yolo``
+slash command; the card is the consent. ``is_yolo_active`` no longer
+ignores a live grant when the env flag is off.
+
+## Unreleased — HITL YOLO card approves once when YOLO is off (2026-08-17)
+
+Pressing **YOLO** on an approval card with ``KAZMA_ALLOW_YOLO=0`` used to
+403 and show an Activity error while the turn stayed paused. The card now
+downgrades to approve-once (the write still runs). The YOLO button is
+hidden when the flag is off.
+
+## Unreleased — KAZMA_ALLOW_YOLO=0 disables YOLO in lab too (2026-08-17)
+
+``yolo_allowed()`` only blocked YOLO under ``KAZMA_PRODUCTION=1``. Setting
+``KAZMA_ALLOW_YOLO=0`` in a personal install did nothing. Explicit ``0``
+now wins in lab and prod; ``is_yolo_active`` honours the same flag.
+
+## Unreleased — Document fidelity: math, LTR code, table paging (2026-08-17)
+
+``$R = P \\cdot I$`` and ``$$...$$`` render as Unicode math (``R = P · I``,
+``S(x) = 1⁄(1 + e⁻ˣ)``), isolated LTR. Bare ``$0.0035$`` stays currency.
+Fenced code is a per-line LTR Consolas cell so RTL no longer reverses
+Python. Tables repeat the header, do not split a row, and small tables
+stay on one page (``cantSplit`` + keep-with-next).
+
+## Unreleased — Keep headings with their body; drop stacked duplicates (2026-08-17)
+
+A heading at the bottom of a page no longer sits alone — DOCX sets
+``w:keepNext`` / ``w:keepLines`` (LibreOffice PDF honours this) and the
+reportlab path wraps heading + first body in ``KeepTogether``. Headings
+are not forced onto a new page. A section heading that is repeated as
+the first ``##`` in the body (the stacked "Quick Research Summary" bar)
+is dropped.
+
+## Unreleased — Arabic body size via w:szCs (2026-08-17)
+
+Arabic body text was still small because Word sizes complex script via
+``w:szCs``, not Latin ``w:sz``. Body runs inherit Normal and had no
+per-run size, so they never got ``szCs`` and fell back to ~11pt; setting
+``Normal.font.size`` to ``body_size_ar`` only pumped mixed English.
+Latin now stays at ``body_size`` (11pt); Arabic uses ``theme_cs_size()``
+→ ``body_size_ar`` (16pt) on ``w:szCs`` (Normal style + every RTL run).
+
+## Unreleased — Memory graph tools in the commitment registry (2026-08-17)
+
+``memory_merge_entities``, ``memory_link_entities``, ``memory_delete_entity``,
+``memory_invalidate``, ``memory_purge_empty_entities``, and ``memory_admin``
+were missing from ``_PROF``. With ``enforce_unknown_mutators`` on (the
+default), the fail-closed gate blocked every memory cleanup as
+"unregistered mutator" while ``memory_store`` still worked. Those tools
+are now registered as ``WRITE_MEMORY``. Other live builtins (file_append,
+spawn_agent, knowledge ingest, git_push/pull, …) are listed too. The
+flag stays on.
+
+## Unreleased — Audit F remaining (2026-08-17)
+
+Soft-nav no longer full-reloads inspector pages (memory / documents /
+replay / research / knowledge); chat, IDE, swarm, settings, and the
+Alpine-app shells stay hard. TUI Documents and dashboard agents read
+the live server API. Swarm Telegram notify is opt-in
+(``maybe_notify_dispatch`` when ``SWARM_BOT_TOKEN`` is set). Tutorial
+does not advertise TUI email/voice/image tabs.
+
+## Unreleased — Audit D remaining (2026-08-17)
+
+``/session #short_id`` actually resolves (the ``#`` is stripped). Season
+pick prefers the stable id over the reshuffling list number. The TUI no
+longer constructs a local SwarmEngine on mount — the Swarm tab and
+inspectors read the live server API. TUI ``/fork <n>`` branches via
+``POST /api/replay/fork``.
+
+## Unreleased — Audit C remaining (2026-08-17)
+
+Soul confirm auto-ON in production / multi-user (env still wins). A Soul
+delta without a commitment id is minted and held — no legacy apply
+loophole. ``cancel_scheduled`` clarifies when the scheduler is down.
+Swarm scope check errors deny. Strict mode with an empty outbound
+allowlist clarifies. Memory tenant isolation follows multi-user /
+production and fail-closes to ``__unscoped__`` instead of the shared
+``default`` tenant.
+
+## Unreleased — Audit B remaining (2026-08-17)
+
+Login and auto-cookie never write the raw ``KAZMA_SECRET`` into
+``kazma-secret``. Opaque sessions are the only browser credential.
+WebSocket query tokens no longer accept the raw secret. Platform RBAC
+fails closed when multi-user is on and the check errors. ``start-web.sh``
+defaults ``KAZMA_TRUST_LAN=0``. Exec cwd pin clarifies instead of
+failing open. The header bell reads ``GET /api/alerts/recent``.
+
+## Unreleased — Audit A remaining (2026-08-17)
+
+Docs no longer claim "Production-Grade" or blanket "multi-replica ready"
+(document metadata is still SQLite unless the Postgres metadata backend is
+on). TUI `/replay <n>` rewinds the live graph via `POST /api/replay/restore`.
+`/swarm status|list`, `/memory`, `/status`, and `/cost` read the live server
+API. Chat turns pin `model` and `workspace_id` per request — they no longer
+call `ensure_active_model` (process-wide). Compaction uses
+`filter_injection()` (broader than override phrases) before storing
+summaries.
+
+## Unreleased — Audit A–F follow-through (2026-08-17)
+
+TUI file-open no longer crashes on Textual 8.2 `hatch: right $panel`.
+Danger-list aliases match CANONICAL. GitHub PAT is not written to `.env`.
+CORS `*` + credentials is rejected. CSRF only trusts `X-Forwarded-Host`
+when it matches `KAZMA_PUBLIC_URL`. `/health` and `/api/status` no longer
+leak init-error strings or workspace paths. `/api/approve` is rate-limited.
+`kazma-web` refuses a non-loopback bind without `KAZMA_SECRET`. Discord
+sender is per-user. Belief extractor rejects assistant-prose predicates.
+Soul pending queue is ConfigStore-backed. Accent color is applied to CSS
+variables. Session list prefers `#short_id`. TUI replay uses real timestamps
+and hides the progress bar after load.
+
+## Unreleased — one turn, one season (2026-08-17)
+
+After Telegram take-over, ``123 Hey`` showed up on both ``/yolo`` and
+``Telegram · bAlfaris``. Sync now writes only the canonical SessionManager
+row (named / longer wins). Opening the twin no longer hydrates the live
+thread's checkpoint onto it. Username matching no longer attaches Telegram
+to a different season.
+
+## Unreleased — Telegram Hey no longer mints a twin season (2026-08-17)
+
+Taking over a TUI/Web season on Telegram, then sending "Hey", created a
+new `Telegram · bAlfaris` row. Two causes: `/session@Bot 40` was not
+parsed as take-over, and a cold resolve minted `gw-telegram-<userid>`
+instead of the existing season. Mouths now strip the `@bot` suffix,
+prefer ConfigStore `active_thread.{sender}`, and reuse the newest
+matching Telegram season instead of inventing a twin.
+
+## Unreleased — TUI: don't call my.kazma.ai for chat (2026-08-17)
+
+When the local server is down, the TUI used to fall through to
+`KAZMA_PUBLIC_URL` and report that host's 302 login page as "not
+reachable". Chat mouths only talk to loopback (or explicit
+`KAZMA_BASE_URL`). A down server now says nothing is listening on
+`:9090` / `:8000`.
+
+## Unreleased — TUI empty reply on `Hey` (2026-08-17)
+
+The TUI posted `POST /api/chat/stream` to `KAZMA_PUBLIC_URL` first
+(`https://my.kazma.ai`). A 200 HTML/challenge/redirect there was treated as
+a finished turn with no tokens → `(empty response)`. Local mouths now try
+loopback (`127.0.0.1:PORT`) first, accept only `text/event-stream`, and
+fall back to `done.content` / `capacity.reply` like the Web client.
+
+## Unreleased — TUI `/session 12` actually loads (2026-08-17)
+
+Enter on `/session 12` was stolen by slash autocomplete because `/sessions`
+is a prefix of `/session` — the palette filled `/sessions` and the season
+never switched. Autocomplete now hides once arguments are typed, and an
+exact `/session` submits instead of completing to `/sessions`. History
+loads from the local SessionManager first (the same list `/sessions`
+already showed) so a hung/401 HTTP hop cannot freeze an empty log.
+
+## Unreleased — One brain Phases B–D (2026-08-17)
+
+Work slashes (`/research`, `/swarm <task>`, bare swarm mentions) rewrite into
+supervisor turns instead of skipping the graph. `/swarm status|list` and
+`/research` usage stay instant. Intent execute allowlist is **job-starters
+only** (`research_deep`); document generate is constrain so HITL can fire.
+Sidebar: Chat is home; Activity groups research/docs/swarm; Settings holds
+ops pages. Mobile dock is Chat / Workspace / Memory / Settings.
+
+## Unreleased — One brain entry (Phase A) + unified seasons (2026-08-17)
+
+The TUI is no longer a second chatbot. It posts to the same
+`POST /api/chat/stream` supervisor the Web UI uses (tools, HITL, memory,
+intent, checkpoints). Gateway `ainvoke` goes through
+`kazma_core.agent.turn.run_agent_turn`. `/session n` in the TUI switches
+onto the shared season list.
+
+## Unreleased — Unified seasons across Web / Telegram / Discord / Slack (2026-08-17)
+
+One conversation directory for every mouth. Start on Web, continue on Discord,
+take over on Telegram — same LangGraph `thread_id`, same sidebar list.
+
+- **Directory** (`kazma_core/sessions/directory.py`): list / resolve / bind /
+  stamp last mouth. SessionManager stays the SoT; `active_thread.{sender}` is
+  only the pointer for *this* mouth.
+- **Gateway:** `/sessions`, `/session 2` (or id / title), `/session new [name]`,
+  `/switch`, `/new`. Take-over merges the current chat's delivery target into
+  SessionStore (platform IDs stay out of graph state).
+- **Web:** session list shows last mouth; Copy ID (+ `/chat?s=` link). New Web
+  seasons use `session_id == thread_id` so the id you copy is the id you switch.
+- **TUI:** `/sessions` lists the same directory (continue the live agent on
+  Web/Telegram — TUI chat posts to the same supervisor).
+
+## Unreleased — Intent Router audit fixes (2026-08-15)
+
+Full read-only audit of the intent routing system (15 findings, F1–F15), all
+fixed:
+- F1 Composer now actually dispatches: policy routes multi-act research+document
+  turns through the registered composer (gated on execute/allowlist/confidence/
+  slots); supervisor looks up handlers+composers via registry.resolve().
+- F2 Tier-2 LLM hardening: user text wrapped in an untrusted data fence and
+  LLM-returned slots validated against a per-act allowlist before use.
+- F3 Intent decision metrics now recorded on the async classify_turn path too
+  (was sync-only, so production decisions were uncounted).
+- F5 Tier-2 positive-signal gate: a GENERAL-only turn (plain chat) no longer
+  spends an LLM refinement call — only turns with a detected act refine.
+- F6 SSE /research error path fixed (undefined `out` → real error text; dropped
+  the unreachable duplicate except).
+- F7 Majlis greeting fast-path only short-circuits short pure greetings, so
+  greeting+task messages reach the graph.
+- F8 Document handler delivery now routes through the send_file tool (execute
+  path) instead of calling send_file_message directly.
+- F10 Focus is computed once per turn and passed into classify_turn (was
+  classified twice, embedding twice).
+- F11 Tier-2 prompt taxonomy now includes document_intel.
+- F12 Entities re-resolved after Tier-2 changes the act set.
+- F13 Removed dead YOLO branch in _can_auto_execute; docstring matches behavior.
+- F14 Topic-drift user-text moved out of INFO logs; intent decision log gains
+  per-act confidence + source; entity ambiguity logged at debug.
+- F4/F15 Stale Phase-0 comments corrected; compat façade noted as superseded.
+- F9 Test suite modernized: positive EXECUTE reachable, confidence boundary,
+  composer dispatch, injection corpus, sync/async parity, metrics, plain-chat
+  no-LLM gate.
+
+## Unreleased — Intent Engine Phase 0 (2026-08-15)
+
+## Unreleased — Intent Engine Phases 2-4 (2026-08-15)
+
+Phase 2 (research SoT): research_deep execute handler via start_deep_research;
+deep_research_route_hint dedup (skip when intent engine already covers it);
+SSE/WS /research unified with gateway (all three call start_deep_research;
+previously SSE and WS ran the pipeline inline, blocking the stream for minutes).
+
+Phase 3 (composer + constrain notes): research_then_document composer chains
+research → document (escalates if research fails, never generates a PDF of
+the error); constrain plan notes for all 9 act kinds (code_exec, file_mgmt,
+analysis, remind, document_intel, swarm, research, research_deep, document_generate).
+
+Phase 4 (hardening): Arabic isolated-form scan on generated PDFs (detects
+bidi rendering issues); TUI intent classify (display-only: shows route/acts
+in the TUI chat log); metrics kazma_intent_decisions_total{route,act}
+Prometheus counter (wired into classify_turn_sync here; extended to the async
+classify_turn path in the audit-fixes entry above).
+
+202 total tests green (129 intent engine + 73 regression).
+
+Replaced the costume router with the intent engine per KAZMA_INTENT_ENGINE.md.
+Phase 0: classify every turn + constrain with plan notes. Execute allowlist
+is EMPTY — nothing bypasses the supervisor loop yet. All 13 false-positive
+corpus utterances verified green (build a PDF parser, rebuild the document
+index, etc.). Kill-switches: KAZMA_INTENT_ENGINE=0, KAZMA_INTENT_EXECUTE=0,
+KAZMA_INTENT_TIER2=0. Arabic continue split (bare أكمل = continue;
+أكمل هذا المستند PDF = document_generate). Mtime glob killed. Old
+document_pipeline early-return removed from supervisor. 85 tests green.
+
 ## Unreleased — Full-repo deep audit executed + fail-safe gates (2026-08-14)
 
 **The 76-finding audit, executed end-to-end**: 14 HIGH / 27 MEDIUM / 26 LOW

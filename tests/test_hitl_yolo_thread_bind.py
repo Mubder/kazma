@@ -48,6 +48,40 @@ def _clean_yolo_grants():
         pass
 
 
+def test_card_yolo_enables_session_even_when_slash_blocked(monkeypatch) -> None:
+    """HITL card YOLO is real session YOLO (native + MCP), not approve-once."""
+    from kazma_core.safety.yolo import (
+        YoloDisabledError,
+        enable_yolo,
+        is_yolo_active,
+        try_enable_yolo,
+    )
+
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "0")
+    tid = "thr-yolo-bind"
+    with pytest.raises(YoloDisabledError):
+        enable_yolo(tid, actor="slash")
+    st = try_enable_yolo(tid, actor="card")
+    assert st.get("downgraded") is False
+    assert is_yolo_active(tid) is True
+
+
+def test_allow_yolo_zero_blocks_even_without_production(monkeypatch) -> None:
+    """KAZMA_ALLOW_YOLO=0 must disable YOLO in lab mode, not only in production."""
+    from kazma_core.safety.yolo import yolo_allowed
+
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "0")
+    assert yolo_allowed() is False
+    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "1")
+    assert yolo_allowed() is True
+    monkeypatch.delenv("KAZMA_ALLOW_YOLO", raising=False)
+    assert yolo_allowed() is True
+    monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+    assert yolo_allowed() is False
+
+
 def test_yolo_requires_context_or_is_ignored():
     tid = "thr-yolo-bind"
     enable_yolo(tid, actor="test")
@@ -136,11 +170,8 @@ async def test_tool_worker_binds_state_thread_id_for_yolo(monkeypatch):
         interrupted["called"] = True
         raise AssertionError(f"interrupt should not run under YOLO: {payload}")
 
-    monkeypatch.setattr(
-        "kazma_core.agent.graph_builder.interrupt",
-        _fake_interrupt,
-    )
-    # interrupt is imported from langgraph inside the function path — patch langgraph too
+    # interrupt is imported from langgraph INSIDE the function (local import,
+    # not a module-level graph_builder attribute) — patch the source module.
     import langgraph.types as lg_types
 
     monkeypatch.setattr(lg_types, "interrupt", _fake_interrupt)

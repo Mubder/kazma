@@ -13,10 +13,10 @@ tools:
       - "أرسل إشعاراً أو تنبيهاً فورياً إلى القناة المحددة"
   send_approval_request:
     arabic_name: "إرسال طلب موافقة تفاعلي"
-    description: "Dispatch an interactive approval card with actions/buttons for human verification (HITL)."
+    description: "Send a platform-native HITL card (Telegram inline Approve/Deny/Approve-for-task buttons). Not a text mock. Do not use this instead of calling the actual danger tool."
     category: "communication"
     prompt_chain:
-      - "أرسل طلب موافقة تفاعلي للمستخدم وأعطه خيارات للموافقة أو الرفض"
+      - "أرسل بطاقة موافقة بأزرار المنصة الحقيقية (Approve/Deny) وليس نصاً"
   send_message:
     arabic_name: "إرسال رسالة"
     description: "Send a text message to the current conversation thread. Use this to reply to the user. The platform and delivery channel are handled automatically."

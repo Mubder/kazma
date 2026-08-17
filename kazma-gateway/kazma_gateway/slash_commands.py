@@ -29,8 +29,55 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "BOT_MENU_COMMANDS",
     "is_slash_command",
     "resolve_slash_command",
+]
+
+# Telegram setMyCommands menu (and any other mouth that shows a "/" picker).
+# Telegram only lists what we register here — handlers may accept more
+# aliases, but if a command is missing from this list it will not appear
+# next to the chat input. Keep in sync with _cmd_help + gateway intercepts.
+# Constraints: command 1–32 [a-z0-9_]; description 3–256 chars; max 100.
+BOT_MENU_COMMANDS: list[dict[str, str]] = [
+    {"command": "help", "description": "Show available commands"},
+    {"command": "sessions", "description": "List every season (Web + Telegram + Discord + Slack)"},
+    {"command": "seasons", "description": "List every season (alias of /sessions)"},
+    {"command": "session", "description": "Switch onto a season (#, id, or name)"},
+    {"command": "season", "description": "Switch onto a season (alias of /session)"},
+    {"command": "switch", "description": "Take over a season (same as /session)"},
+    {"command": "new", "description": "Create a brand new session/season"},
+    {"command": "reset", "description": "Clear conversation history"},
+    {"command": "compact", "description": "Manually trigger context compaction"},
+    {"command": "research", "description": "Deep research via the same agent"},
+    {"command": "swarm", "description": "Swarm orchestration"},
+    {"command": "ide", "description": "IDE: files, git, coding skills"},
+    {
+        "command": "skill",
+        "description": "Agent Skills: list / install / activate (agentskills.io)",
+    },
+    {"command": "documents", "description": "Document Intelligence: list / read / search"},
+    {"command": "docs", "description": "Documents (alias of /documents)"},
+    {"command": "kb", "description": "Knowledge library: list / crawl / search"},
+    {"command": "long", "description": "Long-task mode on/off (deep audits)"},
+    {"command": "mission", "description": "Mission-length budget for this chat"},
+    {"command": "yolo", "description": "Toggle session YOLO safety bypass"},
+    {"command": "unrestricted", "description": "Mission budget + YOLO for this chat"},
+    {"command": "steer", "description": "Add context to the running task"},
+    {"command": "abort", "description": "Stop and abandon the running task"},
+    {"command": "replay", "description": "Time travel snapshots"},
+    {"command": "fork", "description": "Fork from a snapshot into a new thread"},
+    {"command": "undo", "description": "Undo last response"},
+    {"command": "edit", "description": "Edit last response"},
+    {"command": "config", "description": "Configuration wizard"},
+    {"command": "personality", "description": "Agent personality"},
+    {"command": "model", "description": "Show / switch active model"},
+    {"command": "models", "description": "Show / switch active model (alias of /model)"},
+    {"command": "context", "description": "Context window usage"},
+    {"command": "status", "description": "Gateway health overview"},
+    {"command": "memory", "description": "Report memory usage"},
+    {"command": "cost", "description": "Token spend this session"},
+    {"command": "hitl", "description": "Approve or deny a pending HITL tool"},
 ]
 
 # ── Config path / store ──────────────────────────────────────────────
@@ -189,6 +236,8 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         Response string if the command is recognised, None otherwise.
     """
     cmd = text.strip().lower().split()[0]
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
     ctx = context or {}
 
     if cmd == "/help":
@@ -196,7 +245,9 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd == "/reset":
         return None  # Handled by agent_handler directly (clears state)
     if cmd == "/new":
-        return None  # Handled by agent_handler directly (creates new session)
+        return None  # Handled by session_commands (mint a season)
+    if cmd in ("/sessions", "/seasons", "/session", "/season", "/switch"):
+        return None  # Handled by session_commands (list / take-over)
     if cmd == "/compact":
         return None  # Handled by agent_handler directly (manual context compaction)
     if cmd == "/status":
@@ -231,7 +282,11 @@ def _cmd_help() -> str:
     return (
         "*Available commands:*\n\n"
         "🔄 *Session*\n"
-        "• `/new` — Create a brand new session/season\n"
+        "• `/sessions` (`/seasons`) — List every season (Web + Telegram + Discord + Slack)\n"
+        "• `/session 2` (`/season`, `/switch`) — Continue that season here (take over)\n"
+        "• `/session new [name]` — Start a fresh season (`/new` still works)\n"
+        "• `/research deep <topic>` — deep research via the same agent\n"
+        "• `/swarm <task>` — dispatch workers via the same agent\n"
         "• `/reset` — Clear conversation history and starting fresh\n"
         "• `/compact` — Manually trigger context window compaction\n"
         "• `/replay list` — Show available snapshots\n"
@@ -243,6 +298,12 @@ def _cmd_help() -> str:
         "• `/steer <text>` — Add context to the running task (applies next step)\n"
         "• `/steer! <text>` — Pause the task, inject a requirement, then resume\n"
         "• `/abort` — Stop and abandon the running task (won't continue unless re-asked)\n\n"
+        "⚡ *Capacity & YOLO*\n"
+        "• `/long on` · `/long mission` — raise tool-round budget (HITL stays on)\n"
+        "• `/yolo` — skip danger-tool approvals (does **not** raise the budget)\n"
+        "• `/long yolo` — research budget **and** YOLO\n"
+        "• `/unrestricted` — mission + YOLO (full power this chat)\n"
+        "• `/long off` · `/yolo off` · `/unrestricted off`\n\n"
         "🔧 *Tools*\n"
         "• `/personality` — Show current personality\n"
         "• `/personality list` — List all available personalities\n"

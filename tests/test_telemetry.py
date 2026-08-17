@@ -244,14 +244,22 @@ class TestHardwareMonitor:
 
     @pytest.mark.asyncio
     async def test_gpu_with_mocked_nvidia_smi(self):
-        """Test GPU stats collection with a mocked nvidia-smi subprocess."""
+        """Test GPU stats collection with a mocked nvidia-smi subprocess.
+
+        _get_gpu_vram runs nvidia-smi via asyncio.to_thread(subprocess.run, ...)
+        (Windows SelectorEventLoop fix), so the seam is subprocess.run —
+        patching asyncio.create_subprocess_exec silently hits a REAL GPU.
+        """
+
+        class _Completed:
+            returncode = 0
+            stdout = b"88, 14200, 24576\n"
+            stderr = b""
+
         monitor = HardwareMonitor()
+        monitor._nvidia_available = None  # reset
 
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(b"88, 14200, 24576\n", b""))
-        mock_process.returncode = 0
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        with patch("subprocess.run", return_value=_Completed()):
             gpu, vram_used, vram_total = await monitor._get_gpu_vram()
 
         assert gpu == 88.0
@@ -264,7 +272,7 @@ class TestHardwareMonitor:
         monitor = HardwareMonitor()
         monitor._nvidia_available = None  # reset
 
-        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError):
+        with patch("subprocess.run", side_effect=FileNotFoundError):
             gpu, vram_used, vram_total = await monitor._get_gpu_vram()
 
         assert gpu == 0.0
@@ -278,16 +286,8 @@ class TestHardwareMonitor:
         monitor = HardwareMonitor()
         monitor._nvidia_available = None  # reset
 
-        async def _slow_communicate():
-            await asyncio.sleep(10)
-            return (b"", b"")
-
-        mock_process = AsyncMock()
-        mock_process.communicate = _slow_communicate
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
-                gpu, vram_used, vram_total = await monitor._get_gpu_vram()
+        with patch("subprocess.run", side_effect=TimeoutError()):
+            gpu, vram_used, vram_total = await monitor._get_gpu_vram()
 
         assert gpu == 0.0
 
@@ -297,11 +297,12 @@ class TestHardwareMonitor:
         monitor = HardwareMonitor()
         monitor._nvidia_available = None  # reset
 
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(b"", b"No devices were found"))
-        mock_process.returncode = 6
+        class _Failed:
+            returncode = 6
+            stdout = b""
+            stderr = b"No devices were found"
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        with patch("subprocess.run", return_value=_Failed()):
             gpu, vram_used, vram_total = await monitor._get_gpu_vram()
 
         assert gpu == 0.0

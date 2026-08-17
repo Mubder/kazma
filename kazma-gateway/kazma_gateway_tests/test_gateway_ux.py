@@ -6,7 +6,11 @@ import asyncio
 from unittest.mock import AsyncMock
 
 from kazma_gateway.gateway import OutboundMessage
-from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
+from kazma_gateway.slash_commands import (
+    BOT_MENU_COMMANDS,
+    is_slash_command,
+    resolve_slash_command,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -102,6 +106,20 @@ class TestSlashCommands:
         """/compact returns None (handled by agent_handler directly)."""
         result = resolve_slash_command("/compact")
         assert result is None
+
+    def test_bot_menu_includes_season_aliases_and_is_telegram_legal(self):
+        """Telegram / menu must list every season alias and stay API-legal."""
+        names = [row["command"] for row in BOT_MENU_COMMANDS]
+        assert names == list(dict.fromkeys(names)), "duplicate Telegram command names"
+        assert len(names) <= 100
+        for required in ("sessions", "seasons", "session", "season", "switch"):
+            assert required in names
+        for row in BOT_MENU_COMMANDS:
+            cmd = row["command"]
+            desc = row["description"]
+            assert cmd.isascii() and cmd.replace("_", "").isalnum() and cmd.islower()
+            assert 1 <= len(cmd) <= 32
+            assert 3 <= len(desc) <= 256
 
 
 # ══════════════════════════════════════════════════════════════════════

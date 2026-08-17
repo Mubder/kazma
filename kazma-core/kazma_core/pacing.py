@@ -51,12 +51,21 @@ _GREETING_PATTERNS: list[str] = [
     "مساء الخير",
     "هلا فيك",
     "أهلاً وسهلاً",
+    "أهلا وسهلا",
     "كيفك",
     "شخبارك",
     "عساك طيب",
     "الحمد لله",
     "الله يسلمك",
     "تمام الحمد لله",
+    # Bare welcome greetings (2026-08-15: previously undetected — مرحبا fell
+    # through to the LLM instead of the fast path).
+    "مرحبا",
+    "مرحب",
+    "مرحبتين",
+    "أهلا",
+    "اهلا",
+    "هلا",
 ]
 
 _FAREWELL_PATTERNS: list[str] = [
@@ -318,6 +327,48 @@ class ConversationPacing:
         ]
         idx = min(greeting_number - 1, len(responses) - 1)
         return responses[idx]
+
+    def get_greeting_reply(
+        self,
+        text: str,
+        *,
+        is_ramadan: bool = False,
+        is_eid: bool = False,
+    ) -> str:
+        """Type-matched greeting reply (2026-08-15 Majlis fix).
+
+        The reply must relate to WHAT the user said: وعليكم السلام answers
+        السلام عليكم — not "الحمد لله بخير" (an answer to شلونك). Greeting
+        subtype is detected from *text*; Ramadan/Eid replies still take
+        precedence (mirrors get_greeting_response).
+        """
+        import random
+
+        if is_eid:
+            return "عيد مبارك عليكم! كل عام وأنتم بخير"
+        if is_ramadan:
+            return "رمضان كريم! عساك من عواده"
+
+        t = (text or "").strip()
+        # Ordered: most specific greeting first (السلام عليكم before هلا).
+        replies_by_type: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
+            (("السلام عليكم", "سلام عليكم"), ("وعليكم السلام ورحمة الله وبركاته", "وعليكم السلام")),
+            (("صباح الخير", "صباح الورد"), ("صباح النور ☀️", "صباح الخيرات")),
+            (("مساء الخير", "مساء الورد"), ("مساء النور 🌙", "مساء الخيرات")),
+            (
+                ("مرحبا", "مرحب", "مرحبتين", "أهلا", "اهلا", "هلا", "حياك"),
+                ("هلا والله، حياك الله", "أهلا وسهلا", "مرحبتين"),
+            ),
+            (
+                ("شلونك", "شلونكم", "كيف حالك", "كيفك", "كيفكم", "شخبارك", "عساك طيب"),
+                ("الحمد لله بخير، وأنت شحالك؟", "تمام الحمد لله", "بخير الله يخليك"),
+            ),
+            (("الحمد لله", "الله يسلمك", "تمام الحمد"), ("الله يسلمك", "تسلم", "الحمد لله")),
+        ]
+        for patterns, replies in replies_by_type:
+            if any(p in t for p in patterns):
+                return random.choice(replies)
+        return "هلا والله، حياك الله"
 
     def should_allow_transaction(self, text: str) -> bool:
         """Check if the user is trying to initiate a transaction.

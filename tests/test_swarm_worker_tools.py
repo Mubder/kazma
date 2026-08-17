@@ -21,6 +21,21 @@ import pytest
 from kazma_core.llm_provider import LLMResponse, ToolCall
 
 
+@pytest.fixture(autouse=True)
+def _no_auto_model_selection(monkeypatch):
+    """Disable best-model auto-selection so tests control the provider seam.
+
+    worker.dispatch() tries ``select_provider_for_task()`` before falling
+    back to ``registry.get_client()``. With a MagicMock registry the
+    selection returns a garbage provider whose ``chat`` is not awaitable —
+    the tests patch ``get_client``, so force the fallback.
+    """
+    monkeypatch.setattr(
+        "kazma_core.models.selection.select_provider_for_task",
+        lambda registry, prompt: None,
+    )
+
+
 # ── Helpers ────────────────────────────────────────────────────────────
 
 def _make_response(
@@ -390,8 +405,11 @@ class TestMaxIterations:
                 result = await worker.dispatch("start looping")
 
         assert result["status"] == "success"
-        # Exactly 15 iterations (MAX_ITERATIONS), not infinite
-        assert mock_provider.chat.call_count == 15
+        from kazma_core.swarm.worker import worker_iteration_budget
+
+        cap = worker_iteration_budget()
+        # cap loop calls + 1 forced no-tools finalization
+        assert mock_provider.chat.call_count == cap + 1
         assert "Max tool-use iterations" in result["output"] or result["output"]
 
 

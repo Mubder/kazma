@@ -213,18 +213,25 @@ class SecretVault:
         """Retrieve and decrypt a secret by name.
 
         Falls back to global (tenant_id IS NULL) if the tenant-scoped
-        secret doesn't exist.
+        secret doesn't exist. When duplicate rows exist (e.g. a rotated
+        credential stored under two tenants before a cleanup), the most
+        recently written row wins — a stale row must never shadow a newer
+        value (incident 2026-08-16: an old OAuth client secret kept winning
+        over the rotated one and every token refresh failed with
+        ``invalid_client``).
 
         Returns:
             The decrypted secret value, or None if not found.
         """
         tid = self._tenant_filter(tenant_id)
         with self._lock:
-            # Try tenant-specific first, then global.
+            # Try tenant-specific first, then global. Newest-first within a
+            # scope so a rotated credential always wins over a stale copy.
             for query_tid in ([tid] if tid else []) + [None]:
                 row = self._conn.execute(
                     """SELECT encrypted_value, nonce FROM secrets
-                       WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')""",
+                       WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')
+                       ORDER BY rowid DESC LIMIT 1""",
                     (name, query_tid),
                 ).fetchone()
                 if row:

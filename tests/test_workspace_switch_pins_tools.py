@@ -39,9 +39,12 @@ def test_set_active_workspace_repins_file_write(tmp_path, monkeypatch):
     # Switch Repo → ShipX
     assert store.set_active_workspace(rec_s["id"]) is True
     assert fw._get_workspace().resolve() == shipx.resolve()
-    # configure pin must also match
-    assert fw._WORKSPACE_ROOT is not None
-    assert fw._WORKSPACE_ROOT.resolve() == shipx.resolve()
+    # configure pin must also match (the global moved from file_write to
+    # workspace.binding in the §10A binding-SoT refactor)
+    from kazma_core.workspace import binding as ws_binding
+
+    assert ws_binding._WORKSPACE_ROOT is not None
+    assert ws_binding._WORKSPACE_ROOT.resolve() == shipx.resolve()
 
     # env_context must advertise ShipX, not kazma
     from kazma_core.ide.env_context import build_env_context

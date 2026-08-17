@@ -250,7 +250,7 @@ class MetricsDashboard(Widget):
                     card_id="metric-latency",
                 )
                 yield MetricCard(
-                    label="Health (CPU/Mem)",
+                    label="This TUI · CPU/Mem",
                     value=self._format_health(None, None, None),
                     status="normal",
                     show_sparkline=True,
@@ -258,7 +258,7 @@ class MetricsDashboard(Widget):
                 )
             with Horizontal(classes="metric-row"):
                 yield MetricCard(
-                    label="VRAM (GB)",
+                    label="This TUI · VRAM",
                     value=self._format_vram(None, None),
                     status="normal",
                     show_sparkline=True,
@@ -388,6 +388,18 @@ class MetricsDashboard(Widget):
                 agent_names = self._get_agent_names(engine)
             except Exception:
                 logger.debug("SwarmEngine unavailable", exc_info=True)
+        if not agent_names:
+            try:
+                from kazma_core.runtime.local_api import request_json
+
+                data = request_json("GET", "/api/swarm/status")
+                agent_names = sorted(
+                    str(w.get("name"))
+                    for w in (data.get("workers") or [])
+                    if w.get("name")
+                )
+            except Exception:
+                logger.debug("live swarm status unavailable", exc_info=True)
 
         # ── Update MetricCard widgets ───────────────────────────────
         try:
@@ -410,7 +422,7 @@ class MetricsDashboard(Widget):
 
             health_card = self.query_one("#metric-health", MetricCard)
             health_card.update_card(
-                label="Health (CPU/Mem)",
+                label="This TUI · CPU/Mem",
                 value=self._format_health(cpu_value, ram_used, ram_total),
                 status="normal",
                 spark_val=cpu_value if cpu_value is not None else 0.0,
@@ -419,7 +431,7 @@ class MetricsDashboard(Widget):
             vram_card = self.query_one("#metric-vram", MetricCard)
             vram_status = self._determine_vram_status(vram_used, vram_total)
             vram_card.update_card(
-                label="VRAM (GB)",
+                label="This TUI · VRAM",
                 value=self._format_vram(vram_used, vram_total),
                 status=vram_status,
                 spark_val=vram_used if vram_used is not None else 0.0,

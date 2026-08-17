@@ -41,7 +41,10 @@ def test_workspace_store_boot_default_creation(tmp_path: Path) -> None:
     assert len(workspaces) == 1
     default_ws = workspaces[0]
     
-    assert default_ws["name"] == "Default Workspace"
+    # Boot default: when CWD is a real project (has .git/files) the store
+    # names the workspace after the CWD directory, rooted at CWD — not the
+    # legacy "Default Workspace" sandbox name.
+    assert default_ws["name"] == Path.cwd().name
     assert default_ws["root_path"] == str(Path.cwd().resolve())
     assert default_ws["is_active"] is True
     
@@ -116,7 +119,7 @@ def test_workspaces_api_endpoints(tmp_path: Path) -> None:
         data = resp.json()
         assert data["status"] == "ok"
         assert len(data["workspaces"]) == 1
-        assert data["workspaces"][0]["name"] == "Default Workspace"
+        assert data["workspaces"][0]["name"] == Path.cwd().name
         
         default_id = data["active_workspace_id"]
         assert default_id is not None

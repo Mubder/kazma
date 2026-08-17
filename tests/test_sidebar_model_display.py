@@ -116,10 +116,11 @@ class TestSidebarSourceHasDynamicModel:
 
     def test_app_js_sidebar_component_has_fetch(self) -> None:
         """sidebarComponent() in app.js must fetch /api/provider/active."""
-        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
-        # Find the sidebarComponent function
+        js = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
+        # Find the sidebarComponent function (moved out of app.js during the
+        # JS modularization; app.js now only imports/re-exports it)
         idx = js.find("function sidebarComponent()")
-        assert idx != -1, "sidebarComponent() not found in app.js"
+        assert idx != -1, "sidebarComponent() not found in modules/components.js"
         section = js[idx:]
         assert "/api/provider/active" in section, (
             "sidebarComponent() must fetch /api/provider/active"
@@ -127,17 +128,17 @@ class TestSidebarSourceHasDynamicModel:
 
     def test_app_js_sidebar_component_has_init(self) -> None:
         """sidebarComponent() must have an init() that triggers the fetch."""
-        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
+        js = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
         idx = js.find("function sidebarComponent()")
         section = js[idx:]
         assert "init()" in section, "sidebarComponent() must define init()"
-        assert "fetchActiveModel" in section, (
-            "sidebarComponent() must call fetchActiveModel()"
+        assert "_fetchActiveModel" in section, (
+            "sidebarComponent() must call _fetchActiveModel()"
         )
 
     def test_app_js_sidebar_component_has_active_model_state(self) -> None:
         """sidebarComponent() must have activeModel state property."""
-        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
+        js = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
         idx = js.find("function sidebarComponent()")
         section = js[idx:]
         assert "activeModel" in section, (

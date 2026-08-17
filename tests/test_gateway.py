@@ -506,6 +506,10 @@ class TestTelegramAdapter:
 
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=mock_response)
+        # _ensure_http() keeps the client only when is_closed is falsy; a bare
+        # AsyncMock auto-generates a truthy is_closed and would be replaced by
+        # a real httpx client (→ 404 against the live API).
+        mock_http.is_closed = False
         adapter._http = mock_http
 
         ok = await adapter.send(
@@ -532,6 +536,10 @@ class TestTelegramAdapter:
 
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=mock_response)
+        # _ensure_http() keeps the client only when is_closed is falsy; a bare
+        # AsyncMock auto-generates a truthy is_closed and would be replaced by
+        # a real httpx client (→ 404 against the live API).
+        mock_http.is_closed = False
         adapter._http = mock_http
 
         ok = await adapter.send(OutboundMessage(target_id="telegram:99999", text="hi"))
@@ -608,6 +616,7 @@ class TestTelegramAdapter:
 
         mock_http = AsyncMock()
         mock_http.post = mock_post
+        mock_http.is_closed = False  # keep the mock through _ensure_http()
         adapter._http = mock_http
 
         ok = await adapter.send(
@@ -775,7 +784,15 @@ class TestPlatformIsolation:
 
     @pytest.mark.asyncio
     async def test_gateway_block_only_agnostic_fields(self, store) -> None:
-        """_gateway block must contain exactly: thread_id, display_name, platform."""
+        """_gateway block must contain exactly:
+        thread_id, display_name, platform, delivery_target.
+
+        delivery_target is the platform-prefixed routing target (e.g.
+        "telegram:<chat_id>") carried for async delivery (cron reminders) —
+        an intentional, documented member of the internal routing block
+        (AGENTS.md §2/§16), NOT a raw platform ID. Raw chat_id/user_id/
+        message_id must still never leak into graph state.
+        """
         msg = IncomingMessage(
             platform="telegram",
             sender_id="telegram:1",
@@ -793,9 +810,11 @@ class TestPlatformIsolation:
         state = await agent_handler._build_initial_state(msg, store)
         gw = state["_gateway"]
 
-        allowed_keys = {"thread_id", "display_name", "platform"}
+        allowed_keys = {"thread_id", "display_name", "platform", "delivery_target"}
         leaked = set(gw.keys()) - allowed_keys
         assert leaked == set(), f"Unexpected keys in _gateway: {leaked}"
+        # delivery_target is well-formed and platform-prefixed.
+        assert gw["delivery_target"].startswith("telegram:")
 
 
 # ══════════════════════════════════════════════════════════════════════════

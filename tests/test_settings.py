@@ -170,6 +170,21 @@ class TestSettingsManager:
         assert config["name"] == "test-agent"
         assert config["language"] == "en"
 
+    def test_save_agent_config_applies_runtime_personality(self, sm):
+        """PUT /api/settings/agent must switch the live runtime override."""
+        from kazma_core.personalities import (
+            get_runtime_personality,
+            reset_runtime_personality,
+        )
+
+        reset_runtime_personality()
+        try:
+            sm.save_agent_config({"personality": "concise"})
+            assert sm.get_agent_config()["personality"] == "concise"
+            assert get_runtime_personality() == "concise"
+        finally:
+            reset_runtime_personality()
+
     def test_max_iterations_clamped_and_persisted(self, sm):
         """Max tool rounds (agent.max_iterations) clamps 5–100 and round-trips."""
         sm.save_agent_config({"max_iterations": 30})
@@ -955,3 +970,41 @@ class TestUnifiedProvidersRouterAPI:
         data = resp.json()
         assert data["success"] is False
         assert "No token" in data["error"] or "token" in data["error"].lower()
+
+    def test_providers_delete_model(self, client):
+        """DELETE /api/providers/{name}/models/{model_id} deletes a model from provider."""
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        reg.upsert_provider({
+            "name": "ollama-test",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "models": ["deleted-model-1", "active-model"],
+        })
+        reg._discovered_models = {"ollama-test": ["deleted-model-1", "active-model"]}
+        reg.set_selected_models("ollama-test", ["deleted-model-1", "active-model"])
+
+        resp = client.delete("/api/providers/ollama-test/models/deleted-model-1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "deleted-model-1" not in data["discovered_models"]
+        assert "deleted-model-1" not in data["selected_models"]
+        assert "active-model" in data["discovered_models"]
+
+    def test_providers_clear_discovered(self, client):
+        """POST /api/providers/{name}/clear-discovered clears discovered models and selection."""
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        reg.upsert_provider({
+            "name": "ollama-clear",
+            "base_url": "http://127.0.0.1:11434/v1",
+        })
+        reg._discovered_models = {"ollama-clear": ["model-a", "model-b"]}
+        reg.set_selected_models("ollama-clear", ["model-a"])
+
+        resp = client.post("/api/providers/ollama-clear/clear-discovered")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["discovered_models"] == []
+        assert data["selected_models"] == []

@@ -84,7 +84,7 @@ def parse_message_create(data: dict[str, Any] | None) -> IncomingMessage | None:
     text = content or (f"[{attachments[0].kind}]" if attachments else "")
     return IncomingMessage(
         platform="discord",
-        sender_id=f"discord:{channel_id}",
+        sender_id=f"discord:{user_id}:{channel_id}" if user_id else f"discord:{channel_id}",
         text=text,
         attachments=attachments,
         context_metadata={

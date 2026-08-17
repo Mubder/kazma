@@ -70,6 +70,29 @@ def memory_server(tmp_path_factory):
     server.should_exit = True
     thread.join(timeout=3.0)
     os.environ.pop("KAZMA_DATA_DIR", None)
+    # The app's lifespan shutdown fired signal_shutdown() — the GLOBAL
+    # shutdown event stays set for the rest of the process, so every later
+    # SSE stream test sees is_shutting_down()==True and immediately breaks
+    # (root cause of the sse_chat flakes). Reset it here.
+    try:
+        from kazma_core.shutdown import reset_shutdown, uninstall_shutdown_signal_hooks
+        uninstall_shutdown_signal_hooks()
+        reset_shutdown()
+    except Exception:
+        pass
+    # create_app() also initialized process-wide singletons against the TEMP
+    # data dir — reset them so later tests don't see stale singletons.
+    for _reset in (
+        lambda: __import__("kazma_ui.session_manager", fromlist=["reset_session_manager"]).reset_session_manager(),
+        lambda: __import__("kazma_ui.services", fromlist=["reset_swarm_service"]).reset_swarm_service(),
+        lambda: __import__("kazma_core.config_store", fromlist=["reset_config_store"]).reset_config_store(),
+        lambda: __import__("kazma_core.model_registry", fromlist=["reset_model_registry"]).reset_model_registry(),
+        lambda: __import__("kazma_core.swarm.engine", fromlist=["set_swarm_engine"]).set_swarm_engine(None),
+    ):
+        try:
+            _reset()
+        except Exception:
+            pass
 
 
 def test_memory_page_loads_and_renders(memory_server: str) -> None:

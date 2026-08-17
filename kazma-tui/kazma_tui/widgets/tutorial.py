@@ -60,11 +60,10 @@ class TutorialScreen(ModalScreen[bool]):
         {
             "title": "🐝 Swarm Monitoring",
             "message": (
-                "Monitor your agent swarm in real-time.\n\n"
-                "• View active workers and their status\n"
-                "• Track task progress and history\n"
-                "• See resource usage metrics\n"
-                "• Refresh with [bold]F5[/] or [bold]r[/]"
+                "The Swarm tab inspects the *running server* (kazma serve).\n\n"
+                "• Live workers and task history via /api/swarm\n"
+                "• Dispatch work from Chat with /swarm <task>\n"
+                "• Email / voice / image tools live on Web + chat, not extra TUI tabs"
             ),
             "highlight": "swarm",
             "buttons": ["back", "next"],

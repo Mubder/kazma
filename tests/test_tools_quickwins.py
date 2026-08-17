@@ -18,6 +18,29 @@ def _make_mock_ddgs(ddgs_instance):
     return mod
 
 
+# ── helpers to disable the non-DDGS search rungs ──────────────────────────
+# The web_search ladder is searxng -> duckduckgo -> bing -> wikipedia. A REAL
+# SearXNG instance on this machine returns live results before the DDGS mock
+# ever runs, so tests that want deterministic DDGS behavior must switch the
+# other rungs off.
+_OTHER_BACKENDS = (
+    "kazma_core.tools.web_search._searxng_search",
+    "kazma_core.tools.web_search._bing_search",
+    "kazma_core.tools.web_search._wikipedia_search",
+)
+
+
+def _patch_backends_off():
+    """All non-DDGS rungs return no results."""
+    return [patch(name, return_value=(None, "off:test")) for name in _OTHER_BACKENDS]
+
+
+def _patch_backends_raising(exc):
+    """All four rungs raise *exc* so web_search's top-level error mapping fires."""
+    names = _OTHER_BACKENDS + ("kazma_core.tools.web_search._ddg_search",)
+    return [patch(name, side_effect=exc) for name in names]
+
+
 def _make_mock_trafilatura(extract_return):
     """Create a fake trafilatura module whose extract() returns *extract_return*."""
     mod = ModuleType("trafilatura")
@@ -54,7 +77,12 @@ class TestWebSearch:
         mock_ddgs.text = MagicMock(return_value=mock_results)
 
         fake_mod = _make_mock_ddgs(mock_ddgs)
-        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in _patch_backends_off():
+                stack.enter_context(p)
+            stack.enter_context(patch.dict(sys.modules, {"duckduckgo_search": fake_mod}))
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test query", max_results=2)
@@ -73,17 +101,22 @@ class TestWebSearch:
         mock_ddgs.text = MagicMock(return_value=[])
 
         fake_mod = _make_mock_ddgs(mock_ddgs)
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        with (
-            patch.dict(sys.modules, {"duckduckgo_search": fake_mod}),
-            patch("httpx.get", return_value=mock_response),
-        ):
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in _patch_backends_off():
+                stack.enter_context(p)
+            stack.enter_context(patch.dict(sys.modules, {"duckduckgo_search": fake_mod}))
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("nonexistent query xyz")
 
-        assert "No results found" in result
+        # All rungs disabled/empty: the actionable empty message (restored
+        # 2026-08-15 — _format_empty was dead code; empty results again get
+        # the rephrase/read_url/SearXNG guidance instead of an empty header).
+        assert "No web results" in result
+        assert "nonexistent query xyz" in result
+        assert "read_url" in result
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -121,21 +154,19 @@ class TestReadUrl:
 
     @pytest.mark.asyncio
     async def test_read_url_http_error(self) -> None:
-        """read_url returns a friendly error on HTTP failure."""
-        import httpx as _httpx
+        """read_url returns a friendly error on HTTP failure.
 
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        mock_response.raise_for_status = MagicMock(
-            side_effect=_httpx.HTTPStatusError("Not Found", request=MagicMock(), response=mock_response),
-        )
+        The fetch ladder (Jina -> Firecrawl -> httpx -> Playwright, §24B) has
+        its own failover, so the tool's error contract is tested by having
+        the ladder entry report an HTTP failure — patching httpx.AsyncClient
+        just makes the ladder fall through to REAL network rungs.
+        """
+        from unittest.mock import patch as _patch
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with _patch(
+            "kazma_core.tools.read_url._fetch_full_text",
+            new=AsyncMock(return_value="Error: HTTP 404 Not Found"),
+        ):
             from kazma_core.tools.read_url import read_url
 
             result = await read_url("https://example.com/404")
@@ -167,12 +198,13 @@ class TestTruncation:
         raw_content = result["content"]
         assert len(raw_content) == 5000  # registry doesn't truncate
 
-        # Test through the actual production truncation function
-        content = truncate_tool_result(raw_content)
+        # Test through the actual production truncation function. The DEFAULT
+        # cap is now 200k chars (file/research tools keep full output), so
+        # pass an explicit cap to exercise the truncation logic itself.
+        content = truncate_tool_result(raw_content, max_chars=1000)
 
         assert len(content) < 5000
-        assert "[truncated" in content
-        assert "1000 chars" in content
+        assert "[truncated 4000 chars]" in content
 
     @pytest.mark.asyncio
     async def test_truncation_short_unchanged(self) -> None:
@@ -203,17 +235,16 @@ class TestFriendlyErrors:
 
     @pytest.mark.asyncio
     async def test_error_friendly_message(self) -> None:
-        """ConnectionError is mapped to a friendly message, not a traceback."""
-        mock_ddgs = MagicMock()
-        mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
-        mock_ddgs.__exit__ = MagicMock(return_value=False)
-        mock_ddgs.text = MagicMock(side_effect=ConnectionError("Network unreachable"))
+        """ConnectionError is mapped to a friendly message, not a traceback.
 
-        fake_mod = _make_mock_ddgs(mock_ddgs)
-        with (
-            patch.dict(sys.modules, {"duckduckgo_search": fake_mod}),
-            patch("httpx.get", side_effect=ConnectionError("Network unreachable")),
-        ):
+        The ladder catches per-backend errors and fails over, so to reach
+        web_search's top-level mapping ALL backends must raise.
+        """
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in _patch_backends_raising(ConnectionError("Network unreachable")):
+                stack.enter_context(p)
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test")
@@ -449,11 +480,11 @@ class TestWebSearchEdgeCases:
         mock_ddgs.__exit__ = MagicMock(return_value=False)
         mock_ddgs.text = MagicMock(side_effect=TimeoutError("timed out"))
 
-        fake_mod = _make_mock_ddgs(mock_ddgs)
-        with (
-            patch.dict(sys.modules, {"duckduckgo_search": fake_mod}),
-            patch("httpx.get", side_effect=TimeoutError("timed out")),
-        ):
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in _patch_backends_raising(TimeoutError("timed out")):
+                stack.enter_context(p)
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test")

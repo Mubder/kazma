@@ -175,15 +175,25 @@ def _memory_tenant_id() -> str:
     """
     import os
 
-    if str(os.environ.get("KAZMA_MEMORY_ENFORCE_TENANT", "")).strip().lower() in (
+    enforce = str(os.environ.get("KAZMA_MEMORY_ENFORCE_TENANT", "")).strip().lower() in (
         "1", "true", "yes", "on",
-    ):
+    )
+    if not enforce:
+        try:
+            from kazma_core.tenant_isolation import multi_user_or_production
+
+            enforce = bool(multi_user_or_production())
+        except Exception:
+            enforce = False
+    if enforce:
         try:
             from kazma_core.tenant_isolation import require_tenant_id
 
             return require_tenant_id()
         except Exception:
-            return "default"
+            # Do not fall back to the shared "default" tenant — that would
+            # leak another tenant's rows when isolation is required.
+            return "__unscoped__"
     return "default"
 
 

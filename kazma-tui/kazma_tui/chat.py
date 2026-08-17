@@ -38,15 +38,18 @@ class ChatPanel(Vertical):
         ("/help", "Show available commands"),
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
+        ("/sessions", "List seasons (same list as Web/Telegram/Discord)"),
+        ("/session", "Switch onto a season (#short_id, n, or name)"),
         ("/model [set <name>]", "Show/switch active model (interactive picker)"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
         ("/memory", "Memory store stats"),
         ("/cost", "Session token spend"),
-        ("/context", "Context window usage"),
-        ("/personality [list|<name>]", "Show/switch personality"),
-        ("/config", "Interactive config wizard"),
-        ("/replay [list|clear|<n>]", "Time travel: list/replay snapshots"),
+        ("/context", "Season usage + server context window"),
+        ("/personality [list|<name>]", "Show/switch live server personality"),
+        ("/config [show|model|personality|memory|tools|export]", "Live server config"),
+        ("/replay [list|clear|<n>]", "Time travel: list or rewind this season"),
+        ("/fork <n>", "Branch this season from snapshot n (new thread)"),
         ("/export", "Export session to file"),
         ("/swarm [status|list|<task>]", "Swarm dispatch and management"),
         ("/quit", "Exit Kazma TUI"),
@@ -130,6 +133,10 @@ class ChatPanel(Vertical):
         self._ac_index: int = 0
         self._model_cache: list[str] = []
         self._ac_suppress: bool = False
+        self._session_id: str = ""
+        self._thread_id: str = ""
+        self._session_model: str = ""
+        self._workspace_id: str = ""
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -137,7 +144,9 @@ class ChatPanel(Vertical):
             classes="chat-banner",
         )
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
-        yield ProgressBar(id="chat-progress", total=100, show_eta=False)
+        bar = ProgressBar(id="chat-progress", total=100, show_eta=False)
+        bar.display = False
+        yield bar
         yield Input(placeholder="Message  ·  / for commands  ·  Ctrl+P palette", id="chat-input")
         yield ListView(id="autocomplete")
 
@@ -174,9 +183,11 @@ class ChatPanel(Vertical):
             self._populate_ac_list(ac)
             return
 
-        # Default: match slash commands
-        partial = parts[0] if parts else val
-        matches = [(c, d) for c, d in self.SLASH_COMMANDS if c.startswith(partial)]
+        # Default: match slash commands. Hide once the user types args so
+        # Enter on `/session 12` submits instead of filling `/sessions`.
+        from kazma_tui.slash_complete import slash_matches
+
+        matches = slash_matches(val, self.SLASH_COMMANDS)
         self._ac_matches = matches
         self._ac_index = 0
         self._populate_ac_list(ac)
@@ -221,6 +232,11 @@ class ChatPanel(Vertical):
             ac.index = self._ac_index
             event.prevent_default()
         elif event.key == "enter" and self._ac_matches:
+            from kazma_tui.slash_complete import enter_completes_autocomplete
+
+            inp = self.query_one("#chat-input", Input)
+            if not enter_completes_autocomplete(inp.value, self._ac_matches):
+                return
             idx = min(self._ac_index, len(self._ac_matches) - 1)
             self._apply_ac_match(idx)
             ac.display = False
@@ -271,14 +287,14 @@ class ChatPanel(Vertical):
 
     # ── Message display ────────────────────────────────────────────
 
-    def write(self, role: str, text: str) -> None:
+    def write(self, role: str, text: str, *, ts: str | None = None) -> None:
         """Write a message to the chat log with role prefix."""
         log = self.query_one("#chat-log", RichLog)
-        ts = datetime.now().strftime("%H:%M")
+        stamp = ts or datetime.now().strftime("%H:%M")
         c = ROLE_HEX.get(role, "#8b949e")
         # Escape Rich markup in user/LLM text to prevent injection
         from rich.text import Text
-        log.write(Text.from_markup(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] ") + Text(text))
+        log.write(Text.from_markup(f"[dim]{stamp}[/] [{c}]▌ {role.upper()}[/] ") + Text(text))
 
     def add_message(self, role: str, text: str) -> None:
         """Alias for write() - adds a message to the chat log."""
@@ -309,63 +325,57 @@ class ChatPanel(Vertical):
     # ── Streaming ──────────────────────────────────────────────────
 
     async def write_stream(self, prompt: str) -> None:
-        """Send prompt to provider and write response to RichLog."""
+        """Send prompt through the live Kazma supervisor (same as Web)."""
+        from rich.text import Text
+
         log = self.query_one("#chat-log", RichLog)
         ts = datetime.now().strftime("%H:%M")
         log.write(f"[dim]{ts}[/] [#c084fc]▌ KAZMA[/] ")
         self.show_progress(True)
 
         try:
-            from kazma_core.model_registry import get_model_registry
+            if not self._session_id:
+                import uuid
 
-            try:
-                registry = get_model_registry()
-                provider = registry.get_client()
-            except RuntimeError:
-                log.write(
-                    "\n[#ef4444]Error: ModelRegistry not initialized. "
-                    "Start the kazma-ui server first, or run "
-                    "kazma_core.bootstrap.initialize().[/]"
-                )
-                return
-            if provider is None:
-                log.write(
-                    "\n[#ef4444]Error: No LLM provider configured. "
-                    "Add a provider via /models in the chat, or via kazma.yaml.[/]"
-                )
-                return
-
+                self._session_id = str(uuid.uuid4())
+                self._thread_id = self._session_id
             self._messages.append({"role": "user", "content": prompt})
-            # Send the (capped) conversation history so follow-up turns keep
-            # context — previously each turn was a fresh single-message chat
-            # while self._messages only fed /context and /export.
-            # Inject system prompt from kazma.yaml so the model knows to
-            # respond in the user's language and follow Kazma's persona.
-            system_prompt = self._get_system_prompt()
-            messages: list[dict[str, Any]] = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self._messages[-(_MAX_HISTORY_TURNS * 2):])
-            response = await provider.chat(messages)
-            content = getattr(response, "content", "") or ""
+
+            from kazma_core.agent.turn_client import stream_chat_turn
+
+            def _on_event(ev: Any) -> None:
+                if ev.kind == "tool_call" and ev.tool:
+                    log.write(Text(f"[tool] {ev.tool}", style="dim"))
+                elif ev.kind == "error" and ev.text:
+                    log.write(Text(ev.text, style="red"))
+
+            if not self._workspace_id:
+                try:
+                    self._workspace_id = await self._ensure_workspace_id()
+                except Exception:
+                    self._workspace_id = ""
+            content = await stream_chat_turn(
+                text=prompt,
+                session_id=self._session_id,
+                on_event=_on_event,
+                model=self._session_model,
+                workspace_id=self._workspace_id,
+            )
             if content:
                 self._last_response = content
                 self._messages.append({"role": "assistant", "content": content})
-                # Write as plain Text, not markup — the chat-log RichLog is
-                # markup=True, so raw content with [...] (citations, array
-                # indices, "[ERROR]") got parsed as Rich markup → mis-rendered
-                # colors / swallowed text / MarkupError. The sibling write()
-                # already does this (audit finding).
-                from rich.text import Text
                 log.write(Text(content))
             else:
-                log.write("[dim](empty response)[/]")
+                log.write(
+                    "[dim](empty response — the server sent no assistant text. "
+                    "If this keeps happening, the TUI is not reaching "
+                    "127.0.0.1:9090; check KAZMA_PORT / KAZMA_SECRET.)[/]"
+                )
         except Exception as e:
             log.write(f"\n[#ef4444]Error: {e}[/]")
         finally:
             self.show_progress(False)
             self._busy = False
-            # Re-enable input
             try:
                 self.query_one("#chat-input", Input).disabled = False
             except Exception as exc:
@@ -377,13 +387,11 @@ class ChatPanel(Vertical):
         """Callback when a model is selected from the picker."""
         if not model_name:
             return
-        try:
-            from kazma_core.model_registry import get_model_registry
-            registry = get_model_registry()
-            registry.set_active_model(model_name)
-            self.write("system", f"Active model set to: {model_name}")
-        except Exception as e:
-            self.write("error", f"Failed to set model: {e}")
+        self._session_model = model_name
+        self.write(
+            "system",
+            f"This season will use {model_name} (not a process-wide switch).",
+        )
         try:
             self.query_one("#chat-input", Input).focus()
         except Exception:
@@ -397,13 +405,16 @@ class ChatPanel(Vertical):
         if self._busy:
             return
         event.input.clear()
-        if text.startswith("/"):
+        try:
+            from kazma_core.agent.slash_turns import rewrite_work_slash
+
+            _rw = rewrite_work_slash(text)
+            if _rw:
+                text = _rw
+        except Exception:
+            pass
+        if text.startswith("/") and not rewrite_work_slash(text):
             self._handle_command(text)
-        elif self._is_swarm_mention(text):
-            self.write("user", text)
-            self._busy = True
-            event.input.disabled = True
-            self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("user", text)
             self._busy = True
@@ -441,225 +452,749 @@ class ChatPanel(Vertical):
             sub = parts[1].lower() if len(parts) > 1 else ""
             if sub == "set" and len(parts) > 2:
                 model_name = parts[2].strip()
-                try:
-                    from kazma_core.model_registry import get_model_registry
-                    registry = get_model_registry()
-                    registry.set_active_model(model_name)
-                    self.write("system", f"Active model set to: {model_name}")
-                except Exception as e:
-                    self.write("error", f"Failed to set model: {e}")
+                self._session_model = model_name
+                self.write(
+                    "system",
+                    f"This season will use {model_name} (sent on the next turn).",
+                )
             else:
-                try:
-                    from kazma_core.model_registry import get_model_registry
-                    registry = get_model_registry()
-                    active = getattr(registry, "_active_model", "") or ""
-                except Exception:
-                    active = ""
+                active = self._session_model
                 from kazma_tui.widgets.model_picker import ModelPicker
                 self.app.push_screen(ModelPicker(active_model=active), self._on_model_picked)
         elif cmd == "/memory":
-            self._cmd_memory()
+            self.app.call_later(self._cmd_memory)
         elif cmd == "/status":
-            self._cmd_status()
+            self.app.call_later(self._cmd_status)
         elif cmd == "/cost":
-            self._cmd_cost()
+            self.app.call_later(self._cmd_cost)
         elif cmd == "/context":
-            self._cmd_context()
+            self.app.call_later(self._cmd_context)
         elif cmd == "/reset":
             self.write("system", "Conversation context reset.")
+        elif cmd in ("/sessions", "/seasons", "/session", "/season", "/switch"):
+            self._cmd_sessions(text)
         elif cmd == "/personality":
-            self._cmd_personality(text)
+            self.app.call_later(self._cmd_personality, text)
         elif cmd == "/config":
-            self.write("system", "Config wizard available in the Settings tab.")
+            self.app.call_later(self._cmd_config, text)
         elif cmd == "/replay":
-            self._cmd_replay(text)
+            self.app.call_later(self._cmd_replay, text)
+        elif cmd == "/fork":
+            self.app.call_later(self._cmd_fork, text)
         elif cmd == "/export":
-            self._cmd_export()
+            self.app.call_later(self._cmd_export)
         elif cmd == "/swarm":
             self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("system", f"Unknown: {cmd}")
 
-    def _cmd_memory(self) -> None:
+    def _cmd_sessions(self, text: str) -> None:
+        """List or switch onto a season shared with Web and the gateways."""
         try:
-            from kazma_core.memory.health import build_memory_health
-            health = build_memory_health()
+            from kazma_core.sessions.directory import (
+                create_named_session,
+                format_session_list,
+                list_directory,
+                resolve_session,
+            )
+        except Exception as e:
+            self.write("error", f"Session directory unavailable: {e}")
+            return
+        parts = text.split(None, 1)
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        cmd = parts[0].lower()
+        if cmd in ("/sessions", "/seasons") or not rest or rest.lower() in {"list", "ls"}:
+            here = f"this TUI mouth: {self._session_id[-8:]}" if self._session_id else "no season yet"
+            self.write("system", format_session_list(list_directory()) + f"\n({here})")
+            return
+        bits = rest.split(None, 1)
+        if bits[0].lower() in {"new", "start"}:
+            import uuid
+
+            title = bits[1].strip() if len(bits) > 1 else ""
+            sid = ""
+            if title:
+                try:
+                    entry = create_named_session(
+                        platform="web", sender_id="tui", title=title
+                    )
+                    sid = entry.session_id
+                except Exception:
+                    logger.debug("TUI named season create failed", exc_info=True)
+            self._session_id = sid or str(uuid.uuid4())
+            self._thread_id = self._session_id
+            self._messages = []
+            self._reset_chat_log()
+            label = title or f"#{self._session_id[-8:]}"
+            self.write("system", f"New TUI season {label} — same brain as Web.")
+            return
+        hit = resolve_session(rest, current_thread_id=self._session_id or None)
+        if hit is None:
+            self.write("system", f"No season matches {rest!r}. Try /sessions.")
+            return
+        self._session_id = hit.session_id or hit.thread_id
+        self._thread_id = hit.thread_id or self._session_id
+        try:
+            n = self._load_season_messages(hit.session_id, thread_id=hit.thread_id)
+            self._replay_season_log()
+        except Exception as exc:
+            logger.exception("TUI season load failed for %s", hit.session_id)
+            self.write("error", f"Could not load season #{hit.short_id}: {exc}")
+            return
+        hint = (
+            f"Loaded #{hit.short_id}  {hit.title}  ({n} msgs). "
+            "Next messages continue this season on the same supervisor."
+        )
+        if n == 0:
+            hint += (
+                " History was empty here — send a message to continue, "
+                "or check KAZMA_SECRET if this season has turns on Web."
+            )
+        try:
+            self.show_progress(False)
+        except Exception:
+            pass
+        self.write("system", hint)
+
+    def _reset_chat_log(self) -> None:
+        try:
+            log = self.query_one("#chat-log", RichLog)
+            log.clear()
+        except Exception:
+            logger.debug("TUI chat log clear failed", exc_info=True)
+
+    def _replay_season_log(self) -> None:
+        """Paint loaded history into the visible log (cap so huge threads fit)."""
+        self._reset_chat_log()
+        tail = self._messages[-40:]
+        skipped = max(0, len(self._messages) - len(tail))
+        if skipped:
+            self.write("system", f"Showing last {len(tail)} of {len(self._messages)} messages.")
+        for m in tail:
+            role = str(m.get("role") or "assistant")
+            content = str(m.get("content") or "")
+            if not content.strip():
+                continue
+            if len(content) > 4000:
+                content = content[:4000] + "…"
+            raw_ts = str(m.get("ts") or m.get("timestamp") or "")
+            stamp = None
+            if raw_ts:
+                try:
+                    stamp = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).strftime("%H:%M")
+                except Exception:
+                    stamp = raw_ts[11:16] if len(raw_ts) >= 16 else None
+            self.write(role, content, ts=stamp)
+
+    def _load_season_messages(
+        self, session_id: str, *, thread_id: str = ""
+    ) -> int:
+        from kazma_tui.season_load import load_season_messages
+
+        self._messages = load_season_messages(session_id, thread_id)
+        return len(self._messages)
+
+    async def _api(self, method: str, path: str, payload: Any | None = None) -> Any:
+        from kazma_core.runtime.local_api import request_json_async
+
+        return await request_json_async(method, path, payload=payload)
+
+    async def _ensure_workspace_id(self) -> str:
+        if self._workspace_id:
+            return self._workspace_id
+        try:
+            data = await self._api("GET", "/api/workspaces")
+            self._workspace_id = str((data or {}).get("active_workspace_id") or "")
+        except Exception:
+            self._workspace_id = ""
+        return self._workspace_id
+
+    def _replay_thread_id(self) -> str:
+        return self._thread_id or self._session_id or ""
+
+    async def _cmd_memory(self) -> None:
+        try:
+            health = await self._api("GET", "/api/memory/v2/health")
             status = health.get("status", "?")
-            summary = health.get("summary", "")
-            lines = [f"Memory Status: {status}", summary, ""]
-            for c in health.get("components", []):
-                icon = "+" if c.get("ok") else "-"
-                lines.append(f"  [{icon}] {c['name']}: {c.get('status', '?')}")
+            lines = [f"Memory Status: {status} (live /api/memory/v2/health)", ""]
+            beliefs = health.get("beliefs") or {}
+            if beliefs:
+                lines.append(
+                    "  Beliefs: "
+                    f"active={beliefs.get('active', 0)} "
+                    f"superseded={beliefs.get('superseded', 0)} "
+                    f"archived={beliefs.get('archived', 0)}"
+                )
+            episodes = health.get("episodes") or {}
+            if episodes:
+                lines.append(
+                    "  Episodes: "
+                    + " ".join(f"{k}={v}" for k, v in episodes.items())
+                )
+            queue = health.get("queue") or {}
+            if queue:
+                lines.append(
+                    "  Queue: "
+                    f"pending={queue.get('pending', 0)} "
+                    f"processing={queue.get('processing', 0)} "
+                    f"failed={queue.get('failed', 0)}"
+                )
+            lines.append(f"  Entities: {health.get('entities', 0)}")
             self.write("system", "\n".join(lines))
         except Exception as e:
             self.write("error", f"Memory health unavailable: {e}")
 
-    def _cmd_status(self) -> None:
+    async def _cmd_status(self) -> None:
         try:
-            from kazma_core.model_registry import get_model_registry
-            registry = get_model_registry()
-            provider = getattr(registry, "_active_provider", "") or "none"
-            model = getattr(registry, "_active_model", "") or "none"
-            lines = [
-                "Gateway Status",
-                f"  Provider: {provider}",
-                f"  Model:    {model}",
-            ]
+            status = await self._api("GET", "/api/status")
+            active: dict[str, Any] = {}
             try:
-                from kazma_core.swarm import get_swarm_engine
-                engine = get_swarm_engine()
-                if engine:
-                    names = engine.worker_names
-                    lines.append(f"  Workers:  {len(names)}")
-                else:
-                    lines.append("  Workers:  (swarm not initialized)")
+                active = await self._api("GET", "/api/provider/active")
             except Exception:
-                lines.append("  Workers:  (unavailable)")
+                active = {}
+            swarm: dict[str, Any] = {}
+            try:
+                swarm = await self._api("GET", "/api/swarm/status")
+            except Exception:
+                swarm = {}
+            lines = [
+                "Server Status (live)",
+                f"  Health:   {status.get('status', '?')}",
+                f"  Provider: {active.get('provider') or 'none'}",
+                f"  Model:    {self._session_model or active.get('model') or 'none'}"
+                + (" (this season)" if self._session_model else " (server default)"),
+                f"  Workers:  {swarm.get('count', 0)}",
+            ]
+            errs = status.get("init_errors") or []
+            if errs:
+                lines.append(f"  Init:     {len(errs)} subsystem warning(s)")
             self.write("system", "\n".join(lines))
         except Exception as e:
             self.write("error", f"Status unavailable: {e}")
 
-    def _cmd_cost(self) -> None:
+    async def _cmd_cost(self) -> None:
+        sid = self._session_id
+        if not sid:
+            self.write("system", "No season yet — send a message first.")
+            return
         try:
-            from kazma_core.tracing import get_trace_store
-            stats = get_trace_store().stats()
-            cost = stats.get("total_cost", 0.0)
-            tokens = stats.get("total_tokens", 0)
-            llm_calls = stats.get("total_llm_calls", 0)
-            tool_calls = stats.get("total_tool_calls", 0)
-            uptime_s = stats.get("uptime_seconds", 0)
-            uptime = f"{int(uptime_s // 60)}m {int(uptime_s % 60)}s"
+            data = await self._api(
+                "GET", f"/api/chat/sessions/{sid}/messages?stats=1"
+            )
+            if isinstance(data, list):
+                cost = 0.0
+                tokens = 0
+            else:
+                cost = float((data or {}).get("total_cost") or 0.0)
+                tokens = int((data or {}).get("total_tokens") or 0)
             lines = [
-                "Session Cost Report",
+                "Season Cost (live session totals)",
                 f"  Total Cost:   ${cost:.4f}",
                 f"  Total Tokens: {tokens:,}",
-                f"  LLM Calls:    {llm_calls}",
-                f"  Tool Calls:   {tool_calls}",
-                f"  Uptime:       {uptime}",
+                f"  Season:       #{sid[-8:]}",
             ]
             self.write("system", "\n".join(lines))
         except Exception as e:
             self.write("error", f"Cost tracking unavailable: {e}")
 
-    def _cmd_context(self) -> None:
+    async def _session_message_payload(
+        self,
+    ) -> tuple[list[dict[str, Any]], int, float]:
+        """Live session transcript + billed totals (not this TUI process)."""
+        sid = self._session_id
+        if not sid:
+            return [], 0, 0.0
+        data = await self._api("GET", f"/api/chat/sessions/{sid}/messages?stats=1")
+        if isinstance(data, list):
+            return list(data), 0, 0.0
+        data = data or {}
+        msgs = list(data.get("messages") or [])
+        tokens = int(data.get("total_tokens") or 0)
+        cost = float(data.get("total_cost") or 0.0)
+        return msgs, tokens, cost
+
+    async def _cmd_context(self) -> None:
         try:
-            from kazma_core.summarizer import estimate_tokens, TOKEN_THRESHOLD
-            from kazma_core.config_store import get_config_store
-            cs = get_config_store()
-            window = cs.get("memory.max_context_tokens", 128_000)
-            tokens = estimate_tokens(self._messages) if self._messages else 0
+            ctx = await self._api("GET", "/api/settings/agent/context") or {}
+            window = int(ctx.get("max_context_tokens") or 128_000)
+            threshold = float(ctx.get("summarization_threshold") or 0.8)
+            strategy = str(ctx.get("context_strategy") or "sliding_window")
+            msgs: list[dict[str, Any]] = []
+            tokens = 0
+            if self._session_id:
+                msgs, tokens, _cost = await self._session_message_payload()
             pct = (tokens / window * 100) if window else 0
             bar_len = 20
-            filled = int(bar_len * pct / 100)
+            filled = max(0, min(bar_len, int(bar_len * pct / 100)))
             bar = "#" * filled + "-" * (bar_len - filled)
+            sid = self._session_id or ""
             lines = [
-                "Context Window",
-                f"  Tokens:    {tokens:,} / {window:,} ({pct:.1f}%)",
+                "Context Window (live server)",
+                f"  Season tokens: {tokens:,} / {window:,} ({pct:.1f}%)",
                 f"  [{bar}]",
-                f"  Messages:  {len(self._messages)}",
-                f"  Threshold: {TOKEN_THRESHOLD:,} tokens (compaction at 80%)",
+                f"  Messages:      {len(msgs)}"
+                + (f"  #{sid[-8:]}" if sid else "  (no season yet)"),
+                f"  Strategy:      {strategy}",
+                f"  Compact at:    {threshold:.0%} of window",
+                "  Totals are billed session usage from /api/chat/sessions, "
+                "not this TUI process's local buffer.",
             ]
             self.write("system", "\n".join(lines))
         except Exception as e:
             self.write("error", f"Context info unavailable: {e}")
 
-    def _cmd_personality(self, text: str = "/personality") -> None:
+    def _format_personality_row(self, item: dict[str, Any]) -> str:
+        name = str(item.get("name") or "?")
+        emoji = str(item.get("emoji") or "")
+        desc = str(item.get("description") or "").strip()
+        label = f"{name} {emoji}".strip()
+        return f"{label} — {desc}" if desc else label
+
+    async def _cmd_personality(self, text: str = "/personality") -> None:
+        parts = text.strip().split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
         try:
-            from kazma_core.tools.personality_cmd import handle_personality_command
-            from kazma_core.personalities import list_personalities, get_current_personality
-            parts = text.strip().split()
-            sub = parts[1].lower() if len(parts) > 1 else ""
-
-            if not sub or sub == "current":
-                # Show current personality
-                p = get_current_personality()
-                self.write("system", f"Current personality: {p.name} {p.emoji}\n{p.description}")
-                # Also list available
-                names = [f"{x.name} {x.emoji}" for x in list_personalities()]
-                self.write("system", "\nAvailable: " + ", ".join(names) + "\nSwitch: /personality <name>")
-            else:
-                response = handle_personality_command(text)
-                self.write("system", response)
+            agent = await self._api("GET", "/api/settings/agent") or {}
+            plist_raw = await self._api("GET", "/api/settings/agent/personalities") or []
+            plist = [p for p in plist_raw if isinstance(p, dict)]
         except Exception as e:
-            self.write("error", f"Personality command failed: {e}")
+            self.write("error", f"Personality API unavailable: {e}")
+            return
 
-    def _cmd_replay(self, text: str) -> None:
+        current = str(agent.get("personality") or "default")
+        by_name = {
+            str(p.get("name") or "").strip().lower(): p
+            for p in plist
+            if str(p.get("name") or "").strip()
+        }
+        cur = by_name.get(current.lower(), {"name": current, "emoji": "", "description": ""})
+
+        if not sub or sub == "current":
+            self.write(
+                "system",
+                f"Current personality (live server): {self._format_personality_row(cur)}\n"
+                "Available: "
+                + ", ".join(
+                    f"{p.get('name')} {p.get('emoji') or ''}".strip() for p in plist
+                )
+                + "\nSwitch: /personality <name>",
+            )
+            return
+
+        if sub == "list":
+            lines = ["Available personalities (live server):"]
+            for p in plist:
+                mark = " *" if str(p.get("name") or "").lower() == current.lower() else ""
+                lines.append(f"  {self._format_personality_row(p)}{mark}")
+            lines.append("Switch: /personality <name>")
+            self.write("system", "\n".join(lines))
+            return
+
+        hit = by_name.get(sub)
+        if hit is None:
+            available = ", ".join(str(p.get("name") or "") for p in plist) or "(none)"
+            self.write(
+                "system",
+                f"Unknown personality {sub!r}. Available: {available}",
+            )
+            return
+        name = str(hit.get("name") or sub)
+        try:
+            await self._api("PUT", "/api/settings/agent", {"personality": name})
+        except Exception as e:
+            self.write("error", f"Personality switch failed: {e}")
+            return
+        self.write(
+            "system",
+            f"Switched personality to {self._format_personality_row(hit)} (live server).",
+        )
+
+    async def _cmd_config(self, text: str = "/config") -> None:
+        parts = text.strip().split()
+        sub = parts[1].lower() if len(parts) > 1 else "show"
+
+        if sub in ("help", "?"):
+            self.write(
+                "system",
+                "Config (live /api/settings — protected keys stay denied):\n"
+                "  /config show\n"
+                "  /config model [name]\n"
+                "  /config personality [name]\n"
+                "  /config memory [on|off]\n"
+                "  /config tools list | /config tools toggle <name>\n"
+                "  /config export",
+            )
+            return
+
+        if sub == "personality":
+            rest = parts[2] if len(parts) > 2 else ""
+            await self._cmd_personality(
+                f"/personality {rest}".strip() if rest else "/personality"
+            )
+            return
+
+        try:
+            if sub in ("show", ""):
+                agent = await self._api("GET", "/api/settings/agent") or {}
+                active: dict[str, Any] = {}
+                try:
+                    active = await self._api("GET", "/api/provider/active") or {}
+                except Exception:
+                    active = {}
+                mem_on = True
+                try:
+                    grouped = await self._api("GET", "/api/settings") or {}
+                    for keys in grouped.values() if isinstance(grouped, dict) else []:
+                        if isinstance(keys, dict) and "memory.enabled" in keys:
+                            mem_on = bool(keys.get("memory.enabled"))
+                            break
+                except Exception:
+                    pass
+                model = (
+                    self._session_model
+                    or active.get("model")
+                    or "none"
+                )
+                model_note = " (this season)" if self._session_model else " (server default)"
+                lines = [
+                    "Current configuration (live server)",
+                    f"  Name:         {agent.get('name') or 'kazma'}",
+                    f"  Language:     {agent.get('language') or '?'}",
+                    f"  Model:        {model}{model_note}",
+                    f"  Personality:  {agent.get('personality') or 'default'}",
+                    f"  Max rounds:   {agent.get('max_iterations') or '?'}",
+                    f"  Memory:       {'enabled' if mem_on else 'disabled'}",
+                    "  Change: /config model|personality|memory|tools|export",
+                ]
+                self.write("system", "\n".join(lines))
+                return
+
+            if sub == "model":
+                if len(parts) < 3:
+                    active = {}
+                    try:
+                        active = await self._api("GET", "/api/provider/active") or {}
+                    except Exception:
+                        active = {}
+                    current = self._session_model or active.get("model") or "none"
+                    self.write(
+                        "system",
+                        f"Current model: {current}\n"
+                        "Usage: /config model <name>  (server active model)\n"
+                        "Season-only pin: /model set <name>",
+                    )
+                    return
+                model_name = parts[2].strip()
+                data = await self._api(
+                    "PUT", "/api/settings/active_model", {"model": model_name}
+                )
+                if isinstance(data, dict) and data.get("status") == "error":
+                    self.write(
+                        "error",
+                        data.get("error") or data.get("detail") or "model switch failed",
+                    )
+                    return
+                self.write("system", f"Server active model → {model_name}")
+                return
+
+            if sub == "memory":
+                if len(parts) < 3 or parts[2].lower() not in ("on", "off"):
+                    grouped = await self._api("GET", "/api/settings") or {}
+                    mem_on = True
+                    for keys in grouped.values() if isinstance(grouped, dict) else []:
+                        if isinstance(keys, dict) and "memory.enabled" in keys:
+                            mem_on = bool(keys.get("memory.enabled"))
+                            break
+                    state = "enabled" if mem_on else "disabled"
+                    self.write(
+                        "system",
+                        f"Memory is {state}. Usage: /config memory on|off",
+                    )
+                    return
+                enabled = parts[2].lower() == "on"
+                await self._api(
+                    "PUT",
+                    "/api/settings/single",
+                    {
+                        "key": "memory.enabled",
+                        "value": enabled,
+                        "category": "memory",
+                    },
+                )
+                self.write(
+                    "system",
+                    f"Memory {'ON' if enabled else 'OFF'} (live ConfigStore).",
+                )
+                return
+
+            if sub == "tools":
+                action = parts[2].lower() if len(parts) > 2 else "list"
+                tools = await self._api("GET", "/api/settings/tools") or []
+                if not isinstance(tools, list):
+                    tools = []
+                if action == "list" or action == "":
+                    if not tools:
+                        self.write("system", "No tools reported by /api/settings/tools.")
+                        return
+                    lines = ["Tools (live server):"]
+                    for t in tools[:80]:
+                        if not isinstance(t, dict):
+                            continue
+                        name = t.get("name") or "?"
+                        on = t.get("enabled", True)
+                        lines.append(f"  {'on ' if on else 'off'}  {name}")
+                    if len(tools) > 80:
+                        lines.append(f"  … {len(tools) - 80} more")
+                    lines.append("Toggle: /config tools toggle <name>")
+                    self.write("system", "\n".join(lines))
+                    return
+                if action == "toggle" and len(parts) >= 4:
+                    tool_name = parts[3]
+                    current = next(
+                        (
+                            t
+                            for t in tools
+                            if isinstance(t, dict)
+                            and str(t.get("name") or "").lower() == tool_name.lower()
+                        ),
+                        None,
+                    )
+                    if current is None:
+                        self.write("system", f"Unknown tool: {tool_name}")
+                        return
+                    new_on = not bool(current.get("enabled", True))
+                    await self._api(
+                        "PUT",
+                        f"/api/settings/tools/{current.get('name')}/toggle",
+                        {"enabled": new_on},
+                    )
+                    self.write(
+                        "system",
+                        f"Tool {current.get('name')} "
+                        f"{'enabled' if new_on else 'disabled'} (live server).",
+                    )
+                    return
+                self.write(
+                    "system",
+                    "Usage: /config tools list | /config tools toggle <name>",
+                )
+                return
+
+            if sub == "export":
+                grouped = await self._api("GET", "/api/settings") or {}
+                from datetime import datetime
+                from pathlib import Path
+                import json
+
+                export_dir = Path("kazma-data/exports")
+                export_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = export_dir / f"config_{ts}.json"
+                path.write_text(
+                    json.dumps(grouped, indent=2, ensure_ascii=False, default=str),
+                    encoding="utf-8",
+                )
+                self.write(
+                    "system",
+                    f"Wrote live /api/settings (secrets masked) to {path}",
+                )
+                return
+
+            self.write(
+                "system",
+                "Unknown /config sub-command. Try /config help.",
+            )
+        except Exception as e:
+            self.write("error", f"Config command failed: {e}")
+
+    async def _cmd_replay(self, text: str) -> None:
         parts = text.strip().split()
         sub = parts[1].lower() if len(parts) > 1 else ""
 
         if not sub:
             self.write("system",
                 "Replay Commands:\n"
-                "  /replay list          — show available snapshots\n"
-                "  /replay <iteration>   — show snapshot details\n"
-                "  /replay clear         — clear all snapshots")
+                "  /replay list          — snapshots from the live server\n"
+                "  /replay <iteration>   — rewind this season's graph\n"
+                "  /replay show <n>      — snapshot details (no rewind)\n"
+                "  /replay clear         — clear snapshots for this season")
+            return
+
+        thread_id = self._replay_thread_id()
+        if not thread_id:
+            self.write("system", "No season yet — send a message or /session first.")
             return
 
         try:
-            from kazma_core.time_travel import SnapshotStore, DEFAULT_DB_PATH
-            from pathlib import Path
-            db_path = Path(DEFAULT_DB_PATH)
-            if not db_path.exists():
-                self.write("system", "No snapshots available (snapshot DB not found).")
-                return
-            store = SnapshotStore(str(db_path))
-            thread_id = "tui-session"
-
             if sub == "list":
-                records = store.list_for_thread(thread_id)
-                if not records:
-                    self.write("system", "No snapshots available for this session.")
-                else:
-                    lines = ["Available snapshots:", ""]
-                    for rec in records:
-                        lines.append(f"  Iteration {rec.iteration}  |  {rec.timestamp}  |  model={rec.model_used or '?'}")
-                    self.write("system", "\n".join(lines))
-            elif sub == "clear":
-                count = store.clear_thread(thread_id)
-                self.write("system", f"Cleared {count} snapshot(s) for this session.")
-            else:
-                try:
-                    iteration = int(sub)
-                except ValueError:
-                    self.write("system", "Unknown sub-command. Use: /replay list, /replay clear, or /replay <number>")
+                data = await self._api("GET", f"/api/replay/snapshots/{thread_id}")
+                items = (data or {}).get("snapshots") or []
+                if not items and thread_id != self._session_id and self._session_id:
+                    data = await self._api(
+                        "GET", f"/api/replay/snapshots/{self._session_id}"
+                    )
+                    items = (data or {}).get("snapshots") or []
+                    if items:
+                        thread_id = self._session_id
+                        self._thread_id = thread_id
+                if not items:
+                    self.write("system", "No snapshots available for this season.")
                     return
-                rec = store.get(thread_id, iteration)
-                if rec is None:
-                    self.write("system", f"No snapshot for iteration {iteration}.")
-                else:
-                    state = rec.get_state()
-                    msg_count = len(state.get("messages", []))
-                    self.write("system", f"Snapshot {rec.iteration}  |  {rec.timestamp}  |  model={rec.model_used or '?'}  |  {msg_count} messages")
-            store.close()
+                lines = ["Available snapshots (live graph):", ""]
+                for rec in items:
+                    lines.append(
+                        f"  Iteration {rec.get('iteration')}  |  "
+                        f"{rec.get('timestamp') or '?'}  |  "
+                        f"model={rec.get('model') or '?'}  |  "
+                        f"{rec.get('message_count', 0)} msgs"
+                    )
+                self.write("system", "\n".join(lines))
+                return
+
+            if sub == "clear":
+                data = await self._api("DELETE", f"/api/replay/threads/{thread_id}")
+                count = (data or {}).get("cleared", 0)
+                self.write("system", f"Cleared {count} snapshot(s) for this season.")
+                return
+
+            show_only = sub == "show"
+            raw_iter = parts[2] if show_only and len(parts) > 2 else sub
+            try:
+                iteration = int(raw_iter)
+            except ValueError:
+                self.write(
+                    "system",
+                    "Unknown sub-command. Use: /replay list, /replay clear, "
+                    "/replay show <n>, or /replay <number>",
+                )
+                return
+
+            if show_only:
+                data = await self._api(
+                    "GET", f"/api/replay/snapshots/{thread_id}/{iteration}"
+                )
+                self.write(
+                    "system",
+                    f"Snapshot {iteration}  |  model={data.get('model') or '?'}  |  "
+                    f"{data.get('message_count', 0)} messages",
+                )
+                return
+
+            data = await self._api(
+                "POST",
+                "/api/replay/restore",
+                {"thread_id": thread_id, "iteration": iteration},
+            )
+            n = int((data or {}).get("message_count") or 0)
+            try:
+                loaded = self._load_season_messages(
+                    self._session_id, thread_id=thread_id
+                )
+                self._replay_season_log()
+            except Exception:
+                loaded = n
+            self.write(
+                "system",
+                f"Rewound season to iteration {iteration} "
+                f"({loaded} messages). Next send continues from here.",
+            )
         except Exception as e:
             self.write("error", f"Replay command failed: {e}")
 
-    def _cmd_export(self) -> None:
+    async def _cmd_fork(self, text: str) -> None:
+        parts = text.strip().split()
+        if len(parts) < 2:
+            self.write(
+                "system",
+                "Usage: /fork <iteration> — branch this season from a snapshot "
+                "into a new thread (original stays put).",
+            )
+            return
+        try:
+            iteration = int(parts[1])
+        except ValueError:
+            self.write("system", "Usage: /fork <iteration>")
+            return
+        thread_id = self._replay_thread_id()
+        if not thread_id:
+            self.write("system", "No season yet — send a message or /session first.")
+            return
+        try:
+            data = await self._api(
+                "POST",
+                "/api/replay/fork",
+                {"thread_id": thread_id, "iteration": iteration},
+            )
+            new_tid = str((data or {}).get("new_thread_id") or "")
+            if not new_tid:
+                self.write("error", "Fork returned no new_thread_id.")
+                return
+            self._session_id = new_tid
+            self._thread_id = new_tid
+            try:
+                n = self._load_season_messages(new_tid, thread_id=new_tid)
+                self._replay_season_log()
+            except Exception:
+                n = int((data or {}).get("message_count") or 0)
+            self.write(
+                "system",
+                f"Forked iteration {iteration} → #{new_tid[-8:]} ({n} msgs). "
+                "This mouth is now on the new season.",
+            )
+        except Exception as e:
+            self.write("error", f"Fork failed: {e}")
+
+    async def _cmd_export(self) -> None:
+        if not self._session_id:
+            self.write("system", "No season yet — send a message or /session first.")
+            return
         try:
             from datetime import datetime
             from pathlib import Path
             import json
+
+            msgs, tokens, cost = await self._session_message_payload()
             export_dir = Path("kazma-data/exports")
             export_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            sid = self._session_id
 
-            # Markdown
             md_path = export_dir / f"chat_{ts}.md"
-            lines = [f"# Kazma Chat Export", f"Date: {datetime.now().isoformat()}", ""]
-            for msg in self._messages:
-                role = msg.get("role", "unknown").upper()
-                content = msg.get("content", "")
+            lines = [
+                "# Kazma Chat Export",
+                f"Date: {datetime.now().isoformat()}",
+                f"Season: {sid}",
+                f"Tokens: {tokens}",
+                f"Cost: ${cost:.4f}",
+                "",
+            ]
+            for msg in msgs:
+                role = str(msg.get("role") or "unknown").upper()
+                content = str(msg.get("content") or "")
                 lines.append(f"## {role}")
                 lines.append("")
                 lines.append(content)
                 lines.append("")
             md_path.write_text("\n".join(lines), encoding="utf-8")
 
-            # JSON
             json_path = export_dir / f"chat_{ts}.json"
-            json_path.write_text(json.dumps(self._messages, indent=2, ensure_ascii=False), encoding="utf-8")
-
-            self.write("system", f"Exported {len(self._messages)} messages to:\n  {md_path}\n  {json_path}")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "session_id": sid,
+                        "total_tokens": tokens,
+                        "total_cost": cost,
+                        "messages": msgs,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self.write(
+                "system",
+                f"Exported {len(msgs)} live-server messages to:\n  {md_path}\n  {json_path}",
+            )
         except Exception as e:
             self.write("error", f"Export failed: {e}")
 
@@ -698,6 +1233,37 @@ class ChatPanel(Vertical):
                     return
                 sub = parts[1].lower()
                 task_body = parts[2] if len(parts) > 2 else ""
+                if sub in ("status", "list", "ls"):
+                    data = await self._api("GET", "/api/swarm/status")
+                    workers = (data or {}).get("workers") or []
+                    if sub == "status":
+                        lines = [f"Swarm Status ({len(workers)} workers, live API):"]
+                        for w in workers:
+                            name = w.get("name") or "?"
+                            model = w.get("model") or "?"
+                            st = w.get("status") or ""
+                            lines.append(f"  {name} [{model}] {st}".rstrip())
+                        if not workers:
+                            lines.append("  (no workers registered)")
+                        self.write("system", "\n".join(lines))
+                    elif not workers:
+                        self.write(
+                            "system",
+                            "No workers registered. Add workers via the Web UI Swarm panel.",
+                        )
+                    else:
+                        lines = [f"Workers ({len(workers)}):"]
+                        for w in workers:
+                            name = w.get("name") or "?"
+                            role = w.get("role") or ""
+                            model = w.get("model") or ""
+                            lines.append(
+                                f"  {name}"
+                                + (f" ({role})" if role else "")
+                                + (f" [{model}]" if model else "")
+                            )
+                        self.write("system", "\n".join(lines))
+                    return
             else:
                 # Bare mention: strip "swarm" keyword and treat the rest as a task
                 sub = ""
@@ -729,34 +1295,6 @@ class ChatPanel(Vertical):
 
             # ── Known subcommands (only for /swarm prefix) ──────────────
             if is_slash:
-                # /swarm status
-                if sub == "status":
-                    names = engine.worker_names
-                    lines = [f"Swarm Status ({len(names)} workers):"]
-                    for name in names:
-                        w = engine.get_worker(name)
-                        model = getattr(w, "model", "") or "?"
-                        lines.append(f"  {name} [{model}]")
-                    if not names:
-                        lines.append("  (no workers registered)")
-                    self.write("system", "\n".join(lines))
-                    return
-
-                # /swarm list
-                if sub == "list":
-                    names = engine.worker_names
-                    if not names:
-                        self.write("system", "No workers registered. Add workers via the Web UI Swarm panel.")
-                    else:
-                        lines = [f"Workers ({len(names)}):"]
-                        for name in names:
-                            w = engine.get_worker(name)
-                            role = getattr(w, "role", "") or ""
-                            model = getattr(w, "model", "") or ""
-                            lines.append(f"  {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
-                        self.write("system", "\n".join(lines))
-                    return
-
                 # /swarm broadcast <task>
                 if sub == "broadcast":
                     if not task_body:
@@ -881,9 +1419,8 @@ class ChatPanel(Vertical):
     def _get_system_prompt() -> str:
         """Load the system prompt from kazma.yaml or ConfigStore.
 
-        The TUI chat is a direct LLM call (no LangGraph supervisor),
-        so we must inject the system prompt ourselves to ensure the
-        model follows Kazma's persona and language-matching rules.
+        Unused by the live chat path (TUI posts to the supervisor).
+        Kept for /context and export helpers.
         """
         try:
             from kazma_core.config_store import get_config_store

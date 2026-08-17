@@ -61,6 +61,9 @@ DEFAULT_BACKENDS_CFG: dict[str, Any] = {
     "state": {
         "provider": "sqlite",  # sqlite | postgres
         "url": "",  # Postgres DSN when provider=postgres
+        "role": "mirror",  # mirror (assist) | primary (fail-closed recall)
+        "region": "",  # optional region id for #77 conflict policy
+        "conflict_policy": "last_write_wins",  # last_write_wins | origin_wins | fail_closed
     },
     "failover": {
         "on_remote_error": "local",  # local | empty | raise
@@ -850,9 +853,33 @@ def get_backends_cfg() -> dict[str, Any]:
     # Normalize mode
     if out["mode"] not in ("local", "hybrid", "remote"):
         out["mode"] = "local"
+    _apply_state_env_overrides(out)
     # Install / env defaults for Neo4j (fail-open: still sqlite if unset)
     _apply_neo4j_env_defaults(out)
     return out
+
+
+def _apply_state_env_overrides(out: dict[str, Any]) -> None:
+    """Live env overrides for Postgres-primary recall + conflict policy."""
+    import os
+
+    st = out.get("state")
+    if not isinstance(st, dict):
+        return
+    role = (os.environ.get("KAZMA_MEMORY_STATE_ROLE") or "").strip().lower()
+    if role in ("primary", "mirror"):
+        st["role"] = role
+    region = (os.environ.get("KAZMA_MEMORY_STATE_REGION") or "").strip()
+    if region:
+        st["region"] = region
+    policy = (os.environ.get("KAZMA_MEMORY_CONFLICT_POLICY") or "").strip().lower()
+    if policy in ("last_write_wins", "origin_wins", "fail_closed"):
+        st["conflict_policy"] = policy
+    raw_role = str(st.get("role") or "mirror").strip().lower()
+    st["role"] = raw_role if raw_role in ("primary", "mirror") else "mirror"
+    raw_pol = str(st.get("conflict_policy") or "last_write_wins").strip().lower()
+    if raw_pol not in ("last_write_wins", "origin_wins", "fail_closed"):
+        st["conflict_policy"] = "last_write_wins"
 
 
 def _apply_neo4j_env_defaults(out: dict[str, Any]) -> None:

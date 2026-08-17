@@ -189,6 +189,16 @@ MCP_TOOL_TO_SAFETY = {
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _run_sync(coro):
+    """Run a coroutine synchronously, creating a fresh loop when needed.
+
+    asyncio.get_event_loop() fails with RuntimeError when no current loop
+    exists (e.g. after pytest async tests tear down their loops). Use
+    asyncio.run() which always creates a fresh loop.
+    """
+    return asyncio.run(coro)
+
+
 def _resolve(root: Path, p: str) -> Path:
     """Resolve a path relative to root, preventing escape."""
     root_resolved = root.resolve()
@@ -262,20 +272,28 @@ def _tool_read_file(root: Path, args: dict[str, Any]) -> str:
 
 
 def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
-    """Write content to a file via IdeService (HITL-gated)."""
+    """Write content to a file via IdeService (HITL-gated).
+
+    The path is resolved against *root* with escape prevention (_resolve).
+    Previously the raw path went straight to IdeService, so relative paths
+    resolved against the process CWD and the documented root confinement
+    (including the ../../ traversal block) never fired (2026-08-15 audit).
+    """
     import asyncio
 
     from kazma_core.ide import get_ide_service
 
+    target = _resolve(root, args["path"])
+
     async def _run() -> str:
         svc = get_ide_service()
         svc.refresh_root()
-        res = await svc.write_file(args["path"], args["content"])
+        res = await svc.write_file(str(target), args["content"])
         if not res["ok"]:
             return res.get("error", "Write failed (approval may be required)")
-        return res.get("output", f"Wrote {args['path']}")
+        return res.get("output", f"Wrote {target}")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
@@ -284,10 +302,11 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
 
     from kazma_core.ide import get_ide_service
 
+    test_path = str(_resolve(root, args.get("path", "tests/")))
+
     async def _run() -> str:
         svc = get_ide_service()
         svc.refresh_root()
-        test_path = args.get("path", "tests/")
         cmd = f"{sys.executable} -m pytest {test_path}"
         if args.get("keyword"):
             cmd += f" -k {args['keyword']}"
@@ -299,7 +318,7 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "Tests failed (approval may be required)")
         return res.get("output", "(no output)")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
@@ -321,7 +340,7 @@ def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
             f"{'📁' if e['is_dir'] else '📄'} {e['name']}" for e in entries
         )
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
@@ -338,7 +357,7 @@ def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "Command failed")
         return res.get("output", "(no output)")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
@@ -355,7 +374,7 @@ def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
             return res.get("error", "git status failed")
         return res.get("output", "(clean)")
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    return _run_sync(_run())
 
 
 DISPATCH = {

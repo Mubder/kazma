@@ -180,16 +180,19 @@ class PdfEngine:
 
         def _bar(text_html: str, para_style: Any, *, fill: Any | None = None) -> Any:
             para = Paragraph(text_html, para_style)
-            fill_c = fill if fill is not None else heading_fill
+            rule = th.get("accent") or colors.HexColor("#3b82f6")
             tbl = Table([[para]], colWidths=["*"])
-            tbl.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), fill_c),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            cmds = [
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ]))
+                ("LINEBELOW", (0, 0), (-1, -1), 1.15, rule),
+            ]
+            if fill is not None:
+                cmds.insert(0, ("BACKGROUND", (0, 0), (-1, -1), fill))
+            tbl.setStyle(TableStyle(cmds))
             return tbl
 
         page_margin = float(self.theme.get("page_margin", 54))
@@ -202,6 +205,7 @@ class PdfEngine:
 
         # Build the story from the content model.
         story: list[Any] = []
+        self._last_heading_text = ""
         for block in model.blocks:
             try:
                 self._render_block(block, story, _bar, Paragraph, Spacer, PageBreak,
@@ -209,6 +213,7 @@ class PdfEngine:
                                    font, bold_font, col_width, body_size_actual, accent)
             except Exception:
                 logger.debug("[pdf] block render failed: %r", block, exc_info=True)
+        story = self._keep_headings_with_body(story)
 
         # Reshaping library availability warning (only matters when shaping).
         if self.shape_ar:
@@ -360,8 +365,8 @@ class PdfEngine:
         canvas.saveState()
         canvas.setFont(font, 8)
         canvas.setFillColor(th["muted"])
-        canvas.setStrokeColor(th["border"])
-        canvas.setLineWidth(0.8)
+        canvas.setStrokeColor(th.get("accent") or th["border"])
+        canvas.setLineWidth(0.9)
         canvas.line(document.leftMargin, A4[1] - 30, A4[0] - document.rightMargin, A4[1] - 30)
         canvas.line(document.leftMargin, 36, A4[0] - document.rightMargin, 36)
 
@@ -397,11 +402,16 @@ class PdfEngine:
         col_width: float, body_size: float, accent: Any,
     ) -> None:
         if isinstance(block, TitleBlock):
+            if self._is_repeat_heading(block.text):
+                return
+            self._last_heading_text = block.text or ""
             if block.level == 0:
-                story.append(_bar(
+                bar = _bar(
                     inline_markdown_to_reportlab(block.text, shape_arabic=self.shape_ar),
-                    styles["title"], fill=accent,
-                ))
+                    styles["title"],
+                )
+                bar._is_heading = True
+                story.append(bar)
                 story.append(Spacer(1, 14))
             else:
                 # subtitle: direction-aligned sub-heading (mirrors DOCX level).
@@ -411,13 +421,17 @@ class PdfEngine:
                 ))
                 story.append(Spacer(1, 10))
         elif isinstance(block, HeadingBlock):
+            if self._is_repeat_heading(block.text):
+                return
             bar = _bar(
                 inline_markdown_to_reportlab(block.text, shape_arabic=self.shape_ar),
                 styles["h1"] if block.level <= 1 else styles["h2"],
             )
             bar._toc_entry = (block.level, block.text)  # for afterFlowable → TOC
+            bar._is_heading = True
             story.append(bar)
             story.append(Spacer(1, 8))
+            self._last_heading_text = block.text or ""
         elif isinstance(block, BodyBlock):
             story.extend(pdf_flowables_from_body(
                 block.text, styles=styles, shape_arabic=self.shape_ar,
@@ -470,6 +484,49 @@ class PdfEngine:
         elif isinstance(block, ImageBlock):
             self._add_image(block, story, Spacer)
 
+    def _is_repeat_heading(self, text: str) -> bool:
+        from kazma_core.documents.heading_text import headings_equivalent
+
+        prev = getattr(self, "_last_heading_text", "") or ""
+        return bool(text) and headings_equivalent(text, prev)
+
+    @staticmethod
+    def _keep_headings_with_body(story: list[Any]) -> list[Any]:
+        """Keep a heading with the next body block. Not a forced page break."""
+        try:
+            from reportlab.platypus import KeepTogether, PageBreak, Spacer
+        except ImportError:
+            return story
+        out: list[Any] = []
+        i = 0
+        n = len(story)
+        while i < n:
+            item = story[i]
+            is_heading = bool(
+                getattr(item, "_is_heading", False)
+                or getattr(item, "_toc_entry", None)
+            )
+            if not is_heading:
+                out.append(item)
+                i += 1
+                continue
+            group = [item]
+            j = i + 1
+            while j < n and isinstance(story[j], Spacer):
+                group.append(story[j])
+                j += 1
+            if j < n and not isinstance(story[j], PageBreak):
+                nxt = story[j]
+                if not (
+                    getattr(nxt, "_is_heading", False)
+                    or getattr(nxt, "_toc_entry", None)
+                ):
+                    group.append(nxt)
+                    j += 1
+            out.append(KeepTogether(group) if len(group) > 1 else item)
+            i = j
+        return out
+
     def _add_image(self, block: ImageBlock, story: list[Any], Spacer: Any) -> None:
         """Embed an approved-asset image as a reportlab Image flowable (LTR path;
         the DOCX-route handles images via LibreOffice for RTL)."""
@@ -503,7 +560,7 @@ class PdfEngine:
 
         data = [[_cell(c) for c in block.headers]]
         data.extend([_cell(c) for c in row] for row in block.rows)
-        table = Table(data, repeatRows=1)
+        table = Table(data, repeatRows=1, splitByRow=len(data) > 12)
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTNAME", (0, 0), (-1, 0), bold_font),
@@ -519,4 +576,9 @@ class PdfEngine:
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
         ]))
-        story.append(table)
+        if len(data) <= 12:
+            from reportlab.platypus import KeepTogether
+
+            story.append(KeepTogether([table]))
+        else:
+            story.append(table)

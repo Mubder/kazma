@@ -50,6 +50,20 @@ function ideApp() {
       this.loadTree('');
       this.loadSkills();
       this.initChat();
+      var self = this;
+      window.kazmaOnSoftNavLeave = function () { self.destroy(); };
+    },
+
+    destroy() {
+      try { if (this.chatStream && this.chatStream.abort) this.chatStream.abort(); } catch (e) {}
+      this.chatStream = null;
+      try {
+        if (this.cm) {
+          if (typeof this.cm.toTextArea === 'function') this.cm.toTextArea();
+          else if (typeof this.cm.destroy === 'function') this.cm.destroy();
+        }
+      } catch (e) {}
+      this.cm = null;
     },
 
     // ── Chat bootstrap (shared by init + toggleChat) ──
@@ -784,3 +798,4 @@ function ideApp() {
     },
   };
 }
+if (typeof window !== "undefined") window.ideApp = ideApp;

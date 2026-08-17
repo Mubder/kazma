@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import threading
@@ -32,6 +33,28 @@ _backup_progress: dict[str, Any] = {"phase": "idle", "detail": "", "error": ""}
 # Serializes the concurrent-backup guard (check + phase flip must be atomic
 # across the 24h loop thread and a manual UI trigger).
 _backup_lock = threading.Lock()
+# A run stuck in a mid phase longer than this is treated as crashed (process
+# kill / hung thread) so the cadence and the manual button can never be bricked
+# by a stale progress flag. Shared by the in-process lock and the API gate.
+_STALE_AFTER_SECONDS = 1800
+
+
+def backup_progress_is_stale(progress: dict[str, Any] | None = None) -> bool:
+    """True when progress shows a mid phase older than _STALE_AFTER_SECONDS.
+
+    Used by both ``perform_universal_backup``'s lock and the ``/api/backup/now``
+    gate so they agree a hung run is treated as crashed instead of blocking
+    every future backup forever (incident 2026-08-16: the manual button kept
+    returning "A backup is already running" long after the run had died).
+    """
+    p = progress if progress is not None else _backup_progress
+    phase = p.get("phase")
+    started_ts = p.get("started_ts")
+    return (
+        phase not in ("idle", "done", "error")
+        and isinstance(started_ts, (int, float))
+        and time.time() - started_ts > _STALE_AFTER_SECONDS
+    )
 
 
 def get_backup_progress() -> dict[str, Any]:
@@ -54,6 +77,210 @@ def _data_dir() -> Path:
 
 def _universal_dir() -> Path:
     return _data_dir() / "backups" / "universal"
+
+
+# ── Backup-audit gaps (2026-08-15): .env, root work artifacts, offsite ──────
+# The universal sweep only scanned kazma-data/, which left three things
+# unprotected: the install-root .env (KAZMA_SECRET / vault key / DSN — with
+# it lost, the backed-up encrypted vault is unrecoverable), agent-generated
+# deliverables at the workspace root (research/ etc.), and any offsite copy
+# (a single disk failure took data + all backup generations at once).
+
+
+def _offsite_config() -> dict[str, Any]:
+    """Live-read offsite sync config (mirrors pg_backup's reader; never raises).
+
+    Keys: ``backups.offsite.provider`` (google_drive|onedrive|webdav|s3),
+    ``backups.offsite.enabled``, and legacy ``backups.offsite.rclone_remote``
+    (kept for backward compatibility — if only rclone_remote is set, rclone
+    is used as before).
+    """
+    cfg: dict[str, Any] = {"enabled": False, "provider": "", "rclone_remote": ""}
+    try:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+        cfg["provider"] = str(store.get("backups.offsite.provider") or "").strip()
+        cfg["rclone_remote"] = str(store.get("backups.offsite.rclone_remote") or "").strip()
+        enabled = store.get("backups.offsite.enabled")
+        cfg["enabled"] = (
+            bool(enabled)
+            if enabled is not None
+            else bool(cfg["provider"] or cfg["rclone_remote"])
+        )
+    except Exception:
+        logger.debug("[universal-backup] offsite config read failed", exc_info=True)
+    return cfg
+
+
+def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
+    """Copy the install-root .env + configured root work artifacts into *dest*.
+
+    ``backups.extra_paths`` (ConfigStore, comma-separated, default
+    ``research``) names workspace-root dirs/files to include — agent
+    deliverables that live outside kazma-data/ and outside git. The .env is
+    copied verbatim: it is the recovery key for the encrypted vault inside
+    settings.db, so an encrypted copy keyed BY it would be circular. Protect
+    the offsite copy instead (a cloud provider via cloud_sync).
+    """
+    result: dict[str, Any] = {"env": None, "artifacts": []}
+    root = _data_dir().parent
+    try:
+        env_path = root / ".env"
+        if env_path.is_file():
+            target = dest / ".env"
+            shutil.copy2(env_path, target)
+            result["env"] = {"path": ".env", "size": target.stat().st_size}
+        else:
+            result["env"] = {"path": ".env", "missing": True}
+    except Exception:
+        logger.warning("[universal-backup] .env copy failed", exc_info=True)
+        result["env"] = {"path": ".env", "error": True}
+
+    extra: list[str] = ["research"]
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("backups.extra_paths")
+        if isinstance(raw, str) and raw.strip():
+            extra = [p.strip() for p in raw.split(",") if p.strip()]
+        elif isinstance(raw, (list, tuple)) and raw:
+            extra = [str(p).strip() for p in raw if str(p).strip()]
+    except Exception:
+        logger.debug("[universal-backup] extra_paths read failed", exc_info=True)
+
+    for name in extra:
+        try:
+            src = root / name
+            if not src.exists():
+                continue
+            target = dest / name
+            if src.is_dir():
+                count = _robust_copytree(src, target)
+                result["artifacts"].append({"path": name, "files": count})
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, target)
+                result["artifacts"].append({"path": name, "size": target.stat().st_size})
+        except Exception:
+            logger.warning("[universal-backup] root artifact %r failed", name, exc_info=True)
+            result["artifacts"].append({"path": name, "error": True})
+    return result
+
+
+def _zip_backup_dir(dest: Path) -> Path:
+    """Compress the finished backup directory into a single .zip archive.
+
+    One file instead of a folder tree: the cloud copy becomes atomic (a
+    partial upload can't masquerade as a complete backup), uploads are a
+    handful of API calls instead of hundreds, and SQLite DBs compress 5-10x.
+    """
+    import zipfile
+
+    files = [f for f in dest.rglob("*") if f.is_file()]
+    if not files:
+        raise RuntimeError("backup directory is empty — nothing to archive")
+    zip_path = dest.parent / f"{dest.name}.zip"
+    tmp_path = dest.parent / f".{dest.name}.zip.tmp"
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for f in files:
+                zf.write(f, f.relative_to(dest).as_posix())
+        tmp_path.replace(zip_path)
+        return zip_path
+    finally:
+        # Never leave a half-written archive behind (e.g. crash mid-zip).
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+def _offsite_sync(dest: Path) -> dict[str, Any]:
+    """Upload the finished backup to the configured cloud provider (fail-open).
+
+    The ONLY protection against disk death. The backup directory is zipped
+    into ONE archive (manifest included) and uploaded as a single file via the
+    native cloud_sync providers (Google Drive / OneDrive / WebDAV / S3).
+    Falls back to the legacy rclone folder copy if only ``rclone_remote`` is
+    set. Never raises — any error logs and skips.
+    """
+    import asyncio
+
+    cfg = _offsite_config()
+    if not cfg["enabled"]:
+        return {"skipped": "offsite sync disabled"}
+
+    async def _run() -> dict[str, Any]:
+        # Native providers take priority
+        if cfg["provider"]:
+            try:
+                from kazma_core.backup.cloud_sync import get_sync_provider
+
+                provider = get_sync_provider()
+                if provider is None:
+                    return {"skipped": f"unknown provider: {cfg['provider']}"}
+                try:
+                    zip_path = _zip_backup_dir(dest)
+                except Exception as exc:
+                    logger.warning("[universal-backup] zipping backup failed: %s", exc)
+                    return {"ok": False, "error": f"zip failed: {exc}"}
+                try:
+                    result = await provider.upload_file(zip_path, zip_path.name)
+                finally:
+                    # The archive is a transient upload artifact — the local
+                    # backup dir stays authoritative.
+                    try:
+                        zip_path.unlink()
+                    except OSError:
+                        pass
+                if result.get("ok"):
+                    logger.info(
+                        "[universal-backup] offsite sync complete: %s",
+                        result.get("remote"),
+                    )
+                else:
+                    logger.warning(
+                        "[universal-backup] offsite sync failed: %s",
+                        result.get("error"),
+                    )
+                return result
+            except Exception as exc:
+                logger.warning("[universal-backup] native offsite sync error: %s", exc)
+                return {"ok": False, "error": str(exc)}
+
+        # Legacy rclone fallback (only when rclone_remote is set)
+        if not cfg["rclone_remote"]:
+            return {"skipped": "no offsite provider configured"}
+        if shutil.which("rclone") is None:
+            return {"skipped": "rclone not found on PATH (configure a native provider instead)"}
+        import subprocess
+
+        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        if proc.returncode == 0:
+            logger.info("[universal-backup] offsite sync complete: %s", remote)
+            return {"ok": True, "remote": remote}
+        return {"ok": False, "remote": remote, "error": (proc.stderr or "")[:300]}
+
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            return asyncio.run_coroutine_threadsafe(_run(), loop).result(timeout=1900)
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("[universal-backup] offsite sync error: %s", exc)
+        return {"ok": False, "error": str(exc)}
 
 
 def _should_exclude(name: str, is_dir: bool = False) -> bool:
@@ -195,8 +422,28 @@ def _prune(retention: int) -> int:
     return deleted
 
 
+def _read_retention() -> int:
+    """Live-read the backup retention (env override → ``backups.retention``).
+
+    Mirrors pg_backup's reader: ``KAZMA_BACKUP_RETENTION`` wins, then the
+    ConfigStore key, then the default of 7. Clamped to >= 1, never raises.
+    """
+    try:
+        env = (os.environ.get("KAZMA_BACKUP_RETENTION") or "").strip()
+        if env:
+            return max(1, int(env))
+        from kazma_core.config_store import get_config_store
+
+        val = get_config_store().get("backups.retention")
+        if val is not None:
+            return max(1, int(val))
+    except Exception:
+        logger.debug("[universal-backup] retention read failed", exc_info=True)
+    return _DEFAULT_RETENTION
+
+
 def perform_universal_backup(
-    *, retention: int = _DEFAULT_RETENTION, trigger: str = "auto"
+    *, retention: int | None = None, trigger: str = "auto"
 ) -> dict[str, Any]:
     """Back up EVERYTHING: all kazma-data SQLite DBs + assets + Postgres dump.
 
@@ -207,24 +454,14 @@ def perform_universal_backup(
     - ``postgres.dump`` — Postgres shared-state tables (when configured)
     - ``manifest.json`` — itemised listing with sizes
 
-    Returns a summary dict. Never raises — the 24h loop depends on this.
+    ``retention`` defaults to the live ``backups.retention`` config
+    (env ``KAZMA_BACKUP_RETENTION``), falling back to 7. Returns a summary
+    dict. Never raises — the 24h loop depends on this.
     """
     started = time.time()
     ts = int(time.time())
     data = _data_dir()
     dest = _universal_dir() / str(ts)
-
-    # Clean up incomplete backups from interrupted runs (server restart while
-    # a backup was in progress). Any dir without a manifest.json is incomplete.
-    try:
-        base = _universal_dir()
-        if base.is_dir():
-            for old in base.iterdir():
-                if old.is_dir() and not (old / "manifest.json").is_file():
-                    logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
-                    _rmtree_force(old)
-    except Exception:
-        logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
 
     # Guard against concurrent universal backups — the 24h auto loop and a
     # manual "Back Up Now" click can fire within seconds of each other.
@@ -233,14 +470,23 @@ def perform_universal_backup(
     with _backup_lock:
         _phase = _backup_progress.get("phase")
         _started_ts = _backup_progress.get("started_ts")
+        
+        # Clean up incomplete backups from interrupted runs (server restart while
+        # a backup was in progress). Any dir without a manifest.json is incomplete.
+        # Must be INSIDE the lock to prevent race with concurrent backup runs.
+        try:
+            base = _universal_dir()
+            if base.is_dir():
+                for old in base.iterdir():
+                    if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
+                        logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
+                        _rmtree_force(old)
+        except Exception:
+            logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
         # A run that died mid-backup (process kill) leaves a mid phase
         # forever; anything older than 30 min is treated as crashed so the
         # cadence can never brick.
-        _crashed = (
-            _phase not in ("idle", "done", "error")
-            and isinstance(_started_ts, (int, float))
-            and time.time() - _started_ts > 1800
-        )
+        _crashed = backup_progress_is_stale(_backup_progress)
         if _phase not in ("idle", "done", "error") and not _crashed:
             logger.info(
                 "[universal-backup] already running (phase=%s) — skipping",
@@ -290,6 +536,12 @@ def perform_universal_backup(
     asset_results = _copy_assets(data, dest / "assets")
     _set_progress("assets", detail=f"Assets done ({len(asset_results)} groups)")
 
+    # 2.5 Install-root .env + root work artifacts (backup-audit gap #1/#3):
+    # .env holds the vault key — without it the backed-up encrypted vault is
+    # unrecoverable; research/ & co. are deliverables no other sweep covers.
+    _set_progress("assets", detail="Copying .env + root artifacts…")
+    root_artifacts = _copy_root_artifacts(dest)
+
     # 3. Postgres dump — SKIP (the native_pg_backup task already dumps PG
     # separately into backups/pg/. Running it here was redundant (two pg_dump
     # calls) and added 3-5s of I/O. The PG dump is listed in the manifest as
@@ -297,7 +549,13 @@ def perform_universal_backup(
     _set_progress("manifest", detail="Writing manifest…")
     pg_result = {"ok": True, "note": "handled by native_pg_backup task"}
 
-    # 4. Manifest.
+    # 4. Offsite sync (backup-audit gap #2): the finished backup is zipped
+    # into ONE archive and uploaded as a single file. Fail-open — the local
+    # backup stays authoritative. The manifest is written first (with a
+    # placeholder offsite entry) so the archive contains it; the local
+    # manifest is then rewritten with the real cloud result, which the UI
+    # reads to badge backups as ☁ Cloud.
+    _set_progress("offsite", detail="Zipping + uploading to cloud…" if _offsite_config()["enabled"] else "Skipping offsite…")
     elapsed = round(time.time() - started, 1)
     manifest: dict[str, Any] = {
         "timestamp": ts,
@@ -306,12 +564,23 @@ def perform_universal_backup(
         "elapsed_seconds": elapsed,
         "databases": {"ok": db_ok, "failed": db_fail, "items": db_results},
         "assets": asset_results,
+        "root_artifacts": root_artifacts,
         "postgres": pg_result,
+        "offsite": {"status": "pending", "note": "cloud upload in flight at archive time"},
     }
-    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    manifest_path = dest / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    offsite = _offsite_sync(dest)
+    # Final elapsed includes the cloud upload; the zip's embedded manifest
+    # keeps the local-build elapsed it was written with.
+    elapsed = round(time.time() - started, 1)
+    manifest["elapsed_seconds"] = elapsed
+    manifest["offsite"] = offsite
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    # 5. Prune old backups.
-    pruned = _prune(max(1, retention))
+    # 6. Prune old backups (live-configured retention, env override, >= 1).
+    keep = max(1, retention if retention is not None else _read_retention())
+    pruned = _prune(keep)
 
     total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
     size_mb = round(total_size / (1024 * 1024), 1)
@@ -327,6 +596,9 @@ def perform_universal_backup(
         "total_size_mb": size_mb,
         "elapsed_seconds": elapsed,
         "pruned": pruned,
+        "env_backed_up": bool(root_artifacts.get("env") and not root_artifacts["env"].get("error")),
+        "root_artifacts": [a.get("path") for a in root_artifacts.get("artifacts", [])],
+        "offsite": offsite,
     }
     logger.info(
         "[universal-backup] complete: %d DBs, %d asset groups, %.1f MB, %.1fs, pruned %d",
@@ -372,6 +644,12 @@ def list_universal_backups() -> list[dict[str, Any]]:
                 entry["postgres"] = (m.get("postgres") or {}).get("ok", False)
                 entry["elapsed"] = m.get("elapsed_seconds", 0)
                 entry["trigger"] = m.get("trigger", "auto")
+                # Cloud sync status from the manifest (written after the sync).
+                offsite = m.get("offsite") or {}
+                entry["cloud_synced"] = bool(offsite.get("ok"))
+                entry["cloud_remote"] = offsite.get("remote", "")
+                if not entry["cloud_synced"] and offsite.get("skipped"):
+                    entry["cloud_skipped_reason"] = str(offsite.get("skipped", ""))[:80]
             except Exception:
                 pass
         backups.append(entry)

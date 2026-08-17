@@ -8,6 +8,8 @@ Validates:
 
 from __future__ import annotations
 
+import pytest
+
 import re
 from unittest.mock import patch
 

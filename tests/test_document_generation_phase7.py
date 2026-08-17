@@ -447,7 +447,10 @@ async def test_secure_redaction_removes_text_bytes_and_recoverable_structures(
     assert secret.lower().encode() not in payload.lower()
     rebuilt = fitz.open(result.data.export_path)
     assert secret.casefold() not in "".join(page.get_text() for page in rebuilt).casefold()
-    assert not any(rebuilt.metadata.values())
+    # User metadata scrubbed; the 'format' key ("PDF 1.7") is structural
+    # (set by the PDF writer, not user data) so it's excluded.
+    user_meta = {k: v for k, v in rebuilt.metadata.items() if k != "format"}
+    assert not any(user_meta.values())
     assert rebuilt.embfile_count() == 0
     assert all(page.first_annot is None and page.first_widget is None for page in rebuilt)
     rebuilt.close()

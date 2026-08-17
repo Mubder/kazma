@@ -445,12 +445,17 @@
 <script>
   // Deep-link: /memory#hygiene or #console
   (function () {
-    var h = (location.hash || '').replace('#', '');
-    if (h === 'hygiene' || h === 'entities' || h === 'beliefs' || h === 'merges') {
-      document.addEventListener('DOMContentLoaded', function () {
+    function go() {
+      var h = (location.hash || '').replace('#', '');
+      if (h === 'hygiene' || h === 'entities' || h === 'beliefs' || h === 'merges') {
         var btn = document.getElementById('mem-tab-' + h);
         if (btn) btn.click();
-      });
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', go);
+    } else {
+      go();
     }
   })();
 </script>

@@ -338,15 +338,18 @@ Output ONLY the delta text, no preamble."""
                 worker_name,
             )
             return False
-        # Commitment Layer Phase 7 (§R2.5): when soul_requires_confirm is ON and
-        # a commitment_id was provided, the worker delta applies only once that
-        # commitment is 'committed'. Same gate as apply_agent_mutation.
-        if commitment_id and _soul_requires_confirm() and not _soul_commitment_confirmed(commitment_id):
-            logger.info(
-                "[SelfImprovement] worker '%s' soul delta held — commitment %s not confirmed",
-                worker_name, commitment_id,
-            )
-            return False
+        # Same soul-confirm gate as apply_agent_mutation (mint + hold if needed).
+        if _soul_requires_confirm():
+            if not commitment_id:
+                commitment_id = mint_soul_commitment(
+                    delta, worker_name=worker_name,
+                )
+            if not commitment_id or not _soul_commitment_confirmed(commitment_id):
+                logger.info(
+                    "[SelfImprovement] worker '%s' soul delta held — commitment %s not confirmed",
+                    worker_name, commitment_id,
+                )
+                return False
 
         from kazma_core.swarm.registry import get_worker_registry
 
@@ -392,25 +395,49 @@ Output ONLY the delta text, no preamble."""
 
         return True
 
+    _PENDING_KEY = "self_improvement.pending_evolution"
+
     @staticmethod
     def _pending_queue_path() -> Path:
         from kazma_core.paths import data_dir
         return data_dir() / "pending_evolution.json"
 
     @classmethod
+    def _load_pending(cls) -> list[dict[str, Any]]:
+        try:
+            from kazma_core.config_store import get_config_store
+
+            raw = get_config_store().get(cls._PENDING_KEY)
+            if isinstance(raw, list):
+                return [e for e in raw if isinstance(e, dict)]
+        except Exception:
+            logger.debug("[SelfImprovement] pending ConfigStore read failed", exc_info=True)
+        path = cls._pending_queue_path()
+        if path.exists():
+            import json
+
+            try:
+                pending = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(pending, list):
+                    cls._save_pending([e for e in pending if isinstance(e, dict)])
+                    path.rename(path.with_suffix(".json.migrated"))
+                    return [e for e in pending if isinstance(e, dict)]
+            except Exception:
+                logger.debug("[SelfImprovement] pending file migrate failed", exc_info=True)
+        return []
+
+    @classmethod
+    def _save_pending(cls, pending: list[dict[str, Any]]) -> None:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(cls._PENDING_KEY, pending, category="self_improvement")
+
+    @classmethod
     def _stage_delta(cls, worker_name: str, delta: str) -> bool:
         """Write delta to the pending HITL approval queue."""
-        import json
         import time as _time_stage
         try:
-            queue_path = cls._pending_queue_path()
-            queue_path.parent.mkdir(parents=True, exist_ok=True)
-            pending: list[dict[str, Any]] = []
-            if queue_path.exists():
-                try:
-                    pending = json.loads(queue_path.read_text())
-                except json.JSONDecodeError:
-                    pending = []
+            pending = cls._load_pending()
             entry = {
                 "id": f"ev_{int(_time_stage.time())}_{worker_name}",
                 "worker_name": worker_name,
@@ -419,7 +446,7 @@ Output ONLY the delta text, no preamble."""
                 "status": "pending",
             }
             pending.append(entry)
-            queue_path.write_text(json.dumps(pending, indent=2, ensure_ascii=False))
+            cls._save_pending(pending)
             logger.info("[SelfImprovement] Delta staged for HITL: %s → %s", worker_name, entry["id"])
             return True
         except Exception as exc:
@@ -429,24 +456,16 @@ Output ONLY the delta text, no preamble."""
     @classmethod
     def get_pending_deltas(cls) -> list[dict[str, Any]]:
         """Return all pending evolution deltas awaiting HITL approval."""
-        import json
         try:
-            path = cls._pending_queue_path()
-            if not path.exists():
-                return []
-            return json.loads(path.read_text())
+            return cls._load_pending()
         except Exception:
             return []
 
     @classmethod
     def approve_delta(cls, delta_id: str) -> dict[str, Any]:
         """Approve a pending delta — apply it to the worker's Soul."""
-        import json
         try:
-            path = cls._pending_queue_path()
-            if not path.exists():
-                return {"success": False, "error": "No pending queue"}
-            pending = json.loads(path.read_text())
+            pending = cls._load_pending()
             entry = None
             remaining = []
             for e in pending:
@@ -456,22 +475,16 @@ Output ONLY the delta text, no preamble."""
                     remaining.append(e)
             if entry is None:
                 return {"success": False, "error": f"Delta '{delta_id}' not found or not pending"}
-            # Apply to worker registry — use the singleton (see _auto_apply).
             from kazma_core.swarm.registry import get_worker_registry
             registry = get_worker_registry()
             worker_entry = registry.get(entry["worker_name"])
             if worker_entry is not None:
-                # Defense-in-depth: re-check the prompt fence at APPLY time
-                # (AGENTS.md §11B). The other apply sites (_auto_apply /
-                # apply_agent_mutation) already do this; this HITL approve
-                # path did not, so a tampered queue entry could inject an
-                # override directive into the worker Soul unchecked.
                 from kazma_core.safety.prompt_fence import is_override_delta
 
                 if is_override_delta(entry["delta"]):
                     entry["status"] = "rejected"
                     remaining.append(entry)
-                    path.write_text(json.dumps(remaining, indent=2, ensure_ascii=False))
+                    cls._save_pending(remaining)
                     logger.warning(
                         "[SelfImprovement] Delta %s rejected at approve: override marker", delta_id,
                     )
@@ -484,7 +497,7 @@ Output ONLY the delta text, no preamble."""
                 registry.update(entry["worker_name"], system_prompt=new_prompt)
             entry["status"] = "approved"
             remaining.append(entry)
-            path.write_text(json.dumps(remaining, indent=2, ensure_ascii=False))
+            cls._save_pending(remaining)
             logger.info("[SelfImprovement] Delta APPROVED and applied: %s", delta_id)
             return {"success": True, "delta_id": delta_id, "worker_name": entry["worker_name"]}
         except Exception as exc:
@@ -494,12 +507,8 @@ Output ONLY the delta text, no preamble."""
     @classmethod
     def reject_delta(cls, delta_id: str) -> dict[str, Any]:
         """Reject a pending delta — remove from queue without applying."""
-        import json
         try:
-            path = cls._pending_queue_path()
-            if not path.exists():
-                return {"success": False, "error": "No pending queue"}
-            pending = json.loads(path.read_text())
+            pending = cls._load_pending()
             remaining = []
             found = False
             for e in pending:
@@ -509,7 +518,7 @@ Output ONLY the delta text, no preamble."""
                 remaining.append(e)
             if not found:
                 return {"success": False, "error": f"Delta '{delta_id}' not found"}
-            path.write_text(json.dumps(remaining, indent=2, ensure_ascii=False))
+            cls._save_pending(remaining)
             logger.info("[SelfImprovement] Delta REJECTED: %s", delta_id)
             return {"success": True, "delta_id": delta_id, "status": "rejected"}
         except Exception as exc:
@@ -637,7 +646,8 @@ def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
 
 def _soul_requires_confirm() -> bool:
     """Commitment Layer Phase 7 flag (live): must a soul delta be confirmed
-    before it applies? Default OFF — safe rollout (mirrors swarm_scope_enforce)."""
+    before it applies? Default OFF for single-operator labs; ON in
+    production / multi-user unless the operator set the env/ConfigStore."""
     try:
         from kazma_core.safety.commitment.config import get_commitment_config
 
@@ -723,16 +733,18 @@ def apply_agent_mutation(agent_id: str, delta: str, *, commitment_id: str | None
         )
         return False
     # Commitment Layer Phase 7 (§R2.5): behavior mutation is a critical act.
-    # When soul_requires_confirm is ON and a commitment_id was provided, the
-    # delta applies ONLY once that commitment is 'committed' (confirmed via the
-    # HITL bus). An unconfirmed delta is skipped — it stays pending until the
-    # confirm handler re-applies. Gated OFF by default (safe rollout).
-    if commitment_id and _soul_requires_confirm() and not _soul_commitment_confirmed(commitment_id):
-        logger.info(
-            "[SelfImprovement] agent '%s' soul delta held — commitment %s not confirmed",
-            agent_id, commitment_id,
-        )
-        return False
+    # When soul_requires_confirm is ON the delta applies ONLY once a
+    # commitment is 'committed'. Missing commitment_id is minted and held
+    # (no loophole via a legacy caller).
+    if _soul_requires_confirm():
+        if not commitment_id:
+            commitment_id = mint_soul_commitment(delta, agent_id=agent_id)
+        if not commitment_id or not _soul_commitment_confirmed(commitment_id):
+            logger.info(
+                "[SelfImprovement] agent '%s' soul delta held — commitment %s not confirmed",
+                agent_id, commitment_id,
+            )
+            return False
     import time as _time
 
     # Serialize the read-modify-write: ConfigStore's lock only protects

@@ -79,6 +79,24 @@ All packages are in scope. The four main packages:
   `[Attached: … — use file_read to open: …]` stub instead of `image_url`
   (text-only providers like DeepSeek reject `image_url` with a 400).
 
+**Strict local chat templates — system messages MUST stay at the head:**
+- Local OpenAI-compatible servers with strict Jinja templates (LM Studio /
+  llama.cpp Qwen3) return HTTP 400 `System message must be at the beginning`
+  when any `role: system`/`developer` message appears AFTER the first user
+  message. Kazma injects such notes mid-stream (INTENT ENGINE plan notes,
+  iteration budget nudges, mission patches), so checkpointed history
+  naturally contains them — a plain reload+send 400s on every turn.
+- `hoist_system_messages()` (`llm_provider.py`) is applied to the messages
+  payload inside `LLMProvider.chat()` — the single OpenAI-compatible path
+  (LM Studio, Ollama, OpenAI, DeepSeek, …) shared by all transports. It
+  moves system/developer messages to the head (order preserved, no-op when
+  already ordered) and keeps assistant/tool adjacency intact. NEVER remove
+  this call from `chat()`.
+- New mid-stream system-note injection sites are covered by the hoist — but
+  never add a second LLM-call path that bypasses `LLMProvider.chat()`.
+- Anthropic/Gemini/Azure/Bedrock have their own `chat()` implementations
+  that handle system messages natively — do NOT hoist there.
+
 ### 4. Swarm Handoff Cycle Detection (`kazma-core/kazma_core/swarm/engine.py`)
 - `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`
@@ -691,7 +709,7 @@ fail-open throughout.
 - **Swarm scope default** (`worker_dispatch._do_dispatch`): when
   `swarm_scope_enforce` is on, dispatched workers are capped at semantic_tier
   HIGH (deny exec/outbound/config/identity CRITICAL) + denied_acts=
-  {soul_delta, identity, config_change}. Default OFF — opt-in.
+  {soul_delta, identity, config_change}. Default ON since 2026-08-15 (intent-engine auto-dispatch) — opt-OUT via the env/ConfigStore kill-switch.
 - **Soul confirm gate** (`apply_agent_mutation`/`_auto_apply`): when
   `soul_requires_confirm` is on, soul deltas are held until confirmed via
   `POST /api/commitment/soul/{cid}/confirm`. Mint-wired at both apply callers.
@@ -730,7 +748,7 @@ fail-open throughout.
   balanced (default) | autonomous | yolo.
 - Kill-switches (all default OFF / layer default ON):
   `KAZMA_COMMITMENT_ENABLED` (layer, default on),
-  `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` (default off),
+  `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` (default ON since 2026-08-15),
   `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` (default off),
   `KAZMA_AUTO_STORE_BELIEFS` (default conservative).
 
@@ -976,6 +994,12 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 
 ## Server Management
 
+> **RULE (user directive, 2026-08-15): NEVER start or restart the Kazma server.**
+> The user ALWAYS starts it themselves. Do not run uvicorn, do not kill the
+> running server to "apply changes", do not restart it as part of any task.
+> After code changes, just tell the user a restart is needed — they will do it.
+
+
 ```powershell
 # Kill existing server
 Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } | ForEach-Object { Stop-Process -Id $_.Id -Force }
@@ -988,7 +1012,14 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
-- **Run tests:** `& '.venv\Scripts\python.exe' -m pytest <path> -v`
+- **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`
+- **Fast FULL suite (use this — ~5 min, not 20+):**
+  `python scripts/fast_test.py`
+  Crash-tolerant chunked runner: file-chunks run as independent serial pytest
+  processes; crashed/empty chunks are retried per-file; poison files are
+  reported. Do NOT use pytest-xdist here — worker segfaults (native lib) make
+  it silently drop ~half the suite. The serial monolithic run intermittently
+  segfaults and takes 20+ min.
 - **Manual verification:** Restart server, test via Telegram and Web UI
 
 ## Key References

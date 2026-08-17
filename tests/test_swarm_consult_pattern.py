@@ -165,12 +165,18 @@ async def test_in_process_worker_dispatch_includes_system_prompt_in_spawn_contex
                 ),
             )
 
-    # Verify the system prompt was included in the messages
+    # Verify the custom system prompt was included in the messages. The
+    # worker also injects its env-context awareness block (AGENTS.md §10C),
+    # so more than one system message is expected — the custom prompt must
+    # be present as its own message.
     call_args = mock_provider.chat.call_args
     messages = call_args.args[0]
     system_msgs = [m for m in messages if m.get("role") == "system"]
-    assert len(system_msgs) == 1
-    assert "backend architect for consult mode" in system_msgs[0]["content"]
+    matching = [
+        m for m in system_msgs
+        if "backend architect for consult mode" in m.get("content", "")
+    ]
+    assert matching, f"custom system prompt missing from: {system_msgs}"
 
 
 @pytest.mark.asyncio
@@ -335,9 +341,13 @@ def test_api_consult_requires_workers_and_returns_consult_history() -> None:
     history_response = client.get("/api/swarm/tasks", params={"type": "consult"})
     assert history_response.status_code == 200
     history_payload = history_response.json()
-    assert history_payload["count"] == 1
-    assert history_payload["tasks"][0]["type"] == "consult"
-    assert len(history_payload["tasks"][0]["individual_opinions"]) == 2
-    assert history_payload["tasks"][0]["synthesized_output"] == dispatch_payload[
-        "synthesized_output"
+    # Other tests in this file also dispatch consult tasks into the shared
+    # store — find THIS dispatch's task by its synthesized output rather
+    # than asserting an exact count.
+    matching = [
+        t for t in history_payload["tasks"]
+        if t.get("synthesized_output") == dispatch_payload["synthesized_output"]
     ]
+    assert matching, f"This consult task not in history (count={history_payload['count']})"
+    assert matching[0]["type"] == "consult"
+    assert len(matching[0]["individual_opinions"]) == 2

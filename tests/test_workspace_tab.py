@@ -22,6 +22,24 @@ from fastapi.testclient import TestClient
 _UI_DIR = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
 
 
+@pytest.fixture(autouse=True)
+def _no_persisted_active_workspace(monkeypatch):
+    """Neutralize the persisted active-workspace row (binding ladder rung 2).
+
+    The developer machine's WorkspaceStore pins the repo root as the active
+    workspace, which outranks the KAZMA_WORKSPACE env pin these tests rely
+    on — every assertion then runs against the real repo instead of tmp_path.
+    With the row neutralized and the cached binding global reset, the env pin
+    (rung 4) wins, mirroring a fresh install with no repo switched.
+    """
+    from kazma_core.stores import get_workspace_store
+    from kazma_core.workspace import binding
+
+    store = get_workspace_store()
+    monkeypatch.setattr(store, "get_active_workspace", lambda *a, **k: None)
+    monkeypatch.setattr(binding, "_WORKSPACE_ROOT", None)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Source-level checks
 # ══════════════════════════════════════════════════════════════════════════

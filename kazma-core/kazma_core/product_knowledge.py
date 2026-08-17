@@ -74,7 +74,7 @@ def build_product_knowledge() -> str:
 |---------|------|
 | Web UI | Chat, Settings (providers/models/secret), Swarm panel, Workspace, IDE (`/ide`) |
 | Gateway chat | Same agent + **slash commands** (no LLM for pure commands) |
-| TUI | Dashboard, files/editor, swarm status |
+| TUI | Same supervisor as Web (`POST /api/chat/stream`). `/session n` picks a shared season. |
 | CLI | `kazma serve`, status, project helpers |
 | Docker / compose | Production-style deploy of the Web agent |
 
@@ -99,6 +99,8 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### How-to cheat sheet (tell users accurately)
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.
 - **Reset conversation:** `/reset` (history only; memory DB not wiped).
+- **Same season, any mouth:** `/sessions` lists every conversation (Web + Telegram + Discord + Slack). `/session 2` continues that season on the current platform. Web sidebar is the same list; `/chat?s=<id>` opens one.
+- **Work in chat:** `/research deep <topic>` and `/swarm <task>` go through the same agent as a normal message (tools + HITL). `/swarm status` stays instant.
 - **Swarm:** `/swarm` commands / Swarm panel; workers need models + roles configured.
 - **IDE:** open Web `/ide` or TUI editor; workspace root = active WorkspaceStore / pin / `KAZMA_WORKSPACE` / project `kazma-data/workspace`. MCP filesystem rebinds to the same root on Switch Repo (`workspace_bound`). Clones go to `~/kazma-repos` (or `KAZMA_CLONE_DIR`).
 - **Switch model:** Settings UI or `set_active_model` path — **always change provider with model**.

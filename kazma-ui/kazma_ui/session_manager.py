@@ -346,6 +346,24 @@ class SessionManager:
             )
             self._sessions[f"{session.tenant_id}:{session_id}"] = session
 
+    def _merge_missing_from_db(self, limit: int | None = None) -> None:
+        """Pull newest DB rows that are not already in the process cache.
+
+        Must not clobber dirty in-memory sessions (a WS path may append
+        messages before ``put()``).
+        """
+        before = set(self._sessions.keys())
+        scratch: dict[str, ChatSession] = {}
+        saved = self._sessions
+        try:
+            self._sessions = scratch  # type: ignore[assignment]
+            self._load_all_from_db(limit=limit)
+        finally:
+            self._sessions = saved
+        for key, sess in scratch.items():
+            if key not in before:
+                self._sessions[key] = sess
+
     def _evict_if_needed(self, tenant_id: str) -> None:
         """Evict the oldest session for this tenant if we exceed max_sessions."""
         tenant_keys = [key for key in self._sessions.keys() if key.startswith(f"{tenant_id}:")]
@@ -664,6 +682,31 @@ class SessionManager:
             yield session
             self.put(session)
 
+    def add_usage(self, session_id: str, tokens: int, cost: float) -> tuple[int, float]:
+        """Increment cumulative session usage totals (T4-serialized).
+
+        Called by both transports at end-of-turn so the header cost/token
+        badges survive page refreshes: ``ChatSession.total_tokens`` /
+        ``total_cost`` are the cumulative source of truth (per-turn usage
+        lives on the assistant message dict). Returns the new
+        ``(total_tokens, total_cost)``; falls back to the increment values
+        when the session is missing or the write fails so callers can still
+        emit sane payloads.
+        """
+        tokens = int(tokens or 0)
+        cost = float(cost or 0.0)
+        totals: tuple[int, float] = (tokens, cost)
+        try:
+            with self.transact(session_id) as sess:
+                sess.total_tokens += tokens
+                sess.total_cost = round(sess.total_cost + cost, 6)
+                totals = (sess.total_tokens, sess.total_cost)
+        except Exception as exc:
+            logger.debug(
+                "[SessionManager] add_usage skipped for %s: %s", session_id, exc
+            )
+        return totals
+
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if not found."""
         with self._lock:
@@ -841,6 +884,17 @@ class SessionManager:
                     "[SessionManager] prune_empty_web_sessions raised",
                     exc_info=True,
                 )
+            try:
+                from kazma_core.sessions.directory import prune_twin_sessions
+
+                prune_twin_sessions(apply=True)
+            except Exception:
+                logger.debug("[SessionManager] prune_twin_sessions raised", exc_info=True)
+
+        try:
+            self._merge_missing_from_db(limit=min(self._max_sessions, 200))
+        except Exception:
+            logger.debug("[SessionManager] list_all db refresh skipped", exc_info=True)
 
         with self._lock:
             tenant_id = get_current_tenant_id() or "default"

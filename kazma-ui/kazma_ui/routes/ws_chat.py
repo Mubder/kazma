@@ -13,6 +13,7 @@ import logging
 import time
 import traceback
 import uuid
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -139,6 +140,7 @@ def _record_ws_activity(
                 "title": str(data.get("tool_name") or "tool"),
                 "detail": detail[:1000],
                 "state": state,
+                "ts": datetime.now(UTC).isoformat(),
             })
         elif ev.type == "status_update":
             status = str((ev.data or {}).get("status") or "").strip()
@@ -148,12 +150,14 @@ def _record_ws_activity(
                     "kind": "status",
                     "title": "thinking",
                     "state": "running",
+                    "ts": datetime.now(UTC).isoformat(),
                 })
             elif status in ("routing_node",):
                 activity_log.append({
                     "kind": "status",
                     "title": status,
                     "state": "running",
+                    "ts": datetime.now(UTC).isoformat(),
                 })
             elif status == "paused_for_approval":
                 activity_log.append({
@@ -161,9 +165,46 @@ def _record_ws_activity(
                     "title": "Waiting for approval",
                     "detail": str((ev.data or {}).get("tool") or ""),
                     "state": "info",
+                    "ts": datetime.now(UTC).isoformat(),
                 })
     except Exception:
         logger.debug("[WS-Chat] activity capture failed", exc_info=True)
+
+
+async def _read_turn_usage(graph_inst: Any, config: dict[str, Any]) -> tuple[int, float]:
+    """Per-turn ``(tokens, cost_usd)`` from the graph state snapshot.
+
+    ``last_tokens`` / ``last_cost_usd`` are set by every supervisor return
+    (graph_builder), so the post-stream checkpoint snapshot is the
+    authoritative per-turn value even when no ``on_chat_model_end`` events
+    fired (Kazma's custom LLMProvider is not a BaseChatModel). Mirrors the
+    SSE terminal-state extraction so both transports report identical
+    values for the same turn. Fails open to ``(0, 0.0)`` — the client must
+    never receive undefined usage (dead-badge regression).
+    """
+    try:
+        snap = await graph_inst.aget_state(config)
+        vals = getattr(snap, "values", None) or {}
+        if isinstance(vals, dict):
+            tokens = int(vals.get("last_tokens") or 0)
+            cost = float(vals.get("last_cost_usd") or 0.0)
+            if tokens or cost:
+                return tokens, cost
+        logger.info("[WS-Chat] turn usage missing from graph state — reporting 0")
+    except Exception as exc:
+        logger.debug("[WS-Chat] turn usage read failed: %s", exc)
+    return 0, 0.0
+
+
+def _session_usage_totals(session_id: str) -> tuple[int, float]:
+    """Cumulative ``(total_tokens, total_cost)`` for a session (0s if unknown)."""
+    try:
+        sess = get_session_manager().get(session_id)
+        if sess is not None:
+            return int(sess.total_tokens or 0), round(float(sess.total_cost or 0.0), 6)
+    except Exception as exc:
+        logger.debug("[WS-Chat] session usage totals read failed: %s", exc)
+    return 0, 0.0
 
 
 def _friendly_graph_error(exc: BaseException) -> str:
@@ -437,6 +478,8 @@ def create_ws_chat_router(
         prefer_text: str = "",
         activity: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        tokens: int | None = None,
+        cost: float | None = None,
     ) -> str:
         """Persist the latest *new* assistant text to SessionStore.
 
@@ -446,7 +489,8 @@ def create_ws_chat_router(
         *pre_msg_count* from the checkpoint (avoids re-appending older turns).
         When *activity* (the CoT / workbench log for this turn) is given it is
         stored on the assistant message so a later reload restores it.
-        *model* stamps which LLM produced the reply.
+        *model* stamps which LLM produced the reply; *tokens*/*cost* stamp the
+        per-turn usage so reloads can show per-turn stats.
         """
         text = (prefer_text or "").strip()
         model_id = (model or "").strip() or _resolve_active_model()
@@ -504,6 +548,10 @@ def create_ws_chat_router(
                         sess.messages[-1]["activity"] = activity_rows
                     if model_id:
                         sess.messages[-1]["model"] = model_id
+                    if tokens is not None:
+                        sess.messages[-1]["tokens"] = int(tokens)
+                    if cost is not None:
+                        sess.messages[-1]["cost"] = round(float(cost), 6)
                 else:
                     from datetime import UTC, datetime
 
@@ -516,6 +564,10 @@ def create_ws_chat_router(
                         msg["activity"] = activity_rows
                     if model_id:
                         msg["model"] = model_id
+                    if tokens is not None:
+                        msg["tokens"] = int(tokens)
+                    if cost is not None:
+                        msg["cost"] = round(float(cost), 6)
                     sess.messages.append(msg)
 
                 # Collapse accidental identical consecutive assistant rows
@@ -621,6 +673,10 @@ def create_ws_chat_router(
                             last.get("role") == "assistant"
                             and (last.get("content") or "").strip()
                             and not last.get("pending")
+                            # Slash confirmations are not a turn answer —
+                            # replaying them into the next prompt duplicated
+                            # "MISSION ON" (incident 2026-08-16).
+                            and last.get("kind") != "capacity"
                         ):
                             await websocket.send_json(
                                 TelemetryEvent(
@@ -632,6 +688,9 @@ def create_ws_chat_router(
                                         "model": last.get("model") or "",
                                         "session_id": session_id,
                                         "replay": True,
+                                        # Cumulative badges survive tab switches.
+                                        "session_tokens": int(sess.total_tokens or 0),
+                                        "session_cost": round(float(sess.total_cost or 0.0), 6),
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()
@@ -816,33 +875,9 @@ def create_ws_chat_router(
                     if not text:
                         continue
 
-                    # Ensure active model matches the UI selection (same as SSE).
+                    # Per-turn pin (same as SSE) — do not mutate the process-wide registry.
                     requested_model = str(payload.get("model") or "").strip()
-                    if requested_model:
-                        try:
-                            from kazma_core.runtime.model_switch import ensure_active_model
-
-                            _agent = None
-                            if agent_getter is not None:
-                                try:
-                                    _agent = agent_getter()
-                                except Exception:
-                                    _agent = None
-                            _sw = ensure_active_model(requested_model, agent=_agent)
-                            if _sw.ok:
-                                logger.info(
-                                    "[WS-Chat] ensure-active model=%s provider=%s",
-                                    _sw.model,
-                                    _sw.provider,
-                                )
-                            else:
-                                logger.warning(
-                                    "[WS-Chat] ensure-active model %s failed: %s",
-                                    requested_model,
-                                    _sw.error,
-                                )
-                        except Exception as model_exc:
-                            logger.warning("[WS-Chat] model ensure failed: %s", model_exc)
+                    ws_workspace_id = str(payload.get("workspace_id") or "").strip()
 
                     # Record user interaction on cost circuit breaker to un-halt budget
                     try:
@@ -899,108 +934,109 @@ def create_ws_chat_router(
                             except YoloDisabledError as yde:
                                 confirmation = f"🛡️ {yde}"
 
-                        # Send confirmation back to the client (NOT to the LLM)
+                        # Dedicated capacity frame — NOT llm_delta. Reconnect
+                        # catch-up was re-playing the confirmation as the next
+                        # turn's answer (duplicated MISSION ON / YOLO ON).
                         await websocket.send_json(
                             TelemetryEvent(
-                                type="llm_delta",
-                                data={"content": confirmation},
+                                type="capacity",
+                                data={"action": "yolo", "reply": confirmation},
                                 thread_id=thread_id,
                             ).to_dict()
                         )
                         await websocket.send_json(
                             TelemetryEvent(
                                 type="stream_end",
-                                data={},
+                                data={"capacity": True},
                                 thread_id=thread_id,
                             ).to_dict()
                         )
-                        # Persist to session UI projection (NOT the graph checkpoint)
                         session.messages.append({"role": "user", "content": text})
-                        session.messages.append({"role": "assistant", "content": confirmation})
+                        session.messages.append({
+                            "role": "assistant",
+                            "content": confirmation,
+                            "kind": "capacity",
+                        })
                         try:
                             get_session_manager().put(session)
                         except Exception:
                             logger.debug("[WS-Chat] Failed persisting YOLO message")
                         continue  # ← CRITICAL: do NOT fall through to the LLM
 
-                    # ── /research deep (parity with SSE + gateway) ─────
-                    if text.lower().startswith("/research"):
-                        parts = text.split(maxsplit=2)
-                        if len(parts) == 1:
-                            topic, depth = "", "deep"
-                        elif parts[1].lower() in (
-                            "deep", "full", "paper", "comprehensive"
-                        ):
-                            topic = parts[2] if len(parts) > 2 else ""
-                            depth = "deep"
-                        else:
-                            topic = text[len("/research") :].strip()
-                            depth = "deep"
+                    # ── /long /mission /unrestricted /long yolo (parity) ─
+                    from kazma_core.agent.capacity_commands import (
+                        apply_capacity_command,
+                        is_capacity_command,
+                    )
 
+                    if is_capacity_command(text, require_slash=True):
+                        _cap = apply_capacity_command(
+                            thread_id, text, actor=f"ws:{session_id[:12]}",
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="capacity",
+                                data={
+                                    "long_active": _cap.long_active,
+                                    "yolo_active": _cap.yolo_active,
+                                    "action": _cap.action,
+                                    "reply": _cap.reply,
+                                },
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="stream_end",
+                                data={"capacity": True},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        session.messages.append({"role": "user", "content": text})
+                        session.messages.append({
+                            "role": "assistant",
+                            "content": _cap.reply,
+                            "kind": "capacity",
+                        })
+                        try:
+                            get_session_manager().put(session)
+                        except Exception:
+                            logger.debug("[WS-Chat] Failed persisting /long message")
+                        continue
+
+                    try:
+                        from kazma_core.agent.slash_turns import rewrite_work_slash
+
+                        _rw = rewrite_work_slash(text)
+                        if _rw:
+                            text = _rw
+                    except Exception:
+                        logger.debug("[WS-Chat] slash rewrite skipped", exc_info=True)
+
+                    # ── Bare /research (no topic) — usage only ─────
+                    # Work `/research deep <topic>` is rewritten above and
+                    # falls through to the supervisor.
+                    if text.lower().startswith("/research"):
                         async def _ws_research() -> None:
                             try:
-                                # Keep the transcript complete: user question first.
                                 try:
                                     session.add_message("user", text)
                                     get_session_manager().put(session)
                                 except Exception:
                                     pass
-                                if not topic:
-                                    await websocket.send_json(
-                                        TelemetryEvent(
-                                            type="llm_delta",
-                                            data={
-                                                "content": "Usage: `/research deep <topic>`"
-                                            },
-                                            thread_id=thread_id,
-                                        ).to_dict()
-                                    )
-                                    return
-
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="llm_delta",
-                                        data={
-                                            "content": (
-                                                f"🔬 Deep research starting: **{topic}**…\n\n"
-                                            )
-                                        },
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
-
-                                from kazma_core.tools.research_pipeline import (
-                                    run_research_pipeline,
-                                )
-
-                                async def _progress(stage: str, message: str) -> None:
-                                    await websocket.send_json(
-                                        TelemetryEvent(
-                                            type="tool_start",
-                                            data={
-                                                "tool_name": f"research:{stage}",
-                                                "inputs": message[:200],
-                                            },
-                                            thread_id=thread_id,
-                                        ).to_dict()
-                                    )
-
-                                out = await run_research_pipeline(
-                                    topic,
-                                    depth=depth,
-                                    max_sources=8,
-                                    progress_cb=_progress,
-                                    export_docx=True,
+                                _ws_out = (
+                                    "Usage: `/research deep <topic>` — runs through "
+                                    "the same agent as chat (not a side door)."
                                 )
                                 await websocket.send_json(
                                     TelemetryEvent(
                                         type="llm_delta",
-                                        data={"content": out},
+                                        data={"content": _ws_out},
                                         thread_id=thread_id,
                                     ).to_dict()
                                 )
                                 try:
-                                    session.add_message("assistant", out)
+                                    session.add_message("assistant", _ws_out)
                                     get_session_manager().put(session)
                                 except Exception:
                                     pass
@@ -1338,6 +1374,26 @@ def create_ws_chat_router(
                         activity_log: list[dict[str, Any]] = []
                         thought_recorded: list[bool] = [False]
                         tid_token = set_current_thread_id(thread_id)
+                        _ws_pin = None
+                        _model_pin = None
+                        if ws_workspace_id:
+                            try:
+                                from kazma_core.ide.workspace_scope import pin_workspace
+
+                                _ws_pin = pin_workspace(ws_workspace_id)
+                            except Exception:
+                                logger.debug("[WS-Chat] workspace pin skipped", exc_info=True)
+                        if requested_model:
+                            try:
+                                from kazma_core.runtime.turn_model import pin_turn_model
+
+                                _model_pin = pin_turn_model(requested_model)
+                                logger.info(
+                                    "[WS-Chat] turn-model pin=%s (not process-wide)",
+                                    requested_model,
+                                )
+                            except Exception:
+                                logger.debug("[WS-Chat] turn-model pin skipped", exc_info=True)
                         try:
                             pre_msg_count = 0
                             try:
@@ -1502,6 +1558,18 @@ def create_ws_chat_router(
                                 graph_inst, config, websocket, thread_id
                             )
 
+                            # Per-turn usage from graph state (SSE-parity) +
+                            # cumulative session totals for the header badges.
+                            turn_tokens, turn_cost = await _read_turn_usage(
+                                graph_inst, config
+                            )
+                            try:
+                                sess_tokens, sess_cost = get_session_manager().add_usage(
+                                    session_id, turn_tokens, turn_cost
+                                )
+                            except Exception:
+                                sess_tokens, sess_cost = _session_usage_totals(session_id)
+
                             _active_model = _resolve_active_model()
                             final_text = await _persist_final_assistant_message(
                                 graph_inst,
@@ -1511,6 +1579,8 @@ def create_ws_chat_router(
                                 prefer_text=assistant_content_acc,
                                 activity=activity_log,
                                 model=_active_model,
+                                tokens=turn_tokens,
+                                cost=turn_cost,
                             )
                             if interrupted:
                                 # Paused for approval — the approval card takes
@@ -1551,6 +1621,8 @@ def create_ws_chat_router(
                                     prefer_text=recovery,
                                     activity=activity_log,
                                     model=_active_model,
+                                    tokens=turn_tokens,
+                                    cost=turn_cost,
                                 )
                             # Always release the UI turn lock. HITL pause is
                             # signalled via pendingApproval; idle still ends
@@ -1567,6 +1639,10 @@ def create_ws_chat_router(
                                         "model": _active_model,
                                         "session_id": session_id,
                                         "duration_ms": int((time.monotonic() - turn_started_at) * 1000),
+                                        "tokens": turn_tokens,
+                                        "cost": round(turn_cost, 6),
+                                        "session_tokens": sess_tokens,
+                                        "session_cost": round(sess_cost, 6),
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()
@@ -1653,6 +1729,11 @@ def create_ws_chat_router(
                                     thread_id=thread_id,
                                 ).to_dict()
                             )
+                            # Backfill guard: explicit 0s + store totals — the UI
+                            # must never see undefined usage keys (dead badge).
+                            _err_sess_tokens, _err_sess_cost = _session_usage_totals(
+                                session_id
+                            )
                             await send(
                                 TelemetryEvent(
                                     type="turn_complete",
@@ -1663,6 +1744,10 @@ def create_ws_chat_router(
                                         "error": True,
                                         "model": _resolve_active_model(),
                                         "session_id": session_id,
+                                        "tokens": 0,
+                                        "cost": 0.0,
+                                        "session_tokens": _err_sess_tokens,
+                                        "session_cost": _err_sess_cost,
                                     },
                                     thread_id=thread_id,
                                 ).to_dict()
@@ -1679,6 +1764,20 @@ def create_ws_chat_router(
                             )
                         finally:
                             reset_current_thread_id(tid_token)
+                            if _ws_pin is not None:
+                                try:
+                                    from kazma_core.ide.workspace_scope import reset_workspace
+
+                                    reset_workspace(_ws_pin)
+                                except Exception:
+                                    pass
+                            if _model_pin is not None:
+                                try:
+                                    from kazma_core.runtime.turn_model import reset_turn_model
+
+                                    reset_turn_model(_model_pin)
+                                except Exception:
+                                    pass
 
                     if active_task and not active_task.done():
                         active_task.cancel()
@@ -1758,35 +1857,73 @@ def create_ws_chat_router(
                         tools_to_grant.append(str(explicit_tool))
                     tools_to_grant = list(dict.fromkeys(t for t in tools_to_grant if t))
 
+                    # Duplicate-resume guard MUST run before enable_yolo and
+                    # before any `send` helper that only exists inside
+                    # _run_approve_stream (NameError crashed the socket —
+                    # incident 2026-08-16). A finished-but-still-registered
+                    # task does not count (is_turn_running checks task.done()).
+                    if is_turn_running(target_thread_id):
+                        if approved and scope == "yolo":
+                            try:
+                                from kazma_core.safety.yolo import try_enable_yolo
+
+                                try_enable_yolo(target_thread_id, actor=actor)
+                                msg = (
+                                    "YOLO on — the current turn keeps "
+                                    "running; further danger tools "
+                                    "auto-approve."
+                                )
+                                logger.warning(
+                                    "[WS-Chat] YOLO scope on busy turn "
+                                    "thread=%s actor=%s",
+                                    target_thread_id,
+                                    actor,
+                                )
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="status_update",
+                                        data={
+                                            "status": "thinking",
+                                            "message": msg,
+                                        },
+                                        thread_id=target_thread_id,
+                                    ).to_dict()
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "[WS-Chat] YOLO-on-busy failed: %s", exc
+                                )
+                        else:
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "code": "TURN_BUSY",
+                                    "thread_id": target_thread_id,
+                                    "message": (
+                                        "A turn is already running for this thread"
+                                    ),
+                                }
+                            )
+                        await websocket.send_json(
+                            EventBridge.create_idle_event(target_thread_id).to_dict()
+                        )
+                        continue
+
                     # Apply scope grants *before* resume so later danger tools
                     # in the same ainvoke skip interrupt (mirrors HTTP path).
                     if approved and scope == "yolo":
                         try:
-                            from kazma_core.safety.yolo import YoloDisabledError, enable_yolo
+                            from kazma_core.safety.yolo import try_enable_yolo
 
-                            enable_yolo(target_thread_id, actor=actor)
+                            try_enable_yolo(target_thread_id, actor=actor)
                             logger.warning(
                                 "[WS-Chat] YOLO enabled for thread=%s actor=%s",
                                 target_thread_id,
                                 actor,
                             )
-                        except YoloDisabledError as yde:
-                            logger.warning("[WS-Chat] YOLO blocked: %s", yde)
-                            await websocket.send_json(
-                                ApprovalEventBridge.create_approval_error_event(
-                                    target_thread_id,
-                                    error=str(yde),
-                                    code="YOLO_DISABLED",
-                                    tool=tool_name,
-                                    scope=scope,
-                                )
-                            )
-                            await websocket.send_json(
-                                EventBridge.create_idle_event(target_thread_id).to_dict()
-                            )
-                            continue
                         except Exception as exc:
                             logger.warning("[WS-Chat] Failed to enable YOLO scope: %s", exc)
+                            scope = "once"
                     elif approved and scope == "tool":
                         try:
                             from kazma_core.safety.hitl_grants import grant_tool
@@ -2053,6 +2190,18 @@ def create_ws_chat_router(
                                 graph_inst, approve_config, websocket, target_thread_id
                             )
 
+                            # Resume ran via ainvoke — no event stream, so the
+                            # post-run state snapshot is the only usage source.
+                            turn_tokens, turn_cost = await _read_turn_usage(
+                                graph_inst, approve_config
+                            )
+                            try:
+                                sess_tokens, sess_cost = get_session_manager().add_usage(
+                                    session_id, turn_tokens, turn_cost
+                                )
+                            except Exception:
+                                sess_tokens, sess_cost = _session_usage_totals(session_id)
+
                             duration_ms = (time.monotonic() - approval_start_time) * 1000
                             # Authoritative client paint — same contract as prompt path.
                             # Without this the UI stayed on "Still working after approval"
@@ -2068,6 +2217,10 @@ def create_ws_chat_router(
                                         "session_id": session_id,
                                         "duration_ms": int(duration_ms),
                                         "source": "hitl_resume",
+                                        "tokens": turn_tokens,
+                                        "cost": round(turn_cost, 6),
+                                        "session_tokens": sess_tokens,
+                                        "session_cost": round(sess_cost, 6),
                                     },
                                     thread_id=target_thread_id,
                                 ).to_dict()
@@ -2177,17 +2330,8 @@ def create_ws_chat_router(
                         finally:
                             reset_current_thread_id(tid_token)
 
-                    # Guard against a cross-transport duplicate resume: if an
-                    # HTTP/SSE approve (or another WS approve) already resumed
-                    # this thread, starting a second ainvoke(resume) on the same
-                    # checkpoint would double-execute the tool + interleave
-                    # checkpoint writes. SSE guards this; the WS path did not
-                    # (audit finding).
-                    if is_turn_running(target_thread_id):
-                        await send({"type": "error", "code": "TURN_BUSY",
-                                    "thread_id": target_thread_id,
-                                    "message": "A turn is already running for this thread"})
-                        continue
+                    # TURN_BUSY is checked above (before enable_yolo) so a
+                    # live turn never reaches this second ainvoke.
                     if active_task and not active_task.done():
                         active_task.cancel()
                     active_task = asyncio.create_task(_run_approve_stream())

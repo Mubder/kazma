@@ -216,6 +216,232 @@ class SettingsRouterBuilder:
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 
+        @router.get("/api/settings/backup/offsite")
+        async def api_get_offsite_config() -> dict[str, Any]:
+            """Get the current offsite backup configuration + provider statuses."""
+            from kazma_core.config_store import get_config_store as _gcs
+            store = _gcs()
+            provider = str(store.get("backups.offsite.provider") or "")
+            remote = str(store.get("backups.offsite.rclone_remote") or "")
+            enabled = store.get("backups.offsite.enabled")
+            if enabled is None:
+                enabled = bool(provider or remote)
+
+            # Collect statuses from all native providers
+            providers_status: list[dict[str, Any]] = []
+            try:
+                from kazma_core.backup.cloud_sync import (
+                    FTPSync,
+                    GoogleDriveSync,
+                    OneDriveSync,
+                    S3Sync,
+                    WebDAVSync,
+                )
+                for cls in (GoogleDriveSync, OneDriveSync, WebDAVSync, FTPSync, S3Sync):
+                    try:
+                        providers_status.append(cls().status())
+                    except Exception:
+                        providers_status.append({
+                            "provider": cls.__name__,
+                            "connected": False,
+                            "remote": "",
+                            "error": "status check failed",
+                        })
+            except ImportError:
+                pass
+
+            def _vault_has(key: str) -> bool:
+                try:
+                    from kazma_core.security.vault import get_vault as _gv
+                    _v = _gv()
+                    return bool(_v is not None and _v.retrieve(key))
+                except Exception:
+                    return False
+
+            return {
+                "provider": provider,
+                "enabled": bool(enabled),
+                "providers": providers_status,
+                "webdav": {
+                    "url": str(store.get("backups.offsite.webdav.url") or ""),
+                    "username": str(store.get("backups.offsite.webdav.username") or ""),
+                    "password_set": _vault_has("backups.offsite.webdav.password"),
+                },
+                "ftp": {
+                    "host": str(store.get("backups.offsite.ftp.host") or ""),
+                    "port": str(store.get("backups.offsite.ftp.port") or "21"),
+                    "username": str(store.get("backups.offsite.ftp.username") or ""),
+                    "path": str(store.get("backups.offsite.ftp.path") or ""),
+                    "password_set": _vault_has("backups.offsite.ftp.password"),
+                },
+                "s3": {
+                    "access_key": str(store.get("backups.offsite.s3.access_key") or ""),
+                    "bucket": str(store.get("backups.offsite.s3.bucket") or ""),
+                    "endpoint": str(store.get("backups.offsite.s3.endpoint") or ""),
+                    "region": str(store.get("backups.offsite.s3.region") or "us-east-1"),
+                    "secret_key_set": _vault_has("backups.offsite.s3.secret_key"),
+                },
+                # Legacy rclone fields kept for backward compat
+                "rclone_remote": remote,
+            }
+
+        def _store_vault_global(key: str, value: str, category: str = "backups") -> None:
+            """Store a NAS password in the vault's GLOBAL scope.
+
+            The backup sync path (server background) reads the global scope,
+            but this endpoint runs inside a web request with tenant 'default'
+            active — without the pin the password lands in a scope the backup
+            can never read (same class of split that broke Gmail token
+            refresh, incident 2026-08-16).
+            """
+            from kazma_core.tenant_context import (
+                reset_current_tenant_id,
+                set_current_tenant_id,
+            )
+
+            token = set_current_tenant_id(None)
+            try:
+                from kazma_core.security.vault import get_vault as _gv
+
+                _v = _gv()
+                if _v is not None:
+                    _v.store(key, value, category=category)
+            finally:
+                reset_current_tenant_id(token)
+
+        def _apply_offsite_payload(req: dict[str, Any]) -> None:
+            """Persist provider + credentials from the offsite settings form."""
+            from kazma_core.config_store import get_config_store as _gcs
+            store = _gcs()
+
+            provider = str(req.get("provider") or "").strip()
+            store.set("backups.offsite.provider", provider, category="backups")
+            enabled = req.get("enabled")
+            if enabled is not None:
+                store.set("backups.offsite.enabled", bool(enabled), category="backups")
+
+            # WebDAV credentials (password to vault; blank keeps the old value)
+            webdav_url = str(req.get("webdav_url") or "").strip()
+            if webdav_url:
+                store.set("backups.offsite.webdav.url", webdav_url, category="backups")
+            webdav_user = str(req.get("webdav_username") or "").strip()
+            if webdav_user:
+                store.set("backups.offsite.webdav.username", webdav_user, category="backups")
+            webdav_pass = str(req.get("webdav_password") or "")
+            if webdav_pass:
+                try:
+                    _store_vault_global("backups.offsite.webdav.password", webdav_pass)
+                except Exception:
+                    pass
+
+            # FTP credentials (password to vault; blank keeps the old value)
+            ftp_host = str(req.get("ftp_host") or "").strip()
+            if ftp_host:
+                store.set("backups.offsite.ftp.host", ftp_host, category="backups")
+            ftp_port = str(req.get("ftp_port") or "").strip()
+            if ftp_port:
+                store.set("backups.offsite.ftp.port", ftp_port, category="backups")
+            ftp_user = str(req.get("ftp_username") or "").strip()
+            if ftp_user:
+                store.set("backups.offsite.ftp.username", ftp_user, category="backups")
+            ftp_path = str(req.get("ftp_path") or "").strip()
+            if ftp_path:
+                store.set("backups.offsite.ftp.path", ftp_path, category="backups")
+            ftp_pass = str(req.get("ftp_password") or "")
+            if ftp_pass:
+                try:
+                    _store_vault_global("backups.offsite.ftp.password", ftp_pass)
+                except Exception:
+                    pass
+
+            # S3 credentials (secret to vault)
+            s3_key = str(req.get("s3_access_key") or "").strip()
+            if s3_key:
+                store.set("backups.offsite.s3.access_key", s3_key, category="backups")
+            s3_bucket = str(req.get("s3_bucket") or "").strip()
+            if s3_bucket:
+                store.set("backups.offsite.s3.bucket", s3_bucket, category="backups")
+            s3_endpoint = str(req.get("s3_endpoint") or "").strip()
+            if s3_endpoint:
+                store.set("backups.offsite.s3.endpoint", s3_endpoint, category="backups")
+            s3_region = str(req.get("s3_region") or "").strip()
+            if s3_region:
+                store.set("backups.offsite.s3.region", s3_region, category="backups")
+            s3_secret = str(req.get("s3_secret_key") or "")
+            if s3_secret:
+                try:
+                    _store_vault_global("backups.offsite.s3.secret_key", s3_secret)
+                except Exception:
+                    pass
+
+            # Legacy rclone remote
+            rclone = str(req.get("rclone_remote") or "").strip()
+            if rclone:
+                store.set("backups.offsite.rclone_remote", rclone, category="backups")
+
+        @router.put("/api/settings/backup/offsite")
+        async def api_set_offsite_config(req: dict[str, Any]) -> dict[str, str]:
+            """Configure the offsite backup provider."""
+            _apply_offsite_payload(req)
+            return {"status": "ok"}
+
+        @router.post("/api/settings/backup/offsite/test")
+        async def api_test_offsite_remote(req: dict[str, Any]) -> dict[str, Any]:
+            """Test the cloud provider connection."""
+            provider_name = str(req.get("provider") or "").strip()
+            if not provider_name:
+                # Legacy: test rclone remote
+                remote = str(req.get("rclone_remote") or "").strip()
+                if not remote:
+                    return {"ok": False, "error": "No provider or remote specified"}
+                import shutil as _shutil
+                import asyncio as _aio
+                rclone = _shutil.which("rclone")
+                if not rclone:
+                    return {"ok": False, "error": "rclone is not installed. Use a native provider instead."}
+                import subprocess as _sp
+                try:
+                    proc = await _aio.to_thread(
+                        _sp.run, [rclone, "lsd", remote, "--max-depth", "1"],
+                        capture_output=True, text=True, timeout=15,
+                    )
+                    if proc.returncode == 0:
+                        return {"ok": True, "message": "Connection successful"}
+                    return {"ok": False, "error": f"rclone: {(proc.stderr or '')[:200]}"}
+                except Exception as exc:
+                    return {"ok": False, "error": str(exc)}
+
+            # Native provider test — persist the form first so freshly-typed
+            # credentials are what gets tested, then call test_connection().
+            try:
+                from kazma_core.backup.cloud_sync import get_sync_provider
+                _apply_offsite_payload(req)
+                provider = get_sync_provider()
+                if provider is None:
+                    return {"ok": False, "error": f"Unknown provider: {provider_name}"}
+                return await provider.test_connection()
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+
+        @router.get("/api/settings/backup/retention")
+        async def api_get_backup_retention() -> dict[str, Any]:
+            """Effective universal-backup retention (env override wins)."""
+            from kazma_core.backup.universal import _read_retention
+
+            return {"retention": _read_retention()}
+
+        @router.put("/api/settings/backup/retention")
+        async def api_set_backup_retention(req: dict[str, Any]) -> dict[str, str]:
+            """Persist backups.retention (number of local backups to keep)."""
+            from kazma_core.config_store import get_config_store as _gcs
+
+            try:
+                value = max(1, int(req.get("retention")))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return {"status": "error", "error": "retention must be a number >= 1"}
+            _gcs().set("backups.retention", value, category="backups")
+            return {"status": "ok"}
+
         @router.get("/api/settings/agent")
         async def api_get_agent() -> dict[str, Any]:
             """Get agent configuration (name, language, max tool rounds, …)."""
@@ -890,6 +1116,139 @@ class SettingsRouterBuilder:
         async def api_diagnostics() -> dict[str, Any]:
             """Get system diagnostics."""
             return _get_sm().get_diagnostics()
+
+        @router.get("/api/security/hardening")
+        async def api_security_hardening() -> dict[str, Any]:
+            """Run the offline hardening suite (operator report, not a gate)."""
+            from pathlib import Path
+
+            from kazma_core.security.hardening import SecurityHardeningRunner
+
+            report = await SecurityHardeningRunner(Path.cwd()).run_all_checks()
+            return {
+                "total": report.total,
+                "passed": report.passed,
+                "failed": report.failed,
+                "critical_failures": report.critical_failures,
+                "timestamp": report.timestamp,
+                "checks": [
+                    {
+                        "name": c.name,
+                        "passed": c.passed,
+                        "severity": c.severity,
+                        "message": c.message,
+                        "recommendation": c.recommendation,
+                    }
+                    for c in report.checks
+                ],
+            }
+
+        @router.get("/api/divisions/status")
+        async def api_division_status() -> dict[str, Any]:
+            from kazma_core.division_runtime import (
+                current_division_context,
+                division_enforcement_on,
+                list_auth_requests,
+            )
+
+            ctx = current_division_context()
+            return {
+                "enforced": division_enforcement_on(),
+                "user": ctx[0] if ctx else None,
+                "division": ctx[1] if ctx else None,
+                "pending_requests": [
+                    r for r in list_auth_requests() if r.get("status") == "pending"
+                ],
+            }
+
+        @router.get("/api/divisions/requests")
+        async def api_division_requests() -> list[dict[str, Any]]:
+            from kazma_core.division_runtime import list_auth_requests
+
+            return list_auth_requests()
+
+        @router.post("/api/divisions/requests/{request_id}/approve")
+        async def api_division_approve(request_id: str) -> dict[str, Any]:
+            from kazma_core.division_runtime import current_division_context, get_authorization_flow
+
+            ctx = current_division_context()
+            approver = ctx[0] if ctx else "default"
+            result = await get_authorization_flow().approve_request(request_id, approver)
+            return {
+                "success": result.success,
+                "request_id": result.request_id,
+                "message": result.message,
+                "expires_at": result.expires_at,
+            }
+
+        @router.post("/api/divisions/requests/{request_id}/deny")
+        async def api_division_deny(request_id: str, req: dict[str, Any] | None = None) -> dict[str, Any]:
+            from kazma_core.division_runtime import current_division_context, get_authorization_flow
+
+            ctx = current_division_context()
+            approver = ctx[0] if ctx else "default"
+            reason = str((req or {}).get("reason") or "denied")
+            result = await get_authorization_flow().deny_request(request_id, approver, reason)
+            return {
+                "success": result.success,
+                "request_id": result.request_id,
+                "message": result.message,
+            }
+
+        @router.get("/api/security/disclosure")
+        async def api_list_disclosure(status: str | None = None) -> list[dict[str, Any]]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            return await VulnerabilityDisclosure().list_reports(status=status)
+
+        @router.post("/api/security/disclosure")
+        async def api_submit_disclosure(req: dict[str, Any]) -> dict[str, Any]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            rid = await VulnerabilityDisclosure().submit_report(req or {})
+            return {"status": "ok", "id": rid}
+
+        @router.post("/api/security/disclosure/{report_id}/acknowledge")
+        async def api_ack_disclosure(report_id: str) -> dict[str, Any]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            try:
+                return await VulnerabilityDisclosure().acknowledge(report_id)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+
+        @router.post("/api/security/disclosure/{report_id}/status")
+        async def api_disclosure_status(report_id: str, req: dict[str, Any]) -> dict[str, Any]:
+            from kazma_core.security.disclosure import VulnerabilityDisclosure
+
+            try:
+                await VulnerabilityDisclosure().update_status(
+                    report_id,
+                    str(req.get("status") or ""),
+                    notes=str(req.get("notes") or ""),
+                )
+                return {"status": "ok"}
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+
+        @router.get("/api/security/deps")
+        async def api_security_deps() -> dict[str, Any]:
+            """Scan installed skill manifests (local; no NVD/OSV required)."""
+            from kazma_core.security.dependency_scanner import DependabotStyleScanner
+
+            scanner = DependabotStyleScanner()
+            try:
+                hits = await scanner.scan_skill_manifests()
+            except Exception as exc:
+                logger.debug("[security] skill dep scan failed", exc_info=True)
+                return {"status": "error", "error": str(exc), "results": []}
+            out = []
+            for h in hits or []:
+                if hasattr(h, "__dict__"):
+                    out.append({k: v for k, v in vars(h).items() if not k.startswith("_")})
+                else:
+                    out.append(str(h))
+            return {"status": "ok", "results": out}
 
         @router.get("/api/settings/system/updates")
         async def api_check_updates() -> dict[str, Any]:

@@ -36,7 +36,13 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import AsyncIterator
 
-__all__ = ["current_workspace_id", "resolve_workspace_root", "workspace_scope"]
+__all__ = [
+    "current_workspace_id",
+    "pin_workspace",
+    "reset_workspace",
+    "resolve_workspace_root",
+    "workspace_scope",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +58,19 @@ def current_workspace_id() -> str | None:
         return _current_workspace_id.get()
     except LookupError:
         return None
+
+
+def pin_workspace(workspace_id: str | None):
+    """Sync pin for SSE/WS turns. Returns a reset token or None."""
+    if not workspace_id:
+        return None
+    return _current_workspace_id.set(str(workspace_id))
+
+
+def reset_workspace(token) -> None:
+    if token is None:
+        return
+    _current_workspace_id.reset(token)
 
 
 def resolve_workspace_root() -> Path | None:

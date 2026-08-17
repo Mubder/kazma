@@ -120,16 +120,6 @@ class DocumentGarbageCollector:
             started_at=now.isoformat(),
             budget=int(cfg.gc_max_deletions_per_run),
         )
-        # Mark/sweep SQL is SQLite-shaped today. Postgres metadata is multi-replica
-        # safe for CRUD; GC SQL port is tracked separately — fail closed (no deletes).
-        if getattr(self._repo, "backend_name", "sqlite") == "postgres":
-            report.errors.append("gc_postgres_metadata_sql_port_pending")
-            report.finished_at = datetime.now(UTC).isoformat()
-            logger.info(
-                "[documents.retention] GC skipped — metadata backend is Postgres "
-                "(CRUD multi-replica live; GC SQL port pending)"
-            )
-            return report
         try:
             marks = self._mark(cfg, now)
         except Exception as exc:  # noqa: BLE001 - report, don't fabricate success
@@ -198,6 +188,12 @@ class DocumentGarbageCollector:
         tombstone_cutoff = (now - timedelta(days=int(cfg.retention_tombstone_days))).isoformat()
         rejected_cutoff = (now - timedelta(days=int(cfg.retention_rejected_days))).isoformat()
         dead_cutoff = (now - timedelta(days=int(cfg.retention_dead_letter_days))).isoformat()
+        if hasattr(self._repo, "gc_mark"):
+            return self._repo.gc_mark(
+                tombstone_cutoff=tombstone_cutoff,
+                rejected_cutoff=rejected_cutoff,
+                dead_cutoff=dead_cutoff,
+            )
 
         conn = self._repo._conn  # noqa: SLF001 - shared read connection
         lock = self._repo._lock  # noqa: SLF001
@@ -367,6 +363,8 @@ class DocumentGarbageCollector:
 
     def _is_live_reference(self, *, kind: str, sha: str) -> bool:
         """Recheck authoritative references immediately before unlink."""
+        if hasattr(self._repo, "gc_is_live_reference"):
+            return bool(self._repo.gc_is_live_reference(kind=kind, sha=sha))
 
         conn = self._repo._conn  # noqa: SLF001
         lock = self._repo._lock  # noqa: SLF001
@@ -525,6 +523,12 @@ class DocumentGarbageCollector:
     ) -> int:
         cutoff = (now - grace).isoformat()
         referenced = marks["referenced_blob_ids"]
+        if hasattr(self._repo, "gc_old_unreferenced_blob_ids"):
+            return len(
+                self._repo.gc_old_unreferenced_blob_ids(
+                    cutoff_iso=cutoff, referenced=referenced, limit=10_000
+                )
+            )
         conn = self._repo._conn  # noqa: SLF001
         lock = self._repo._lock  # noqa: SLF001
         with lock:
@@ -538,6 +542,15 @@ class DocumentGarbageCollector:
     ) -> int:
         cutoff = (now - grace).isoformat()
         referenced = marks["referenced_blob_ids"]
+        if hasattr(self._repo, "gc_old_unreferenced_blob_ids") and hasattr(
+            self._repo, "gc_delete_blob_ids"
+        ):
+            to_delete = self._repo.gc_old_unreferenced_blob_ids(
+                cutoff_iso=cutoff, referenced=referenced, limit=budget
+            )
+            n = int(self._repo.gc_delete_blob_ids(to_delete))
+            report.deleted_blob_rows += n
+            return max(0, budget - n)
         conn = self._repo._conn  # noqa: SLF001
         lock = self._repo._lock  # noqa: SLF001
         with lock:

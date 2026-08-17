@@ -22,6 +22,7 @@ from .hitl import (
     _check_graph_interrupt,
     _build_approval_prompt,
     _handle_hitl_resume,
+    apply_hitl_approval_markup,
 )
 from .commands import (
     _try_documents_command,
@@ -33,6 +34,7 @@ from .commands import (
     _try_swarm_command,
     _build_slash_ctx,
 )
+from .session_commands import try_session_command
 
 logger = logging.getLogger(__name__)
 
@@ -132,10 +134,10 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
     checkpointer used by Telegram/Discord/Slack.
     """
     try:
+        from kazma_core.sessions.directory import canonical_web_session
         from kazma_ui.session_manager import get_session_manager
         store = get_session_manager()
-        # Canonical id: platform thread_id == web session_id
-        session = store.get_or_create(thread_id)
+        session = canonical_web_session(thread_id) or store.get_or_create(thread_id)
         session.thread_id = thread_id
         converted = _convert_messages_to_dicts(messages)
         # Prefer richer checkpoint-derived history when available; never wipe
@@ -160,14 +162,13 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         plat = (platform or "chat").capitalize()
         if not session.title or session.title.startswith("Linked "):
             session.title = f"{plat} · {username}"
-        # Tag for UI badges (platform takeover)
-        try:
-            meta = dict(getattr(session, "metadata", None) or {})
-        except Exception:
-            meta = {}
-        # ChatSession may not have metadata field — store on title prefix only
-        # and put platform into a lightweight side channel via title convention.
         store.put(session)
+        try:
+            from kazma_core.sessions.directory import stamp_last_platform
+
+            stamp_last_platform(thread_id, platform)
+        except Exception:
+            pass
         logger.info(
             "[agent-handler] Synced platform season %s → web (platform=%s msgs=%d)",
             thread_id,
@@ -242,6 +243,28 @@ def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
             break  # Last message is a complete tool response
         break  # Last message is user or plain assistant — clean
     return result
+
+
+# F7: cap for the Majlis fast-path. A greeting/farewell longer than this is
+# assumed to carry a real request after the pleasantry and must reach the graph.
+_MAJLIS_FAST_PATH_MAX_LEN = 60
+
+
+async def _majlis_fast_path_reply(text: str, *, sender_id: str = "") -> str | None:
+    """Return a canned cultural reply iff *text* is a SHORT pure greeting/farewell.
+
+    Uses the live :class:`MajlisProtocol` orchestrator (per-sender phase
+    machine). F7: only short-circuit when the message is ONLY a
+    greeting/farewell. Fail-open: any error returns None.
+    """
+    if len((text or "").strip()) > _MAJLIS_FAST_PATH_MAX_LEN:
+        return None
+    try:
+        from kazma_core.majlis_runtime import maybe_majlis_short_circuit
+
+        return await maybe_majlis_short_circuit(text, sender_id=sender_id)
+    except Exception:
+        return None
 
 
 def create_graph_handler(
@@ -358,10 +381,30 @@ def create_graph_handler(
         """Process a single IncomingMessage through the agent graph."""
         sender = msg.sender_id
 
-        # Resolve thread_id using standardized resolver (synchronized)
+        # Resolve thread_id using standardized resolver (synchronized).
+        # ConfigStore / existing seasons win over the in-memory cache so a
+        # /session take-over (or a restart) cannot mint a twin Telegram row.
         async with _sessions_lock:
-            if sender in _sessions:
-                # LRU: mark as most-recently-used.
+            found = None
+            try:
+                from kazma_core.sessions.directory import find_mouth_thread
+
+                found = find_mouth_thread(
+                    sender,
+                    platform=msg.platform,
+                    username=str(
+                        (msg.context_metadata or {}).get("username")
+                        or (msg.context_metadata or {}).get("display_name")
+                        or ""
+                    ),
+                )
+            except Exception:
+                logger.debug("[agent-handler] find_mouth_thread failed", exc_info=True)
+            if found:
+                _sessions[sender] = found
+                _sessions.move_to_end(sender)
+                thread_id = found
+            elif sender in _sessions:
                 _sessions.move_to_end(sender)
                 thread_id = _sessions[sender]
             else:
@@ -369,6 +412,12 @@ def create_graph_handler(
                 while len(_sessions) > _MAX_DICT_ENTRIES:
                     _sessions.popitem(last=False)
                 thread_id = _sessions[sender]
+            try:
+                from kazma_core.sessions.directory import remember_sender_thread
+
+                remember_sender_thread(sender, thread_id)
+            except Exception:
+                logger.debug("[agent-handler] remember_sender_thread failed", exc_info=True)
 
         # Inject the resolved thread_id into context_metadata
         # so _build_initial_state can pick it up
@@ -428,6 +477,16 @@ def create_graph_handler(
     async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
         """Inner handler body (typing keepalive wraps this)."""
         sender = msg.sender_id or "unknown"
+        # Work slashes become graph turns (research / swarm dispatch / …).
+        # Control slashes (help/list/status) stay on the intercepts below.
+        try:
+            from kazma_core.agent.slash_turns import rewrite_work_slash
+
+            _rewritten = rewrite_work_slash(msg.text or "")
+            if _rewritten:
+                msg.text = _rewritten
+        except Exception:
+            logger.debug("[agent-handler] slash rewrite skipped", exc_info=True)
         # Cost breaker gate
         if cost_breaker and cost_breaker.should_halt():
             # Restore platform context for the reply
@@ -451,6 +510,21 @@ def create_graph_handler(
 
         # ── Build platform-agnostic state ──────────────────────────
         state = await _build_initial_state(msg, _store)
+
+        # §17: pin working memory (attachments, constraints) so the intent
+        # engine sees them at iteration 0. No platform IDs enter _wm.
+        try:
+            from kazma_core.agent.turn_input import build_turn_working_memory
+
+            _wm = build_turn_working_memory(
+                user_text,
+                messages=state.get("messages"),
+                client_attachments=msg.attachments or [],
+            )
+            if _wm:
+                state.update(_wm)
+        except Exception as _wm_exc:
+            logger.debug("[agent-handler] WM pin skipped: %s", _wm_exc)
 
         try:
             from kazma_core.agent.long_task import resolve_turn_budgets
@@ -496,59 +570,20 @@ def create_graph_handler(
         except Exception:
             pass
 
-        # ── /new: Create a brand new session/season ───────────────
-        if msg.text and msg.text.strip().lower() == "/new":
-            import uuid
-            new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
-            
-            # Persist mapping in ConfigStore
-            try:
-                from kazma_core.config_store import get_config_store
-                cs = get_config_store()
-                cs.set(f"active_thread.{sender}", new_thread_id)
-            except Exception as exc:
-                logger.error("[agent-handler] Failed to persist active thread mapping: %s", exc)
-                
-            # Update in-memory session cache
-            async with _sessions_lock:
-                _sessions[sender] = new_thread_id
-                
-            # Initialize empty linked session in Web UI's SessionManager
-            username = msg.context_metadata.get("username") or msg.context_metadata.get("display_name") or "user"
-            try:
-                from kazma_ui.session_manager import get_session_manager, ChatSession
-                web_store = get_session_manager()
-                web_session = ChatSession(
-                    session_id=new_thread_id,
-                    thread_id=new_thread_id,
-                    title=f"Linked {msg.platform.capitalize()} ({username})",
-                    messages=[]
-                )
-                web_store.put(web_session)
-            except Exception as exc:
-                logger.debug("[agent-handler] Failed to create empty Web UI session: %s", exc)
-                
-            # Phase C: drop working-tier buffer for the old thread
-            try:
-                from kazma_core.memory.consolidator import clear_working_memory
-
-                clear_working_memory(thread_id)
-            except Exception:
-                logger.debug("[agent-handler] clear_working_memory on /new failed", exc_info=True)
-
-            reply_msg = (
-                f"🆕 Created a brand new season/session!\n\n"
-                f"All your future messages here will be kept in a separate thread.\n"
-                f"You can view or continue it in the Web UI as: **Linked {msg.platform.capitalize()} ({username})**"
+        # ── /sessions /session /switch /new — pick or mint a season ─
+        # Same directory as the Web sidebar. Switching binds this mouth
+        # to an existing thread_id and moves delivery here (take-over).
+        async with _sessions_lock:
+            session_handled = await try_session_command(
+                msg,
+                thread_id=thread_id,
+                sender=sender,
+                store=_store,
+                manager=manager,
+                sessions_map=_sessions,
+                prepare_outbound=_prepare_tg_outbound,
             )
-            ctx = msg.context_metadata
-            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=out_text,
-                context_metadata=out_ctx,
-            ))
-            logger.info("[agent-handler] /new for thread=%s (new_thread=%s)", thread_id, new_thread_id)
+        if session_handled:
             return
 
         # ── Checkpoint-mutating commands serialize per thread ─────
@@ -680,113 +715,31 @@ def create_graph_handler(
             logger.info("[agent-handler] /yolo cmd=%s thread=%s", cmd, thread_id)
             return
 
-        # ── /long + /mission: capacity mode (NOT HITL bypass) ──────
-        # Budget /long raises soft ceilings (still PARTIAL at limit).
-        # /long mission = real run-until-done hard wall (default ~500 rounds).
+        # ── /long + /mission + /unrestricted + /long yolo ───────────
+        # Capacity (rounds) and YOLO (HITL) stay independent primitives;
+        # apply_capacity_command is the one combiner (Web/SSE/gateway).
         if msg.text:
-            _lt_raw = msg.text.strip().lower()
-            _lt_parts = _lt_raw.split()
-            _lt_cmd = _lt_parts[0] if _lt_parts else ""
-            if _lt_cmd in ("/long", "long", "/mission", "mission"):
-                from kazma_core.agent.long_task import (
-                    disable_long_task,
-                    enable_long_task,
-                    format_status_message,
-                )
+            from kazma_core.agent.capacity_commands import (
+                apply_capacity_command,
+                is_capacity_command,
+            )
 
+            if is_capacity_command(msg.text, require_slash=False):
                 actor = msg.sender_id or "gateway"
-                # /mission [on|off|status] → mission mode shortcuts
-                if _lt_cmd in ("/mission", "mission"):
-                    sub = _lt_parts[1] if len(_lt_parts) > 1 else "on"
-                    if sub in ("status", "?", "info"):
-                        sub = "status"
-                    elif sub in ("off", "disable", "0"):
-                        sub = "off"
-                    else:
-                        sub = "mission"
-                else:
-                    sub = _lt_parts[1] if len(_lt_parts) > 1 else "status"
-
-                if sub in ("status", "?", "info"):
-                    reply_msg = format_status_message(thread_id)
-                elif sub in ("off", "disable", "0"):
-                    disable_long_task(thread_id, actor=actor)
-                    reply_msg = (
-                        "📋 Long-task / mission mode **OFF**. Chat baselines restored "
-                        "(Settings → Max tool rounds).\n"
-                        "HITL unchanged. Re-enable: `/long on` or `/long mission`"
-                    )
-                elif sub in (
-                    "mission",
-                    "unlimited",
-                    "unbounded",
-                    "full",
-                    "auto",
-                ):
-                    st = enable_long_task(
-                        thread_id, actor=actor, mode="mission"
-                    )
-                    rem = st.get("remaining_seconds")
-                    ttl_note = (
-                        f"Auto-expires in ~{rem // 60}m."
-                        if rem is not None
-                        else "No auto-expiry."
-                    )
-                    reply_msg = (
-                        "🚀 **MISSION mode ON** — run until done "
-                        f"(hard wall **{st.get('mission_hard_rounds', st.get('max_iterations'))}** "
-                        f"tool rounds · ~**{st.get('recursion_limit')}** graph steps).\n"
-                        f"{ttl_note}\n"
-                        "Not literally infinite (cost / process / hard wall). "
-                        "Far past soft Research/40 PARTIAL stops.\n"
-                        "HITL still on — use `/yolo` for danger-tool auto-approve.\n"
-                        "Disable: `/long off`"
-                    )
-                elif sub in ("on", "enable", "1", "research", "deep", "chat"):
-                    preset = "research" if sub in ("on", "enable", "1") else sub
-                    st = enable_long_task(thread_id, actor=actor, preset=preset)
-                    rem = st.get("remaining_seconds")
-                    ttl_note = (
-                        f"Auto-expires in ~{rem // 60}m."
-                        if rem is not None
-                        else "No auto-expiry."
-                    )
-                    reply_msg = (
-                        f"🧠 **Long-task BUDGET ON** ({st.get('preset', preset)}).\n"
-                        f"Soft ceiling: **{st.get('max_iterations')}** tool rounds · "
-                        f"**~{st.get('recursion_limit')}** graph steps "
-                        f"(may still PARTIAL — then **Proceed** or switch to mission).\n"
-                        f"{ttl_note}\n"
-                        "For real long runs: `/long mission`\n"
-                        "Does **not** skip HITL — use `/yolo`.\n"
-                        "Disable: `/long off`"
-                    )
-                elif sub.isdigit():
-                    st = enable_long_task(
-                        thread_id, actor=actor, max_iterations=int(sub)
-                    )
-                    reply_msg = (
-                        f"🧠 **Long-task BUDGET ON** (custom {st.get('max_iterations')} rounds · "
-                        f"~{st.get('recursion_limit')} steps).\n"
-                        "For run-until-done: `/long mission`\n"
-                        "Disable: `/long off`"
-                    )
-                else:
-                    reply_msg = (
-                        "Usage:\n"
-                        "  `/long` · `/long on` · `/long deep` · `/long research` · `/long 50`\n"
-                        "  `/long mission` or `/mission on` — real long run (hard wall ~500)\n"
-                        "  `/long off`"
-                    )
-
+                _cap = apply_capacity_command(
+                    thread_id, msg.text, actor=actor, require_slash=False,
+                )
                 ctx = await _store.get(thread_id) or msg.context_metadata
-                out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+                out_text, out_ctx = _prepare_tg_outbound(msg, _cap.reply, ctx)
                 await manager.send(OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
                     text=out_text,
                     context_metadata=out_ctx,
                 ))
-                logger.info("[agent-handler] /long sub=%s thread=%s", sub, thread_id)
+                logger.info(
+                    "[agent-handler] /long action=%s thread=%s yolo=%s",
+                    _cap.action, thread_id, _cap.yolo_active,
+                )
                 return
 
         # ── /undo: Remove last assistant response ──────────────────
@@ -1111,38 +1064,21 @@ def create_graph_handler(
 
         # ── Majlis cultural fast-path ─────────────────────────────
         # Detect pure greetings/farewells before invoking the LLM.
-        # Instant (< 50ms), zero token cost, culturally aware.
-        try:
-            from kazma_core.pacing import detect_intent, Intent, get_greeting_response
-            from kazma_core.cultural_context import CulturalContext
-
-            intent = detect_intent(msg.text)
-            if intent in (Intent.GREETING, Intent.FAREWELL):
-                cc = CulturalContext()
-                if intent == Intent.GREETING:
-                    greeting = get_greeting_response(
-                        dialect="kw",
-                        is_ramadan=cc.state.is_ramadan,
-                        is_eid=cc.state.is_eid,
-                    )
-                    reply_text = greeting
-                else:
-                    # Farewell
-                    reply_text = "في أمان الله 👋"
-
-                ctx = msg.context_metadata
-                tg_text, tg_ctx = _prepare_tg_outbound(msg, reply_text, ctx)
-                await manager.send(
-                    OutboundMessage(
-                        target_id=_build_target_id(msg.platform, ctx),
-                        text=tg_text,
-                        context_metadata=tg_ctx,
-                    )
+        # Instant (< 50ms), zero token cost, culturally aware. F7: only
+        # short pure greetings short-circuit (see _majlis_fast_path_reply).
+        _majlis_reply = await _majlis_fast_path_reply(msg.text, sender_id=msg.sender_id)
+        if _majlis_reply is not None:
+            ctx = msg.context_metadata
+            tg_text, tg_ctx = _prepare_tg_outbound(msg, _majlis_reply, ctx)
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=tg_text,
+                    context_metadata=tg_ctx,
                 )
-                logger.info("[agent-handler] Majlis fast-path: %s (thread=%s)", intent.name, thread_id)
-                return  # skip LLM — instant cultural greeting/farewell
-        except Exception as exc:
-            logger.debug("[agent-handler] Majlis fast-path unavailable: %s", exc)
+            )
+            logger.info("[agent-handler] Majlis fast-path (thread=%s)", thread_id)
+            return  # skip LLM — instant cultural greeting/farewell
 
         # ── Serialize per thread_id ────────────────────────────────
         # Two concurrent messages for the same thread_id must NOT interleave
@@ -1369,7 +1305,17 @@ def create_graph_handler(
                 pass
             try:
                 try:
-                    result_state = await graph.ainvoke(state, config)
+                    from kazma_core.agent.turn import run_agent_turn
+
+                    _turn = await run_agent_turn(
+                        graph=graph,
+                        thread_id=thread_id,
+                        state=state,
+                        config=config,
+                    )
+                    result_state = _turn.state or {}
+                    if _turn.error and not _turn.interrupted and not result_state.get("messages"):
+                        raise RuntimeError(_turn.error)
                 finally:
                     if _gw_registered:
                         try:
@@ -1385,7 +1331,9 @@ def create_graph_handler(
                 # tool, ainvoke returns a partial state and the graph is
                 # paused at the checkpoint. Surface an approval prompt so
                 # the user can resume via /hitl approve {thread_id}.
-                hitl_payload = await _check_graph_interrupt(graph, config)
+                hitl_payload = _turn.interrupt_payload if _turn.interrupted else None
+                if hitl_payload is None:
+                    hitl_payload = await _check_graph_interrupt(graph, config)
                 if hitl_payload is not None:
                     ctx = await _store.get(thread_id)
                     if not ctx:
@@ -1972,14 +1920,24 @@ def create_graph_handler(
                 ctx = await _store.get(target_id)
             if not ctx:
                 ctx = {"thread_id": target_id}
+            # Always copy — HITL markup must not mutate a shared session ctx.
+            out_ctx = dict(ctx)
             # target_id is prefixed "telegram:..." — convert markdown to HTML
             # so worker output renders instead of showing literal markers.
             if str(target_id).startswith("telegram:"):
-                out_ctx = dict(ctx)
                 out_ctx["parse_mode"] = "HTML"
                 out_text: str = md_to_tg_html(text)
             else:
-                out_ctx, out_text = ctx, text
+                out_text = text
+            out_ctx = apply_hitl_approval_markup(
+                out_ctx,
+                platform="telegram",
+                hitl_approval=kwargs.get("hitl_approval")
+                if isinstance(kwargs.get("hitl_approval"), dict)
+                else None,
+            )
+            if kwargs.get("reply_markup"):
+                out_ctx["reply_markup"] = kwargs["reply_markup"]
             # Build attachments from kwargs (file delivery via send_file_message).
             raw_attachments = kwargs.get("attachments")
             outbound_attachments: list[Attachment] = []

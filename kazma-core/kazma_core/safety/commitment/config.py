@@ -27,8 +27,11 @@ _DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "mode": "balanced",
     "high_confidence": 0.85,
-    "enforce_unknown_mutators": False,
-    "swarm_scope_enforce": False,
+    "enforce_unknown_mutators": True,
+    # Default ON (2026-08-15): the intent engine can now auto-dispatch
+    # (execute route), so dispatched workers get the HIGH-tier cap unless
+    # explicitly disabled via env/ConfigStore. Kill-switch still wins.
+    "swarm_scope_enforce": True,
     "soul_requires_confirm": False,
     "false_clarify_budget": 0.15,
     "outbound_allowed_targets": [],  # empty = permissive (HITL handles); populate to enforce an allowlist
@@ -74,9 +77,11 @@ def get_commitment_config() -> dict[str, Any]:
     env_sse = _env_bool("KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE")
     if env_sse is not None:
         cfg["swarm_scope_enforce"] = env_sse
+    soul_explicit = False
     env_src = _env_bool("KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM")
     if env_src is not None:
         cfg["soul_requires_confirm"] = env_src
+        soul_explicit = True
 
     # ── ConfigStore (Settings UI / programmatic) ───────────────────────────
     try:
@@ -104,6 +109,7 @@ def get_commitment_config() -> dict[str, Any]:
         src = cs.get("agent.commitment.soul_requires_confirm")
         if src is not None:
             cfg["soul_requires_confirm"] = bool(src)
+            soul_explicit = True
         oat = cs.get("agent.commitment.outbound_allowed_targets")
         if oat is not None:
             if isinstance(oat, str):
@@ -137,5 +143,16 @@ def get_commitment_config() -> dict[str, Any]:
                 pass
     except Exception:
         logger.debug("[commitment] get_commitment_config: ConfigStore read failed — defaults", exc_info=True)
+
+    # Soul confirm: operator-set value wins. Otherwise ON in production /
+    # multi-user so a Soul delta cannot silently rewrite the supervisor.
+    if not soul_explicit and not cfg["soul_requires_confirm"]:
+        try:
+            from kazma_core.tenant_isolation import multi_user_or_production
+
+            if multi_user_or_production():
+                cfg["soul_requires_confirm"] = True
+        except Exception:
+            pass
 
     return cfg

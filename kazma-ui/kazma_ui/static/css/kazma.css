@@ -39,11 +39,15 @@
   /* Grid texture */
   --grid: rgba(59, 130, 246, 0.04);
 
-  /* Text — cool ice blue-grays */
+  /* Text — cool ice blue-grays.
+     Dark tertiary/muted used to sit at #5d6f8a / #4a5b78 — unreadable on
+     #16223a panels (chat footer, hints, badges). Lifted to the same
+     family as --text-secondary so labels stay visible. Light theme
+     ([data-theme=light] / prefers-color-scheme) is unchanged. */
   --text-primary: #eef3fb;
-  --text-secondary: #9fb0c9;
-  --text-tertiary: #5d6f8a;
-  --text-muted: #4a5b78;
+  --text-secondary: #c5d0e0;
+  --text-tertiary: #9fb0c9;
+  --text-muted: #8b9bb3;
   --text-inverse: #040815;
 
   /* Accent — royal blue */
@@ -374,9 +378,15 @@ button { cursor: pointer; font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--sp-4);
+  /* Horizontal-only padding + a FIXED height (not min-height) so this
+     header's bottom border lands exactly on --header-height like the
+     page-header's does. The old 16px vertical padding + the 38px v5 logo
+     overflowed the 56px minimum (~70px actual) and the two separators
+     drifted apart — they live in separate paint contexts (fixed sidebar
+     vs .main-content), so nothing else keeps them in sync. */
+  padding: 0 var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
-  min-height: var(--header-height);
+  height: var(--header-height);
 }
 .logo {
   display: flex;
@@ -707,6 +717,22 @@ button { cursor: pointer; font-family: inherit; }
   border-radius: 50%;
   border: 2px solid var(--bg-panel);
 }
+.notification-dot.notification-count {
+  width: auto;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 0.6rem;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+  border-radius: 8px;
+}
+.notif-dropdown {
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+}
 
 /* User dropdown */
 .user-menu {
@@ -829,9 +855,11 @@ button { cursor: pointer; font-family: inherit; }
 
 /* Settings navigation (12-tab system) */
 .settings-nav {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin;
+  display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin;
   border-bottom: 1px solid var(--border-subtle); padding-bottom: 0;
   -webkit-overflow-scrolling: touch; margin-bottom: var(--sp-5);
+  scroll-snap-type: x proximity;
 }
 .settings-tab {
   padding: 8px 14px; background: none; border: none;
@@ -839,6 +867,8 @@ button { cursor: pointer; font-family: inherit; }
   color: var(--text-tertiary); cursor: pointer;
   font-family: var(--font-sans);
   font-size: 0.85rem; transition: all 0.15s;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
 }
 .settings-tab:hover { color: var(--text-primary); }
 .settings-tab.active { color: var(--accent-light); border-bottom-color: var(--accent); }
@@ -1232,9 +1262,15 @@ tbody tr:last-child td {
 /* ── 10. Tabs ───────────────────────────────────────────────────── */
 .tabs {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--sp-5);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
 }
 .tab {
   padding: var(--sp-2) var(--sp-4);
@@ -1247,6 +1283,9 @@ tbody tr:last-child td {
   font-family: inherit;
   font-weight: 500;
   transition: all var(--transition-fast);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  scroll-snap-align: start;
 }
 .tab:hover { color: var(--text-primary); }
 .tab.active {
@@ -1799,6 +1838,45 @@ tbody tr:last-child td {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
 }
+.capacity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+.capacity-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-inline-end: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.capacity-pill {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.capacity-pill:hover { border-color: var(--accent); color: var(--text-primary); }
+.capacity-pill.is-on {
+  border-color: #ca8a04;
+  color: #fff8e1;
+  background: #a16207;
+}
+.capacity-pill-power {
+  border-color: #ca8a04;
+  background: #a16207;
+  color: #fff8e1;
+}
+.capacity-pill-power:hover { filter: brightness(1.08); }
+.capacity-pill-off { opacity: 1; }
 /* Pending attachments — chips ABOVE the composer, never in the placeholder */
 .chat-attachments {
   display: flex;
@@ -1967,17 +2045,33 @@ tbody tr:last-child td {
 
 .input-footer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
 }
 .cost-badge,
 .token-badge {
   padding: 2px 8px;
-  background: var(--tint);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  color: var(--text-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-input-footer-hint {
+  margin-inline-start: auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.chat-input-footer-hint kbd {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text-primary);
 }
 
 /* Thinking indicator */
@@ -2011,27 +2105,72 @@ tbody tr:last-child td {
 .agent-progress {
   margin: 0 0 var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elevated, var(--bg-panel));
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 42%),
+    var(--bg-elevated, var(--bg-panel));
   overflow: hidden;
   font-size: 0.8rem;
 }
 .agent-progress.is-active {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 10px 28px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .agent-progress.is-done {
-  opacity: 0.96;
+  opacity: 1;
+  background: var(--bg-elevated, var(--bg-panel));
 }
 .agent-progress-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   cursor: pointer;
   user-select: none;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 45%, transparent);
+  flex-wrap: wrap;
+}
+.agent-progress-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+.agent-progress-kicker {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-light, var(--accent));
+}
+.cot-phases {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cot-phase {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  background: transparent;
+}
+.cot-phase.is-on {
+  color: #f8fbff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.cot-phase.is-done {
+  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
 }
 .agent-progress-header:hover {
   background: var(--bg-hover);
@@ -2059,7 +2198,6 @@ tbody tr:last-child td {
 .agent-progress-title {
   font-weight: 600;
   color: var(--text-primary);
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2302,23 +2440,58 @@ tbody tr:last-child td {
 .agent-progress-steps {
   list-style: none;
   margin: 0;
-  padding: 4px 0 10px;
-  max-height: 320px;
+  padding: 6px 0 12px;
+  max-height: 340px;
   overflow-y: auto;
 }
 .agent-progress-step {
   display: flex;
   gap: 8px;
-  padding: 6px 12px;
+  position: relative;
+  padding-block: 8px;
+  padding-inline: 40px 14px;
   align-items: flex-start;
   color: var(--text-secondary);
+  animation: cotRowIn 0.22s ease-out;
 }
+.agent-progress-step::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 22px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+.agent-progress-step:first-child::before { top: 18px; }
+.agent-progress-step:last-child::before { bottom: auto; height: 18px; }
 .agent-progress-step .step-icon {
+  position: absolute;
+  inset-inline-start: 13px;
+  top: 8px;
   flex-shrink: 0;
-  width: 1.1em;
-  text-align: center;
-  opacity: 0.85;
-  line-height: 1.4;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--accent-light, var(--accent));
+  z-index: 1;
+}
+.agent-progress-step .step-icon .step-glyph { display: block; }
+.agent-progress-step .step-icon.fam-read { color: #38bdf8; border-color: color-mix(in srgb, #38bdf8 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-write { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-exec { color: #fb7185; border-color: color-mix(in srgb, #fb7185 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-search { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-browse { color: #22d3ee; border-color: color-mix(in srgb, #22d3ee 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-memory { color: #34d399; border-color: color-mix(in srgb, #34d399 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+@keyframes cotRowIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
 }
 .agent-progress-step .step-body { flex: 1; min-width: 0; }
 .agent-progress-step .step-line {
@@ -2397,6 +2570,78 @@ tbody tr:last-child td {
 }
 .message-meta time {
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Workbench enhancements: parity, richer rows, polish ────────── */
+/* Animated thinking-row icon (running status rows). Killed globally by
+   the prefers-reduced-motion block (§a11y). */
+@keyframes stepIconPulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.3; }
+}
+.agent-progress-step.state-running .step-icon.is-animated {
+  animation: stepIconPulse 1.2s ease-in-out infinite;
+}
+/* Reserve height while the panel is active so appended rows don't make
+   the transcript jump (streaming polish). */
+.agent-progress.is-active .agent-progress-body { min-height: 42px; }
+
+/* Inline error text on failed tool rows */
+.agent-progress-step.state-failed .step-detail {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-subtle);
+}
+
+/* Long tool results clamp with a "show more" toggle (shared builder
+   renders .is-clamped + button when detail exceeds the JS threshold). */
+.agent-progress-step .step-detail.is-clamped { max-height: 3.6em; overflow: hidden; }
+.step-show-more {
+  margin-top: 2px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  font: 600 0.68rem var(--font-sans, inherit);
+  cursor: pointer;
+}
+.step-show-more:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* RTL: mirror the workbench chevron */
+[dir="rtl"] .agent-progress-chevron { transform: scaleX(-1); }
+
+/* Context + composer badges — same pill family as cost/token badges */
+.context-badge,
+.char-badge {
+  padding: 2px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+}
+.context-badge { color: var(--text-primary); }
+.char-badge.is-empty { opacity: 0.85; }
+
+/* Turn summary bar density: the done title carries
+   "Done · N tools · M steps · Xs · $cost · tokens" — keep it one line */
+.agent-progress.is-done .agent-progress-title { white-space: nowrap; }
+
+/* Chat transcript: stretchable column with wide side margins (approved
+   mockup look). Mobile (≤768px) rules below still clamp to --sp-3. */
+.chat-messages { padding: var(--sp-6) clamp(64px, 12vw, 180px); }
+.message { max-width: none; }
+
+/* ── ≤520px: usable single-hand layout (AC#7) ── */
+@media (max-width: 520px) {
+  .chat-messages { padding: var(--sp-3); }
+  .input-footer { gap: 6px; }
+  .message { gap: var(--sp-2); }
+  .message-avatar { width: 28px; height: 28px; }
+  .agent-progress-steps { max-height: 240px; }
+  .agent-progress-header { min-height: 36px; }  /* ≥36px tap target */
 }
 
 /* ── 14. Skills & MCP Cards ─────────────────────────────────────── */
@@ -2793,6 +3038,40 @@ tbody tr:last-child td {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.2);
+}
+.provider-card .model-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+.provider-card .model-item-row.selected {
+  background: rgba(99, 102, 241, 0.15);
+}
+.provider-card .model-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.provider-card .model-check-label input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #6366f1);
+}
+.provider-card .model-check-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Input with icon */
@@ -3573,11 +3852,102 @@ tbody tr:last-child td {
   .skills-grid { grid-template-columns: 1fr; }
   .mcp-grid { grid-template-columns: 1fr; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  .metrics-grid { grid-template-columns: 1fr; }
+  /* Two-up metrics — six stacked cards on a phone is a long scroll */
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
   .charts-row { grid-template-columns: 1fr; }
+  .dash-pro-split { grid-template-columns: 1fr; }
+  .dash-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .feature-cards-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .hitl-panel-desc { display: none; }
+  .hitl-approval-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+    justify-content: center;
+  }
+  .dash-pro-title { font-size: 1.2rem; }
+  .dash-pro-toolbar { width: 100%; }
+  .dash-pro-toolbar .range-selector { flex: 1 1 auto; }
+  .dash-pro-toolbar .range-btn { flex: 1; text-align: center; }
+
+  /* Dashboard tables → cards */
+  .dash-table-wrap { display: none !important; }
+  .dash-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0 8px;
+  }
+  .dash-mobile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-surface);
+  }
+  .dash-mobile-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .dash-mobile-card-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dash-mobile-card-id {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dash-mobile-card-meta {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+  }
+  .dash-session-delete { align-self: flex-end; }
+
+  /* Settings + Swarm tab chip rail */
+  .settings-nav,
+  .tabs {
+    flex-wrap: nowrap;
+    position: sticky;
+    top: var(--header-height);
+    z-index: 15;
+    background: var(--bg-panel);
+    padding: 8px 4px;
+    margin-inline: -4px;
+    gap: 6px;
+  }
+  .settings-tab,
+  .tabs .tab {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    border-bottom-width: 1px;
+  }
+  .settings-tab.active,
+  .tabs .tab.active {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--accent-light);
+  }
+
+  .ws-action-btn { flex: 1 1 auto; }
+  .swarm-metrics-grid { grid-template-columns: 1fr 1fr !important; }
+  .swarm-container .card > div[style*="justify-content:space-between"] {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
   .workspace-grid { grid-template-columns: 1fr; }
   .swarm-container .workspace-grid { grid-template-columns: 1fr; }
-  .swarm-metrics-grid { grid-template-columns: 1fr !important; }
   .two-col-grid { grid-template-columns: 1fr !important; }   /* inline-grid helper */
 
   /* ── Padding reductions ──
@@ -3623,12 +3993,14 @@ tbody tr:last-child td {
   .hitl-card { flex-wrap: wrap; }
   .hitl-actions { margin-left: 0; width: 100%; }
   .header-right .hide-sm { display: none; }
+  .hitl-panel-head { padding: 12px 14px; }
+  .dash-pro .metric-card { min-height: 0; padding: 12px; }
 }
 
 @media (max-width: 480px) {
   .header-title { font-size: 0.95rem; }
   .metrics-row { grid-template-columns: 1fr; }
-  .metrics-grid { grid-template-columns: 1fr; }
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
   .header-right .hide-xs { display: none; }
   /* Toasts must fit narrow phones (was right:20px + max-width:380px → overflow). */
   .toast {
@@ -3641,6 +4013,7 @@ tbody tr:last-child td {
 /* ── Tier 5: Small phone ── */
 @media (max-width: 380px) {
   .metrics-grid { grid-template-columns: 1fr; }
+  .hitl-approval-actions .btn { flex: 1 1 100%; }
   /* Longhand — preserve the Tier 2 dock clearance (see Tier 3 note). */
   .page-body {
     padding-top: var(--sp-3);
@@ -3656,6 +4029,9 @@ tbody tr:last-child td {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 1.5rem;
+}
+.swarm-metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .metric-card {
   background: var(--tint);
@@ -4087,8 +4463,147 @@ canvas { display: block; border-radius: 4px; }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Memory graph inspect — desktop dock; phone = compact bottom sheet */
+.v2g-inspect {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  width: min(320px, 42vw);
+  max-width: 320px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  word-break: break-word;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(10, 15, 20, 0.94);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+.v2g-inspect-head {
+  display: flex;
+  justify-content: flex-end;
+  position: sticky;
+  top: -4px;
+  margin: -4px -4px 4px 0;
+}
+.v2g-inspect-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.v2g-inspect-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+.v2g-inspect-contents { max-height: 200px; overflow-y: auto; }
+.v2g-inspect-edges { max-height: 260px; overflow-y: auto; }
+
+@media (max-width: 768px) {
+  #v2g-tooltip { display: none !important; }
+  .v2g-inspect {
+    top: auto;
+    right: 8px;
+    left: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+    max-height: min(36vh, 220px);
+    padding: 8px 10px 10px;
+    font-size: 0.68rem;
+    border-radius: 14px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.5);
+  }
+  .v2g-inspect-contents { max-height: 64px; }
+  .v2g-inspect-edges { max-height: 96px; }
+}
+
+/* Dashboard cards — hidden on desktop; phone media shows them */
+.dash-card-list { display: none; }
+
 /* Dashboard */
 .dashboard-container { max-width: 1400px; margin: 0 auto; }
+.dashboard-container.dash-pro {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 0.25rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.dash-pro-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dash-pro-kicker {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.dash-pro-title {
+  font-size: 1.45rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  margin: 0;
+}
+.dash-pro-sub {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  max-width: 36rem;
+  line-height: 1.4;
+}
+.dash-pro-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.dash-pro-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 16px;
+  margin-bottom: 1.25rem;
+}
+.feature-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.hitl-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.hitl-panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hitl-panel-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
 .trace-row { transition: background 0.15s; }
 .trace-row:hover { background: var(--bg-hover); }
 
@@ -4100,7 +4615,7 @@ canvas { display: block; border-radius: 4px; }
 }
 /* Identical sizing for the Create Workspace / Switch Repo action buttons */
 .ws-action-btn {
-  min-width: 150px;
+  min-width: 0;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -4260,6 +4775,7 @@ canvas { display: block; border-radius: 4px; }
 .hitl-approval-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .btn-success {

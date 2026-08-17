@@ -137,8 +137,9 @@ def test_pg_backup_enabled_false_on_sqlite(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_pg_backup_enabled_true_on_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Set ONLY the backend flag (the shield reverts it to sqlite if a real
+    # DSN var is set). is_postgres() reads the flag; no DSN needed here.
     monkeypatch.setenv("KAZMA_DB_BACKEND", "postgres")
-    monkeypatch.setenv("KAZMA_DATABASE_URL", "postgresql://u:p@127.0.0.1:5433/kazma")
     monkeypatch.delenv("KAZMA_PG_BACKUP_ENABLED", raising=False)
     assert pg_backup.pg_backup_enabled() is True
 
@@ -154,9 +155,18 @@ def test_pg_backup_enabled_kill_switch_wins(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.fixture()
 def _pg_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Backend flag is shield-safe to set directly; the DSN is NOT — the root
+    # shield strips KAZMA_DATABASE_URL (and reverts the backend to sqlite when
+    # it's set). These tests mock dump_database, so monkeypatch the DSN getter
+    # instead of putting a real-looking DSN in the environment.
     monkeypatch.setenv("KAZMA_DB_BACKEND", "postgres")
-    monkeypatch.setenv("KAZMA_DATABASE_URL", "postgresql://u:p@127.0.0.1:5433/kazma")
     monkeypatch.delenv("KAZMA_PG_BACKUP_ENABLED", raising=False)
+    import kazma_core.db.backend as _backend_mod
+
+    monkeypatch.setattr(
+        _backend_mod, "get_database_url",
+        lambda: "postgresql://u:p@127.0.0.1:5433/kazma",
+    )
     monkeypatch.setattr(pg_backup, "pg_backup_dir", lambda: tmp_path)
     return tmp_path
 

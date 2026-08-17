@@ -59,11 +59,10 @@ def test_confirmed_soul_delta_applies(isolated):
     assert ok is True, "confirmed soul delta must apply"
 
 
-def test_no_commitment_id_applies_even_with_flag_on(isolated):
-    """Flag ON but no commitment_id (legacy caller) → applies as before. The
-    gate only bites when a commitment_id is threaded through."""
+def test_no_commitment_id_holds_when_flag_on(isolated):
+    """Flag ON + no commitment_id → mint and hold (no legacy loophole)."""
     ok = apply_agent_mutation("a1", "a benign delta")
-    assert ok is True
+    assert ok is False, "unconfirmed soul delta must NOT apply without a cid"
 
 
 def test_soul_commitment_is_critical_act_retention(isolated):

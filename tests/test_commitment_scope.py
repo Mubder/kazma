@@ -2,8 +2,9 @@
 
 A dispatched worker inherits its orchestrator's scope; a mutator outside that
 scope is denied. The main agent (no scope) is never restricted. Enforcement is
-gated by agent.commitment.swarm_scope_enforce (default OFF; live via
-KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE).
+gated by agent.commitment.swarm_scope_enforce (default ON since 2026-08-15;
+live via KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE). Every test below sets the
+flag explicitly so it is independent of the ambient default.
 """
 
 from __future__ import annotations

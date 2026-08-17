@@ -148,6 +148,23 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
         except Exception as exc:
             logger.debug("Failed to append Commitment metrics: %s", exc)
 
+        # ── Intent engine metrics (in-process counters) ────────────────
+        try:
+            from kazma_core.agent.intent.metrics import get_intent_counters
+
+            counters = get_intent_counters()
+            if counters:
+                lines.append(
+                    "# HELP kazma_intent_decisions_total Intent engine decisions by route and act"
+                )
+                lines.append("# TYPE kazma_intent_decisions_total counter")
+                for (route, act), count in sorted(counters.items()):
+                    lines.append(
+                        f'kazma_intent_decisions_total{{route="{route}",act="{act}"}} {count}'
+                    )
+        except Exception as exc:
+            logger.debug("Failed to append intent engine metrics: %s", exc)
+
         # ── In-process prometheus_client registry (kazma-core Counters) ──
         # Exposes counters that aren't DB-derivable — notably
         # kazma_commitment_terminal_total (PR3 loop-prevention signal) and the

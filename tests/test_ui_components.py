@@ -142,6 +142,23 @@ class TestSidebarComponent:
     def test_has_dashboard_link(self, sidebar_html):
         assert 'href="/dashboard"' in sidebar_html
 
+    def test_dashboard_lives_in_work_section(self, sidebar_html):
+        """Dashboard is a Work item, not a Settings item."""
+        work = sidebar_html.find("nav.primary")
+        dash = sidebar_html.find('href="/dashboard"')
+        activity = sidebar_html.find("nav.activity")
+        settings = sidebar_html.find("nav.configuration")
+        assert work != -1 and dash != -1 and activity != -1 and settings != -1
+        assert work < dash < activity < settings, (
+            "Dashboard must sit in the Work group (after nav.primary, "
+            "before Activity / Settings)"
+        )
+        assert sidebar_html.count('href="/dashboard"') == 1
+        agents = sidebar_html.find('href="/agents"')
+        replay = sidebar_html.find('href="/replay"')
+        assert work < agents < activity, "Agents belong in Work"
+        assert activity < replay < settings, "Replay belongs in Activity"
+
     def test_has_skills_link(self, sidebar_html):
         assert 'href="/skills"' in sidebar_html
 
@@ -324,6 +341,12 @@ class TestCSSDesignSystem:
 
     def test_has_header_height(self, css):
         assert "--header-height" in css
+
+    def test_mobile_metrics_stay_two_up(self, css):
+        """Phones keep a 2-col metric grid (not a 6-card stack)."""
+        assert ".metrics-grid { grid-template-columns: 1fr 1fr; }" in css
+        assert ".dash-pro-split" in css
+        assert ".hitl-panel-desc { display: none; }" in css
 
     def test_has_app_layout(self, css):
         assert ".app-layout" in css

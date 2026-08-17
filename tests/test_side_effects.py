@@ -70,6 +70,55 @@ def test_reads_are_not_semantically_gated():
         assert is_read_only(t), t
 
 
+_MEMORY_GRAPH_TOOLS = (
+    "memory_store",
+    "memory_search",
+    "memory_list_beliefs",
+    "memory_list_entities",
+    "memory_invalidate",
+    "memory_merge_entities",
+    "memory_link_entities",
+    "memory_delete_entity",
+    "memory_purge_empty_entities",
+    "memory_admin",
+)
+
+
+def test_memory_graph_tools_are_registered():
+    """Cleanup tools must not infer as unregistered mutators (fail-closed)."""
+    missing = [t for t in _MEMORY_GRAPH_TOOLS if not get_effect_profile(t).registered]
+    assert missing == [], f"memory tools missing from _PROF: {missing}"
+
+
+def test_memory_merge_not_denied_when_enforcement_on():
+    from kazma_core.safety.commitment import authorize_effect
+
+    d = authorize_effect(
+        "memory_merge_entities",
+        {"source_id": "mubder_kazma", "target_id": "kazma"},
+        enforce_unknown_mutators=True,
+        context={"source": "registry"},
+    )
+    assert d.decision != "deny", d.reason
+    assert d.profile.registered is True
+    assert d.profile.effect == EffectKind.WRITE_MEMORY
+
+
+def test_memory_link_and_delete_not_unregistered_deny():
+    from kazma_core.safety.commitment import authorize_effect
+
+    for name, args in (
+        ("memory_link_entities", {"subject": "user", "object": "kazma", "predicate": "has_project"}),
+        ("memory_delete_entity", {"entity_id": "true"}),
+        ("memory_invalidate", {"belief_id": "b1"}),
+        ("memory_purge_empty_entities", {"confirm": True}),
+        ("memory_admin", {"action": "list_entities"}),
+    ):
+        d = authorize_effect(name, args, enforce_unknown_mutators=True)
+        assert d.decision != "deny", f"{name}: {d.reason}"
+        assert d.profile.registered is True, name
+
+
 # ── fail-closed for unregistered tools (§5.2) ──────────────────────────────
 
 def test_unknown_mutator_fails_closed():

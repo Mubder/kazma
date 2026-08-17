@@ -557,6 +557,34 @@ async def supervisor_node(
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
+    # ── Iteration-efficiency nudges (audit 2026-08-15) ──────────────
+    # Long tasks burn iterations on one-tool-per-turn patterns (71 of 117
+    # calls were python_exec on a calendar reproduction task). Inject a
+    # strategy-change hint at milestones so the model course-corrects
+    # BEFORE hitting the hard iteration wall.
+    _ITER_NUDGE_MARKERS = (20, 40, 60, 80)
+    _budget_nudge: dict[str, Any] | None = None
+    if iteration in _ITER_NUDGE_MARKERS:
+        _max_iter_now = int(state.get("max_iterations") or 15)
+        _remaining = max(0, _max_iter_now - iteration)
+        _budget_nudge = {
+            "role": "system",
+            "content": (
+                f"SYSTEM BUDGET CHECK: You have used {iteration} iterations "
+                f"({_remaining} remaining of {_max_iter_now}). If you are making "
+                "steady progress, continue. If you are LOOPING (re-reading files "
+                "you already read, writing debug scripts, retrying similar code):\n"
+                "- BATCH tool calls: issue MULTIPLE reads/writes in ONE response\n"
+                "- Use structured tools (generate_pdf, file_write) not python_exec\n"
+                "- Summarize what you have so far and produce the final output NOW"
+            ),
+        }
+        logger.info(
+            "[Supervisor] iteration-efficiency nudge injected at iteration=%d "
+            "(ephemeral — not checkpointed)",
+            iteration,
+        )
+
     # ── Mission mode: auto-extend past soft max_iterations ─────────
     # Budget /long still force-stops. Mission mode resets the wave counter
     # and continues until mission_hard_rounds (safety wall), without asking
@@ -777,6 +805,95 @@ async def supervisor_node(
         _is_shift = _intent_mode == "shift"
 
         intent_patch["intent_mode"] = _intent_mode
+
+        # ── Intent Engine (§14 of KAZMA_INTENT_ENGINE.md) ─────────────
+        # Classify every turn (focus + acts + entities) and write the
+        # decision onto SupervisorState. Route is execute/constrain/loop.
+        # Phase 2+: execute allowlist = {document_generate, research_deep};
+        # multi-act research+document dispatches the composer.
+        _decision = None
+        if iteration == 0:
+            try:
+                from kazma_core.agent.intent.classify import classify_turn
+                from kazma_core.agent.intent.config import intent_engine_enabled
+
+                if intent_engine_enabled():
+                    _atts = list(state.get("active_attachments") or [])
+                    if not _atts:
+                        try:
+                            from kazma_core.agent.turn_input import extract_active_attachments
+
+                            _atts = extract_active_attachments(
+                                messages, user_text=last_user_content
+                            )
+                        except Exception:
+                            _atts = []
+                    _decision = await classify_turn(
+                        last_user_content,
+                        messages=messages,
+                        attachments=_atts,
+                        task_status=_prev_status,
+                        task_goal_summary=_prev_goal,
+                        llm=llm,
+                        use_embedding_drift=(iteration == 0),
+                        focus=_intent_mode,
+                    )
+                    _intent_mode = _decision.focus
+                    intent_patch["intent_mode"] = _decision.focus
+                    intent_patch["intent_route"] = str(_decision.route)
+                    intent_patch["intent_acts"] = [
+                        {"kind": a.kind, "confidence": a.confidence, "slots": a.slots, "source": a.source}
+                        for a in _decision.acts
+                    ]
+                    intent_patch["intent_reason"] = _decision.reason
+                    logger.info(
+                        "[Supervisor] Intent Engine: focus=%s route=%s acts=%s reason=%s source=%s",
+                        _decision.focus,
+                        _decision.route,
+                        [(a.kind, round(a.confidence, 2)) for a in _decision.acts],
+                        _decision.reason,
+                        _decision.source,
+                    )
+            except Exception:
+                logger.debug("[Supervisor] Intent engine failed (non-fatal)", exc_info=True)
+                _decision = None
+
+        # Execute (Phase 2+: document_generate / research_deep / composer)
+        if _decision is not None and _decision.route.value == "execute" and _decision.handler:
+            try:
+                from kazma_core.agent.intent.registry import get_registry as _get_intent_registry
+
+                _h = _get_intent_registry().resolve(_decision.handler)
+                if _h is not None:
+                    _res = await asyncio.wait_for(
+                        _h.run(_decision, {**state, "messages": messages}, llm=llm, tool_executor=tool_executor),
+                        timeout=_h.timeout_seconds,
+                    )
+                else:
+                    _res = None
+            except Exception as exc:
+                logger.warning("[Supervisor] handler %s failed: %s — loop", _decision.handler, exc)
+                _res = None
+            if _res is not None and _res.ok and not _res.escalate:
+                return {
+                    **intent_patch,
+                    "messages": messages + [{"role": "assistant", "content": _res.message}],
+                    "next_node": NodeName.RESPOND,
+                    "iteration": iteration + 1,
+                }
+            # else fall through to loop
+
+        # Constrain: inject plan_note once
+        if (
+            _decision is not None
+            and _decision.route.value == "constrain"
+            and _decision.plan_note
+            and not any(
+                m.get("role") == "system" and "INTENT ENGINE" in str(m.get("content") or "")
+                for m in messages
+            )
+        ):
+            messages = list(messages) + [{"role": "system", "content": _decision.plan_note}]
 
         # Collapse prior multi-step tool payloads when focus is done/shifted
         # so attention is not dominated by stale tool chains (PR5).
@@ -1080,6 +1197,19 @@ async def supervisor_node(
                 model_spec.model,
             )
 
+    # Per-turn pin from the mouth (SSE/WS body.model) wins over the router
+    # and does NOT mutate the process-wide active profile.
+    turn_llm = llm
+    try:
+        from kazma_core.runtime.turn_model import resolve_turn_client
+
+        turn_llm, _pinned = resolve_turn_client(llm)
+        if _pinned:
+            routed_model = _pinned
+            logger.info("[Supervisor] turn-model pin=%s", _pinned)
+    except Exception:
+        turn_llm = llm
+
     # ── Per-turn memory retrieval (RAG) ──────────────────────────
     # Retrieve relevant memories for the current user message and inject
     # them as a system message before the LLM call. Gated on iteration==0
@@ -1382,19 +1512,30 @@ async def supervisor_node(
             messages.append({"role": "system", "content": _plan_nudge})
 
     # R4: soft-route deep research intent toward run_research_pipeline
+    # §18 Phase 2: skip when the intent engine's constrain note already
+    # covers research_deep (avoid double-nudging)
     if iteration == 0 and effective_tool_definitions and last_user_content:
-        try:
-            from kazma_core.agent.research_policy import deep_research_route_hint
-
-            route = deep_research_route_hint(last_user_content)
-            if route and not any(
-                m.get("role") == "system"
-                and "DEEP RESEARCH ROUTE" in str(m.get("content", ""))
+        _intent_covers_research = (
+            _decision is not None
+            and any(a.kind == "research_deep" for a in _decision.acts)
+            and any(
+                m.get("role") == "system" and "INTENT ENGINE" in str(m.get("content", ""))
                 for m in messages
-            ):
-                messages.append({"role": "system", "content": route})
-        except Exception:
-            logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
+            )
+        )
+        if not _intent_covers_research:
+            try:
+                from kazma_core.agent.research_policy import deep_research_route_hint
+
+                route = deep_research_route_hint(last_user_content)
+                if route and not any(
+                    m.get("role") == "system"
+                    and "DEEP RESEARCH ROUTE" in str(m.get("content", ""))
+                    for m in messages
+                ):
+                    messages.append({"role": "system", "content": route})
+            except Exception:
+                logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
 
     # ── Steer: hard pause + soft drain, right before the LLM call ────
     # HARD steer: if one is pending, fire a LangGraph interrupt so the
@@ -1463,16 +1604,24 @@ async def supervisor_node(
 
         _llm_attempts = 0
         _served_by: list[str] = []  # failover bookkeeping: [model] when a chain model answered
+        _llm_messages = list(messages) + ([_budget_nudge] if _budget_nudge else [])
 
         async def _call_llm_with_retry() -> Any:
             nonlocal _llm_attempts
             last_exc: Exception | None = None
+            # Per-call max_tokens: tool-call iterations need less output
+            # (tool JSON is bounded) — use 8192 to save cost. Content-only
+            # turns (no tools) may produce long answers — use the full
+            # configured limit (16384 default). This prevents the wasteful
+            # truncation-retry loop on content-generation tasks.
+            _call_max_tokens = 8192 if effective_tool_definitions else None
             for attempt in range(1, cfg["max_attempts"] + 1):
                 try:
-                    return await llm.chat(
-                        messages=messages,
+                    return await turn_llm.chat(
+                        messages=_llm_messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
+                        max_tokens=_call_max_tokens,
                     )
                 except retryable_exc as exc:
                     last_exc = exc
@@ -1571,7 +1720,7 @@ async def supervisor_node(
                         fb_model,
                     )
                     response = await client.chat(
-                        messages=messages,
+                        messages=_llm_messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=fb_model,
                     )
@@ -1727,7 +1876,7 @@ async def supervisor_node(
                 )},
             ]
             try:
-                nudge_response = await llm.chat(
+                nudge_response = await turn_llm.chat(
                     messages=pruned_nudge_msgs,
                     tools=[],
                     model=routed_model,
@@ -2356,6 +2505,42 @@ async def tool_worker_node(
                     is_error=True,
                     duration_ms=duration_ms,
                 )
+
+            # Document-generation guard: the model is trying to build a
+            # PDF/DOCX/XLSX via raw Python (reportlab/fpdf/openpyxl) instead
+            # of the purpose-built generate_* tools. This burns dozens of
+            # iterations on code that produces inferior output — intercept
+            # and redirect BEFORE execution (audit 2026-08-14: 100-iteration
+            # rabbit hole on a 24-post Arabic calendar).
+            _tool_name_low = str(tc["name"]).lower()
+            if _tool_name_low in ("python_exec", "code_exec", "shell_exec"):
+                _code = str(_args.get("code") or _args.get("command") or "")
+                _code_low = _code.lower()
+                if any(
+                    marker in _code_low
+                    for marker in (
+                        "reportlab", "fpdf", "from fpdf", "simpledoctemplate",
+                        "canvas(", "platypus", "openpyxl.workbook",
+                        "docx.document", "from docx",
+                    )
+                ) and "generate_pdf" not in _code_low and "generate_docx" not in _code_low:
+                    _doc_hint = (
+                        "SYSTEM OVERRIDE: You are trying to build a document via raw "
+                        "Python. STOP — use the dedicated document generator tools instead:\n"
+                        "1. Write content to a .md file: file_write(path='output.md', content=...)\n"
+                        "2. Generate: generate_pdf(title='...', markdown_path='output.md')\n"
+                        "The generate_pdf tool handles Arabic shaping, RTL layout, styling, "
+                        "and page numbering automatically — your manual code cannot. "
+                        "Do NOT retry with Python."
+                    )
+                    _dur = (time.monotonic() - start) * 1000
+                    return ToolResult(
+                        tool_call_id=tc["id"],
+                        name=tc["name"],
+                        content=_doc_hint,
+                        is_error=True,
+                        duration_ms=_dur,
+                    )
             # Per-tool wall-clock timeout (audit B: fault isolation). A hung
             # tool (deadlocked MCP server, wedged subprocess) previously
             # blocked the whole turn until the outer KAZMA_TURN_TIMEOUT
@@ -2520,6 +2705,8 @@ async def tool_worker_node(
                 primary_tool = f"{len(danger_tools)} tools"
                 primary_args = {"tools": [t["name"] for t in tools_payload]}
 
+            from kazma_core.safety.yolo import yolo_allowed as _yolo_allowed
+
             approval_input = {
                 "type": "hitl_approval",
                 "kind": "security",  # self-describing (§4.3): every payload carries kind
@@ -2527,6 +2714,7 @@ async def tool_worker_node(
                 "args": primary_args,
                 "tools": tools_payload,
                 "message": message,
+                "yolo_allowed": _yolo_allowed(),
             }
 
             # Defense-in-depth: requires_approval() already filtered YOLO/grants
@@ -2779,6 +2967,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     messages = [_normalize_msg(m) for m in state.get("messages", [])]
     iteration = state.get("iteration", 0) + 1
 
+    # Clear the per-turn file-read dedup cache (turn boundary — audit 2026-08-15)
+    try:
+        from kazma_core.tools.file_read import clear_turn_read_cache
+
+        clear_turn_read_cache()
+    except Exception:
+        pass
+
     # Sanitize tool chains to remove any unhandled/dangling tool_calls
     # (e.g. when max_iterations forced routing to respond before ToolWorker ran)
     messages = sanitize_tool_chains(messages)
@@ -2856,6 +3052,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     if _needs_synthesis:
         _llm = llm or state.get("_llm")
         if _llm is not None:
+            try:
+                from kazma_core.runtime.turn_model import resolve_turn_client
+
+                _llm, _ = resolve_turn_client(_llm)
+            except Exception:
+                pass
             try:
                 from kazma_core.summarizer import prune_tool_outputs
                 pruned_for_synth = prune_tool_outputs(messages, max_tokens=18000)
