@@ -388,6 +388,18 @@ class MetricsDashboard(Widget):
                 agent_names = self._get_agent_names(engine)
             except Exception:
                 logger.debug("SwarmEngine unavailable", exc_info=True)
+        if not agent_names:
+            try:
+                from kazma_core.runtime.local_api import request_json
+
+                data = request_json("GET", "/api/swarm/status")
+                agent_names = sorted(
+                    str(w.get("name"))
+                    for w in (data.get("workers") or [])
+                    if w.get("name")
+                )
+            except Exception:
+                logger.debug("live swarm status unavailable", exc_info=True)
 
         # ── Update MetricCard widgets ───────────────────────────────
         try:

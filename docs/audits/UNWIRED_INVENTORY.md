@@ -45,7 +45,7 @@ These are live; listed only for contrast:
 | `security/disclosure.py` | ~490 | `test_disclosure.py` | Vulnerability disclosure workflow |
 | `security/hardening.py` + `audit_trail.py` | ~890 | `test_hardening.py` | Offline hardening runner |
 | `docs/` package | ~400 | `test_doc_generator.py` | Doc generator (Docusaurus is hand-written) |
-| `kazma_gateway/swarm_notify.py` | ~370 | `test_swarm_notify.py` | Optional Telegram progress notifier; not hooked into dispatch |
+| `kazma_gateway/swarm_notify.py` | ~370 | `test_swarm_notify.py` | Opt-in Telegram notify: `maybe_notify_dispatch` on swarm dispatch when `SWARM_BOT_TOKEN` is set |
 
 ### Explicit non-goals for cleanup
 

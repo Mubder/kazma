@@ -291,11 +291,37 @@ def register_tasks_routes(
             else:
                 result = await engine.dispatch(swarm_task)
             await _route_task_result(result)
+            try:
+                from kazma_gateway.swarm_notify import maybe_notify_dispatch
+
+                await maybe_notify_dispatch(
+                    task_id=str(getattr(swarm_task, "id", "") or ""),
+                    prompt=str(getattr(swarm_task, "prompt", "") or ""),
+                    status=str(getattr(result, "status", None) or "done"),
+                    summary=str(
+                        getattr(result, "aggregated_output", None)
+                        or getattr(result, "synthesized_output", None)
+                        or ""
+                    ),
+                )
+            except Exception:
+                logger.debug("[Swarm] notify hook skipped", exc_info=True)
             return result
         except Exception as exc:
             logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
             error_msg = f"⚠️ Swarm task failed: {exc}"
             await _maybe_send_to_output_target_fallback(error_msg)
+            try:
+                from kazma_gateway.swarm_notify import maybe_notify_dispatch
+
+                await maybe_notify_dispatch(
+                    task_id=str(getattr(swarm_task, "id", "") or ""),
+                    prompt=str(getattr(swarm_task, "prompt", "") or ""),
+                    status="failed",
+                    summary=str(exc)[:400],
+                )
+            except Exception:
+                logger.debug("[Swarm] notify hook skipped", exc_info=True)
             raise exc
 
     @router.post("/api/swarm/dispatch", dependencies=[Depends(rate_limit("swarm_dispatch", 20))])

@@ -321,6 +321,7 @@ class TestFallbackOnImportError:
         assert hasattr(sn, "SwarmNotifier")
         assert hasattr(sn, "SwarmTaskTracker")
         assert hasattr(sn, "TrackedTask")
+        assert hasattr(sn, "maybe_notify_dispatch")
 
         # Verify from_env works with empty env (graceful, no crash)
         env = {"SWARM_BOT_TOKEN": "standalone-token"}
@@ -340,9 +341,15 @@ class TestFallbackOnImportError:
         }
         with patch.dict("os.environ", env, clear=False):
             notifier = SwarmNotifier.from_swarm_manager(bare_manager)
+            assert notifier._token == "fallback-token"
+            assert notifier._default_chat_id == "00000"
+            assert notifier._parse_mode == "Markdown"
+            await notifier.close()
 
-        assert notifier._token == "fallback-token"
-        assert notifier._default_chat_id == "00000"
-        assert notifier._parse_mode == "Markdown"  # default
 
-        await notifier.close()
+@pytest.mark.asyncio
+async def test_maybe_notify_dispatch_noop_without_token(monkeypatch):
+    from kazma_gateway.swarm_notify import maybe_notify_dispatch
+
+    monkeypatch.delenv("SWARM_BOT_TOKEN", raising=False)
+    assert await maybe_notify_dispatch(task_id="t1", status="done") is False

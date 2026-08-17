@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Audit F remaining (2026-08-17)
+
+Soft-nav no longer full-reloads inspector pages (memory / documents /
+replay / research / knowledge); chat, IDE, swarm, settings, and the
+Alpine-app shells stay hard. TUI Documents and dashboard agents read
+the live server API. Swarm Telegram notify is opt-in
+(``maybe_notify_dispatch`` when ``SWARM_BOT_TOKEN`` is set). Tutorial
+does not advertise TUI email/voice/image tabs.
+
 ## Unreleased — Audit D remaining (2026-08-17)
 
 ``/session #short_id`` actually resolves (the ``#`` is stripped). Season
