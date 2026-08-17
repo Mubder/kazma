@@ -48,6 +48,21 @@ def _clean_yolo_grants():
         pass
 
 
+def test_allow_yolo_zero_blocks_even_without_production(monkeypatch) -> None:
+    """KAZMA_ALLOW_YOLO=0 must disable YOLO in lab mode, not only in production."""
+    from kazma_core.safety.yolo import yolo_allowed
+
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "0")
+    assert yolo_allowed() is False
+    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "1")
+    assert yolo_allowed() is True
+    monkeypatch.delenv("KAZMA_ALLOW_YOLO", raising=False)
+    assert yolo_allowed() is True
+    monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+    assert yolo_allowed() is False
+
+
 def test_yolo_requires_context_or_is_ignored():
     tid = "thr-yolo-bind"
     enable_yolo(tid, actor="test")

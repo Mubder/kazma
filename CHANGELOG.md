@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased — KAZMA_ALLOW_YOLO=0 disables YOLO in lab too (2026-08-17)
+
+``yolo_allowed()`` only blocked YOLO under ``KAZMA_PRODUCTION=1``. Setting
+``KAZMA_ALLOW_YOLO=0`` in a personal install did nothing. Explicit ``0``
+now wins in lab and prod; ``is_yolo_active`` honours the same flag.
+
 ## Unreleased — Document fidelity: math, LTR code, table paging (2026-08-17)
 
 ``$R = P \\cdot I$`` and ``$$...$$`` render as Unicode math (``R = P · I``,

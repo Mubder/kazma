@@ -37,12 +37,16 @@ def _truthy(raw: str | None) -> bool:
 def yolo_allowed() -> bool:
     """Return True when YOLO may be enabled.
 
+    Explicit ``KAZMA_ALLOW_YOLO=0`` always wins (lab or prod).
     Production (``KAZMA_PRODUCTION=1``) disables YOLO unless the operator
-    explicitly opts in with ``KAZMA_ALLOW_YOLO=1``.
+    opts in with ``KAZMA_ALLOW_YOLO=1``. Unset + non-production stays allowed.
     """
-    if not _truthy(os.environ.get("KAZMA_PRODUCTION")):
-        return True
-    return _truthy(os.environ.get("KAZMA_ALLOW_YOLO"))
+    raw = os.environ.get("KAZMA_ALLOW_YOLO")
+    if raw is not None and str(raw).strip() != "":
+        return _truthy(str(raw))
+    if _truthy(os.environ.get("KAZMA_PRODUCTION")):
+        return False
+    return True
 
 
 def _ttl_seconds() -> int:
@@ -117,7 +121,7 @@ def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
 
 def is_yolo_active(thread_id: str | None) -> bool:
     """True if YOLO is on and not expired for this thread."""
-    if not thread_id:
+    if not thread_id or not yolo_allowed():
         return False
     st = yolo_status(thread_id)
     return bool(st.get("active"))
