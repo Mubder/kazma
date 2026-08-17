@@ -32,6 +32,63 @@ def test_state_capability_postgres_needs_url():
     assert cap["write_ready"] is False
 
 
+def test_state_capability_postgres_primary():
+    from kazma_core.memory.state_backend import state_capability
+
+    cap = state_capability(
+        {
+            "state": {
+                "provider": "postgres",
+                "url": "postgresql://localhost/kazma",
+                "role": "primary",
+                "conflict_policy": "fail_closed",
+                "region": "eu-1",
+            }
+        }
+    )
+    assert cap["status"] == "postgres_primary"
+    assert cap["role"] == "primary"
+    assert cap["conflict_policy"] == "fail_closed"
+    assert "fail-closed" in cap["detail"]
+
+
+def test_conflict_policy_origin_and_fail_closed():
+    from kazma_core.memory.state_backend import should_apply_remote_write
+
+    ok, _ = should_apply_remote_write(None, region="a", policy="fail_closed")
+    assert ok is True
+    ok, reason = should_apply_remote_write(
+        {"region": "eu"}, region="us", policy="origin_wins"
+    )
+    assert ok is False
+    assert "origin_wins" in reason
+    ok, reason = should_apply_remote_write(
+        {"region": "eu"}, region="us", policy="fail_closed"
+    )
+    assert ok is False
+    assert "fail_closed" in reason
+    ok, _ = should_apply_remote_write(
+        {"region": "eu"}, region="us", policy="last_write_wins"
+    )
+    assert ok is True
+
+
+def test_recall_primary_fail_closed_when_backend_down(monkeypatch):
+    from kazma_core.memory.recall import recall
+    from kazma_core.memory.state_backend import NullStateBackend
+
+    monkeypatch.setattr(
+        "kazma_core.memory.state_backend.is_state_primary", lambda cfg=None: True
+    )
+    monkeypatch.setattr(
+        "kazma_core.memory.state_backend.get_state_backend",
+        lambda: NullStateBackend(),
+    )
+    result = recall("where do I live")
+    assert result.beliefs == []
+    assert result.episodes == []
+
+
 def test_graph_sqlite_neighbors(tmp_path, monkeypatch):
     from kazma_core.memory.graph_backend import SqliteGraphBackend, graph_capability
     from kazma_core.memory.schema_v2 import ensure_primary_schema

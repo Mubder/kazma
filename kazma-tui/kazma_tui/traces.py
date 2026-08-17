@@ -98,7 +98,10 @@ class TracesPanel(Vertical):
         self._selected_entry: Any = None
 
     def compose(self) -> ComposeResult:
-        yield Static("  TRACES  ·  filter · inspect", classes="section-label")
+        yield Static(
+            "  TRACES  ·  this TUI process  ·  server traces live on the Web Traces page",
+            classes="section-label",
+        )
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="Filter traces (text or regex)…", id="trace-search")
             yield Static("0 traces · 0 tok · $0", id="trace-stats", classes="stats-bar")

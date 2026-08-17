@@ -151,6 +151,11 @@ def test_tui_inspectors_use_live_api():
     assert "/api/status" in chat
     assert "workspace_id=" in chat
     assert "model=self._session_model" in chat
+    assert "/api/settings/agent" in chat
+    assert "/api/settings/agent/personalities" in chat
+    assert "/api/settings/agent/context" in chat
+    assert "handle_personality_command" not in chat
+    assert "estimate_tokens" not in chat
 
 
 def test_sse_pins_turn_model_not_process_wide():

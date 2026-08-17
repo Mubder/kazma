@@ -5,8 +5,10 @@ Default remains local SQLite (``memory_state.db``). When
 **dual-mirror** beliefs/episodes to Postgres so multiple app processes share
 a durable copy for APIs / future cutover.
 
-Chat recall still prefers SQLite FTS/dense until a full remote recall path
-is cut over — this module is the **wiring base**, not a forced migration.
+Default recall still prefers SQLite FTS/dense with this module as a
+**mirror + ILIKE assist**. Set ``memory.backends.state.role=primary``
+(or ``KAZMA_MEMORY_STATE_ROLE=primary``) to make StateBackend the
+recall SoT — fail-closed if Postgres is down (no silent SQLite lie).
 """
 
 from __future__ import annotations
@@ -25,7 +27,12 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "StateBackend",
     "get_state_backend",
+    "is_state_primary",
+    "should_apply_remote_write",
     "state_capability",
+    "state_conflict_policy",
+    "state_region",
+    "state_role",
     "mirror_episode_to_state",
     "mirror_belief_to_state",
     "backfill_state_mirror",
@@ -200,6 +207,28 @@ class PostgresStateBackend:
         cur.close()
         self._ensured = True
 
+    def _existing_meta(self, conn: Any, table: str, row_id: str) -> dict[str, Any] | None:
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT metadata_json FROM {table} WHERE id = %s", (row_id,))
+            hit = cur.fetchone()
+        finally:
+            cur.close()
+        if not hit:
+            return None
+        return _parse_meta(hit[0])
+
+    def _may_write(self, conn: Any, table: str, row_id: str) -> bool:
+        existing = self._existing_meta(conn, table, str(row_id))
+        if existing is None:
+            return True
+        ok, reason = should_apply_remote_write(
+            existing, region=state_region(), policy=state_conflict_policy()
+        )
+        if not ok:
+            logger.info("[state_backend] skip %s %s: %s", table, row_id, reason)
+        return ok
+
     def mirror_episode(self, row: dict[str, Any]) -> bool:
         if not self._dsn or not row.get("id"):
             return False
@@ -207,6 +236,8 @@ class PostgresStateBackend:
             conn = self._connect()
             try:
                 self._ensure(conn)
+                if not self._may_write(conn, "kazma_episodes", str(row.get("id"))):
+                    return False
                 cur = conn.cursor()
                 cur.execute(
                     """
@@ -234,9 +265,7 @@ class PostgresStateBackend:
                         row.get("tier") or "episodic",
                         int(row.get("structural_importance") or 1),
                         float(row.get("created_at") or time.time()),
-                        row.get("metadata_json")
-                        if isinstance(row.get("metadata_json"), str)
-                        else json.dumps(row.get("metadata") or {}, ensure_ascii=False),
+                        _stamp_region_meta(row),
                     ),
                 )
                 conn.commit()
@@ -255,6 +284,8 @@ class PostgresStateBackend:
             conn = self._connect()
             try:
                 self._ensure(conn)
+                if not self._may_write(conn, "kazma_beliefs", str(row.get("id"))):
+                    return False
                 cur = conn.cursor()
                 cur.execute(
                     """
@@ -283,9 +314,7 @@ class PostgresStateBackend:
                         row.get("valid_from"),
                         row.get("valid_until"),
                         row.get("invalidated_at"),
-                        row.get("metadata_json")
-                        if isinstance(row.get("metadata_json"), str)
-                        else json.dumps(row.get("metadata") or {}, ensure_ascii=False),
+                        _stamp_region_meta(row),
                     ),
                 )
                 conn.commit()
@@ -428,28 +457,122 @@ def _cfg() -> dict[str, Any]:
         return {}
 
 
+def state_role(cfg: dict[str, Any] | None = None) -> str:
+    """``mirror`` (default) or ``primary``."""
+    st = (cfg or _cfg()).get("state") or {}
+    role = str(st.get("role") or "mirror").strip().lower()
+    return role if role in ("primary", "mirror") else "mirror"
+
+
+def is_state_primary(cfg: dict[str, Any] | None = None) -> bool:
+    return state_role(cfg) == "primary"
+
+
+def state_region(cfg: dict[str, Any] | None = None) -> str:
+    return str(((cfg or _cfg()).get("state") or {}).get("region") or "").strip()
+
+
+def state_conflict_policy(cfg: dict[str, Any] | None = None) -> str:
+    raw = str(
+        ((cfg or _cfg()).get("state") or {}).get("conflict_policy") or "last_write_wins"
+    ).strip().lower()
+    if raw in ("last_write_wins", "origin_wins", "fail_closed"):
+        return raw
+    return "last_write_wins"
+
+
+def should_apply_remote_write(
+    existing_meta: dict[str, Any] | None,
+    *,
+    region: str = "",
+    policy: str = "last_write_wins",
+) -> tuple[bool, str]:
+    """Decide whether a dual-write may overwrite an existing mirrored row.
+
+    * ``last_write_wins`` — always apply (default).
+    * ``origin_wins`` — first writer / same region keeps the row.
+    * ``fail_closed`` — refuse when another region already owns the id.
+    """
+    pol = (policy or "last_write_wins").strip().lower()
+    if pol not in ("last_write_wins", "origin_wins", "fail_closed"):
+        pol = "last_write_wins"
+    if pol == "last_write_wins":
+        return True, "last_write_wins"
+    existing_region = str((existing_meta or {}).get("region") or "").strip()
+    incoming = (region or "").strip()
+    if not existing_region or existing_region == incoming:
+        return True, "same_or_empty_region"
+    if pol == "origin_wins":
+        return False, f"origin_wins: kept region {existing_region!r}"
+    return False, f"fail_closed: region conflict {existing_region!r} vs {incoming!r}"
+
+
+def _parse_meta(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _stamp_region_meta(row: dict[str, Any]) -> str:
+    meta = _parse_meta(row.get("metadata_json") or row.get("metadata"))
+    region = state_region()
+    if region:
+        meta["region"] = region
+    meta["updated_at"] = time.time()
+    meta["conflict_policy"] = state_conflict_policy()
+    return json.dumps(meta, ensure_ascii=False)
+
+
 def state_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     c = cfg or _cfg()
     st = c.get("state") or c.get("graph") or {}
     # Prefer dedicated state section; fall back to graph.url for advanced
     provider = str(st.get("provider") or "sqlite").lower()
     url = str(st.get("url") or "").strip()
+    role = state_role(c)
+    policy = state_conflict_policy(c)
+    region = state_region(c)
+    extra = {
+        "role": role,
+        "conflict_policy": policy,
+        "region": region,
+    }
     if provider in ("sqlite", "local", ""):
         return {
             "provider": "sqlite",
             "write_ready": True,
             "status": "local",
             "detail": "Primary state is local SQLite (memory_state.db)",
+            **extra,
         }
     if provider in ("postgres", "postgresql", "pg") and url:
+        if role == "primary":
+            return {
+                "provider": "postgres",
+                "write_ready": True,
+                "status": "postgres_primary",
+                "detail": (
+                    "Postgres is the recall primary (StateBackend ILIKE). "
+                    "Down = fail-closed empty recall, no silent SQLite fallback. "
+                    f"Conflict policy: {policy}."
+                ),
+                **extra,
+            }
         return {
             "provider": "postgres",
             "write_ready": True,
             "status": "dual_mirror_and_sparse_read",
             "detail": (
                 "Postgres dual-mirror + sparse ILIKE recall assist "
-                "(local SQLite FTS/dense still primary)"
+                f"(local SQLite FTS/dense still primary; conflict={policy})"
             ),
+            **extra,
         }
     if provider in ("postgres", "postgresql", "pg"):
         return {

@@ -97,6 +97,19 @@ def recall(
         Empty lists (not exceptions) on any failure — recall is
         best-effort so a broken path degrades silently.
     """
+    try:
+        from kazma_core.memory.state_backend import is_state_primary
+
+        if is_state_primary():
+            return _recall_postgres_primary(
+                query,
+                tenant_id=tenant_id,
+                limit=limit,
+                explain=explain,
+            )
+    except Exception:
+        logger.debug("[recall] primary-role check failed — using local path", exc_info=True)
+
     own_conn = conn is None
     if conn is None:
         try:
@@ -176,6 +189,82 @@ def recall(
                 conn.close()
             except Exception:
                 pass
+
+
+def _recall_postgres_primary(
+    query: str,
+    *,
+    tenant_id: str,
+    limit: int,
+    explain: bool | None,
+) -> RecallResult:
+    """Recall exclusively through StateBackend (Postgres).
+
+    Fail-closed when the primary is down — do not silently read SQLite.
+    Search uses the existing adapter seam (ILIKE), not a second FTS port.
+    """
+    do_explain = bool(explain)
+    if explain is None:
+        try:
+            from kazma_core.memory.config import read_memory_cfg
+
+            do_explain = bool(
+                ((read_memory_cfg() or {}).get("v2") or {}).get("explain_recall", False)
+            )
+        except Exception:
+            do_explain = False
+
+    try:
+        from kazma_core.memory.state_backend import get_state_backend
+    except Exception as exc:
+        logger.warning("[recall] postgres-primary import failed: %s", exc)
+        try:
+            from kazma_core.memory.health import mark_recall_degraded
+
+            mark_recall_degraded("postgres-primary import failed")
+        except Exception:
+            pass
+        return RecallResult([], [])
+
+    be = get_state_backend()
+    if getattr(be, "name", "") == "null" or not getattr(be, "available", False):
+        msg = "postgres-primary recall: StateBackend unavailable"
+        logger.warning("[recall] %s", msg)
+        try:
+            from kazma_core.memory.health import mark_recall_degraded
+
+            mark_recall_degraded(msg)
+        except Exception:
+            pass
+        return RecallResult([], [])
+
+    try:
+        episodes, beliefs = _merge_remote_state_hits(
+            query,
+            tenant_id=tenant_id,
+            limit=limit,
+            episodes=[],
+            beliefs=[],
+            explain=do_explain,
+        )
+        for hit in episodes:
+            hit.source = "postgres_primary"
+            if do_explain:
+                hit.metadata["sources"] = ["postgres_primary"]
+        for hit in beliefs:
+            hit.source = "postgres_primary"
+            if do_explain:
+                hit.metadata["sources"] = ["postgres_primary"]
+        return RecallResult(beliefs=beliefs, episodes=episodes)
+    except Exception as exc:
+        logger.warning("[recall] postgres-primary search failed: %s", exc)
+        try:
+            from kazma_core.memory.health import mark_recall_degraded
+
+            mark_recall_degraded(str(exc)[:200])
+        except Exception:
+            pass
+        return RecallResult([], [])
 
 
 def _merge_remote_state_hits(

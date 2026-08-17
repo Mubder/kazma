@@ -56,7 +56,13 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any, get_type_hints
 
-__all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "tool"]
+__all__ = [
+    "LocalTool",
+    "LocalToolRegistry",
+    "get_tool_registry",
+    "reset_permission_manager_cache",
+    "tool",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -85,30 +91,61 @@ _PERMISSION_MANAGER: Any = None
 _PERMISSION_MANAGER_RESOLVED = False
 
 
-def _get_permission_manager() -> Any:
-    """Return a PermissionManager when kazma-permissions.yaml defines a
-    ``users:`` map, else ``None`` (feature off — backward compatible).
+class _FailClosedPermissions:
+    """Used when enforce is on and the YAML cannot be loaded."""
 
-    The shipped kazma-permissions.yaml is a *divisions* template with no
-    ``users`` key; enforcing it as an allowlist would deny every tool on a
-    default install. Lazy + cached: the file is read once per process.
+    def is_allowed(self, tool_name: str, user: str = "default") -> bool:
+        return False
+
+
+def reset_permission_manager_cache() -> None:
+    """Drop the process cache (tests / live YAML reload)."""
+    global _PERMISSION_MANAGER, _PERMISSION_MANAGER_RESOLVED
+    _PERMISSION_MANAGER = None
+    _PERMISSION_MANAGER_RESOLVED = False
+
+
+def _get_permission_manager() -> Any:
+    """Return a PermissionManager when enforcement is active, else ``None``.
+
+    Active when ``kazma-permissions.yaml`` has a ``users:`` map **or**
+    ``KAZMA_PERMISSIONS_ENFORCE=1``. The shipped file is a divisions
+    template with no ``users`` key — that stays off. Load errors fail
+    closed only when enforcement was requested.
     """
     global _PERMISSION_MANAGER, _PERMISSION_MANAGER_RESOLVED
     if _PERMISSION_MANAGER_RESOLVED:
         return _PERMISSION_MANAGER
     _PERMISSION_MANAGER_RESOLVED = True
     try:
-        from kazma_core.permissions import PermissionManager
+        from kazma_core.permissions import (
+            PermissionManager,
+            permissions_enforce_requested,
+            should_enforce_permissions,
+        )
 
         pm = PermissionManager()
-        users = pm.users()
-        if users:
+        if should_enforce_permissions(pm):
             _PERMISSION_MANAGER = pm
             logger.info(
-                "[ToolRegistry] permissions allowlist active for users: %s", users
+                "[ToolRegistry] permissions allowlist active for users: %s",
+                pm.users(),
+            )
+        elif permissions_enforce_requested():
+            _PERMISSION_MANAGER = _FailClosedPermissions()
+            logger.warning(
+                "[ToolRegistry] KAZMA_PERMISSIONS_ENFORCE=1 but YAML unusable "
+                "— denying all tools"
             )
     except Exception as exc:
+        from kazma_core.permissions import permissions_enforce_requested
+
         logger.debug("[ToolRegistry] permissions manager unavailable: %s", exc)
+        if permissions_enforce_requested():
+            _PERMISSION_MANAGER = _FailClosedPermissions()
+            logger.warning(
+                "[ToolRegistry] permissions load failed under enforce — deny all"
+            )
     return _PERMISSION_MANAGER
 
 
@@ -528,8 +565,6 @@ class LocalToolRegistry:
         # the shipped file is a divisions template (no users), and enforcing
         # an empty allowlist would deny everything on default installs.
         try:
-            from kazma_core.permissions import PermissionManager
-
             pm = _get_permission_manager()
             if pm is not None and not pm.is_allowed(tool_name, user="default"):
                 logger.warning(
@@ -540,11 +575,24 @@ class LocalToolRegistry:
                     "content": (
                         f"Error: Tool '{tool_name}' is not in the permissions allowlist "
                         "(kazma-permissions.yaml users.default). Add it to `allowed` or "
-                        "remove the allowlist to enable."
+                        "set allowed: ['*'] for the single-operator default."
                     ),
                     "is_error": True,
                 }
         except Exception as exc:
+            from kazma_core.permissions import permissions_enforce_requested
+
+            if permissions_enforce_requested() or _get_permission_manager() is not None:
+                logger.warning(
+                    "[ToolRegistry] permissions check failed closed: %s", exc
+                )
+                return {
+                    "content": (
+                        f"Error: Tool '{tool_name}' blocked — permissions check "
+                        "failed closed (KAZMA_PERMISSIONS_ENFORCE or users: map)."
+                    ),
+                    "is_error": True,
+                }
             logger.debug("[ToolRegistry] permissions check skipped: %s", exc)
 
         # ── Safety check — gate danger-tier tools (HITL) ───────────

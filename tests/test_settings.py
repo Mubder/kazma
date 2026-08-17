@@ -170,6 +170,21 @@ class TestSettingsManager:
         assert config["name"] == "test-agent"
         assert config["language"] == "en"
 
+    def test_save_agent_config_applies_runtime_personality(self, sm):
+        """PUT /api/settings/agent must switch the live runtime override."""
+        from kazma_core.personalities import (
+            get_runtime_personality,
+            reset_runtime_personality,
+        )
+
+        reset_runtime_personality()
+        try:
+            sm.save_agent_config({"personality": "concise"})
+            assert sm.get_agent_config()["personality"] == "concise"
+            assert get_runtime_personality() == "concise"
+        finally:
+            reset_runtime_personality()
+
     def test_max_iterations_clamped_and_persisted(self, sm):
         """Max tool rounds (agent.max_iterations) clamps 5–100 and round-trips."""
         sm.save_agent_config({"max_iterations": 30})

@@ -30,6 +30,7 @@ __all__ = [
     "format_session_list",
     "infer_origin",
     "list_directory",
+    "prune_twin_sessions",
     "remember_sender_thread",
     "resolve_session",
     "stamp_last_platform",
@@ -186,6 +187,68 @@ def canonical_web_session(thread_id: str) -> Any | None:
         )
 
     return max(candidates, key=_score)
+
+
+def _twin_score(sess: Any) -> tuple[int, int, int]:
+    title = str(getattr(sess, "title", "") or "").strip()
+    low = title.lower()
+    auto = (not title) or low.startswith("linked ") or " · " in low
+    return (
+        0 if auto else 1,
+        len(getattr(sess, "messages", None) or []),
+        1 if getattr(sess, "session_id", "") == getattr(sess, "thread_id", "") else 0,
+    )
+
+
+def prune_twin_sessions(*, apply: bool = True) -> list[str]:
+    """Archive extra sidebar rows that share one LangGraph thread.
+
+    Keeps ``canonical_web_session`` (named / longer). Archives auto-titled
+    twins such as ``Telegram · bAlfaris``. Never archives the last row.
+    Returns archived session_ids (empty when nothing to do).
+    """
+    try:
+        from kazma_ui.session_manager import get_session_manager
+
+        store = get_session_manager()
+        rows = store.list_all(
+            include_archived=False, include_empty=True, prune_empty=False,
+        )
+    except Exception:
+        logger.debug("[sessions] twin prune skipped", exc_info=True)
+        return []
+
+    by_thread: dict[str, list[Any]] = {}
+    for sess in rows:
+        tid = str(getattr(sess, "thread_id", "") or getattr(sess, "session_id", "") or "")
+        if not tid:
+            continue
+        by_thread.setdefault(tid, []).append(sess)
+
+    archived: list[str] = []
+    for tid, group in by_thread.items():
+        if len(group) < 2:
+            continue
+        keep = max(group, key=_twin_score)
+        keep_id = str(getattr(keep, "session_id", "") or "")
+        for sess in group:
+            sid = str(getattr(sess, "session_id", "") or "")
+            if not sid or sid == keep_id:
+                continue
+            if apply:
+                try:
+                    store.set_archived(sid, True)
+                except Exception:
+                    logger.debug("[sessions] archive twin %s failed", sid, exc_info=True)
+                    continue
+            archived.append(sid)
+            logger.info(
+                "[sessions] archived twin season %s (kept %s on thread %s)",
+                sid[:12],
+                keep_id[:12],
+                tid[:12],
+            )
+    return archived
 
 
 def stamp_last_platform(thread_id: str, platform: str) -> None:

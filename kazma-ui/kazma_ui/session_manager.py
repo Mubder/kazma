@@ -884,6 +884,12 @@ class SessionManager:
                     "[SessionManager] prune_empty_web_sessions raised",
                     exc_info=True,
                 )
+            try:
+                from kazma_core.sessions.directory import prune_twin_sessions
+
+                prune_twin_sessions(apply=True)
+            except Exception:
+                logger.debug("[SessionManager] prune_twin_sessions raised", exc_info=True)
 
         try:
             self._merge_missing_from_db(limit=min(self._max_sessions, 200))

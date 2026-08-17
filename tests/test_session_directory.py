@@ -185,6 +185,25 @@ def test_canonical_web_session_prefers_named_season_over_telegram_twin():
     assert picked.session_id == "web-yolo-sid"
 
 
+def test_prune_twin_sessions_archives_telegram_auto_title():
+    from kazma_core.sessions.directory import prune_twin_sessions
+
+    tid = "shared-thread-prune"
+    yolo = _seed("/yolo", "web-keep-sid", platform="web", msgs=5)
+    yolo.thread_id = tid
+    get_session_manager().put(yolo)
+    twin = _seed("Telegram · bAlfaris", "gw-telegram-twin", platform="telegram", msgs=2)
+    twin.thread_id = tid
+    get_session_manager().put(twin)
+    gone = prune_twin_sessions(apply=True)
+    assert "gw-telegram-twin" in gone
+    assert get_session_manager().get("gw-telegram-twin").archived is True
+    assert get_session_manager().get("web-keep-sid").archived is False
+    live = [s.session_id for s in get_session_manager().list_all(prune_empty=False)]
+    assert "web-keep-sid" in live
+    assert "gw-telegram-twin" not in live
+
+
 def test_slash_resolver_strips_telegram_bot_suffix():
     from kazma_gateway.slash_commands import resolve_slash_command
 

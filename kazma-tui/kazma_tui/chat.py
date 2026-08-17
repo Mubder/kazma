@@ -45,9 +45,9 @@ class ChatPanel(Vertical):
         ("/status", "Gateway health overview"),
         ("/memory", "Memory store stats"),
         ("/cost", "Session token spend"),
-        ("/context", "Context window usage"),
-        ("/personality [list|<name>]", "Show/switch personality"),
-        ("/config", "Interactive config wizard"),
+        ("/context", "Season usage + server context window"),
+        ("/personality [list|<name>]", "Show/switch live server personality"),
+        ("/config [show|model|personality|memory|tools|export]", "Live server config"),
         ("/replay [list|clear|<n>]", "Time travel: list or rewind this season"),
         ("/fork <n>", "Branch this season from snapshot n (new thread)"),
         ("/export", "Export session to file"),
@@ -468,21 +468,21 @@ class ChatPanel(Vertical):
         elif cmd == "/cost":
             self.app.call_later(self._cmd_cost)
         elif cmd == "/context":
-            self._cmd_context()
+            self.app.call_later(self._cmd_context)
         elif cmd == "/reset":
             self.write("system", "Conversation context reset.")
         elif cmd in ("/sessions", "/seasons", "/session", "/season", "/switch"):
             self._cmd_sessions(text)
         elif cmd == "/personality":
-            self._cmd_personality(text)
+            self.app.call_later(self._cmd_personality, text)
         elif cmd == "/config":
-            self.write("system", "Config wizard available in the Settings tab.")
+            self.app.call_later(self._cmd_config, text)
         elif cmd == "/replay":
             self.app.call_later(self._cmd_replay, text)
         elif cmd == "/fork":
             self.app.call_later(self._cmd_fork, text)
         elif cmd == "/export":
-            self._cmd_export()
+            self.app.call_later(self._cmd_export)
         elif cmd == "/swarm":
             self.app.call_later(self._handle_swarm_command, text)
         else:
@@ -697,47 +697,315 @@ class ChatPanel(Vertical):
         except Exception as e:
             self.write("error", f"Cost tracking unavailable: {e}")
 
-    def _cmd_context(self) -> None:
+    async def _session_message_payload(
+        self,
+    ) -> tuple[list[dict[str, Any]], int, float]:
+        """Live session transcript + billed totals (not this TUI process)."""
+        sid = self._session_id
+        if not sid:
+            return [], 0, 0.0
+        data = await self._api("GET", f"/api/chat/sessions/{sid}/messages?stats=1")
+        if isinstance(data, list):
+            return list(data), 0, 0.0
+        data = data or {}
+        msgs = list(data.get("messages") or [])
+        tokens = int(data.get("total_tokens") or 0)
+        cost = float(data.get("total_cost") or 0.0)
+        return msgs, tokens, cost
+
+    async def _cmd_context(self) -> None:
         try:
-            from kazma_core.summarizer import estimate_tokens, TOKEN_THRESHOLD
-            from kazma_core.config_store import get_config_store
-            cs = get_config_store()
-            window = cs.get("memory.max_context_tokens", 128_000)
-            tokens = estimate_tokens(self._messages) if self._messages else 0
+            ctx = await self._api("GET", "/api/settings/agent/context") or {}
+            window = int(ctx.get("max_context_tokens") or 128_000)
+            threshold = float(ctx.get("summarization_threshold") or 0.8)
+            strategy = str(ctx.get("context_strategy") or "sliding_window")
+            msgs: list[dict[str, Any]] = []
+            tokens = 0
+            if self._session_id:
+                msgs, tokens, _cost = await self._session_message_payload()
             pct = (tokens / window * 100) if window else 0
             bar_len = 20
-            filled = int(bar_len * pct / 100)
+            filled = max(0, min(bar_len, int(bar_len * pct / 100)))
             bar = "#" * filled + "-" * (bar_len - filled)
+            sid = self._session_id or ""
             lines = [
-                "Context Window",
-                f"  Tokens:    {tokens:,} / {window:,} ({pct:.1f}%)",
+                "Context Window (live server)",
+                f"  Season tokens: {tokens:,} / {window:,} ({pct:.1f}%)",
                 f"  [{bar}]",
-                f"  Messages:  {len(self._messages)}",
-                f"  Threshold: {TOKEN_THRESHOLD:,} tokens (compaction at 80%)",
+                f"  Messages:      {len(msgs)}"
+                + (f"  #{sid[-8:]}" if sid else "  (no season yet)"),
+                f"  Strategy:      {strategy}",
+                f"  Compact at:    {threshold:.0%} of window",
+                "  Totals are billed session usage from /api/chat/sessions, "
+                "not this TUI process's local buffer.",
             ]
             self.write("system", "\n".join(lines))
         except Exception as e:
             self.write("error", f"Context info unavailable: {e}")
 
-    def _cmd_personality(self, text: str = "/personality") -> None:
-        try:
-            from kazma_core.tools.personality_cmd import handle_personality_command
-            from kazma_core.personalities import list_personalities, get_current_personality
-            parts = text.strip().split()
-            sub = parts[1].lower() if len(parts) > 1 else ""
+    def _format_personality_row(self, item: dict[str, Any]) -> str:
+        name = str(item.get("name") or "?")
+        emoji = str(item.get("emoji") or "")
+        desc = str(item.get("description") or "").strip()
+        label = f"{name} {emoji}".strip()
+        return f"{label} — {desc}" if desc else label
 
-            if not sub or sub == "current":
-                # Show current personality
-                p = get_current_personality()
-                self.write("system", f"Current personality: {p.name} {p.emoji}\n{p.description}")
-                # Also list available
-                names = [f"{x.name} {x.emoji}" for x in list_personalities()]
-                self.write("system", "\nAvailable: " + ", ".join(names) + "\nSwitch: /personality <name>")
-            else:
-                response = handle_personality_command(text)
-                self.write("system", response)
+    async def _cmd_personality(self, text: str = "/personality") -> None:
+        parts = text.strip().split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+        try:
+            agent = await self._api("GET", "/api/settings/agent") or {}
+            plist_raw = await self._api("GET", "/api/settings/agent/personalities") or []
+            plist = [p for p in plist_raw if isinstance(p, dict)]
         except Exception as e:
-            self.write("error", f"Personality command failed: {e}")
+            self.write("error", f"Personality API unavailable: {e}")
+            return
+
+        current = str(agent.get("personality") or "default")
+        by_name = {
+            str(p.get("name") or "").strip().lower(): p
+            for p in plist
+            if str(p.get("name") or "").strip()
+        }
+        cur = by_name.get(current.lower(), {"name": current, "emoji": "", "description": ""})
+
+        if not sub or sub == "current":
+            self.write(
+                "system",
+                f"Current personality (live server): {self._format_personality_row(cur)}\n"
+                "Available: "
+                + ", ".join(
+                    f"{p.get('name')} {p.get('emoji') or ''}".strip() for p in plist
+                )
+                + "\nSwitch: /personality <name>",
+            )
+            return
+
+        if sub == "list":
+            lines = ["Available personalities (live server):"]
+            for p in plist:
+                mark = " *" if str(p.get("name") or "").lower() == current.lower() else ""
+                lines.append(f"  {self._format_personality_row(p)}{mark}")
+            lines.append("Switch: /personality <name>")
+            self.write("system", "\n".join(lines))
+            return
+
+        hit = by_name.get(sub)
+        if hit is None:
+            available = ", ".join(str(p.get("name") or "") for p in plist) or "(none)"
+            self.write(
+                "system",
+                f"Unknown personality {sub!r}. Available: {available}",
+            )
+            return
+        name = str(hit.get("name") or sub)
+        try:
+            await self._api("PUT", "/api/settings/agent", {"personality": name})
+        except Exception as e:
+            self.write("error", f"Personality switch failed: {e}")
+            return
+        self.write(
+            "system",
+            f"Switched personality to {self._format_personality_row(hit)} (live server).",
+        )
+
+    async def _cmd_config(self, text: str = "/config") -> None:
+        parts = text.strip().split()
+        sub = parts[1].lower() if len(parts) > 1 else "show"
+
+        if sub in ("help", "?"):
+            self.write(
+                "system",
+                "Config (live /api/settings — protected keys stay denied):\n"
+                "  /config show\n"
+                "  /config model [name]\n"
+                "  /config personality [name]\n"
+                "  /config memory [on|off]\n"
+                "  /config tools list | /config tools toggle <name>\n"
+                "  /config export",
+            )
+            return
+
+        if sub == "personality":
+            rest = parts[2] if len(parts) > 2 else ""
+            await self._cmd_personality(
+                f"/personality {rest}".strip() if rest else "/personality"
+            )
+            return
+
+        try:
+            if sub in ("show", ""):
+                agent = await self._api("GET", "/api/settings/agent") or {}
+                active: dict[str, Any] = {}
+                try:
+                    active = await self._api("GET", "/api/provider/active") or {}
+                except Exception:
+                    active = {}
+                mem_on = True
+                try:
+                    grouped = await self._api("GET", "/api/settings") or {}
+                    for keys in grouped.values() if isinstance(grouped, dict) else []:
+                        if isinstance(keys, dict) and "memory.enabled" in keys:
+                            mem_on = bool(keys.get("memory.enabled"))
+                            break
+                except Exception:
+                    pass
+                model = (
+                    self._session_model
+                    or active.get("model")
+                    or "none"
+                )
+                model_note = " (this season)" if self._session_model else " (server default)"
+                lines = [
+                    "Current configuration (live server)",
+                    f"  Name:         {agent.get('name') or 'kazma'}",
+                    f"  Language:     {agent.get('language') or '?'}",
+                    f"  Model:        {model}{model_note}",
+                    f"  Personality:  {agent.get('personality') or 'default'}",
+                    f"  Max rounds:   {agent.get('max_iterations') or '?'}",
+                    f"  Memory:       {'enabled' if mem_on else 'disabled'}",
+                    "  Change: /config model|personality|memory|tools|export",
+                ]
+                self.write("system", "\n".join(lines))
+                return
+
+            if sub == "model":
+                if len(parts) < 3:
+                    active = {}
+                    try:
+                        active = await self._api("GET", "/api/provider/active") or {}
+                    except Exception:
+                        active = {}
+                    current = self._session_model or active.get("model") or "none"
+                    self.write(
+                        "system",
+                        f"Current model: {current}\n"
+                        "Usage: /config model <name>  (server active model)\n"
+                        "Season-only pin: /model set <name>",
+                    )
+                    return
+                model_name = parts[2].strip()
+                data = await self._api(
+                    "PUT", "/api/settings/active_model", {"model": model_name}
+                )
+                if isinstance(data, dict) and data.get("status") == "error":
+                    self.write(
+                        "error",
+                        data.get("error") or data.get("detail") or "model switch failed",
+                    )
+                    return
+                self.write("system", f"Server active model → {model_name}")
+                return
+
+            if sub == "memory":
+                if len(parts) < 3 or parts[2].lower() not in ("on", "off"):
+                    grouped = await self._api("GET", "/api/settings") or {}
+                    mem_on = True
+                    for keys in grouped.values() if isinstance(grouped, dict) else []:
+                        if isinstance(keys, dict) and "memory.enabled" in keys:
+                            mem_on = bool(keys.get("memory.enabled"))
+                            break
+                    state = "enabled" if mem_on else "disabled"
+                    self.write(
+                        "system",
+                        f"Memory is {state}. Usage: /config memory on|off",
+                    )
+                    return
+                enabled = parts[2].lower() == "on"
+                await self._api(
+                    "PUT",
+                    "/api/settings/single",
+                    {
+                        "key": "memory.enabled",
+                        "value": enabled,
+                        "category": "memory",
+                    },
+                )
+                self.write(
+                    "system",
+                    f"Memory {'ON' if enabled else 'OFF'} (live ConfigStore).",
+                )
+                return
+
+            if sub == "tools":
+                action = parts[2].lower() if len(parts) > 2 else "list"
+                tools = await self._api("GET", "/api/settings/tools") or []
+                if not isinstance(tools, list):
+                    tools = []
+                if action == "list" or action == "":
+                    if not tools:
+                        self.write("system", "No tools reported by /api/settings/tools.")
+                        return
+                    lines = ["Tools (live server):"]
+                    for t in tools[:80]:
+                        if not isinstance(t, dict):
+                            continue
+                        name = t.get("name") or "?"
+                        on = t.get("enabled", True)
+                        lines.append(f"  {'on ' if on else 'off'}  {name}")
+                    if len(tools) > 80:
+                        lines.append(f"  … {len(tools) - 80} more")
+                    lines.append("Toggle: /config tools toggle <name>")
+                    self.write("system", "\n".join(lines))
+                    return
+                if action == "toggle" and len(parts) >= 4:
+                    tool_name = parts[3]
+                    current = next(
+                        (
+                            t
+                            for t in tools
+                            if isinstance(t, dict)
+                            and str(t.get("name") or "").lower() == tool_name.lower()
+                        ),
+                        None,
+                    )
+                    if current is None:
+                        self.write("system", f"Unknown tool: {tool_name}")
+                        return
+                    new_on = not bool(current.get("enabled", True))
+                    await self._api(
+                        "PUT",
+                        f"/api/settings/tools/{current.get('name')}/toggle",
+                        {"enabled": new_on},
+                    )
+                    self.write(
+                        "system",
+                        f"Tool {current.get('name')} "
+                        f"{'enabled' if new_on else 'disabled'} (live server).",
+                    )
+                    return
+                self.write(
+                    "system",
+                    "Usage: /config tools list | /config tools toggle <name>",
+                )
+                return
+
+            if sub == "export":
+                grouped = await self._api("GET", "/api/settings") or {}
+                from datetime import datetime
+                from pathlib import Path
+                import json
+
+                export_dir = Path("kazma-data/exports")
+                export_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = export_dir / f"config_{ts}.json"
+                path.write_text(
+                    json.dumps(grouped, indent=2, ensure_ascii=False, default=str),
+                    encoding="utf-8",
+                )
+                self.write(
+                    "system",
+                    f"Wrote live /api/settings (secrets masked) to {path}",
+                )
+                return
+
+            self.write(
+                "system",
+                "Unknown /config sub-command. Try /config help.",
+            )
+        except Exception as e:
+            self.write("error", f"Config command failed: {e}")
 
     async def _cmd_replay(self, text: str) -> None:
         parts = text.strip().split()
@@ -876,32 +1144,57 @@ class ChatPanel(Vertical):
         except Exception as e:
             self.write("error", f"Fork failed: {e}")
 
-    def _cmd_export(self) -> None:
+    async def _cmd_export(self) -> None:
+        if not self._session_id:
+            self.write("system", "No season yet — send a message or /session first.")
+            return
         try:
             from datetime import datetime
             from pathlib import Path
             import json
+
+            msgs, tokens, cost = await self._session_message_payload()
             export_dir = Path("kazma-data/exports")
             export_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            sid = self._session_id
 
-            # Markdown
             md_path = export_dir / f"chat_{ts}.md"
-            lines = [f"# Kazma Chat Export", f"Date: {datetime.now().isoformat()}", ""]
-            for msg in self._messages:
-                role = msg.get("role", "unknown").upper()
-                content = msg.get("content", "")
+            lines = [
+                "# Kazma Chat Export",
+                f"Date: {datetime.now().isoformat()}",
+                f"Season: {sid}",
+                f"Tokens: {tokens}",
+                f"Cost: ${cost:.4f}",
+                "",
+            ]
+            for msg in msgs:
+                role = str(msg.get("role") or "unknown").upper()
+                content = str(msg.get("content") or "")
                 lines.append(f"## {role}")
                 lines.append("")
                 lines.append(content)
                 lines.append("")
             md_path.write_text("\n".join(lines), encoding="utf-8")
 
-            # JSON
             json_path = export_dir / f"chat_{ts}.json"
-            json_path.write_text(json.dumps(self._messages, indent=2, ensure_ascii=False), encoding="utf-8")
-
-            self.write("system", f"Exported {len(self._messages)} messages to:\n  {md_path}\n  {json_path}")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "session_id": sid,
+                        "total_tokens": tokens,
+                        "total_cost": cost,
+                        "messages": msgs,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self.write(
+                "system",
+                f"Exported {len(msgs)} live-server messages to:\n  {md_path}\n  {json_path}",
+            )
         except Exception as e:
             self.write("error", f"Export failed: {e}")
 

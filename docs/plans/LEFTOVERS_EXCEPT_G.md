@@ -1,7 +1,7 @@
 # Plan: Leftovers except G
 
 **Date:** 2026-08-17  
-**Status:** ready to run (A–F of the prior audit are on `main`)  
+**Status:** implemented 2026-08-17 (P0–P3; P4 inspectors already soft-nav)  
 **Not this plan:** G (WhatsApp, BrightData/Oxylabs, soak, Windows/Postgres CI gates, Ruff/Bandit as gates, phone sign-off, hosted embed fleet #78, Gmail `pageToken`)
 
 ## Context
@@ -17,7 +17,6 @@ Do **not** flip `enforce_unknown_mutators` off. Do **not** start/restart the ser
 - Soul confirm off on a single-operator lab (already on in production / multi-user).
 - `/health` and `/api/status` staying reachable (payloads already stripped of workspace paths / init-error strings).
 - Document metadata remaining SQLite unless the operator turns on the Postgres metadata backend.
-- Deleting leftover `Telegram · bAlfaris` rows by hand.
 - A new memory engine, a new intent router, or a React rewrite.
 - Starting or restarting `kazma serve`.
 
@@ -28,6 +27,20 @@ One mouth, one brain. Anything the TUI still does in-process that the Web alread
 Permissions stay one list. If we enforce YAML `permissions.py`, it must sit **inside** `LocalToolRegistry.execute` next to HITL + `authorize_effect`, not as a parallel executor.
 
 Memory scale uses the existing V2 stack + adapters. No third recall path.
+
+---
+
+## Patch 0 — Archive leftover season twins
+
+A take-over used to mint `Telegram · bAlfaris` next to `/yolo` on the **same**
+`thread_id`. New turns no longer do that. Old twin rows still clutter the
+sidebar until something archives them.
+
+- `prune_twin_sessions()` groups SessionManager rows by `thread_id`, keeps
+  `canonical_web_session` (named / longer wins), **archives** the rest
+  (not hard-delete — recoverable).
+- Run from `SessionManager.list_all` (same cadence as empty-web prune).
+- Never archive the last remaining row for a thread.
 
 ---
 

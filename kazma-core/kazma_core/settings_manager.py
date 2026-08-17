@@ -352,6 +352,14 @@ class SettingsManager:
         # recursion_limit is derived — never persist a user-forged value as SoT
         data.pop("recursion_limit", None)
 
+        # Personality must apply the server runtime override, not only the
+        # ConfigStore key — otherwise Web/TUI Settings write a value the
+        # next turn still ignores if /personality set _runtime_override.
+        if "personality" in data:
+            name = data.pop("personality")
+            if name is not None and str(name).strip():
+                self.set_personality(str(name).strip())
+
         for key, value in data.items():
             if value is None:
                 continue

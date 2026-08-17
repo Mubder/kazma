@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from kazma_core.permissions import PermissionManager
 
 # ---------------------------------------------------------------------------
@@ -189,3 +191,98 @@ class TestEdgeCases:
         pm = _make_pm(tmp_path)
         pm._data = None  # force unloaded state
         assert not pm.is_allowed("foo")  # should auto-load and return False
+
+
+class TestShouldEnforce:
+    def test_empty_default_user_is_not_enforced(self, tmp_path: Path) -> None:
+        from kazma_core.permissions import should_enforce_permissions
+
+        pm = _make_pm(tmp_path)
+        pm.load_permissions()
+        assert should_enforce_permissions(pm) is False
+
+    def test_wildcard_is_enforced(self, tmp_path: Path) -> None:
+        from kazma_core.permissions import should_enforce_permissions
+
+        pm = _make_pm(tmp_path)
+        pm.grant("*")
+        assert should_enforce_permissions(pm) is True
+        assert pm.is_allowed("anything")
+
+    def test_env_forces_enforce(self, tmp_path: Path, monkeypatch) -> None:
+        from kazma_core.permissions import should_enforce_permissions
+
+        monkeypatch.setenv("KAZMA_PERMISSIONS_ENFORCE", "1")
+        pm = _make_pm(tmp_path)
+        pm.load_permissions()
+        assert should_enforce_permissions(pm) is True
+
+
+class _AllowDecision:
+    decision = "allow"
+    reason = ""
+
+
+def _patch_commitment_allow(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "kazma_core.safety.commitment.authorize_effect",
+        lambda *a, **k: _AllowDecision(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_denies_when_allowlist_active(tmp_path: Path, monkeypatch) -> None:
+    import kazma_core.agent.tool_registry as tr
+    from kazma_core.agent.tool_registry import LocalToolRegistry
+    from kazma_core.permissions import PermissionManager
+
+    _patch_commitment_allow(monkeypatch)
+    cfg = tmp_path / "perms.yaml"
+    cfg.write_text(
+        "users:\n  default:\n    allowed:\n      - other_tool\n    denied: []\n",
+        encoding="utf-8",
+    )
+    tr.reset_permission_manager_cache()
+    monkeypatch.setattr(tr, "_PERMISSION_MANAGER", PermissionManager(cfg))
+    monkeypatch.setattr(tr, "_PERMISSION_MANAGER_RESOLVED", True)
+    try:
+        reg = LocalToolRegistry(include_builtins=False)
+
+        @reg.register(description="ping")
+        def ping() -> str:
+            return "ok"
+
+        out = await reg.execute("ping", {})
+        assert out["is_error"] is True
+        assert "permissions" in out["content"].lower()
+    finally:
+        tr.reset_permission_manager_cache()
+
+
+@pytest.mark.asyncio
+async def test_execute_allows_wildcard_default(tmp_path: Path, monkeypatch) -> None:
+    import kazma_core.agent.tool_registry as tr
+    from kazma_core.agent.tool_registry import LocalToolRegistry
+    from kazma_core.permissions import PermissionManager
+
+    _patch_commitment_allow(monkeypatch)
+    cfg = tmp_path / "perms.yaml"
+    cfg.write_text(
+        "users:\n  default:\n    allowed:\n      - \"*\"\n    denied: []\n",
+        encoding="utf-8",
+    )
+    tr.reset_permission_manager_cache()
+    monkeypatch.setattr(tr, "_PERMISSION_MANAGER", PermissionManager(cfg))
+    monkeypatch.setattr(tr, "_PERMISSION_MANAGER_RESOLVED", True)
+    try:
+        reg = LocalToolRegistry(include_builtins=False)
+
+        @reg.register(description="ping")
+        def ping() -> str:
+            return "ok"
+
+        out = await reg.execute("ping", {})
+        assert out["is_error"] is False
+        assert "ok" in str(out.get("content") or "")
+    finally:
+        tr.reset_permission_manager_cache()
