@@ -528,7 +528,7 @@ class DocxEngine:
         }
         size = sizes.get(int(level), 12.0)
         ink = (self.theme.get("heading") or "#1e3a5f").lstrip("#")
-        gold = (self.theme.get("gold") or "#b0892e").lstrip("#").upper()
+        rule = (self.theme.get("accent") or "#3b82f6").lstrip("#").upper()
 
         p = document.add_paragraph()
         run = p.add_run(text or "")
@@ -545,7 +545,7 @@ class DocxEngine:
         bottom.set(qn("w:val"), "single")
         bottom.set(qn("w:sz"), "16" if int(level) == 0 else "8")
         bottom.set(qn("w:space"), "6")
-        bottom.set(qn("w:color"), gold)
+        bottom.set(qn("w:color"), rule)
         p_bdr.append(bottom)
         if int(level) in (1, 2):
             edge = "right" if self.profile.rtl else "left"
@@ -553,7 +553,7 @@ class DocxEngine:
             side.set(qn("w:val"), "single")
             side.set(qn("w:sz"), "18")
             side.set(qn("w:space"), "8")
-            side.set(qn("w:color"), gold)
+            side.set(qn("w:color"), rule)
             p_bdr.append(side)
         p_pr.append(p_bdr)
 
@@ -632,14 +632,15 @@ class DocxEngine:
         def _fill(cell: Any, text: str, *, header: bool) -> None:
             p = cell.paragraphs[0]
             run = p.add_run(str(text))
-            run.font.size = Pt(10)
+            run.font.size = Pt(12 if self.profile.rtl else 10)
             run.font.name = theme_fonts(rtl=self.profile.rtl)["latin"]
             if header:
                 run.bold = True
-                run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                _shade(cell, "1E3A5F")
+                fg = (self.theme.get("table_header_fg") or "#16223a").lstrip("#")
+                run.font.color.rgb = RGBColor(int(fg[0:2], 16), int(fg[2:4], 16), int(fg[4:6], 16))
+                _shade(cell, (self.theme.get("table_header_bg") or "#eff6ff").lstrip("#").upper())
             else:
-                _shade(cell, "F8FAFC")
+                _shade(cell, (self.theme.get("table_row_bg") or "#f8fafc").lstrip("#").upper())
             self._set_paragraph(p, "start")
 
         for ci, h in enumerate(headers):

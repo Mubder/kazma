@@ -1,8 +1,8 @@
 """Unified Kazma document visual theme (PDF + DOCX, EN + AR).
 
-Editorial Gulf look: navy ink + warm brass, not inverted heading bars.
-Only *direction*, *shaping*, and the Arabic typeface change for RTL;
-spacing, gold rules, and table chrome stay one language.
+Print projection of the Web brand: royal ``#3b82f6``, sky ``#38bdf8``,
+deep navy ink. No gold. Editorial headings (type + accent rule), not
+inverted bars. Arabic uses a larger body size / leading.
 """
 
 from __future__ import annotations
@@ -18,30 +18,31 @@ __all__ = [
 
 # Shared tokens — keep in sync with HTML engine CSS.
 THEME: dict[str, Any] = {
-    "accent": "#0f172a",
-    "gold": "#b0892e",
-    "heading": "#1e3a5f",
-    "heading_fill": "#1e3a5f",
-    "heading_text": "#1e3a5f",
+    # Brand (kazma.css): royal accent, sky secondary, deep navy ink.
+    "accent": "#3b82f6",
+    "secondary": "#38bdf8",
+    "heading": "#16223a",
+    "heading_fill": "#16223a",
+    "heading_text": "#16223a",
     "heading_on_fill": "#ffffff",
     "body": "#1e293b",
     "muted": "#64748b",
     "border": "#e2e8f0",
-    "bg_alt": "#f8fafc",
+    "bg_alt": "#f0f4fa",
     "quote": "#475569",
-    "code_bg": "#f1f5f9",
-    "table_header_bg": "#1e3a5f",
-    "table_header_fg": "#ffffff",
+    "code_bg": "#eff6ff",
+    "table_header_bg": "#eff6ff",
+    "table_header_fg": "#16223a",
     "table_row_bg": "#f8fafc",
-    "table_grid": "#cbd5e1",
-    "title_size": 22,
-    "h1_size": 16,
-    "h2_size": 14,
-    "h3_size": 12.5,
+    "table_grid": "#bfdbfe",
+    "title_size": 24,
+    "h1_size": 17,
+    "h2_size": 15,
+    "h3_size": 13,
     "body_size": 11,
-    "body_size_ar": 12,
+    "body_size_ar": 14,
     "line_height": 1.65,
-    "line_height_ar": 1.85,
+    "line_height_ar": 2.0,
     "page_margin": 56,
     "font_latin": "Calibri",
     "font_arabic": "Sakkal Majalla",

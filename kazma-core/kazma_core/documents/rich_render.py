@@ -659,10 +659,10 @@ def pdf_flowables_from_body(
                 [
                     ("FONTNAME", (0, 0), (-1, -1), font_name),
                     ("FONTNAME", (0, 0), (-1, 0), bold_font_name),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eff6ff")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#16223a")),
                     ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#bfdbfe")),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("TOPPADDING", (0, 0), (-1, -1), 6),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6),

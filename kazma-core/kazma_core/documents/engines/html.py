@@ -117,7 +117,7 @@ class HtmlEngine:
         fonts = theme_fonts(rtl=self.profile.rtl)
         body_pt = t.get("body_size_ar", 12) if self.profile.rtl else t.get("body_size", 11)
         leading = t.get("line_height_ar", 1.85) if self.profile.rtl else t.get("line_height", 1.65)
-        gold = t.get("gold", "#b0892e")
+        rule = t.get("accent", "#3b82f6")
         return f"""
     *, *::before, *::after {{ box-sizing: border-box; }}
     body {{
@@ -136,7 +136,7 @@ class HtmlEngine:
     .doc-title {{
       margin: 0 0 28px 0;
       padding: 0 0 14px 0;
-      border-bottom: 2px solid {gold};
+      border-bottom: 2px solid {rule};
     }}
     .doc-title h1 {{
       font-size: {t.get("title_size", 22)}pt;
@@ -152,14 +152,14 @@ class HtmlEngine:
       padding: 0 0 6px 0;
       margin: 26px 0 12px 0;
       border: none;
-      border-inline-start: 3px solid {gold};
+      border-inline-start: 3px solid {rule};
       padding-inline-start: 12px;
       font-size: 15pt;
       font-weight: 650;
     }}
     .content-body h3 {{
       color: {t["heading"]};
-      border-bottom: 1px solid {gold};
+      border-bottom: 1px solid {rule};
       padding-bottom: 4px;
       margin: 18px 0 8px 0;
     }}

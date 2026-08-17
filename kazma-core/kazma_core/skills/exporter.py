@@ -114,7 +114,7 @@ def _css(*, rtl: bool, brand: str) -> str:
       color: {t["heading"]};
       padding: 0 0 14px 0;
       margin: 0 0 22px 0;
-      border-bottom: 2px solid {t.get("gold", "#b0892e")};
+      border-bottom: 2px solid {t.get("accent", "#3b82f6")};
     }}
 
     .header-card h1 {{
@@ -140,14 +140,14 @@ def _css(*, rtl: bool, brand: str) -> str:
       color: {t["heading_fill"]} !important;
       padding: 0 0 6px 0;
       margin: 20px 0 10px 0;
-      border-inline-start: 3px solid {t.get("gold", "#b0892e")};
+      border-inline-start: 3px solid {t.get("accent", "#3b82f6")};
       padding-inline-start: 12px;
       font-size: 14pt;
     }}
 
     h3 {{
       color: {t["heading"]};
-      border-bottom: 1px solid {t.get("gold", "#b0892e")};
+      border-bottom: 1px solid {t.get("accent", "#3b82f6")};
       padding-bottom: 4px;
       margin: 14px 0 8px 0;
     }}

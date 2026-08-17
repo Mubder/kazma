@@ -36,9 +36,8 @@ The single source of truth for a document's **direction + design + chrome**.
 - `direction` (`ltr`/`rtl`), auto-detected from content via `is_arabic_dominant`
   (full Unicode Arabic blocks), honouring explicit `lang`/`rtl` overrides.
 - `theme` — colours, fonts, sizes, page size (A4), shared from `style_theme.THEME`.
-  Editorial Gulf look: navy ink + brass rules (no inverted heading bars).
-  Arabic uses `font_arabic` (Sakkal Majalla) as the complex-script face and a
-  slightly larger body size / leading.
+  Brand colours (royal `#3b82f6`, navy ink `#16223a`). Arabic uses
+  `font_arabic` (Sakkal Majalla) and a larger body size / leading.
 - `chrome` — localized labels (`المحتويات` / `Contents`, brand string) via `localized_chrome`.
 - **alignment policy** — the critical piece. `docx_jc(intent)` / `pdf_align(intent)` /
   `html_text_align(intent)` map an *intent* (`start` / `justify` / `end`) to each

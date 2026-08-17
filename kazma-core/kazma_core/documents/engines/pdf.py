@@ -180,7 +180,7 @@ class PdfEngine:
 
         def _bar(text_html: str, para_style: Any, *, fill: Any | None = None) -> Any:
             para = Paragraph(text_html, para_style)
-            gold = th.get("gold") or colors.HexColor("#b0892e")
+            rule = th.get("accent") or colors.HexColor("#3b82f6")
             tbl = Table([[para]], colWidths=["*"])
             cmds = [
                 ("LEFTPADDING", (0, 0), (-1, -1), 2),
@@ -188,7 +188,7 @@ class PdfEngine:
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LINEBELOW", (0, 0), (-1, -1), 1.15, gold),
+                ("LINEBELOW", (0, 0), (-1, -1), 1.15, rule),
             ]
             if fill is not None:
                 cmds.insert(0, ("BACKGROUND", (0, 0), (-1, -1), fill))
@@ -363,7 +363,7 @@ class PdfEngine:
         canvas.saveState()
         canvas.setFont(font, 8)
         canvas.setFillColor(th["muted"])
-        canvas.setStrokeColor(th.get("gold") or th["border"])
+        canvas.setStrokeColor(th.get("accent") or th["border"])
         canvas.setLineWidth(0.9)
         canvas.line(document.leftMargin, A4[1] - 30, A4[0] - document.rightMargin, A4[1] - 30)
         canvas.line(document.leftMargin, 36, A4[0] - document.rightMargin, 36)

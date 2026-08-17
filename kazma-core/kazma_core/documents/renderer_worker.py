@@ -169,7 +169,8 @@ def _build_model_and_profile(
     model.keywords = str(payload.get("keywords") or "")
 
     # Title (+ optional subtitle).
-    model.add(TitleBlock(text=str(payload.get("title", "Document")),
+    title_txt = str(payload.get("title", "Document")).strip()
+    model.add(TitleBlock(text=title_txt or "Document",
                          level=0, fill=fill_title))
     if payload.get("subtitle"):
         model.add(TitleBlock(text=str(payload["subtitle"]), level=3, fill=fill_h))
@@ -180,11 +181,13 @@ def _build_model_and_profile(
             entries=[it["heading"] for it in sections if it.get("heading")]
         ))
 
-    # Sections: heading bar + rich Markdown body.
+    # Sections: heading + rich Markdown body. Skip a first heading that
+    # repeats the document title (the stacked-bar / doubled-title bug).
     for item in sections:
         if item.get("heading"):
-            model.add(HeadingBlock(text=item["heading"].lstrip("#").strip(),
-                                   level=1, fill=fill_h))
+            heading = item["heading"].lstrip("#").strip()
+            if heading and heading != title_txt:
+                model.add(HeadingBlock(text=heading, level=1, fill=fill_h))
         body = item.get("body") or ""
         if body.strip():
             model.add(BodyBlock(text=body))
