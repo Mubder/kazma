@@ -133,10 +133,10 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
     checkpointer used by Telegram/Discord/Slack.
     """
     try:
+        from kazma_core.sessions.directory import canonical_web_session
         from kazma_ui.session_manager import get_session_manager
         store = get_session_manager()
-        # Canonical id: platform thread_id == web session_id
-        session = store.get_or_create(thread_id)
+        session = canonical_web_session(thread_id) or store.get_or_create(thread_id)
         session.thread_id = thread_id
         converted = _convert_messages_to_dicts(messages)
         # Prefer richer checkpoint-derived history when available; never wipe

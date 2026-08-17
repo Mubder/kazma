@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SessionEntry",
     "bind_sender_to_thread",
+    "canonical_web_session",
     "create_named_session",
     "enrich_summary",
     "find_mouth_thread",
@@ -144,21 +145,47 @@ def find_mouth_thread(
                 return str(sess.thread_id or sess.session_id)
     except Exception:
         logger.debug("[sessions] mouth SM lookup failed", exc_info=True)
-
-    uname = (username or "").strip().lower()
-    if not plat and not uname:
-        return None
-    for e in list_directory(include_archived=True, limit=200):
-        if plat and e.origin != plat and e.platform != plat:
-            continue
-        sid = (e.session_id or "").lower()
-        tid = (e.thread_id or "").lower()
-        title = (e.title or "").lower()
-        if tail and (sid.endswith(tail.lower()) or tail.lower() in sid):
-            return e.thread_id
-        if uname and (uname in title or uname in sid or uname in tid):
-            return e.thread_id
     return None
+
+
+def canonical_web_session(thread_id: str) -> Any | None:
+    """The one SessionManager row that should receive this thread's transcript.
+
+    Prefer a named season with more history over an auto-titled twin
+    (``Telegram · user``) so take-over cannot write the same turn twice.
+    """
+    if not thread_id:
+        return None
+    try:
+        from kazma_ui.session_manager import get_session_manager
+
+        store = get_session_manager()
+    except Exception:
+        return None
+    seen: set[str] = set()
+    candidates: list[Any] = []
+    for sess in (store.get(thread_id), store.get_by_thread_id(thread_id)):
+        if sess is None:
+            continue
+        sid = str(getattr(sess, "session_id", "") or "")
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        candidates.append(sess)
+    if not candidates:
+        return store.get_or_create(thread_id)
+
+    def _score(sess: Any) -> tuple[int, int, int]:
+        title = str(getattr(sess, "title", "") or "").strip()
+        low = title.lower()
+        auto = (not title) or low.startswith("linked ") or " · " in low
+        return (
+            0 if auto else 1,
+            len(getattr(sess, "messages", None) or []),
+            1 if sess.session_id == thread_id else 0,
+        )
+
+    return max(candidates, key=_score)
 
 
 def stamp_last_platform(thread_id: str, platform: str) -> None:

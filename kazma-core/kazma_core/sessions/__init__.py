@@ -10,6 +10,7 @@ from __future__ import annotations
 from kazma_core.sessions.directory import (
     SessionEntry,
     bind_sender_to_thread,
+    canonical_web_session,
     create_named_session,
     enrich_summary,
     find_mouth_thread,
@@ -23,6 +24,7 @@ from kazma_core.sessions.directory import (
 __all__ = [
     "SessionEntry",
     "bind_sender_to_thread",
+    "canonical_web_session",
     "create_named_session",
     "enrich_summary",
     "find_mouth_thread",

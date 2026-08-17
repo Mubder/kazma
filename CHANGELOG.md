@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — one turn, one season (2026-08-17)
+
+After Telegram take-over, ``123 Hey`` showed up on both ``/yolo`` and
+``Telegram · bAlfaris``. Sync now writes only the canonical SessionManager
+row (named / longer wins). Opening the twin no longer hydrates the live
+thread's checkpoint onto it. Username matching no longer attaches Telegram
+to a different season.
+
 ## Unreleased — Telegram Hey no longer mints a twin season (2026-08-17)
 
 Taking over a TUI/Web season on Telegram, then sending "Hey", created a

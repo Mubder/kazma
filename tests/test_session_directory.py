@@ -156,12 +156,27 @@ def test_find_mouth_thread_prefers_configstore_then_existing_telegram():
     remember_sender_thread("telegram:99", existing.session_id)
     assert find_mouth_thread("telegram:99", platform="telegram", username="bAlfaris") == existing.session_id
 
-    # Without a pointer, still reuse the existing Telegram season (do not mint).
+    # Username is not enough to steal another season (that duplicated Hey).
     from kazma_core.config_store import get_config_store
 
     get_config_store().delete("active_thread.telegram:99")
     found = find_mouth_thread("telegram:99", platform="telegram", username="bAlfaris")
-    assert found == existing.session_id
+    assert found is None
+
+
+def test_canonical_web_session_prefers_named_season_over_telegram_twin():
+    from kazma_core.sessions.directory import canonical_web_session
+
+    tid = "shared-thread-yolo"
+    yolo = _seed("/yolo", "web-yolo-sid", platform="web", msgs=5)
+    yolo.thread_id = tid
+    get_session_manager().put(yolo)
+    twin = _seed("Telegram · bAlfaris", tid, platform="telegram", msgs=2)
+    twin.thread_id = tid
+    get_session_manager().put(twin)
+    picked = canonical_web_session(tid)
+    assert picked is not None
+    assert picked.session_id == "web-yolo-sid"
 
 
 def test_slash_resolver_strips_telegram_bot_suffix():

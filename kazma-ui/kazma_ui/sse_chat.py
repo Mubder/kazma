@@ -2009,6 +2009,12 @@ def create_sse_chat_router(
                 tid = session.thread_id or (
                     session_id if session_id.startswith("gw-") else ""
                 )
+                # Twin sidebar rows (take-over) must not copy this thread's
+                # transcript onto a different session_id.
+                if tid:
+                    owner = _get_store().get(tid) or _get_store().get_by_thread_id(tid)
+                    if owner is not None and owner.session_id != session.session_id:
+                        tid = ""
                 if live and tid and getattr(live, "checkpointer", None):
                     from kazma_core.agent.turn_input import load_checkpoint_messages
 
