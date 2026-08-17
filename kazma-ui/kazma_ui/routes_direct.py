@@ -3066,9 +3066,6 @@ def register_direct_routes(self: Any) -> None:
                     from kazma_core.safety.yolo import try_enable_yolo
 
                     grant_info = try_enable_yolo(thread_id, actor=actor)
-                    if grant_info.get("downgraded"):
-                        # Card YOLO with the flag off → approve this call once.
-                        scope = "once"
                 except Exception:
                     logger.exception("[HITL] failed to enable YOLO scope")
                     scope = "once"

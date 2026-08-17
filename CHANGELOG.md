@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — HITL YOLO session is real session YOLO (2026-08-17)
+
+Clicking **YOLO session** on a card now enables the thread for every
+danger tool (native ``file_write``, MCP ``edit_file``, …) until
+``/yolo off`` or TTL. ``KAZMA_ALLOW_YOLO=0`` still blocks the ``/yolo``
+slash command; the card is the consent. ``is_yolo_active`` no longer
+ignores a live grant when the env flag is off.
+
 ## Unreleased — HITL YOLO card approves once when YOLO is off (2026-08-17)
 
 Pressing **YOLO** on an approval card with ``KAZMA_ALLOW_YOLO=0`` used to

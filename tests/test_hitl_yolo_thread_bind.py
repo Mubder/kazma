@@ -48,15 +48,23 @@ def _clean_yolo_grants():
         pass
 
 
-def test_try_enable_yolo_downgrades_when_flag_off(monkeypatch) -> None:
-    from kazma_core.safety.yolo import try_enable_yolo
+def test_card_yolo_enables_session_even_when_slash_blocked(monkeypatch) -> None:
+    """HITL card YOLO is real session YOLO (native + MCP), not approve-once."""
+    from kazma_core.safety.yolo import (
+        YoloDisabledError,
+        enable_yolo,
+        is_yolo_active,
+        try_enable_yolo,
+    )
 
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
     monkeypatch.setenv("KAZMA_ALLOW_YOLO", "0")
-    st = try_enable_yolo("thr-yolo-bind", actor="test")
-    assert st.get("downgraded") is True
-    assert st.get("active") is False
-    assert "ALLOW_YOLO=0" in (st.get("reason") or "")
+    tid = "thr-yolo-bind"
+    with pytest.raises(YoloDisabledError):
+        enable_yolo(tid, actor="slash")
+    st = try_enable_yolo(tid, actor="card")
+    assert st.get("downgraded") is False
+    assert is_yolo_active(tid) is True
 
 
 def test_allow_yolo_zero_blocks_even_without_production(monkeypatch) -> None:

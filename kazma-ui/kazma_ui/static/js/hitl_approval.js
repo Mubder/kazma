@@ -143,11 +143,9 @@
         '    <button class="btn btn-sm btn-primary hitl-approve-tool-btn" data-thread-id="' + threadId + '" data-scope="tool" data-tool="' + toolName + '">' +
         '      ' + t('dashboard.hitl_allow_tool', 'Allow tool') +
         '    </button>' +
-        (item.yolo_allowed === false
-          ? ''
-          : '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
-            '      ' + t('dashboard.hitl_yolo', 'YOLO') +
-            '    </button>') +
+        '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
+        '      ' + t('dashboard.hitl_yolo', 'YOLO') +
+        '    </button>' +
         '    <button class="btn btn-sm btn-danger hitl-deny-btn" data-thread-id="' + threadId + '">' +
         '      ' + safeIcon('x') + ' ' + t('dashboard.hitl_deny', 'Deny') +
         '    </button>' +

@@ -66,23 +66,13 @@ def yolo_block_reason() -> str:
 
 
 def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
-    """Enable YOLO, or report a one-shot downgrade when the flag is off.
+    """Enable session YOLO from a HITL card click.
 
-    HITL card YOLO must not 403 — the operator already asked to proceed.
+    The operator is already on an approval card — that is consent for
+    this thread. ``KAZMA_ALLOW_YOLO=0`` still blocks the ``/yolo`` slash
+    command (``enable_yolo`` without ``force``).
     """
-    if not yolo_allowed():
-        logger.info(
-            "[SECURITY] YOLO card downgraded to approve-once thread=%s actor=%s",
-            thread_id,
-            actor,
-        )
-        return {
-            "active": False,
-            "downgraded": True,
-            "thread_id": thread_id,
-            "reason": yolo_block_reason(),
-        }
-    st = enable_yolo(thread_id, actor=actor)
+    st = enable_yolo(thread_id, actor=actor, force=True)
     st["downgraded"] = False
     return st
 
@@ -97,14 +87,16 @@ def _ttl_seconds() -> int:
     return _DEFAULT_TTL_SECONDS
 
 
-def enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
+def enable_yolo(
+    thread_id: str, *, actor: str = "unknown", force: bool = False,
+) -> dict[str, Any]:
     """Enable YOLO for *thread_id*. Returns status dict for the user message.
 
     Raises:
-        YoloDisabledError: When production mode blocks YOLO (unless
-            ``KAZMA_ALLOW_YOLO=1``).
+        YoloDisabledError: When ``/yolo`` is blocked by policy, unless
+            *force* (HITL card click).
     """
-    if not yolo_allowed():
+    if not force and not yolo_allowed():
         reason = yolo_block_reason()
         logger.warning(
             "[SECURITY] YOLO blocked thread=%s actor=%s reason=%s",
@@ -156,8 +148,13 @@ def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
 
 
 def is_yolo_active(thread_id: str | None) -> bool:
-    """True if YOLO is on and not expired for this thread."""
-    if not thread_id or not yolo_allowed():
+    """True if this thread has a live YOLO grant (any danger tool).
+
+    Does not re-check ``yolo_allowed()``. A card-enabled session stays
+    YOLO until ``/yolo off`` or TTL — otherwise MCP/native tools keep
+    prompting after the first card.
+    """
+    if not thread_id:
         return False
     st = yolo_status(thread_id)
     return bool(st.get("active"))

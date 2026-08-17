@@ -1867,24 +1867,17 @@ def create_ws_chat_router(
                             try:
                                 from kazma_core.safety.yolo import try_enable_yolo
 
-                                _yst = try_enable_yolo(target_thread_id, actor=actor)
-                                if _yst.get("downgraded"):
-                                    msg = (
-                                        "YOLO is off — approved this tool once. "
-                                        "The current turn keeps running."
-                                    )
-                                else:
-                                    msg = (
-                                        "YOLO on — the current turn keeps "
-                                        "running; further danger tools "
-                                        "auto-approve."
-                                    )
+                                try_enable_yolo(target_thread_id, actor=actor)
+                                msg = (
+                                    "YOLO on — the current turn keeps "
+                                    "running; further danger tools "
+                                    "auto-approve."
+                                )
                                 logger.warning(
                                     "[WS-Chat] YOLO scope on busy turn "
-                                    "thread=%s actor=%s downgraded=%s",
+                                    "thread=%s actor=%s",
                                     target_thread_id,
                                     actor,
-                                    bool(_yst.get("downgraded")),
                                 )
                                 await websocket.send_json(
                                     TelemetryEvent(
@@ -1922,21 +1915,12 @@ def create_ws_chat_router(
                         try:
                             from kazma_core.safety.yolo import try_enable_yolo
 
-                            _yst = try_enable_yolo(target_thread_id, actor=actor)
-                            if _yst.get("downgraded"):
-                                scope = "once"
-                                logger.info(
-                                    "[WS-Chat] YOLO card downgraded to once "
-                                    "thread=%s actor=%s",
-                                    target_thread_id,
-                                    actor,
-                                )
-                            else:
-                                logger.warning(
-                                    "[WS-Chat] YOLO enabled for thread=%s actor=%s",
-                                    target_thread_id,
-                                    actor,
-                                )
+                            try_enable_yolo(target_thread_id, actor=actor)
+                            logger.warning(
+                                "[WS-Chat] YOLO enabled for thread=%s actor=%s",
+                                target_thread_id,
+                                actor,
+                            )
                         except Exception as exc:
                             logger.warning("[WS-Chat] Failed to enable YOLO scope: %s", exc)
                             scope = "once"
