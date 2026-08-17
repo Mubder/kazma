@@ -49,6 +49,7 @@ class ChatPanel(Vertical):
         ("/personality [list|<name>]", "Show/switch personality"),
         ("/config", "Interactive config wizard"),
         ("/replay [list|clear|<n>]", "Time travel: list or rewind this season"),
+        ("/fork <n>", "Branch this season from snapshot n (new thread)"),
         ("/export", "Export session to file"),
         ("/swarm [status|list|<task>]", "Swarm dispatch and management"),
         ("/quit", "Exit Kazma TUI"),
@@ -478,6 +479,8 @@ class ChatPanel(Vertical):
             self.write("system", "Config wizard available in the Settings tab.")
         elif cmd == "/replay":
             self.app.call_later(self._cmd_replay, text)
+        elif cmd == "/fork":
+            self.app.call_later(self._cmd_fork, text)
         elif cmd == "/export":
             self._cmd_export()
         elif cmd == "/swarm":
@@ -829,6 +832,49 @@ class ChatPanel(Vertical):
             )
         except Exception as e:
             self.write("error", f"Replay command failed: {e}")
+
+    async def _cmd_fork(self, text: str) -> None:
+        parts = text.strip().split()
+        if len(parts) < 2:
+            self.write(
+                "system",
+                "Usage: /fork <iteration> — branch this season from a snapshot "
+                "into a new thread (original stays put).",
+            )
+            return
+        try:
+            iteration = int(parts[1])
+        except ValueError:
+            self.write("system", "Usage: /fork <iteration>")
+            return
+        thread_id = self._replay_thread_id()
+        if not thread_id:
+            self.write("system", "No season yet — send a message or /session first.")
+            return
+        try:
+            data = await self._api(
+                "POST",
+                "/api/replay/fork",
+                {"thread_id": thread_id, "iteration": iteration},
+            )
+            new_tid = str((data or {}).get("new_thread_id") or "")
+            if not new_tid:
+                self.write("error", "Fork returned no new_thread_id.")
+                return
+            self._session_id = new_tid
+            self._thread_id = new_tid
+            try:
+                n = self._load_season_messages(new_tid, thread_id=new_tid)
+                self._replay_season_log()
+            except Exception:
+                n = int((data or {}).get("message_count") or 0)
+            self.write(
+                "system",
+                f"Forked iteration {iteration} → #{new_tid[-8:]} ({n} msgs). "
+                "This mouth is now on the new season.",
+            )
+        except Exception as e:
+            self.write("error", f"Fork failed: {e}")
 
     def _cmd_export(self) -> None:
         try:

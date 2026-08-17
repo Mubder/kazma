@@ -268,6 +268,10 @@ def resolve_session(
     raw = (query or "").strip()
     if not raw:
         return None
+    if raw.startswith("#"):
+        raw = raw[1:].strip()
+        if not raw:
+            return None
     q = raw.lower()
     if q in {"here", "current", ".", "this"}:
         if not current_thread_id:
@@ -275,25 +279,32 @@ def resolve_session(
         return resolve_session(current_thread_id, include_archived=True)
 
     entries = list_directory(include_archived=include_archived, limit=_MAX_LIST)
-    if q.isdigit():
-        idx = int(q)
-        if 1 <= idx <= len(entries):
-            return entries[idx - 1]
-        return None
 
+    # Stable identity first: full id, exact short_id, then unique suffix.
+    # List index is last — numbers reshuffle as seasons update.
     for e in entries:
         if raw == e.session_id or raw == e.thread_id:
             return e
         if q == e.session_id.lower() or q == e.thread_id.lower():
             return e
+        if q == e.short_id.lower():
+            return e
 
-    if len(raw) >= 6:
+    if len(raw) >= 4:
         suffix_hits = [
             e for e in entries
-            if e.session_id.lower().endswith(q) or e.thread_id.lower().endswith(q)
+            if e.session_id.lower().endswith(q)
+            or e.thread_id.lower().endswith(q)
+            or e.short_id.lower().endswith(q)
         ]
         if len(suffix_hits) == 1:
             return suffix_hits[0]
+
+    if q.isdigit():
+        idx = int(q)
+        if 1 <= idx <= len(entries):
+            return entries[idx - 1]
+        return None
 
     title_hits = [e for e in entries if q in e.title.lower()]
     if len(title_hits) == 1:
@@ -347,8 +358,8 @@ def format_session_list(
     lines.extend(
         [
             "",
-            "/session #short_id — continue that season here (take over)",
-            "/session 2 — same, by list number (numbers move as you chat)",
+            "/session #short_id — continue that season here (stable id)",
+            "/session 2 — list number (numbers move as you chat — prefer #id)",
             "/session new <name> — start a fresh season",
             "Web: open /chat?s=<id> or pick it in the sidebar.",
         ]

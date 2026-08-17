@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Audit D remaining (2026-08-17)
+
+``/session #short_id`` actually resolves (the ``#`` is stripped). Season
+pick prefers the stable id over the reshuffling list number. The TUI no
+longer constructs a local SwarmEngine on mount — the Swarm tab and
+inspectors read the live server API. TUI ``/fork <n>`` branches via
+``POST /api/replay/fork``.
+
 ## Unreleased — Audit C remaining (2026-08-17)
 
 Soul confirm auto-ON in production / multi-user (env still wins). A Soul

@@ -62,6 +62,12 @@ def test_list_and_resolve_by_index_and_suffix():
     by_suffix = resolve_session("bbb22222")
     assert by_suffix is not None
     assert by_suffix.title == "Telegram chat"
+    by_hash = resolve_session("#bbb22222")
+    assert by_hash is not None
+    assert by_hash.title == "Telegram chat"
+    by_short = resolve_session(by_suffix.short_id)
+    assert by_short is not None
+    assert by_short.thread_id == by_suffix.thread_id
     by_title = resolve_session("research")
     assert by_title is not None
     assert by_title.title == "Research notes"
