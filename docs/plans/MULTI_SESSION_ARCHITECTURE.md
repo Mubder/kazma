@@ -1,7 +1,10 @@
 # Multi-Session Architecture Plan
 
-**Status:** Approved for future implementation — do NOT implement yet.
-**Date:** 2026-08-15 (deep audit session)
+**Status:** Phase 4 list/switch + take-over shipped 2026-08-17 (`/sessions`,
+`/session n`, directory in `kazma_core/sessions/`). Native Telegram topics /
+Discord threads (Phase 1 platform mapping) still later. Per-session model /
+cost / workspace (Phases 2–3) still later.
+**Date:** 2026-08-15 (deep audit session); take-over commands 2026-08-17
 **Trigger:** User requested industry-level non-conflictable multi-session design.
 
 ---

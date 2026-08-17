@@ -1,7 +1,7 @@
 """Policy — the ONLY place that sets route=execute.
 
-Phase 2+: execute allowlist = {document_generate, research_deep}; a
-multi-act turn whose kind-set matches a registered composer dispatches it.
+Execute allowlist is job-starters only ({research_deep}). Document
+generation is constrain so writes go through tool_worker + HITL.
 """
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ __all__ = ["decide"]
 
 logger = logging.getLogger(__name__)
 
-# Phase 2: research_deep added.
-# Phase 3: add composer "research_then_document"
+# Execute only starts background jobs that already go through tools.
+# document_generate is CONSTRAIN — writes must run in tool_worker so HITL
+# interrupt() can fire (supervisor_node cannot pause for approval).
 _PHASE_EXECUTE_ALLOWLIST: frozenset[str] = frozenset({
-    ActKind.DOCUMENT_GENERATE,
     ActKind.RESEARCH_DEEP,
 })
 
@@ -75,8 +75,8 @@ def _plan_note_for(kind: str, slots: dict, entities: EntitySet) -> str:
         )
     if kind == ActKind.SWARM:
         return (
-            "INTENT ENGINE: If parallel workers are needed, tell the user to use "
-            "`/swarm` or the swarm panel. Do not invent a dispatch."
+            "INTENT ENGINE: If the user asked for parallel workers, dispatch via "
+            "the swarm tools. Do not invent workers. Do not skip HITL."
         )
     if kind == ActKind.CODE_EXEC:
         return (
@@ -100,8 +100,8 @@ def _plan_note_for(kind: str, slots: dict, entities: EntitySet) -> str:
         )
     if kind == ActKind.DOCUMENT_INTEL:
         return (
-            "INTENT ENGINE: Use `/documents` commands or the document_intel tools "
-            "for ingestion, indexing, and redaction."
+            "INTENT ENGINE: Use document_* tools (import, read, index, search) "
+            "for ingestion and redaction. Do not send the user to a page."
         )
     return f"INTENT ENGINE: {kind} act detected."
 
@@ -120,7 +120,7 @@ def _multi_act_plan_note(acts: tuple[IntentAct, ...]) -> str:
             fmt = a.slots.get("format", "pdf")
             parts.append(f"{i}) Generate a {fmt.upper()} from the report via `generate_{fmt}(markdown_path=...)`")
         elif a.kind == ActKind.SWARM:
-            parts.append(f"{i}) Use `/swarm` for parallel workers")
+            parts.append(f"{i}) Dispatch swarm workers for the parallel part")
         else:
             parts.append(f"{i}) {a.kind}")
     return "INTENT ENGINE: " + " ".join(parts)

@@ -1,0 +1,44 @@
+"""How in-process mouths find the running Kazma HTTP API.
+
+TUI / CLI are separate processes. They are mouths of the *same* brain
+only if they talk to the server the operator already started — not a
+second LLM loop.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterable
+
+__all__ = ["auth_headers", "candidate_api_bases"]
+
+
+def candidate_api_bases() -> list[str]:
+    """Deduped local API roots, preferred first."""
+    found: list[str] = []
+    for key in ("KAZMA_PUBLIC_URL", "KAZMA_BASE_URL"):
+        raw = (os.environ.get(key) or "").strip().rstrip("/")
+        if raw:
+            found.append(raw)
+    port = (os.environ.get("KAZMA_PORT") or "").strip()
+    if port:
+        found.append(f"http://127.0.0.1:{port}")
+    found.append("http://127.0.0.1:9090")
+    found.append("http://127.0.0.1:8000")
+    out: list[str] = []
+    for u in found:
+        if u not in out:
+            out.append(u)
+    return out
+
+
+def auth_headers() -> dict[str, str]:
+    secret = (os.environ.get("KAZMA_SECRET") or "").strip()
+    if not secret:
+        return {}
+    return {"X-Kazma-Secret": secret}
+
+
+def first_reachable(bases: Iterable[str] | None = None) -> list[str]:
+    """Return candidate list (reachability is checked by the caller)."""
+    return list(bases) if bases is not None else candidate_api_bases()

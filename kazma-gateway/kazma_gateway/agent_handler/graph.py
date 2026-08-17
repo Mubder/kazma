@@ -33,6 +33,7 @@ from .commands import (
     _try_swarm_command,
     _build_slash_ctx,
 )
+from .session_commands import try_session_command
 
 logger = logging.getLogger(__name__)
 
@@ -160,14 +161,13 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         plat = (platform or "chat").capitalize()
         if not session.title or session.title.startswith("Linked "):
             session.title = f"{plat} · {username}"
-        # Tag for UI badges (platform takeover)
-        try:
-            meta = dict(getattr(session, "metadata", None) or {})
-        except Exception:
-            meta = {}
-        # ChatSession may not have metadata field — store on title prefix only
-        # and put platform into a lightweight side channel via title convention.
         store.put(session)
+        try:
+            from kazma_core.sessions.directory import stamp_last_platform
+
+            stamp_last_platform(thread_id, platform)
+        except Exception:
+            pass
         logger.info(
             "[agent-handler] Synced platform season %s → web (platform=%s msgs=%d)",
             thread_id,
@@ -470,6 +470,16 @@ def create_graph_handler(
     async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
         """Inner handler body (typing keepalive wraps this)."""
         sender = msg.sender_id or "unknown"
+        # Work slashes become graph turns (research / swarm dispatch / …).
+        # Control slashes (help/list/status) stay on the intercepts below.
+        try:
+            from kazma_core.agent.slash_turns import rewrite_work_slash
+
+            _rewritten = rewrite_work_slash(msg.text or "")
+            if _rewritten:
+                msg.text = _rewritten
+        except Exception:
+            logger.debug("[agent-handler] slash rewrite skipped", exc_info=True)
         # Cost breaker gate
         if cost_breaker and cost_breaker.should_halt():
             # Restore platform context for the reply
@@ -553,59 +563,20 @@ def create_graph_handler(
         except Exception:
             pass
 
-        # ── /new: Create a brand new session/season ───────────────
-        if msg.text and msg.text.strip().lower() == "/new":
-            import uuid
-            new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
-            
-            # Persist mapping in ConfigStore
-            try:
-                from kazma_core.config_store import get_config_store
-                cs = get_config_store()
-                cs.set(f"active_thread.{sender}", new_thread_id)
-            except Exception as exc:
-                logger.error("[agent-handler] Failed to persist active thread mapping: %s", exc)
-                
-            # Update in-memory session cache
-            async with _sessions_lock:
-                _sessions[sender] = new_thread_id
-                
-            # Initialize empty linked session in Web UI's SessionManager
-            username = msg.context_metadata.get("username") or msg.context_metadata.get("display_name") or "user"
-            try:
-                from kazma_ui.session_manager import get_session_manager, ChatSession
-                web_store = get_session_manager()
-                web_session = ChatSession(
-                    session_id=new_thread_id,
-                    thread_id=new_thread_id,
-                    title=f"Linked {msg.platform.capitalize()} ({username})",
-                    messages=[]
-                )
-                web_store.put(web_session)
-            except Exception as exc:
-                logger.debug("[agent-handler] Failed to create empty Web UI session: %s", exc)
-                
-            # Phase C: drop working-tier buffer for the old thread
-            try:
-                from kazma_core.memory.consolidator import clear_working_memory
-
-                clear_working_memory(thread_id)
-            except Exception:
-                logger.debug("[agent-handler] clear_working_memory on /new failed", exc_info=True)
-
-            reply_msg = (
-                f"🆕 Created a brand new season/session!\n\n"
-                f"All your future messages here will be kept in a separate thread.\n"
-                f"You can view or continue it in the Web UI as: **Linked {msg.platform.capitalize()} ({username})**"
+        # ── /sessions /session /switch /new — pick or mint a season ─
+        # Same directory as the Web sidebar. Switching binds this mouth
+        # to an existing thread_id and moves delivery here (take-over).
+        async with _sessions_lock:
+            session_handled = await try_session_command(
+                msg,
+                thread_id=thread_id,
+                sender=sender,
+                store=_store,
+                manager=manager,
+                sessions_map=_sessions,
+                prepare_outbound=_prepare_tg_outbound,
             )
-            ctx = msg.context_metadata
-            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=out_text,
-                context_metadata=out_ctx,
-            ))
-            logger.info("[agent-handler] /new for thread=%s (new_thread=%s)", thread_id, new_thread_id)
+        if session_handled:
             return
 
         # ── Checkpoint-mutating commands serialize per thread ─────
@@ -1327,7 +1298,17 @@ def create_graph_handler(
                 pass
             try:
                 try:
-                    result_state = await graph.ainvoke(state, config)
+                    from kazma_core.agent.turn import run_agent_turn
+
+                    _turn = await run_agent_turn(
+                        graph=graph,
+                        thread_id=thread_id,
+                        state=state,
+                        config=config,
+                    )
+                    result_state = _turn.state or {}
+                    if _turn.error and not _turn.interrupted and not result_state.get("messages"):
+                        raise RuntimeError(_turn.error)
                 finally:
                     if _gw_registered:
                         try:
@@ -1343,7 +1324,9 @@ def create_graph_handler(
                 # tool, ainvoke returns a partial state and the graph is
                 # paused at the checkpoint. Surface an approval prompt so
                 # the user can resume via /hitl approve {thread_id}.
-                hitl_payload = await _check_graph_interrupt(graph, config)
+                hitl_payload = _turn.interrupt_payload if _turn.interrupted else None
+                if hitl_payload is None:
+                    hitl_payload = await _check_graph_interrupt(graph, config)
                 if hitl_payload is not None:
                     ctx = await _store.get(thread_id)
                     if not ctx:

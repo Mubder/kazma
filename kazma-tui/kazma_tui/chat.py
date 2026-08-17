@@ -38,6 +38,8 @@ class ChatPanel(Vertical):
         ("/help", "Show available commands"),
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
+        ("/sessions", "List seasons (same list as Web/Telegram/Discord)"),
+        ("/session [n|id]", "Switch this TUI chat onto that season"),
         ("/model [set <name>]", "Show/switch active model (interactive picker)"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
@@ -130,6 +132,7 @@ class ChatPanel(Vertical):
         self._ac_index: int = 0
         self._model_cache: list[str] = []
         self._ac_suppress: bool = False
+        self._session_id: str = ""
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -309,76 +312,37 @@ class ChatPanel(Vertical):
     # ── Streaming ──────────────────────────────────────────────────
 
     async def write_stream(self, prompt: str) -> None:
-        """Send prompt to provider and write response to RichLog."""
+        """Send prompt through the live Kazma supervisor (same as Web)."""
+        from rich.text import Text
+
         log = self.query_one("#chat-log", RichLog)
         ts = datetime.now().strftime("%H:%M")
         log.write(f"[dim]{ts}[/] [#c084fc]▌ KAZMA[/] ")
         self.show_progress(True)
 
         try:
-            from kazma_core.model_registry import get_model_registry
+            if not self._session_id:
+                import uuid
 
-            try:
-                registry = get_model_registry()
-                provider = registry.get_client()
-            except RuntimeError:
-                log.write(
-                    "\n[#ef4444]Error: ModelRegistry not initialized. "
-                    "Start the kazma-ui server first, or run "
-                    "kazma_core.bootstrap.initialize().[/]"
-                )
-                return
-            if provider is None:
-                log.write(
-                    "\n[#ef4444]Error: No LLM provider configured. "
-                    "Add a provider via /models in the chat, or via kazma.yaml.[/]"
-                )
-                return
-
+                self._session_id = str(uuid.uuid4())
             self._messages.append({"role": "user", "content": prompt})
-            # §21 Phase 4: intent engine classify (display-only — the TUI
-            # doesn't go through the supervisor, but the classification
-            # is logged and available for debugging)
-            try:
-                from kazma_core.agent.intent.classify import classify_turn_sync
-                from kazma_core.agent.intent.types import RouteKind
 
-                _td = classify_turn_sync(prompt, messages=self._messages[:-1])
-                _route_icon = {
-                    RouteKind.EXECUTE: "⚡",
-                    RouteKind.CONSTRAIN: "📋",
-                    RouteKind.LOOP: "💬",
-                }.get(_td.route, "❓")
-                _acts_str = ",".join(a.kind for a in _td.acts if a.kind != "general")
-                if _acts_str or _td.route != RouteKind.LOOP:
-                    log.write(
-                        f"\n[dim]{_route_icon} intent: {_td.route.value}"
-                        + (f" [{_acts_str}]" if _acts_str else "")
-                        + f" ({_td.reason})[/]\n"
-                    )
-            except Exception:
-                pass  # TUI intent display is best-effort
-            # Send the (capped) conversation history so follow-up turns keep
-            # context — previously each turn was a fresh single-message chat
-            # while self._messages only fed /context and /export.
-            # Inject system prompt from kazma.yaml so the model knows to
-            # respond in the user's language and follow Kazma's persona.
-            system_prompt = self._get_system_prompt()
-            messages: list[dict[str, Any]] = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self._messages[-(_MAX_HISTORY_TURNS * 2):])
-            response = await provider.chat(messages)
-            content = getattr(response, "content", "") or ""
+            from kazma_core.agent.turn_client import stream_chat_turn
+
+            def _on_event(ev: Any) -> None:
+                if ev.kind == "tool_call" and ev.tool:
+                    log.write(Text(f"[tool] {ev.tool}", style="dim"))
+                elif ev.kind == "error" and ev.text:
+                    log.write(Text(ev.text, style="red"))
+
+            content = await stream_chat_turn(
+                text=prompt,
+                session_id=self._session_id,
+                on_event=_on_event,
+            )
             if content:
                 self._last_response = content
                 self._messages.append({"role": "assistant", "content": content})
-                # Write as plain Text, not markup — the chat-log RichLog is
-                # markup=True, so raw content with [...] (citations, array
-                # indices, "[ERROR]") got parsed as Rich markup → mis-rendered
-                # colors / swallowed text / MarkupError. The sibling write()
-                # already does this (audit finding).
-                from rich.text import Text
                 log.write(Text(content))
             else:
                 log.write("[dim](empty response)[/]")
@@ -387,7 +351,6 @@ class ChatPanel(Vertical):
         finally:
             self.show_progress(False)
             self._busy = False
-            # Re-enable input
             try:
                 self.query_one("#chat-input", Input).disabled = False
             except Exception as exc:
@@ -419,13 +382,16 @@ class ChatPanel(Vertical):
         if self._busy:
             return
         event.input.clear()
-        if text.startswith("/"):
+        try:
+            from kazma_core.agent.slash_turns import rewrite_work_slash
+
+            _rw = rewrite_work_slash(text)
+            if _rw:
+                text = _rw
+        except Exception:
+            pass
+        if text.startswith("/") and not rewrite_work_slash(text):
             self._handle_command(text)
-        elif self._is_swarm_mention(text):
-            self.write("user", text)
-            self._busy = True
-            event.input.disabled = True
-            self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("user", text)
             self._busy = True
@@ -489,6 +455,8 @@ class ChatPanel(Vertical):
             self._cmd_context()
         elif cmd == "/reset":
             self.write("system", "Conversation context reset.")
+        elif cmd in ("/sessions", "/seasons", "/session", "/season", "/switch"):
+            self._cmd_sessions(text)
         elif cmd == "/personality":
             self._cmd_personality(text)
         elif cmd == "/config":
@@ -501,6 +469,58 @@ class ChatPanel(Vertical):
             self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("system", f"Unknown: {cmd}")
+
+    def _cmd_sessions(self, text: str) -> None:
+        """List or switch onto a season shared with Web and the gateways."""
+        try:
+            from kazma_core.sessions.directory import (
+                format_session_list,
+                list_directory,
+                resolve_session,
+            )
+        except Exception as e:
+            self.write("error", f"Session directory unavailable: {e}")
+            return
+        parts = text.split(None, 1)
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        cmd = parts[0].lower()
+        if cmd in ("/sessions", "/seasons") or not rest or rest.lower() in {"list", "ls"}:
+            here = f"this TUI mouth: {self._session_id[-8:]}" if self._session_id else "no season yet"
+            self.write("system", format_session_list(list_directory()) + f"\n({here})")
+            return
+        if rest.lower() in {"new", "start"}:
+            import uuid
+
+            self._session_id = str(uuid.uuid4())
+            self._messages = []
+            self.write("system", f"New TUI season `{self._session_id[-8:]}` — same brain as Web.")
+            return
+        hit = resolve_session(rest)
+        if hit is None:
+            self.write("system", f"No season matches {rest!r}. Try /sessions.")
+            return
+        self._session_id = hit.session_id
+        self._load_season_messages(hit.session_id)
+        self.write(
+            "system",
+            f"TUI is now on **{hit.title}** (`{hit.short_id}`). "
+            f"Next messages go through the same supervisor as Web / Telegram.",
+        )
+
+    def _load_season_messages(self, session_id: str) -> None:
+        try:
+            from kazma_ui.session_manager import get_session_manager
+
+            sess = get_session_manager().get(session_id)
+            if sess is None:
+                return
+            self._messages = [
+                {"role": m.get("role"), "content": m.get("content")}
+                for m in (sess.messages or [])
+                if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+            ]
+        except Exception:
+            logger.debug("TUI season history load failed", exc_info=True)
 
     def _cmd_memory(self) -> None:
         try:
@@ -903,9 +923,8 @@ class ChatPanel(Vertical):
     def _get_system_prompt() -> str:
         """Load the system prompt from kazma.yaml or ConfigStore.
 
-        The TUI chat is a direct LLM call (no LangGraph supervisor),
-        so we must inject the system prompt ourselves to ensure the
-        model follows Kazma's persona and language-matching rules.
+        Unused by the live chat path (TUI posts to the supervisor).
+        Kept for /context and export helpers.
         """
         try:
             from kazma_core.config_store import get_config_store

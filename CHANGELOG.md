@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Unreleased — One brain Phases B–D (2026-08-17)
+
+Work slashes (`/research`, `/swarm <task>`, bare swarm mentions) rewrite into
+supervisor turns instead of skipping the graph. `/swarm status|list` and
+`/research` usage stay instant. Intent execute allowlist is **job-starters
+only** (`research_deep`); document generate is constrain so HITL can fire.
+Sidebar: Chat is home; Activity groups research/docs/swarm; Settings holds
+ops pages. Mobile dock is Chat / Workspace / Memory / Settings.
+
+## Unreleased — One brain entry (Phase A) + unified seasons (2026-08-17)
+
+The TUI is no longer a second chatbot. It posts to the same
+`POST /api/chat/stream` supervisor the Web UI uses (tools, HITL, memory,
+intent, checkpoints). Gateway `ainvoke` goes through
+`kazma_core.agent.turn.run_agent_turn`. `/session n` in the TUI switches
+onto the shared season list.
+
+## Unreleased — Unified seasons across Web / Telegram / Discord / Slack (2026-08-17)
+
+One conversation directory for every mouth. Start on Web, continue on Discord,
+take over on Telegram — same LangGraph `thread_id`, same sidebar list.
+
+- **Directory** (`kazma_core/sessions/directory.py`): list / resolve / bind /
+  stamp last mouth. SessionManager stays the SoT; `active_thread.{sender}` is
+  only the pointer for *this* mouth.
+- **Gateway:** `/sessions`, `/session 2` (or id / title), `/session new [name]`,
+  `/switch`, `/new`. Take-over merges the current chat's delivery target into
+  SessionStore (platform IDs stay out of graph state).
+- **Web:** session list shows last mouth; Copy ID (+ `/chat?s=` link). New Web
+  seasons use `session_id == thread_id` so the id you copy is the id you switch.
+- **TUI:** `/sessions` lists the same directory (continue the live agent on
+  Web/Telegram — TUI chat is still not the supervisor).
+
 ## Unreleased — Intent Router audit fixes (2026-08-15)
 
 Full read-only audit of the intent routing system (15 findings, F1–F15), all

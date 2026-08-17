@@ -87,12 +87,11 @@ class FakeLLM:
 
 class TestExecuteReachable:
     def test_document_generate_executes_with_inline_content(self):
-        """A document_generate with format + inline content reaches EXECUTE."""
+        """document_generate is constrain — writes go through tool_worker HITL."""
         text = "create a PDF report from the following detailed meeting notes about the quarterly budget review"
         route, handler, reason, _ = _decide(text, registry=_registry_with_doc_handler())
-        assert route == RouteKind.EXECUTE
-        assert handler == "document_generate"
-        assert reason == "checklist_passed"
+        assert route == RouteKind.CONSTRAIN
+        assert reason == "phase_allowlist"
 
     def test_research_deep_executes_with_topic(self):
         """A research_deep with a topic reaches EXECUTE."""
@@ -131,8 +130,8 @@ class TestConfidenceBoundary:
             entities=EntitySet(),
             registry=_registry_with_doc_handler(),
         )
-        assert route == RouteKind.EXECUTE
-        assert reason == "checklist_passed"
+        assert route == RouteKind.CONSTRAIN
+        assert reason == "phase_allowlist"
 
     def test_below_threshold_constrains(self):
         """Confidence just below EXECUTE_MIN → low_confidence constrain."""
@@ -204,9 +203,8 @@ class TestComposerDispatch:
             entities=EntitySet(),
             registry=self._registry_with_composer(),
         )
-        assert route == RouteKind.EXECUTE
-        assert handler == "research_then_document"
-        assert reason == "checklist_passed"
+        assert route == RouteKind.CONSTRAIN
+        assert reason == "phase_allowlist"
 
     def test_composer_missing_slot_constrains(self):
         """Composer with a missing required slot → CONSTRAIN/missing_slot."""
@@ -224,7 +222,9 @@ class TestComposerDispatch:
             registry=self._registry_with_composer(),
         )
         assert route == RouteKind.CONSTRAIN
-        assert reason == "missing_slot"
+        # document_generate is no longer execute-allowlisted, so the
+        # composer fails the phase gate before slot checks.
+        assert reason in ("missing_slot", "phase_allowlist")
 
     def test_composer_low_confidence_constrains(self):
         """A participating act below EXECUTE_MIN → CONSTRAIN/low_confidence."""

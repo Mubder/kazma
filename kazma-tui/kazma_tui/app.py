@@ -546,14 +546,23 @@ class KazmaTUI(App[None]):
         import httpx
         try:
             headers = {}
-            secret = os.environ.get("KAZMA_SECRET", "")
-            if secret:
-                headers["X-Kazma-Secret"] = secret
+            from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
 
-            _port = os.environ.get("KAZMA_PORT", "8000")
+            headers = dict(auth_headers())
             if self._hitl_http is None:
                 self._hitl_http = httpx.AsyncClient(timeout=2.0)
-            response = await self._hitl_http.get(f"http://127.0.0.1:{_port}/api/pending-approvals", headers=headers)
+            response = None
+            for _base in candidate_api_bases():
+                try:
+                    response = await self._hitl_http.get(
+                        f"{_base}/api/pending-approvals", headers=headers
+                    )
+                    if response.status_code < 500:
+                        break
+                except Exception:
+                    response = None
+            if response is None:
+                return
             if response.status_code == 200:
                 data = response.json()
                 pending_list = data.get("pending", [])
@@ -596,22 +605,28 @@ class KazmaTUI(App[None]):
 
         decision = "approve" if approved else "deny"
         try:
-            headers = {}
-            secret = os.environ.get("KAZMA_SECRET", "")
-            if secret:
-                headers["X-Kazma-Secret"] = secret
+            from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
 
-            _port = os.environ.get("KAZMA_PORT", "8000")
+            headers = dict(auth_headers())
+            response = None
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(
-                    f"http://127.0.0.1:{_port}/api/approve/{thread_id}",
-                    json={"action": decision},
-                    headers=headers,
-                )
-                if response.status_code in (200, 202):
-                    self.push_screen(Toast(f"HITL task {decision}d successfully", "success"))
-                else:
-                    self.push_screen(Toast(f"Error submitting decision: {response.text}", "error"))
+                for _base in candidate_api_bases():
+                    try:
+                        response = await client.post(
+                            f"{_base}/api/approve/{thread_id}",
+                            json={"action": decision},
+                            headers=headers,
+                        )
+                        if response.status_code < 500:
+                            break
+                    except Exception:
+                        response = None
+            if response is None:
+                raise RuntimeError("Kazma server not reachable")
+            if response.status_code in (200, 202):
+                self.push_screen(Toast(f"HITL task {decision}d successfully", "success"))
+            else:
+                self.push_screen(Toast(f"Error submitting decision: {response.text}", "error"))
         except Exception as exc:
             logger.exception("Failed to submit HITL decision")
             self.push_screen(Toast(f"Failed to submit decision: {exc}", "error"))

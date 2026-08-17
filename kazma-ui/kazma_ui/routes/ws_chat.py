@@ -1028,68 +1028,29 @@ def create_ws_chat_router(
                             logger.debug("[WS-Chat] Failed persisting /long message")
                         continue
 
-                    # ── /research deep (parity with SSE + gateway) ─────
-                    if text.lower().startswith("/research"):
-                        parts = text.split(maxsplit=2)
-                        if len(parts) == 1:
-                            topic, depth = "", "deep"
-                        elif parts[1].lower() in (
-                            "deep", "full", "paper", "comprehensive"
-                        ):
-                            topic = parts[2] if len(parts) > 2 else ""
-                            depth = "deep"
-                        else:
-                            topic = text[len("/research") :].strip()
-                            depth = "deep"
+                    try:
+                        from kazma_core.agent.slash_turns import rewrite_work_slash
 
+                        _rw = rewrite_work_slash(text)
+                        if _rw:
+                            text = _rw
+                    except Exception:
+                        logger.debug("[WS-Chat] slash rewrite skipped", exc_info=True)
+
+                    # ── Bare /research (no topic) — usage only ─────
+                    # Work `/research deep <topic>` is rewritten above and
+                    # falls through to the supervisor.
+                    if text.lower().startswith("/research"):
                         async def _ws_research() -> None:
                             try:
-                                # Keep the transcript complete: user question first.
                                 try:
                                     session.add_message("user", text)
                                     get_session_manager().put(session)
                                 except Exception:
                                     pass
-                                if not topic:
-                                    await websocket.send_json(
-                                        TelemetryEvent(
-                                            type="llm_delta",
-                                            data={
-                                                "content": "Usage: `/research deep <topic>`"
-                                            },
-                                            thread_id=thread_id,
-                                        ).to_dict()
-                                    )
-                                    return
-
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="llm_delta",
-                                        data={
-                                            "content": (
-                                                f"🔬 Deep research starting: **{topic}**…\n\n"
-                                            )
-                                        },
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
-
-                                # §18 Phase 2: unified with gateway — uses
-                                # start_deep_research, not inline pipeline
-                                from kazma_core.tools.research_session import (
-                                    start_deep_research,
-                                )
-
-                                sess = await start_deep_research(
-                                    topic, depth=depth, max_sources=8
-                                )
                                 _ws_out = (
-                                    f"✅ Research session created: `{sess.id}`\n\n"
-                                    f"The pipeline is running in background.\n"
-                                    f"Track progress: Research panel or "
-                                    f"`/api/research/sessions/{sess.id}`"
-                                    if sess and sess.status not in ("error",)
-                                    else f"⚠️ Research failed: {getattr(sess, 'error', 'unknown')}"
+                                    "Usage: `/research deep <topic>` — runs through "
+                                    "the same agent as chat (not a side door)."
                                 )
                                 await websocket.send_json(
                                     TelemetryEvent(

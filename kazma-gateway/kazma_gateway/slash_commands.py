@@ -196,7 +196,9 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd == "/reset":
         return None  # Handled by agent_handler directly (clears state)
     if cmd == "/new":
-        return None  # Handled by agent_handler directly (creates new session)
+        return None  # Handled by session_commands (mint a season)
+    if cmd in ("/sessions", "/seasons", "/session", "/season", "/switch"):
+        return None  # Handled by session_commands (list / take-over)
     if cmd == "/compact":
         return None  # Handled by agent_handler directly (manual context compaction)
     if cmd == "/status":
@@ -231,7 +233,11 @@ def _cmd_help() -> str:
     return (
         "*Available commands:*\n\n"
         "🔄 *Session*\n"
-        "• `/new` — Create a brand new session/season\n"
+        "• `/sessions` — List every season (Web + Telegram + Discord + Slack)\n"
+        "• `/session 2` — Continue that season here (take over)\n"
+        "• `/session new [name]` — Start a fresh season (`/new` still works)\n"
+        "• `/research deep <topic>` — deep research via the same agent\n"
+        "• `/swarm <task>` — dispatch workers via the same agent\n"
         "• `/reset` — Clear conversation history and starting fresh\n"
         "• `/compact` — Manually trigger context window compaction\n"
         "• `/replay list` — Show available snapshots\n"

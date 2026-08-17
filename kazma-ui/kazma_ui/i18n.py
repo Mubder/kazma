@@ -34,10 +34,11 @@ __all__ = ["TRANSLATIONS", "get_arabic_plural_form", "t_plural", "t", "make_tran
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     # ── Navigation / Sidebar ──────────────────────────────────────────
-    "nav.primary": {"en": "Main", "ar": "الرئيسية"},
+    "nav.primary": {"en": "Work", "ar": "العمل"},
+    "nav.activity": {"en": "Activity", "ar": "النشاط"},
     "nav.tools": {"en": "Tools", "ar": "الأدوات"},
     "nav.capabilities": {"en": "Capabilities", "ar": "القدرات"},
-    "nav.configuration": {"en": "Configuration", "ar": "الإعدادات"},
+    "nav.configuration": {"en": "Settings", "ar": "الإعدادات"},
     "nav.workspace": {"en": "Workspace", "ar": "مساحة العمل"},
     "nav.ide": {"en": "IDE", "ar": "بيئة التطوير المتكاملة"},
     "nav.chat": {"en": "Chat", "ar": "المحادثة"},

@@ -949,13 +949,15 @@ def create_sse_chat_router(
         Web and Telegram share one checkpointer season.
         """
         session = _get_store().get_or_create(session_id)
-        # Platform-linked seasons: session_id == thread_id always.
+        # One id everywhere: Web session_id == LangGraph thread_id, same as
+        # gw-* platform seasons. Existing rows keep a previously stored
+        # thread_id so we never orphan a checkpointer chain.
         if session_id.startswith("gw-"):
             if session.thread_id != session_id:
                 session.thread_id = session_id
                 _get_store().put(session)
         elif not session.thread_id:
-            session.thread_id = str(uuid.uuid4())
+            session.thread_id = session_id
             _get_store().put(session)
         return session, session.thread_id
 
@@ -1013,70 +1015,38 @@ def create_sse_chat_router(
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
+        try:
+            from kazma_core.sessions.directory import stamp_last_platform
+
+            stamp_last_platform(thread_id, "web")
+        except Exception:
+            pass
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
-        # Deep research slash (§18 Phase 2: unified with gateway — uses
-        # start_deep_research session wrapper, not inline run_research_pipeline)
+        try:
+            from kazma_core.agent.slash_turns import rewrite_work_slash
+
+            _rw = rewrite_work_slash(raw_msg)
+            if _rw:
+                raw_msg = _rw
+                user_message = _rw
+        except Exception:
+            logger.debug("[SSE] slash rewrite skipped", exc_info=True)
+        # Bare /research with no topic — usage only. Work slashes fall through
+        # to the supervisor (same brain as Telegram / TUI).
         if raw_msg.lower().startswith("/research"):
-            from kazma_core.tools.research_session import start_deep_research
-
-            parts = raw_msg.split(maxsplit=2)
-            if len(parts) == 1:
-                topic = ""
-                depth = "deep"
-            elif parts[1].lower() in ("deep", "full", "paper", "comprehensive"):
-                topic = parts[2] if len(parts) > 2 else ""
-                depth = "deep"
-            else:
-                topic = raw_msg[len("/research") :].strip()
-                depth = "deep"
-
             async def _research_gen() -> AsyncGenerator[str, None]:
-                if not topic:
-                    yield _sse_frame(
-                        "token",
-                        {"content": "Usage: `/research deep <topic>`"},
-                    )
-                    yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
-                    return
                 yield _sse_frame(
                     "token",
-                    {"content": f"🔬 Deep research starting: **{topic}**…\n\n"},
+                    {
+                        "content": (
+                            "Usage: `/research deep <topic>` — runs through "
+                            "the same agent as chat (tools + HITL)."
+                        )
+                    },
                 )
-                try:
-                    sess = await start_deep_research(topic, depth=depth, max_sources=8)
-                    if sess and sess.status not in ("error",):
-                        yield _sse_frame(
-                            "token",
-                            {
-                                "content": (
-                                    f"✅ Research session created: `{sess.id}`\n\n"
-                                    f"The pipeline is running in background.\n"
-                                    f"Track progress: Research panel or "
-                                    f"`/api/research/sessions/{sess.id}`\n\n"
-                                    f"Use `/research status` to check completion."
-                                )
-                            },
-                        )
-                    else:
-                        err = getattr(sess, "error", "") or "unknown"
-                        yield _sse_frame(
-                            "token",
-                            {"content": f"⚠️ Research failed to start: {err}"},
-                        )
-                except Exception as exc:
-                    err_text = f"⚠️ Research error: {exc}"
-                    yield _sse_frame(
-                        "token",
-                        {"content": err_text},
-                    )
-                    try:
-                        session.add_message("assistant", err_text)
-                        _get_store().put(session)
-                    except Exception:
-                        pass
-                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 0})
+                yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
 
             return StreamingResponse(
                 _research_gen(),
@@ -1286,137 +1256,24 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        # ── Intercept /swarm <task> and /research <topic> ──────────
-        # These dispatch directly through SwarmEngine — bypassing the LLM's
-        # tool-call decision — so swarm research always works from chat.
-        # Match at start of line OR when embedded in Arabic text (e.g.
-        # "استخدم /research لعمل بحث عن...").
-        _lower = raw_msg.lower().strip()
-        _swarm_cmd = None
-        _swarm_text = ""
-        if _lower.startswith("/swarm ") or _lower == "/swarm":
-            _swarm_cmd = "swarm"
-            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
-        elif _lower.startswith("/research ") or _lower == "/research":
-            _swarm_cmd = "research"
-            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
-        elif "/research" in _lower:
-            # Embedded in Arabic/other text — extract the topic after /research.
-            # Use regex to handle Arabic ligatures/attachments before the command.
-            import re as _re
-            _m = _re.search(r'/research\s+(.*)', raw_msg, _re.DOTALL)
-            if _m:
-                _swarm_cmd = "research"
-                _swarm_text = _m.group(1).strip()
-                # Strip trailing /swarm or other trailing commands.
-                for _trailer in [" /swarm", "/swarm", " /research"]:
-                    if _swarm_text.lower().endswith(_trailer):
-                        _swarm_text = _swarm_text[:-len(_trailer)].strip()
-        elif "/swarm" in _lower and not _lower.startswith("/swarm"):
-            import re as _re
-            _m = _re.search(r'/swarm\s+(.*)', raw_msg, _re.DOTALL)
-            if _m:
-                _swarm_cmd = "swarm"
-                _swarm_text = _m.group(1).strip()
+        # Work /swarm and /research are rewritten above and fall through
+        # to the supervisor. Bare `/swarm` is usage only.
+        if raw_msg.lower().strip() in ("/swarm", "/swarm help"):
+            async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {
+                    "content": (
+                        "🐝 `/swarm <task>` goes through the same agent as chat "
+                        "(tools + HITL). Example: `/swarm analyze competitor pricing`\n"
+                        "`/swarm status` and `/swarm list` still answer instantly."
+                    )
+                })
+                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
 
-        if _swarm_cmd:
-            _is_research = _swarm_cmd == "research"
-            _task_text = _swarm_text
-            if not _task_text:
-                _usage = (
-                    "🔍 *Usage:* `/research <topic>` — dispatches the swarm to research a topic.\n\n"
-                    "Example: `/research latest hair transplant techniques`"
-                ) if _is_research else (
-                    "🐝 *Usage:* `/swarm <task>` — dispatches a task to the swarm.\n\n"
-                    "Example: `/swarm analyze competitor pricing`"
-                )
-
-                async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
-                    yield _sse_frame("token", {"content": _usage})
-                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-
-                return StreamingResponse(
-                    _swarm_usage_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
-
-            try:
-                import asyncio as _asyncio
-                from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
-
-                _engine = get_swarm_engine()
-                if _engine is None:
-                    raise RuntimeError("Swarm engine not initialized")
-
-                # Auto-register a researcher worker if none exist.
-                if not _engine.worker_names:
-                    from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
-                    _profile = registry.get_active_profile() if registry else {}
-                    _engine.add_worker(WorkerConfig(
-                        name="researcher",
-                        type="in_process",
-                        model=_profile.get("model", ""),
-                        provider=_profile.get("provider", ""),
-                        role="researcher",
-                        system_prompt="You are a Researcher. Use web_search, read_url, and crawl_site to research thoroughly.",
-                        capabilities=WorkerCapabilities(
-                            role="researcher", expertise=["research"],
-                            tools=["web_search", "read_url", "crawl_site"],
-                        ),
-                    ))
-
-                _worker = _engine.worker_names[0]
-                _swarm_task = SwarmTask(
-                    prompt=_task_text,
-                    workers=[_worker],
-                    type=TaskType.DISPATCH,
-                    timeout=300.0,
-                    metadata={"source": "chat", "kind": "research" if _is_research else "swarm"},
-                )
-                logger.info("[SSE] /swarm dispatch: task=%s worker=%s", _swarm_task.id, _worker)
-
-                # Run dispatch in foreground (blocking) and stream the result.
-                async def _swarm_dispatch_gen() -> AsyncGenerator[str, None]:
-                    yield _sse_frame("token", {"content": f"🐝 Dispatching to swarm worker '{_worker}'...\n\n"})
-                    try:
-                        result = await _engine.dispatch(_swarm_task)
-                        _output = ""
-                        if result:
-                            _output = (
-                                result.aggregated_output
-                                or result.synthesized_output
-                                or (result.worker_results[0].output if result.worker_results else "")
-                                or "(no output)"
-                            )
-                            _cost = getattr(result, "total_cost", 0.0)
-                            _dur = getattr(result, "duration_seconds", 0.0)
-                            _output = f"✅ Swarm task complete (cost: ${_cost:.4f}, duration: {_dur:.1f}s)\n\n{_output}"
-                        else:
-                            _output = "⚠️ Swarm task returned no result."
-                    except Exception as exc:
-                        _output = f"⚠️ Swarm task failed: {exc}"
-                        logger.exception("[SSE] /swarm dispatch failed")
-                    yield _sse_frame("token", {"content": _output})
-                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-
-                return StreamingResponse(
-                    _swarm_dispatch_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
-            except Exception as exc:
-                logger.exception("[SSE] /swarm intercept failed")
-
-                async def _swarm_err_gen() -> AsyncGenerator[str, None]:
-                    yield _sse_frame("token", {"content": f"⚠️ Could not dispatch swarm: {exc}"})
-                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-
-                return StreamingResponse(
-                    _swarm_err_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
+            return StreamingResponse(
+                _swarm_usage_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         # ── Apply model from request body ──────────────────────────
         # Ensure the process-wide active model matches the UI selection
@@ -1981,10 +1838,12 @@ def create_sse_chat_router(
     @r.get("/api/chat/sessions")
     async def list_sessions() -> list[dict[str, Any]]:
         """List all active chat sessions (shared store)."""
-        return [
-            s.to_summary()
-            for s in _get_store().list_all()
-        ]
+        try:
+            from kazma_core.sessions.directory import enrich_summary
+
+            return [enrich_summary(s.to_summary()) for s in _get_store().list_all()]
+        except Exception:
+            return [s.to_summary() for s in _get_store().list_all()]
 
     @r.get("/api/chat/sessions/{session_id}/status")
     async def get_session_status(session_id: str) -> dict[str, Any]:
@@ -2096,13 +1955,19 @@ def create_sse_chat_router(
     async def list_archived_sessions() -> list[dict[str, Any]]:
         """List archived chat sessions (for the archive view)."""
         try:
+            from kazma_core.sessions.directory import enrich_summary
+
+            return [
+                enrich_summary(s.to_summary())
+                for s in _get_store().list_all(include_archived=True)
+                if s.archived
+            ]
+        except Exception:
             return [
                 s.to_summary()
                 for s in _get_store().list_all(include_archived=True)
                 if s.archived
             ]
-        except Exception:
-            return []
 
     @r.get("/api/chat/sessions/{session_id}/messages")
     async def get_session_messages(

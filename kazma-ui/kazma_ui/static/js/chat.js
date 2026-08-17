@@ -3393,7 +3393,8 @@
     var plat = s.platform || 'web';
     var absTime = '';
     try { absTime = new Date(s.updated_at || s.created_at).toLocaleString(); } catch (e) {}
-    var meta = s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+    var lastPlat = s.last_platform || s.platform || 'web';
+    var meta = lastPlat + ' \u00B7 ' + s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
     var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
       '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(plat) + '"></span>' +
       '<div class="session-info">' +
@@ -3413,6 +3414,8 @@
             escapeHtml(ti(s.pinned ? 'unpin' : 'pin', s.pinned ? 'Unpin' : 'Pin')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="rename" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('rename', 'Rename')) + '</button>' +
+          '<button class="session-menu-item" data-menu-action="copyid" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti('copy_id', 'Copy ID')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="archive" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('archive', 'Archive')) + '</button>' +
           '<button class="session-menu-item danger" data-menu-action="delete" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
@@ -3522,6 +3525,7 @@
         if (action === 'pin') pinSession(sid, true);
         else if (action === 'unpin') pinSession(sid, false);
         else if (action === 'rename') renameSession(sid);
+        else if (action === 'copyid') copySessionId(sid);
         else if (action === 'archive') archiveSession(sid);
         else if (action === 'delete') deleteSession(sid);
       });
@@ -3600,6 +3604,22 @@
       if (headerTitle) headerTitle.textContent = 'Sessions';
       if (newBtn) newBtn.style.display = '';
       loadSessions();
+    }
+  }
+
+  function copySessionId(sessionId) {
+    var text = String(sessionId || '');
+    var link = window.location.origin + '/chat?s=' + encodeURIComponent(text);
+    var payload = text + '\n' + link;
+    var done = function() {
+      if (window.KS && KS.toast) KS.toast('Copied ID — /session ' + text.slice(-8) + ' on Telegram/Discord', 'success', 3500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(payload).then(done).catch(function() {
+        window.prompt('Session ID', text);
+      });
+    } else {
+      window.prompt('Session ID', text);
     }
   }
 
