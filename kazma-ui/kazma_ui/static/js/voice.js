@@ -280,7 +280,7 @@
       // Open WebSocket
       var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       // WebSocket — browser sends cookies automatically, so the
-      // kazma-secret cookie (set at login) will be used by the server
+      // kazma-session cookie (set at login) will be used by the server
       // to authenticate the connection.
       ws = new WebSocket(proto + '//' + window.location.host + '/ws/voice');
 

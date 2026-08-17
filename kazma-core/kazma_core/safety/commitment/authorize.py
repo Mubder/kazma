@@ -668,7 +668,33 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
                     return EffectDecision("clarify", q, profile, audit, commitment_id=cid,
                                           clarify_question=q)
         except Exception:
-            pass  # fail-open if workspace resolution fails
+            logger.warning(
+                "[commitment] cwd pin check failed — clarify (not fail-open)",
+                exc_info=True,
+            )
+            c = Commitment(
+                thread_id=thread_id or "",
+                act="exec",
+                tool_name=tool_name,
+                goal_text=command[:200],
+                args_digest=_args_digest(args),
+                request_at=time.time(),
+                tenant_id=tenant_id,
+                slots={"command": command[:500], "cwd": str(cwd)},
+                confidence=0.2,
+            )
+            c.status = "needs_clarify"
+            c.policy_decision = "clarify"
+            cid = create_commitment(c, cfg=cfg)
+            q = "Could not verify cwd is inside the workspace. Run anyway?"
+            return EffectDecision(
+                "clarify",
+                q,
+                profile,
+                audit,
+                commitment_id=cid,
+                clarify_question=q,
+            )
     # 3. Safe command → allow (the HITL security card still applies separately).
     # Audit trail: the exec resolver returns before the generic allow logging,
     # so "silent allows" skipped the audit entirely (§8.2) — log here (audit).

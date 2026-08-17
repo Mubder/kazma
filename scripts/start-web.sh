@@ -30,7 +30,8 @@ fi
 
 # Defaults tuned for WSL → Windows browser via portproxy / WSL eth IP
 export KAZMA_HOST="${KAZMA_HOST:-0.0.0.0}"
-export KAZMA_TRUST_LAN="${KAZMA_TRUST_LAN:-1}"
+# Do not auto-trust private LAN. Set KAZMA_TRUST_LAN=1 in .env for WSL labs.
+export KAZMA_TRUST_LAN="${KAZMA_TRUST_LAN:-0}"
 
 if [[ -x "$ROOT/.venv/bin/kazma" ]]; then
   KAZMA_BIN="$ROOT/.venv/bin/kazma"

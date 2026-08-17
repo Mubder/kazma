@@ -44,13 +44,26 @@
             </svg>
         </button>
 
-        {# Notifications #}
-        <button class="header-btn" @click="$store.notifications.open = !$store.notifications.open" title="Notifications">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
-            </svg>
-            <span class="notification-dot" x-show="$store.notifications.count > 0" x-text="$store.notifications.count"></span>
-        </button>
+        {# Notifications — live /api/alerts/recent (not a dead empty store) #}
+        <div class="user-menu" x-init="$store.notifications.refresh()" @click.outside="$store.notifications.open = false">
+            <button class="header-btn" @click="$store.notifications.open = !$store.notifications.open" title="Notifications">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
+                </svg>
+                <span class="notification-dot notification-count" x-show="$store.notifications.count > 0" x-cloak x-text="$store.notifications.count"></span>
+            </button>
+            <div class="user-menu-dropdown notif-dropdown" x-show="$store.notifications.open" x-cloak>
+                <template x-if="$store.notifications.items.length === 0">
+                    <div class="dropdown-item" style="cursor:default;opacity:0.7">No system alerts</div>
+                </template>
+                <template x-for="item in $store.notifications.items" :key="item.id">
+                    <div class="dropdown-item" style="cursor:default;flex-direction:column;align-items:flex-start;gap:2px">
+                        <span x-text="(item.severity || '') + ' · ' + (item.subsystem || item.title || 'alert')"></span>
+                        <span style="font-size:0.75rem;opacity:0.7" x-text="item.reason || item.status || ''"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
 
         {# Language Toggle #}
         <button class="theme-toggle lang-toggle" @click="toggleLanguage()" :title="lang === 'ar' ? 'English' : 'العربية'">

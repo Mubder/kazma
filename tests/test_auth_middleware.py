@@ -60,14 +60,20 @@ def _build_test_app() -> FastAPI:
         if not verify_secret(secret, expected):
             return JSONResponse({"detail": "Invalid secret"}, status_code=401)
         resp = JSONResponse({"status": "ok", "authenticated": True})
-        resp.set_cookie(SECRET_COOKIE, expected, httponly=True, samesite="strict", path="/")
+        from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
+
+        sid = create_session(actor="test-login")
+        resp.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="strict", path="/")
+        resp.delete_cookie(SECRET_COOKIE, path="/")
         return resp
 
     @app.post("/api/auth/logout")
     async def auth_logout() -> Response:
+        from kazma_core.security.web_sessions import SESSION_COOKIE
         from kazma_ui.auth import SECRET_COOKIE
 
         resp = JSONResponse({"status": "ok"})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
         resp.delete_cookie(SECRET_COOKIE, path="/")
         return resp
 
@@ -124,17 +130,18 @@ def _build_test_app() -> FastAPI:
 
     @app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
-        from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
-        expected = get_kazma_secret()
-        if expected:
-            provided = websocket.headers.get("x-kazma-secret", "")
-            if not provided:
-                provided = websocket.cookies.get(SECRET_COOKIE, "")
-            import hmac as _hmac
+        from unittest.mock import patch as _patch
 
-            if not provided or not _hmac.compare_digest(provided, expected):
-                await websocket.close(code=4003, reason="Unauthorized")
-                return
+        from kazma_ui.auth import websocket_is_authenticated
+
+        # TestClient peers are loopback (auto-allow). Force the remote
+        # credential path so these tests cover real header/cookie checks.
+        with _patch("kazma_ui.auth._is_loopback_client", return_value=False):
+            with _patch("kazma_ui.auth._is_private_lan_client", return_value=False):
+                ok = websocket_is_authenticated(websocket)
+        if not ok:
+            await websocket.close(code=4003, reason="Unauthorized")
+            return
         await websocket.accept()
         await websocket.send_text("connected")
         await websocket.close()
@@ -418,13 +425,25 @@ class TestAuthMiddlewareWithSecret:
             assert data == "connected"
 
     def test_websocket_authorized_with_cookie(self):
-        """Websocket connection succeeds when secret is provided in cookies (browser fallback)."""
-        # Pass the secret via cookies, representing browser WebSocket behavior
-        self.client.cookies.set("kazma-secret", TEST_SECRET)
+        """Websocket succeeds with an opaque kazma-session cookie (not raw secret)."""
+        from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
+
+        sid = create_session(actor="test")
+        self.client.cookies.set(SESSION_COOKIE, sid)
         try:
             with self.client.websocket_connect("/ws/dashboard") as ws:
                 data = ws.receive_text()
                 assert data == "connected"
+        finally:
+            self.client.cookies.clear()
+
+    def test_websocket_legacy_secret_cookie_rejected(self):
+        """Raw kazma-secret cookie is not a credential when opaque sessions are on."""
+        self.client.cookies.set("kazma-secret", TEST_SECRET)
+        try:
+            with pytest.raises(Exception):
+                with self.client.websocket_connect("/ws/dashboard") as ws:
+                    ws.receive_text()
         finally:
             self.client.cookies.clear()
 

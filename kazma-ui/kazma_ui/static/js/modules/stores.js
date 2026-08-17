@@ -405,6 +405,33 @@ export function registerStores() {
             open: false,
             count: 0,
             items: [],
+            error: '',
+
+            init() {
+                this.refresh();
+                try {
+                    setInterval(() => this.refresh(), 15000);
+                } catch (e) { /* no window timers in some tests */ }
+            },
+
+            async refresh() {
+                try {
+                    const res = await fetch('/api/alerts/recent', {
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'same-origin',
+                    });
+                    if (!res.ok) {
+                        this.error = 'alerts unavailable';
+                        return;
+                    }
+                    const alerts = await res.json();
+                    this.items = Array.isArray(alerts) ? alerts : [];
+                    this.count = this.items.length;
+                    this.error = '';
+                } catch (e) {
+                    this.error = 'alerts unavailable';
+                }
+            },
         });
 
         // ── 5. Settings Store ──────────────────────────────────────────

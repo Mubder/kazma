@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Audit B remaining (2026-08-17)
+
+Login and auto-cookie never write the raw ``KAZMA_SECRET`` into
+``kazma-secret``. Opaque sessions are the only browser credential.
+WebSocket query tokens no longer accept the raw secret. Platform RBAC
+fails closed when multi-user is on and the check errors. ``start-web.sh``
+defaults ``KAZMA_TRUST_LAN=0``. Exec cwd pin clarifies instead of
+failing open. The header bell reads ``GET /api/alerts/recent``.
+
 ## Unreleased — Audit A remaining (2026-08-17)
 
 Docs no longer claim "Production-Grade" or blanket "multi-replica ready"

@@ -717,6 +717,22 @@ button { cursor: pointer; font-family: inherit; }
   border-radius: 50%;
   border: 2px solid var(--bg-panel);
 }
+.notification-dot.notification-count {
+  width: auto;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 0.6rem;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+  border-radius: 8px;
+}
+.notif-dropdown {
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+}
 
 /* User dropdown */
 .user-menu {

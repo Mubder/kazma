@@ -2083,44 +2083,33 @@ def register_direct_routes(self: Any) -> None:
             "username": session_user,
             "role": session_role,
         })
-        # Opaque session cookie preferred (audit H1)
+        # Always mint an opaque session — never put KAZMA_SECRET in a cookie.
         try:
-            from kazma_core.security.web_sessions import (
-                SESSION_COOKIE,
-                create_session,
-                use_opaque_sessions,
-            )
+            from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
 
-            if use_opaque_sessions():
-                sid = create_session(
-                    actor="login",
-                    username=session_user,
-                    role=session_role,
-                    user_id=session_uid,
-                )
-                resp.set_cookie(
-                    key=SESSION_COOKIE,
-                    value=sid,
-                    httponly=True,
-                    samesite="lax",
-                    path="/",
-                    secure=_is_https(request),
-                    max_age=60 * 60 * 24 * 14,
-                )
-                resp.delete_cookie(SECRET_COOKIE, path="/")
-                return resp
+            sid = create_session(
+                actor="login",
+                username=session_user,
+                role=session_role,
+                user_id=session_uid,
+            )
+            resp.set_cookie(
+                key=SESSION_COOKIE,
+                value=sid,
+                httponly=True,
+                samesite="lax",
+                path="/",
+                secure=_is_https(request),
+                max_age=60 * 60 * 24 * 14,
+            )
+            resp.delete_cookie(SECRET_COOKIE, path="/")
+            return resp
         except Exception:
-            logger.debug("[auth] opaque session create failed; legacy cookie", exc_info=True)
-        resp.set_cookie(
-            key=SECRET_COOKIE,
-            value=expected,
-            httponly=True,
-            samesite="lax",  # LAN/IP + form POST login
-            path="/",
-            secure=_is_https(request),
-            max_age=60 * 60 * 24 * 14,  # 14 days
-        )
-        return resp
+            logger.warning("[auth] opaque session create failed — refusing raw secret cookie", exc_info=True)
+            return _JSONResponse(
+                {"error": "session_create_failed", "detail": "Could not mint a login session."},
+                status_code=503,
+            )
 
     @self.app.get("/api/auth/oidc/start")
     async def _oidc_start(request: Request) -> Response:
