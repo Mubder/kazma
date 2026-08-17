@@ -25,9 +25,11 @@ __all__ = [
     "bind_sender_to_thread",
     "create_named_session",
     "enrich_summary",
+    "find_mouth_thread",
     "format_session_list",
     "infer_origin",
     "list_directory",
+    "remember_sender_thread",
     "resolve_session",
     "stamp_last_platform",
 ]
@@ -83,6 +85,80 @@ def _last_platform_stored(thread_id: str) -> str:
     except Exception:
         logger.debug("[sessions] last_platform read failed", exc_info=True)
     return ""
+
+
+def remember_sender_thread(sender_id: str, thread_id: str) -> None:
+    """Persist which season this mouth is on (ConfigStore)."""
+    if not sender_id or not thread_id:
+        return
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(
+            f"active_thread.{sender_id}",
+            thread_id,
+            category="session",
+        )
+    except Exception:
+        logger.warning("[sessions] persist active_thread failed", exc_info=True)
+
+
+def find_mouth_thread(
+    sender_id: str,
+    *,
+    platform: str = "",
+    username: str = "",
+) -> str | None:
+    """Return the season this mouth should continue (no minting).
+
+    Order: ConfigStore pointer → deterministic ``gw-<platform>-<id>`` row
+    → newest existing season for this platform+username. Never invents an id.
+    """
+    if sender_id:
+        try:
+            from kazma_core.config_store import get_config_store
+
+            persisted = get_config_store().get(f"active_thread.{sender_id}")
+            if persisted:
+                return str(persisted)
+        except Exception:
+            logger.debug("[sessions] active_thread read failed", exc_info=True)
+
+    plat = (platform or "").strip().lower()
+    tail = ""
+    if sender_id and ":" in sender_id:
+        _p, tail = sender_id.split(":", 1)
+        if not plat:
+            plat = _p.strip().lower()
+    elif sender_id:
+        tail = sender_id
+    det = f"gw-{plat}-{tail}" if plat and tail else ""
+
+    try:
+        from kazma_ui.session_manager import get_session_manager
+
+        sm = get_session_manager()
+        if det:
+            sess = sm.get(det) or sm.get_by_thread_id(det)
+            if sess is not None:
+                return str(sess.thread_id or sess.session_id)
+    except Exception:
+        logger.debug("[sessions] mouth SM lookup failed", exc_info=True)
+
+    uname = (username or "").strip().lower()
+    if not plat and not uname:
+        return None
+    for e in list_directory(include_archived=True, limit=200):
+        if plat and e.origin != plat and e.platform != plat:
+            continue
+        sid = (e.session_id or "").lower()
+        tid = (e.thread_id or "").lower()
+        title = (e.title or "").lower()
+        if tail and (sid.endswith(tail.lower()) or tail.lower() in sid):
+            return e.thread_id
+        if uname and (uname in title or uname in sid or uname in tid):
+            return e.thread_id
+    return None
 
 
 def stamp_last_platform(thread_id: str, platform: str) -> None:
@@ -292,16 +368,7 @@ async def bind_sender_to_thread(
     """
     if not sender_id or not thread_id:
         return None
-    try:
-        from kazma_core.config_store import get_config_store
-
-        get_config_store().set(
-            f"active_thread.{sender_id}",
-            thread_id,
-            category="session",
-        )
-    except Exception:
-        logger.warning("[sessions] persist active_thread failed", exc_info=True)
+    remember_sender_thread(sender_id, thread_id)
 
     if session_store is not None and delivery_ctx is not None:
         try:

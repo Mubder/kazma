@@ -400,10 +400,30 @@ def create_graph_handler(
         """Process a single IncomingMessage through the agent graph."""
         sender = msg.sender_id
 
-        # Resolve thread_id using standardized resolver (synchronized)
+        # Resolve thread_id using standardized resolver (synchronized).
+        # ConfigStore / existing seasons win over the in-memory cache so a
+        # /session take-over (or a restart) cannot mint a twin Telegram row.
         async with _sessions_lock:
-            if sender in _sessions:
-                # LRU: mark as most-recently-used.
+            found = None
+            try:
+                from kazma_core.sessions.directory import find_mouth_thread
+
+                found = find_mouth_thread(
+                    sender,
+                    platform=msg.platform,
+                    username=str(
+                        (msg.context_metadata or {}).get("username")
+                        or (msg.context_metadata or {}).get("display_name")
+                        or ""
+                    ),
+                )
+            except Exception:
+                logger.debug("[agent-handler] find_mouth_thread failed", exc_info=True)
+            if found:
+                _sessions[sender] = found
+                _sessions.move_to_end(sender)
+                thread_id = found
+            elif sender in _sessions:
                 _sessions.move_to_end(sender)
                 thread_id = _sessions[sender]
             else:
@@ -411,6 +431,12 @@ def create_graph_handler(
                 while len(_sessions) > _MAX_DICT_ENTRIES:
                     _sessions.popitem(last=False)
                 thread_id = _sessions[sender]
+            try:
+                from kazma_core.sessions.directory import remember_sender_thread
+
+                remember_sender_thread(sender, thread_id)
+            except Exception:
+                logger.debug("[agent-handler] remember_sender_thread failed", exc_info=True)
 
         # Inject the resolved thread_id into context_metadata
         # so _build_initial_state can pick it up

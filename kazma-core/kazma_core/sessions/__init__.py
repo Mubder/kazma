@@ -12,8 +12,10 @@ from kazma_core.sessions.directory import (
     bind_sender_to_thread,
     create_named_session,
     enrich_summary,
+    find_mouth_thread,
     format_session_list,
     list_directory,
+    remember_sender_thread,
     resolve_session,
     stamp_last_platform,
 )
@@ -23,8 +25,10 @@ __all__ = [
     "bind_sender_to_thread",
     "create_named_session",
     "enrich_summary",
+    "find_mouth_thread",
     "format_session_list",
     "list_directory",
+    "remember_sender_thread",
     "resolve_session",
     "stamp_last_platform",
 ]

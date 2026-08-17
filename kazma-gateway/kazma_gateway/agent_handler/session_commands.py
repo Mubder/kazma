@@ -21,6 +21,8 @@ def _parse(text: str) -> tuple[str, str] | None:
         return None
     parts = raw.split(None, 1)
     cmd = parts[0].lower().lstrip("/")
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
     rest = parts[1].strip() if len(parts) > 1 else ""
     if cmd in {"sessions", "seasons"}:
         return ("list", rest)

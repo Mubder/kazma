@@ -140,3 +140,32 @@ def test_session_command_parse():
     assert _parse("/switch 3") == ("switch", "3")
     assert _parse("/session here") == ("here", "")
     assert _parse("hello") is None
+    assert _parse("/session@KazmaBot 40") == ("switch", "40")
+    assert _parse("/sessions@KazmaBot") == ("list", "")
+
+
+def test_find_mouth_thread_prefers_configstore_then_existing_telegram():
+    from kazma_core.sessions.directory import find_mouth_thread, remember_sender_thread
+
+    existing = _seed(
+        "Telegram · bAlfaris",
+        "gw-telegram-bAlfaris-fd44e607",
+        platform="telegram",
+        msgs=3,
+    )
+    remember_sender_thread("telegram:99", existing.session_id)
+    assert find_mouth_thread("telegram:99", platform="telegram", username="bAlfaris") == existing.session_id
+
+    # Without a pointer, still reuse the existing Telegram season (do not mint).
+    from kazma_core.config_store import get_config_store
+
+    get_config_store().delete("active_thread.telegram:99")
+    found = find_mouth_thread("telegram:99", platform="telegram", username="bAlfaris")
+    assert found == existing.session_id
+
+
+def test_slash_resolver_strips_telegram_bot_suffix():
+    from kazma_gateway.slash_commands import resolve_slash_command
+
+    assert resolve_slash_command("/session@KazmaBot 40") is None
+    assert resolve_slash_command("/sessions@KazmaBot") is None

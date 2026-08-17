@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Telegram Hey no longer mints a twin season (2026-08-17)
+
+Taking over a TUI/Web season on Telegram, then sending "Hey", created a
+new `Telegram · bAlfaris` row. Two causes: `/session@Bot 40` was not
+parsed as take-over, and a cold resolve minted `gw-telegram-<userid>`
+instead of the existing season. Mouths now strip the `@bot` suffix,
+prefer ConfigStore `active_thread.{sender}`, and reuse the newest
+matching Telegram season instead of inventing a twin.
+
 ## Unreleased — TUI: don't call my.kazma.ai for chat (2026-08-17)
 
 When the local server is down, the TUI used to fall through to

@@ -189,6 +189,8 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         Response string if the command is recognised, None otherwise.
     """
     cmd = text.strip().lower().split()[0]
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
     ctx = context or {}
 
     if cmd == "/help":
