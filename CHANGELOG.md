@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Telegram HITL example cards are real buttons (2026-08-17)
+
+``send_approval_request`` drew ``[ APPROVE ]`` / ``[ DENY ]`` as plain
+text. It now sends the same Telegram inline keyboard as a real graph
+HITL interrupt (Approve / Deny / Approve for task). The send backend
+forwards ``hitl_approval`` as ``reply_markup``.
+
 ## Unreleased — HITL YOLO session is real session YOLO (2026-08-17)
 
 Clicking **YOLO session** on a card now enables the thread for every

@@ -22,6 +22,7 @@ from .hitl import (
     _check_graph_interrupt,
     _build_approval_prompt,
     _handle_hitl_resume,
+    apply_hitl_approval_markup,
 )
 from .commands import (
     _try_documents_command,
@@ -1919,14 +1920,24 @@ def create_graph_handler(
                 ctx = await _store.get(target_id)
             if not ctx:
                 ctx = {"thread_id": target_id}
+            # Always copy — HITL markup must not mutate a shared session ctx.
+            out_ctx = dict(ctx)
             # target_id is prefixed "telegram:..." — convert markdown to HTML
             # so worker output renders instead of showing literal markers.
             if str(target_id).startswith("telegram:"):
-                out_ctx = dict(ctx)
                 out_ctx["parse_mode"] = "HTML"
                 out_text: str = md_to_tg_html(text)
             else:
-                out_ctx, out_text = ctx, text
+                out_text = text
+            out_ctx = apply_hitl_approval_markup(
+                out_ctx,
+                platform="telegram",
+                hitl_approval=kwargs.get("hitl_approval")
+                if isinstance(kwargs.get("hitl_approval"), dict)
+                else None,
+            )
+            if kwargs.get("reply_markup"):
+                out_ctx["reply_markup"] = kwargs["reply_markup"]
             # Build attachments from kwargs (file delivery via send_file_message).
             raw_attachments = kwargs.get("attachments")
             outbound_attachments: list[Attachment] = []

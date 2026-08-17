@@ -42,42 +42,63 @@ async def send_approval_request(
     title: str,
     actions: list[str],
 ) -> str:
-    """Dispatch an interactive approval card with actions/buttons for human verification (HITL).
+    """Dispatch a platform-native HITL approval card (Telegram inline buttons).
 
-    Formats a robust markdown button card block compatible across Telegram, Discord, and Slack.
+    Telegram/Discord/Slack get the same Approve / Deny / Approve-for-task
+    controls as a real graph interrupt. Do not draw fake ``[ APPROVE ]``
+    text — those are not buttons. This card does not replace calling a
+    danger tool (``file_write``, etc.); those already pause for HITL.
 
     Args:
         channel: Platform backend ('telegram', 'discord', 'slack').
-        recipient_id: Recipient target ID.
+        recipient_id: Recipient target ID (e.g. 'telegram:12345').
         title: The heading or prompt description requiring human review.
-        actions: List of actions/buttons, e.g. ['Approve', 'Deny'].
+        actions: Hint list (Approve/Deny). The platform keyboard is fixed
+            to the HITL action vocabulary the adapters already handle.
 
     Returns:
         The dispatch status.
     """
-    if not recipient_id or not title:
+    from kazma_core.safety.hitl import get_current_thread_id
+    from kazma_core.tools.send_message import get_current_delivery_target
+
+    if not title:
+        return "Error: Title must be specified."
+
+    recipient_id = (recipient_id or "").strip() or (get_current_delivery_target() or "")
+    if not recipient_id:
         return "Error: Recipient ID and title must be specified."
+
+    allowed_channels = {"telegram", "discord", "slack"}
+    chan = (channel or "telegram").lower().strip()
+    if chan not in allowed_channels:
+        return f"Error: Channel '{channel}' not supported. Supported: {', '.join(sorted(allowed_channels))}"
 
     if not actions:
         actions = ["Approve", "Deny"]
 
-    # Construct premium interactive text representation
-    card = [
-        "🔔 *KAZMA INTERACTIVE HITL CARD*",
-        "==================================",
-        f"📝 *Request:* {title}",
-        "",
-        "👇 *Please select an action below:*",
-    ]
+    request_id = (get_current_thread_id() or "").strip() or recipient_id
 
-    for act in actions:
-        card.append(f"• [ {act.upper()} ]")
-    card.append("==================================")
-
-    formatted_card = "\n".join(card)
+    # Same body shape as graph HITL so Telegram looks like the Web card,
+    # plus typed fallbacks if the keyboard cannot be delivered.
+    formatted_card = (
+        f"⚠️ Approval required\n"
+        f"{title}\n\n"
+        f"Reply: hitl approve {request_id}\n"
+        f"   or: hitl deny {request_id}"
+    )
 
     try:
-        res = await _core_send_message(target_id=recipient_id, text=formatted_card, backend=channel.lower().strip())
+        res = await _core_send_message(
+            target_id=recipient_id,
+            text=formatted_card,
+            backend=chan,
+            hitl_approval={
+                "request_id": request_id,
+                "title": title,
+                "actions": list(actions),
+            },
+        )
         return f"Approval request dispatched. Status: {res}"
     except Exception as e:
         logger.error("Error sending approval request card: %s", e)
