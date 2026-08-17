@@ -170,15 +170,13 @@
             <button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>
           </div>
           <button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>
+          <div class="capacity-group session-metrics" aria-label="Session usage">
+            <span id="session-cost" class="capacity-stat cost-badge">$0.0000</span>
+            <span id="session-tokens" class="capacity-stat token-badge">0 tok</span>
+            <span id="context-size" class="capacity-stat context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
+          </div>
         </div>
         <div class="input-footer">
-          <div class="session-metrics" aria-label="Session usage">
-            <span id="session-cost" class="metric-item cost-badge">$0.0000</span>
-            <span class="metric-dot" aria-hidden="true">·</span>
-            <span id="session-tokens" class="metric-item token-badge">0 tok</span>
-            <span class="metric-dot" aria-hidden="true">·</span>
-            <span id="context-size" class="metric-item context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
-          </div>
           <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}" hidden>0</span>
           <span class="chat-input-footer-hint">
             <kbd>Enter</kbd> {{ t('chat.send_shortcut') }}

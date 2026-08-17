@@ -1903,7 +1903,7 @@ tbody tr:last-child td {
 }
 .capacity-reset {
   flex: 0 0 auto;
-  margin-inline-start: auto;
+  margin-inline-start: 0;
   background: transparent;
   border: 0;
   color: var(--text-muted);
@@ -1920,6 +1920,24 @@ tbody tr:last-child td {
 }
 .capacity-pill-power,
 .capacity-pill-off { /* back-compat no-ops — power look is .is-on only */ }
+.session-metrics {
+  margin-inline-start: auto;
+}
+.capacity-stat {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 5px 11px;
+  border: 0;
+  border-inline-end: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.session-metrics .capacity-stat:last-child { border-inline-end: 0; }
 /* Pending attachments — chips ABOVE the composer, never in the placeholder */
 .chat-attachments {
   display: flex;
@@ -2095,30 +2113,10 @@ tbody tr:last-child td {
   font-size: 0.72rem;
   color: var(--text-tertiary);
 }
-.session-metrics {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-.metric-item,
 .cost-badge,
 .token-badge,
 .context-badge {
-  padding: 0;
-  background: none;
-  border: 0;
-  border-radius: 0;
-  color: var(--text-tertiary);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.metric-dot {
-  margin: 0 7px;
-  color: var(--text-muted);
-  opacity: 0.55;
-  user-select: none;
+  color: inherit;
 }
 .chat-input-footer-hint {
   margin-inline-start: auto;

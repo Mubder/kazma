@@ -4213,7 +4213,12 @@
           '<button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="Skip danger-tool approvals">YOLO</button>' +
           '<button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>' +
         '</div>' +
-        '<button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>';
+        '<button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>' +
+        '<div class="capacity-group session-metrics" aria-label="Session usage">' +
+          '<span id="session-cost" class="capacity-stat cost-badge">$0.0000</span>' +
+          '<span id="session-tokens" class="capacity-stat token-badge">0 tok</span>' +
+          '<span id="context-size" class="capacity-stat context-badge">—</span>' +
+        '</div>';
     }
     if (bar && footer && bar.nextElementSibling !== footer) {
       footer.parentNode.insertBefore(bar, footer);

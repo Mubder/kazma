@@ -36,12 +36,16 @@ def html_power_block(css: str) -> str:
     return css.split(".capacity-pill-power")[1].split("}", 1)[0]
 
 
-def test_metrics_are_inline_not_competing_pills() -> None:
+def test_metrics_share_button_row_and_shape() -> None:
+    html = _CHAT_HTML.read_text(encoding="utf-8")
     css = _CSS.read_text(encoding="utf-8")
-    assert ".session-metrics" in css
-    assert ".char-badge.is-empty { display: none; }" in css.replace("\n", " ")
     js = _CHAT_JS.read_text(encoding="utf-8")
+    assert 'class="capacity-group session-metrics"' in html
+    assert "capacity-stat" in html
+    assert ".session-metrics" in css
+    assert "margin-inline-start: auto" in css.split(".session-metrics")[1][:80]
+    assert ".char-badge.is-empty { display: none; }" in css.replace("\n", " ")
     assert "formatCompactCount" in js
     assert "'~' + formatCompactCount(totalTokens) + ' ctx'" in js
     assert "charBadge.hidden = n === 0" in js
-    assert "YOLO' : 'HITL'" not in js  # status no longer dumps YOLO/HITL into the label
+    assert "YOLO' : 'HITL'" not in js
