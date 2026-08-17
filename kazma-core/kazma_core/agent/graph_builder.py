@@ -1563,6 +1563,13 @@ async def supervisor_node(
         )
 
         _steer_tid = str(state.get("thread_id") or "")
+        if not _steer_tid:
+            try:
+                from kazma_core.safety.hitl import get_current_thread_id
+
+                _steer_tid = str(get_current_thread_id() or "")
+            except Exception:
+                _steer_tid = ""
         _hard_text = peek_hard_steer(_steer_tid)
         if _hard_text:
             from langgraph.types import interrupt  # local import (cf. commitment gate)

@@ -158,23 +158,32 @@
         </button>
       </div>
       <div class="chat-drop-hint" id="chat-drop-hint" hidden aria-hidden="true">{{ t('chat.drop_files') }}</div>
-      <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="Turn budget and HITL">
-        <span id="capacity-status" class="capacity-status">Mode</span>
-        <button type="button" class="capacity-pill" data-cap="/long on" title="Research budget, HITL stays on">Long</button>
-        <button type="button" class="capacity-pill" data-cap="/long mission" title="Run until done (~500 rounds)">Mission</button>
-        <button type="button" class="capacity-pill" data-cap="/yolo" title="Skip danger-tool approvals">YOLO</button>
-        <button type="button" class="capacity-pill capacity-pill-power" data-cap="/unrestricted" title="Mission + YOLO — finish this job">Unrestricted</button>
-        <button type="button" class="capacity-pill capacity-pill-off" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>
-      </div>
-      <div class="input-footer">
-        <span id="session-cost" class="cost-badge">$0.0000</span>
-        <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
-        <span id="context-size" class="context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
-        <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}">0</span>
-        <span class="chat-input-footer-hint">
-          <kbd>Enter</kbd> / <kbd>Ctrl+Enter</kbd> {{ t('chat.send_shortcut') }} ·
-          <kbd>Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
-        </span>
+      <div class="composer-chrome">
+        <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="Turn budget and HITL">
+          <span id="capacity-status" class="capacity-status" title="Current turn budget">Chat · 100</span>
+          <div class="capacity-group" role="group" aria-label="Budget">
+            <button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="Research budget, HITL stays on">Long</button>
+            <button type="button" class="capacity-pill" data-cap="/long mission" aria-pressed="false" title="Run until done (~500 rounds)">Mission</button>
+          </div>
+          <div class="capacity-group" role="group" aria-label="Approvals">
+            <button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="Skip danger-tool approvals">YOLO</button>
+            <button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>
+          </div>
+          <button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>
+        </div>
+        <div class="input-footer">
+          <div class="session-metrics" aria-label="Session usage">
+            <span id="session-cost" class="metric-item cost-badge">$0.0000</span>
+            <span class="metric-dot" aria-hidden="true">·</span>
+            <span id="session-tokens" class="metric-item token-badge">0 tok</span>
+            <span class="metric-dot" aria-hidden="true">·</span>
+            <span id="context-size" class="metric-item context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
+          </div>
+          <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}" hidden>0</span>
+          <span class="chat-input-footer-hint">
+            <kbd>Enter</kbd> {{ t('chat.send_shortcut') }}
+          </span>
+        </div>
       </div>
     </div>
   </main>

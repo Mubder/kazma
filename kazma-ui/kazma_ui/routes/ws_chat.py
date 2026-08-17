@@ -750,10 +750,27 @@ def create_ws_chat_router(
                         ).to_dict())
                         continue
                     if not is_turn_running(thread_id):
-                        await websocket.send_json(TelemetryEvent(
-                            type="graph_error", data={"message": "no active task to steer"}, thread_id=thread_id,
-                        ).to_dict())
-                        continue
+                        # HITL / hard-steer interrupt: pump is idle but the
+                        # graph is still paused — allow steer (same as HTTP).
+                        _st_paused_now = False
+                        try:
+                            _st_snap0 = await _get_graph().aget_state({
+                                "configurable": {
+                                    "thread_id": thread_id,
+                                    "checkpoint_ns": "",
+                                },
+                                "recursion_limit": _ws_recursion_limit(thread_id),
+                            })
+                            _st_paused_now = bool(getattr(_st_snap0, "next", None))
+                        except Exception:
+                            _st_paused_now = False
+                        if not _st_paused_now:
+                            await websocket.send_json(TelemetryEvent(
+                                type="graph_error",
+                                data={"message": "no active task to steer"},
+                                thread_id=thread_id,
+                            ).to_dict())
+                            continue
                     from kazma_core.agent.steer import (
                         clear_all_steers,
                         is_hard_steer_interrupt,

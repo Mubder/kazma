@@ -1838,45 +1838,88 @@ tbody tr:last-child td {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
 }
+.composer-chrome {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
 .capacity-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  margin-bottom: 6px;
+  gap: 8px;
+  min-height: 32px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.capacity-bar::-webkit-scrollbar { display: none; }
 .capacity-status {
-  font-size: 0.78rem;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-primary);
-  margin-inline-end: 4px;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  margin: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-surface);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.capacity-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-surface);
 }
 .capacity-pill {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong, var(--border));
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border-radius: 999px;
+  letter-spacing: 0.01em;
+  padding: 5px 11px;
+  border: 0;
+  border-inline-end: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
-  line-height: 1.3;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.capacity-pill:hover { border-color: var(--accent); color: var(--text-primary); }
+.capacity-group .capacity-pill:last-child { border-inline-end: 0; }
+.capacity-pill:hover { color: var(--text-primary); background: var(--bg-hover); }
+.capacity-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Active = muted danger (never gold). Mix keeps it readable, not neon. */
 .capacity-pill.is-on {
-  border-color: #ca8a04;
-  color: #fff8e1;
-  background: #a16207;
+  color: color-mix(in srgb, #e7b8b8 55%, var(--text-primary));
+  background: color-mix(in srgb, var(--danger) 20%, var(--bg-elevated));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 38%, transparent);
 }
-.capacity-pill-power {
-  border-color: #ca8a04;
-  background: #a16207;
-  color: #fff8e1;
+.capacity-reset {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 5px 8px;
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
 }
-.capacity-pill-power:hover { filter: brightness(1.08); }
-.capacity-pill-off { opacity: 1; }
+.capacity-reset:hover {
+  color: color-mix(in srgb, var(--danger) 55%, var(--text-primary));
+  background: var(--danger-subtle);
+}
+.capacity-pill-power,
+.capacity-pill-off { /* back-compat no-ops — power look is .is-on only */ }
 /* Pending attachments — chips ABOVE the composer, never in the placeholder */
 .chat-attachments {
   display: flex;
@@ -2047,31 +2090,47 @@ tbody tr:last-child td {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-2);
-  margin-top: var(--sp-2);
-  font-size: 0.8rem;
-  color: var(--text-primary);
+  gap: 8px;
+  margin-top: 0;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
 }
+.session-metrics {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.metric-item,
 .cost-badge,
-.token-badge {
-  padding: 2px 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--text-primary);
-  font-weight: 600;
+.token-badge,
+.context-badge {
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.metric-dot {
+  margin: 0 7px;
+  color: var(--text-muted);
+  opacity: 0.55;
+  user-select: none;
 }
 .chat-input-footer-hint {
   margin-inline-start: auto;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 .chat-input-footer-hint kbd {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   padding: 1px 5px;
   border-radius: 3px;
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
 
 /* Thinking indicator */
@@ -2610,20 +2669,17 @@ tbody tr:last-child td {
 /* RTL: mirror the workbench chevron */
 [dir="rtl"] .agent-progress-chevron { transform: scaleX(-1); }
 
-/* Context + composer badges — same pill family as cost/token badges */
-.context-badge,
+/* Context lives in .session-metrics; composer count is a quiet draft meter. */
 .char-badge {
-  padding: 2px 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--text-primary);
-  font-weight: 600;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   unicode-bidi: isolate;
 }
-.context-badge { color: var(--text-primary); }
-.char-badge.is-empty { opacity: 0.85; }
+.char-badge.is-empty { display: none; }
 
 /* Turn summary bar density: the done title carries
    "Done · N tools · M steps · Xs · $cost · tokens" — keep it one line */
@@ -3512,8 +3568,9 @@ tbody tr:last-child td {
 [dir="rtl"] .input-wrapper {
   flex-direction: row-reverse;
 }
-[dir="rtl"] .chat-input-area .input-footer {
-  flex-direction: row-reverse;
+[dir="rtl"] .chat-input-area .input-footer,
+[dir="rtl"] .chat-input-area .capacity-bar {
+  flex-direction: row;
 }
 [dir="rtl"] .session-search-wrapper .form-input {
   padding-right: var(--sp-3);

@@ -113,6 +113,11 @@
       syncInputBidi();
     }
     if (sendBtn) sendBtn.addEventListener('click', function() {
+      var draft = (inputEl && inputEl.value || '').trim();
+      if (isSteerOrAbortCommand(draft)) {
+        sendMessage();
+        return;
+      }
       if (_isGenerating) { abortGeneration(); } else { sendMessage(); }
     });
 
@@ -476,11 +481,73 @@
     { cmd: '/long off', desc: 'Budget only off (HITL unchanged)' },
     { cmd: '/new', desc: 'Start a new chat session' },
     { cmd: '/reset', desc: 'Clear this conversation history' },
-    { cmd: '/steer <text>', desc: 'Add context to the running task (applies next step)' },
-    { cmd: '/steer! <text>', desc: 'Pause the running task, inject a requirement, resume' },
+    { cmd: '/steer', insert: '/steer ', desc: 'Queue a note for the running task — edit, then Enter' },
+    { cmd: '/steer!', insert: '/steer! ', desc: 'Pause the running task and inject a requirement' },
     { cmd: '/abort', desc: 'Stop and abandon the running task' },
     { cmd: '/help', desc: 'List available slash commands' },
   ];
+
+  function _cmdHead(text) {
+    return String(text || '').trim().split(/\s+/)[0].toLowerCase();
+  }
+
+  function isAbortCommand(text) {
+    return _cmdHead(text) === '/abort';
+  }
+
+  function isSteerCommand(text) {
+    var h = _cmdHead(text);
+    return h === '/steer' || h === '/steer!';
+  }
+
+  function isSteerOrAbortCommand(text) {
+    return isSteerCommand(text) || isAbortCommand(text);
+  }
+
+  function steerBody(text) {
+    var rest = (String(text || '').trim().split(/\s(.+)/)[1] || '').trim();
+    // Leftover menu placeholders like "<text>" are not a real note.
+    if (!rest || /^<[^>]+>$/.test(rest)) return '';
+    return rest;
+  }
+
+  function currentThreadId() {
+    if (!chatSessionId) return '';
+    for (var i = 0; i < sessions.length; i++) {
+      if (sessions[i] && sessions[i].session_id === chatSessionId) {
+        return sessions[i].thread_id || chatSessionId;
+      }
+    }
+    return chatSessionId;
+  }
+
+  /** Stop vs Send: a steer/abort draft in the box must be submittable. */
+  function syncSendButtonForDraft() {
+    if (!sendBtn) return;
+    var draft = (inputEl && inputEl.value || '').trim();
+    var canSendSteer = isSteerOrAbortCommand(draft);
+    if (_isGenerating && canSendSteer) {
+      sendBtn.disabled = false;
+      sendBtn.classList.remove('stop-mode');
+      sendBtn.title = isAbortCommand(draft)
+        ? 'Abort the running task'
+        : (steerBody(draft) ? 'Send steer (Enter)' : 'Type your steer, then Enter');
+      sendBtn.innerHTML = _SEND_SVG;
+      return;
+    }
+    if (_isGenerating) {
+      sendBtn.disabled = false;
+      sendBtn.classList.add('stop-mode');
+      sendBtn.title = ti('stop_generation', 'Stop generation');
+      sendBtn.innerHTML = _STOP_SVG;
+      return;
+    }
+    sendBtn.classList.remove('stop-mode');
+    sendBtn.innerHTML = _SEND_SVG;
+    sendBtn.title = _awaitingApproval
+      ? 'Send steer or command'
+      : 'Send (Enter / Ctrl+Enter)';
+  }
 
   function ensureSlashMenu() {
     var menu = document.getElementById('chat-slash-menu');
@@ -513,7 +580,11 @@
     });
     if (!matches.length) { hideSlashMenu(); return; }
     menu.innerHTML = matches.map(function(c) {
-      return '<button type="button" class="chat-slash-item" data-cmd="' + escapeHtml(c.cmd) + '" ' +
+      var insertAttr = c.insert
+        ? ' data-insert="' + escapeHtml(c.insert) + '"'
+        : '';
+      return '<button type="button" class="chat-slash-item" data-cmd="' + escapeHtml(c.cmd) + '"' +
+        insertAttr + ' ' +
         'style="display:flex;flex-direction:column;align-items:flex-start;width:100%;' +
         'padding:8px 12px;border:0;background:transparent;color:var(--text-primary);' +
         'cursor:pointer;text-align:left;border-bottom:1px solid var(--border-subtle);">' +
@@ -524,8 +595,25 @@
     menu.style.display = 'block';
     menu.querySelectorAll('.chat-slash-item').forEach(function(btn) {
       btn.addEventListener('click', function() {
-        inputEl.value = btn.getAttribute('data-cmd') || '';
+        var insert = btn.getAttribute('data-insert');
+        var cmd = btn.getAttribute('data-cmd') || '';
         hideSlashMenu();
+        if (!inputEl) return;
+        // /steer and /steer! queue a draft so the user can edit, then send.
+        // Other complete commands (/help, /yolo, /abort) still send immediately.
+        if (insert) {
+          inputEl.value = insert;
+          inputEl.focus();
+          try { inputEl.setSelectionRange(insert.length, insert.length); } catch (e) {}
+          onInputResize.call(inputEl);
+          if (window.showToast) {
+            window.showToast(
+              'Steer queued — add your note, then Enter to apply.',
+              'info', 2800);
+          }
+          return;
+        }
+        inputEl.value = cmd;
         inputEl.focus();
         sendMessage();
       });
@@ -548,9 +636,16 @@
       hideSlashMenu();
       return;
     }
-    // While generating, Enter just inserts a newline (user is typing a
-    // queued message). They can press the Stop button to abort.
+    // While generating, Enter submits a steer/abort draft; otherwise it
+    // does not send a new turn (Stop / Escape still abort).
     if (_isGenerating && e.key === 'Enter') {
+      var draft = (inputEl && inputEl.value || '').trim();
+      if (!e.shiftKey && isSteerOrAbortCommand(draft)) {
+        e.preventDefault();
+        hideSlashMenu();
+        sendMessage();
+        return;
+      }
       if (!e.shiftKey) e.preventDefault();
       return;
     }
@@ -583,14 +678,27 @@
     syncInputBidi();
     // Composer character counter (live; reset on send)
     updateComposerCharCount();
+    syncSendButtonForDraft();
   }
 
   /** Live character counter on the composer footer badge. */
   function updateComposerCharCount() {
     if (!charBadge || !inputEl) return;
     var n = (inputEl.value || '').length;
-    charBadge.textContent = String(n);
+    charBadge.textContent = n ? String(n) : '';
     charBadge.classList.toggle('is-empty', n === 0);
+    charBadge.hidden = n === 0;
+  }
+
+  function formatCompactCount(n) {
+    n = Math.max(0, Number(n) || 0);
+    if (n < 1000) return String(Math.round(n));
+    if (n < 1000000) {
+      var k = n / 1000;
+      var digits = k < 10 ? 1 : (k < 100 ? 1 : 0);
+      return k.toFixed(digits).replace(/\.0$/, '') + 'k';
+    }
+    return (n / 1000000).toFixed(2).replace(/\.?0+$/, '') + 'M';
   }
 
   /**
@@ -755,6 +863,7 @@
       sendBtn.title = ti('stop_generation', 'Stop generation');
       sendBtn.innerHTML = _STOP_SVG;
     }
+    syncSendButtonForDraft();
   }
 
   function endTurn() {
@@ -785,6 +894,7 @@
       sendBtn.title = 'Send (Enter / Ctrl+Enter)';
       sendBtn.innerHTML = _SEND_SVG;
     }
+    syncSendButtonForDraft();
     // Stamp finish time on the open assistant meta if still empty-ish
     if (currentMsgEl) {
       var meta = currentMsgEl.querySelector('.message-meta time');
@@ -845,6 +955,7 @@
       sendBtn.title = 'Send steer or command';
       sendBtn.innerHTML = _SEND_SVG;
     }
+    syncSendButtonForDraft();
     void data;
   }
 
@@ -1385,12 +1496,11 @@
     var _steerHard = _cmdLow === '/steer!' || _cmdLow.startsWith('/steer! ');
     var _steerSoft = !_steerHard && (_cmdLow === '/steer' || _cmdLow.startsWith('/steer '));
     var _abortCmd = _cmdLow === '/abort';
-    var _turnActive = !!_isGenerating || !!_awaitingApproval ||
-      !!(window.Alpine && Alpine.store && Alpine.store('agent') && Alpine.store('agent')._turnActive);
     if (_steerHard || _steerSoft || _abortCmd) {
       if (_abortCmd) {
         inputEl.value = '';
         inputEl.style.height = 'auto';
+        syncSendButtonForDraft();
         if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
         fetch('/api/chat/abort', {
@@ -1402,33 +1512,61 @@
         return;
       }
 
-      var _steerText = (text.split(/\s(.+)/)[1] || '').trim();
+      var _steerText = steerBody(text);
       if (!_steerText) {
+        // Keep the draft queued so the user can type the note.
         if (window.showToast) window.showToast(
-          'Usage: /steer <context>  or  /steer! <requirement>', 'info', 3500);
+          'Steer queued — add your note, then Enter to apply.', 'info', 3500);
+        if (inputEl && !String(inputEl.value || '').trim()) {
+          inputEl.value = _steerHard ? '/steer! ' : '/steer ';
+        }
+        try {
+          var _pos = (inputEl.value || '').length;
+          inputEl.setSelectionRange(_pos, _pos);
+        } catch (e) {}
+        inputEl.focus();
+        syncSendButtonForDraft();
         return;
       }
-      if (!_turnActive) {
+      if (!chatSessionId) {
         if (window.showToast) window.showToast(
           'No active task to steer — send a message first.', 'info', 3000);
         return;
       }
-      // Visible + editable: keep a user bubble, then clear the composer.
+      // Visible in the transcript; composer clears so they can queue another.
       appendMessage('user', text);
       inputEl.value = '';
       inputEl.style.height = 'auto';
+      syncSendButtonForDraft();
       if (window.showToast) window.showToast(
         _steerHard ? '⏸️ Pausing task to apply your steer…' : '🧭 Steer noted — applying on the next step.',
         'info', 3000);
       fetch('/api/chat/steer', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: chatSessionId || '', text: _steerText, mode: _steerHard ? 'hard' : 'soft',
+          session_id: chatSessionId || '',
+          thread_id: currentThreadId(),
+          text: _steerText,
+          mode: _steerHard ? 'hard' : 'soft',
         }),
         credentials: 'same-origin',
-      }).then(function(r) { return r.ok ? r.json() : { ok: false }; }).then(function(body) {
-        if (body && body.ok === false && body.reason === 'no_active_task' && window.showToast) {
-          window.showToast('No active task to steer.', 'info', 3000);
+      }).then(function(r) {
+        var ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (ct.indexOf('text/event-stream') >= 0) {
+          return { ok: r.ok, mode: 'hard', streamed: true };
+        }
+        return r.ok ? r.json() : r.json().catch(function() { return { ok: false }; });
+      }).then(function(body) {
+        if (body && body.ok === false && window.showToast) {
+          if (body.reason === 'no_active_task') {
+            window.showToast('No active task to steer.', 'info', 3000);
+          } else if (body.reason) {
+            window.showToast('Steer failed: ' + body.reason, 'error', 3500);
+          }
+        } else if (body && body.demoted && window.showToast) {
+          window.showToast(
+            'Steer will apply on the next step (could not pause in time).',
+            'info', 3500);
         }
       }).catch(function() { /* best-effort */ });
       return;
@@ -1463,7 +1601,10 @@
       fetch('/api/chat/steer', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: chatSessionId || '', text: text, mode: 'soft',
+          session_id: chatSessionId || '',
+          thread_id: currentThreadId(),
+          text: text,
+          mode: 'soft',
         }),
         credentials: 'same-origin',
       }).catch(function() { /* best-effort */ });
@@ -4063,12 +4204,16 @@
       bar.setAttribute('role', 'toolbar');
       bar.setAttribute('aria-label', 'Turn budget and HITL');
       bar.innerHTML =
-        '<span id="capacity-status" class="capacity-status">Mode</span>' +
-        '<button type="button" class="capacity-pill" data-cap="/long on" title="Research budget, HITL stays on">Long</button>' +
-        '<button type="button" class="capacity-pill" data-cap="/long mission" title="Run until done (~500 rounds)">Mission</button>' +
-        '<button type="button" class="capacity-pill" data-cap="/yolo" title="Skip danger-tool approvals">YOLO</button>' +
-        '<button type="button" class="capacity-pill capacity-pill-power" data-cap="/unrestricted" title="Mission + YOLO — finish this job">Unrestricted</button>' +
-        '<button type="button" class="capacity-pill capacity-pill-off" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>';
+        '<span id="capacity-status" class="capacity-status">Chat · 100</span>' +
+        '<div class="capacity-group" role="group" aria-label="Budget">' +
+          '<button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="Research budget, HITL stays on">Long</button>' +
+          '<button type="button" class="capacity-pill" data-cap="/long mission" aria-pressed="false" title="Run until done (~500 rounds)">Mission</button>' +
+        '</div>' +
+        '<div class="capacity-group" role="group" aria-label="Approvals">' +
+          '<button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="Skip danger-tool approvals">YOLO</button>' +
+          '<button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>' +
+        '</div>' +
+        '<button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>';
     }
     if (bar && footer && bar.nextElementSibling !== footer) {
       footer.parentNode.insertBefore(bar, footer);
@@ -4091,19 +4236,23 @@
       if (!snap || !snap.ok) return;
       var status = document.getElementById('capacity-status');
       if (status) {
-        var bits = [];
+        var modeLabel = 'Chat';
         if (snap.long_active) {
-          bits.push((snap.mode === 'mission' ? 'Mission ' : 'Long ') + snap.max_iterations);
-        } else {
-          bits.push('Chat ' + snap.max_iterations);
+          modeLabel = snap.mode === 'mission' ? 'Mission' : 'Long';
         }
-        bits.push(snap.yolo_active ? 'YOLO' : 'HITL');
-        if (snap.iteration != null) bits.push(snap.iteration + '/' + snap.max_iterations);
-        status.textContent = bits.join(' · ');
+        var budget = String(snap.max_iterations != null ? snap.max_iterations : '');
+        if (snap.iteration != null && budget) {
+          status.textContent = modeLabel + ' · ' + snap.iteration + '/' + budget;
+        } else {
+          status.textContent = budget ? (modeLabel + ' · ' + budget) : modeLabel;
+        }
+        status.title = snap.yolo_active
+          ? (status.textContent + ' · YOLO on')
+          : (status.textContent + ' · HITL on');
       }
       var bar = document.getElementById('capacity-bar');
       if (!bar) return;
-      bar.querySelectorAll('[data-cap]').forEach(function(btn) {
+      bar.querySelectorAll('.capacity-pill[data-cap]').forEach(function(btn) {
         var cap = btn.getAttribute('data-cap') || '';
         var on = false;
         if (cap === '/long on') on = !!snap.long_active && snap.mode !== 'mission';
@@ -4111,6 +4260,7 @@
         if (cap === '/yolo') on = !!snap.yolo_active;
         if (cap === '/unrestricted') on = !!snap.long_active && snap.mode === 'mission' && !!snap.yolo_active;
         btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }).catch(function() {});
   }
@@ -4239,7 +4389,8 @@
     }
     if (costBadge) costBadge.textContent = KS.formatCost(_sessionTotals.cost);
     if (tokensBadge) {
-      tokensBadge.textContent = KS.formatTokens(_sessionTotals.tokens) + ' ' + ti('tokens', 'tokens');
+      tokensBadge.textContent = formatCompactCount(_sessionTotals.tokens) + ' tok';
+      tokensBadge.title = KS.formatTokens(_sessionTotals.tokens) + ' ' + ti('tokens', 'tokens');
     }
   }
 
@@ -4248,7 +4399,10 @@
     _sessionTotals.tokens = 0;
     _sessionTotals.cost = 0;
     if (costBadge) costBadge.textContent = KS.formatCost(0);
-    if (tokensBadge) tokensBadge.textContent = KS.formatTokens(0) + ' ' + ti('tokens', 'tokens');
+    if (tokensBadge) {
+      tokensBadge.textContent = '0 tok';
+      tokensBadge.title = '0 ' + ti('tokens', 'tokens');
+    }
   }
 
   // ── Context conversation badge (chars → estimated tokens) ──
@@ -4291,10 +4445,14 @@
         totalTokens += estimateTokens(t);   // per-message: preserves script mix
       }
     } catch (e) { return; }
-    contextBadge.textContent = tiFmt('context_size', '{chars} chars \u2248 {tokens} tokens', {
+    var full = tiFmt('context_size', '{chars} chars \u2248 {tokens} tokens', {
       chars: totalChars.toLocaleString(),
       tokens: totalTokens.toLocaleString(),
     });
+    contextBadge.textContent = totalTokens
+      ? ('~' + formatCompactCount(totalTokens) + ' ctx')
+      : '—';
+    contextBadge.title = full;
   }
 
   // ── Utils ─────────────────────────────────────────────
