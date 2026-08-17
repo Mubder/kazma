@@ -44,6 +44,9 @@ def test_metrics_share_button_row_and_shape() -> None:
     assert "capacity-stat" in html
     assert ".session-metrics" in css
     assert "margin-inline-start: auto" in css.split(".session-metrics")[1][:80]
+    assert "flex-wrap: wrap" in css.split(".capacity-bar {")[1][:160]
+    assert ".capacity-bar .session-metrics" in css
+    assert "flex: 1 0 100%" in css
     assert ".char-badge.is-empty { display: none; }" in css.replace("\n", " ")
     assert "formatCompactCount" in js
     assert "'~' + formatCompactCount(totalTokens) + ' ctx'" in js

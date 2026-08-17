@@ -1846,14 +1846,11 @@ tbody tr:last-child td {
 }
 .capacity-bar {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 32px;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.capacity-bar::-webkit-scrollbar { display: none; }
 .capacity-status {
   flex: 0 0 auto;
   font-size: 0.72rem;
@@ -4029,6 +4026,17 @@ tbody tr:last-child td {
   .chat-input-area { padding: var(--sp-3); }
   .chat-welcome { padding: var(--sp-6) var(--sp-4); }
   .chat-input-footer-hint { display: none; }   /* hide "Enter / Ctrl+Enter" hint */
+  /* Metrics drop under the mode buttons instead of scrolling off-screen. */
+  .capacity-bar .session-metrics {
+    flex: 1 0 100%;
+    width: 100%;
+    margin-inline-start: 0;
+    display: flex;
+  }
+  .capacity-bar .session-metrics .capacity-stat {
+    flex: 1;
+    text-align: center;
+  }
 
   /* ── Modals ── */
   .modal { margin: var(--sp-4); max-height: 90vh; }
