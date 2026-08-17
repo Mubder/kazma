@@ -43,6 +43,21 @@ def test_iter_sse_frames_tokens_tools_done():
     assert evs[2].tool == "file_read"
 
 
+def test_iter_sse_frames_done_and_capacity_carry_text():
+    evs = iter_sse_frames([
+        "event: done",
+        "data: {\"content\": \"full reply\", \"tokens\": 3}",
+        "",
+        "event: capacity",
+        "data: {\"action\": \"yolo\", \"reply\": \"YOLO ON\"}",
+        "",
+    ])
+    assert evs[0].kind == "done"
+    assert evs[0].text == "full reply"
+    assert evs[1].kind == "capacity"
+    assert evs[1].text == "YOLO ON"
+
+
 def test_candidate_api_bases_include_9090_and_8000(monkeypatch):
     monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
     monkeypatch.delenv("KAZMA_BASE_URL", raising=False)
@@ -58,3 +73,12 @@ def test_candidate_api_bases_honor_env(monkeypatch):
     monkeypatch.setenv("KAZMA_PORT", "9090")
     bases = candidate_api_bases()
     assert bases.count("http://127.0.0.1:9090") == 1
+
+
+def test_candidate_api_bases_prefer_loopback_over_public_url(monkeypatch):
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://my.kazma.ai")
+    monkeypatch.delenv("KAZMA_BASE_URL", raising=False)
+    monkeypatch.delenv("KAZMA_PORT", raising=False)
+    bases = candidate_api_bases()
+    assert bases[0] == "http://127.0.0.1:9090"
+    assert bases[-1] == "https://my.kazma.ai"

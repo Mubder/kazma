@@ -352,7 +352,11 @@ class ChatPanel(Vertical):
                 self._messages.append({"role": "assistant", "content": content})
                 log.write(Text(content))
             else:
-                log.write("[dim](empty response)[/]")
+                log.write(
+                    "[dim](empty response — the server sent no assistant text. "
+                    "If this keeps happening, the TUI is not reaching "
+                    "127.0.0.1:9090; check KAZMA_PORT / KAZMA_SECRET.)[/]"
+                )
         except Exception as e:
             log.write(f"\n[#ef4444]Error: {e}[/]")
         finally:

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — TUI empty reply on `Hey` (2026-08-17)
+
+The TUI posted `POST /api/chat/stream` to `KAZMA_PUBLIC_URL` first
+(`https://my.kazma.ai`). A 200 HTML/challenge/redirect there was treated as
+a finished turn with no tokens → `(empty response)`. Local mouths now try
+loopback (`127.0.0.1:PORT`) first, accept only `text/event-stream`, and
+fall back to `done.content` / `capacity.reply` like the Web client.
+
 ## Unreleased — TUI `/session 12` actually loads (2026-08-17)
 
 Enter on `/session 12` was stolen by slash autocomplete because `/sessions`

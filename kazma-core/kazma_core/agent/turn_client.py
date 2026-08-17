@@ -72,10 +72,24 @@ def iter_sse_frames(lines: list[str]) -> list[ChatStreamEvent]:
             )
         elif kind == "error":
             events.append(ChatStreamEvent("error", text=str(payload.get("content") or raw)))
-        elif kind == "done":
-            events.append(ChatStreamEvent("done", data=payload))
+        elif kind in ("done", "turn_complete"):
+            events.append(
+                ChatStreamEvent(
+                    kind,
+                    text=str(payload.get("content") or payload.get("reply") or ""),
+                    data=payload,
+                )
+            )
+        elif kind == "capacity":
+            events.append(
+                ChatStreamEvent(
+                    "capacity",
+                    text=str(payload.get("reply") or payload.get("content") or ""),
+                    data=payload,
+                )
+            )
         else:
-            content = str(payload.get("content") or "")
+            content = str(payload.get("content") or payload.get("reply") or "")
             if content:
                 events.append(ChatStreamEvent(kind, text=content, data=payload))
 
@@ -108,10 +122,11 @@ async def stream_chat_turn(
     headers = {"Accept": "text/event-stream", **auth_headers()}
     body = {"message": text, "session_id": session_id}
     last_err = "no API candidates"
-    assembled: list[str] = []
 
     for base in candidate_api_bases():
         url = f"{base}/api/chat/stream"
+        assembled: list[str] = []
+        saw_sse = False
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=2.0)) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
@@ -121,22 +136,51 @@ async def stream_chat_turn(
                             "to the same secret the server is using."
                         )
                         continue
-                    if resp.status_code >= 400:
-                        last_err = f"{url} returned {resp.status_code}"
+                    ctype = (resp.headers.get("content-type") or "").lower()
+                    if resp.status_code != 200 or "text/event-stream" not in ctype:
+                        last_err = (
+                            f"{url} returned {resp.status_code} "
+                            f"({ctype or 'no content-type'})"
+                        )
                         continue
                     buf: list[str] = []
-                    async for line in resp.aiter_lines():
-                        buf.append(line)
-                        if line != "":
-                            continue
-                        for ev in iter_sse_frames(buf):
+
+                    def _ingest(events: list[ChatStreamEvent]) -> None:
+                        nonlocal saw_sse
+                        for ev in events:
+                            if ev.kind in {
+                                "token",
+                                "done",
+                                "turn_complete",
+                                "error",
+                                "capacity",
+                                "tool_call",
+                            }:
+                                saw_sse = True
                             if ev.kind == "token" and ev.text:
+                                assembled.append(ev.text)
+                            elif (
+                                ev.kind in ("done", "turn_complete", "capacity")
+                                and ev.text
+                                and not assembled
+                            ):
                                 assembled.append(ev.text)
                             if on_event is not None:
                                 on_event(ev)
                             if ev.kind == "error" and ev.text:
                                 raise RuntimeError(ev.text)
+
+                    async for line in resp.aiter_lines():
+                        buf.append(line)
+                        if line != "":
+                            continue
+                        _ingest(iter_sse_frames(buf))
                         buf = []
+                    if buf:
+                        _ingest(iter_sse_frames(buf))
+                    if not saw_sse:
+                        last_err = f"{url} returned 200 without SSE frames"
+                        continue
                     return "".join(assembled)
         except httpx.ConnectError:
             last_err = f"nothing listening at {base}"
