@@ -1,363 +1,296 @@
+<div align="center">
+
+  <img src="https://raw.githubusercontent.com/Mubder/kazma/main/kazma-ui/kazma_ui/static/img/kazma-logo.png" alt="Kazma Agent Framework" height="90">
+
+  # Kazma Agent Framework
+
+  **Production-Grade Multi-Agent AI System with Bi-Temporal Cognitive Memory, Swarm Orchestration, and Autonomous Reliability**
+
+  <p align="center">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
+    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-5%2C608%20Passing-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-2%2C430%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
+    <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
+  </p>
+
+</div>
+
+---
+
+## ⚡ Executive Summary & Metrics
+
+Kazma is an open-source, self-hosted multi-agent framework architected for continuous autonomous operation. Built on a LangGraph supervisor core, Kazma integrates a **Pure V2 Cognitive Memory Engine** (bi-temporal belief graph + PPR associative recall), **autonomous swarm orchestration** with dynamic template autoscaling, **triple-wired Human-In-The-Loop (HITL) safety gates**, an **enterprise document intelligence platform**, and **cross-platform dispatch** (Web, TUI, CLI, Telegram, Discord, Slack) with native Arabic and Khaleeji dialect intelligence.
+
+<!-- Metrics auto-verified from METRICS.md -->
+| Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
+|---|---|---|---|
+| **~315K LOC** (252K Python code + 28K JS) | **5,608 automated tests** (394 test suites) | **2,430+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
+
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Mubder/kazma/main/kazma-ui/kazma_ui/static/img/kazma-logo.png" alt="Kazma" height="80">
+  <img src="docs/screenshots/dashboard.png" alt="Kazma Observability Dashboard & Control Plane" width="100%">
 </p>
 
-**Self-hosted multi-platform agents with deep multilingual intelligence**
+---
 
-Kazma is the reliable multi-agent framework built for real deployment. Cryptographic skill signing, triple-wired human-in-the-loop safety, durable execution, and native Arabic dialect support — all in one full-stack system with live Web UI, TUI, CLI, and multi-platform gateways.
+## 📖 Origin & Architectural Philosophy
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests: 4,243](https://img.shields.io/badge/tests-4%2C243-brightgreen.svg)](#-development)
+**Kazma** (كاظمة) was an ancient coastal oasis in Kuwait — a vital network of freshwater wells and a flourishing gateway connecting global trade routes between civilizations. In 633 CE, it was the site of the historic **Battle of Chains** (ذات السلاسل): an opposing army chained its ranks into a rigid, monolithic wall, which Khalid ibn al-Walid decisively dismantled through adaptive, decentralized maneuvering.
+
+Kazma's architecture reflects those foundational principles:
+
+- 🏜️ **The Wells (Cognitive Memory)** — Deep, persistent memory that retains context across months of sessions, allowing agents to draw from bi-temporal knowledge graphs rather than forgetting across turns.
+- 🚪 **The Gateway (Multi-Platform Control)** — A unified supervisor brain seamlessly routing execution between Web UI, Textual TUI, CLI, and team messaging channels (Telegram, Discord, Slack).
+- ⚔️ **Breaking the Chains (Decentralized Swarms)** — Monolithic, rigid pipelines inevitably fail in real-world deployments. Kazma replaces brittle linear chains with decentralized swarm dispatch patterns, dynamic worker autoscaling, and self-healing execution loops.
 
 ---
 
-## ⚡ At a Glance
+## 🏛️ System Architecture
 
-<!-- Update from METRICS.md via: python scripts/generate_metrics.py --write -->
-| Lines of code | Tests | Commits | Contributors |
-|---|---:|---:|---:|
-| ~248K Python (~271K Total) | 4,319 | 1,799+ | 7 |
-
-![Kazma Dashboard](https://kazma.ai/screenshots/Hero-en.png)
-
----
-
-## 📖 What does "Kazma" mean?
-
-**Kazma** (كاظمة) was an ancient coastal oasis in Kuwait — a network of wells and a gateway for trade between civilizations. It was also the site of the legendary **Battle of Chains** (ذات السلاسل, 633 CE): the Persian army chained its soldiers into a single, rigid wall, yet Khalid ibn al-Walid shattered it through precise, decentralized maneuvering — and won.
-
-We engineered Kazma on those same pillars — not as metaphor, but as architecture:
-
-- 🏜️ **The Wells** — Deep memory that holds context across sessions. The agent draws from it when it needs to remember, like caravans drawing from oasis wells.
-- 🚪 **The Gateway** — One supervisor brain routed to Telegram, Discord, Slack, Web, and TUI — the way ancient Kazma routed trade between civilizations.
-- ⚔️ **Breaking the Chains** — The chains in that battle were rigidity — and rigidity is what makes monolithic agent pipelines fragile. Kazma runs decentralized swarm patterns and self-healing circuit breakers instead, adapting and recovering where rigid chains would snap.
-
----
-
-## 🧩 Features
-
-### 🧠 Agent Brain & V2 Cognitive Memory
-LangGraph supervisor with a ReAct loop, tool calling, durable checkpointing, 80% context compaction, and **Pure V2 Cognitive Memory** — bi-temporal belief tracking (`valid_from` / `valid_until`), Local Ego-Graph Personalized PageRank (PPR), hybrid FTS + vector episode retrieval, and prompt-fenced per-turn context injection. **Knowledge Library** stays a separate store but can inject into chat (labeled) with federated search. Optional **Neo4j** dual-write and Postgres/Qdrant adapters — SQLite remains the zero-config default.
-
-### 🛡️ Non-Stop Execution & Self-Healing Engine
-Autonomous watchdog (`supervised_invoke()`) tracks node heartbeats, detects stalls, and performs automatic checkpoint rollbacks to clean state with `[KAZMA RECOVERY]` system reflection injection. Features model failover chains with per-provider cooldowns, durable SQLite **LLM Call Ledger** (`kazma-data/llm_calls.db`), orphan task startup recovery, and an automatic HITL approval timeout watchdog.
-
-### 🐝 Swarm Orchestration & Autoscaler
-Six dispatch patterns (broadcast, pipeline, fan-out, consult, conditional, dispatch) with a **Dynamic Swarm Autoscaler** that auto-spawns specialist workers from templates (`coder`, `researcher`, `generalist`) with automatic best-model-per-task routing (coding, reasoning, vision). Inspect and drive it live from the **Swarm Panel** in the Web UI (worker registry, active tasks, dispatch, metrics).
-
-```yaml
-swarm:
-  max_workers: 8
-  autoscale: true
-  templates: [coder, researcher, generalist]
+```
+                                 ┌──────────────────────────────────────────────────────────┐
+                                 │          Client Layer (Web / TUI / Chat / CLI)           │
+                                 └────────────────────────────┬─────────────────────────────┘
+                                                              │
+                                                              ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                   KAZMA GATEWAY & SUPERVISOR                                                │
+│  ┌───────────────────────────────┐     ┌───────────────────────────────┐     ┌───────────────────────────────────────────┐  │
+│  │     Platform Isolation        │ ──► │   LangGraph ReAct Supervisor  │ ◄─► │         Triple-Wired HITL Gate            │  │
+│  │ (SessionStore / Zero Leakage) │     │  (80% Compaction / Turn Ledger)│     │  (Graph Interrupt / Swarm Bus / Pipeline) │  │
+│  └───────────────────────────────┘     └───────────────┬───────────────┘     └───────────────────────────────────────────┘  │
+│                                                        │                                                                    │
+│  ┌───────────────────────────────┐     ┌───────────────┴───────────────┐     ┌───────────────────────────────────────────┐  │
+│  │   Document Intelligence       │ ──► │     Commitment Layer Gate     │ ◄── │          Local & Native Tools             │  │
+│  │ (CAS / Subprocess OCR / Parse)│     │     (Resolve-Before-Act)      │     │    (IDE / Web / Bash / Python / Vault)    │  │
+│  └───────────────────────────────┘     └───────────────┬───────────────┘     └───────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────┘
+                                                         │
+                                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                             AUTONOMOUS SWARM & MEMORY TIER                                                  │
+│  ┌─────────────────────────────────────────────┐                    ┌────────────────────────────────────────────────────┐  │
+│  │                SwarmEngine                  │                    │            Pure V2 Cognitive Memory                │  │
+│  │  • 6 Dispatch Patterns (Fan-Out/Pipeline/..)│                    │  • Bi-Temporal Belief Graph (valid_from/until)     │  │
+│  │  • Dynamic Autoscaler (Coder/Researcher/..) │                    │  • Local Ego-Graph Personalized PageRank (PPR)     │  │
+│  │  • ReliabilityRegistry (Breakers & Retries) │                    │  • Sparse (FTS5) + Dense (sqlite-vec) Episodes     │  │
+│  │  • Best-Model-Per-Task Prompt Classifier    │                    │  • Parametric Action DAGs + 24h Auto-Consolidation │  │
+│  └─────────────────────────────────────────────┘                    └────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────┘
+                                                         │
+                                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                           EXECUTION & PROVIDER INFRASTRUCTURE                                               │
+│  OpenAI-Compatible Layer • Anthropic Native • Google Gemini (ADC) • Azure OpenAI • AWS Bedrock • Ollama / LM Studio • MCP   │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 🔒 Triple-Wired Safety
-Three independent HITL gates — graph interrupt, swarm bus, and pipeline checkpoints — ensure dangerous tools never execute without human approval. Downloaded Agent Skills are **integrity-verified (HMAC-SHA256)** at load, and Soul evolution deltas are injected behind an untrusted-data prompt fence (`<kazma:data untrusted>`).
+---
 
-### 🧭 Commitment Layer (resolve-before-act)
-A policy gate between the LLM and durable mutations. Before the agent can schedule, send, execute, or change config, Kazma **resolves its intent against memory** — so a model can't invent a date and schedule it over a real belief. Ambiguous acts raise a **semantic clarify/confirm card** with per-option buttons on Web, Telegram, Discord, and Slack. Modes (strict / balanced / autonomous / yolo) and kill-switches for every enforcement layer. Docs: [Commitment Layer](docs/docs/guide/commitment-layer.md).
+## 🌟 Core Capabilities
 
-### 🌐 Multi-Platform
-Telegram, Discord, Slack, Web UI, and TUI — all powered by a single LangGraph supervisor. Platform IDs never enter LangGraph state. **Steer any running task** mid-flight with `/steer` (soft), `/steer!` (pause + inject), or `/abort` — no need to wait for the turn to finish.
+### 🧠 Pure V2 Cognitive Memory Engine
+- **Bi-Temporal Beliefs**: Tracks factual assertions with both assertion time and validity time (`valid_from` / `valid_until`) to manage evolving knowledge without hallucination or historical corruption.
+- **Associative PPR Graph**: Multi-hop associative recall via Local Ego-Graph Personalized PageRank over belief entities.
+- **Hybrid Episode Retrieval**: Recalls past dialogues and actions using Reciprocal Rank Fusion (RRF) over SQLite FTS5 (lexical) and `sqlite-vec` (dense embeddings).
+- **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated 24-hour snapshot backups (`sqlite3.backup` + JSONL/GraphML exports).
+- **Prompt-Fenced Injection**: Injects all retrieved context inside `<kazma:data untrusted>` fences to protect against prompt injection attacks.
 
-### 📜 Arabic-Native
-Custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol. Built in Kuwait, for the world.
+### 🐝 Swarm Orchestration & Dynamic Autoscaler
+- **6 Dispatch Patterns**: `dispatch` (single specialist), `broadcast` (all workers), `pipeline` (sequential handoffs with checkpoint gates), `fan-out` (parallel execution with aggregation/voting), `consult` (independent expert reviews + synthesis), and `conditional` (router-driven execution).
+- **Dynamic Autoscaling**: Zero pre-configured worker requirement. Automatically classifies task prompts and dynamically spins up specialized workers (`coder`, `researcher`, `generalist`) with best-model-per-task selection (coding, reasoning, vision).
+- **Reliability & Circuit Breakers**: Per-worker circuit breakers, half-open probes, exponential retry policies, output schema validators, and handoff cycle guards ($depth \le 5$).
 
-### 📄 Document Intelligence Platform
-Production document pipeline: streamed intake → content-addressed quarantine → MIME/OOXML/PDF policy sniff → **isolated subprocess parse/OCR** → durable job queue (leases, retries, dead-letter) → optional Knowledge Library index, generate/convert/redact, and ops (capacity, GC, immutable audit).
+### 🛡️ Non-Stop Execution & Self-Healing Watchdog
+- **Heartbeat & Stall Detection**: `supervised_invoke()` watchdog tracks execution heartbeats across graph nodes and automatically mitigates stalls.
+- **Checkpoint Rollback & Reflection**: Automatically rolls back corrupted turns to clean checkpoint states and injects `[KAZMA RECOVERY]` system reflection notes to re-steer the model.
+- **Model Failover Chains**: Transparent multi-provider failover with per-provider cooldown timers and durable SQLite call ledgers (`kazma-data/llm_calls.db`).
 
-| Surface | Entry |
-|---|---|
-| Web | `/documents` + Settings → **Documents** |
-| API | `/api/documents/*` (upload, jobs, convert, redact, index, ops) |
-| Agent | `document-platform` tools (`document_import`, `document_read`, `document_index`, …) |
-| Chat | `/documents` / `/docs` slash commands |
-| TUI | Documents tab |
+### 🔒 Triple-Wired HITL Safety Architecture
+- **Layer 1 (Graph Interrupt)**: Single-agent execution pauses at the LangGraph level before mutating actions (`file_write`, `shell_exec`, `vault_retrieve`). Resumable from Web, TUI, or chat channels.
+- **Layer 2 (Swarm Bus)**: Multi-agent and CLI swarm dispatches enforce fail-closed approval gates on platform adapters (`FanOutBusAdapter` across Telegram/Discord/Slack).
+- **Layer 3 (Pipeline Checkpoints)**: Multi-stage pipeline tasks pause at designated approval milestones.
+- **Security & Sandboxing**: HMAC-SHA256 skill verification, prompt-fenced Soul mutation deltas, and AES-256-GCM encrypted credential vault.
 
-- **Hostile-by-default** — XXE/macro/polyglot/encryption rejection, prompt fences (`<kazma:data untrusted>`), optional **ClamAV** malware scan (`auto`/`on`/`off`)
-- **Jobs can multi-replica** — Postgres job claims (`SKIP LOCKED`); document **metadata** is still single-replica SQLite unless `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres`
-- **Canary rollout** — `enabled` / `shadow` / `default_authoritative` live ConfigStore flags
-- **Certification** — `python scripts/certify_documents.py` (+ hostile corpus, soak)
+### 📄 Enterprise Document Intelligence Platform
+- **Intake & Quarantine**: Content-addressed storage (CAS) with MIME/OOXML/PDF policy validation, macro rejection, and optional ClamAV malware scanning.
+- **Isolated Subprocess Processing**: Secure OCR and document parsing for PDF, DOCX, XLSX, and PPTX formats in isolated sub-processes.
+- **Document Ops**: Background job leases (`SKIP LOCKED`), dead-letter queues, format conversions, PDF split/merge/redaction, and one-click indexing into Knowledge Library corpora.
 
-Docs: [Document Intelligence](docs/docs/guide/document-intelligence.md) · [Ops](docs/docs/ops/document-processing.md) · [Security](docs/docs/security/document-security.md) · [Phases 0–10](docs/docs/guide/document-phases.md)
+### 💻 Dual IDE & Multi-Platform Gateway
+- **Web IDE & Textual TUI**: Integrated editor with syntax highlighting, multi-tab navigation, workspace-scoped terminal execution, and file-aware AI chat.
+- **Live In-Flight Steering**: Intercept and guide active operations in real time using `/steer` (soft nudge), `/steer!` (pause & inject), or `/abort`.
+- **Zero-Leak Platform Isolation**: Session identifiers (`chat_id`, `user_id`) remain isolated within `SessionStore` and never pollute LangGraph state.
 
-### 🔌 Rich Ecosystem
-- **Any LLM** — OpenAI, Anthropic, Gemini, DeepSeek, xAI, Ollama, and 15+ more via plain HTTP with Vision Capability Routing
-- **MCP Marketplace** — One-click install from 85+ preset MCP servers with namespaced tools
-- **Hardened Scraping & Auto-Retry** — 5 MB streaming byte limits (`KAZMA_FETCH_MAX_BYTES`), binary payload gates, exponential 5xx backoff, `robots.txt` options (`KAZMA_CRAWL_RESPECT_ROBOTS`), and automatic doubled `max_tokens` retry on truncation
-- **Knowledge Library** — Ingest entire documentation sites into searchable RAG corpora with cited sources; **document_index** bridges platform uploads into the same libraries
-- **IDE Subsystem** — Transport-agnostic coding backend: multi-tab editor, file-aware AI chat, `/ide` commands across all platforms
-- **Time-Travel Replay & Branching** — Snapshot every iteration to SQLite WAL (`snapshots.db`); restore in-place (`/replay`), fork threads (`/fork`), and compare paths
-- **Encrypted Vault** — AES-256-GCM storage for API keys and credentials
-- **Browser, Calendar & Document generation** — Playwright automation, Google/Outlook calendar, legacy `generate_pdf`/`docx`/`xlsx` skills, plus the full **Document Intelligence** platform above
-- **Deep Research** — Multi-query web search → parallel acquire → digest → LLM synthesis with DOCX export
+### 🌐 Arabic-Native & Cultural Alignment
+- **Majlis Protocol**: Native handling of Arabic nuances, formal MSA, and Gulf/Kuwaiti dialect expressions.
+- **Bilingual Interface**: Full Right-To-Left (RTL) Web and TUI interfaces with culturally aligned interaction models.
 
 ---
 
 ## 🆚 Why Kazma?
 
-| Feature | Kazma | LangChain | CrewAI | AutoGPT | n8n |
-|---|---|---|---|---|---|
-| **Self-hosted, MIT** | ✅ | ✅ | ✅ | ✅ | ⚠️ Fair-code |
-| **Arabic-native** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **HITL safety gates** | ✅ 3 layers | ❌ | ❌ | ⚠️ basic | ❌ |
-| **Swarm orchestration** | ✅ 6 patterns | ⚠️ via LangGraph | ✅ | ❌ | ❌ |
-| **Built-in IDE** | ✅ Web+TUI | ❌ | ❌ | ❌ | ❌ |
-| **Encrypted vault** | ✅ AES-256 | ❌ | ❌ | ❌ | ❌ |
-| **MCP marketplace** | ✅ 85+ servers | ❌ | ❌ | ❌ | ❌ |
-| **Time-travel replay** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Skill integrity** | ✅ HMAC-SHA256 | ❌ | ❌ | ❌ | ❌ |
-| **Web UI included** | ✅ | ❌ | ❌ | ❌ | ✅ |
-| **Document Intelligence** | ✅ secure pipeline | ⚠️ ad-hoc | ❌ | ❌ | ⚠️ limited |
+| Capability | Kazma | LangChain / LangGraph | CrewAI | AutoGPT | n8n |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Architecture** | **Full-Stack Autonomous System** | Library / Graph Primitive | Multi-Agent Framework | Autonomous Agent | Workflow Automation |
+| **Cognitive Memory** | ✅ **Bi-temporal + PPR Graph** | ⚠️ Basic Vector Store | ⚠️ Simple RAG | ⚠️ Basic Memory | ❌ None |
+| **HITL Safety Gates** | ✅ **Triple-Wired (Fail-Closed)** | ⚠️ Manual code wiring | ❌ None | ⚠️ Basic prompt | ⚠️ Workflow pause |
+| **Swarm Orchestration** | ✅ **6 Patterns + Autoscaler** | ⚠️ Custom Graph | ✅ Role-based | ❌ Single loop | ❌ Node based |
+| **Built-in Web & TUI IDE**| ✅ **Included (Dual Interface)** | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Observability Control Plane**| ✅ **Live Dashboard Included** | ⚠️ External (LangSmith) | ❌ None | ❌ None | ⚠️ Execution log |
+| **Document Intelligence**| ✅ **Quarantine + OCR + Redact**| ⚠️ Ad-hoc loaders | ❌ None | ❌ None | ⚠️ Basic parsers |
+| **Multi-Platform Gateways**| ✅ **Web, TUI, Telegram, Discord, Slack** | ❌ None | ❌ None | ❌ None | ⚠️ Webhook triggers |
+| **Arabic-Native & RTL** | ✅ **Full Native & Dialect Support** | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Self-Hosted License** | ✅ **MIT (100% Open Source)** | ✅ MIT | ✅ MIT | ✅ MIT | ⚠️ Fair-Code |
 
 ---
 
-## 📸 Screenshots
+## 📸 Interface Showcase
 
-| Dashboard | Web IDE | Chat with HITL |
+| Observability Dashboard | Integrated Web IDE | Real-Time Chat & HITL |
 |---|---|---|
 | ![Dashboard](https://kazma.ai/screenshots/Dashboard-en.png) | ![IDE](https://kazma.ai/screenshots/IDE-en.png) | ![Chat](https://kazma.ai/screenshots/Chat-en.png) |
 
-| Swarm Task Builder | Skills | MCP Servers |
+| Swarm Task Builder | Native Skills Manager | MCP Server Marketplace |
 |---|---|---|
 | ![Swarm](https://kazma.ai/screenshots/Swarm-Task-Builder-en.png) | ![Skills](https://kazma.ai/screenshots/Skills-en.png) | ![MCP](https://kazma.ai/screenshots/MCP-en.png) |
-
-> **Documents:** open `/documents` after `kazma serve` for secure upload → parse → index (see [Document Intelligence](docs/docs/guide/document-intelligence.md)).
 
 ---
 
 ## 🚀 Quick Start
 
-> **Requires Python 3.11+** (3.12–3.13 recommended).
+> **Prerequisites:** Python 3.11+ (Python 3.12 or 3.13 recommended).
 
-### 1. Clone & Install
+### 1. Installation
 
 ```bash
 git clone https://github.com/Mubder/kazma.git
 cd kazma
 ```
 
-**Option A — uv (recommended):**
-
+**Recommended: `uv` (Fast & Reproducible)**
 ```bash
 uv venv --python 3.13
 uv sync --all-extras
 ```
 
-**Option B — pip + venv:**
-
+**Alternative: `pip` + `venv`**
 ```bash
 # Linux / macOS / WSL
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[rag,dev]"
+pip install -e ".[all]"
 
 # Windows (PowerShell)
 py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[rag,dev]"
+pip install -e ".[all]"
 ```
 
-> **Extras:** `rag` = vector memory; `dev` = tests/lint; `web` = Playwright; `document` = simple PDF/DOCX/XLSX generators; `document-platform` = full Document Intelligence engines (OCR helpers, WeasyPrint, PyMuPDF); `database` = Postgres/MySQL/Mongo; `postgres` = multi-replica shared state (also document jobs/metadata when configured). Install everything with `pip install -e ".[all]"` or `uv sync --all-extras`.
-
-### 2. Configure
+### 2. Environment Configuration
 
 ```bash
-# Linux / macOS / WSL
-cp .env.example .env
-
-# Windows (PowerShell)
-Copy-Item .env.example .env
+# Copy template environment file
+cp .env.example .env    # Linux / macOS
+Copy-Item .env.example .env  # Windows PowerShell
 ```
 
-Edit `.env` — set **at least one** LLM key:
-
+Edit `.env` to configure your preferred LLM provider key:
 ```dotenv
+# OpenAI, DeepSeek, Anthropic, Gemini, Groq, or Local Ollama
 OPENAI_API_KEY=sk-...
+# Optional: DEEPSEEK_API_KEY=... | ANTHROPIC_API_KEY=... | GEMINI_API_KEY=...
 ```
 
-### 3. Run
+### 3. Launch Kazma
 
 ```bash
-# Web UI (default: http://127.0.0.1:9090)
+# Start the full Web UI & Gateway (http://127.0.0.1:9090)
 kazma serve
 
-# Terminal UI
+# Or launch the Terminal User Interface (TUI)
 kazma-tui
 ```
 
-Open **http://127.0.0.1:9090/documents** for Document Intelligence (upload → parse → index).
-
-> **Full guides:** [Quickstart](docs/docs/guide/quickstart.md) · [Configuration](docs/docs/guide/configuration.md) · [Document Intelligence](docs/docs/guide/document-intelligence.md) · [Troubleshooting](docs/docs/guide/troubleshooting-and-workarounds.md)
-
----
-
-## 🏗 Architecture
-
-```
-User (Telegram/Discord/Slack/Web/TUI)
-    ↓
-Platform Adapter (isolates platform IDs)
-    ↓
-Supervisor Graph (LangGraph ReAct loop)
-    ├── ContextAuthority (80% compaction + per-turn RAG retrieval)
-    ├── UnifiedToolExecutor (LocalToolRegistry + native skills + MCP)
-    ├── IdeService (workspace-scoped file/exec/git)
-    ├── DocumentIngestionService (durable docs: CAS + jobs + isolated parse)
-    ├── HITL Gate (interrupt before danger tools)
-    └── LLM Provider (any OpenAI-compatible endpoint)
-    ↓
-SwarmEngine (when multi-agent is needed)
-    ├── 6 dispatch patterns
-    ├── Reliability layer (circuit breaker, retry, timeout)
-    ├── Self-improvement (auto-learning feedback loop)
-    └── V2 Cognitive Engine (bi-temporal beliefs + PPR recall)
-```
-
-Built on: `LangGraph` · `FastAPI` · `SQLite` (WAL) · `Postgres` · `Docker` · `sentence-transformers` · `sqlite-vec`
-
-Full diagrams: [Architecture](docs/docs/guide/architecture.md) · [System Map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md)
+Navigate to:
+- **Dashboard & Control Plane**: `http://127.0.0.1:9090/`
+- **Web IDE**: `http://127.0.0.1:9090/ide`
+- **Document Intelligence**: `http://127.0.0.1:9090/documents`
+- **Memory & Belief Graph**: `http://127.0.0.1:9090/memory`
 
 ---
 
-## 🧠 Pure V2 Cognitive Memory & RAG
-
-Kazma operates on a **V2 Cognitive Engine** for personal memory (single SoT for chat recall) plus an optional **Knowledge Library** product merge — unified in chat, **not** merged into one schema table:
-
-| Component | Architecture | Role |
-|---|---|---|
-| **Bi-Temporal Beliefs** | SQLite SoT | Functional / set / state beliefs with temporal scrubbing; Dashboard topology paints from SQLite |
-| **Episode Retrieval** | FTS5 + `sqlite-vec` | Sparse + dense fusion for “what we said” |
-| **Associative PPR** | Local Ego-Graph | Multi-hop weight expansion over the belief graph |
-| **Knowledge Library** | Separate store | Docs + citations; inject / federated search (`MEM` / `KB` labels); **document_index** from Document Intelligence |
-| **Optional Neo4j** | Dual-write | Belief triples when configured; never required for install |
-| **Procedural Memory** | Parametric Action DAGs | Tool skills with confidence smoothing and quarantine |
-
-- **Per-Turn Prompt-Fenced RAG** — Beliefs/episodes (and optional KB) wrapped in `<kazma:data untrusted>` fences.
-- **Settings → Memory** — Isolation, KB inject toggles, backends, Neo4j Test/Sync, and embedder in one tab.
-- **Durable Task Queue (`memory_ops.db`)** — Post-turn extraction, micro-consolidation, partitioned reconsolidation for large corpora.
-- **Automated Nightly Backups & Exports** — Native `sqlite3.backup()` plus JSONL / GraphML on a 24h scheduler.
-- **Prompt-Fenced Soul Engine** — Self-improvement deltas via `ConfigStore` + untrusted fence.
-
-Deep dive: [Memory & RAG](docs/docs/guide/memory-and-rag.md) · [Memory best path](docs/docs/guide/memory-best-path.md)
-
----
-
-## 🔒 Safety by Design
-
-Three independent gates. All fail-closed by default.
-
-1. **Graph interrupt** — pauses before `file_write`, `shell_exec`, `vault_retrieve`, and all danger-tier tools
-2. **Swarm bus** — `/swarm` dispatches require HITL approval for dangerous operations
-3. **Pipeline checkpoints** — multi-stage pipelines pause at configured steps
-
-Multi-platform approvals: interactive sliding cards in Web, inline buttons on Telegram/Discord/Slack.
-
-See: [Security & Safety](docs/docs/guide/security-and-safety.md)
-
----
-
-## 🐝 Swarm in 30 Seconds
+## 🐝 Swarm Orchestration in 30 Seconds
 
 ```bash
-# Add workers
-kazma swarm worker add researcher --model deepseek-chat --provider deepseek
+# 1. Dispatch a dynamic specialist task (Autoscaler selects best model)
+kazma swarm dispatch --workers auto "Analyze the codebase security posture and produce a report"
 
-# Run a pipeline
-kazma swarm pipeline --workers researcher,builder,validator "Build a CLI tool"
+# 2. Run a structured multi-stage pipeline
+kazma swarm pipeline --workers researcher,coder,validator "Implement an OAuth2 device code provider"
 
-# Fan out and vote
-kazma swarm fanout --workers a,b,c --aggregation vote "Best approach?"
+# 3. Parallel consensus voting (Fan-Out)
+kazma swarm fanout --workers a,b,c --aggregation vote "Select optimal database schema indexing"
 
-# Check results
+# 4. View live telemetry and history
 kazma swarm history
 kazma swarm metrics
 ```
 
-Workers automatically **learn from outcomes** via the self-improvement engine — success patterns are reinforced, failure patterns are corrected in the worker's system prompt.
-
-Full guide: [Swarm Orchestration](docs/docs/guide/swarm-orchestration.md)
-
 ---
 
-## 📦 Project Structure
+## 📦 Monorepo Package Structure
 
-```
-kazma-core/       Agent runner, LLM provider, swarm, memory/RAG, IDE, safety, documents/
-kazma-gateway/    Telegram/Discord/Slack adapters, slash commands (/documents)
-kazma-ui/         FastAPI web app, /documents, Settings, IDE, SSE chat, dashboard
-kazma-tui/        Textual terminal dashboard + IDE + Documents tab
-kazma-memory/     Arabic tokenizer + FTS5 search backend
-kazma-skills/     Native skills (document-platform, vault, database, crawler, …)
-kazma-cli/        The `kazma` command surface
-```
-
----
-
-## 📖 Documentation
-
-| Document | What's inside |
-|---|---|
-| [Docs home](docs/docs/intro.md) | Full documentation map |
-| [Document Intelligence](docs/docs/guide/document-intelligence.md) | Secure document pipeline (ingest → OCR → index → ops) |
-| [Document processing ops](docs/docs/ops/document-processing.md) | Metrics, capacity, GC, multi-replica readiness |
-| [Document security](docs/docs/security/document-security.md) | Threat model, sandbox, malware, fences |
-| [Quickstart](docs/docs/guide/quickstart.md) | Install paths, minimal config, first message |
-| [Architecture](docs/docs/guide/architecture.md) | Engine internals, data-flow diagrams |
-| [Configuration](docs/docs/guide/configuration.md) | `kazma.yaml`, ConfigStore, providers |
-| [Environment variables](docs/docs/reference/environment-variables.md) | Every important env var |
-| [Tools catalog](docs/docs/reference/tools-catalog.md) | Built-in + native skill tools |
-| [CLI Reference](docs/docs/guide/cli-reference.md) | Complete command tree |
-| [Swarm](docs/docs/guide/swarm-orchestration.md) | Patterns, reliability, checkpoints |
-| [IDE](docs/docs/products/ide.md) | Web/TUI/chat coding backend |
-| [Security & Safety](docs/docs/guide/security-and-safety.md) | Three HITL gates, vault, skill signing |
-| [Production checklist](docs/docs/ops/production-checklist.md) | Go-live checklist |
-| [System map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) | Full monorepo engineering map |
-
----
-
-## 🏗 Built Alongside Kazma
-
-These projects grew up next to Kazma — each one taught us something about agents, trust, and real interfaces that shaped the framework.
-
-| Project | Description | Status |
+| Package | Path | Description |
 |---|---|---|
-| [IndexArc](https://github.com/Mubder/IndexArc) | Portable personal vault for secrets, API keys, and notes. Offline (Ollama) or cloud. | Open Source |
-| ShipX | AI delivery platform via WhatsApp — text or voice in Khaleeji Arabic. | In Development |
-| KCA | Institutional Intelligence System — Genesis, OS, Guardian, Network, Evolution. | In Development |
+| **`kazma-core`** | [`kazma-core/`](file:///G:/GitHubRepos/kazma/kazma-core) | Agent runner, LLM provider matrix, SwarmEngine, V2 Cognitive Memory, IDE backend, Safety & Document services |
+| **`kazma-gateway`** | [`kazma-gateway/`](file:///G:/GitHubRepos/kazma/kazma-gateway) | Multi-platform adapters (Telegram, Discord, Slack), slash commands, in-flight task steering (`/steer`) |
+| **`kazma-ui`** | [`kazma-ui/`](file:///G:/GitHubRepos/kazma/kazma-ui) | FastAPI web application, SSE streaming chat, Observability Dashboard, Web IDE, and Memory console |
+| **`kazma-tui`** | [`kazma-tui/`](file:///G:/GitHubRepos/kazma/kazma-tui) | Textual-based rich terminal dashboard, interactive IDE, and Documents manager |
+| **`kazma-skills`** | [`kazma-skills/`](file:///G:/GitHubRepos/kazma/kazma-skills) | Native certified skills (Document Platform, Encrypted Vault, Deep Research, Crawler, Database) |
+| **`kazma-cli`** | [`kazma-cli/`](file:///G:/GitHubRepos/kazma/kazma-cli) | Unified command-line interface (`kazma`, `kazma swarm`, `kazma migrate`, `kazma serve`) |
 
 ---
 
-## 🧪 Development
+## 🧪 Testing & Verification
 
-**4,243+ tests passing** across 5 suites.
+Kazma maintains rigorous test coverage with **5,600+ automated test cases** across unit, integration, swarm reliability, and security layers:
 
 ```bash
-uv sync --all-extras
-pytest                          # All 5 test suites
-ruff check kazma-core/          # Lint
-mypy kazma-core/                # Type check
-```
+# Run complete test suite
+pytest
 
-See: [Development](docs/docs/guide/development.md) · [CONTRIBUTING.md](CONTRIBUTING.md)
+# Code quality and type validation
+ruff check kazma-core/
+mypy kazma-core/
+```
 
 ---
 
-## 🎯 Who is this for?
+## 📚 Documentation Reference
 
-- **Indie developers** who want a self-hosted agent that doesn't phone home
-- **Arabic-speaking teams** who need native RTL and dialect support
-- **Startups & enterprises** evaluating production-grade multi-agent orchestration
-- **Contributors** looking for a well-tested, well-documented AI framework to build on
+| Guide | Description |
+|---|---|
+| [System Architecture](docs/docs/guide/architecture.md) | In-depth breakdown of supervisor graph, ReAct loops, and engine internals |
+| [Monorepo System Map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) | Comprehensive structural map of all monorepo modules and dependencies |
+| [V2 Cognitive Memory](docs/docs/guide/memory-and-rag.md) | Bi-temporal belief stores, PPR graphs, and automated reconsolidation |
+| [Swarm Orchestration](docs/docs/guide/swarm-orchestration.md) | Dispatch patterns, reliability breakers, autoscaling, and worker lifecycle |
+| [Document Intelligence](docs/docs/guide/document-intelligence.md) | Secure ingestion pipelines, quarantined OCR, and redaction operations |
+| [Security & HITL](docs/docs/guide/security-and-safety.md) | Triple-wired approval architecture, prompt fencing, and vault encryption |
+| [Configuration Reference](docs/docs/guide/configuration.md) | Detailed `kazma.yaml`, environment variables, and provider settings |
 
-MIT-licensed, production-tested, 1,668+ commits. Built in Kuwait 🇰🇼 with full-stack execution.
+---
 
-[🌐 kazma.ai](https://kazma.ai) · [🐙 GitHub](https://github.com/Mubder/kazma) · [💬 Try the live demo](https://kazma-demo.fly.dev/) · [📧 Pilots & partnerships](mailto:admin@kazma.ai)
+## 📬 Community & Contact
+
+- 🌐 **Official Website**: [kazma.ai](https://kazma.ai)
+- 🐙 **GitHub Repository**: [github.com/Mubder/kazma](https://github.com/Mubder/kazma)
+- 💬 **Live Demonstration**: [kazma-demo.fly.dev](https://kazma-demo.fly.dev/)
+- 📧 **Pilots, Partnerships & Inquiries**: [admin@kazma.ai](mailto:admin@kazma.ai)
+- 🛡️ **Security Vulnerability Reporting**: [admin@kazma.ai](mailto:admin@kazma.ai) · [Security Advisory](https://github.com/Mubder/kazma/security/advisories/new)
 
 ---
 
 ## 📜 License
 
-MIT — see [LICENSE](LICENSE).
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
