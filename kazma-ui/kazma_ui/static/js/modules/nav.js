@@ -6,29 +6,39 @@
 // Soft-nav is on for every page. Failures fall back to a full load.
 // Chat / IDE / Swarm register window.kazmaOnSoftNavLeave to abort SSE
 // and destroy the editor before the next page binds.
+//
+// First-click empty pages: a whitelist used to skip companions
+// (memory_console.js, dash_lists.js, voice.js, mermaid, CodeMirror).
+// Second click on the same nav item is a full reload, so it looked
+// "fixed". isSoftNavPageScript() is the single gate now.
+
+const GLOBAL_LIB_PATHS = [
+    '/static/js/app.js',
+    '/static/js/htmx.min.js',
+    '/static/js/alpine.min.js',
+    '/static/js/icons.js',
+    '/static/js/auth-guard.js',
+    '/static/js/bidi.js',
+];
+
+/** True for a script the incoming page owns and soft-nav must re-run. */
+export function isSoftNavPageScript(src) {
+    if (!src) return false;
+    const path = String(src).split('?')[0];
+    if (GLOBAL_LIB_PATHS.some((g) => path.endsWith(g))) return false;
+    if (path.includes('/static/js/modules/')) return false;
+    // documents.js, memory_console.js, dash_lists.js, voice.js, mermaid, …
+    if (path.includes('/static/js/')) return true;
+    if (/codemirror/i.test(path)) return true;
+    return false;
+}
 
 export function initSoftNav() {
     const SOFT_NAV_ENABLED = true;
 
-    // Always full document navigation (enter OR leave).
-    // /dashboard uses large inline init (sessions + memory board); soft-nav
-    // reinjects dashboard.js but historically skipped that inline block →
-    // Session Management stuck on skeleton until F5.
-    // SSE chat, the IDE editor, and swarm task streams still hard-reload.
-    // Settings / dashboard / agents / skills / MCP now soft-nav: page
-    // bundles + inline scripts re-run, EventSources close on leave.
     const HARD_RELOAD_ALWAYS = new Set([]);
 
-    const GLOBAL_LIBS = [
-        '/static/js/app.js',
-        '/static/js/htmx.min.js',
-        '/static/js/alpine.min.js',
-        '/static/js/icons.js',
-    ];
-
-    // Only these classic page bundles are re-injected on soft-nav.
-    // (Keeps importmap / module / alpine out of the reinject loop.)
-    const PAGE_SCRIPT_RE = /\/static\/js\/(?:providers|models|settings|agents|skills|mcp|dashboard|workspace|streaming|hitl_approval|replay|research|memory|kb|documents|chat|ide|swarm)\.js(?:\?|$)/i;
+    const GLOBAL_LIBS = GLOBAL_LIB_PATHS;
 
     let navInFlight = null;
     let softNavGeneration = 0;
@@ -169,11 +179,15 @@ export function initSoftNav() {
             if (type === 'module' || type === 'importmap') return false;
             if (isGlobalLib(src)) return false;
             if (s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script')) return true;
-            return PAGE_SCRIPT_RE.test(src);
+            return isSoftNavPageScript(src);
         });
 
         for (const s of pageScripts) {
             const src = s.getAttribute('src') || '';
+            // CodeMirror / mermaid are sticky globals — reloading them mid-session
+            // resets the constructor. Skip if the previous page already loaded them.
+            if (/codemirror/i.test(src) && window.CodeMirror) continue;
+            if (/mermaid\.min/i.test(src) && window.mermaid) continue;
             const fullSrc = src.includes('?')
                 ? src + '&_sn=' + Date.now()
                 : src + '?_sn=' + Date.now();
@@ -323,6 +337,59 @@ export function initSoftNav() {
         }
     }
 
+    function mergePageHead(doc) {
+        document.querySelectorAll('[data-kazma-soft-head]').forEach((el) => el.remove());
+        if (!doc.head) return;
+        Array.from(doc.head.children).forEach((el) => {
+            const tag = (el.tagName || '').toLowerCase();
+            if (tag === 'style') {
+                const clone = el.cloneNode(true);
+                clone.setAttribute('data-kazma-soft-head', '1');
+                document.head.appendChild(clone);
+                return;
+            }
+            if (tag === 'link' && (el.getAttribute('rel') || '') === 'stylesheet') {
+                const href = el.getAttribute('href') || '';
+                if (!href || /kazma(\.v5)?\.css/i.test(href)) return;
+                const exists = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(
+                    (l) => (l.getAttribute('href') || '').split('?')[0] === href.split('?')[0],
+                );
+                if (exists) return;
+                const clone = el.cloneNode(true);
+                clone.setAttribute('data-kazma-soft-head', '1');
+                document.head.appendChild(clone);
+            }
+        });
+    }
+
+    function runIncomingBodyScripts(doc) {
+        // {% block scripts %} lives after .page-body. Re-run those inlines
+        // (hash deep-links, page I18N) that runInlinePageScripts never sees.
+        if (!doc.body) return;
+        const scripts = Array.from(doc.body.querySelectorAll('script')).filter((s) => {
+            if (s.getAttribute('src')) return false;
+            if (s.closest('.page-body')) return false;
+            const type = (s.getAttribute('type') || '').toLowerCase();
+            if (type && type !== 'text/javascript' && type !== 'application/javascript') {
+                return false;
+            }
+            const text = (s.textContent || '').trim();
+            if (!text) return false;
+            if (text.includes('window.KAZMA_I18N')) return false;
+            return true;
+        });
+        for (const s of scripts) {
+            try {
+                const ns = document.createElement('script');
+                ns.textContent = s.textContent;
+                ns.setAttribute('data-kazma-inline-rerun', '1');
+                document.body.appendChild(ns);
+            } catch (e) {
+                console.warn('[soft-nav] body inline script re-run failed:', e);
+            }
+        }
+    }
+
     function runInlinePageScripts(root) {
         if (!root) return;
         const scripts = Array.from(root.querySelectorAll('script')).filter((s) => {
@@ -392,8 +459,10 @@ export function initSoftNav() {
                 oldMain.innerHTML = newMain.innerHTML;
                 if (doc.title) document.title = doc.title;
                 window.scrollTo(0, 0);
+                mergePageHead(doc);
                 await reinjectPageScripts(doc);
                 runInlinePageScripts(oldMain);
+                runIncomingBodyScripts(doc);
                 if (gen !== softNavGeneration) return;
                 await bindPageAlpine(oldMain, gen);
             } else {
@@ -402,8 +471,10 @@ export function initSoftNav() {
                 syncChrome(doc);
                 window.scrollTo(0, 0);
 
+                mergePageHead(doc);
                 await reinjectPageScripts(doc);
                 runInlinePageScripts(oldBody);
+                runIncomingBodyScripts(doc);
                 if (gen !== softNavGeneration) return;
 
                 await bindPageAlpine(oldBody, gen);

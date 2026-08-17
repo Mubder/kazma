@@ -8,6 +8,28 @@
  */
 (function () {
   "use strict";
+  if (typeof window.__kazmaMemConsoleCleanup === 'function') {
+    try { window.__kazmaMemConsoleCleanup(); } catch (e0) { /* ignore */ }
+  }
+  var _memTimers = [];
+  var _memWin = [];
+  function _memEvery(ms, fn) {
+    var id = setInterval(fn, ms);
+    _memTimers.push(id);
+    return id;
+  }
+  function _memOnWin(ev, fn) {
+    window.addEventListener(ev, fn);
+    _memWin.push([ev, fn]);
+  }
+  window.__kazmaMemConsoleCleanup = function () {
+    _memTimers.forEach(clearInterval);
+    _memTimers = [];
+    _memWin.forEach(function (pair) {
+      try { window.removeEventListener(pair[0], pair[1]); } catch (e1) { /* ignore */ }
+    });
+    _memWin = [];
+  };
   var I18N = window.__DASH_MEM_I18N || window.I18N || {};
   // Visible build stamp — if missing in browser console, JS is stale/cached
   window.__KAZMA_MEMORY_CONSOLE_BUILD = 'comp-collapse-2026-08-04';
@@ -636,7 +658,7 @@
   // Poll immediately and then every 5 seconds
   pollMemoryStatus();
   // Skip the poll tick while the tab is hidden (long-lived interval — audit).
-  setInterval(function() { if (!document.hidden) pollMemoryStatus(); }, 5000);
+  _memEvery(5000, function() { if (!document.hidden) pollMemoryStatus(); });
 
   // ── V2 Cognitive Engine panel ─────────────────────────────────
   function _v2ChipStyle(status) {
@@ -4200,7 +4222,7 @@
     // F4: load predicate chips from /vocab on init.
     _v2gLoadPredChips();
     // List → graph slot sync (Entities form Src/Tgt)
-    window.addEventListener('kazma:memory-ops-slots', function(ev) {
+    _memOnWin('kazma:memory-ops-slots', function(ev) {
       var d = (ev && ev.detail) || {};
       // Avoid feedback loop: only apply if values differ from graph state
       // and the event is marked from list (fromList: true)
@@ -4303,7 +4325,7 @@
     }
     // Resize debouncer
     var rto;
-    window.addEventListener('resize', function() { clearTimeout(rto); rto = setTimeout(function() { if (_v2gPts.length) _v2gRepaint(); }, 200); });
+    _memOnWin('resize', function() { clearTimeout(rto); rto = setTimeout(function() { if (_v2gPts.length) _v2gRepaint(); }, 200); });
   }
 
   // Expose for Memory admin list ↔ graph bridge
@@ -4366,6 +4388,12 @@
     _v2gRenderFilters();
     _v2gWireControls();
     _v2gLoad();
-    setInterval(function() { if (!document.hidden) _v2gLoad(); }, 30000);
+    _memEvery(30000, function() { if (!document.hidden) _v2gLoad(); });
+    var _prevCleanup = window.__kazmaMemConsoleCleanup;
+    window.__kazmaMemConsoleCleanup = function () {
+      if (_v2gAnim) { try { cancelAnimationFrame(_v2gAnim); } catch (e2) { /* ignore */ } _v2gAnim = null; }
+      if (typeof _prevCleanup === 'function') _prevCleanup();
+    };
+    window.kazmaOnSoftNavLeave = window.__kazmaMemConsoleCleanup;
   } catch (e) { /* V2 graph optional */ }
 })();

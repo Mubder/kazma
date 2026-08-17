@@ -17,7 +17,7 @@ def test_chat_ide_swarm_soft_nav_and_teardown():
     assert "'/chat'" not in hard
     assert "'/ide'" not in hard
     assert "'/swarm'" not in hard
-    assert "chat|ide|swarm" in nav
+    assert "isSoftNavPageScript" in nav
     chat = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js").read_text(
         encoding="utf-8"
     )

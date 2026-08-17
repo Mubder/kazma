@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Soft-nav first click loads the real page (2026-08-17)
+
+Sidebar first-click on Memory (and IDE / Dashboard / Swarm / Chat)
+swapped the shell but skipped companion scripts
+(``memory_console.js``, CodeMirror, mermaid, ``dash_lists.js``).
+The same link clicked again did a full reload, so the page suddenly
+filled. Soft-nav now re-injects every page-owned script and head
+asset, not a name whitelist.
+
 ## Unreleased — Memory graph inspect is a compact phone sheet (2026-08-17)
 
 Tapping a node no longer covers the graph with an 88vw blur overlay.

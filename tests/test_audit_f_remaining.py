@@ -25,7 +25,8 @@ def test_soft_nav_does_not_hard_reload_inspectors():
     assert "'/memory'" not in hard
     assert "'/documents'" not in hard
     assert "'/replay'" not in hard
-    assert "documents" in nav  # PAGE_SCRIPT_RE
+    assert "isSoftNavPageScript" in nav
+    assert "memory_console.js" in nav
     assert "runInlinePageScripts" in nav
     assert "teardownLiveSockets" in nav
 
