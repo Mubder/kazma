@@ -1865,41 +1865,36 @@ def create_ws_chat_router(
                     if is_turn_running(target_thread_id):
                         if approved and scope == "yolo":
                             try:
-                                from kazma_core.safety.yolo import (
-                                    YoloDisabledError,
-                                    enable_yolo,
-                                )
+                                from kazma_core.safety.yolo import try_enable_yolo
 
-                                enable_yolo(target_thread_id, actor=actor)
+                                _yst = try_enable_yolo(target_thread_id, actor=actor)
+                                if _yst.get("downgraded"):
+                                    msg = (
+                                        "YOLO is off — approved this tool once. "
+                                        "The current turn keeps running."
+                                    )
+                                else:
+                                    msg = (
+                                        "YOLO on — the current turn keeps "
+                                        "running; further danger tools "
+                                        "auto-approve."
+                                    )
                                 logger.warning(
-                                    "[WS-Chat] YOLO enabled (turn already running) "
-                                    "thread=%s actor=%s",
+                                    "[WS-Chat] YOLO scope on busy turn "
+                                    "thread=%s actor=%s downgraded=%s",
                                     target_thread_id,
                                     actor,
+                                    bool(_yst.get("downgraded")),
                                 )
                                 await websocket.send_json(
                                     TelemetryEvent(
                                         type="status_update",
                                         data={
                                             "status": "thinking",
-                                            "message": (
-                                                "YOLO on — the current turn keeps "
-                                                "running; further danger tools "
-                                                "auto-approve."
-                                            ),
+                                            "message": msg,
                                         },
                                         thread_id=target_thread_id,
                                     ).to_dict()
-                                )
-                            except YoloDisabledError as yde:
-                                await websocket.send_json(
-                                    ApprovalEventBridge.create_approval_error_event(
-                                        target_thread_id,
-                                        error=str(yde),
-                                        code="YOLO_DISABLED",
-                                        tool=tool_name,
-                                        scope=scope,
-                                    )
                                 )
                             except Exception as exc:
                                 logger.warning(
@@ -1925,31 +1920,26 @@ def create_ws_chat_router(
                     # in the same ainvoke skip interrupt (mirrors HTTP path).
                     if approved and scope == "yolo":
                         try:
-                            from kazma_core.safety.yolo import YoloDisabledError, enable_yolo
+                            from kazma_core.safety.yolo import try_enable_yolo
 
-                            enable_yolo(target_thread_id, actor=actor)
-                            logger.warning(
-                                "[WS-Chat] YOLO enabled for thread=%s actor=%s",
-                                target_thread_id,
-                                actor,
-                            )
-                        except YoloDisabledError as yde:
-                            logger.warning("[WS-Chat] YOLO blocked: %s", yde)
-                            await websocket.send_json(
-                                ApprovalEventBridge.create_approval_error_event(
+                            _yst = try_enable_yolo(target_thread_id, actor=actor)
+                            if _yst.get("downgraded"):
+                                scope = "once"
+                                logger.info(
+                                    "[WS-Chat] YOLO card downgraded to once "
+                                    "thread=%s actor=%s",
                                     target_thread_id,
-                                    error=str(yde),
-                                    code="YOLO_DISABLED",
-                                    tool=tool_name,
-                                    scope=scope,
+                                    actor,
                                 )
-                            )
-                            await websocket.send_json(
-                                EventBridge.create_idle_event(target_thread_id).to_dict()
-                            )
-                            continue
+                            else:
+                                logger.warning(
+                                    "[WS-Chat] YOLO enabled for thread=%s actor=%s",
+                                    target_thread_id,
+                                    actor,
+                                )
                         except Exception as exc:
                             logger.warning("[WS-Chat] Failed to enable YOLO scope: %s", exc)
+                            scope = "once"
                     elif approved and scope == "tool":
                         try:
                             from kazma_core.safety.hitl_grants import grant_tool

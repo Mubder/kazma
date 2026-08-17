@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — HITL YOLO card approves once when YOLO is off (2026-08-17)
+
+Pressing **YOLO** on an approval card with ``KAZMA_ALLOW_YOLO=0`` used to
+403 and show an Activity error while the turn stayed paused. The card now
+downgrades to approve-once (the write still runs). The YOLO button is
+hidden when the flag is off.
+
 ## Unreleased — KAZMA_ALLOW_YOLO=0 disables YOLO in lab too (2026-08-17)
 
 ``yolo_allowed()`` only blocked YOLO under ``KAZMA_PRODUCTION=1``. Setting

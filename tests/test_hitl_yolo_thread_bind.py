@@ -48,6 +48,17 @@ def _clean_yolo_grants():
         pass
 
 
+def test_try_enable_yolo_downgrades_when_flag_off(monkeypatch) -> None:
+    from kazma_core.safety.yolo import try_enable_yolo
+
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    monkeypatch.setenv("KAZMA_ALLOW_YOLO", "0")
+    st = try_enable_yolo("thr-yolo-bind", actor="test")
+    assert st.get("downgraded") is True
+    assert st.get("active") is False
+    assert "ALLOW_YOLO=0" in (st.get("reason") or "")
+
+
 def test_allow_yolo_zero_blocks_even_without_production(monkeypatch) -> None:
     """KAZMA_ALLOW_YOLO=0 must disable YOLO in lab mode, not only in production."""
     from kazma_core.safety.yolo import yolo_allowed

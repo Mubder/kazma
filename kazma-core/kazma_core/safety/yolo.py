@@ -16,7 +16,9 @@ __all__ = [
     "disable_yolo",
     "enable_yolo",
     "is_yolo_active",
+    "try_enable_yolo",
     "yolo_allowed",
+    "yolo_block_reason",
     "yolo_status",
     "YoloDisabledError",
 ]
@@ -49,6 +51,42 @@ def yolo_allowed() -> bool:
     return True
 
 
+def yolo_block_reason() -> str:
+    """Operator-facing reason when ``yolo_allowed()`` is False."""
+    raw = os.environ.get("KAZMA_ALLOW_YOLO")
+    if raw is not None and str(raw).strip() != "" and not _truthy(str(raw)):
+        return (
+            "YOLO is turned off (KAZMA_ALLOW_YOLO=0). "
+            "This tool can still be approved once."
+        )
+    return (
+        "YOLO is disabled in production. "
+        "Set KAZMA_ALLOW_YOLO=1 to opt in."
+    )
+
+
+def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
+    """Enable YOLO, or report a one-shot downgrade when the flag is off.
+
+    HITL card YOLO must not 403 — the operator already asked to proceed.
+    """
+    if not yolo_allowed():
+        logger.info(
+            "[SECURITY] YOLO card downgraded to approve-once thread=%s actor=%s",
+            thread_id,
+            actor,
+        )
+        return {
+            "active": False,
+            "downgraded": True,
+            "thread_id": thread_id,
+            "reason": yolo_block_reason(),
+        }
+    st = enable_yolo(thread_id, actor=actor)
+    st["downgraded"] = False
+    return st
+
+
 def _ttl_seconds() -> int:
     raw = (os.environ.get("KAZMA_YOLO_TTL_SECONDS") or "").strip()
     if raw.isdigit():
@@ -67,16 +105,14 @@ def enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
             ``KAZMA_ALLOW_YOLO=1``).
     """
     if not yolo_allowed():
+        reason = yolo_block_reason()
         logger.warning(
-            "[SECURITY] YOLO blocked (KAZMA_PRODUCTION without KAZMA_ALLOW_YOLO) "
-            "thread=%s actor=%s",
+            "[SECURITY] YOLO blocked thread=%s actor=%s reason=%s",
             thread_id,
             actor,
+            reason,
         )
-        raise YoloDisabledError(
-            "YOLO is disabled in production. "
-            "Set KAZMA_ALLOW_YOLO=1 to opt in, or unset KAZMA_PRODUCTION."
-        )
+        raise YoloDisabledError(reason)
 
     from kazma_core.config_store import get_config_store
 

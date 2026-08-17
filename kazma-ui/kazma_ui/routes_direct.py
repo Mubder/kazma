@@ -3063,20 +3063,15 @@ def register_direct_routes(self: Any) -> None:
             grant_info: dict[str, Any] | None = None
             if approved and scope == "yolo":
                 try:
-                    from kazma_core.safety.yolo import YoloDisabledError, enable_yolo
+                    from kazma_core.safety.yolo import try_enable_yolo
 
-                    grant_info = enable_yolo(thread_id, actor=actor)
-                except YoloDisabledError as yde:
-                    logger.warning("[HITL] YOLO scope blocked: %s", yde)
-                    return _JSONResponse(
-                        {
-                            "error": str(yde),
-                            "status": "yolo_disabled",
-                        },
-                        status_code=403,
-                    )
+                    grant_info = try_enable_yolo(thread_id, actor=actor)
+                    if grant_info.get("downgraded"):
+                        # Card YOLO with the flag off → approve this call once.
+                        scope = "once"
                 except Exception:
                     logger.exception("[HITL] failed to enable YOLO scope")
+                    scope = "once"
             elif approved and scope == "tool":
                 try:
                     from kazma_core.safety.hitl_grants import grant_tool

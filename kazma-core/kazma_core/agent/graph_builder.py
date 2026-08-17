@@ -2705,6 +2705,8 @@ async def tool_worker_node(
                 primary_tool = f"{len(danger_tools)} tools"
                 primary_args = {"tools": [t["name"] for t in tools_payload]}
 
+            from kazma_core.safety.yolo import yolo_allowed as _yolo_allowed
+
             approval_input = {
                 "type": "hitl_approval",
                 "kind": "security",  # self-describing (§4.3): every payload carries kind
@@ -2712,6 +2714,7 @@ async def tool_worker_node(
                 "args": primary_args,
                 "tools": tools_payload,
                 "message": message,
+                "yolo_allowed": _yolo_allowed(),
             }
 
             # Defense-in-depth: requires_approval() already filtered YOLO/grants
