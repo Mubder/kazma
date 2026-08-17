@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Memory graph tools in the commitment registry (2026-08-17)
+
+``memory_merge_entities``, ``memory_link_entities``, ``memory_delete_entity``,
+``memory_invalidate``, ``memory_purge_empty_entities``, and ``memory_admin``
+were missing from ``_PROF``. With ``enforce_unknown_mutators`` on (the
+default), the fail-closed gate blocked every memory cleanup as
+"unregistered mutator" while ``memory_store`` still worked. Those tools
+are now registered as ``WRITE_MEMORY``. Other live builtins (file_append,
+spawn_agent, knowledge ingest, git_push/pull, …) are listed too. The
+flag stays on.
+
 ## Unreleased — Audit F remaining (2026-08-17)
 
 Soft-nav no longer full-reloads inspector pages (memory / documents /

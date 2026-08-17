@@ -17,11 +17,10 @@ Design
 - **Unregistered mutators are classified fail-closed** (plan §5.2): a
   mutator-like name with no profile is treated as ``critical`` / unsafe.
   Classification is always fail-closed; *enforcement* (the actual deny) is
-  opt-in via ``agent.commitment.enforce_unknown_mutators`` (default OFF, per
-  AGENTS.md §20E's safe-rollout rule). With the default, an unregistered
-  mutator is flagged dangerous but reaches audit-only allow unless that flag
-  is on — so rely on the HITL danger list / approval card for such tools
-  unless you enable the flag. Pure reads are always allowed.
+  ``agent.commitment.enforce_unknown_mutators`` (**default ON**). A tool
+  that is not in this registry (and not on CANONICAL/TOOL_TIERS) is denied
+  on the IDE/swarm ``execute()`` path. Pure reads stay allowed. Add every
+  real mutator here — do not flip the flag off to paper over drift.
 """
 
 from __future__ import annotations
@@ -85,19 +84,39 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
                       ("event_ref|event_at", "fire_at|lead", "prompt")),
     "cancel_scheduled": (EffectKind.SCHEDULE, SemanticTier.HIGH, "cancel_job",
                          ("job_id",)),
-    # memory
+    # memory (graph cleanup + store — omitting these fail-closes merge/delete)
     "memory_store": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
                      "store_fact|revise_fact",
                      ("subject", "predicate", "object")),
     "memory_search": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "memory_list_beliefs": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "memory_list_entities": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "memory_invalidate": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                          "store_fact|revise_fact", ("belief_id",)),
+    "memory_merge_entities": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                              "store_fact|revise_fact",
+                              ("source_id", "target_id")),
+    "memory_link_entities": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                             "store_fact|revise_fact",
+                             ("subject", "object")),
+    "memory_delete_entity": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                             "store_fact|revise_fact", ("entity_id",)),
+    "memory_purge_empty_entities": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                                    "store_fact|revise_fact", ()),
+    "memory_admin": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
+                     "store_fact|revise_fact", ()),
     # filesystem
     "file_write": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs",
                    ("path", "op")),
+    "file_append": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs",
+                    ("path",)),
     "file_delete": (EffectKind.WRITE_FS, SemanticTier.CRITICAL, "mutate_fs",
                     ("path", "op")),
     "file_read": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "file_search": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "file_list": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "send_file": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
+                  ("path",)),
     # Path grants expand the FS allowlist (HITL danger).
     "request_path_access": (EffectKind.CONFIG, SemanticTier.CRITICAL, "config_change",
                             ("path", "mode")),
@@ -109,6 +128,7 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "browser_eval_js": (EffectKind.EXEC, SemanticTier.HIGH, "exec", ()),
     # config
     "config_save": (EffectKind.CONFIG, SemanticTier.CRITICAL, "config_change", ()),
+    "config_read": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "vault_delete": (EffectKind.CONFIG, SemanticTier.CRITICAL, "config_change", ()),
     "vault_retrieve": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # outbound
@@ -122,6 +142,9 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     # git / github
     "git_commit": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     "git_push_pull": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "git_push": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "git_pull": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "git_merge": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     "github_create_pr": (EffectKind.OUTBOUND, SemanticTier.HIGH, "send_outbound", ()),
     "github_merge_pr": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound", ()),
     # install / delegate
@@ -133,6 +156,38 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "sqlite_query": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "current_datetime": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "send_message": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    "context_info": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "update_scratchpad": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    "mcp_test_server": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # knowledge library
+    "knowledge_list_libraries": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "knowledge_search": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "knowledge_create_library": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH, None, ()),
+    "knowledge_ingest_url": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH, None, ()),
+    "knowledge_ingest_site": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH, None, ()),
+    # research
+    "plan_research_queries": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "critique_synthesis_gaps": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "list_research_papers": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "research_readiness": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "start_deep_research": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
+    # swarm / sub-agents
+    "spawn_agent": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
+    "spawn_agents": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
+    "dispatch_swarm": (EffectKind.DELEGATE, SemanticTier.HIGH, "delegate", ()),
+    "check_swarm_task": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # native skills commonly loaded
+    "lint_code": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "format_code": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "run_unit_tests": (EffectKind.EXEC, SemanticTier.HIGH, "exec", ()),
+    "generate_pdf": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "generate_docx": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "generate_xlsx": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
+    "browser_navigate": (EffectKind.NONE, SemanticTier.LOW, None, ()),
+    "browser_click": (EffectKind.NONE, SemanticTier.LOW, None, ()),
+    "browser_extract_text": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "browser_screenshot": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "browser_fill_form": (EffectKind.NONE, SemanticTier.LOW, None, ()),
 }
 
 
