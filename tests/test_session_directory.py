@@ -128,26 +128,33 @@ def test_slash_resolver_falls_through_to_graph():
     from kazma_gateway.slash_commands import resolve_slash_command
 
     assert resolve_slash_command("/sessions") is None
+    assert resolve_slash_command("/seasons") is None
     assert resolve_slash_command("/session 2") is None
+    assert resolve_slash_command("/season 2") is None
     assert resolve_slash_command("/switch 1") is None
     assert resolve_slash_command("/new") is None
     help_text = resolve_slash_command("/help")
     assert help_text is not None
     assert "/sessions" in help_text
+    assert "/seasons" in help_text
     assert "/session 2" in help_text
+    assert "/season" in help_text
 
 
 def test_session_command_parse():
     from kazma_gateway.agent_handler.session_commands import _parse
 
     assert _parse("/sessions") == ("list", "")
+    assert _parse("/seasons") == ("list", "")
     assert _parse("/session new Notes") == ("new", "Notes")
+    assert _parse("/season 2") == ("switch", "2")
     assert _parse("/new") == ("new", "")
     assert _parse("/switch 3") == ("switch", "3")
     assert _parse("/session here") == ("here", "")
     assert _parse("hello") is None
     assert _parse("/session@KazmaBot 40") == ("switch", "40")
     assert _parse("/sessions@KazmaBot") == ("list", "")
+    assert _parse("/seasons@KazmaBot") == ("list", "")
 
 
 def test_find_mouth_thread_prefers_configstore_then_existing_telegram():

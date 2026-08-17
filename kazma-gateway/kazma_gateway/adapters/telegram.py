@@ -45,6 +45,7 @@ from kazma_gateway.gateway import (
     OutboundMessage,
     RateLimiter,
 )
+from kazma_gateway.slash_commands import BOT_MENU_COMMANDS
 
 logger = logging.getLogger(__name__)
 
@@ -1397,32 +1398,8 @@ class TelegramAdapter(BaseAdapter):
         in ``listen()`` before this method is called).
         """
         # Telegram shows only what we register here (menu next to the input).
-        # Handlers may support more commands than this list; keep this in sync
-        # with slash_commands help + gateway intercepts (_try_skill, _try_ide, …).
-        commands = [
-            {"command": "help", "description": "Show available commands"},
-            {"command": "long", "description": "Long-task mode on/off (deep audits)"},
-            {"command": "reset", "description": "Clear conversation history"},
-            {"command": "status", "description": "Gateway health overview"},
-            {"command": "model", "description": "Show active model"},
-            {"command": "memory", "description": "Report memory usage"},
-            {"command": "cost", "description": "Token spend this session"},
-            {"command": "replay", "description": "Time travel snapshots"},
-            {"command": "config", "description": "Configuration wizard"},
-            {"command": "personality", "description": "Agent personality"},
-            {"command": "context", "description": "Context window usage"},
-            {"command": "undo", "description": "Undo last response"},
-            {"command": "edit", "description": "Edit last response"},
-            {"command": "swarm", "description": "Swarm orchestration"},
-            {
-                "command": "skill",
-                "description": "Agent Skills: list / install / activate (agentskills.io)",
-            },
-            {"command": "ide", "description": "IDE: files, git, coding skills"},
-            {"command": "new", "description": "Create a brand new session/season"},
-            {"command": "compact", "description": "Manually trigger context compaction"},
-            {"command": "yolo", "description": "Toggle session YOLO safety bypass"},
-        ]
+        # Single SoT: kazma_gateway.slash_commands.BOT_MENU_COMMANDS.
+        commands = list(BOT_MENU_COMMANDS)
 
         scopes: list[tuple[str, str]] = [
             ("default", "default"),

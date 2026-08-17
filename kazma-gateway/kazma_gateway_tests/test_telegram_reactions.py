@@ -172,6 +172,22 @@ class TestTelegramRelativePaths:
         ]
         for scope_type in scopes:
             assert scope_type in called_scopes, f"Missing scope: {scope_type}"
+        registered = {
+            cmd["command"]
+            for cmd in set_my_commands_calls[0].kwargs["json"]["commands"]
+        }
+        for required in (
+            "sessions",
+            "seasons",
+            "session",
+            "season",
+            "switch",
+            "new",
+            "research",
+            "documents",
+            "help",
+        ):
+            assert required in registered, f"Missing Telegram menu command: /{required}"
         mock_http.get.assert_awaited_once_with("/getMe")
 
     @pytest.mark.asyncio

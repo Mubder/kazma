@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — Telegram / menu lists every slash command (2026-08-18)
+
+Telegram's input-field command picker only shows what `setMyCommands`
+registers. `/sessions`, `/seasons`, `/session`, `/season`, `/switch`,
+and the other gateway intercepts (`/research`, `/documents`, `/kb`,
+`/fork`, `/steer`, `/abort`, …) were missing from that list even though
+they already worked if you typed them. The menu now uses a single
+`BOT_MENU_COMMANDS` catalog in `slash_commands.py`. Restart the server
+so the bot re-registers; Telegram clients may take a moment to refresh.
+
 ## Unreleased — Settings first click: Alpine was binding an empty shell (2026-08-17)
 
 ``<html x-data="kazmaApp()">`` means Alpine's MutationObserver owns
