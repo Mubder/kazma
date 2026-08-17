@@ -154,6 +154,10 @@ class TestSidebarComponent:
             "before Activity / Settings)"
         )
         assert sidebar_html.count('href="/dashboard"') == 1
+        agents = sidebar_html.find('href="/agents"')
+        replay = sidebar_html.find('href="/replay"')
+        assert work < agents < activity, "Agents belong in Work"
+        assert activity < replay < settings, "Replay belongs in Activity"
 
     def test_has_skills_link(self, sidebar_html):
         assert 'href="/skills"' in sidebar_html

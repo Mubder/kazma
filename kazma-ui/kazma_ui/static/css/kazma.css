@@ -855,9 +855,11 @@ button { cursor: pointer; font-family: inherit; }
 
 /* Settings navigation (12-tab system) */
 .settings-nav {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin;
+  display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin;
   border-bottom: 1px solid var(--border-subtle); padding-bottom: 0;
   -webkit-overflow-scrolling: touch; margin-bottom: var(--sp-5);
+  scroll-snap-type: x proximity;
 }
 .settings-tab {
   padding: 8px 14px; background: none; border: none;
@@ -865,6 +867,8 @@ button { cursor: pointer; font-family: inherit; }
   color: var(--text-tertiary); cursor: pointer;
   font-family: var(--font-sans);
   font-size: 0.85rem; transition: all 0.15s;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
 }
 .settings-tab:hover { color: var(--text-primary); }
 .settings-tab.active { color: var(--accent-light); border-bottom-color: var(--accent); }
@@ -1258,9 +1262,15 @@ tbody tr:last-child td {
 /* ── 10. Tabs ───────────────────────────────────────────────────── */
 .tabs {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--sp-5);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
 }
 .tab {
   padding: var(--sp-2) var(--sp-4);
@@ -1273,6 +1283,9 @@ tbody tr:last-child td {
   font-family: inherit;
   font-weight: 500;
   transition: all var(--transition-fast);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  scroll-snap-align: start;
 }
 .tab:hover { color: var(--text-primary); }
 .tab.active {
@@ -3855,9 +3868,86 @@ tbody tr:last-child td {
   .dash-pro-toolbar { width: 100%; }
   .dash-pro-toolbar .range-selector { flex: 1 1 auto; }
   .dash-pro-toolbar .range-btn { flex: 1; text-align: center; }
+
+  /* Dashboard tables → cards */
+  .dash-table-wrap { display: none !important; }
+  .dash-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0 8px;
+  }
+  .dash-mobile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-surface);
+  }
+  .dash-mobile-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .dash-mobile-card-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dash-mobile-card-id {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dash-mobile-card-meta {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+  }
+  .dash-session-delete { align-self: flex-end; }
+
+  /* Settings + Swarm tab chip rail */
+  .settings-nav,
+  .tabs {
+    flex-wrap: nowrap;
+    position: sticky;
+    top: var(--header-height);
+    z-index: 15;
+    background: var(--bg-panel);
+    padding: 8px 4px;
+    margin-inline: -4px;
+    gap: 6px;
+  }
+  .settings-tab,
+  .tabs .tab {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    border-bottom-width: 1px;
+  }
+  .settings-tab.active,
+  .tabs .tab.active {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--accent-light);
+  }
+
+  .ws-action-btn { flex: 1 1 auto; }
+  .swarm-metrics-grid { grid-template-columns: 1fr 1fr !important; }
+  .swarm-container .card > div[style*="justify-content:space-between"] {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
   .workspace-grid { grid-template-columns: 1fr; }
   .swarm-container .workspace-grid { grid-template-columns: 1fr; }
-  .swarm-metrics-grid { grid-template-columns: 1fr !important; }
   .two-col-grid { grid-template-columns: 1fr !important; }   /* inline-grid helper */
 
   /* ── Padding reductions ──
@@ -3939,6 +4029,9 @@ tbody tr:last-child td {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 1.5rem;
+}
+.swarm-metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .metric-card {
   background: var(--tint);
@@ -4370,6 +4463,9 @@ canvas { display: block; border-radius: 4px; }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Dashboard cards — hidden on desktop; phone media shows them */
+.dash-card-list { display: none; }
+
 /* Dashboard */
 .dashboard-container { max-width: 1400px; margin: 0 auto; }
 .dashboard-container.dash-pro {
@@ -4455,7 +4551,7 @@ canvas { display: block; border-radius: 4px; }
 }
 /* Identical sizing for the Create Workspace / Switch Repo action buttons */
 .ws-action-btn {
-  min-width: 150px;
+  min-width: 0;
   white-space: nowrap;
   flex-shrink: 0;
 }

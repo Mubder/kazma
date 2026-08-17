@@ -51,6 +51,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.knowledge": {"en": "Knowledge", "ar": "المكتبة المعرفية"},
     "nav.documents": {"en": "Documents", "ar": "المستندات"},
     "nav.memory": {"en": "Memory", "ar": "الذاكرة"},
+    "nav.more": {"en": "More", "ar": "المزيد"},
     "memory.title": {"en": "Memory", "ar": "الذاكرة"},
     "memory.intro": {
         "en": "Browse beliefs and entities, merge/link isolated nodes, run hygiene, and explore the belief graph — one place for all memory ops.",

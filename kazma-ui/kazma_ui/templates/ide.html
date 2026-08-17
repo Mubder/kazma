@@ -89,6 +89,20 @@
     .ide-resizer:hover, .ide-resizer.dragging { background: var(--accent); }
     @media (max-width: 1100px) { .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 220px) 4px 1fr 4px var(--ide-chat-w, 320px); } }
     @media (max-width: 900px) { .ide-layout, .ide-layout.with-chat { grid-template-columns: 1fr; height: auto; } .ide-chat { min-height: 320px; } .ide-resizer { display: none; } }
+    @media (max-width: 768px) {
+      .ide-layout, .ide-layout.with-chat {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: 0;
+        gap: 10px;
+      }
+      .ide-tree { max-height: 36vh; }
+      .ide-editor-wrap { min-height: 46vh; }
+      .ide-chat { min-height: 280px; max-height: 50vh; }
+      .ide-toolbar { gap: 6px; padding: 8px 10px; }
+      .ide-toolbar-actions { width: 100%; margin-left: 0; }
+      .ide-toolbar-actions .btn { flex: 1 1 auto; }
+    }
   </style>
 {% endblock %}
 

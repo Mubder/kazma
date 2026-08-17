@@ -2,6 +2,8 @@
 // Alpine.js global stores. Registered on alpine:init so they exist before
 // any component initializes. Imported by the app.js entry module.
 
+import { KAZMA_SEARCH_PAGES } from './search_pages.js';
+
 export function registerStores() {
     document.addEventListener('alpine:init', () => {
         Alpine.store('toast', {
@@ -305,19 +307,7 @@ export function registerStores() {
             searched: false,
             hovered: 0,
 
-            _pages: [
-                { href: '/', title: 'Dashboard' },
-                { href: '/chat', title: 'Chat' },
-                { href: '/dashboard', title: 'Analytics' },
-                { href: '/skills', title: 'Skills' },
-                { href: '/mcp', title: 'MCP' },
-                { href: '/swarm', title: 'Swarm' },
-                { href: '/workspace', title: 'Workspace' },
-                { href: '/settings', title: 'Settings' },
-                { href: '/research', title: 'Research' },
-                { href: '/knowledge', title: 'Knowledge' },
-                { href: '/memory', title: 'Memory' },
-            ],
+            _pages: KAZMA_SEARCH_PAGES,
 
             toggle() {
                 this.open = !this.open;

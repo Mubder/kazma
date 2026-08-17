@@ -207,7 +207,8 @@
         <p>{{ t('dashboard.no_active_sessions') }}</p>
         <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.sessions_hint') }}</p>
       </div>
-      <div style="overflow-x:auto;width:100%;">
+      <div id="sessions-cards" class="dash-card-list"></div>
+      <div class="dash-table-wrap" style="overflow-x:auto;width:100%;">
         <table id="sessions-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;display:none;">
           <thead>
             <tr style="border-bottom:1px solid var(--border-subtle);">
@@ -239,7 +240,19 @@
       </h2>
       <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ traces|length }} {{ t('dashboard.traces_count') }}</span>
     </div>
-    <div style="overflow-x:auto;">
+    <div id="traces-cards" class="dash-card-list">
+      {% for trace in traces %}
+      <article class="dash-mobile-card">
+        <div class="dash-mobile-card-top">
+          <span class="badge badge-basic">{{ trace.trace_type }}</span>
+          <span class="badge {{ trace.badge_class }}">{{ trace.status }}</span>
+        </div>
+        <div class="dash-mobile-card-name">{{ trace.label }}</div>
+        <div class="dash-mobile-card-meta">{{ trace.time }} · {{ trace.duration_ms }}ms · {{ trace.tokens }} tok · {{ trace.cost }}</div>
+      </article>
+      {% endfor %}
+    </div>
+    <div class="dash-table-wrap" style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
         <thead>
           <tr style="border-bottom:1px solid var(--border-subtle);">
@@ -280,6 +293,7 @@
 
 {% block scripts %}
 <script src="/static/js/streaming.js"></script>
+<script src="/static/js/dash_lists.js"></script>
 <script src="/static/js/dashboard.js"></script>
 <script src="/static/js/hitl_approval.js"></script>
 <script>

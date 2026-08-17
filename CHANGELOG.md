@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Six UI follow-ups: nav, phone rails, cards (2026-08-17)
+
+Bottom bar is Chat / Workspace / Dashboard / Settings / More. Agents
+moved into Work; Replay into Activity. Settings and Swarm tabs are a
+horizontal chip rail on phones. Workspace buttons no longer force
+150px. Swarm metrics are two-up; IDE stacks tree → editor → chat.
+Dashboard sessions/traces render as cards under 768px. Ctrl+K labels
+match the sidebar (Dashboard is Dashboard, not Analytics).
+
 ## Unreleased — Dashboard moves to Work; mobile dashboard layout (2026-08-17)
 
 Sidebar **Dashboard** now sits in the Work group (with Chat / Workspace /
