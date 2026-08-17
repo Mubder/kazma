@@ -55,7 +55,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout framework repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history — generate_metrics.py needs git ls-files + rev-parse
           token: ${{ secrets.GITHUB_TOKEN }} # write back to framework main
