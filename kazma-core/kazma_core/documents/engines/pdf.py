@@ -560,7 +560,7 @@ class PdfEngine:
 
         data = [[_cell(c) for c in block.headers]]
         data.extend([_cell(c) for c in row] for row in block.rows)
-        table = Table(data, repeatRows=1)
+        table = Table(data, repeatRows=1, splitByRow=len(data) > 12)
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTNAME", (0, 0), (-1, 0), bold_font),
@@ -576,4 +576,9 @@ class PdfEngine:
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
         ]))
-        story.append(table)
+        if len(data) <= 12:
+            from reportlab.platypus import KeepTogether
+
+            story.append(KeepTogether([table]))
+        else:
+            story.append(table)

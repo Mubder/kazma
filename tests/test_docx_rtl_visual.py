@@ -354,6 +354,39 @@ def test_duplicate_heading_is_not_rendered_twice(tmp_path: Path) -> None:
     )
 
 
+def test_docx_math_and_code_are_ltr_isolated(tmp_path: Path) -> None:
+    """Math becomes Unicode; code is LTR (no w:bidi=1) and not reversed."""
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    docx = tmp_path / "math.docx"
+    _generate_docx(docx, {
+        "title": "تقرير",
+        "lang": "ar",
+        "sections": [{
+            "heading": "معادلات",
+            "body": (
+                "قيمة المخاطر $R = P \\cdot I$.\n\n"
+                "$$S(x) = \\frac{1}{1 + e^{-x}}$$\n\n"
+                "```python\n"
+                "def verify_cipher(cipher_text, key):\n"
+                "    computed = hmac.new(key, cipher_text).digest()\n"
+                "    return computed\n"
+                "```\n"
+            ),
+        }],
+    })
+    xml = _docx_text(docx)
+    assert "R = P · I" in xml or "R = P · I".replace(" ", "") in xml.replace(" ", "")
+    assert "⁄" in xml or "1/" in xml or "1⁄" in xml
+    assert r"\cdot" not in xml
+    assert r"\frac" not in xml
+    assert "w:cantSplit" in xml
+    assert "def verify_cipher" in xml
+    assert "hmac.new" in xml
+    # Code cell paragraphs must be forced LTR (bidi val 0), not section RTL.
+    assert 'w:bidi w:val="0"' in xml or 'w:val="0"' in xml
+
+
 def test_heading_key_equivalence() -> None:
     from kazma_core.documents.heading_text import (
         drop_leading_heading,

@@ -275,8 +275,15 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
         if parsed is not None:
             blocks.append(parsed)
             return
-        # Prefer space-joined for normal paragraphs (original behavior)
-        blocks.append({"type": "paragraph", "text": space_joined})
+        # Prefer space-joined for normal paragraphs (original behavior).
+        # Pull $$display$$ out so it does not sit as raw TeX in the body.
+        from kazma_core.documents.math_text import split_display_math
+
+        for kind, chunk in split_display_math(space_joined):
+            if kind == "math":
+                blocks.append({"type": "math", "text": chunk, "display": True})
+            elif chunk.strip():
+                blocks.append({"type": "paragraph", "text": chunk.strip()})
 
     def flush_list() -> None:
         nonlocal list_buf, list_kind
@@ -302,6 +309,32 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
             if i < len(lines):
                 i += 1  # closing fence
             blocks.append({"type": "code", "lang": lang, "text": "\n".join(code_lines)})
+            continue
+
+        # Display math on its own line(s): $$ ... $$
+        if stripped.startswith("$$"):
+            flush_para()
+            flush_list()
+            rest = stripped[2:]
+            if rest.endswith("$$") and len(rest) > 2:
+                blocks.append({"type": "math", "text": rest[:-2].strip(), "display": True})
+                i += 1
+                continue
+            math_lines = [rest] if rest else []
+            i += 1
+            while i < len(lines) and "$$" not in lines[i]:
+                math_lines.append(lines[i])
+                i += 1
+            if i < len(lines):
+                before, _, _ = lines[i].partition("$$")
+                if before.strip():
+                    math_lines.append(before)
+                i += 1
+            blocks.append({
+                "type": "math",
+                "text": "\n".join(math_lines).strip(),
+                "display": True,
+            })
             continue
 
         if not stripped:
@@ -420,10 +453,9 @@ def inline_markdown_to_reportlab(
     if not text:
         return ""
 
+    from kazma_core.documents.math_text import latex_to_unicode, split_inline_math
+
     # Tokenize inline patterns on the *raw* string, escape segments
-    parts: list[str] = []
-    pos = 0
-    # Simpler sequential pass
     pattern = re.compile(
         r"\*\*(.+?)\*\*|__(.+?)__|"
         r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|"
@@ -452,28 +484,45 @@ def inline_markdown_to_reportlab(
         s2 = shape_for_pdf(s) if shape_arabic else s
         return html.escape(s2)
 
-    for m in pattern.finditer(text):
-        if m.start() > pos:
-            parts.append(_esc_shape(text[pos : m.start()]))
-        if m.group(1) is not None or m.group(2) is not None:
-            inner = m.group(1) if m.group(1) is not None else m.group(2)
-            parts.append(f"<b>{_esc_shape(inner)}</b>")
-        elif m.group(3) is not None or m.group(4) is not None:
-            inner = m.group(3) if m.group(3) is not None else m.group(4)
-            parts.append(f"<i>{_esc_shape(inner)}</i>")
-        elif m.group(5) is not None:
-            parts.append(
-                f'<font face="Courier" size="9" color="#0f172a">'
-                f"{_esc_shape(m.group(5))}</font>"
+    def _md_chunk(chunk: str) -> str:
+        parts: list[str] = []
+        pos = 0
+        for m in pattern.finditer(chunk):
+            if m.start() > pos:
+                parts.append(_esc_shape(chunk[pos : m.start()]))
+            if m.group(1) is not None or m.group(2) is not None:
+                inner = m.group(1) if m.group(1) is not None else m.group(2)
+                parts.append(f"<b>{_esc_shape(inner)}</b>")
+            elif m.group(3) is not None or m.group(4) is not None:
+                inner = m.group(3) if m.group(3) is not None else m.group(4)
+                parts.append(f"<i>{_esc_shape(inner)}</i>")
+            elif m.group(5) is not None:
+                parts.append(
+                    f'<font face="Courier" size="9" color="#0f172a">'
+                    f"{_esc_shape(m.group(5))}</font>"
+                )
+            elif m.group(6) is not None:
+                label = _esc_shape(m.group(6))
+                href = html.escape(m.group(7), quote=True)
+                parts.append(f'<link href="{href}" color="#2563eb"><u>{label}</u></link>')
+            pos = m.end()
+        if pos < len(chunk):
+            parts.append(_esc_shape(chunk[pos:]))
+        return "".join(parts) if parts else _esc_shape(chunk)
+
+    rendered: list[str] = []
+    for kind, chunk in split_inline_math(text):
+        if kind == "math":
+            rendered.append(
+                f'<font face="Courier" size="11">{html.escape(latex_to_unicode(chunk))}</font>'
             )
-        elif m.group(6) is not None:
-            label = _esc_shape(m.group(6))
-            href = html.escape(m.group(7), quote=True)
-            parts.append(f'<link href="{href}" color="#2563eb"><u>{label}</u></link>')
-        pos = m.end()
-    if pos < len(text):
-        parts.append(_esc_shape(text[pos:]))
-    return "".join(parts) if parts else _esc_shape(text)
+        elif kind == "money":
+            rendered.append(
+                f'<font face="Courier">${html.escape(chunk.strip())}</font>'
+            )
+        else:
+            rendered.append(_md_chunk(chunk))
+    return "".join(rendered)
 
 
 # ── Pygments code highlighting for reportlab PDF ──────────────────────
@@ -704,7 +753,19 @@ def pdf_flowables_from_body(
             flow.append(Spacer(1, 8))
         elif btype == "code":
             raw = block.get("text") or ""
-            flow.append(Paragraph(_highlight_code_pdf(raw, block.get("lang") or ""), code_style))
+            try:
+                from reportlab.platypus import Preformatted, KeepTogether
+                pre_style = styles.get("code", code_style)
+                flow.append(KeepTogether([Preformatted(raw, pre_style)]))
+            except Exception:
+                flow.append(Paragraph(_highlight_code_pdf(raw, block.get("lang") or ""), code_style))
+            flow.append(Spacer(1, 8))
+        elif btype == "math":
+            from kazma_core.documents.math_text import latex_to_unicode
+
+            shown = html.escape(latex_to_unicode(block.get("text") or ""))
+            math_style = styles.get("code", body_style)
+            flow.append(Paragraph(shown, math_style))
             flow.append(Spacer(1, 8))
         elif btype == "list":
             ordered = bool(block.get("ordered"))

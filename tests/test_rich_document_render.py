@@ -15,6 +15,27 @@ from kazma_core.documents.rich_render import (
 from kazma_core.documents.style_theme import THEME, theme_cs_size
 
 
+def test_latex_to_unicode_common_forms() -> None:
+    from kazma_core.documents.math_text import (
+        latex_to_unicode,
+        looks_like_currency,
+        split_inline_math,
+    )
+    from kazma_core.documents.rich_render import parse_rich_blocks
+
+    assert latex_to_unicode(r"R = P \cdot I") == "R = P · I"
+    out = latex_to_unicode(r"S(x) = \frac{1}{1 + e^{-x}}")
+    assert "⁄" in out
+    assert "⁻" in out or "−" in out or "-x" in out or "ˣ" in out
+    assert looks_like_currency("0.0035")
+    assert not looks_like_currency(r"R = P \\cdot I")
+    kinds = [k for k, _ in split_inline_math(r"cost $0.0035$ and $R = P \\cdot I$")]
+    assert "money" in kinds
+    assert "math" in kinds
+    blocks = parse_rich_blocks("intro\n\n$$S(x) = \\frac{1}{1+e^{-x}}$$\n\nmore")
+    assert any(b.get("type") == "math" for b in blocks)
+
+
 def test_theme_cs_size_splits_latin_and_arabic() -> None:
     """Arabic body is larger than Latin; chrome gets a modest bump only."""
     assert THEME["body_size_ar"] > THEME["body_size"]

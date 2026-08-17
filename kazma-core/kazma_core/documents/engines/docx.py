@@ -377,6 +377,134 @@ class DocxEngine:
             el.set(qn("w:val"), "1")
 
     @staticmethod
+    def _force_ltr_paragraph(p: Any) -> None:
+        """Pin a paragraph to LTR (code / math). Do not mark runs RTL."""
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p_pr = p._p.get_or_add_pPr()
+        bidi = p_pr.find(qn("w:bidi"))
+        if bidi is None:
+            bidi = OxmlElement("w:bidi")
+            p_pr.append(bidi)
+        bidi.set(qn("w:val"), "0")
+        jc = p_pr.find(qn("w:jc"))
+        if jc is None:
+            jc = OxmlElement("w:jc")
+            p_pr.append(jc)
+        jc.set(qn("w:val"), "left")
+
+    @staticmethod
+    def _mark_ltr_run(run: Any) -> None:
+        """Force a run to Latin LTR (no w:rtl) so source/math is not reversed."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        r_pr = run._r.get_or_add_rPr()
+        rtl = r_pr.find(qn("w:rtl"))
+        if rtl is not None:
+            r_pr.remove(rtl)
+        r_fonts = r_pr.find(qn("w:rFonts"))
+        if r_fonts is None:
+            r_fonts = OxmlElement("w:rFonts")
+            r_pr.insert(0, r_fonts)
+        face = run.font.name or "Consolas"
+        for attr in ("w:ascii", "w:hAnsi", "w:cs"):
+            r_fonts.set(qn(attr), face)
+
+    def _write_math(self, document: Any, tex: str, *, display: bool) -> None:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
+
+        from kazma_core.documents.math_text import latex_to_unicode
+
+        shown = latex_to_unicode(tex)
+        p = document.add_paragraph()
+        run = p.add_run(shown)
+        run.font.name = "Cambria Math"
+        run.italic = True
+        run.font.size = Pt(13 if display else 11)
+        self._mark_ltr_run(run)
+        self._force_ltr_paragraph(p)
+        if display:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(8)
+
+    def _write_code_block(self, document: Any, text: str) -> None:
+        """LTR isolated code: one line per paragraph inside a single cell.
+
+        An RTL section bidi-reverses a single wrapped run (the 'digest()'
+        / comment-jumble symptom). Per-line LTR paragraphs in a table cell
+        keep source order.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Pt
+
+        table = document.add_table(rows=1, cols=1)
+        cell = table.rows[0].cells[0]
+        fill = (self.theme.get("code_bg") or "#eff6ff").lstrip("#").upper()
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:fill"), fill)
+        shd.set(qn("w:val"), "clear")
+        tc_pr.append(shd)
+        lines = (text or "").splitlines() or [""]
+        for i, line in enumerate(lines):
+            p = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+            run = p.add_run(line if line else " ")
+            run.font.name = "Consolas"
+            run.font.size = Pt(9)
+            self._mark_ltr_run(run)
+            self._force_ltr_paragraph(p)
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = 1.15
+        # Do not mark the table bidiVisual — code stays LTR even in RTL docs.
+        self._decorate_table_paging(table, header=False, keep_together=True)
+        sp = document.add_paragraph("")
+        self._set_paragraph(sp, "start")
+
+    def _decorate_table_paging(
+        self,
+        table: Any,
+        *,
+        header: bool = False,
+        keep_together: bool | None = None,
+    ) -> None:
+        """Don't split rows; optionally repeat the header; keep small tables intact."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        nrows = len(table.rows)
+        if keep_together is None:
+            keep_together = nrows <= 12
+        for i, row in enumerate(table.rows):
+            tr = row._tr
+            tr_pr = tr.find(qn("w:trPr"))
+            if tr_pr is None:
+                tr_pr = OxmlElement("w:trPr")
+                tr.insert(0, tr_pr)
+            cant = tr_pr.find(qn("w:cantSplit"))
+            if cant is None:
+                cant = OxmlElement("w:cantSplit")
+                tr_pr.append(cant)
+            cant.set(qn("w:val"), "1")
+            if header and i == 0:
+                hdr = tr_pr.find(qn("w:tblHeader"))
+                if hdr is None:
+                    hdr = OxmlElement("w:tblHeader")
+                    tr_pr.append(hdr)
+                hdr.set(qn("w:val"), "1")
+            if keep_together and i < nrows - 1:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        self._keep_with_following(p)
+
+    @staticmethod
     def _set_sz_cs(r_pr: Any, size_pt: float, *, after: Any = None) -> None:
         """Set or update ``w:szCs`` (half-points) on a run/style rPr."""
         from docx.oxml import OxmlElement
@@ -713,6 +841,8 @@ class DocxEngine:
         if self.profile.rtl:
             self._mark_table_rtl(table)
 
+        self._decorate_table_paging(table, header=True)
+
         # Spacer paragraph after the table.
         sp = document.add_paragraph("")
         self._set_paragraph(sp, "start")
@@ -753,6 +883,8 @@ class DocxEngine:
                 p = document.add_paragraph()
                 self._add_inline_md_runs(p, block.get("text") or "")
                 self._set_paragraph(p, "justify")
+            elif btype == "math":
+                self._write_math(document, block.get("text") or "", display=True)
             elif btype == "quote":
                 p = document.add_paragraph()
                 run = p.add_run(block.get("text") or "")
@@ -761,13 +893,7 @@ class DocxEngine:
                 self._set_paragraph(p, "justify")
                 p.paragraph_format.left_indent = Pt(18)
             elif btype == "code":
-                # Code blocks are always LTR source; isolate them.
-                p = document.add_paragraph()
-                run = p.add_run(block.get("text") or "")
-                run.font.name = "Consolas"
-                run.font.size = Pt(9)
-                from docx.enum.text import WD_ALIGN_PARAGRAPH
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                self._write_code_block(document, block.get("text") or "")
             elif btype == "list":
                 style = "List Number" if block.get("ordered") else "List Bullet"
                 for item in block.get("items") or []:
@@ -787,30 +913,54 @@ class DocxEngine:
                 from docx.enum.text import WD_ALIGN_PARAGRAPH
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    @staticmethod
-    def _add_inline_md_runs(paragraph: Any, text: str) -> None:
-        """Add bold/italic/code/plain runs for inline Markdown (no shaping)."""
+    def _add_inline_md_runs(self, paragraph: Any, text: str) -> None:
+        """Add bold/italic/code/math/plain runs for inline Markdown."""
+        from kazma_core.documents.math_text import (
+            latex_to_unicode,
+            split_inline_math,
+        )
+
         pattern = re.compile(
             r"\*\*(.+?)\*\*|__(.+?)__|"
             r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|"
             r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)|"
             r"`([^`]+)`"
         )
-        pos = 0
-        for m in pattern.finditer(text):
-            if m.start() > pos:
-                paragraph.add_run(text[pos:m.start()])
-            if m.group(1) is not None or m.group(2) is not None:
-                run = paragraph.add_run(m.group(1) if m.group(1) is not None else m.group(2))
-                run.bold = True
-            elif m.group(3) is not None or m.group(4) is not None:
-                run = paragraph.add_run(m.group(3) if m.group(3) is not None else m.group(4))
+
+        def _md_chunk(chunk: str) -> None:
+            pos = 0
+            for m in pattern.finditer(chunk):
+                if m.start() > pos:
+                    paragraph.add_run(chunk[pos:m.start()])
+                if m.group(1) is not None or m.group(2) is not None:
+                    run = paragraph.add_run(
+                        m.group(1) if m.group(1) is not None else m.group(2)
+                    )
+                    run.bold = True
+                elif m.group(3) is not None or m.group(4) is not None:
+                    run = paragraph.add_run(
+                        m.group(3) if m.group(3) is not None else m.group(4)
+                    )
+                    run.italic = True
+                elif m.group(5) is not None:
+                    run = paragraph.add_run(m.group(5))
+                    run.font.name = "Consolas"
+                    self._mark_ltr_run(run)
+                pos = m.end()
+            if pos < len(chunk):
+                paragraph.add_run(chunk[pos:])
+
+        for kind, chunk in split_inline_math(text or ""):
+            if kind == "math":
+                run = paragraph.add_run(latex_to_unicode(chunk))
+                run.font.name = "Cambria Math"
                 run.italic = True
-            elif m.group(5) is not None:
-                run = paragraph.add_run(m.group(5))
+                self._mark_ltr_run(run)
+            elif kind == "money":
+                run = paragraph.add_run("$" + chunk.strip())
                 run.font.name = "Consolas"
-            pos = m.end()
-        if pos < len(text):
-            paragraph.add_run(text[pos:])
+                self._mark_ltr_run(run)
+            else:
+                _md_chunk(chunk)
         if not text:
             paragraph.add_run("")

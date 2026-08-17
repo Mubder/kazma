@@ -45,17 +45,53 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
     )
     text = iso_pattern.sub(r'<bdi dir="ltr">\1</bdi>', text)
 
-    text = re.sub(
-        r"\$\$(.*?)\$\$",
-        r'<div class="math-block" dir="ltr">\1</div>',
-        text,
-        flags=re.DOTALL,
+    from kazma_core.documents.math_text import (
+        latex_to_unicode,
+        looks_like_currency,
+        split_display_math,
+        split_inline_math,
     )
-    text = re.sub(r"\$(.*?)\$", r'<span class="math-inline" dir="ltr">\1</span>', text)
+
+    held: list[str] = []
+
+    def _park(frag: str) -> str:
+        held.append(frag)
+        return f"@@MATH{len(held) - 1}@@"
+
+    rebuilt: list[str] = []
+    for kind, chunk in split_display_math(text):
+        if kind == "math":
+            rebuilt.append(
+                _park(
+                    f'<div class="math-block" dir="ltr">'
+                    f"{html_lib.escape(latex_to_unicode(chunk))}</div>"
+                )
+            )
+            continue
+        inner: list[str] = []
+        for k2, c2 in split_inline_math(chunk):
+            if k2 == "math":
+                inner.append(
+                    _park(
+                        f'<span class="math-inline" dir="ltr">'
+                        f"{html_lib.escape(latex_to_unicode(c2))}</span>"
+                    )
+                )
+            elif k2 == "money" or looks_like_currency(c2):
+                inner.append(
+                    _park(
+                        f'<span class="math-inline" dir="ltr">'
+                        f"${html_lib.escape(c2.strip())}</span>"
+                    )
+                )
+            else:
+                inner.append(c2)
+        rebuilt.append("".join(inner))
+    text = "".join(rebuilt)
 
     if markdown is not None:
         try:
-            return markdown.markdown(
+            html_body = markdown.markdown(
                 text,
                 extensions=[
                     "tables",
@@ -67,9 +103,12 @@ def prepare_markdown_for_pdf(raw_markdown: str) -> str:
             )
         except Exception as exc:
             logger.debug("[exporter] markdown extension compile fallback: %s", exc)
-            return markdown.markdown(text)
-
-    return f"<pre>{html_lib.escape(text)}</pre>"
+            html_body = markdown.markdown(text)
+    else:
+        html_body = f"<pre>{html_lib.escape(text)}</pre>"
+    for i, frag in enumerate(held):
+        html_body = html_body.replace(f"@@MATH{i}@@", frag)
+    return html_body
 
 
 def _css(*, rtl: bool, brand: str) -> str:
@@ -173,6 +212,13 @@ def _css(*, rtl: bool, brand: str) -> str:
       margin: 0 0 0.75em 0;
     }}
 
+    thead {{ display: table-header-group; }}
+    tr {{ break-inside: avoid; page-break-inside: avoid; }}
+    .math-block, .math-inline {{
+      direction: ltr !important; unicode-bidi: isolate;
+      font-family: 'Cambria Math', 'IBM Plex Mono', Consolas, serif;
+    }}
+    .math-block {{ text-align: center; font-size: 13pt; margin: 12px 0; }}
     table {{
       width: 100%;
       border-collapse: collapse;

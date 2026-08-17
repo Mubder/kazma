@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Document fidelity: math, LTR code, table paging (2026-08-17)
+
+``$R = P \\cdot I$`` and ``$$...$$`` render as Unicode math (``R = P · I``,
+``S(x) = 1⁄(1 + e⁻ˣ)``), isolated LTR. Bare ``$0.0035$`` stays currency.
+Fenced code is a per-line LTR Consolas cell so RTL no longer reverses
+Python. Tables repeat the header, do not split a row, and small tables
+stay on one page (``cantSplit`` + keep-with-next).
+
 ## Unreleased — Keep headings with their body; drop stacked duplicates (2026-08-17)
 
 A heading at the bottom of a page no longer sits alone — DOCX sets

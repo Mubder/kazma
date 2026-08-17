@@ -186,6 +186,17 @@ class HtmlEngine:
       width: 100%; border-collapse: collapse; margin: 16px 0;
       direction: {direction}; font-size: {table_pt}pt;
     }}
+    thead {{ display: table-header-group; }}
+    tr {{ break-inside: avoid; page-break-inside: avoid; }}
+    .math-display {{
+      direction: ltr !important; text-align: center; unicode-bidi: isolate;
+      font-family: 'Cambria Math', 'Consolas', serif; font-size: 13pt;
+      margin: 12px 0;
+    }}
+    .math-inline {{
+      direction: ltr !important; unicode-bidi: isolate;
+      font-family: 'Cambria Math', 'Consolas', serif;
+    }}
     th, td {{ border: 1px solid {t["table_grid"]}; padding: 8px 12px; text-align: start; }}
     th {{ background-color: {t["table_header_bg"]}; font-weight: 600; color: {t["table_header_fg"]}; }}
     td {{ background-color: {t["table_row_bg"]}; }}
@@ -343,7 +354,8 @@ class HtmlEngine:
     def _markdown_to_html(self, text: str, *, indent: str = "") -> str:
         """Render markdown to HTML via the ``markdown`` library, with bidi
         isolation of Latin tokens when RTL."""
-        prepared = self._isolate(text) if self.profile.rtl else text
+        prepared, held = self._hold_math(text or "")
+        prepared = self._isolate(prepared) if self.profile.rtl else prepared
         try:
             import markdown
             html_body = markdown.markdown(
@@ -352,9 +364,57 @@ class HtmlEngine:
             )
         except ImportError:
             html_body = "<pre>" + _html_lib.escape(prepared) + "</pre>"
+        for i, frag in enumerate(held):
+            html_body = html_body.replace(f"@@MATH{i}@@", frag)
         if indent:
             html_body = "\n".join(indent + ln if ln.strip() else ln for ln in html_body.splitlines())
         return html_body
+
+    @staticmethod
+    def _hold_math(text: str) -> tuple[str, list[str]]:
+        """Replace ``$`` / ``$$`` math with placeholders the markdown pass won't eat."""
+        from kazma_core.documents.math_text import (
+            latex_to_unicode,
+            split_display_math,
+            split_inline_math,
+        )
+
+        held: list[str] = []
+
+        def park(html_frag: str) -> str:
+            held.append(html_frag)
+            return f"@@MATH{len(held) - 1}@@"
+
+        pieces: list[str] = []
+        for kind, chunk in split_display_math(text):
+            if kind == "math":
+                pieces.append(
+                    park(
+                        f'<p class="math-display" dir="ltr">'
+                        f"{_html_lib.escape(latex_to_unicode(chunk))}</p>"
+                    )
+                )
+                continue
+            inner: list[str] = []
+            for k2, c2 in split_inline_math(chunk):
+                if k2 == "math":
+                    inner.append(
+                        park(
+                            f'<span class="math-inline" dir="ltr">'
+                            f"{_html_lib.escape(latex_to_unicode(c2))}</span>"
+                        )
+                    )
+                elif k2 == "money":
+                    inner.append(
+                        park(
+                            f'<span class="math-inline" dir="ltr">'
+                            f"${_html_lib.escape(c2.strip())}</span>"
+                        )
+                    )
+                else:
+                    inner.append(c2)
+            pieces.append("".join(inner))
+        return "".join(pieces), held
 
     def _isolate(self, text: str) -> str:
         """Wrap URLs and Latin standard tokens in ``<bdi dir="ltr">`` so they
