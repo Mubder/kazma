@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Memory graph inspect is a compact phone sheet (2026-08-17)
+
+Tapping a node no longer covers the graph with an 88vw blur overlay.
+The inspect card is a bottom sheet (max ~220px), hidden until a node
+or edge is selected, with Link / Cut hub up front and extra actions
+behind More. Idle animation pauses while the sheet is open.
+
 ## Unreleased — Six UI follow-ups: nav, phone rails, cards (2026-08-17)
 
 Bottom bar is Chat / Workspace / Dashboard / Settings / More. Agents

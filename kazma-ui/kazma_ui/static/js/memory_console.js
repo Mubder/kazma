@@ -1380,6 +1380,7 @@
   // pinned: physics does not pull the node back after the user places it.
   var _v2gPosCache = {};
   var _v2gAlpha = 0, _v2gAnim = null, _v2gDrag = null, _v2gHover = -1, _v2gSelectedId = null;
+  var _v2gInspectAllEdges = false;
   var _v2gCap = 80, _v2gNodeBaseR = 7;
   var _v2gMinScale = 0.3, _v2gMaxScale = 4;
   var _v2gTimeRange = { min: 0, max: 0 };
@@ -1865,7 +1866,12 @@
     for (var i = 0; i < _v2gPts.length; i++) {
       if (_v2gIsUser(_v2gPts[i]) || _v2gPts[i].isHighStakes) { idle = true; break; }
     }
-    if (_v2gAlpha > 0 || _v2gDrag || idle) {
+    var sheetOpen = false;
+    try {
+      var inspTick = document.getElementById('v2g-inspect');
+      sheetOpen = !!(inspTick && inspTick.classList.contains('is-open') && _v2gIsPhone());
+    } catch (eTick) { /* ignore */ }
+    if (_v2gAlpha > 0 || _v2gDrag || (idle && !sheetOpen)) {
       _v2gAnim = requestAnimationFrame(_v2gTick);
     } else {
       _v2gAnim = null;
@@ -2517,7 +2523,7 @@
         _v2gOps.selectedEdgeIdx = -1;
         var insp = document.getElementById('v2g-inspect');
         if (insp) {
-          insp.innerHTML = '<span style="color:var(--text-muted);">Connection cut. Click a node or edge.</span>';
+          _v2gInspectClose();
         }
         await _v2gReloadGraph();
         try {
@@ -2933,6 +2939,50 @@
     return true;
   }
 
+  function _v2gIsPhone() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function _v2gInspectClose() {
+    _v2gSelectedId = null;
+    _v2gHighlightSubj = null;
+    _v2gHighlightObj = null;
+    _v2gOps.selectedEdgeIdx = -1;
+    _v2gInspectAllEdges = false;
+    _v2gInspectSet('', false);
+    _v2gRepaint();
+  }
+
+  function _v2gInspectSet(bodyHtml, open) {
+    var el = document.getElementById('v2g-inspect');
+    if (!el) return null;
+    if (!open) {
+      el.classList.remove('is-open');
+      el.hidden = true;
+      el.innerHTML = '';
+      return el;
+    }
+    el.hidden = false;
+    el.classList.add('is-open');
+    el.innerHTML =
+      '<div class="v2g-inspect-head">' +
+        '<button type="button" class="v2g-inspect-close" aria-label="Close">×</button>' +
+      '</div>' + (bodyHtml || '');
+    var close = el.querySelector('.v2g-inspect-close');
+    if (close) {
+      close.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _v2gInspectClose();
+      });
+    }
+    return el;
+  }
+
   function _v2gInspectEdge(edgeIdx) {
     var el = document.getElementById('v2g-inspect');
     if (!el || edgeIdx < 0 || !_v2gEdges[edgeIdx]) return;
@@ -2945,9 +2995,7 @@
     _v2gHighlightObj = B.id;
     var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
     var pred = ed.fullLabel || ed.label || '';
-    var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">';
-    html += '<div style="font-weight:700;font-size:0.8rem;color:#fbbf24;word-break:break-word;flex:1;">Edge · belief</div>';
-    html += '</div>';
+    var html = '<div style="font-weight:700;font-size:0.8rem;color:#fbbf24;word-break:break-word;margin-bottom:6px;">Edge · belief</div>';
     html += '<div style="font-size:0.74rem;line-height:1.45;margin-bottom:8px;color:var(--text-primary);">';
     html += '<b>' + _v2gEsc(_v2gDisplayName(A)) + '</b> ';
     html += '<span style="color:' + pcolor + ';">' + _v2gEsc(String(pred).replace(/_/g, ' ')) + '</span> ';
@@ -2972,7 +3020,8 @@
     el.setAttribute('data-edge-target', B.id || '');
     el.setAttribute('data-edge-predicate', pred || '');
     el.setAttribute('data-edge-object', ed.objectText || B.id || '');
-    el.innerHTML = html;
+    el = _v2gInspectSet(html, true);
+    if (!el) return;
     el.querySelectorAll('.v2g-edge-act').forEach(function(btn) {
       btn.addEventListener('click', function(ev) {
         ev.preventDefault();
@@ -3049,7 +3098,7 @@
           sy0: c.sy,
           moved: false,
         };
-        _v2gSelectedId = p.id; _v2gInspect(p); canvas.setPointerCapture(ev.pointerId);
+        _v2gSelectedId = p.id; _v2gInspectAllEdges = false; _v2gInspect(p); canvas.setPointerCapture(ev.pointerId);
         canvas.style.cursor = 'grabbing';
         // Clear belief-click highlight when selecting a node directly
         _v2gHighlightSubj = null; _v2gHighlightObj = null;
@@ -3068,9 +3117,7 @@
         }
         _v2gDrag = { pan: true, sx: c.sx, sy: c.sy, ox: _v2gView.ox, oy: _v2gView.oy };
         canvas.style.cursor = 'grabbing';
-        // Clear selection + belief highlight on empty-space click
-        _v2gSelectedId = null; _v2gHighlightSubj = null; _v2gHighlightObj = null;
-        _v2gOps.selectedEdgeIdx = -1;
+        _v2gInspectClose();
       }
       // Heat lightly so free nodes can settle; pinned nodes stay fixed.
       _v2gHeated(); _v2gRepaint();
@@ -3097,6 +3144,11 @@
         var eHover = idx < 0 ? _v2gHitEdge(c.sx, c.sy) : -1;
         if (idx !== _v2gHover) { _v2gHover = idx; _v2gRepaint(); }
         canvas.style.cursor = (idx >= 0 || eHover >= 0) ? 'pointer' : 'grab';
+        if (_v2gIsPhone()) {
+          var tipOff = document.getElementById('v2g-tooltip');
+          if (tipOff) tipOff.style.display = 'none';
+          return;
+        }
         var tip = document.getElementById('v2g-tooltip');
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
@@ -3220,12 +3272,11 @@
     try {
     _v2gRefreshPalette();
     _v2gOps.selectedEdgeIdx = -1;
+    var phone = _v2gIsPhone();
     var color = _v2gNodeColor(p);
     var fullName = _v2gDisplayName(p);
     var title = _v2gTitle(fullName);
-    var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px;">';
-    html += '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;flex:1;min-width:0;">' + _v2gEsc(title) + '</div>';
-    html += '</div>';
+    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;margin-bottom:4px;padding-right:28px;">' + _v2gEsc(title) + '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:6px;">';
     html += _v2gIsUser(p) ? 'you · memory hub' : ('type: ' + p.type);
     if (p.id) html += ' · id: <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
@@ -3239,37 +3290,44 @@
     // Hub shortcut: leaf linked to hub AND to another node (should be leaf→parent→hub)
     var hubShortcut = !_v2gIsUser(p) && hubEdges.length > 0 && nonHubEdges.length > 0;
 
-    // Node ops — always show Cut when there is anything to cut
+    // Node ops — phone keeps Link + Cut; extra actions sit behind More.
     if (!p.isEpisode) {
-      html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
-      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge source">Src</button>';
-      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;" title="Set as link/merge target">Tgt</button>';
-      html += '<button type="button" class="btn btn-sm btn-primary v2g-node-act" data-act="link-from" style="font-size:0.65rem;padding:2px 8px;" title="Start link from this node — click target next">Link→</button>';
-      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="merge-from" style="font-size:0.65rem;padding:2px 8px;" title="Start merge from this node (will be retired)">Merge→</button>';
-      // F: "Group under" — view-only association (no memory change). The hub
-      // can't be grouped (it's the root), so hide it for the hub.
-      if (!_v2gIsUser(p)) {
-        html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="group-under" style="font-size:0.65rem;padding:2px 8px;" title="Group this node under a parent (view-only — does not change memory)">Group under→</button>';
+      function _actBtn(act, cls, label, title) {
+        return '<button type="button" class="btn btn-sm ' + cls + ' v2g-node-act" data-act="' + act +
+          '" style="font-size:0.65rem;padding:2px 8px;" title="' + title + '">' + label + '</button>';
       }
-      // Always offer Cut hub when any hub edge exists (even without "shortcut" pattern)
-      if (hubEdges.length && !_v2gIsUser(p)) {
-        html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="font-size:0.65rem;padding:2px 8px;" title="Remove direct link(s) to You/Mubder — keep parent chain">Cut hub</button>';
+      var extra = '';
+      extra += _actBtn('src', 'btn-secondary', 'Src', 'Set as link/merge source');
+      extra += _actBtn('tgt', 'btn-secondary', 'Tgt', 'Set as link/merge target');
+      extra += _actBtn('merge-from', 'btn-secondary', 'Merge→', 'Start merge from this node (will be retired)');
+      if (!_v2gIsUser(p)) {
+        extra += _actBtn('group-under', 'btn-secondary', 'Group under→', 'Group this node under a parent');
       }
       if (nodeEdges.length >= 1 && !_v2gIsUser(p)) {
-        html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="cut-all" style="font-size:0.65rem;padding:2px 8px;" title="Cut every edge on this node">Cut all (' + nodeEdges.length + ')</button>';
+        extra += _actBtn('cut-all', 'btn-secondary', 'Cut all (' + nodeEdges.length + ')', 'Cut every edge on this node');
       }
-      // Major toggle — mark important nodes (projects, hubs) so they render
-      // bigger + violet. Hidden for the hub (always major) and virtual facts.
       if (!_v2gIsUser(p) && !p.isVirtual) {
         var isMaj = !!p.isMajor;
-        html += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' + (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') + '" title="Mark as major (bigger + violet)">' + (isMaj ? KazmaIcons.span('star') + ' Major' : 'Major') + '</button>';
+        extra += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' +
+          (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') +
+          '" title="Mark as major">' + (isMaj ? KazmaIcons.span('star') + ' Major' : 'Major') + '</button>';
       }
-      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="rename" style="font-size:0.65rem;padding:2px 8px;" title="Change display name (id stays the same)">Rename</button>';
-      html += '<button type="button" class="btn btn-sm btn-secondary v2g-node-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;" title="Highlight in entities list">In list</button>';
+      extra += _actBtn('rename', 'btn-secondary', 'Rename', 'Change display name');
+      extra += _actBtn('list', 'btn-secondary', 'In list', 'Highlight in entities list');
       if (!_v2gIsUser(p) && !p.isVirtual) {
-        html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="delete" style="font-size:0.65rem;padding:2px 8px;" title="Delete empty entity shell">Del</button>';
+        extra += _actBtn('delete', 'btn-danger', 'Del', 'Delete empty entity shell');
       }
-      html += '</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
+      html += _actBtn('link-from', 'btn-primary', 'Link→', 'Start link from this node — click target next');
+      if (hubEdges.length && !_v2gIsUser(p)) {
+        html += _actBtn('cut-hub', 'btn-danger', 'Cut hub', 'Remove direct link(s) to You/Mubder');
+      }
+      if (phone) {
+        html += '<button type="button" class="btn btn-sm btn-secondary" id="v2g-inspect-more-btn" style="font-size:0.65rem;padding:2px 8px;">More</button>';
+        html += '</div><div id="v2g-inspect-extra" hidden style="display:flex;flex-wrap:wrap;gap:4px;margin:-4px 0 8px;">' + extra + '</div>';
+      } else {
+        html += extra + '</div>';
+      }
     }
 
     // Banner: true shortcut (hub + other), OR softer note when only hub-linked
@@ -3294,13 +3352,14 @@
     // Contents — the full text of this belief/entity, shown exactly once.
     if (fullName !== title) {
       html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Contents</div>';
-      html += '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;max-height:200px;overflow-y:auto;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
+      html += '<div class="v2g-inspect-contents" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
     }
     // Connections — one Cut per neighbor (easy topology cleanup)
     if (nodeEdges.length) {
-      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Connections (' + nodeEdges.length + ') · Cut to detach</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:3px;max-height:260px;overflow-y:auto;">';
-      for (var r = 0; r < nodeEdges.length; r++) {
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Connections (' + nodeEdges.length + ')</div>';
+      html += '<div class="v2g-inspect-edges" style="display:flex;flex-direction:column;gap:3px;">';
+      var edgeLimit = (phone && !_v2gInspectAllEdges) ? 4 : nodeEdges.length;
+      for (var r = 0; r < Math.min(edgeLimit, nodeEdges.length); r++) {
         var row = nodeEdges[r];
         var ed = row.ed;
         var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
@@ -3321,15 +3380,40 @@
         html += '</div>';
         html += '<div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">';
         html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="cut" data-edge-idx="' + row.idx + '" style="font-size:0.62rem;padding:2px 8px;" title="Cut this edge only">Cut</button>';
-        html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Edit</button>';
-        html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="move" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;" title="Move this edge to another node (repoint)">Move</button>';
+        if (!phone) {
+          html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Edit</button>';
+          html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="move" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;" title="Move this edge to another node (repoint)">Move</button>';
+        }
         html += '</div></div></div>';
+      }
+      if (phone && nodeEdges.length > 4 && !_v2gInspectAllEdges) {
+        html += '<button type="button" class="btn btn-sm btn-secondary" id="v2g-inspect-more-edges" style="font-size:0.65rem;padding:3px 8px;margin-top:2px;">+' + (nodeEdges.length - 4) + ' more</button>';
       }
       html += '</div>';
     } else {
-      html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — set as Src and Link→ another node to connect it.</div>';
+      html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — use Link→ to connect it.</div>';
     }
-    el.innerHTML = html;
+    el = _v2gInspectSet(html, true);
+    if (!el) return;
+    var moreBtn = el.querySelector('#v2g-inspect-more-btn');
+    if (moreBtn) {
+      moreBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var extraBox = el.querySelector('#v2g-inspect-extra');
+        if (extraBox) extraBox.hidden = !extraBox.hidden;
+        moreBtn.textContent = extraBox && !extraBox.hidden ? 'Less' : 'More';
+      });
+    }
+    var moreEdges = el.querySelector('#v2g-inspect-more-edges');
+    if (moreEdges) {
+      moreEdges.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _v2gInspectAllEdges = true;
+        _v2gInspect(p);
+      });
+    }
 
     el.querySelectorAll('.v2g-node-act').forEach(function(btn) {
       btn.addEventListener('click', function(ev) {
@@ -4154,9 +4238,9 @@
         } else if (ev.key === 'Home') {
           _v2gView = { scale: 1, ox: 0, oy: 0 };
         } else if (ev.key === 'Escape') {
-          _v2gSelectedId = null; _v2gPathIds = {};
-          _v2gOps.mode = null; _v2gOps.selectedEdgeIdx = -1;
-          _v2gHighlightSubj = null; _v2gHighlightObj = null;
+          _v2gPathIds = {};
+          _v2gOps.mode = null;
+          _v2gInspectClose();
           _v2gSyncOpsBar();
         } else {
           handled = false;

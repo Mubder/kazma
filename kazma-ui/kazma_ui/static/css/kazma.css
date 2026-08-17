@@ -4463,6 +4463,70 @@ canvas { display: block; border-radius: 4px; }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Memory graph inspect — desktop dock; phone = compact bottom sheet */
+.v2g-inspect {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  width: min(320px, 42vw);
+  max-width: 320px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  word-break: break-word;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(10, 15, 20, 0.94);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+.v2g-inspect-head {
+  display: flex;
+  justify-content: flex-end;
+  position: sticky;
+  top: -4px;
+  margin: -4px -4px 4px 0;
+}
+.v2g-inspect-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.v2g-inspect-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+.v2g-inspect-contents { max-height: 200px; overflow-y: auto; }
+.v2g-inspect-edges { max-height: 260px; overflow-y: auto; }
+
+@media (max-width: 768px) {
+  #v2g-tooltip { display: none !important; }
+  .v2g-inspect {
+    top: auto;
+    right: 8px;
+    left: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+    max-height: min(36vh, 220px);
+    padding: 8px 10px 10px;
+    font-size: 0.68rem;
+    border-radius: 14px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.5);
+  }
+  .v2g-inspect-contents { max-height: 64px; }
+  .v2g-inspect-edges { max-height: 96px; }
+}
+
 /* Dashboard cards — hidden on desktop; phone media shows them */
 .dash-card-list { display: none; }
 
