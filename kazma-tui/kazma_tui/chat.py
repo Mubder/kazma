@@ -39,7 +39,7 @@ class ChatPanel(Vertical):
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
         ("/sessions", "List seasons (same list as Web/Telegram/Discord)"),
-        ("/session [n|id]", "Switch this TUI chat onto that season"),
+        ("/session", "Switch onto a season (n, id, or name)"),
         ("/model [set <name>]", "Show/switch active model (interactive picker)"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
@@ -177,9 +177,11 @@ class ChatPanel(Vertical):
             self._populate_ac_list(ac)
             return
 
-        # Default: match slash commands
-        partial = parts[0] if parts else val
-        matches = [(c, d) for c, d in self.SLASH_COMMANDS if c.startswith(partial)]
+        # Default: match slash commands. Hide once the user types args so
+        # Enter on `/session 12` submits instead of filling `/sessions`.
+        from kazma_tui.slash_complete import slash_matches
+
+        matches = slash_matches(val, self.SLASH_COMMANDS)
         self._ac_matches = matches
         self._ac_index = 0
         self._populate_ac_list(ac)
@@ -224,6 +226,11 @@ class ChatPanel(Vertical):
             ac.index = self._ac_index
             event.prevent_default()
         elif event.key == "enter" and self._ac_matches:
+            from kazma_tui.slash_complete import enter_completes_autocomplete
+
+            inp = self.query_one("#chat-input", Input)
+            if not enter_completes_autocomplete(inp.value, self._ac_matches):
+                return
             idx = min(self._ac_index, len(self._ac_matches) - 1)
             self._apply_ac_match(idx)
             ac.display = False
@@ -474,6 +481,7 @@ class ChatPanel(Vertical):
         """List or switch onto a season shared with Web and the gateways."""
         try:
             from kazma_core.sessions.directory import (
+                create_named_session,
                 format_session_list,
                 list_directory,
                 resolve_session,
@@ -488,26 +496,48 @@ class ChatPanel(Vertical):
             here = f"this TUI mouth: {self._session_id[-8:]}" if self._session_id else "no season yet"
             self.write("system", format_session_list(list_directory()) + f"\n({here})")
             return
-        if rest.lower() in {"new", "start"}:
+        bits = rest.split(None, 1)
+        if bits[0].lower() in {"new", "start"}:
             import uuid
 
-            self._session_id = str(uuid.uuid4())
+            title = bits[1].strip() if len(bits) > 1 else ""
+            sid = ""
+            if title:
+                try:
+                    entry = create_named_session(
+                        platform="web", sender_id="tui", title=title
+                    )
+                    sid = entry.session_id
+                except Exception:
+                    logger.debug("TUI named season create failed", exc_info=True)
+            self._session_id = sid or str(uuid.uuid4())
             self._messages = []
             self._reset_chat_log()
-            self.write("system", f"New TUI season #{self._session_id[-8:]} — same brain as Web.")
+            label = title or f"#{self._session_id[-8:]}"
+            self.write("system", f"New TUI season {label} — same brain as Web.")
             return
         hit = resolve_session(rest, current_thread_id=self._session_id or None)
         if hit is None:
             self.write("system", f"No season matches {rest!r}. Try /sessions.")
             return
-        self._session_id = hit.session_id
-        n = self._load_season_messages(hit.session_id, thread_id=hit.thread_id)
-        self._replay_season_log()
-        self.write(
-            "system",
+        self._session_id = hit.session_id or hit.thread_id
+        try:
+            n = self._load_season_messages(hit.session_id, thread_id=hit.thread_id)
+            self._replay_season_log()
+        except Exception as exc:
+            logger.exception("TUI season load failed for %s", hit.session_id)
+            self.write("error", f"Could not load season #{hit.short_id}: {exc}")
+            return
+        hint = (
             f"Loaded #{hit.short_id}  {hit.title}  ({n} msgs). "
-            "Next messages continue this season on the same supervisor.",
+            "Next messages continue this season on the same supervisor."
         )
+        if n == 0:
+            hint += (
+                " History was empty here — send a message to continue, "
+                "or check KAZMA_SECRET if this season has turns on Web."
+            )
+        self.write("system", hint)
 
     def _reset_chat_log(self) -> None:
         try:
@@ -526,60 +556,19 @@ class ChatPanel(Vertical):
         for m in tail:
             role = str(m.get("role") or "assistant")
             content = str(m.get("content") or "")
+            if not content.strip():
+                continue
             if len(content) > 4000:
                 content = content[:4000] + "…"
             self.write(role, content)
 
-    def _fetch_season_messages_http(self, session_id: str) -> list[dict[str, Any]]:
-        import httpx
-
-        from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
-
-        headers = dict(auth_headers())
-        for base in candidate_api_bases():
-            url = f"{base}/api/chat/sessions/{session_id}/messages"
-            try:
-                resp = httpx.get(url, headers=headers, timeout=5.0)
-            except Exception:
-                continue
-            if resp.status_code >= 400:
-                continue
-            data = resp.json()
-            if isinstance(data, dict):
-                data = data.get("messages") or []
-            if not isinstance(data, list):
-                continue
-            return [
-                {"role": m.get("role"), "content": m.get("content")}
-                for m in data
-                if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-            ]
-        return []
-
     def _load_season_messages(
         self, session_id: str, *, thread_id: str = ""
     ) -> int:
-        rows = self._fetch_season_messages_http(session_id)
-        if not rows and thread_id and thread_id != session_id:
-            rows = self._fetch_season_messages_http(thread_id)
-        if not rows:
-            try:
-                from kazma_ui.session_manager import get_session_manager
+        from kazma_tui.season_load import load_season_messages
 
-                sm = get_session_manager()
-                sess = sm.get(session_id) or (
-                    sm.get_by_thread_id(thread_id) if thread_id else None
-                )
-                if sess is not None:
-                    rows = [
-                        {"role": m.get("role"), "content": m.get("content")}
-                        for m in (sess.messages or [])
-                        if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-                    ]
-            except Exception:
-                logger.debug("TUI season history load failed", exc_info=True)
-        self._messages = rows
-        return len(rows)
+        self._messages = load_season_messages(session_id, thread_id)
+        return len(self._messages)
 
     def _cmd_memory(self) -> None:
         try:

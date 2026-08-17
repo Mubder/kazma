@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — TUI `/session 12` actually loads (2026-08-17)
+
+Enter on `/session 12` was stolen by slash autocomplete because `/sessions`
+is a prefix of `/session` — the palette filled `/sessions` and the season
+never switched. Autocomplete now hides once arguments are typed, and an
+exact `/session` submits instead of completing to `/sessions`. History
+loads from the local SessionManager first (the same list `/sessions`
+already showed) so a hung/401 HTTP hop cannot freeze an empty log.
+
 ## Unreleased — One brain Phases B–D (2026-08-17)
 
 Work slashes (`/research`, `/swarm <task>`, bare swarm mentions) rewrite into

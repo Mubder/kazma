@@ -687,7 +687,25 @@ class KazmaTUI(App[None]):
             logger.debug("Failed to update header localization: %s", exc)
 
 
+def _load_local_env() -> None:
+    """Pick up cwd `.env` so TUI mouths send the same KAZMA_SECRET as the server.
+
+    Does not override variables already in the process environment.
+    """
+    try:
+        from pathlib import Path
+
+        from dotenv import load_dotenv
+
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.is_file():
+            load_dotenv(dotenv_path=cwd_env, override=False)
+    except Exception:
+        logger.debug("TUI .env load skipped", exc_info=True)
+
+
 def main() -> None:
+    _load_local_env()
     try:
         KazmaTUI().run()
     except Exception:
