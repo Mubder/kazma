@@ -40,6 +40,43 @@ flowchart TB
 | **C** | Swarm PIPELINE tasks | `swarm/checkpoint.py` + `checkpoint_manager.py` | `POST /api/swarm/tasks/\{id\}/approve` |
 
 ---
+## Critical: All three build sites now pass `hitl_config`
+
+**Important:** The gate was historically dormant at one build site, but per the July 2026 remediation (audit P0 fix), **all three** build sites now pass `hitl_config`:
+
+| Build site | File:line | Passes `hitl_config`? |
+|---|---|---|
+| `KazmaAgent.get_streaming_graph()` | `agent_runner.py:530-539` | ✅ Active (SSE chat path) |
+| `KazmaAgent._ensure_graph()` | `agent_runner.py:566-576` | ✅ Active (run path) |
+| `app.py` startup recompile | `kazma-ui/kazma_ui/app.py:741-751` | ✅ Active |
+| `create_supervisor_graph()` factory | `graph_builder.py:974-985` | ⚠️ Dormant (CLI/3rd-party entry — does not pass `hitl_config`) |
+
+> **Previously inaccurate:** older notes cited "app.py ~line 966" as the startup recompile. That is **incorrect** — `graph_builder.py:966` is an unrelated `aiosqlite.connect` inside `create_supervisor_app()`, which does *not* pass `hitl_config`. The real startup recompile is at `kazma-ui/kazma_ui/app.py:741-751`.
+
+## 2. Gate A — the graph gate (single-agent chat) {#the-graph-gate}
+
+### 2.1 How it works
+
+`tool_worker_node` (`graph_builder.py:336`) is where the gate lives. When `hitl_config` is supplied:
+
+1. Each pending tool call is tested with `requires_approval(tc["name"], hitl_config)` (imported from `kazma_core.safety.hitl`, line 356). Tools split into `safe_tools` / `danger_tools` (lines 418-429).
+2. For each danger tool, an `approval_input` dict is built (`type: "hitl_approval"`, tool name, args, message) and **`interrupt(approval_input)`** is called (line 493) — the graph **suspends**.
+3. On approval, the tool call is copied and **`approved_tc_args["_hitl_approved"] = True`** is injected (lines 495-503) so `tool_registry.execute()` skips the redundant bus check.
+4. On denial, a `ToolResult` with `is_error=True` is returned via `_denied_result` (lines 467-475).
+
+> **Dormant by default:** if `hitl_config` is falsy, **all** tools go to `safe_tools` (line 429). The gate is only active when `hitl_config` is passed to `build_supervisor_graph()`.
+
+### ⚠️ Auth warning: `KAZMA_SECRET` and session cookies
+
+**Never rely on cookie-based `KAZMA_SECRET` for multi-user safety.** The session cookie `Set-Cookie: kazma-secret=<KAZMA_SECRET>` stores the raw shared secret:
+
+- **Cookie theft = permanent admin** until `KAZMA_SECRET` is rotated in the environment for all clients
+- **No session table** exists for revocation
+- **No per-user identity** — the secret is shared across all operators
+
+**Remediation:** Use opaque server-side sessions (`kazma-session` random ID → hashed row + expiry). Keep `KAZMA_SECRET` only for machine-to-machine header auth. If `KAZMA_SECRET` is unset, `get_kazma_secret()` may return `""` and approval endpoints become **unauthenticated** — always set `KAZMA_SECRET` for any non-localhost deployment.
+
+---
 
 ## 2. Gate A — the graph gate (single-agent chat) {#the-graph-gate}
 

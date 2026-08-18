@@ -97,9 +97,10 @@ def get_streaming_graph(self):
 
 ### 3.3 Durable execution
 
-- **Checkpointer:** `AsyncSqliteSaver` (from `langgraph-checkpoint-sqlite`) on `kazma-data/checkpoints.db` (configured in `kazma-ui/.../app.py:724-726`).
+- **Checkpointer:** `AsyncSqliteSaver` (from `langgraph-checkpoint-sqlite`) on `kazma-data/checkpoints.db` (configured in `kazma-ui/kazma_ui/app.py:724-726`).
 - **Thread identity:** each conversation has a `thread_id` (derived from sender id, e.g. `gw-telegram-12345`, or a fresh UUID4 — see `agent_handler/store.py:34 _resolve_thread`).
 - **Crash recovery:** HITL pauses persist in the checkpointer. On restart, `restore_paused_tasks()` (`swarm/checkpoint_manager.py:182`) reloads paused swarm tasks and re-arms their auto-reject timeouts. Graph-path pauses survive because they live in the checkpointer.
+- **⚠️ Incomplete shutdown (audit C3):** `_on_shutdown()` must drain cron scheduler, swarm `_task_handles`/`stop_all()`, TaskStore, VectorMemory, FTS, and close HTTP pool / gateway. In-flight swarm work and cron LangGraph jobs continue during uvicorn teardown; SQLite/Chroma can corrupt on hard kill. Full remediation: see `kazma-ui/kazma_ui/app.py:_on_shutdown` — must stop cron first, then drain swarm, then close remaining components.
 - **Time travel:** `/replay list | &lt;iter> | compare &lt;a> &lt;b> | clear` (slash command) and `time_travel` config (`kazma.yaml:111-114`, `max_snapshots: 50`).
 
 ---

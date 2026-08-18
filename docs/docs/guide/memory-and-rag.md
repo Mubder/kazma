@@ -10,7 +10,10 @@ description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, /memory
 > - **Personal memory** — bi-temporal beliefs, 4-tier episodes, PPR, FTS5 + sqlite-vec, durable queue.
 > - **Knowledge Library** — separate store; **product merge** via labeled inject + federated search (not one table).
 > - **Optional adapters** — Neo4j dual-write, Postgres state mirror, Qdrant/pgvector (fail-open to local).
-> - **V1 4-layer RRF** (Chroma / L1–L4 concepts) was **removed**. Do not resurrect it in docs or UI copy.
+> - **V1 4-layer RRF** (Chroma / L1–L4 concepts) was **removed**. Do not resurrect it in docs or UI copy. Earlier notes referencing `UnifiedMemoryAdapter` / `VectorMemory` are obsolete.
+
+Operator checklist: [Memory best path](./memory-best-path.md).  
+Backlog / scale issues: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 Operator checklist: [Memory best path](./memory-best-path.md).  
 Backlog / scale issues: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
