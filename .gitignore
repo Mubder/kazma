@@ -116,7 +116,10 @@ demo_documents/
 # Test artifact from tests/test_tool_arg_validation.py (file_write demo)
 hello.html
 
-# Transient document intelligence outputs and UX previews
+# Transient document intelligence outputs, reports, and UX previews
 document_output_*
 ux-rework-preview*
+reports/
+research/reports/
+
 
