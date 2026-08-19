@@ -213,13 +213,15 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
 
     # Long-task continue protocol: inject salvaged context from a prior
     # budget-exhausted turn so "Proceed" does not re-do the same work.
+    # GATED by reply shape (deep-audit 2026-08-19 Telegram desync): the
+    # directive is only injected when the user's message reads as a
+    # continuation — a fresh command must NEVER be prefixed with the
+    # "do not re-do / produce a final report" framing.
     try:
         from kazma_core.agent.long_task import consume_continue_context
 
-        cont = consume_continue_context(thread_id)
+        cont = consume_continue_context(thread_id, user_text=msg.text)
         if cont:
-            text_l = (msg.text or "").strip().lower()
-            # Always attach if stored; especially useful for short continues
             state["messages"] = [
                 {"role": "system", "content": cont},
                 {"role": "user", "content": user_content},
@@ -229,7 +231,7 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
             _logging.getLogger(__name__).info(
                 "[agent-handler] injected long-task continue context thread=%s user=%r",
                 thread_id,
-                text_l[:40],
+                (msg.text or "")[:40],
             )
     except Exception:
         pass

@@ -1613,15 +1613,25 @@ def create_graph_handler(
                     except Exception:
                         pass
                     if partial:
+                        _was_long = False
                         try:
                             from kazma_core.agent.long_task import (
+                                is_long_task_active,
+                                pause_long_task,
                                 record_budget_exhausted,
                                 store_continue_context,
                             )
 
+                            _was_long = is_long_task_active(thread_id)
                             store_continue_context(
                                 thread_id, summary=partial, reason="recursion"
                             )
+                            if _was_long:
+                                # A Partial must NOT leave the long task
+                                # silently active — subsequent user messages
+                                # are fresh commands, not mission follow-ups
+                                # (deep-audit 2026-08-19 Telegram desync).
+                                pause_long_task(thread_id, reason="recursion")
                             record_budget_exhausted("recursion")
                         except Exception:
                             pass
@@ -1633,6 +1643,12 @@ def create_graph_handler(
                             "(or just **Proceed** — prior findings are remembered)."
                             + long_hint
                         )
+                        if _was_long:
+                            err_msg += (
+                                "\n\n⏸️ Long task paused after this Partial — reply "
+                                "**Proceed** to finish the remaining steps with the "
+                                "salvaged context, or send a new task and it runs fresh."
+                            )
                     else:
                         try:
                             from kazma_core.agent.long_task import record_budget_exhausted

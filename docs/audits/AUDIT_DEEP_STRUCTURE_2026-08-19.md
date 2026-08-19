@@ -711,5 +711,50 @@ Round-7 CI results: **certification and session_directory are green**;
    fast_test now records the verbose last-test line so the next run names
    the crashing test for a targeted fix.
 
+## 20. Patch 13 (same day) — the Telegram "Saved. Ready…" desync
+
+**Symptom (user report, 2026-08-19 21:17–21:25):** during a mission-mode
+naming task that ended Partial at the recursion limit, fresh Telegram
+commands ("Sweep for social media accounts", "Yes next patch but always
+check for social media accounts in one go") received short
+"Saved. Ready when you are…" acknowledgments instead of executing.
+
+**Root cause (verified in code):**
+1. `agent_handler/store.py` injected the stored LONG-TASK CONTINUE
+   CONTEXT ("Do not re-do this work. Only pursue remaining gaps and
+   produce a final report.") **unconditionally** ahead of the next user
+   message — designed for "Proceed" replies, but it fired on ANY message,
+   including brand-new commands. The model resolved the conflict toward
+   the injected system directive and treated commands as preference
+   notes for the stale mission.
+2. A recursion-Partial did **not** disable the long task — the mission
+   stayed active (3 follow-up turns + 30-min TTL), so every subsequent
+   message also ran under mission budgets and mission framing.
+
+**Fixes:**
+1. `consume_continue_context(thread_id, user_text=…)` — gated by
+   `is_continuation_reply()` (strict: ≤8-word replies matching
+   proceed/continue/yes/ok/go-on/keep-going/wrap-up + Arabic كمّل/اكمل/
+   تابع/نعم/يلا/زين; longer messages are overwhelmingly new commands).
+   The stored context is cleared either way so a stale directive can
+   never leak into a later turn; the header gained an explicit escape
+   clause ("if the user's latest message is a NEW task … ignore this
+   directive").
+2. `pause_long_task()` — the gateway's recursion-Partial handler now
+   pauses an active long task: `long_task_status` reports inactive with
+   baseline budgets (no mission framing/ceilings), `is_mission_mode`
+   defuses, `consume_long_task_turn` stops eating follow-up turns while
+   paused, and the Partial reply tells mission users the state ("reply
+   **Proceed** to finish remaining steps, or send a new task and it runs
+   fresh"). The record survives for `/long status` until TTL.
+
+User-side note for the RUNNING (pre-restart) instance: `/long off` (or
+`/abort`) clears the stale mission immediately; otherwise it self-expires
+30 minutes after last activity.
+
+Patch-13 validation: long-task suite 14 passed (4 new regressions);
+gateway + slash-turns + capacity 64 passed; all touched files
+compile-clean.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

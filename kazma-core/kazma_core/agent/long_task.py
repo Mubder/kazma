@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
@@ -35,12 +36,14 @@ __all__ = [
     "enable_long_task",
     "format_status_message",
     "get_progress_sender",
+    "is_continuation_reply",
     "is_long_task_active",
     "is_mission_mode",
     "long_task_status",
     "maybe_heartbeat",
     "mission_hard_rounds",
     "mission_recursion_limit",
+    "pause_long_task",
     "record_budget_exhausted",
     "record_long_task_event",
     "reset_progress_sender",
@@ -287,6 +290,10 @@ def consume_long_task_turn(thread_id: str | None) -> None:
         raw = cs.get(f"long_task.{thread_id}")
         if not raw or not isinstance(raw, dict) or not raw.get("enabled"):
             return
+        # Paused after a Partial — no turns are eaten while idle; a later
+        # /long re-enable or TTL expiry resolves the record.
+        if raw.get("paused"):
+            return
         remaining = int(raw.get("remaining_turns", 1))
         # Enabling /long is intercepted (no consume). The first real prompt
         # after enable must still receive the raised budget. Expire only when
@@ -343,6 +350,21 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
                 }
         except (TypeError, ValueError):
             pass
+
+    # Paused after a Partial (budget-exhausted) result: report INACTIVE with
+    # baseline budgets so new commands run as fresh, normal turns — no
+    # mission framing, no raised iteration ceilings. The record survives
+    # (TTL still applies) so /long status can show the paused state
+    # (deep-audit 2026-08-19 Telegram desync).
+    if raw.get("paused"):
+        return {
+            "active": False,
+            "thread_id": thread_id,
+            "paused": True,
+            "paused_reason": raw.get("paused_reason"),
+            "max_iterations": _baseline_iterations(),
+            "recursion_limit": derive_recursion_limit(_baseline_iterations()),
+        }
 
     # Turn-count is owned by consume_long_task_turn() (expire at the *next*
     # prompt when remaining already hit 0). Status must stay active for the
@@ -546,6 +568,64 @@ async def maybe_heartbeat(
 
 # ── Continue protocol (partial summary for "Proceed") ────────────────────
 
+# A reply that means "keep going on the prior (budget-exhausted) task".
+# STRICT on purpose: a false positive reframes a brand-new command as the
+# continuation of a stale mission (the 2026-08-19 Telegram desync —
+# "Sweep for social media accounts" got "Saved." instead of executing),
+# while a false negative only costs context that is already visible in the
+# conversation history (the user saw the Partial reply).
+_CONTINUATION_RE = re.compile(
+    r"\b(?:proceed|continue|cont|go\s*on|keep\s*going|carry\s*on|"
+    r"yes|yeah|yep|ok|okay|finish|wrap\s*up|wrapup|"
+    r"كمّل|كممل|اكمل|أكمل|تابع|نعم|يلا|زين)\b",
+    re.IGNORECASE,
+)
+
+
+def is_continuation_reply(text: str | None) -> bool:
+    """Whether *text* reads as 'continue the prior task' (vs a new command).
+
+    Short replies only (≤ 8 words): anything longer is overwhelmingly a
+    new instruction or a preference statement and MUST NOT trigger the
+    continuation directive. Empty text (voice with no transcript, media
+    captions) defaults to continuation — matching the pre-gating behavior.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True
+    if len(t.split()) > 8:
+        return False
+    return bool(_CONTINUATION_RE.search(t))
+
+
+def pause_long_task(thread_id: str | None, *, reason: str = "budget_exhausted") -> None:
+    """Pause an active long task after a Partial (budget-exhausted) result.
+
+    A Partial used to leave the mission silently ACTIVE: every subsequent
+    user message ran under mission budgets + mission framing, so fresh
+    commands kept being interpreted as notes for the stale mission (the
+    2026-08-19 Telegram desync). Paused returns the thread to baseline
+    budgets and normal (non-mission) framing; the record survives for
+    ``/long status`` until TTL expiry, and a later ``/long`` re-enable
+    always works.
+    """
+    if not thread_id:
+        return
+    from kazma_core.config_store import get_config_store
+
+    cs = get_config_store()
+    raw = cs.get(f"long_task.{thread_id}")
+    if not isinstance(raw, dict) or not raw.get("enabled") or raw.get("paused"):
+        return
+    raw["paused"] = True
+    raw["paused_reason"] = reason
+    raw["paused_at"] = time.time()
+    cs.set(f"long_task.{thread_id}", raw, category="agent")
+    record_long_task_event("task_paused")
+    logger.info(
+        "[long_task] PAUSED thread=%s reason=%s", thread_id[:12], reason
+    )
+
 
 def store_continue_context(
     thread_id: str,
@@ -575,8 +655,23 @@ def store_continue_context(
     )
 
 
-def consume_continue_context(thread_id: str | None) -> str | None:
-    """Return and clear stored continue context, or None."""
+def consume_continue_context(
+    thread_id: str | None,
+    *,
+    user_text: str | None = None,
+) -> str | None:
+    """Return and clear stored continue context, or None.
+
+    When *user_text* is provided, the salvage is ONLY returned when the
+    reply reads as a continuation ("Proceed", "yes", …). A brand-new
+    command must NOT be prefixed with the budget-exhausted continuation
+    directive — that reframed fresh commands as notes for a stale mission
+    (the 2026-08-19 Telegram desync: "Sweep for social media accounts"
+    got "Saved." instead of executing). The stored context is cleared
+    either way: the salvage summary is already in the conversation
+    history (the user saw the Partial reply), so a stale directive must
+    never leak into a later turn.
+    """
     if not thread_id:
         return None
     from kazma_core.config_store import get_config_store
@@ -593,11 +688,21 @@ def consume_continue_context(thread_id: str | None) -> str | None:
         pass
     if not summary:
         return None
+    if user_text is not None and not is_continuation_reply(user_text):
+        logger.info(
+            "[long_task] continue context dropped — new command (not a "
+            "continuation reply) thread=%s",
+            thread_id[:12],
+        )
+        return None
     record_long_task_event("continue_consumed")
     return (
         "[LONG-TASK CONTINUE CONTEXT — prior turn hit a budget limit]\n"
         "You already gathered the following. Do **not** re-do this work. "
-        "Only pursue remaining gaps and produce a final report.\n\n"
+        "Only pursue remaining gaps and produce a final report. "
+        "IMPORTANT: if the user's latest message is a NEW task rather than "
+        "a continuation, treat it as a fresh instruction and ignore this "
+        "directive entirely.\n\n"
         f"{summary}\n"
         "[/LONG-TASK CONTINUE CONTEXT]"
     )

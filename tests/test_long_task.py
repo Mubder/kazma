@@ -137,6 +137,88 @@ def test_continue_protocol_store_and_consume() -> None:
     assert consume_continue_context(tid) is None
 
 
+# ── Continue-context gating + Partial pause (2026-08-19 Telegram desync) ──
+
+
+def test_is_continuation_reply() -> None:
+    from kazma_core.agent.long_task import is_continuation_reply
+
+    # Continuations
+    for text in ("Proceed", "proceed", "yes", "yeah", "ok", "okay go on",
+                 "keep going", "wrap up the report", "كمّل", "اكمل", "نعم", ""):
+        assert is_continuation_reply(text) is True, text
+
+    # New commands / preference statements — MUST NOT trigger the directive
+    for text in (
+        "Sweep for social media accounts",
+        "Check aigrit.com and aimove.com then tell me",
+        "Yes next patch but always check for social media accounts in one go",
+    ):
+        assert is_continuation_reply(text) is False, text
+
+
+def test_continue_context_not_injected_for_new_commands() -> None:
+    from kazma_core.agent.long_task import (
+        consume_continue_context,
+        store_continue_context,
+    )
+
+    tid = "test-continue-gate-1"
+    store_continue_context(tid, summary="Verified 6 of 8 domains.", reason="test")
+
+    # A fresh command must NOT get the continuation directive…
+    assert consume_continue_context(tid, user_text="Sweep for social media accounts") is None
+    # …and the stored context is cleared so it can never leak into a later turn.
+    assert consume_continue_context(tid, user_text="Proceed") is None
+
+
+def test_continue_context_injected_for_proceed() -> None:
+    from kazma_core.agent.long_task import (
+        consume_continue_context,
+        store_continue_context,
+    )
+
+    tid = "test-continue-gate-2"
+    store_continue_context(tid, summary="Verified 6 of 8 domains.", reason="test")
+
+    ctx = consume_continue_context(tid, user_text="Proceed")
+    assert ctx is not None
+    assert "Verified 6 of 8" in ctx
+    # Escape clause: the directive must yield to a genuinely new task.
+    assert "NEW task" in ctx
+
+
+def test_partial_pauses_long_task(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    from kazma_core.agent.long_task import (
+        consume_long_task_turn,
+        enable_long_task,
+        is_long_task_active,
+        is_mission_mode,
+        long_task_status,
+        pause_long_task,
+    )
+
+    tid = "test-continue-pause-1"
+    enable_long_task(tid, actor="tester", preset="mission")
+    assert is_long_task_active(tid) is True
+    assert is_mission_mode(tid) is True
+
+    pause_long_task(tid, reason="recursion")
+
+    st = long_task_status(tid)
+    assert st["active"] is False
+    assert st.get("paused") is True
+    assert st.get("paused_reason") == "recursion"
+    # Baseline budgets while paused — no mission framing or ceilings.
+    assert st["max_iterations"] <= 100
+    assert is_mission_mode(tid) is False
+    # Paused tasks do not consume follow-up turns while idle.
+    consume_long_task_turn(tid)
+    consume_long_task_turn(tid)
+    assert long_task_status(tid).get("paused") is True
+
+
 def test_detect_tool_loop() -> None:
     from kazma_core.agent.long_task import detect_tool_loop, tool_call_signature
 
