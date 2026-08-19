@@ -135,6 +135,10 @@ unattended-danger-tool security gap:
 - `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
 - `check_sync()` is **fail-closed** (default): blocks danger tools when no real
   bus adapter is present. `allow_headless_danger=True` is the test/dev escape hatch
+- Optional canonical floor (deep-audit 2026-08-19): `KAZMA_HITL_CANONICAL_FLOOR=1`
+  unions CANONICAL back into the effective `require_approval_for`, so
+  Settings/YAML narrowing below CANONICAL is capped back up (strict
+  multi-operator deployments). The drift warning repeats every 15 min either way.
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
 - App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
   multiple are configured (first approval wins). NullBus = internal-only /
@@ -1001,10 +1005,43 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   spots (deep-audit 2026-08-19, patched same day): the G1 commitment-latency
   file's `slow` marker was removed (it runs in ~6s and was the ONLY slow file,
   so `-m "not slow"` silently excluded it), and CI now installs the light
-  pure-wheel deps (pillow/pymupdf/sqlite-vec/pypdfium2) that the
-  `.[test]`-only install left `importorskip`ing. Still blind: Playwright e2e
-  (deliberately absent until its flaky boot-wait is stabilized) and the
-  torch-bearing `rag` extra.
+  pure-wheel deps (pillow/pymupdf/sqlite-vec/pypdfium2/numpy — without numpy
+  the belief-graph PPR silently runs its degraded uniform-seed path) that the
+  `.[test]`-only install left `importorskip`ing/degrading. Still blind:
+  Playwright e2e (deliberately absent until its flaky boot-wait is
+  stabilized) and the torch-bearing `rag` extra.
+
+### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
+
+Born from the 2026-08-19 Telegram desync ("Saved. Ready…" acks instead of
+executing commands after a mission ended Partial) — full diagnosis in
+`docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` §20.
+
+**A. The continue-context injection is GATED by reply shape.**
+- `consume_continue_context(thread_id, user_text=…)` returns the stored
+  salvage ONLY when `is_continuation_reply(user_text)` is true: ≤8-word
+  replies matching proceed/continue/yes/ok/go-on/keep-going/wrap-up
+  (Arabic كمّل/اكمل/تابع/نعم/يلا/زين included).
+- The stored `long_task.continue.{thread}` context is cleared on EVERY
+  consume call — gated or not — so a stale "do not re-do / final report"
+  directive can never leak into a later turn. The salvage itself is
+  already in the conversation history (the user saw the Partial reply).
+- The injection header carries an explicit escape clause ("if the user's
+  latest message is a NEW task, ignore this directive") as defense in
+  depth. Only injection site: gateway `agent_handler/store.py` — keep the
+  `user_text=` argument if a second site is ever added.
+
+**B. A Partial PAUSES the long task.**
+- The gateway's recursion-Partial handler calls `pause_long_task()`:
+  `long_task_status()` then reports `active: False` with baseline budgets
+  (no mission framing/ceilings), `is_mission_mode()` defuses, and
+  `consume_long_task_turn()` stops eating follow-up turns while paused.
+- The paused record survives for `/long status` until TTL expiry; a fresh
+  `/long` re-enable always works. The Partial reply tells the user the
+  state machine ("reply **Proceed** to wrap up, or send a new task and it
+  runs fresh").
+- `/long off` (or `/abort`) remains the immediate manual clear on any
+  build.
 
 ## UI Conventions (Web)
 
@@ -1078,6 +1115,7 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
 - `docs/docs/reference/tools-catalog.md` — Built-in + native tools
 - `docs/docs/ops/production-checklist.md` — Production go-live checklist
+- `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
 - `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report
 - `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)

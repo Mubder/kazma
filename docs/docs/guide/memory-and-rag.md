@@ -67,6 +67,13 @@ Do **not** merge these — background consolidation must not WAL-contend with ch
 
 Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connectors` → LLM Providers → Platform Connectors.
 
+> **Embedder download guard (2026-08-19):** a deliberately configured
+> `local` embedder may download its model on first use, but FALLBACK
+> embedders (unknown provider / broken remote config) never do — they
+> check the local HuggingFace cache and degrade to no embeddings with an
+> actionable warning instead of stalling the process on a live ~2GB
+> `bge-m3` download. Force-allow with `KAZMA_EMBED_ALLOW_DOWNLOAD=1`.
+
 ---
 
 ## Recall & post-turn

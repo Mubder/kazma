@@ -237,6 +237,12 @@ Default (`kazma.yaml:84-94`): `file_write`, `file_delete`, `shell_exec`, `code_e
 
 Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 
+> **Narrowing guard (2026-08-19):** the effective list can drift below the
+> canonical set via Settings/YAML — a warning repeats every 15 minutes
+> naming the drifted tools. Strict deployments can enforce
+> `KAZMA_HITL_CANONICAL_FLOOR=1`, which unions the canonical danger tools
+> back into the effective list so narrowing below them is impossible.
+
 ### 5.2 Gate B (swarm bus) — `_EXTENDED_DANGER`
 
 `swarm/safety.py:23-31`: `DEFAULT_DANGER_TOOLS` (file_write, file_delete, shell_exec, vault_retrieve, vault_delete) **+** `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests` (MCP IDE test runner).
@@ -349,6 +355,8 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 6. **Do not set `allow_headless_danger=True` in production.** It's the test/dev escape hatch.
 7. **Run as the non-root `kazma` user** in Docker (the Dockerfile already does this).
 8. **Bind `127.0.0.1`** unless you have a reverse proxy + `KAZMA_SECRET` in place.
+9. **Multi-operator: set platform allowlists + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1`** (2026-08-19) — by default the Telegram/Discord/Slack adapters run allow-all for backward compatibility with single-operator installs; strict mode fails closed on an empty allowlist.
+10. **Set `KAZMA_HITL_CANONICAL_FLOOR=1`** on strict deployments so the danger-tool approval list cannot be narrowed below the canonical set.
 
 ---
 

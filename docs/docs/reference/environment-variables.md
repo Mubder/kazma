@@ -194,6 +194,21 @@ HITL: `email_send`, `email_delete`, `email_categorize`. Guide: [Email integratio
 
 ---
 
+## Safety guards & embedder downloads (2026-08-19)
+
+Opt-in hardening from the deep-structure audit
+(`docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md`) — all default OFF
+(current behavior preserved) unless noted.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KAZMA_HITL_CANONICAL_FLOOR` | unset (off) | Union the canonical danger-tool list back into the effective `require_approval_for`, so Settings/YAML cannot narrow below it. Strict multi-operator deployments should set `1`. The drift warning repeats every 15 min regardless. |
+| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | unset (compat) | Stop forcing `_allow_all` on the Telegram/Discord/Slack adapters — an empty allowlist then fails closed (no messages). Without it, forced allow-all logs a WARNING naming both remediations when no allowlist is configured. |
+| `KAZMA_MCP_SCOPE_GUARD` | `1` (on) | Fail-close MCP tool calls when a per-task `workspace_scope` targets a different root than the process-bound MCP root (prevents silent wrong-repo operations). Set `0` only if the guard blocks a legitimate flow. |
+| `KAZMA_EMBED_ALLOW_DOWNLOAD` | unset (contextual) | Force-allow the local embedder to download its model from HuggingFace. Fallback embedders (unknown provider / broken remote config) never download — they check the local HF cache and degrade to no embeddings with an actionable warning instead of stalling on a ~2GB download. Deliberate `local` configs keep first-run download rights. |
+
+---
+
 ## Cost, chaos, tests
 
 | Variable | Default | Purpose |

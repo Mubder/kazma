@@ -268,6 +268,24 @@ not continue the task unless you ask it to redo it.
 > (`agent_handler/graph.py`), not the gateway slash resolver — they need live
 > access to the running turn's checkpoint state.
 
+### `/long` — budget/mission mode & the Partial protocol
+
+`/long on` (soft Research budget — may end **Partial**), `/long mission`
+(run-until-done with a hard wall, default 500 rounds), `/long status`,
+`/long off`. A full reference lives in the diagnosis map (§11 Long-task);
+the behavior that matters in chat:
+
+- When a turn hits the budget/recursion limit, Kazma replies with the
+  salvaged progress (**Partial**). Reply **Proceed** (or the remaining
+  steps) and the stored continue-context is injected so nothing is re-done.
+- Since **2026-08-19** the continue-context is only injected for
+  continuation-shaped replies (short "proceed/continue/yes/…"): a fresh
+  command after a Partial runs as a **new task** — never reframed as a
+  note for the old mission.
+- A Partial **pauses** the long task (baseline budgets, no mission
+  framing) until you `/long` again or the TTL lapses; `/long off` clears
+  it immediately.
+
 ---
 
 ## 🔧 Tool Commands [core]

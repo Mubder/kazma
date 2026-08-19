@@ -62,6 +62,13 @@ description: Disaster Recovery — production ops
 3. Copy the resulting `kazma-backup-YYYYMMDD….zip` to **offsite** storage (S3, NAS, encrypted drive).
 4. Confirm secrets are in the password manager (not only in the zip).
 
+> **Offsite / WebDAV TLS (2026-08-19):** cloud-sync offsite uploads
+> (including WebDAV) verify TLS certificates by default. The universal
+> backup zip can carry the plaintext `.env` (vault recovery key), so a
+> non-loopback endpoint with verification disabled is a secret-exfiltration
+> surface. Only disable for self-signed lab servers via ConfigStore
+> `backups.offsite.webdav.tls_verify=false`.
+
 ### What the script does
 
 - `PRAGMA wal_checkpoint(TRUNCATE)` on each `*.db` for a more consistent copy  

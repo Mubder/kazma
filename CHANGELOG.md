@@ -1,5 +1,91 @@
 # CHANGELOG
 
+## Unreleased — Telegram "Saved. Ready…" desync: continue-context gating + Partial pause (2026-08-19)
+
+After a mission ended **Partial** at the recursion limit, fresh Telegram
+commands were acknowledged ("Saved. Ready when you are…") instead of
+executed. Two causes, both fixed: the salvaged LONG-TASK CONTINUE CONTEXT
+("do not re-do this work / produce a final report") was injected
+**unconditionally** ahead of the next user message — including brand-new
+commands — and a Partial left the mission silently active (3 follow-up
+turns + 30-min TTL of mission budgets and framing).
+
+- `consume_continue_context(thread_id, user_text=…)` is now gated by a
+  strict `is_continuation_reply()` (≤8-word proceed/continue/yes/ok/go-on/
+  wrap-up replies, Arabic included); the stored context is cleared either
+  way so a stale directive can never leak into a later turn, and the
+  header gained an explicit NEW-task escape clause.
+- `pause_long_task()`: the gateway's recursion-Partial handler pauses the
+  long task — baseline budgets, no mission framing, follow-up turns are
+  not consumed while paused — and the Partial reply tells mission users
+  the state ("reply **Proceed** to wrap up, or send a new task and it
+  runs fresh"). `/long off` remains the immediate manual clear.
+- Full diagnosis: `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` §20.
+
+## Unreleased — CI recovery: 134 failing tests + 2 POISON → green gate (2026-08-19)
+
+The merge gate had been red long before the audit (134 failing tests in
+the pre-audit run, much of it silent partial-coverage). Root causes fixed
+across seven triage rounds, all documented in
+`docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` §13–§19:
+
+- **Real bugs:** `IdeService.resolve()` rebased POSIX-absolute paths into
+  the workspace (the outside-root denial never fired on Linux);
+  `DocumentService.read_ir` leaked a raw `ValueError` on zero-page
+  documents (failed hostile-corpus certification on every platform —
+  certification now passes on Windows too and the baseline gate runs
+  everywhere); division-runtime components (RBACEngine,
+  AuthorizationFlow's AuditLogger) leaked non-daemon aiosqlite workers
+  that hung interpreter shutdown; the embedder's local fallback could
+  stall on a live ~2GB bge-m3 HuggingFace download (now cache-gated on
+  fallback paths, `KAZMA_EMBED_ALLOW_DOWNLOAD=1` force-allows).
+- **Test-layer fixes:** commitment-choke fixtures for fabricated tool
+  names; settings-JS-family readers for the split settings surface; the
+  hostile-corpus manifest determinism check compares canonical fields
+  (zip DEFLATE output differs across zlib builds — in the certifier too);
+  session-manager test isolation (the random `disk I/O error` flake
+  family); deterministic read_url seams; platform-correct Discord grammar
+  and PDF bake-off assertions; README honesty contract restored.
+- **Runner (fast_test.py):** prints per-chunk FAILURES **and ERRORS**
+  tracebacks it used to discard; pytest exit 5 (no tests collected) is no
+  longer POISON; POSIX signal deaths (exit −11) are classified as crashes
+  so segfaulted chunks retry per-file instead of silently dropping ~1000
+  tests; hung files name their last-running test; intermittent crashes
+  get a second chance before POISON. CI now installs the light pure-wheel
+  deps (pillow/pymupdf/sqlite-vec/pypdfium2/**numpy** — without numpy the
+  belief-graph PPR silently ran its degraded uniform path).
+
+## Unreleased — Deep-structure audit patches 1–5 (2026-08-19)
+
+Full-repo audit (`docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md`) — 22
+findings, 19 fixed same day:
+
+- **Patch 1:** gateway working-memory pin referenced `user_text` before
+  assignment (silently dead); Slack empty-text sends dropped attachments;
+  BROADCAST cancel leaked as RUNNING; checkpoint reject double-finalized;
+  WebDAV offsite uploads verified TLS off while carrying the plaintext
+  `.env` (now on, `backups.offsite.webdav.tls_verify=false` opts out);
+  graph recompile re-reads HITL live; the embedded gateway suite joined
+  CI testpaths; six AGENTS.md drift items corrected.
+- **Patch 2:** `format_skill_activation` UnboundLocal; `/fork` copied a
+  stale `thread_id`; CWD-relative defaults (autoscaler templates, cron
+  store) resolved absolute; stale doc links and the wrong GitHub org in
+  Docusaurus fixed.
+- **Patch 3 (security hardening):** fence-unavailable fallbacks fail
+  closed; commitment-gate exceptions fail closed at both chokes (the
+  remind/exec classes can no longer free-fire on a broken policy engine);
+  HITL drift warning repeats on a 15-min cooldown with a new opt-in
+  `KAZMA_HITL_CANONICAL_FLOOR=1`; gateway strict allowlists via
+  `KAZMA_GATEWAY_STRICT_ALLOWLIST=1`.
+- **Patch 4:** typing keepalive refcounted per chat; RateLimiter sleeps
+  outside its lock; shadowed duplicate `/api/providers` removed;
+  fire-and-forget memory-index tasks hold strong refs; the G1
+  commitment-latency invariant now runs in CI.
+- **Patch 5 (deferrals):** Telegram update processing moved off the poll
+  loop onto per-chat serialization chains (same-chat order preserved);
+  MCP per-task scope guard fail-closes cross-workspace calls
+  (`KAZMA_MCP_SCOPE_GUARD=0` to disable).
+
 ## Unreleased — Telegram / menu lists every slash command (2026-08-18)
 
 Telegram's input-field command picker only shows what `setMyCommands`

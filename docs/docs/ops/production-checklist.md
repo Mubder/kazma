@@ -36,6 +36,9 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] Shell allowlist + env scrub active
 - [ ] Workspace root confinement in production
 - [ ] Cron concurrency / stop / stale RUNNING handled
+- [ ] Multi-operator: platform allowlists set + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1` (2026-08-19; adapters otherwise run allow-all for backward compat)
+- [ ] `KAZMA_HITL_CANONICAL_FLOOR=1` on strict deployments (danger list cannot narrow below canonical; 2026-08-19)
+- [ ] Offsite/cloud-sync backups verify TLS (WebDAV default ON since 2026-08-19; `backups.offsite.webdav.tls_verify=false` only for self-signed labs)
 
 ## Multi-user / multi-replica (if applicable)
 

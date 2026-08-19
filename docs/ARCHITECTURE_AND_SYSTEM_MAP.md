@@ -2,7 +2,8 @@
 
 **Single source of truth for system architecture**  
 **Version:** 0.9.x (one-brain mouths + audit F remaining: soft-nav inspectors, swarm notify hook)  
-**Date:** 2026-08-17 (July 21 production audit is historical, not current SoT)  
+**Date:** 2026-08-19 (July 21 production audit is historical, not current SoT)  
+**Latest deep audit:** `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` (22 findings, full change-impact map, CI recovery §13–§19, Telegram desync §20)  
 **Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
 `docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/archive/REMEDIATION_PLAN_2026-07-21.md`,  
 `docs/docs/ops/*`, `AGENTS.md`

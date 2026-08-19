@@ -65,6 +65,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | **Tool loop / recursion limit** (bilingual stop card) | `recursion_limit` vs `agent.max_iterations` misaligned | `/long on` or Settings long-task; `resolve_turn_budgets()` | §11 Long-task |
 | **Proceed** redoes same work after budget hit | Continue context not stored/consumed | `long_task.continue.{thread}` + inject on next turn | §11 Long-task |
 | Long audit dies with YOLO on | YOLO only skips HITL; still needs capacity | Enable **both** `/long on` and `/yolo` | §4, §11 |
+| Bot acks **"Saved. Ready…"** instead of executing commands | Stale mission after a **Partial**: continue-context injected ahead of a NEW command + mission left active | Since 2026-08-19: injection gated by `is_continuation_reply`, Partial pauses the long task. Older builds: `/long off` clears it | §11 Long-task |
 
 ---
 
@@ -385,7 +386,8 @@ When you **merge** two paths into one, add a test that would have failed under t
 | Baseline tool rounds | `agent.max_iterations` (Settings → Agent) |
 | LangGraph step cap | **Derived** `resolve_turn_budgets()` → `recursion_limit` (mission uses `mission_recursion_limit()`) |
 | Mission env knobs | `KAZMA_MISSION_MAX_ROUNDS`, `KAZMA_MISSION_RECURSION` |
-| Continue after budget | `long_task.continue.{thread_id}` stored on exhaust; injected next turn |
+| Continue after budget | `long_task.continue.{thread_id}` stored on exhaust; injected next turn **only for continuation-shaped replies** (≤8-word proceed/continue/yes/… — a fresh command never gets the directive; the stored context is cleared either way) |
+| Partial behavior | A recursion-Partial **pauses** the long task (`pause_long_task`): baseline budgets, no mission framing, follow-up turns not consumed; record survives for `/long status` until TTL |
 | Metrics | Prometheus `kazma_long_task_events_total{kind=…}` |
 | HITL vs capacity | `/yolo` = danger bypass; `/long` = budgets only; mission ≠ infinite |
 
