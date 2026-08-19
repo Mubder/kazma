@@ -263,7 +263,23 @@ def main() -> int:
                     print(f"[fast-test] {f.relative_to(REPO)}: crash was intermittent "
                           f"(exit={code}) — rerun {'clean' if not failed2 else 'had failures'}")
                 else:
-                    poison.append(f"{f.relative_to(REPO)} (exit={code}, rerun exit={code2})")
+                    # Double crash — identify WHICH test crashes, mirroring
+                    # the hang diagnostic (verbose rerun; the last line
+                    # naming a test is the best suspect).
+                    _, diag = run_pytest(
+                        [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=20",
+                         "--continue-on-collection-errors", "-v"],
+                        120.0,
+                    )
+                    last = next(
+                        (ln.strip() for ln in reversed(diag.splitlines())
+                         if "::" in ln),
+                        "unknown",
+                    )
+                    poison.append(
+                        f"{f.relative_to(REPO)} (exit={code}, rerun exit={code2}; "
+                        f"last test line: {last})"
+                    )
 
     wall = time.time() - t0
     print(f"\n[fast-test] TOTALS in {wall:.0f}s: " +

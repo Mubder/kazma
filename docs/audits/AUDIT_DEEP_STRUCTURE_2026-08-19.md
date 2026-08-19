@@ -699,5 +699,17 @@ Patch-12 validation: full certification PASS locally (was FAIL);
 certification + chat_sse + session_directory + audit regressions 74
 passed; manifest determinism 4 passed post-regeneration.
 
+Round-7 CI results: **certification and session_directory are green**;
+5596 passed, 1 failed. Remaining two, characterized:
+1. `test_chat_sse_fix::TestSessionHistoryPersistence` — CI timing selects
+   the pump's fallback path (`aget_state` fails on the MagicMock graph)
+   which persists a DUPLICATE web session alongside thread-A
+   (`assert len(sessions) == 1` → 2). Needs the pump's persistence
+   fallback read (possible real duplicate-session wart), not test luck.
+2. `test_mcp_bridge.py` segfaulted twice consecutively (exit=-11,
+   rerun exit=-11) — less intermittent than believed; the crash branch of
+   fast_test now records the verbose last-test line so the next run names
+   the crashing test for a targeted fix.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
