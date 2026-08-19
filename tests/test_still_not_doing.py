@@ -9,6 +9,22 @@ import pytest
 _ROOT = Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture(autouse=True)
+async def _aclose_division_after_each_test():
+    """Close division-runtime singletons inside the live event loop.
+
+    RBACEngine and AuthorizationFlow's AuditLogger hold aiosqlite
+    connections whose worker threads are NON-DAEMON — left open, the
+    interpreter hangs at shutdown after every test passes (the CI POISON
+    hang; deep-audit 2026-08-19 CI triage). Closing must happen while the
+    test's loop is still alive.
+    """
+    yield
+    from kazma_core.division_runtime import aclose_division_runtime
+
+    await aclose_division_runtime()
+
+
 def test_chat_ide_swarm_soft_nav_and_teardown():
     nav = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "modules" / "nav.js").read_text(
         encoding="utf-8"

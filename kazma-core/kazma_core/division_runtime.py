@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "aclose_division_runtime",
     "check_division_tool",
     "current_division_context",
     "division_enforcement_on",
@@ -31,13 +32,82 @@ _sandbox: Any = None
 _flow: Any = None
 _yaml_cache: dict[str, Any] | None = None
 
+# Strong refs for best-effort close tasks scheduled from sync contexts.
+_RESET_TASKS: set = set()
 
-def reset_division_runtime() -> None:
+
+async def _aclose_component(comp: Any) -> None:
+    """Close one runtime component's async resources (best-effort)."""
+    if comp is None:
+        return
+    closer = getattr(comp, "close", None)
+    if closer is not None:
+        try:
+            await closer()
+        except Exception:
+            logger.debug("[division] component close failed", exc_info=True)
+    # AuthorizationFlow holds its AuditLogger (aiosqlite) internally —
+    # close it too when present and not already owned by comp.close().
+    audit_close = getattr(getattr(comp, "audit", None), "close", None)
+    if audit_close is not None:
+        try:
+            await audit_close()
+        except Exception:
+            logger.debug("[division] audit close failed", exc_info=True)
+
+
+async def aclose_division_runtime() -> None:
+    """Close and reset all division-runtime singletons (async contexts).
+
+    The components hold aiosqlite connections whose worker threads are
+    NON-DAEMON — dropping the references without closing hangs interpreter
+    shutdown after the event loop is gone (the CI POISON hang in
+    tests/test_still_not_doing.py, deep-audit 2026-08-19 CI triage).
+    """
     global _rbac, _sandbox, _flow, _yaml_cache
+    old = [_rbac, _sandbox, _flow]
     _rbac = None
     _sandbox = None
     _flow = None
     _yaml_cache = None
+    for comp in old:
+        await _aclose_component(comp)
+
+
+def reset_division_runtime() -> None:
+    """Reset singletons, best-effort closing their async resources.
+
+    From a running event loop the close is scheduled (strong-referenced);
+    from sync context with no loop it runs on a throwaway loop. Components
+    created on an already-closed loop may not fully close — prefer
+    :func:`aclose_division_runtime` from async tests/teardowns.
+    """
+    import asyncio
+
+    global _rbac, _sandbox, _flow, _yaml_cache
+    old = [_rbac, _sandbox, _flow]
+    _rbac = None
+    _sandbox = None
+    _flow = None
+    _yaml_cache = None
+
+    async def _close_all() -> None:
+        for comp in old:
+            await _aclose_component(comp)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        task = loop.create_task(_close_all())
+        _RESET_TASKS.add(task)
+        task.add_done_callback(_RESET_TASKS.discard)
+    else:
+        try:
+            asyncio.run(_close_all())
+        except Exception:
+            logger.debug("[division] offline close failed", exc_info=True)
 
 
 def division_enforcement_on() -> bool:

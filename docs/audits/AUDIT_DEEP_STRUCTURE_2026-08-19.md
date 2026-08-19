@@ -543,5 +543,44 @@ Patch-7 validation: tools_quickwins + document_parsers_phase4 +
 memory_v2 phase2/phase_b 75 passed locally; fast_test + ci.yml
 compile/lint-clean.
 
+## 15. Patch 8 (same day, CI triage round 3 — the last POISON hang)
+
+Round-2 CI run: **0 failing tests** (5,495 passed) — the only red was the
+`tests/test_still_not_doing.py` shutdown hang, with the new diagnostic
+showing every test in the file PASSED ([100%]) before the hang.
+
+Root cause (reproduced locally on Windows, platform-independent):
+`division_runtime.check_division_tool` touches two components that each
+open an aiosqlite connection — `RBACEngine._get_db()` (rbac.py:151) and
+`AuthorizationFlow`'s `AuditLogger` — and NOTHING ever closed them.
+aiosqlite worker threads are non-daemon, so after the tests pass and the
+event loop closes, interpreter shutdown blocks forever in
+`threading._shutdown` (two workers parked on `tx.get()`; confirmed via a
+thread-stack dump). This also means any production path that resets the
+division runtime was leaking connections the same way.
+
+Fixes:
+1. `division_runtime.aclose_division_runtime()` — new awaitable teardown
+   that closes RBACEngine / sandbox / AuthorizationFlow (+ its audit
+   logger) and resets the singletons; `reset_division_runtime()` (sync)
+   now ALSO best-effort closes: schedules a strong-referenced close task
+   when a loop is running, else runs one on a throwaway loop.
+2. `tests/test_still_not_doing.py` — autouse async fixture closes the
+   runtime inside each test's live loop (closing after the loop dies
+   cannot wake the worker threads).
+
+Verification: the thread-dump repro now exits cleanly with zero
+non-daemon threads; division/rbac/platform-rbac/authorization-flow +
+the fixed file: 57 passed. With this, every known CI failure and poison
+is resolved — the merge gate should go green on the next run.
+
+### Incidental finding (not fixed here)
+
+`get_embedder()` with an unknown `KAZMA_EMBED_PROVIDER` (or any local
+fallback on a machine without the model cached) attempts a live
+HuggingFace download of the ~2GB `BAAI/bge-m3` at runtime — reproduced
+as a multi-minute stall. Worth a guard (explicit opt-in for downloads /
+clearer fallback) in a future patch.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
