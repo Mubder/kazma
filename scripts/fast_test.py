@@ -156,8 +156,12 @@ def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
 
 
 def is_crash(code: int) -> bool:
-    # Windows subprocess returns large negative codes for access violations.
-    return code in _CRASH_CODES or code < -1000 or code == 139
+    # Windows subprocess returns large negative codes for access violations;
+    # POSIX returns -N when the process died from signal N (e.g. -11 =
+    # SIGSEGV — previously unclassified, so a segfaulted chunk was never
+    # retried and its partial log counted as final, silently dropping
+    # ~1000 tests (deep-audit 2026-08-19 CI triage, round 3).
+    return code < 0 or code in _CRASH_CODES or code == 139
 
 
 def main() -> int:

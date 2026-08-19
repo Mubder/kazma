@@ -582,5 +582,21 @@ HuggingFace download of the ~2GB `BAAI/bge-m3` at runtime — reproduced
 as a multi-minute stall. Worth a guard (explicit opt-in for downloads /
 clearer fallback) in a future patch.
 
+## 16. Patch 9 (same day, CI triage round 4 — runner crash-classification bug)
+
+The round-3 run confirmed the POISON hang is GONE (chunk 01 completes,
+no poison) — but exposed a fast_test bug: Linux segfaults surface as
+subprocess exit **-11** (negative signal), and `is_crash()` only matched
+Windows access-violation codes and bare `139`. A SIGSEGF'd chunk was
+therefore never retried per-file, its PARTIAL log counted as final
+(~1000 tests silently dropped; totals 4312 vs 5495), and a failure
+scraped from the partial log of the corrupted process
+(`test_chat_sse_fix` empty-content — deterministic pass everywhere
+clean) failed the gate. `is_crash()` now classifies ANY negative exit
+code as a crash, restoring the per-file retry for signal deaths.
+
+Patch-9 validation: fast_test compile-clean; test_chat_sse_fix 15
+passed locally (deterministic).
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
