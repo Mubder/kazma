@@ -237,8 +237,14 @@ def certify_hostile_corpus(root: str | Path) -> CertificationCheck:
         / "hostile_manifest.json"
     )
     if committed.is_file():
+        from kazma_core.documents.hostile_corpus import canonical_manifest
+
         expected = json.loads(committed.read_text(encoding="utf-8"))
-        if expected != manifest:
+        # Canonical comparison: sha256/byte_size are ZIP-container artifacts
+        # whose DEFLATE streams differ across zlib builds — byte equality
+        # with the committed manifest is unattainable cross-platform
+        # (deep-audit 2026-08-19 CI triage).
+        if canonical_manifest(expected) != canonical_manifest(manifest):
             return CertificationCheck(
                 "hostile_corpus",
                 "FAIL",

@@ -139,20 +139,25 @@ _DIGEST_LIMIT = 6000
 
 
 def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
-    """Extract the FAILURES section (tracebacks) from pytest ``-q`` output.
+    """Extract the FAILURES/ERRORS sections (tracebacks) from pytest -q output.
 
     The runner previously captured pytest output but never printed it, so
     CI logs showed only the failing-test ids with no assertions/tracebacks
     — Linux-only failures were undiagnosable from the logs alone
-    (deep-audit 2026-08-19 CI triage).
+    (deep-audit 2026-08-19 CI triage). ERRORS sections matter too: fixture
+    / setup errors (e.g. the session_directory family) appear there, not
+    under FAILURES.
     """
-    m = re.search(r"^=+ FAILURES =+\s*$", log, re.M)
-    if m is None:
-        return ""
-    rest = log[m.start():]
-    m2 = re.search(r"^=+ (short test summary|slowest\d* test) ", rest, re.M)
-    section = rest[: m2.start()] if m2 else rest
-    return section[:limit]
+    sections: list[str] = []
+    for name in ("FAILURES", "ERRORS"):
+        m = re.search(rf"^=+ {name} =+\s*$", log, re.M)
+        if m is None:
+            continue
+        rest = log[m.start():]
+        m2 = re.search(r"^=+ (short test summary|slowest\d* test) ", rest, re.M)
+        section = rest[: m2.start()] if m2 else rest
+        sections.append(section[:limit])
+    return "\n".join(sections)[:limit]
 
 
 def is_crash(code: int) -> bool:

@@ -71,20 +71,12 @@ class TestHostileCorpusDeterminism:
         committed = json.loads(committed_path.read_text(encoding="utf-8"))
         generated = hostile_corpus_manifest()
 
-        def _canonical(manifest: dict) -> dict:
-            # sha256 / byte_size are ZIP-CONTAINER artifacts: the generator
-            # already pins timestamps, entry order, and permissions, but the
-            # DEFLATE stream itself differs across zlib builds — byte-exact
-            # cross-platform determinism is unattainable. Every structural
-            # field must still match exactly.
-            out = json.loads(json.dumps(manifest))
-            for case in out.get("cases", []):
-                if isinstance(case, dict):
-                    case.pop("sha256", None)
-                    case.pop("byte_size", None)
-            return out
+        from kazma_core.documents.hostile_corpus import canonical_manifest
 
-        assert _canonical(generated) == _canonical(committed), (
+        # sha256 / byte_size are ZIP-container artifacts (DEFLATE differs
+        # across zlib builds) — canonical equality is the review-relevant
+        # comparison; see canonical_manifest() for the rationale.
+        assert canonical_manifest(generated) == canonical_manifest(committed), (
             "Hostile corpus manifest differs structurally from committed copy. "
             "Regenerate with the command above."
         )

@@ -423,6 +423,27 @@ def hostile_corpus_manifest() -> dict[str, object]:
     }
 
 
+def canonical_manifest(manifest: dict[str, object]) -> dict[str, object]:
+    """Return *manifest* stripped of ZIP-container artifacts.
+
+    ``sha256`` / ``byte_size`` depend on the DEFLATE stream, which differs
+    across zlib builds even though the generator pins timestamps, entry
+    order, and permissions — byte-exact cross-platform determinism is
+    unattainable. Every structural field is preserved, so canonical
+    equality is the review-relevant comparison (deep-audit 2026-08-19).
+    """
+    import copy
+
+    out = copy.deepcopy(manifest)  # type: ignore[arg-type]
+    cases = out.get("cases")
+    if isinstance(cases, list):
+        for case in cases:
+            if isinstance(case, dict):
+                case.pop("sha256", None)
+                case.pop("byte_size", None)
+    return out
+
+
 def write_hostile_corpus(root: str | Path) -> tuple[Path, dict[str, object]]:
     """Materialize the corpus and manifest beneath ``root``."""
 

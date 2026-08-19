@@ -652,5 +652,23 @@ Patch-10 validation: audit-regression file 19 passed (2 new); document
 certification 47 passed/1 skipped; kazma-core/tests 289 passed;
 fast_test + embedder compile-clean.
 
+## 18. Patch 11 (same day, round 6)
+
+Round-5 CI results: the manifest determinism test now passes, chat_sse
+stayed green, mcp_bridge passed (no segfault this run) — and the digest
+finally revealed the certification-baseline root cause: **the product's
+own certifier** (`certification.py:241`) compared the generated manifest
+against the committed one byte-for-byte, hitting the same cross-platform
+DEFLATE variance. Fixed with a shared `canonical_manifest()` helper in
+`hostile_corpus.py`, used by BOTH the certifier and the test.
+
+The 11 session_directory ERRORS (pass-locally family) still lack
+tracebacks — they are fixture/setup ERRORS reported under pytest's
+"= ERRORS =" section, which the digest didn't capture. The digest now
+extracts ERRORS sections too, so the next run pinpoints them.
+
+Patch-11 validation: determinism + certification JSON + audit regressions
+24 passed; all touched files compile-clean.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
