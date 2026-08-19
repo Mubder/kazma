@@ -1879,11 +1879,16 @@ def create_graph_handler(
             await graph.aupdate_state(new_config, {"messages": state.get("messages", [])})
             logger.info("[agent-handler] /fork seeded new thread=%s from %s iter=%d", new_thread_id, thread_id, iteration)
 
-            # Copy platform context so the fork can route replies.
+            # Copy platform context so the fork can route replies. Override
+            # the source thread_id (injected at handler entry) so consumers
+            # reading ctx["thread_id"] on the fork's row get the fork id,
+            # not the original thread (deep-audit 2026-08-19, finding #6).
             try:
                 src_ctx = await _store.get(thread_id)
                 if src_ctx:
-                    await _store.put(new_thread_id, src_ctx)
+                    fork_ctx = dict(src_ctx)
+                    fork_ctx["thread_id"] = new_thread_id
+                    await _store.put(new_thread_id, fork_ctx)
             except Exception:
                 logger.debug("[agent-handler] /fork: could not copy session context", exc_info=True)
 

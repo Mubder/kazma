@@ -95,6 +95,7 @@ def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> st
     the untrusted-data prompt fence (it is arbitrary GitHub-sourced text).
     """
     # Integrity gate (fail-closed on tamper, warn on unsigned).
+    vr = None  # stays None if the integrity check itself errors below
     try:
         from kazma_core.agent_skills.integrity import verify_skill
 
@@ -120,7 +121,10 @@ def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> st
 
     body = skill.parsed.body or "(no body content)"
     fenced_body = format_untrusted_block(body, source=f"agent_skill:{skill.name}")
-    integrity_note = "" if vr.signed else " (unsigned — not integrity-verified)"
+    # vr is None only when the check itself errored — degrade to the
+    # unsigned note instead of crashing on an unbound name (deep-audit
+    # 2026-08-19, finding #2).
+    integrity_note = "" if (vr is not None and vr.signed) else " (unsigned — not integrity-verified)"
 
     resources = _list_resources(skill.base_dir, max_resources=max_resources)
 

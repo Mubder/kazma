@@ -302,5 +302,30 @@ Validation: py_compile over every edited file; targeted suites green
 broadcast flows+manager 53, embedded gateway suite 18, new regressions 6,
 import-integrity gate 13).
 
+## 9. Patch 2 (same day, second batch)
+
+1. Fixed finding #2 — `agent_skills/catalog.py:format_skill_activation`
+   no longer raises `UnboundLocalError` when the integrity check itself
+   errors (`vr` degrades to the unsigned note).
+2. Fixed finding #6 — gateway `/fork` copies the session context with the
+   `thread_id` overridden to the fork id (consumers reading
+   `ctx["thread_id"]` on the fork's row no longer get the original thread).
+3. Fixed finding #14 — CWD-relative defaults resolved: autoscaler
+   `_DEFAULT_TEMPLATES_PATH` is now absolute (mirrors `WorkerRegistry`), and
+   `SQLiteCronStore` defaults to `paths.data_dir()/cron.db` (app.py wiring
+   uses the default) so a server started from a subdirectory opens the same
+   DB instead of minting an empty one.
+4. Fixed finding #22 — stale doc references: `DOCS_CONSOLIDATION_PLAN.md`
+   pointed at its pre-move location (AGENTS.md, intro.md, development.md);
+   nonexistent `archive/` links repointed at `docs/audits/archive/` and
+   `UNWIRED_INVENTORY.md`; Docusaurus org corrected `kazma-ai` → `Mubder`
+   (4 sites); system-map companion-doc paths fixed.
+5. Extended `tests/test_audit_deep_structure_fixes.py` to 9 regressions
+   (added: catalog integrity-error survival, autoscaler absolute default,
+   cron store absolute default).
+
+Patch-2 validation: py_compile + `node --check`; suites green (skills ×2,
+cron, dynamic spawning, replay command: 78; regressions: 9).
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

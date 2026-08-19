@@ -1059,7 +1059,7 @@ class KazmaAppBuilder:
                         return agent.build_child_graph()
                     return agent.get_streaming_graph()
 
-                self.cron_store = SQLiteCronStore("kazma-data/cron.db")
+                self.cron_store = SQLiteCronStore()
                 self.cron_scheduler = CronScheduler(
                     store=self.cron_store,
                     graph_builder=_cron_graph_builder,

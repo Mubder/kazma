@@ -8,7 +8,7 @@ const config = {
   favicon: 'img/kazma-logo.png',
   url: 'https://kazma.ai',
   baseUrl: '/kazma/',
-  organizationName: 'kazma-ai',
+  organizationName: 'Mubder',
   projectName: 'kazma',
   onBrokenLinks: 'warn',
   onBrokenAnchors: 'warn',
@@ -49,7 +49,7 @@ const config = {
       ({
         docs: {
           sidebarPath: require.resolve('./sidebars.js'),
-          editUrl: 'https://github.com/kazma-ai/kazma/tree/main/docs/',
+          editUrl: 'https://github.com/Mubder/kazma/tree/main/docs/',
           // Default landing after /docs
           routeBasePath: 'docs',
         },
@@ -100,7 +100,7 @@ const config = {
             label: 'Contributing',
           },
           {
-            href: 'https://github.com/kazma-ai/kazma',
+            href: 'https://github.com/Mubder/kazma',
             label: 'GitHub',
             position: 'right',
           },
@@ -132,7 +132,7 @@ const config = {
           {
             title: 'Community',
             items: [
-              { label: 'GitHub', href: 'https://github.com/kazma-ai/kazma' },
+              { label: 'GitHub', href: 'https://github.com/Mubder/kazma' },
               { label: 'Discord', href: 'https://discord.gg/kazma' },
               { label: 'Twitter', href: 'https://x.com/kazma_ai' },
             ],

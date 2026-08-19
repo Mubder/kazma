@@ -19,8 +19,7 @@ kazma/
 ├── kazma-memory/        # Arabic tokenizer + SQLite/FTS5 search backend
 ├── kazma-skills/        # Native skills + manifests
 ├── kazma-cli/           # The `kazma` command surface
-├── docs/                # Docusaurus site — single SoT (content under docs/docs/)
-├── archive/             # Retired docs (former docs-v2, legacy pages)
+├── docs/                # Docusaurus site — single SoT (content under docs/docs/); archived audits under docs/audits/archive/
 ├── tests/               # Cross-cutting tests
 ├── examples/            # Example skills (e.g. almuhalab_custom_skills)
 ├── scripts/             # Ops: migrate, smoke, tools-catalog regen, …
@@ -161,7 +160,7 @@ Regenerate the tools catalog after adding tools:
 python scripts/generate_tools_catalog.py
 ```
 
-Plan & archive policy: `docs/DOCS_CONSOLIDATION_PLAN.md`, `archive/README.md`.
+Plan & archive policy: `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` (completed; retired trees live under `docs/audits/archive/`).
 
 ---
 

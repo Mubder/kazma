@@ -38,7 +38,11 @@ __all__ = ["AutoScaler", "WorkerTemplate"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TEMPLATES_PATH = Path("swarm_templates.json")
+# Default templates file lives alongside kazma.yaml (project root or CWD).
+# Resolved to an absolute path at import time — mirrors WorkerRegistry — so
+# the autoscaler still finds templates when the app is started from a
+# different working directory (deep-audit 2026-08-19, finding #14).
+_DEFAULT_TEMPLATES_PATH = Path("swarm_templates.json").resolve()
 _DEFAULT_IDLE_TTL = 300  # 5 minutes
 
 

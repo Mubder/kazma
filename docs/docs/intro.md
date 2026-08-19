@@ -9,7 +9,7 @@ description: Map of all Kazma documentation — start here
 # Kazma documentation
 
 **Single source of truth** for the Kazma agent framework (v0.9+).  
-Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical trees live in [`archive/`](https://github.com/kazma-ai/kazma/tree/main/archive).
+Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical audits live in [`docs/audits/archive/`](https://github.com/Mubder/kazma/tree/main/docs/audits/archive).
 
 ## Start here
 
@@ -76,11 +76,11 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md), [Document docs goal](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md), [Document residuals](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_RESIDUALS_GOAL.md)) |
 | `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` | Document Intelligence certification report |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
-| `docs/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan |
+| `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan (completed) |
 | `AGENTS.md` | Rules for coding agents working in the repo |
 | `CHANGELOG.md` | Sprint history |
-| `archive/` | Retired docs trees (`docs-v2`, legacy pages) |
+| `docs/audits/archive/` | Archived audits (former docs-v2 / legacy trees) |
 
 ## Honesty policy
 
-Docs distinguish **what the code does today** from **planned / library-only** features. Retired/unwired code is moved to `archive/` (e.g. the former `delegation/*` package) — see [Roadmap](guide/roadmap-and-future) and audits `UNWIRED_INVENTORY.md`.
+Docs distinguish **what the code does today** from **planned / library-only** features. Retired/unwired code is tracked in the audits [`UNWIRED_INVENTORY.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/UNWIRED_INVENTORY.md) — see [Roadmap](guide/roadmap-and-future).

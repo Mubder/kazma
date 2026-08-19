@@ -165,3 +165,53 @@ def test_webdav_tls_verify_defaults_on():
         assert cs._webdav_tls_verify() is True
     finally:
         cs._read_config = original  # type: ignore[assignment]
+
+
+# ── Patch 2 — finding #2: catalog activation never crashes on integrity
+#    check errors (vr unbound) ────────────────────────────────────────────
+
+
+def test_format_skill_activation_survives_integrity_check_error(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from kazma_core.agent_skills import catalog
+    from kazma_core.agent_skills.discovery import AgentSkill
+    from kazma_core.agent_skills.parser import ParsedSkill
+
+    skill = AgentSkill(
+        name="demo",
+        description="demo skill",
+        location=Path(tmp_path) / "SKILL.md",
+        scope="user",
+        parsed=ParsedSkill(name="demo", description="demo skill", body="Do things."),
+    )
+
+    def _boom(location):
+        raise RuntimeError("integrity backend exploded")
+
+    monkeypatch.setattr("kazma_core.agent_skills.integrity.verify_skill", _boom)
+
+    result = catalog.format_skill_activation(skill)  # must not raise
+
+    assert "unsigned — not integrity-verified" in result
+    assert "Do things." in result  # fenced body still loads (warn-only path)
+
+
+# ── Patch 2 — finding #14: no CWD-relative default paths ────────────────
+
+
+def test_autoscaler_default_templates_path_is_absolute():
+    from kazma_core.swarm.autoscaler import _DEFAULT_TEMPLATES_PATH
+
+    assert _DEFAULT_TEMPLATES_PATH.is_absolute()
+
+
+def test_cron_store_default_db_path_is_absolute():
+    from pathlib import Path
+
+    from kazma_core.cron.scheduler import SQLiteCronStore
+
+    assert Path(SQLiteCronStore()._db_path).is_absolute()
+    assert SQLiteCronStore()._db_path.endswith("cron.db")
+    # Explicit paths are honored verbatim.
+    assert SQLiteCronStore("/tmp/custom.db")._db_path == "/tmp/custom.db"

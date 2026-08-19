@@ -173,7 +173,15 @@ class SQLiteCronStore:
         db_path: Path to the SQLite database.
     """
 
-    def __init__(self, db_path: str = "kazma-data/cron.db") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        # Default resolves via paths.data_dir() (walks up to the
+        # pyproject.toml root) instead of a bare CWD-relative literal, so a
+        # server started from a subdirectory opens the SAME cron.db instead
+        # of silently minting an empty one (deep-audit 2026-08-19, #14).
+        if db_path is None:
+            from kazma_core.paths import data_dir
+
+            db_path = str(data_dir() / "cron.db")
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
 

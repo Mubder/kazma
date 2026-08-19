@@ -4,8 +4,8 @@
 **Version:** 0.9.x (one-brain mouths + audit F remaining: soft-nav inspectors, swarm notify hook)  
 **Date:** 2026-08-17 (July 21 production audit is historical, not current SoT)  
 **Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
-`docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/REMEDIATION_PLAN_2026-07-21.md`,  
-`docs/ops/*`, `AGENTS.md`
+`docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/archive/REMEDIATION_PLAN_2026-07-21.md`,  
+`docs/docs/ops/*`, `AGENTS.md`
 
 **Honesty note:** This map prioritizes **production-wired paths** and catalogs **all source modules** under main packages. Generated artifacts (`docs/node_modules`, `docs/build`, `__pycache__`, `.venv`) are excluded. Library-only modules are labeled **[LIBRARY]**.
 

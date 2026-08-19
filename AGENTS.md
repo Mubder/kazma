@@ -1061,6 +1061,6 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 - `docs/docs/ops/production-checklist.md` — Production go-live checklist
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
 - `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report
-- `docs/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan
+- `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
 - `CHANGELOG.md` — Sprint history
 - Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees.
