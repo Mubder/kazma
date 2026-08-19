@@ -380,7 +380,44 @@ class SwarmEngine:
         # stamping, and task_started SSE as a normal dispatch (previously it
         # returned before all four, exempting the most expensive pattern).
         if task.type == TaskType.BROADCAST:
-            return await self.broadcast(task)
+            # It must ALSO finalize through the same cancel/timeout/error
+            # paths as a normal dispatch: returning before the try/except
+            # below let a cancelled BROADCAST leak as RUNNING in
+            # _active_tasks until the watchdog reaped it, with no
+            # task_completed SSE (deep-audit 2026-08-19).
+            try:
+                return await self.broadcast(task)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[SwarmEngine] Broadcast '%s' timed out after %.1fs",
+                    task.id, float(task.timeout or 0),
+                )
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="timeout",
+                    error=f"Task timed out after {float(task.timeout or 0):.1f}s",
+                    duration_seconds=perf_counter() - started,
+                )
+            except asyncio.CancelledError:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="cancelled",
+                    error="Cancelled by user",
+                    duration_seconds=perf_counter() - started,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[SwarmEngine] Unhandled error in broadcast for task '%s'", task.id
+                )
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
 
         # Start a root tracing span for this task.
         task_span = self._tracing_emitter.start_task_span(
@@ -455,6 +492,18 @@ class SwarmEngine:
         """Sweep _active_tasks and finalize any that exceeded timeout + margin."""
         reaped = 0
         for tid, t in list(self._active_tasks.items()):
+            # Paused HITL checkpoints wait on a HUMAN, not on task.timeout —
+            # their lifecycle is owned by the checkpoint_timeout auto-reject.
+            # Reaping them here killed healthy paused pipelines after
+            # task.timeout+30s and left the _paused entry dangling, so a later
+            # reject wrote a second terminal record (deep-audit 2026-08-19).
+            # No checkpoint timeout configured → still reap (abandoned-
+            # pipeline safety net).
+            if (
+                getattr(t, "status", None) == TaskStatus.PAUSED
+                and (t.metadata or {}).get("checkpoint_timeout")
+            ):
+                continue
             timeout = getattr(t, "timeout", None) or 300.0
             started_iso = getattr(t, "started_at", None)
             if not started_iso:
@@ -1192,30 +1241,52 @@ class SwarmEngine:
                     metadata=dict(getattr(result, "metadata", None) or {}),
                 )
             else:
-                # Update task history with the failed result.
-                def _mark_failed(task: SwarmTask) -> None:
-                    task.status = TaskStatus.FAILED
-                    task.result = result
-
-                updated = _hist_update_task(
-                    self._task_history,
-                    self._task_lock,
-                    task_id,
-                    _mark_failed,
-                    max_history=self._max_history,
-                )
-                if updated is not None:
-                    if self._task_store is not None:
-                        try:
-                            self._task_store.persist_task(updated)
-                        except Exception:
-                            logger.exception(
-                                "[SwarmEngine] failed to persist rejected task '%s'",
-                                task_id,
-                            )
+                # Update task history with the failed result — unless the
+                # task already carries a terminal record (reaped/cancelled
+                # while paused): overwriting would persist a SECOND terminal
+                # result for the same task (deep-audit 2026-08-19).
+                _terminal = {
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                    TaskStatus.TIMEOUT,
+                }
+                _existing = _hist_get_task(self._task_history, self._task_lock, task_id)
+                if (
+                    _existing is not None
+                    and getattr(_existing, "status", None) in _terminal
+                    and getattr(_existing, "result", None) is not None
+                ):
+                    logger.debug(
+                        "[SwarmEngine] reject_checkpoint('%s'): task already "
+                        "terminally finalized (status=%s) — skipping duplicate persist",
+                        task_id,
+                        getattr(_existing, "status", None),
+                    )
                 else:
-                    # If task not in history, store the result directly.
-                    self._checkpoint_mgr.complete_pipeline(task_id, result)
+                    def _mark_failed(task: SwarmTask) -> None:
+                        task.status = TaskStatus.FAILED
+                        task.result = result
+
+                    updated = _hist_update_task(
+                        self._task_history,
+                        self._task_lock,
+                        task_id,
+                        _mark_failed,
+                        max_history=self._max_history,
+                    )
+                    if updated is not None:
+                        if self._task_store is not None:
+                            try:
+                                self._task_store.persist_task(updated)
+                            except Exception:
+                                logger.exception(
+                                    "[SwarmEngine] failed to persist rejected task '%s'",
+                                    task_id,
+                                )
+                    else:
+                        # If task not in history, store the result directly.
+                        self._checkpoint_mgr.complete_pipeline(task_id, result)
             # Ensure active maps cleared even if finalize path missed
             self._active_tasks.pop(task_id, None)
             self._task_handles.pop(task_id, None)

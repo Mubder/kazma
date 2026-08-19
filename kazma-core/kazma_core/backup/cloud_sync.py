@@ -85,6 +85,19 @@ def _read_vault(key: str) -> str:
         return ""
 
 
+def _webdav_tls_verify() -> bool:
+    """TLS verification for WebDAV uploads (default ON).
+
+    The universal backup zip carries the plaintext ``.env`` (vault recovery
+    key), so a non-loopback WebDAV with certificate verification disabled is
+    a full secret-exfiltration surface. Verify defaults to on; set
+    ``backups.offsite.webdav.tls_verify=false`` only for self-signed lab
+    servers (deep-audit 2026-08-19).
+    """
+    val = str(_read_config("backups.offsite.webdav.tls_verify", "true")).strip().lower()
+    return val not in ("0", "false", "no", "off")
+
+
 def _write_vault(key: str, value: str, category: str = "backups") -> None:
     try:
         from kazma_core.security.vault import get_vault
@@ -590,7 +603,7 @@ class WebDAVSync:
             # MKCOL parent directories first
             parts = rel.split("/")[:-1]
             current = f"{url}/{remote_path}"
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with httpx.AsyncClient(timeout=300, verify=_webdav_tls_verify()) as client:
                 for part in parts:
                     current = f"{current}/{part}"
                     # MKCOL is idempotent (409 = already exists is fine)
@@ -620,7 +633,7 @@ class WebDAVSync:
         # bytes read up-front: httpx 0.28 async clients reject sync file objects
         with open(local, "rb") as f:
             data = f.read()
-        async with httpx.AsyncClient(timeout=300, verify=False) as client:
+        async with httpx.AsyncClient(timeout=300, verify=_webdav_tls_verify()) as client:
             # MKCOL the root folder — idempotent (405/409 = already exists)
             await client.request("MKCOL", f"{url}/{self._ROOT_FOLDER}", auth=auth)
             resp = await client.put(
@@ -638,7 +651,7 @@ class WebDAVSync:
             return {"ok": False, "error": "WebDAV URL not configured"}
         auth = (username, password) if username else None
         try:
-            async with httpx.AsyncClient(timeout=10, verify=False) as client:
+            async with httpx.AsyncClient(timeout=10, verify=_webdav_tls_verify()) as client:
                 resp = await client.request(
                     "PROPFIND", url, auth=auth, headers={"Depth": "0"}
                 )

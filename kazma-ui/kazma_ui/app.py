@@ -1464,10 +1464,6 @@ class KazmaAppBuilder:
             from kazma_core.agent.graph_builder import build_supervisor_graph
             from kazma_core.safety.hitl import get_hitl_config
 
-            recompile_hitl = get_hitl_config(self.config.raw)
-            if not recompile_hitl.get("enabled", True):
-                recompile_hitl = None
-
             # Time Travel — reuse the agent's snapshot recorder so the SSE
             # path captures snapshots too. Create lazily if the agent hasn't
             # built its graph yet. Failure is LOUD (warning, not debug): a
@@ -1484,6 +1480,16 @@ class KazmaAppBuilder:
             self._snapshot_recorder = _recorder
 
             def _recompile_holder_graph() -> None:
+                # Re-read HITL config LIVE on every recompile: the boot-time
+                # snapshot went stale after a Settings change, so graphs
+                # recompiled on model switch silently kept the old gate until
+                # a process restart (deep-audit 2026-08-19, finding #13).
+                try:
+                    _hitl = get_hitl_config(self.config.raw)
+                    if not _hitl.get("enabled", True):
+                        _hitl = None
+                except Exception:  # noqa: BLE001
+                    _hitl = None
                 recompiled = build_supervisor_graph(
                     llm=self.agent.llm,
                     system_prompt=self.agent.system_prompt,
@@ -1493,7 +1499,7 @@ class KazmaAppBuilder:
                     authority=self.agent.authority,
                     tracer=self.agent.tracer,
                     checkpointer=self._checkpointer,
-                    hitl_config=recompile_hitl,
+                    hitl_config=_hitl,
                     snapshot_recorder=_recorder,
                 )
                 self._graph_holder["graph"] = recompiled

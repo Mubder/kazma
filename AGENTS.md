@@ -101,7 +101,7 @@ All packages are in scope. The four main packages:
 - `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`
 - Max depth is 5; removing the guard causes infinite recursion on A->B->A cycles
-- Workers can be revisited up to `_MAX_VISITS=2` times (allows legitimate A->B->A return handoffs)
+- Workers can be revisited up to `MAX_VISITS=2` times (allows legitimate A->B->A return handoffs)
 - Visit counts are now tracked per-worker (not just a boolean set)
 
 ### 5. Circuit Breaker Half-Open (`kazma-core/kazma_core/swarm/reliability.py`) + ReliabilityRegistry (`reliability_registry.py`)
@@ -147,12 +147,15 @@ unattended-danger-tool security gap:
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
 - **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested by
-  `tests/test_agent_skills.py::TestHitlWiring::test_yaml_parity`; both lists are
-  alphabetical — add a new danger tool to BOTH or the test fails)
+  `tests/test_agent_skills.py::TestHitlWiring::test_yaml_parity` and
+  `tests/test_hitl_wiring.py` — the tests compare SETS; `hitl.py` groups the
+  tools thematically while the YAML list is alphabetical. Add a new danger
+  tool to BOTH or the tests fail)
 - **Settings UI / ConfigStore:** `safety.require_approval_for` — consumed by
   `get_hitl_config()` (runtime override)
-- **Swarm bus:** `swarm/safety.py` `_EXTENDED_DANGER` is an **alias** of CANONICAL
-  (not a longer list — spawn tools only if on CANONICAL)
+- **Swarm bus:** `swarm/safety.py` `_EXTENDED_DANGER` is a materialized copy of
+  CANONICAL with identical contents (CANONICAL is a tuple, so it cannot be the
+  same object — spawn tools only if on CANONICAL)
 - **MCP tools:** `classify_mcp_tool()` name patterns (write/exec/delete → danger).
   Gate is in `UnifiedToolExecutor.execute()`
 
@@ -172,7 +175,7 @@ compatibility. **All public API methods and constructors are unchanged.**
 
 | Module | Responsibility | When to open it |
 |--------|---------------|-----------------|
-| `engine.py` (1573 lines) | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
+| `engine.py` (1366 lines) | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
 | `reliability_registry.py` | Circuit breakers, retries, timeouts, validators, concurrency | Configuring per-worker reliability |
 | `phonebook.py` | WorkerRegistry summon + dispatch_by_name | Topology/DAG worker lookup |
 | `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
@@ -214,9 +217,10 @@ workspace. Three new modules; understanding their interaction is essential.
 - `build_env_context()` resolves workspace root, repo slug (from WorkspaceStore
   cache or `git remote`), branch, GitHub auth, and available tools into a
   markdown block.
-- Injected at THREE sites: main agent init (`agent_runner.py` + `graph_builder.py`),
-  per-turn in the SSE chat path (`sse_chat.py`, so workspace switches take
-  effect immediately), and into every dispatched worker prompt (`worker.py`).
+- Injected at THREE sites: main agent init (`agent_runner.py` — NOT
+  `graph_builder.py`, which has no env_context reference), per-turn in the SSE
+  chat path (`sse_chat.py`, so workspace switches take effect immediately),
+  and into every dispatched worker prompt (`worker.py`).
 - `IdeService.send_to_swarm()` attaches the env block to the task `context` —
   never drop this or workers lose workspace awareness.
 
@@ -381,19 +385,20 @@ swarm works with zero pre-registered workers.
 ### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
 
 The V2 cognitive engine has a background maintenance tier: a durable task
-queue drained by a worker, plus two fire-and-forget asyncio scheduler loops.
+queue drained by a worker, plus FOUR fire-and-forget asyncio scheduler loops.
 These were the subsystem that silently lost its backup/export runs (the
 routines existed but nothing called them) — read this before touching the
 background memory path.
 
-**A. `start_memory_worker()` is the single boot entry — it starts BOTH
-schedulers.** Called from `app.py:1283-1289` (wrapped in try/except so it
+**A. `start_memory_worker()` is the single boot entry — it starts ALL FOUR
+schedulers.** Called from `app.py` startup (wrapped in try/except so it
 can't block boot). It registers handlers + calls `start_worker()` +
-`_start_macro_sleep_scheduler()` + `_start_backup_export_scheduler()`. If a
-new scheduler is added, register/start it HERE or it will never run (the
+`_start_macro_sleep_scheduler()` + `_start_backup_export_scheduler()` +
+`_start_reconsolidation_scheduler()` + `_start_commitment_gc_scheduler()`.
+If a new scheduler is added, register/start it HERE or it will never run (the
 exact gap that previously left backups/export inert).
 
-**B. Two scheduler loops, distinct cadences (do not collapse them):**
+**B. Four scheduler loops, distinct cadences (do not collapse them):**
 - **6h `macro_sleep` loop** (`_MACRO_SLEEP_INTERVAL_HOURS = 6`): enqueues a
   `macro_sleep` task every 6h → decay scoring, tier demotion/promotion,
   archival (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
@@ -403,7 +408,12 @@ exact gap that previously left backups/export inert).
   dumps (`export.py`) + a filtered `pg_dump` of Kazma's Postgres
   shared-state tables (§21). First sweep 120s after boot. Kept separate
   from the 6h loop so a slow disk on backup can't stall decay.
-Both loops only `enqueue_task(...)`; the durable worker drains the actual
+- **24h reconsolidation loop** (`_RECONSOLIDATION_INTERVAL_HOURS = 24`):
+  enqueues `global_reconsolidation` (dedupe + re-embed of beliefs,
+  subject-hash partitioned).
+- **15-min commitment GC loop** (`_COMMITMENT_GC_INTERVAL_MINUTES = 15`):
+  enqueues the commitment-store sweep (TTL expiry + tiered retention, §20).
+All loops only `enqueue_task(...)`; the durable worker drains the actual
 work, so a failed enqueue cannot kill the cadence and a failed handler is
 retried/bounded by the queue.
 
@@ -670,13 +680,17 @@ default + MCP classification), 6 (autonomy modes), 7 (soul confirm gate), 8
 (docs + metrics). Default-off kill-switches on every enforcement layer;
 fail-open throughout.
 
-**A. Three choke points — all mutator paths go through `authorize_effect`.**
+**A. Two `authorize_effect` choke points + an independent memory-side gate.**
 - `agent/graph_builder.py:tool_worker_node` — the single-agent chat path; the
   gate runs BEFORE the security HITL split so it can rewrite args first.
 - `agent/tool_registry.py:LocalToolRegistry.execute` — the IDE/swarm path
-  (audit-only; full decisions are graph-side).
+  (mostly audit-only — remind/cancel_job decisions need graph context — but
+  the exec denylist / outbound allowlist / config protected-key resolvers DO
+  enforce here).
 - `memory/belief_mutation.py:_mutate_functional` — the memory corruption half
-  is gated here (source-trust), independent of the policy gate.
+  is gated by its OWN source-trust check (a `user_explicit` functional belief
+  cannot be superseded by `llm_inferred`/`system_tool`), NOT by an
+  `authorize_effect` call — two independent defenses, by design.
 
 **B. The decision mapping (§3.4). `authorize_effect` returns one of:**
 - `allow` (+ optional `rewritten_args`): for the remind act, the gate anchors
@@ -916,10 +930,13 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   ingest fallback use the public name — do not import the underscored one.
 
 **B. Web acquisition — ONE egress stack.**
-- SoT ladder: `tools/read_url._fetch_full_text` (Jina → Firecrawl → httpx →
-  Playwright) built on `proxy.client.get_scraping_client` (proxy provider +
-  rotating UA pool); `web_acquire` is the façade (`fetch_text`/`search`/
-  `rank_urls`/profiles) used by research pipeline, KB ingest, and readiness.
+- SoT ladder: `tools/read_url._fetch_full_text` (SSRF-validate → Firecrawl if
+  key configured → Jina only when explicitly opted in via
+  `KAZMA_JINA_READER=1` → httpx via scraping client → hard-page recovery
+  Firecrawl→Jina→Playwright) built on `proxy.client.get_scraping_client`
+  (proxy provider + rotating UA pool); `web_acquire` is the façade
+  (`fetch_text`/`search`/`rank_urls`/profiles) used by research pipeline, KB
+  ingest, and readiness.
 - `crawl_site(profile=...)` accepts named cap presets (`research_brief` |
   `research_deep` | `kb_site` | `single_page`); explicit args win; hard env
   ceilings (`KAZMA_CRAWL_MAX_PAGES` etc.) still clamp.
@@ -962,12 +979,18 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   503 when any check fails; TTL-cached 30s (aggressive polling is free).
   Poll it in ops dashboards — it exists to catch SILENT no-ops (the
   recall-NameError class), which structural checks cannot see.
-- CI (`ci.yml`) GATES on the full suite: bare `pytest` (all testpaths —
-  the five package suites were previously orphaned by `pytest tests/`),
-  `-m "not slow"`, `--timeout=300`. Never reintroduce `|| true` on the
-  test step — that single flag let every regression class in this audit
-  ship silently. Lint/bandit remain advisory (`--exit-zero`/`|| true`)
-  until their backlogs are triaged.
+- CI (`ci.yml`) GATES on the full suite: `python scripts/fast_test.py --chunks
+  4 --chunk-timeout 1500` (crash-tolerant chunked serial pytest over ALL
+  testpaths — the package suites were previously orphaned by `pytest tests/`),
+  `-m "not slow"`, per-chunk `--timeout=120`. Compile-check (py_compile over
+  every repo `.py`) and `node --check` over static JS are separate GATES.
+  Never reintroduce `|| true` on the test step — that single flag let every
+  regression class in this audit ship silently. Lint/bandit remain advisory
+  (`--exit-zero`/`|| true`) until their backlogs are triaged. Known CI blind
+  spots (deep-audit 2026-08-19): the only `slow`-marked file is the G1
+  commitment-latency gate (never runs under `-m "not slow"`), and CI installs
+  only `.[test]` so Playwright/PIL/pymupdf/sqlite-vec tests `importorskip`
+  silently on the merge gate.
 
 ## UI Conventions (Web)
 

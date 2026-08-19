@@ -516,8 +516,20 @@ def create_graph_handler(
         try:
             from kazma_core.agent.turn_input import build_turn_working_memory
 
+            # Derive the turn text the same way as the history restore below:
+            # last user message in state, falling back to the raw platform
+            # text. (Deep-audit 2026-08-19: `user_text` was referenced here
+            # before its first assignment, so the NameError was swallowed and
+            # this pin silently never ran on the gateway path.)
+            _wm_text = ""
+            for _m in reversed(list(state.get("messages") or [])):
+                if isinstance(_m, dict) and _m.get("role") == "user":
+                    _wm_text = str(_m.get("content") or "")
+                    break
+            if not _wm_text:
+                _wm_text = (msg.text or "").strip()
             _wm = build_turn_working_memory(
-                user_text,
+                _wm_text,
                 messages=state.get("messages"),
                 client_attachments=msg.attachments or [],
             )

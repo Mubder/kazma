@@ -171,6 +171,17 @@ class SlackAdapter(BaseAdapter):
         # Audit G9b: sanitize <!everyone>/<!here>/<!channel> and <@user> mentions
         # so untrusted agent/tool output can't broadcast/ping.
         chunks = chunk_message(sanitize_outbound(outbound.text or ""))
+        if not chunks and blocks:
+            # Blocks-only outbound: empty fallback text is valid when blocks
+            # are present, so keep exactly one payload to carry them.
+            chunks = [""]
+        if not chunks:
+            # No text and no blocks: nothing to post. Deliver media directly —
+            # the old [""] chunk made Slack 400 (must_not_be_blank) and the
+            # attachments after it were never sent (deep-audit 2026-08-19).
+            for att in outbound.attachments:
+                await self._send_attachment(channel_id, att, thread_ts)
+            return True
         
         for chunk_idx, chunk in enumerate(chunks):
             payload: dict[str, Any] = {

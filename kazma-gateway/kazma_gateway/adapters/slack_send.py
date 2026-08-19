@@ -52,6 +52,12 @@ def resolve_channel_id(
 
 
 def chunk_message(text: str, limit: int = SLACK_MAX_MESSAGE_LEN) -> list[str]:
+    """Split *text* into Slack-safe chunks.
+
+    Empty text yields NO chunks — the old ``[""]`` made Slack reject the
+    message (``must_not_be_blank``) and the attachments after it were never
+    sent (same fix as Telegram/Discord; deep-audit 2026-08-19).
+    """
     if not text:
-        return [""]
+        return []
     return [text[i : i + limit] for i in range(0, len(text), limit)]
