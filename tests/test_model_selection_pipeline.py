@@ -22,8 +22,22 @@ from kazma_ui.sse_chat import _is_cloud_url, create_sse_chat_router
 
 _UI = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
 _CHAT_JS = _UI / "static" / "js" / "chat.js"
-_SETTINGS_JS = _UI / "static" / "js" / "settings.js"
 _CHAT_HTML = _UI / "templates" / "chat.html"
+
+
+def _settings_js_family() -> str:
+    """Concatenated settings JS family (settings*.js).
+
+    The settings surface was split into hub/core/agent/integrations/ops
+    files; saveModel + provider switch live in settings_hub.js. Reading the
+    whole family keeps these assertions stable across future splits
+    (deep-audit 2026-08-19 CI triage).
+    """
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted((_UI / "static" / "js").glob("settings*.js"))
+        if p.is_file()
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -383,13 +397,13 @@ class TestSettingsJsProviderSwitch:
     """VAL-UI-004: settings.js saveModel must call POST /api/provider/switch."""
 
     def test_settings_js_save_model_calls_provider_switch(self):
-        js = _SETTINGS_JS.read_text(encoding="utf-8")
+        js = _settings_js_family()
         assert "/api/provider/switch" in js, (
-            "settings.js saveModel() must call POST /api/provider/switch"
+            "settings JS saveModel() must call POST /api/provider/switch"
         )
 
     def test_settings_js_save_model_sends_model_and_key(self):
-        js = _SETTINGS_JS.read_text(encoding="utf-8")
+        js = _settings_js_family()
         # The switch body must include model, base_url, and api_key
         assert "api_key" in js
         assert "base_url" in js

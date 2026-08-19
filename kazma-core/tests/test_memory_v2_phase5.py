@@ -22,6 +22,19 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):
+    """Disable the commitment layer for the procedural-feed test.
+
+    It executes a fabricated tool name ("echo_tool") not in the side-effect
+    registry — the unregistered-mutator fail-closed DENY (default ON since
+    2026-08-15) blocks it before the procedural recorder ever observes a
+    run, so the procedural_dags table is never written (deep-audit
+    2026-08-19 CI triage; same fixture as tests/test_mcp_bridge.py).
+    """
+    monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
+
+
 @pytest.fixture()
 def isolated_data(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))

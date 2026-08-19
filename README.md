@@ -4,7 +4,7 @@
 
   # Kazma Agent Framework
 
-  **Production-Grade Multi-Agent AI System with Bi-Temporal Cognitive Memory, Swarm Orchestration, and Autonomous Reliability**
+  **Multi-Agent AI System with Bi-Temporal Cognitive Memory, Swarm Orchestration, and Autonomous Reliability**
 
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
@@ -239,6 +239,20 @@ kazma swarm fanout --workers a,b,c --aggregation vote "Select optimal database s
 kazma swarm history
 kazma swarm metrics
 ```
+
+Prefer a UI? The web **Swarm Panel** (`/swarm`) shows live dispatch telemetry,
+worker status, and task history — and the TUI has a Swarm tab. Enable the
+engine in `kazma.yaml`:
+
+```yaml
+swarm:
+  enabled: true
+  workers: []   # the autoscaler spawns specialists on demand
+```
+
+**Multi-replica honesty: Jobs can multi-replica** (document jobs, via
+Postgres `SKIP LOCKED` claims); document *metadata* and the SQLite stores
+remain single-replica — see `docs/docs/guide/document-intelligence.md`.
 
 ---
 

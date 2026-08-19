@@ -10,6 +10,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):
+    """Disable the commitment layer for tool-plumbing tests here.
+
+    They execute fabricated tool names not in the side-effect registry —
+    the unregistered-mutator fail-closed DENY (default ON since 2026-08-15)
+    blocks them before the code under test is reached (deep-audit
+    2026-08-19 CI triage; same fixture as tests/test_mcp_bridge.py).
+    """
+    monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
+
+
 # ── helpers to inject mock modules for missing optional deps ──────────────
 def _make_mock_ddgs(ddgs_instance):
     """Create a fake duckduckgo_search module with DDGS returning *ddgs_instance*."""

@@ -1054,7 +1054,12 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
   `python scripts/fast_test.py`
   Crash-tolerant chunked runner: file-chunks run as independent serial pytest
   processes; crashed/empty chunks are retried per-file; poison files are
-  reported. Do NOT use pytest-xdist here — worker segfaults (native lib) make
+  reported. It PRINTS the per-chunk FAILURES tracebacks (deep-audit
+  2026-08-19 — they used to be captured and discarded, leaving CI-only
+  failures undiagnosable) and treats pytest exit 5 ("no tests collected",
+  i.e. module-level importorskip like the Playwright e2e suite on a
+  `.[test]`-only install) as a benign skip, not POISON. Do NOT use
+  pytest-xdist here — worker segfaults (native lib) make
   it silently drop ~half the suite. The serial monolithic run intermittently
   segfaults and takes 20+ min.
 - **Manual verification:** Restart server, test via Telegram and Web UI

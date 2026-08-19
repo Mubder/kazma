@@ -20,6 +20,18 @@ from kazma_core.agent.state import (
 )
 from kazma_core.agent.tool_registry import LocalToolRegistry, _generate_schema
 
+
+@pytest.fixture(autouse=True)
+def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):
+    """Disable the commitment layer for registry/plumbing tests here.
+
+    They execute fabricated tool names not in the side-effect registry —
+    the unregistered-mutator fail-closed DENY (default ON since 2026-08-15)
+    blocks them before execution is reached (deep-audit 2026-08-19 CI
+    triage; same fixture as tests/test_mcp_bridge.py).
+    """
+    monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
+
 # ═══════════════════════════════════════════════════════════════════
 # SupervisorState
 # ═══════════════════════════════════════════════════════════════════

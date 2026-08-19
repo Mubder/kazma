@@ -123,9 +123,36 @@ def run_chunk(idx: int, files: list[Path], timeout: float) -> dict:
         "code": code,
         "counts": counts,
         "failed": fail_ids,
-        "log_tail": log[-800:],
+        "log": log,
         "files": files,
     }
+
+
+# pytest exit codes that are NOT failures/crashes:
+#   0 = green, 1 = tests failed (reported normally), 5 = NO TESTS COLLECTED
+# (module-level importorskip files, e.g. the Playwright e2e suite on a
+# .[test]-only CI install). Treating 5 as poison kept CI permanently red
+# for a benign skip (deep-audit 2026-08-19 CI triage).
+_BENIGN_EXIT_CODES = (0, 1, 5)
+
+_DIGEST_LIMIT = 6000
+
+
+def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
+    """Extract the FAILURES section (tracebacks) from pytest ``-q`` output.
+
+    The runner previously captured pytest output but never printed it, so
+    CI logs showed only the failing-test ids with no assertions/tracebacks
+    — Linux-only failures were undiagnosable from the logs alone
+    (deep-audit 2026-08-19 CI triage).
+    """
+    m = re.search(r"^=+ FAILURES =+\s*$", log, re.M)
+    if m is None:
+        return ""
+    rest = log[m.start():]
+    m2 = re.search(r"^=+ (short test summary|slowest\d* test) ", rest, re.M)
+    section = rest[: m2.start()] if m2 else rest
+    return section[:limit]
 
 
 def is_crash(code: int) -> bool:
@@ -150,19 +177,22 @@ def main() -> int:
     totals: dict[str, int] = {}
     all_failed: list[str] = []
     crashed_chunks: list[dict] = []
+    failure_logs: list[str] = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as pool:
         futs = {pool.submit(run_chunk, i, c, args.chunk_timeout): i
                 for i, c in enumerate(chunks)}
         for fut in concurrent.futures.as_completed(futs):
             r = fut.result()
-            status = "OK" if r["code"] in (0, 1) else f"exit={r['code']}"
+            status = "OK" if r["code"] in _BENIGN_EXIT_CODES else f"exit={r['code']}"
             print(f"[fast-test] chunk {r['idx']:02d}: {status} "
                   f"{r['counts'].get('passed', 0)}p/{r['counts'].get('failed', 0)}f "
                   f"({len(r['files'])} files)")
             for k, v in r["counts"].items():
                 totals[k] = totals.get(k, 0) + v
             all_failed.extend(r["failed"])
+            if r["failed"]:
+                failure_logs.append(r["log"])
             # A chunk that produced NO summary line lost its output (observed
             # under heavy concurrency) — treat like a crash and retry per-file.
             if is_crash(r["code"]) or r["code"] == 124 or (
@@ -181,10 +211,13 @@ def main() -> int:
                  "--continue-on-collection-errors"],
                 args.file_timeout,
             )
-            if code in (0, 1):
+            if code in _BENIGN_EXIT_CODES:
                 for k, v in _parse_summary(log).items():
                     totals[k] = totals.get(k, 0) + v
-                all_failed.extend(m.group(2) for m in _FAILED_RE.finditer(log))
+                failed_here = [m.group(2) for m in _FAILED_RE.finditer(log)]
+                all_failed.extend(failed_here)
+                if failed_here:
+                    failure_logs.append(log)
             elif code == 124:
                 poison.append(f"{f.relative_to(REPO)} (hang)")
             else:
@@ -197,6 +230,10 @@ def main() -> int:
         print(f"\n[fast-test] {len(all_failed)} failing tests:")
         for t in sorted(set(all_failed)):
             print(f"  FAILED {t}")
+        digest = "\n".join(_failure_digest(log) for log in failure_logs).strip()
+        if digest:
+            print("\n[fast-test] failure tracebacks (per-chunk FAILURES sections):")
+            print(digest[:24000])
     if poison:
         print(f"\n[fast-test] POISON files (crash/hang even standalone):")
         for p in poison:

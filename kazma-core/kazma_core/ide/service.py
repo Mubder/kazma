@@ -127,7 +127,16 @@ class IdeService:
         ws_root = self.root  # re-resolves, honoring workspace_scope
         if not rel_path:
             return ws_root
-        rel = rel_path.strip().lstrip("/\\")
+        rel = rel_path.strip()
+        if not os.path.isabs(rel):
+            # Root-relative inputs may carry leading separators — strip
+            # them. Platform-ABSOLUTE inputs (POSIX "/etc/…" or Windows
+            # "C:\\…") are kept so the absolute branch below resolves them
+            # and containment decides: previously the unconditional lstrip
+            # silently rebased POSIX-absolute paths INTO the workspace,
+            # so the documented outside-root denial never fired on Linux
+            # (deep-audit 2026-08-19 CI triage / test_resolve_blocks_…).
+            rel = rel.lstrip("/\\")
         norm = os.path.normpath(rel)
 
         # A normalized relative path that still starts with ".." escapes the

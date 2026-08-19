@@ -24,6 +24,22 @@ _STATIC_DIR = _UI_DIR / "static"
 _JS_DIR = _STATIC_DIR / "js"
 
 
+def _settings_js_family() -> str:
+    """Concatenated settings JS family (settings*.js).
+
+    The settings surface was split into hub/core/agent/integrations/ops
+    files; saveConnector lives in settings_hub.js and shortcut capture in
+    settings_ops.js. Reading the whole family keeps these assertions
+    stable across future splits (deep-audit 2026-08-19 CI triage).
+    """
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted(_JS_DIR.glob("settings*.js"))
+        if p.is_file()
+    )
+
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # VAL-UI-004: Gateway adapters auto-refresh on connector save
 # ══════════════════════════════════════════════════════════════════════════
@@ -33,7 +49,7 @@ class TestGatewayRefreshOnSave:
     """saveConnector must call /api/gateway/refresh-adapters after saving."""
 
     def test_save_connector_calls_refresh(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
+        js = _settings_js_family()
         assert "refresh-adapters" in js, (
             "saveConnector must call POST /api/gateway/refresh-adapters"
         )
@@ -46,7 +62,7 @@ class TestGatewayRefreshOnSave:
 
     def test_save_connector_no_manual_restart_message(self) -> None:
         """The old 'Restart gateway to apply' message should be gone."""
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
+        js = _settings_js_family()
         assert "Restart gateway to apply" not in js, (
             "saveConnector still tells user to restart manually"
         )
@@ -178,7 +194,7 @@ class TestKeyboardShortcuts:
 
     def test_settings_shortcuts_capture_on_keydown(self) -> None:
         """Settings shortcuts tab must capture keys on keydown (not text input)."""
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
+        js = _settings_js_family()
         assert "captureShortcut" in js
         html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
         assert "@keydown" in html

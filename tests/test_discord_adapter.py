@@ -39,7 +39,10 @@ class TestDiscordAdapter:
         assert msg is not None
         assert msg.platform == "discord"
         assert msg.text == "Hello Kazma"
-        assert msg.sender_id == "discord:222"
+        # Sender grammar is discord:{user}:{channel} — per-channel season
+        # isolation (deep-audit 2026-08-19 CI triage: the old
+        # discord:{channel} expectation predated this change).
+        assert msg.sender_id == "discord:444:222"
 
     def test_context_metadata_shape(self) -> None:
         """Test 2: context_metadata has channel_id, guild_id, user_id, username."""

@@ -99,12 +99,27 @@ class TestSidebarWorkspaceLink:
 class TestKeyboardShortcutCapture:
     """Settings page must capture key combinations on keydown."""
 
+    @staticmethod
+    def _settings_js_source() -> str:
+        """Concatenated settings JS family.
+
+        The settings surface was split into hub/core/agent/integrations/ops
+        files; shortcut capture lives in settings_ops.js. Reading the whole
+        family keeps these assertions stable across future splits
+        (deep-audit 2026-08-19 CI triage).
+        """
+        parts = [
+            p.read_text(encoding="utf-8")
+            for p in sorted(_JS_DIR.glob("settings*.js"))
+            if p.is_file()
+        ]
+        return "\n".join(parts)
+
     def test_capture_shortcut_function_exists(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
-        assert "captureShortcut" in js, "captureShortcut function missing from settings.js"
+        js = self._settings_js_source()
+        assert "captureShortcut" in js, "captureShortcut function missing from settings JS family"
 
     def test_capture_shortcut_prevents_default(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
         # The HTML binds @keydown.prevent which prevents default
         html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
         assert "@keydown" in html or "keydown" in html, (
@@ -112,7 +127,7 @@ class TestKeyboardShortcutCapture:
         )
 
     def test_capture_shortcut_detects_modifiers(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
+        js = self._settings_js_source()
         # Must detect ctrl, alt, shift, meta
         assert "ctrlKey" in js or "event.ctrlKey" in js
         assert "altKey" in js or "event.altKey" in js
@@ -120,7 +135,7 @@ class TestKeyboardShortcutCapture:
         assert "metaKey" in js or "event.metaKey" in js
 
     def test_capture_shortcut_formats_combination(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
+        js = self._settings_js_source()
         # Must join with '+' to format the combination
         assert ".join('+')" in js or "join('+')" in js
 

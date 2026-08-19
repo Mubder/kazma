@@ -19,6 +19,11 @@ import sys
 
 import pytest
 
+# The tests monkeypatch playwright.sync_api — without playwright installed
+# (CI's .[test] install) they would fail with AttributeError instead of
+# skipping (deep-audit 2026-08-19 CI triage).
+pytest.importorskip("playwright")
+
 from kazma_skills.native.browser_automation import tools as bt
 
 _IS_WINDOWS = sys.platform.startswith("win")

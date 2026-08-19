@@ -452,5 +452,63 @@ gateway + output-routing 88 passed; MCP suites (hitl/servers-store/
 win32-shim/auth + embedded gateway) 32 passed; bridge + dedup + audit
 regressions 56 passed (17 regressions total in the audit file).
 
+## 13. Patch 6 (same day, CI triage round 1 — finding #23)
+
+Baseline: patch-3 CI run (5a1a1ea5) = 49 failing tests + 2 POISON files;
+25 of the 49 reproduced locally on Windows and were root-caused:
+
+1. **Commitment-choke class (8 more tests)** — `test_supervisor.py` (3),
+   `test_retry_backoff.py` (2), `test_tools_quickwins.py` truncation (2)
+   and `TestReadUrl` adjacency, and
+   `kazma-core/tests/test_memory_v2_phase5.py::test_procedural_feed` (1;
+   the DENY prevented the procedural recorder from ever observing a run,
+   so `procedural_dags` was never written). Autouse
+   `KAZMA_COMMITMENT_ENABLED=0` fixtures added, same pattern as patch 5.
+2. **Stale settings.js paths (7 tests)** — the settings JS split moved
+   `captureShortcut` (settings_ops.js) and `saveConnector`/`saveModel`
+   (settings_hub.js) out of settings.js; `test_ui001_quick_fixes.py` (3),
+   `test_ui004_ui008_gateway_misc.py` (2),
+   `test_model_selection_pipeline.py` (2) now read the concatenated
+   `settings*.js` family.
+3. **README honesty contract (2 tests)** — the 2026-08-18 README rewrite
+   reintroduced a "Production-Grade" tagline and dropped the honest
+   multi-replica statement and the Swarm Panel/YAML references. README
+   fixed (tests are the spec): tagline de-claimed, multi-replica honesty
+   note restored, Swarm Panel + `swarm:` YAML block re-added.
+4. **Stale Discord grammar (1 test)** — expects the pre-change
+   `discord:{channel}` sender; current intentional grammar is
+   `discord:{user}:{channel}` (audit §5.9). Test updated.
+5. **`test_browser_boot_policy.py` (2)** — monkeypatches
+   `playwright.sync_api` without importorskip → AttributeError (not skip)
+   on CI's playwright-less install. `pytest.importorskip("playwright")`
+   added.
+6. **REAL BUG — `IdeService.resolve()` POSIX absolute-path bypass** — the
+   unconditional `lstrip("/\\")` silently rebased POSIX-absolute inputs
+   (`/etc/passwd` → `<workspace>/etc/passwd`), so the documented
+   outside-root denial never fired on Linux
+   (`kazma-core/tests/test_ide_service.py::test_resolve_blocks_traversal`
+   failed on every CI run). Platform-absolute inputs now take the absolute
+   branch and containment decides. Windows behavior unchanged (8/8 pass).
+7. **fast_test.py runner fixes (unblocks the gate):**
+   - pytest exit 5 ("no tests collected", e.g. the Playwright e2e suite
+     under a `.[test]`-only install) is no longer classified POISON —
+     that alone kept CI permanently red.
+   - The runner now PRINTS the per-chunk FAILURES sections (tracebacks)
+     it previously captured and discarded — Linux-only failures were
+     undiagnosable from CI logs.
+
+Still open for round 2 (CI-only, pass on Windows, now diagnosable via the
+new digests): `test_mcp_server` write-file ×3, `test_rich_document_render`
+×3, `test_unified_document_layer` toc ×1, document certification ×2,
+memory_v2 phase2/phase_b, `test_chat_sse_fix` token-frame ×1,
+`test_still_not_doing.py` Linux hang, `test_session_directory` flake ×11
+(pass locally), and `test_e2e_playwright` (now benignly exit-5-skipped).
+
+Patch-6 validation: all touched suites green locally — supervisor 24,
+retry_backoff 26, tools_quickwins 21, ui001 15, ui004 18,
+model_selection 33, discord 21, audit_followthrough + swarm_api 33,
+ide_service 8, memory_v2_phase5 10, browser_boot (skipped with
+playwright present: passes), mcp_server 26.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
