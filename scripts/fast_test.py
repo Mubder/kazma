@@ -238,7 +238,27 @@ def main() -> int:
                 )
                 poison.append(f"{f.relative_to(REPO)} (hang; last test line: {last})")
             else:
-                poison.append(f"{f.relative_to(REPO)} (exit={code})")
+                # One extra chance for the crash class: the native-lib
+                # segfaults are INTERMITTENT — a file that crashed standalone
+                # often passes an immediate rerun (observed with
+                # tests/test_mcp_bridge.py). Only a second consecutive crash
+                # is declared POISON (deep-audit 2026-08-19 CI triage).
+                code2, log2 = run_pytest(
+                    [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
+                     "--continue-on-collection-errors"],
+                    args.file_timeout,
+                )
+                if code2 in _BENIGN_EXIT_CODES:
+                    for k, v in _parse_summary(log2).items():
+                        totals[k] = totals.get(k, 0) + v
+                    failed2 = [m.group(2) for m in _FAILED_RE.finditer(log2)]
+                    all_failed.extend(failed2)
+                    if failed2:
+                        failure_logs.append(log2)
+                    print(f"[fast-test] {f.relative_to(REPO)}: crash was intermittent "
+                          f"(exit={code}) — rerun {'clean' if not failed2 else 'had failures'}")
+                else:
+                    poison.append(f"{f.relative_to(REPO)} (exit={code}, rerun exit={code2})")
 
     wall = time.time() - t0
     print(f"\n[fast-test] TOTALS in {wall:.0f}s: " +
@@ -247,7 +267,12 @@ def main() -> int:
         print(f"\n[fast-test] {len(all_failed)} failing tests:")
         for t in sorted(set(all_failed)):
             print(f"  FAILED {t}")
-        digest = "\n".join(_failure_digest(log) for log in failure_logs).strip()
+        # Per-log digest budget: a single verbose diff (e.g. a full manifest
+        # comparison) previously ate the whole global cap and starved the
+        # other chunks' tracebacks (deep-audit 2026-08-19 CI triage).
+        digest = "\n\n".join(
+            _failure_digest(log, limit=3000) for log in failure_logs
+        ).strip()
         if digest:
             print("\n[fast-test] failure tracebacks (per-chunk FAILURES sections):")
             print(digest[:24000])

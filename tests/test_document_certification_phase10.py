@@ -70,9 +70,33 @@ class TestHostileCorpusDeterminism:
         )
         committed = json.loads(committed_path.read_text(encoding="utf-8"))
         generated = hostile_corpus_manifest()
-        assert generated == committed, (
-            "Hostile corpus manifest differs from committed copy. "
+
+        def _canonical(manifest: dict) -> dict:
+            # sha256 / byte_size are ZIP-CONTAINER artifacts: the generator
+            # already pins timestamps, entry order, and permissions, but the
+            # DEFLATE stream itself differs across zlib builds — byte-exact
+            # cross-platform determinism is unattainable. Every structural
+            # field must still match exactly.
+            out = json.loads(json.dumps(manifest))
+            for case in out.get("cases", []):
+                if isinstance(case, dict):
+                    case.pop("sha256", None)
+                    case.pop("byte_size", None)
+            return out
+
+        assert _canonical(generated) == _canonical(committed), (
+            "Hostile corpus manifest differs structurally from committed copy. "
             "Regenerate with the command above."
+        )
+        # Container hashes must still be internally consistent and unique
+        # within a single generation (checked separately per-platform).
+        gen_hashes = [
+            str(case["sha256"])
+            for case in generated["cases"]
+            if isinstance(case, dict)
+        ]
+        assert len(set(gen_hashes)) == len(gen_hashes), (
+            "Generated corpus has duplicate SHA256 entries"
         )
 
     def test_every_case_has_unique_sha256(self):

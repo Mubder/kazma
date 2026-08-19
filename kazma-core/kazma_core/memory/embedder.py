@@ -97,13 +97,27 @@ class LocalSentenceTransformerEmbedder:
 
     Wraps the same ``SentenceTransformer(model_name)`` the codebase already
     used, preserving the lazy-singleton behavior. Returns ``list[float]``.
+
+    ``allow_download`` (default True) controls whether constructing the
+    model may pull it from HuggingFace when it is not in the local cache.
+    FALLBACK embedders (unknown provider / broken remote config) get
+    ``allow_download=False`` — a misconfiguration must not stall the
+    process on a live ~2GB model download (deep-audit 2026-08-19; force
+    with ``KAZMA_EMBED_ALLOW_DOWNLOAD=1``).
     """
 
-    def __init__(self, model_name: str = DEFAULT_MODEL, dim: int = DEFAULT_DIM) -> None:
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL,
+        dim: int = DEFAULT_DIM,
+        *,
+        allow_download: bool = True,
+    ) -> None:
         self._model_name = model_name
         self._dim = dim
         self._model: Any = None
         self._model_lock = threading.Lock()
+        self._allow_download = allow_download
 
     def _ensure_model(self) -> Any:
         if self._model is not None:
@@ -114,6 +128,15 @@ class LocalSentenceTransformerEmbedder:
         with self._model_lock:
             if self._model is not None:
                 return self._model
+            if not self._allow_download and not _model_in_hf_cache(self._model_name):
+                logger.warning(
+                    "[Embedder:local] %s is not in the local HF cache and "
+                    "downloads are disabled for fallback embedders (set "
+                    "KAZMA_EMBED_ALLOW_DOWNLOAD=1 to permit) — degrading to "
+                    "no local embeddings",
+                    self._model_name,
+                )
+                return None
             try:
                 from sentence_transformers import SentenceTransformer
 
@@ -460,6 +483,22 @@ def get_embedder_status() -> dict[str, Any]:
 _embedder: Embedder | None = None
 
 
+def _model_in_hf_cache(model_name: str) -> bool:
+    """Whether *model_name* resolves from the local HF cache (no network).
+
+    ``snapshot_download(local_files_only=True)`` raises when the model is
+    not cached and never touches the network — the guard that lets
+    fallback embedders degrade instead of stalling on a live download.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(repo_id=model_name, local_files_only=True)
+        return True
+    except Exception:
+        return False
+
+
 def get_embedder() -> Embedder | None:
     """Return the shared Embedder singleton.
 
@@ -544,8 +583,17 @@ def get_embedder() -> Embedder | None:
         local_model = cfg.get("model") or DEFAULT_MODEL
         local_dim = int(cfg.get("dim") or DEFAULT_DIM)
 
+    # Fallback embedders (unknown provider / broken remote config) may NOT
+    # surprise-download the ~2GB model — only a deliberate local config
+    # may (deep-audit 2026-08-19). KAZMA_EMBED_ALLOW_DOWNLOAD force-allows.
+    allow_download = not fell_back_from_remote
+    if os.environ.get("KAZMA_EMBED_ALLOW_DOWNLOAD", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        allow_download = True
+
     _embedder = LocalSentenceTransformerEmbedder(
-        model_name=local_model, dim=local_dim,
+        model_name=local_model, dim=local_dim, allow_download=allow_download,
     )
     logger.info("[Embedder] Using local: %s (dim=%d)", local_model, local_dim)
     return _embedder

@@ -480,3 +480,56 @@ async def test_telegram_same_chat_order_preserved():
     assert q.qsize() == 2
     assert q.get_nowait().text == "first (voice)"  # slow one still first
     assert q.get_nowait().text == "second"
+
+
+# ── Patch 10 — embedder fallback download guard ─────────────────────────
+
+
+def test_fallback_embedder_degrades_without_download(monkeypatch):
+    import sys
+    from types import ModuleType
+    from unittest.mock import MagicMock
+
+    fake_hub = ModuleType("huggingface_hub")
+
+    def _not_cached(**kwargs):
+        raise RuntimeError("entry not found in local cache")
+
+    fake_hub.snapshot_download = MagicMock(side_effect=_not_cached)
+
+    fake_st = ModuleType("sentence_transformers")
+    st_ctor = MagicMock(name="SentenceTransformer")
+    fake_st.SentenceTransformer = st_ctor
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st)
+    monkeypatch.delenv("KAZMA_EMBED_ALLOW_DOWNLOAD", raising=False)
+
+    from kazma_core.memory.embedder import LocalSentenceTransformerEmbedder
+
+    emb = LocalSentenceTransformerEmbedder(allow_download=False)
+    assert emb._ensure_model() is None  # degrades instead of downloading
+    assert st_ctor.call_count == 0
+    assert emb.encode("hello") == []
+
+
+def test_fallback_embedder_loads_when_cached(monkeypatch):
+    import sys
+    from types import ModuleType
+    from unittest.mock import MagicMock
+
+    fake_hub = ModuleType("huggingface_hub")
+    fake_hub.snapshot_download = MagicMock(return_value="/hf/cache/models--x")
+    fake_st = ModuleType("sentence_transformers")
+    st_ctor = MagicMock(name="SentenceTransformer")
+    fake_st.SentenceTransformer = st_ctor
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st)
+    monkeypatch.delenv("KAZMA_EMBED_ALLOW_DOWNLOAD", raising=False)
+
+    from kazma_core.memory.embedder import LocalSentenceTransformerEmbedder
+
+    emb = LocalSentenceTransformerEmbedder(allow_download=False)
+    assert emb._ensure_model() is st_ctor.return_value  # cached → loads
+    assert st_ctor.call_count == 1

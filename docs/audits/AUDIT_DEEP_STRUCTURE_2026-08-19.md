@@ -616,5 +616,41 @@ tests + 1 intermittent native segfault**, with the gate's diagnostics
 (traceback digests, hang identification, crash classification) fixed
 along the way.
 
+## 17. Patch 10 (same day, round 5 — remaining CI items + the "worth
+## patching" finding)
+
+1. **Certification manifest determinism fixed** — the test compared
+   zip-container SHA-256s, but DEFLATE output differs across zlib builds
+   (the generator already pins timestamps/order/permissions; the bytes
+   still differ). Now compares CANONICAL fields (everything except
+   sha256/byte_size) plus uniqueness of generated hashes per-platform.
+2. **fast_test digest budgeting** — per-log 3000-char digests instead of
+   one 6000-char slice: a single verbose diff (the old manifest
+   comparison) previously starved every other chunk's traceback, which is
+   exactly why the certification-baseline and chat_sse failures remained
+   undiagnosed. Their details will be visible on the next run.
+3. **fast_test intermittent-crash second chance** — a file that crashes
+   standalone gets ONE immediate rerun before being declared POISON (the
+   native-lib segfault class is intermittent; test_mcp_bridge passed the
+   identical retry in earlier rounds). Only a second consecutive crash
+   poisons, and the entry records both exit codes.
+4. **Embedder fallback download guard (the "worth patching" item)** —
+   `LocalSentenceTransformerEmbedder(allow_download=False)` (set by
+   `get_embedder` for FALLBACK paths: unknown provider / broken remote
+   config) checks the local HF cache via
+   `snapshot_download(local_files_only=True)` before constructing the
+   model; uncached → degrade to no embeddings with an actionable warning
+   instead of stalling on a live ~2GB bge-m3 download. Deliberate local
+   configs still download on first use;
+   `KAZMA_EMBED_ALLOW_DOWNLOAD=1` force-allows. Two regressions added.
+5. **Still open** (awaiting next-run digests): the certification-baseline
+   Linux failure detail (Windows fails for the documented Job-Objects
+   reason — "pdf-malformed-xref: leaked ValueError"), and the chat_sse
+   varying-test flake.
+
+Patch-10 validation: audit-regression file 19 passed (2 new); document
+certification 47 passed/1 skipped; kazma-core/tests 289 passed;
+fast_test + embedder compile-clean.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
