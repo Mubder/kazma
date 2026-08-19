@@ -598,5 +598,23 @@ code as a crash, restoring the per-file retry for signal deaths.
 Patch-9 validation: fast_test compile-clean; test_chat_sse_fix 15
 passed locally (deterministic).
 
+Round-4 run (526c9612) observed: retry works (5,592 passed, zero hangs);
+remaining red = 3 items, each now well-characterized for a future pass:
+1. `test_document_certification_phase10` ×2 — the hostile-corpus manifest
+   "determinism" check compares the zip-container SHA-256, which differs
+   cross-platform (deflate/zlib output); compare canonical fields instead.
+2. `test_chat_sse_fix` — one DIFFERENT test fails per CI run (empty-content
+   one run, supervisor-error-path the next) while all pass standalone
+   locally — Linux-specific nondeterminism to isolate.
+3. `test_mcp_bridge.py` segfaulted STANDALONE once (exit=-11) — the
+   documented intermittent native-lib instability class (it passed the
+   identical standalone retry in earlier rounds); likely pymupdf/
+   sqlite-vec native interaction on the runner.
+
+Net CI trajectory this audit: **134 failing tests + 2 POISON → 3 failing
+tests + 1 intermittent native segfault**, with the gate's diagnostics
+(traceback digests, hang identification, crash classification) fixed
+along the way.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
