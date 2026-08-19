@@ -59,7 +59,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install deps
-        run: pip install -e ".[test]"
+        # Extra light pure-wheel deps (deep-audit 2026-08-19, finding #20)
+        # un-skip the PIL / pymupdf / sqlite-vec / pypdfium2 test suites that
+        # otherwise `importorskip` silently on the merge gate. Playwright e2e
+        # stays deliberately absent until its flaky boot-wait is stabilized;
+        # torch-bearing extras (rag) are too heavy for CI.
+        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2
       - name: Run tests (GATE — failures fail CI)
         # Crash-tolerant chunked runner (scripts/fast_test.py): the bare
         # monolithic pytest run takes 20+ min and intermittently segfaults

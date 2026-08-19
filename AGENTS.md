@@ -992,10 +992,13 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Never reintroduce `|| true` on the test step — that single flag let every
   regression class in this audit ship silently. Lint/bandit remain advisory
   (`--exit-zero`/`|| true`) until their backlogs are triaged. Known CI blind
-  spots (deep-audit 2026-08-19): the only `slow`-marked file is the G1
-  commitment-latency gate (never runs under `-m "not slow"`), and CI installs
-  only `.[test]` so Playwright/PIL/pymupdf/sqlite-vec tests `importorskip`
-  silently on the merge gate.
+  spots (deep-audit 2026-08-19, patched same day): the G1 commitment-latency
+  file's `slow` marker was removed (it runs in ~6s and was the ONLY slow file,
+  so `-m "not slow"` silently excluded it), and CI now installs the light
+  pure-wheel deps (pillow/pymupdf/sqlite-vec/pypdfium2) that the
+  `.[test]`-only install left `importorskip`ing. Still blind: Playwright e2e
+  (deliberately absent until its flaky boot-wait is stabilized) and the
+  torch-bearing `rag` extra.
 
 ## UI Conventions (Web)
 

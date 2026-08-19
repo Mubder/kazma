@@ -23,11 +23,21 @@ TypingFn = Callable[[str], Awaitable[None]]
 
 
 class TypingKeepalive:
-    """Manage per-target typing refresh tasks."""
+    """Manage per-target typing refresh tasks.
+
+    Refcounted per target (deep-audit 2026-08-19, finding #15): the gateway
+    consumer dispatches messages concurrently, so two turns in the same chat
+    (e.g. a HITL approve arriving mid-turn, or two users in one Telegram
+    group) can hold the indicator at once. The second ``start()`` previously
+    cancelled the first turn's task, and the first turn's ``stop()`` then
+    cancelled the second's. Now ``start()``/``stop()`` form a bracket pair
+    and the indicator dies only when the last holder stops.
+    """
 
     def __init__(self, interval: float = _DEFAULT_INTERVAL) -> None:
         self._interval = interval
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._refs: dict[str, int] = {}
         self._lock = asyncio.Lock()
 
     async def start(
@@ -37,12 +47,16 @@ class TypingKeepalive:
         *,
         interval: float | None = None,
     ) -> None:
-        """Begin (or restart) typing keepalive for *target_id*."""
+        """Begin (or join) typing keepalive for *target_id*."""
         if not target_id or typing_fn is None:
             return
         period = interval if interval is not None else self._interval
         async with self._lock:
-            await self._cancel_unlocked(target_id)
+            refs = self._refs.get(target_id, 0) + 1
+            self._refs[target_id] = refs
+            existing = self._tasks.get(target_id)
+            if refs > 1 and existing is not None and not existing.done():
+                return  # another turn already holds a live indicator
             task = asyncio.create_task(
                 self._loop(target_id, typing_fn, period),
                 name=f"typing-keepalive:{target_id}",
@@ -50,12 +64,18 @@ class TypingKeepalive:
             self._tasks[target_id] = task
 
     async def stop(self, target_id: str) -> None:
-        """Stop keepalive for *target_id* (idempotent)."""
+        """Stop keepalive for *target_id* when the last holder stops (idempotent)."""
         async with self._lock:
+            refs = self._refs.get(target_id, 0)
+            if refs > 1:
+                self._refs[target_id] = refs - 1
+                return  # another turn still needs the indicator
+            self._refs.pop(target_id, None)
             await self._cancel_unlocked(target_id)
 
     async def stop_all(self) -> None:
         async with self._lock:
+            self._refs.clear()
             for tid in list(self._tasks.keys()):
                 await self._cancel_unlocked(tid)
 

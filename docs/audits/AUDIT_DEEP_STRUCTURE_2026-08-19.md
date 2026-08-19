@@ -366,5 +366,45 @@ Patch-3 validation: py_compile over all four edited files; commitment
 suite 129 passed (+1 slow deselected); HITL wiring + compaction + skills
 75 passed; regressions now 13.
 
+## 11. Patch 4 (same day, consistency traps + CI gaps)
+
+1. Fixed finding #15a — `typing_keepalive.py` is now refcounted per target:
+   two concurrent turns in one chat bracket the indicator with
+   `start()`/`stop()` pairs instead of the second start cancelling the
+   first turn's task and the first stop killing the second's.
+2. Fixed finding #15b — `RateLimiter.acquire()` now sleeps OUTSIDE its
+   lock (loop-and-recheck); a 429 backoff no longer serializes every
+   sender behind the lock. (No dedicated regression test: for a single
+   shared token bucket the old and new timings are mathematically
+   indistinguishable — the fix is lock hygiene, covered by gateway suites.)
+3. Fixed finding #15c — DEFERRED: moving Telegram media/STT off the poll
+   loop requires the URL-attachment lazy-fetch refactor of the Telegram
+   ingest path (async httpx already keeps the event loop unblocked; the
+   cost is serialized update processing only).
+4. Fixed finding #16 — the shadowed duplicate `GET /api/providers` removed
+   from `sse_chat.py` (the providers router owns the path and mounts
+   first; `/api/provider/active` remains unique to sse_chat).
+5. Fixed finding #17 — fire-and-forget memory-index tasks in
+   `worker_dispatch.py` now hold strong references
+   (`_MEMORY_INDEX_TASKS` + done-callback discard), mirroring the alert-task
+   fix in engine.py; the dead nested `all_tasks` in `swarm_notify.py`
+   moved into `SwarmTaskTracker` where it was always intended to live.
+   `PostTaskSuggester.suggest()` left as-is (tested library surface; wiring
+   it into the post-task path is a product decision).
+6. Fixed finding #19 — the `slow` marker removed from
+   `test_commitment_g1_latency.py::test_g1_full_curve` (whole file runs in
+   ~6s; it was the ONLY slow-marked file, so the documented G1 invariant
+   never ran in CI).
+7. Fixed finding #20 — CI installs the light pure-wheel deps
+   (pillow/pymupdf/sqlite-vec/pypdfium2) alongside `.[test]`, un-skipping
+   the PIL/fitz/sqlite-vec/pypdfium2 suites. Playwright e2e deliberately
+   stays absent until its flaky boot-wait is stabilized; the torch-bearing
+   `rag` extra stays out (CI weight).
+8. AGENTS.md §24E blind-spot note updated to reflect the new state.
+
+Patch-4 validation: py_compile over all edited files; gateway + output
+routing + swarm flows + settings suites 193 passed; regressions + keepalive
++ G1 latency 17 passed (the G1 gate now runs under `-m "not slow"`).
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

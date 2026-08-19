@@ -2163,11 +2163,12 @@ def create_sse_chat_router(
             safe["api_key"] = "***"
         return safe
 
-    @r.get("/api/providers")
-    async def list_providers_endpoint() -> list[dict[str, str]]:
-        """Return the list of known provider presets."""
-        from kazma_core.providers import list_providers
-        return list_providers()
+    # NOTE: there is intentionally NO `GET /api/providers` here — the
+    # providers router (providers.py, mounted before this one) owns that
+    # path with the full masked-config shape the sidebar consumes. The
+    # preset-list variant that used to live here was shadowed dead weight
+    # (deep-audit 2026-08-19, finding #16). `/api/provider/active` below
+    # remains unique to this router.
 
     @r.post("/api/provider/switch")
     async def switch_provider(request: Request) -> dict[str, Any]:

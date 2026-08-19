@@ -245,6 +245,15 @@ class SwarmTaskTracker:
         self._counter += 1
         return f"task-{self._counter}"
 
+    def all_tasks(self) -> list[TrackedTask]:
+        """Return all tracked tasks.
+
+        Moved here from a dead nesting inside ``maybe_notify_dispatch``
+        (deep-audit 2026-08-19, finding #17) — it was syntactically nested
+        after that function's returns and therefore unreachable.
+        """
+        return list(self._tasks.values())
+
     def _cleanup_completed(self) -> None:
         """Remove oldest completed tasks when dict exceeds the cap."""
         if len(self._tasks) <= self._max_tasks:
@@ -404,7 +413,3 @@ async def maybe_notify_dispatch(
     except Exception:
         logger.debug("[SwarmNotify] dispatch notify skipped", exc_info=True)
         return False
-
-    def all_tasks(self) -> list[TrackedTask]:
-        """Return all tracked tasks."""
-        return list(self._tasks.values())

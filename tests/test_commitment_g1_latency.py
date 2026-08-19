@@ -24,8 +24,6 @@ import statistics
 import time
 from datetime import datetime, timezone
 
-import pytest
-
 from kazma_core.safety.commitment import resolve_remind
 
 REQUEST_AT = datetime(2026, 8, 11, 10, 0, 0, tzinfo=timezone.utc)
@@ -124,13 +122,15 @@ def test_g1_production_scale_under_20ms(capsys):
     )
 
 
-@pytest.mark.slow
 def test_g1_full_curve(capsys):
     """Full latency-vs-scale curve (Phase 0 G1 report deliverable, §R2.1).
 
-    slow-marked; run with ``pytest -m slow`` or the standalone script. Prints
-    the curve so the headroom and the cliff are visible — the gate itself is
-    enforced by ``test_g1_production_scale_under_20ms``.
+    Unmarked since 2026-08-19 (deep-audit finding #19): the whole file runs
+    in ~6s, well inside the per-chunk timeout, and it was the ONLY
+    `slow`-marked file — so `-m "not slow"` silently excluded this curve
+    from every CI run. Prints the curve so the headroom and the cliff are
+    visible — the gate itself is enforced by
+    ``test_g1_production_scale_under_20ms``.
     """
     rows = measure_curve()
     print("\n" + format_curve(rows))

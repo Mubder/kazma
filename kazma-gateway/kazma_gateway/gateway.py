@@ -179,17 +179,20 @@ class RateLimiter:
 
     async def acquire(self) -> None:
         """Wait until a token is available, then consume one."""
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_refill
-            self._tokens = min(self._max, self._tokens + elapsed * self._max)
-            self._last_refill = now
-            if self._tokens < 1:
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last_refill
+                self._tokens = min(self._max, self._tokens + elapsed * self._max)
+                self._last_refill = now
+                if self._tokens >= 1:
+                    self._tokens -= 1
+                    return
                 wait = (1 - self._tokens) / self._max
-                await asyncio.sleep(wait)
-                self._tokens = 0
-            else:
-                self._tokens -= 1
+            # Sleep OUTSIDE the lock: sleeping while holding it stalled every
+            # sender platform-wide during a single 429 backoff
+            # (deep-audit 2026-08-19, finding #15).
+            await asyncio.sleep(wait)
 
 
 # ══════════════════════════════════════════════════════════════════════════

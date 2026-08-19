@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Strong references for fire-and-forget memory-index tasks (deep-audit
+# 2026-08-19, finding #17): the loop holds only weak refs to tasks, so an
+# unreferenced one can be GC'd mid-write and silently drop the index —
+# same bug class already fixed for alert tasks in engine.py.
+_MEMORY_INDEX_TASKS: set = set()
+
 
 async def _index_worker_l4_memory(
     *,
@@ -287,7 +293,7 @@ async def dispatch_worker(
             try:
                 import asyncio as _aio_create
 
-                _aio_create.create_task(
+                _idx_task = _aio_create.create_task(
                     _index_worker_l4_memory(
                         worker_name=getattr(worker, "name", "") or "default",
                         prompt=prompt or "",
@@ -295,6 +301,8 @@ async def dispatch_worker(
                         task_id=getattr(context, "task_id", "") if context is not None else "",
                     )
                 )
+                _MEMORY_INDEX_TASKS.add(_idx_task)
+                _idx_task.add_done_callback(_MEMORY_INDEX_TASKS.discard)
             except Exception:
                 logger.debug(
                     "[SwarmEngine] worker memory index spawn failed for %s",

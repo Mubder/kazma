@@ -305,3 +305,41 @@ def test_hitl_canonical_floor_caps_narrowing(monkeypatch):
     monkeypatch.setenv("KAZMA_HITL_CANONICAL_FLOOR", "1")
     effective = get_hitl_config(narrowed)["require_approval_for"]
     assert set(CANONICAL_DANGER_TOOLS) <= set(effective)
+
+
+# ── Patch 4 — finding #15a: typing keepalive is refcounted per target ───
+
+
+@pytest.mark.asyncio
+async def test_typing_keepalive_survives_overlapping_turns():
+    import asyncio
+
+    from kazma_gateway.typing_keepalive import TypingKeepalive
+
+    calls: list[str] = []
+
+    async def typing_fn(target: str) -> None:
+        calls.append(target)
+
+    ka = TypingKeepalive(interval=0.05)
+    await ka.start("telegram:1", typing_fn)  # turn A
+    await asyncio.sleep(0.02)
+    await ka.start("telegram:1", typing_fn)  # turn B (same chat)
+    await asyncio.sleep(0.02)
+    await ka.stop("telegram:1")  # turn A ends — B still running
+
+    n = len(calls)
+    await asyncio.sleep(0.15)  # indicator must keep firing for turn B
+    assert len(calls) > n
+
+    await ka.stop("telegram:1")  # turn B ends — now it stops
+    n = len(calls)
+    await asyncio.sleep(0.12)
+    assert len(calls) == n
+
+
+# NOTE on finding #15b (RateLimiter sleeping outside its lock): kept as a
+# code fix without a dedicated regression test — for a single shared token
+# bucket, refill math guarantees no later arriver has a token available
+# while an earlier sender waits out a deficit, so old vs new behavior is
+# not deterministically distinguishable. Covered by the gateway suites.
