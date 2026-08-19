@@ -327,5 +327,44 @@ import-integrity gate 13).
 Patch-2 validation: py_compile + `node --check`; suites green (skills ×2,
 cron, dynamic spawning, replay command: 78; regressions: 9).
 
+## 10. Patch 3 (same day, security-hardening batch)
+
+1. Fixed finding #8 — the fence-import fallback no longer injects untrusted
+   text raw: both sites (`compaction.py:_build_compacted_system`,
+   `graph_builder.py:_format_retrieved_memories`) now DROP the memory block
+   with a loud warning when `prompt_fence` is unavailable (fail-closed —
+   the content is untrusted and lands in the system prompt).
+2. Fixed finding #9 — commitment fail direction unified:
+   - `graph_builder.py:_commitment_resolve_gate` per-tool
+     `authorize_effect` exceptions now fail CLOSED (blocked with a
+     terminal, user-visible error), mirroring the registry choke — a
+     broken policy engine can no longer free-fire semantic acts (the
+     remind/CoPilot class) on the chat path.
+   - Transient `load_constraint_beliefs` failures no longer skip the whole
+     gate (which free-fired every semantic tool): the gate proceeds with
+     empty memory anchors instead.
+   - Structural gate failure stays fail-open (kill-switch posture) but is
+     now WARNING-level, not debug.
+   - AGENTS.md §20 fail-posture documentation updated to match.
+3. Fixed finding #10 — HITL narrowing hardening: the CANONICAL-drift
+   warning now repeats on a 15-minute cooldown instead of once per
+   process, the inaccurate "YAML ships as a subset" comment corrected, and
+   a new opt-in `KAZMA_HITL_CANONICAL_FLOOR=1` flag unions CANONICAL back
+   into the effective list so Settings/YAML cannot narrow below it
+   (default off — existing deliberately-narrowed installs unchanged).
+4. Fixed finding #12 — gateway allowlists: new opt-in
+   `KAZMA_GATEWAY_STRICT_ALLOWLIST=1` stops forcing `_allow_all=True` on
+   the Telegram/Discord/Slack adapters (empty allowlist → fail-closed,
+   the adapters' native default); the backward-compat force now logs a
+   WARNING naming both remediation options when no allowlist is set.
+5. Finding #11 (process-global MCP filesystem root vs per-task
+   `workspace_scope`) is DEFERRED as an architectural item — a real fix
+   needs per-workspace MCP server instances; it remains documented in
+   `workspace/mcp_rebind.py` and `ide/env_context.py`.
+
+Patch-3 validation: py_compile over all four edited files; commitment
+suite 129 passed (+1 slow deselected); HITL wiring + compaction + skills
+75 passed; regressions now 13.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import os
+import time
 from typing import Any
 
 __all__ = [
@@ -33,6 +35,12 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# HITL/CANONICAL drift warning cooldown: the warning repeats at this cadence
+# so a narrowed danger list keeps nagging the log instead of scrolling away
+# once per process (deep-audit 2026-08-19, finding #10).
+_DRIFT_WARN_COOLDOWN_S = 900.0  # 15 minutes
+_DRIFT_WARN_LAST: list[float] = [0.0]
 
 # Thread-safe context var for tracking active session/thread_id
 _current_thread_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_thread_id", default=None)
@@ -232,14 +240,33 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception as exc:
         logger.error("ConfigStore overrides read failed in get_hitl_config — using yaml defaults: %s", exc)
 
-    # Phase 0 instrumentation (Commitment Layer §5.1): surface drift between
-    # the effective require_approval_for list and CANONICAL_DANGER_TOOLS once
-    # per process. The YAML list ships as a subset of CANONICAL and operators
-    # may further narrow it via Settings — this makes that drift visible so
-    # danger tools missing from the effective list (which would silently skip
-    # approval) are caught at boot. One-shot diagnostic; not a gate.
+    # Optional canonical floor (deep-audit 2026-08-19, finding #10): when
+    # KAZMA_HITL_CANONICAL_FLOOR is set, canonical danger tools can never be
+    # narrowed out of the effective list — Settings/YAML narrowing below
+    # CANONICAL is capped back up. Opt-in so existing single-operator
+    # installs that deliberately narrowed the list keep working; strict
+    # multi-operator deployments should set it.
     try:
-        if not getattr(get_hitl_config, "_drift_warned", False):
+        if os.environ.get("KAZMA_HITL_CANONICAL_FLOOR", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            require_approval_for = set(require_approval_for or []) | set(
+                CANONICAL_DANGER_TOOLS
+            )
+    except Exception:
+        logger.debug("[Safety] KAZMA_HITL_CANONICAL_FLOOR check failed", exc_info=True)
+
+    # Phase 0 instrumentation (Commitment Layer §5.1): surface drift between
+    # the effective require_approval_for list and CANONICAL_DANGER_TOOLS.
+    # The YAML list ships IDENTICAL to CANONICAL (set-parity tested); the
+    # effective list may still be narrowed via Settings — this makes the
+    # drift visible so danger tools missing from it (which would silently
+    # skip approval) are caught. Cooldown-based repeat, not one-shot
+    # (deep-audit 2026-08-19, finding #10). Diagnostic; enforcement is the
+    # KAZMA_HITL_CANONICAL_FLOOR flag above.
+    try:
+        _now = time.monotonic()
+        if _now - _DRIFT_WARN_LAST[0] >= _DRIFT_WARN_COOLDOWN_S:
             _canonical = set(CANONICAL_DANGER_TOOLS)
             _effective = set(require_approval_for or [])
             _canonical_only = _canonical - _effective
@@ -248,10 +275,11 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
                 logger.warning(
                     "[Safety] HITL/CANONICAL drift — canonical_only (danger "
                     "tools NOT requiring approval under the effective list)=%s; "
-                    "effective_only (configured, not in canonical)=%s",
+                    "effective_only (configured, not in canonical)=%s; set "
+                    "KAZMA_HITL_CANONICAL_FLOOR=1 to enforce the canonical floor",
                     sorted(_canonical_only), sorted(_effective_only),
                 )
-            get_hitl_config._drift_warned = True
+            _DRIFT_WARN_LAST[0] = _now
     except Exception:
         logger.debug("[Safety] HITL/CANONICAL drift check failed", exc_info=True)
 

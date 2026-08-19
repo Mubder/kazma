@@ -463,9 +463,16 @@ def _format_retrieved_memories(memories: list[dict[str, Any]]) -> str:
             format_untrusted_block,
             is_override_delta,
         )
-    except Exception:  # pragma: no cover — fence always ship with core
-        format_untrusted_block = None  # type: ignore[assignment]
-        is_override_delta = None  # type: ignore[assignment]
+    except Exception:  # pragma: no cover — fence always ships with core
+        # Fence unavailable → fail CLOSED (deep-audit 2026-08-19, finding
+        # #8): untrusted memory hits must not enter the system prompt raw,
+        # with the injection filter also disabled.
+        logger.warning(
+            "[graph_builder] prompt_fence unavailable — dropping %d memory "
+            "hits (fail-closed)",
+            len(memories),
+        )
+        return ""
 
     lines: list[str] = []
     for mem in memories:
@@ -2091,7 +2098,19 @@ def _commitment_resolve_gate(
             if _sem:
                 _tenant = state.get("tenant_id") or "default"
                 _req_at = _dt.now(_tz.utc)
-                _beliefs = _load_beliefs(_tenant) if _load_beliefs else []
+                try:
+                    _beliefs = _load_beliefs(_tenant) if _load_beliefs else []
+                except Exception:
+                    # Transient belief-store failure must not skip the whole
+                    # gate (that would free-fire every semantic tool) —
+                    # authorize without memory anchors instead
+                    # (deep-audit 2026-08-19, finding #9).
+                    logger.warning(
+                        "[ToolWorker] constraint beliefs unavailable — gating "
+                        "without memory anchors",
+                        exc_info=True,
+                    )
+                    _beliefs = []
                 _user_text = _last_user_text(state)
                 _kept: list[PendingToolCall] = [_tc for _tc in pending if not _needs_sem(_tc["name"])]
                 for _tc in _sem:
@@ -2103,9 +2122,26 @@ def _commitment_resolve_gate(
                             context={"source": "graph"},
                         )
                     except Exception:
-                        logger.debug("[ToolWorker] commitment gate errored for %s — fail-open",
-                                     _tc["name"], exc_info=True)
-                        _kept.append(_tc)
+                        # Fail CLOSED (deep-audit 2026-08-19, finding #9):
+                        # mirror the registry choke's posture so a broken
+                        # policy engine cannot free-fire semantic acts (the
+                        # remind/CoPilot class). The error tells the model to
+                        # surface the failure instead of retrying blind.
+                        logger.warning(
+                            "[ToolWorker] commitment gate errored for %s — fail-closed",
+                            _tc["name"],
+                            exc_info=True,
+                        )
+                        semantic_blocked.append(ToolResult(
+                            tool_call_id=str(_tc.get("id") or ""),
+                            name=_tc["name"],
+                            content=(
+                                f"Commitment gate unavailable for {_tc['name']} — "
+                                "blocked while the policy engine is unhealthy. "
+                                "Do not retry; tell the user what failed."
+                            ),
+                            is_error=True, duration_ms=0, outcome="terminal",
+                        ))
                         continue
                     if _dec.decision == "allow":
                         if _dec.rewritten_args:
@@ -2127,7 +2163,11 @@ def _commitment_resolve_gate(
                         except Exception: pass
                 pending = _kept
         except Exception:
-            logger.debug("[ToolWorker] commitment gate skipped — fail-open", exc_info=True)
+            # Structural breakage inside the gate (not per-tool). Treated
+            # like the layer being disabled — the kill-switch posture is
+            # fail-open — but logged loudly so it is investigated
+            # (deep-audit 2026-08-19, finding #9).
+            logger.warning("[ToolWorker] commitment gate skipped (structural failure)", exc_info=True)
 
     if semantic_hold:
         _items = [{

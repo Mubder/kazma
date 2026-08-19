@@ -733,6 +733,14 @@ class KazmaAppBuilder:
                 telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
             tg_adapter: TelegramAdapter | None = None
+            # Strict allowlists (deep-audit 2026-08-19, finding #12): the
+            # adapters fail closed on an empty allowlist by default, but the
+            # backward-compat _allow_all=True below neutralizes that for
+            # existing single-operator installs. KAZMA_GATEWAY_STRICT_ALLOWLIST=1
+            # opts into the fail-closed posture (no allowlist → no messages).
+            _strict_allowlists = os.environ.get(
+                "KAZMA_GATEWAY_STRICT_ALLOWLIST", ""
+            ).strip().lower() in ("1", "true", "yes", "on")
             # connectors.<platform>.enabled is authoritative (audit N1):
             # previously only token presence gated the adapter, so the YAML
             # `enabled: false` flag was dead config.
@@ -761,7 +769,16 @@ class KazmaAppBuilder:
                 )
                 # Set allowed users (backward compat: empty = allow_all for existing installs)
                 allowed = self.config_store.get("connectors.telegram.allowed_users", "")
-                tg_adapter._allow_all = True  # backward compat: existing single-operator installs
+                if _strict_allowlists:
+                    tg_adapter._allow_all = False  # fail-closed until an allowlist is set
+                else:
+                    tg_adapter._allow_all = True  # backward compat: existing single-operator installs
+                    if not allowed:
+                        logger.warning(
+                            "[Gateway] Telegram allow_all forced (backward compat) with no "
+                            "allowed_users — set connectors.telegram.allowed_users or "
+                            "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
+                        )
                 if allowed:
                     try:
                         allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
@@ -790,10 +807,19 @@ class KazmaAppBuilder:
                 from kazma_gateway.adapters.discord import DiscordAdapter
 
                 discord_adapter = DiscordAdapter(token=discord_token)
-                discord_adapter._allow_all = True  # backward compat
                 # User-level allowlist (mirrors Telegram). Stored in ConfigStore
                 # as a comma-separated string of Discord user IDs.
                 discord_allowed = self.config_store.get("connectors.discord.allowed_users", "")
+                if _strict_allowlists:
+                    discord_adapter._allow_all = False  # fail-closed until an allowlist is set
+                else:
+                    discord_adapter._allow_all = True  # backward compat
+                    if not discord_allowed:
+                        logger.warning(
+                            "[Gateway] Discord allow_all forced (backward compat) with no "
+                            "allowed_users — set connectors.discord.allowed_users or "
+                            "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
+                        )
                 if discord_allowed:
                     discord_ids = [uid.strip() for uid in discord_allowed.split(",") if uid.strip()]
                     discord_adapter.set_allowed_users(discord_ids)
@@ -828,12 +854,18 @@ class KazmaAppBuilder:
 
                 slack_teams = _split_ids(self.config_store.get("connectors.slack.allowed_teams", ""))
                 slack_channels = _split_ids(self.config_store.get("connectors.slack.allowed_channels", ""))
+                if not _strict_allowlists and not (slack_teams or slack_channels):
+                    logger.warning(
+                        "[Gateway] Slack allow_all forced (backward compat) with no "
+                        "allowed_teams/allowed_channels — set them or "
+                        "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
+                    )
                 slack_adapter = SlackAdapter(
                     bot_token=slack_bot_token,
                     app_token=slack_app_token or None,
                     allowed_teams=slack_teams or None,
                     allowed_channels=slack_channels or None,
-                    allow_all=True,  # backward compat: existing installs
+                    allow_all=not _strict_allowlists,  # backward compat unless strict mode
                 )
                 self.gateway.add_adapter(slack_adapter)
                 if slack_app_token:

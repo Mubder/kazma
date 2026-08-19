@@ -677,8 +677,11 @@ schedule layer and the memory layer. Full plan + Phase-0 exit report:
 (core + gate + store + TTL/GC), 3 (semantic clarify/confirm interrupt card),
 4 (remind + cancel_job + exec/outbound/config resolvers), 5 (swarm scope-token
 default + MCP classification), 6 (autonomy modes), 7 (soul confirm gate), 8
-(docs + metrics). Default-off kill-switches on every enforcement layer;
-fail-open throughout.
+(docs + metrics). Default-off kill-switches on every enforcement layer.
+**Fail posture (deep-audit 2026-08-19):** authorization-engine EXCEPTIONS on
+semantic tools fail CLOSED at both chokes (a broken policy engine must not
+free-fire the remind/exec classes); the layer kill-switch and
+import-unavailable degradation stay fail-open (treated as layer-off).
 
 **A. Two `authorize_effect` choke points + an independent memory-side gate.**
 - `agent/graph_builder.py:tool_worker_node` — the single-agent chat path; the
@@ -729,7 +732,9 @@ fail-open throughout.
   `POST /api/commitment/soul/{cid}/confirm`. Mint-wired at both apply callers.
   Default OFF.
 - **Fail-open + kill-switch**: `KAZMA_COMMITMENT_ENABLED=0` disables the whole
-  layer. Every enforcement layer has its own default-OFF flag.
+  layer. Every enforcement layer has its own default-OFF flag. (Engine
+  *exceptions* on semantic tools fail closed at both chokes — see the §20
+  header; only the kill-switch/import-degradation paths fail open.)
 - **Conservative auto-store**, **No late approve**, **GC cadence** — as before.
 
 **D. Components (`kazma_core/safety/commitment/`).**

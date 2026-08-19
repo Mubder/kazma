@@ -372,7 +372,18 @@ class CompactionEngine:
                     filter_injection,
                     format_untrusted_block,
                 )
-            except Exception:  # safety module unavailable → degrade to no filter
+            except Exception:
+                # Fence unavailable → fail CLOSED: memory content is untrusted
+                # (conversation/tool-derived) and this block lands in the
+                # SYSTEM prompt — the highest-trust slot. Dropping the recall
+                # beats injecting it raw with no fence and no injection
+                # filter (deep-audit 2026-08-19, finding #8).
+                logger.warning(
+                    "[Compaction] prompt_fence unavailable — dropping %d memory "
+                    "hits from the system prompt (fail-closed)",
+                    len(memories),
+                )
+                memories = []
                 format_untrusted_block = None  # type: ignore[assignment]
                 filter_injection = None  # type: ignore[assignment]
 
