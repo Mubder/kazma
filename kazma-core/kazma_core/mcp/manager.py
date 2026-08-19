@@ -613,6 +613,48 @@ class AsyncMCPManager:
                 "is_error": True,
             }
 
+        # ── Per-task workspace scope guard (deep-audit 2026-08-19, #11) ──
+        # Workspace-bound MCP servers are rebound to the PROCESS-ACTIVE
+        # workspace only, but a dispatched swarm task may target a different
+        # workspace via workspace_scope. Executing against the process-bound
+        # root would silently operate on the WRONG repo's files — fail
+        # closed with an actionable error instead. Only fires when a
+        # per-task scope is active AND the roots actually differ (the
+        # common single-workspace case is unaffected).
+        # Kill-switch: KAZMA_MCP_SCOPE_GUARD=0.
+        try:
+            import os as _os
+
+            if _os.environ.get("KAZMA_MCP_SCOPE_GUARD", "1").strip().lower() not in (
+                "0", "false", "no", "off",
+            ):
+                from pathlib import Path as _Path
+
+                from kazma_core.ide.workspace_scope import resolve_workspace_root
+                from kazma_core.workspace.binding import get_bound_mcp_root
+
+                scoped_root = resolve_workspace_root()
+                bound_root = get_bound_mcp_root()
+                if (
+                    scoped_root is not None
+                    and bound_root is not None
+                    and _Path(bound_root).resolve() != _Path(scoped_root).resolve()
+                ):
+                    return {
+                        "content": (
+                            f"MCP server '{server_name}' is bound to the active "
+                            f"workspace ({bound_root}) but this task targets a "
+                            f"different workspace ({scoped_root}). Per-workspace "
+                            "MCP instances are not supported yet — switch the "
+                            "active workspace, or dispatch without a per-task "
+                            "workspace_id. (KAZMA_MCP_SCOPE_GUARD=0 disables "
+                            "this guard.)"
+                        ),
+                        "is_error": True,
+                    }
+        except Exception:
+            logger.debug("[MCP] scope guard check failed — allowing call", exc_info=True)
+
         # Strip the mcp__<server>__ namespace prefix if present — the LLM
         # emits the namespaced form (to avoid collisions), but the server
         # only knows its own raw tool names.

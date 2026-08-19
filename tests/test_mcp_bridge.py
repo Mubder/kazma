@@ -22,6 +22,19 @@ from kazma_core.mcp.manager import (
     _jsonrpc_request,
 )
 
+
+@pytest.fixture(autouse=True)
+def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):
+    """Disable the commitment layer for these routing/execution tests.
+
+    They exercise UnifiedToolExecutor / tool_worker plumbing with fabricated
+    tool names ("shared_tool", "a", "b", …) that are not in the side-effect
+    registry — the unregistered-mutator fail-closed DENY (default ON since
+    2026-08-15) blocks them before routing is ever reached, which is out of
+    scope for what these tests verify (deep-audit 2026-08-19 follow-up).
+    """
+    monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
+
 # ═══════════════════════════════════════════════════════════════════
 # JSON-RPC helpers
 # ═══════════════════════════════════════════════════════════════════

@@ -148,6 +148,12 @@ class TelegramAdapter(BaseAdapter):
         self._webhook_secret = webhook_secret or ""
         # Strong refs for fire-and-forget tasks (see _spawn).
         self._bg_tasks: set[asyncio.Task] = set()
+        # Per-chat update-processing chains (deep-audit 2026-08-19, #15c):
+        # voice STT + media downloads run OFF the poll loop, serialized per
+        # chat so same-chat message order is preserved (the handler's
+        # per-thread lock processes turns in enqueue order). Maps chat_id →
+        # the chat's tail task; strong refs by construction.
+        self._chat_chains: dict[int, asyncio.Task] = {}
 
     def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
         """Set the whitelist of allowed Telegram user IDs (public setter).
@@ -324,89 +330,17 @@ class TelegramAdapter(BaseAdapter):
                             )
                             continue
 
-                        # Handle voice messages (async download + transcribe)
-                        # and generic media (photo/document/video/animation).
-                        msg = self._parse_update(update)
-                        if msg is None:
-                            message = (
-                                update.get("message")
-                                or update.get("channel_post")
-                                or update.get("edited_message")
-                            )
-                            if message and self.detect_voice_message(message):
-                                voice_result = await self._handle_voice_message(message)
-                                if voice_result is None:
-                                    continue
-                                from_user = message.get("from", {})
-                                user_id = from_user.get("id", 0)
-                                chat_id = message.get("chat", {}).get("id", 0)
-                                username = (
-                                    from_user.get("username", "")
-                                    or from_user.get("first_name", "")
-                                    or f"tg_{user_id}"
-                                )
-                                sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
-                                msg = IncomingMessage(
-                                    platform="telegram",
-                                    sender_id=sender_id,
-                                    text=voice_result,
-                                    context_metadata={
-                                        "chat_id": chat_id,
-                                        "user_id": user_id,
-                                        "username": username,
-                                        "message_id": message.get("message_id", 0),
-                                        "chat_type": message.get("chat", {}).get("type", "private"),
-                                        "update_id": update.get("update_id", 0),
-                                        "voice_transcribed": True,
-                                    },
-                                )
-                            elif message and self._detect_media_message(message):
-                                # Photo / document / video / animation:
-                                # download and attach instead of dropping.
-                                msg = await self._handle_media_message(message)
-                                if msg is None:
-                                    continue
-                            else:
-                                continue
-
-                        # User whitelist (fail-closed: empty list + allow_all=false = reject all)
-                        if not self._allowed_users and not self._allow_all:
-                            logger.warning("[telegram] Rejecting message — no allowed_users and allow_all is false")
-                            continue
-                        if self._allowed_users:
-                            user_id = msg.context_metadata.get("user_id", 0)
-                            if user_id not in self._allowed_users:
-                                logger.debug(
-                                    "[telegram] Ignoring user %d (not whitelisted)",
-                                    user_id,
-                                )
-                                continue
-
-                        try:
-                            queue.put_nowait(msg)
-                            logger.info(
-                                "[telegram] Enqueued from %s (chat=%d): %.80s",
-                                msg.context_metadata.get("username", "?"),
-                                msg.context_metadata.get("chat_id", 0),
-                                msg.text,
-                            )
-                            # Fire 👀 reaction on the user's message
-                            if msg.context_metadata.get("message_id"):
-                                self._spawn(
-                                    self._set_reaction(
-                                        msg.context_metadata["chat_id"],
-                                        msg.context_metadata["message_id"],
-                                        "👀",
-                                    )
-                                )
-                        except asyncio.QueueFull:
-                            logger.warning(
-                                "[telegram] Queue full — dropping message from chat=%d",
-                                msg.context_metadata.get("chat_id", 0),
-                            )
+                        # Offload per-update processing off the poll loop
+                        # (deep-audit 2026-08-19, finding #15c): voice STT
+                        # and media downloads can take seconds — processed
+                        # inline they stalled every subsequent Telegram
+                        # update. Serialized PER CHAT so same-chat message
+                        # order is preserved; different chats proceed
+                        # concurrently.
+                        self._dispatch_update_to_chain(update, queue)
                     except Exception:
                         logger.exception(
-                            "[telegram] Error processing update %s",
+                            "[telegram] Error dispatching update %s",
                             update.get("update_id", "?"),
                         )
                         continue
@@ -421,6 +355,144 @@ class TelegramAdapter(BaseAdapter):
                 self._http = None
             self._running = False
             logger.info("[telegram] Polling stopped")
+
+    def _dispatch_update_to_chain(
+        self, update: dict, queue: asyncio.Queue
+    ) -> None:
+        """Spawn update processing on its chat's serialization chain."""
+        message = (
+            update.get("message")
+            or update.get("channel_post")
+            or update.get("edited_message")
+        )
+        chat_id = 0
+        try:
+            if message:
+                chat_id = int(message.get("chat", {}).get("id", 0) or 0)
+        except Exception:
+            chat_id = 0
+        if not chat_id:
+            # No chat identity (rare/unknown update shapes) — process
+            # unchained but still off the poll loop.
+            self._spawn(self._process_update(update, queue))
+            return
+        prev = self._chat_chains.get(chat_id)
+        task = asyncio.create_task(
+            self._process_update_chained(prev, chat_id, update, queue),
+            name=f"tg-update:{chat_id}:{update.get('update_id', '?')}",
+        )
+        self._chat_chains[chat_id] = task
+
+    async def _process_update_chained(
+        self,
+        prev: asyncio.Task | None,
+        chat_id: int,
+        update: dict,
+        queue: asyncio.Queue,
+    ) -> None:
+        try:
+            if prev is not None:
+                try:
+                    await prev
+                except Exception:
+                    pass  # the previous update logged its own error
+            await self._process_update(update, queue)
+        finally:
+            if self._chat_chains.get(chat_id) is asyncio.current_task():
+                self._chat_chains.pop(chat_id, None)
+
+    async def _process_update(self, update: dict, queue: asyncio.Queue) -> None:
+        """Parse, gate, and enqueue a single Telegram update.
+
+        Extracted from the poll loop (deep-audit 2026-08-19, #15c) so it can
+        run on a per-chat chain task instead of blocking getUpdates.
+        """
+        try:
+            # Handle voice messages (async download + transcribe)
+            # and generic media (photo/document/video/animation).
+            msg = self._parse_update(update)
+            if msg is None:
+                message = (
+                    update.get("message")
+                    or update.get("channel_post")
+                    or update.get("edited_message")
+                )
+                if message and self.detect_voice_message(message):
+                    voice_result = await self._handle_voice_message(message)
+                    if voice_result is None:
+                        return
+                    from_user = message.get("from", {})
+                    user_id = from_user.get("id", 0)
+                    chat_id = message.get("chat", {}).get("id", 0)
+                    username = (
+                        from_user.get("username", "")
+                        or from_user.get("first_name", "")
+                        or f"tg_{user_id}"
+                    )
+                    sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+                    msg = IncomingMessage(
+                        platform="telegram",
+                        sender_id=sender_id,
+                        text=voice_result,
+                        context_metadata={
+                            "chat_id": chat_id,
+                            "user_id": user_id,
+                            "username": username,
+                            "message_id": message.get("message_id", 0),
+                            "chat_type": message.get("chat", {}).get("type", "private"),
+                            "update_id": update.get("update_id", 0),
+                            "voice_transcribed": True,
+                        },
+                    )
+                elif message and self._detect_media_message(message):
+                    # Photo / document / video / animation:
+                    # download and attach instead of dropping.
+                    msg = await self._handle_media_message(message)
+                    if msg is None:
+                        return
+                else:
+                    return
+
+            # User whitelist (fail-closed: empty list + allow_all=false = reject all)
+            if not self._allowed_users and not self._allow_all:
+                logger.warning("[telegram] Rejecting message — no allowed_users and allow_all is false")
+                return
+            if self._allowed_users:
+                user_id = msg.context_metadata.get("user_id", 0)
+                if user_id not in self._allowed_users:
+                    logger.debug(
+                        "[telegram] Ignoring user %d (not whitelisted)",
+                        user_id,
+                    )
+                    return
+
+            try:
+                queue.put_nowait(msg)
+                logger.info(
+                    "[telegram] Enqueued from %s (chat=%d): %.80s",
+                    msg.context_metadata.get("username", "?"),
+                    msg.context_metadata.get("chat_id", 0),
+                    msg.text,
+                )
+                # Fire 👀 reaction on the user's message
+                if msg.context_metadata.get("message_id"):
+                    self._spawn(
+                        self._set_reaction(
+                            msg.context_metadata["chat_id"],
+                            msg.context_metadata["message_id"],
+                            "👀",
+                        )
+                    )
+            except asyncio.QueueFull:
+                logger.warning(
+                    "[telegram] Queue full — dropping message from chat=%d",
+                    msg.context_metadata.get("chat_id", 0),
+                )
+        except Exception:
+            logger.exception(
+                "[telegram] Error processing update %s",
+                update.get("update_id", "?"),
+            )
 
     def _spawn(self, coro: Any) -> asyncio.Task:
         """Fire-and-forget with a strong reference.

@@ -343,3 +343,140 @@ async def test_typing_keepalive_survives_overlapping_turns():
 # bucket, refill math guarantees no later arriver has a token available
 # while an earlier sender waits out a deficit, so old vs new behavior is
 # not deterministically distinguishable. Covered by the gateway suites.
+
+
+# ── Patch 5 — finding #11: MCP per-task scope guard ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_scope_guard_blocks_cross_workspace_calls(monkeypatch, tmp_path):
+    from kazma_core.mcp.manager import AsyncMCPManager, MCPServerHandle
+
+    mgr = AsyncMCPManager()
+    mgr._servers["fs"] = MCPServerHandle(name="fs", transport="stdio", connected=True)
+
+    root_a = tmp_path / "repo-a"
+    root_b = tmp_path / "repo-b"
+    root_a.mkdir()
+    root_b.mkdir()
+
+    import kazma_core.ide.workspace_scope as ws_scope
+    import kazma_core.workspace.binding as binding
+
+    monkeypatch.setattr(ws_scope, "resolve_workspace_root", lambda: root_a.resolve())
+    monkeypatch.setattr(binding, "get_bound_mcp_root", lambda: root_b.resolve())
+    monkeypatch.delenv("KAZMA_MCP_SCOPE_GUARD", raising=False)
+
+    out = await mgr.execute_mcp_tool("fs", "list_tools", {})
+    assert out["is_error"] is True
+    assert "different workspace" in out["content"]
+
+    # Matching roots → guard passes (the call proceeds past it).
+    monkeypatch.setattr(binding, "get_bound_mcp_root", lambda: root_a.resolve())
+    out = await mgr.execute_mcp_tool("fs", "list_tools", {})
+    assert "different workspace" not in out["content"]
+
+    # Kill-switch disables the guard entirely.
+    monkeypatch.setattr(binding, "get_bound_mcp_root", lambda: root_b.resolve())
+    monkeypatch.setenv("KAZMA_MCP_SCOPE_GUARD", "0")
+    out = await mgr.execute_mcp_tool("fs", "list_tools", {})
+    assert "different workspace" not in out["content"]
+
+
+# ── Patch 5 — finding #15c: Telegram update chains ──────────────────────
+
+
+def _tg_adapter():
+    from kazma_gateway.adapters.telegram import TelegramAdapter
+
+    adapter = TelegramAdapter(token="test-token")
+    adapter._allow_all = True
+
+    async def _noop_reaction(chat_id, message_id, emoji):
+        return None
+
+    adapter._set_reaction = _noop_reaction
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_telegram_heavy_update_does_not_block_other_chats():
+    import asyncio
+
+    from kazma_gateway.gateway import IncomingMessage
+
+    adapter = _tg_adapter()
+    q: asyncio.Queue = asyncio.Queue()
+
+    text_msg = IncomingMessage(
+        platform="telegram",
+        sender_id="telegram:2",
+        text="hello",
+        context_metadata={
+            "chat_id": 2, "user_id": 2, "message_id": 2, "chat_type": "private",
+        },
+    )
+    slow_release = asyncio.Event()
+
+    async def slow_voice(message):
+        await slow_release.wait()
+        return "transcribed"
+
+    adapter._handle_voice_message = slow_voice
+    adapter.detect_voice_message = lambda message: True
+    adapter._parse_update = lambda update: text_msg if update.get("_fast") else None
+
+    heavy = {"message": {"chat": {"id": 1}, "message_id": 1, "from": {"id": 1}}}
+    fast = {"_fast": True, "message": {"chat": {"id": 2}, "message_id": 2, "from": {"id": 2}}}
+
+    adapter._dispatch_update_to_chain(heavy, q)  # chat 1 — slow voice download
+    await asyncio.sleep(0.02)
+    adapter._dispatch_update_to_chain(fast, q)  # chat 2 — must not wait on chat 1
+    await asyncio.sleep(0.05)
+
+    assert q.qsize() == 1
+    assert q.get_nowait().text == "hello"
+
+    slow_release.set()
+    await asyncio.sleep(0.05)
+    assert q.qsize() == 1
+    assert q.get_nowait().text == "transcribed"
+
+
+@pytest.mark.asyncio
+async def test_telegram_same_chat_order_preserved():
+    import asyncio
+
+    from kazma_gateway.gateway import IncomingMessage
+
+    adapter = _tg_adapter()
+    q: asyncio.Queue = asyncio.Queue()
+
+    second_msg = IncomingMessage(
+        platform="telegram",
+        sender_id="telegram:5",
+        text="second",
+        context_metadata={
+            "chat_id": 5, "user_id": 5, "message_id": 2, "chat_type": "private",
+        },
+    )
+
+    async def slow_voice(message):
+        await asyncio.sleep(0.15)
+        return "first (voice)"
+
+    adapter._handle_voice_message = slow_voice
+    adapter.detect_voice_message = lambda message: True
+    adapter._parse_update = lambda update: second_msg if update.get("_fast") else None
+
+    voice = {"message": {"chat": {"id": 5}, "message_id": 1, "from": {"id": 5}}}
+    text = {"_fast": True, "message": {"chat": {"id": 5}, "message_id": 2, "from": {"id": 5}}}
+
+    adapter._dispatch_update_to_chain(voice, q)
+    await asyncio.sleep(0.02)
+    adapter._dispatch_update_to_chain(text, q)
+    await asyncio.sleep(0.35)
+
+    assert q.qsize() == 2
+    assert q.get_nowait().text == "first (voice)"  # slow one still first
+    assert q.get_nowait().text == "second"

@@ -18,6 +18,18 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture(autouse=True)
+def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):
+    """Disable the commitment layer for the executor-routing test.
+
+    It uses a fabricated tool name ("shared_tool") not in the side-effect
+    registry — the unregistered-mutator fail-closed DENY (default ON since
+    2026-08-15) blocks it before routing is reached (deep-audit 2026-08-19
+    follow-up; same fixture as tests/test_mcp_bridge.py).
+    """
+    monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
+
+
 # ═══════════════════════════════════════════════════════════════════
 # VAL-DEDUP-001: Only one ToolRegistry abstraction remains
 # ═══════════════════════════════════════════════════════════════════

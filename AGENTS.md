@@ -204,6 +204,12 @@ workspace. Three new modules; understanding their interaction is essential.
   `workspace_bound` servers (`${KAZMA_ACTIVE_WORKSPACE}` in command).
 - MCP filesystem must NOT stay on a static `kazma-data/workspace` fossil
   after Switch Repo / clone.
+- **Per-task scope guard (deep-audit 2026-08-19):** MCP rebind is
+  PROCESS-GLOBAL — a per-task `workspace_scope` does NOT rebind servers.
+  `mcp/manager.py:execute_mcp_tool` fail-closes with an actionable error
+  when a per-task scope targets a different root than the bound MCP root
+  (kill-switch `KAZMA_MCP_SCOPE_GUARD=0`). Per-workspace MCP instances
+  remain future work.
 - Path-traversal protection: `IdeService.resolve()` does a string-level
   `normpath` `..` check + containment backstop (symlink/junction-aware).
 

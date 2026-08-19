@@ -406,5 +406,51 @@ Patch-4 validation: py_compile over all edited files; gateway + output
 routing + swarm flows + settings suites 193 passed; regressions + keepalive
 + G1 latency 17 passed (the G1 gate now runs under `-m "not slow"`).
 
+## 12. Patch 5 (same day, deferrals)
+
+1. Fixed finding #15c (was deferred) — Telegram update processing now runs
+   OFF the poll loop via per-chat serialization chains
+   (`_dispatch_update_to_chain` / `_process_update_chained` /
+   `_process_update`): voice STT and media downloads no longer stall every
+   subsequent Telegram update, while same-chat message order is preserved
+   (the handler's per-thread lock processes turns in enqueue order, so
+   naive task-spawning would have inverted same-chat turns). Different
+   chats proceed concurrently; updates without chat identity run unchained
+   off-loop; chain tasks are strong-referenced by the chain map itself.
+2. Fixed finding #11 (was deferred) — a per-task workspace scope guard in
+   `mcp/manager.py:execute_mcp_tool` fail-closes MCP calls when a
+   `workspace_scope` targets a different root than the process-bound MCP
+   root, with an actionable error naming both remediations. Full
+   per-workspace MCP instances remain future work; until then the
+   cross-repo leak is a loud denial instead of a silent wrong-repo
+   operation. Kill-switch: `KAZMA_MCP_SCOPE_GUARD=0` (default on; only
+   fires under an active per-task scope with genuinely differing roots).
+3. Follow-up fix — `tests/test_mcp_bridge.py` (4 tests) and
+   `tests/test_dedup_tool_registries.py` (1 test) were failing because the
+   commitment layer's unregistered-mutator fail-closed DENY (default ON
+   since 2026-08-15) blocks their fabricated tool names before routing is
+   reached. Added an autouse `KAZMA_COMMITMENT_ENABLED=0` fixture to both
+   files (they test routing plumbing, not commitment policy).
+
+### New finding #23 (discovered during patch 5): CI on main is RED and
+### predates this audit
+
+Live CI history shows `failure` verdicts going back BEFORE today's audit
+work (e7225be4, f46f51a2 — 134 failing tests in that run, including
+crashed-chunk artifacts), 47 failing tests at patch-2 (of which 11
+`test_session_directory.py` failures pass locally and are environmental).
+Clusters: the commitment-choke-vs-fake-tools class (partially fixed in
+item 3 above), `test_browser_boot_policy`, `test_chat_sse_fix` (flaky
+chunk), `kazma-core/tests` memory/IDE files, a README-drift test, and
+document-certification. The audit's original CI analysis examined
+configuration, not live run history — the gate itself is honest (no
+`|| true`) and has been faithfully reporting a red main. Triage of the
+remaining ~40 CI failures is recommended as the next work item.
+
+Patch-5 validation: py_compile over all edited files; telegram (6 files) +
+gateway + output-routing 88 passed; MCP suites (hitl/servers-store/
+win32-shim/auth + embedded gateway) 32 passed; bridge + dedup + audit
+regressions 56 passed (17 regressions total in the audit file).
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
