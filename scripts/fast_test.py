@@ -219,7 +219,20 @@ def main() -> int:
                 if failed_here:
                     failure_logs.append(log)
             elif code == 124:
-                poison.append(f"{f.relative_to(REPO)} (hang)")
+                # Identify WHICH test hangs: rerun verbosely with a short
+                # per-test timeout — the last line naming a test is the
+                # best suspect (deep-audit 2026-08-19 CI triage).
+                _, diag = run_pytest(
+                    [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=20",
+                     "--continue-on-collection-errors", "-v"],
+                    120.0,
+                )
+                last = next(
+                    (ln.strip() for ln in reversed(diag.splitlines())
+                     if "::" in ln),
+                    "unknown",
+                )
+                poison.append(f"{f.relative_to(REPO)} (hang; last test line: {last})")
             else:
                 poison.append(f"{f.relative_to(REPO)} (exit={code})")
 

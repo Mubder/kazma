@@ -510,5 +510,38 @@ model_selection 33, discord 21, audit_followthrough + swarm_api 33,
 ide_service 8, memory_v2_phase5 10, browser_boot (skipped with
 playwright present: passes), mcp_server 26.
 
+## 14. Patch 7 (same day, CI triage round 2 — via the new digests)
+
+Round 1 cut CI from 49 failing tests to **6** (and the e2e exit-5 poison
+is gone). Round 2 root-causes the six from the first-ever traceback
+digests:
+
+1. **CI never had numpy** — `compute_local_ppr` silently degrades to
+   "uniform on seeds" without it (ppr.py:128-136), so
+   `test_ppr_directed_flow_decay` KeyErrored on 'france' and the
+   belief-graph multi-hop recall failed. numpy (small pure wheel) added to
+   the CI install. CI had been testing the DEGRADED pagerank all along.
+2. **`test_read_url_extracts_content` mocked the wrong layer** — it
+   patched `httpx.AsyncClient`, but the fetch ladder builds clients via
+   the scraping factory and fell through to REAL network rungs on CI
+   (its sibling `test_read_url_http_error` already documented this
+   lesson). Rewritten to mock the module seams
+   (`_fetch_via_optional_backends` + `_get_capped`) — deterministic
+   everywhere.
+3. **`test_pdf_parser_arabic_logical_order_pymupdf` over-specified the
+   bake-off winner** — the load-bearing invariant (Arabic logical order,
+   not visual reverse) PASSED on CI; only the `extractor == "pymupdf"`
+   assertion failed because pypdfium2 legitimately won the scored bake-off
+   on CI's font stack. Assertion relaxed to accept either tier-1 backend.
+4. **`test_still_not_doing.py` Linux hang** — still undiagnosed (the
+   digest only covers failures, and the per-file retry reported only
+   "(hang)"). fast_test now reruns hung files verbosely with a 20s
+   per-test timeout and names the last-started test in the POISON entry —
+   the next CI run pinpoints it.
+
+Patch-7 validation: tools_quickwins + document_parsers_phase4 +
+memory_v2 phase2/phase_b 75 passed locally; fast_test + ci.yml
+compile/lint-clean.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

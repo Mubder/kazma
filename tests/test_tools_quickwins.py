@@ -155,12 +155,25 @@ class TestReadUrl:
 
         fake_trafilatura = _make_mock_trafilatura("Hello World")
         with (
-            patch("httpx.AsyncClient", return_value=mock_client),
             patch.dict(sys.modules, {"trafilatura": fake_trafilatura}),
+            patch(
+                "kazma_core.tools.read_url._fetch_via_optional_backends",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "kazma_core.tools.read_url._get_capped",
+                new=AsyncMock(return_value=(mock_response, html, False)),
+            ),
         ):
+            # Deterministic seams (deep-audit 2026-08-19 CI triage): the old
+            # test patched httpx.AsyncClient, but the fetch ladder builds
+            # its client via the scraping factory and falls through to REAL
+            # network rungs when that patch doesn't intercept — same lesson
+            # as test_read_url_http_error below. Mock the optional-backends
+            # rung and the capped GET instead.
             from kazma_core.tools.read_url import read_url
 
-            result = await read_url("https://example.com")
+            result = await read_url("https://example.com/extract-test")
 
         assert "Hello World" in result
 
