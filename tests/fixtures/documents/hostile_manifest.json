@@ -132,11 +132,12 @@
       "byte_size": 53,
       "category": "corruption",
       "config_overrides": {},
-      "description": "A truncated/malformed cross-reference table fails closed in isolation.",
+      "description": "A truncated/malformed cross-reference table fails closed in isolation; a tolerant parser may instead read it as zero pages, which read_ir rejects as an unsupported format rather than leaking a raw ValueError (deep-audit 2026-08-19).",
       "disposition": "reject",
       "expected_codes": [
         "parser_worker_failure",
-        "document_parse_error"
+        "document_parse_error",
+        "unsupported_document_format"
       ],
       "filename": "malformed-xref.pdf",
       "id": "pdf-malformed-xref",

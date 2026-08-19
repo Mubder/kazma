@@ -670,5 +670,34 @@ extracts ERRORS sections too, so the next run pinpoints them.
 Patch-11 validation: determinism + certification JSON + audit regressions
 24 passed; all touched files compile-clean.
 
+## 19. Patch 12 (same day, round 7 — the last two root causes)
+
+Round-6 CI: session_directory didn't recur; the ERRORS digest nailed the
+chat_sse flake; the certification failure finally traced to a REAL
+product bug:
+
+1. **chat_sse / session_directory CI flake family** — the shared
+   `reset_session_manager()` singleton re-creates against the REAL
+   `data_dir()/chat_sessions.db`; cross-file interference corrupted it on
+   CI and the next test's SETUP died with `sqlite3.OperationalError:
+   disk I/O error` — a random victim each run. Both files' autouse
+   fixtures now monkeypatch `paths.data_dir` to a tmp dir before reset.
+2. **REAL BUG — `DocumentService.read_ir` leaked a raw ValueError on
+   zero-page documents**: `last = len(document.pages)` makes `last=0 <
+   first=1`, hitting the caller-argument error ("page selector is
+   invalid") for what is degenerate DOCUMENT content. A tolerant parse of
+   the hostile `malformed-xref.pdf` produced exactly that, failing
+   certification on every platform (the old Windows-skip assumed Linux
+   sandboxes contained it; CI runners don't). Zero-page documents now
+   raise typed `DocumentFormatError` ("unsupported_document_format"), the
+   hostile case accepts that outcome alongside the sandbox codes, and the
+   committed manifest was regenerated (canonical fields only).
+   **Certification now PASSES on Windows too — the skipif was removed and
+   the baseline gate runs on every platform.**
+
+Patch-12 validation: full certification PASS locally (was FAIL);
+certification + chat_sse + session_directory + audit regressions 74
+passed; manifest determinism 4 passed post-regeneration.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

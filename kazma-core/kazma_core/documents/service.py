@@ -874,6 +874,13 @@ class DocumentService:
             raise ValueError("max_chars must be a positive integer")
         first = page if page is not None else (page_start or 1)
         last = page if page is not None else (page_end or len(document.pages))
+        if not document.pages:
+            # Degenerate parse output — a hostile/malformed file a parser
+            # tolerantly read as ZERO pages. This is document content, not a
+            # caller argument error: the raw ValueError this used to raise
+            # leaked through the typed boundary and failed certification on
+            # every platform (deep-audit 2026-08-19 CI triage, round 7).
+            raise DocumentFormatError("Document contains no readable pages")
         if first < 1 or last < first:
             raise ValueError("page selector is invalid")
         selected = [

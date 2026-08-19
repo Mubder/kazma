@@ -302,10 +302,13 @@ _CASES = (
         "pdf-malformed-xref",
         "malformed-xref.pdf",
         "corruption",
-        "A truncated/malformed cross-reference table fails closed in isolation.",
+        "A truncated/malformed cross-reference table fails closed in isolation; "
+        "a tolerant parser may instead read it as zero pages, which read_ir "
+        "rejects as an unsupported format rather than leaking a raw "
+        "ValueError (deep-audit 2026-08-19).",
         "parse",
         "reject",
-        ("parser_worker_failure", "document_parse_error"),
+        ("parser_worker_failure", "document_parse_error", "unsupported_document_format"),
     ),
     HostileCorpusCase(
         "pdf-page-limit",

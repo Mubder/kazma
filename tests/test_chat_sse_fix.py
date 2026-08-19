@@ -31,10 +31,17 @@ from kazma_ui.sse_chat import _stream_langgraph_events, create_sse_chat_router
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_session_store():
-    """Reset the shared SessionManager singleton before each test."""
+def _reset_shared_session_store(tmp_path, monkeypatch):
+    """Reset the shared SessionManager singleton before each test.
+
+    Isolated against a tmp data dir: reset_session_manager() re-creates
+    against the REAL data_dir()/chat_sessions.db, so cross-file
+    interference on CI produced sqlite "disk I/O error" setup failures in
+    a RANDOM test of this file each run (deep-audit 2026-08-19 CI triage).
+    """
     from kazma_ui.session_manager import reset_session_manager
 
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
     reset_session_manager()
 
 

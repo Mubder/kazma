@@ -157,17 +157,16 @@ class TestCertificationRunner:
         }
         assert required <= names, f"Missing required gates: {required - names}"
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "Hostile-corpus parser leaks a raw ValueError on malformed-xref.pdf "
-            "because Windows Job Objects cannot enforce the CPU-time limits that "
-            "contain it on Linux (§19E sandbox limitation). The cert stays "
-            "enforced on Linux/CI; the proper fix is a parser-boundary change."
-        ),
-    )
     def test_hostile_corpus_certification_passes_on_baseline(self, tmp_path):
-        """The hostile corpus certifier should pass against its own generated corpus."""
+        """The hostile corpus certifier should pass against its own generated corpus.
+
+        Runs on ALL platforms since 2026-08-19 (deep-audit round 7): the
+        old Windows skip existed because a tolerant zero-page parse of
+        malformed-xref.pdf leaked a raw ValueError through the typed
+        boundary; read_ir now raises DocumentFormatError for zero-page
+        documents and the case accepts that outcome, so certification
+        passes on Windows and Linux alike.
+        """
         from kazma_core.documents.certification import certify_hostile_corpus
 
         result = certify_hostile_corpus(tmp_path / "hostile-cert")

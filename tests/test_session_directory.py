@@ -23,7 +23,13 @@ from kazma_ui.session_manager import (
 
 
 @pytest.fixture(autouse=True)
-def _isolated(tmp_path):
+def _isolated(tmp_path, monkeypatch):
+    reset_session_manager()
+    # Isolate the session-manager DB too: reset_session_manager() targets
+    # the REAL data_dir()/chat_sessions.db, which cross-file interference
+    # corrupted on CI ("disk I/O error", the 11-test ERROR flake family;
+    # deep-audit 2026-08-19 CI triage).
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: tmp_path)
     reset_session_manager()
     store = ConfigStore(
         db_path=str(tmp_path / "settings.db"),
