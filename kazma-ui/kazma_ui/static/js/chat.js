@@ -1501,6 +1501,10 @@
         inputEl.value = '';
         inputEl.style.height = 'auto';
         syncSendButtonForDraft();
+        // Visible in the transcript (parity with /steer) — an invisible
+        // command that only toasts reads as "not really working"
+        // (command audit 2026-08-19).
+        appendMessage('user', '/abort');
         if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
         fetch('/api/chat/abort', {
@@ -1611,7 +1615,31 @@
       return;
     }
 
+    // Unknown slash-command hint (command audit 2026-08-19): a typo like
+    // /about used to silently ride to the LLM as a prompt and burn a turn.
+    // Non-blocking — the message still sends (backend/graph may know
+    // commands the composer list doesn't), but the user gets a pointer.
+    if (text.charAt(0) === '/') {
+      var _knownHeads = {};
+      SLASH_COMMANDS.forEach(function(c) {
+        _knownHeads[_cmdHead(c.cmd)] = true;
+      });
+      ['/compact', '/research', '/swarm', '/dup', '/voice'].forEach(function(h) {
+        _knownHeads[h] = true;
+      });
+      var _head = _cmdHead(text);
+      if (!_knownHeads[_head] && window.showToast) {
+        window.showToast(
+          'Unknown command ' + _head + ' — sending anyway. /help lists what works here.',
+          'info', 3500);
+      }
+    }
+
     // Handle /reset command locally
+    // NOTE: the missing `return` below is DELIBERATE — the local clear is
+    // instant feedback; the fall-through then sends "/reset" to the backend
+    // fast path (SSE) / intercept (WS), which deletes the thread's
+    // checkpoints and persists the cleared session. That is the real reset.
     if (text.toLowerCase() === '/reset') {
       messagesEl.innerHTML =
         '<div class="chat-welcome">' +

@@ -756,5 +756,42 @@ Patch-13 validation: long-task suite 14 passed (4 new regressions);
 gateway + slash-turns + capacity 64 passed; all touched files
 compile-clean.
 
+## 21. Patch 14 (2026-08-19) — web command audit: real vs cosmetic
+
+**Trigger (user report):** `/about` in the Web UI showed an "aborting"
+toast with no message in the chat. `/about` does not exist anywhere in
+the codebase; the reported toast matches the `/abort` path exactly — the
+only "aborting" toast — which also left NO transcript bubble. That
+second symptom was a real defect class: commands whose only feedback is
+a toast read as "not really working".
+
+**Full inventory (web transports — SSE fallback + default WS bus):**
+
+| Command | SSE | WS | Verdict before this patch |
+|---|---|---|---|
+| `/yolo` (+on/off/status), `/long` `/mission` `/unrestricted` | fast path | intercept | REAL (both) |
+| `/steer` `/steer!` | real endpoints (checkpoint steer buffers + interrupt; transcript-persisted) | same | REAL |
+| `/abort` | real endpoint — cancels pump, writes `task_status=abandoned` + abort marker into the checkpoint (covers WS turns) | same | REAL but INVISIBLE (toast-only, no bubble) |
+| `/research deep …`, `/swarm …` (work forms) | rewritten → supervisor (same brain) | same | REAL |
+| `/reset` | fast path: `checkpointer.adelete_thread` + session cleared | **NO INTERCEPT** | **COSMETIC ON WS** — client cleared the UI locally, then "/reset" rode to the LLM as a plain prompt; server history survived |
+| `/compact` | fast path (needs_compaction → ainvoke) | **NO INTERCEPT** | SSE-only; cosmetic on WS |
+| `/help`, `/new`, `/voice*` | local-only by design | same | acceptable (settings/help) |
+
+**Fixes:**
+1. WS parity intercepts for `/reset` and `/compact` in `ws_chat.py`
+   (mirroring the SSE fast paths; capacity-frame replies). `/reset` is
+   now a REAL reset on both transports.
+2. `/abort` appends a user bubble before the toast (parity with
+   `/steer`) — commands are visible in the transcript.
+3. Unknown slash commands (e.g. `/about`) get a non-blocking hint toast
+   ("Unknown command /about — sending anyway. /help lists what works
+   here.") instead of silently riding to the LLM; the message still
+   sends in case the backend knows commands the composer list doesn't.
+4. Clarified the DELIBERATE `/reset` fall-through in chat.js (local
+   clear + backend reset is the real flow, not a missing `return`).
+5. `tests/test_web_command_parity.py` — 5 source-level guards pinning
+   the wiring (reset/compact on both transports, abort visibility,
+   unknown-slash hint, yolo/capacity intercepts).
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

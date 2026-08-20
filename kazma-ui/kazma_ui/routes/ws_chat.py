@@ -1021,6 +1021,89 @@ def create_ws_chat_router(
                             logger.debug("[WS-Chat] Failed persisting /long message")
                         continue
 
+                    # ── /reset — REAL reset on WS too (parity with the SSE
+                    # fast path). Without this intercept the client's local
+                    # UI clear was the ONLY effect and "/reset" went to the
+                    # LLM as a plain prompt — a cosmetic-only command
+                    # (command audit 2026-08-19).
+                    if text.lower().strip() == "/reset":
+                        _rs_graph = _get_graph()
+                        if (
+                            _rs_graph
+                            and hasattr(_rs_graph, "checkpointer")
+                            and _rs_graph.checkpointer
+                        ):
+                            try:
+                                await _rs_graph.checkpointer.adelete_thread(thread_id)
+                            except Exception as exc:
+                                logger.debug(
+                                    "[WS-Chat] failed to delete checkpoints on /reset: %s", exc
+                                )
+                        session.messages = []
+                        session.title = ""
+                        try:
+                            get_session_manager().put(session)
+                        except Exception:
+                            logger.debug("[WS-Chat] Failed persisting /reset")
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="capacity",
+                                data={"action": "reset", "reply": "🔄 Conversation cleared. Starting fresh."},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="stream_end",
+                                data={"capacity": True},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        continue
+
+                    # ── /compact — context compaction on WS too (parity
+                    # with the SSE fast path; previously SSE-only).
+                    if text.lower().strip() == "/compact":
+                        _cp_reply = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
+                        try:
+                            _cp_graph = _get_graph()
+                            if _cp_graph:
+                                _cp_cfg = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                                _cp_snap = await _cp_graph.aget_state(_cp_cfg)
+                                if _cp_snap and _cp_snap.values:
+                                    _cp_values = dict(_cp_snap.values)
+                                    _cp_values["needs_compaction"] = True
+                                    _cp_result = await _cp_graph.ainvoke(_cp_values, _cp_cfg)
+                                    from kazma_ui.sse_chat import _convert_messages_to_dicts as _cp_conv
+
+                                    session.messages = _cp_conv(_cp_result.get("messages", []))
+                                    try:
+                                        get_session_manager().put(session)
+                                    except Exception:
+                                        logger.debug("[WS-Chat] Failed persisting /compact")
+                                else:
+                                    _cp_reply = "🗜️ No conversation history found to compact yet."
+                            else:
+                                _cp_reply = "⚠️ Live graph not loaded."
+                        except Exception as exc:
+                            logger.error("[WS-Chat] failed to compact context: %s", exc)
+                            _cp_reply = "⚠️ Failed to compact context. (Compaction error)"
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="capacity",
+                                data={"action": "compact", "reply": _cp_reply},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="stream_end",
+                                data={"capacity": True},
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        continue
+
                     try:
                         from kazma_core.agent.slash_turns import rewrite_work_slash
 
