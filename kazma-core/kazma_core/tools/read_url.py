@@ -722,6 +722,34 @@ async def _try_firecrawl(url: str) -> str | None:
     return None
 
 
+def _is_registry_or_api_url(url: str) -> bool:
+    """URLs that never benefit from scraping backends (Firecrawl/Jina).
+
+    Registry RDAP endpoints, oEmbed lookups, and .json API paths return pure
+    JSON in ~300ms via direct httpx — routing them through Firecrawl adds
+    ~1s of API latency per call (and its 429 backoffs) for zero gain. Domain
+    sweeps batch dozens of these, so the fast-path is the difference between
+    a 15s and a 90s sweep (2026-08-21 domain-sweep follow-up).
+    """
+    try:
+        from urllib.parse import urlparse
+
+        host = (urlparse(url).hostname or "").lower()
+        path = (urlparse(url).path or "").lower()
+        q = (urlparse(url).query or "").lower()
+    except Exception:
+        return False
+    if host.startswith("rdap.") or ".rdap." in host:
+        return True
+    if path.endswith(".json") or "/api/" in path or "oembed" in path or "oembed" in q:
+        return True
+    # Well-known registry endpoints that don't carry rdap in the host.
+    for marker in ("verisign.com", "identitydigital", "iana.org"):
+        if marker in host:
+            return True
+    return False
+
+
 async def _fetch_via_optional_backends(url: str) -> str | None:
     """Try stronger optional backends before local httpx.
 
@@ -731,6 +759,12 @@ async def _fetch_via_optional_backends(url: str) -> str | None:
     """
     backend = (os.environ.get("KAZMA_FETCH_BACKEND") or "auto").strip().lower()
     if backend == "httpx":
+        return None
+    if _is_registry_or_api_url(url) and backend == "auto":
+        # JSON APIs answer faster and cleaner via direct httpx — skip the
+        # scraping backends entirely (their ~1s overhead per call was the
+        # gap between the promised ~300ms and the observed ~1.5s per name).
+        logger.debug("[read_url] registry/API fast-path for %s — direct httpx", url)
         return None
     if backend == "firecrawl":
         return await _try_firecrawl(url)
