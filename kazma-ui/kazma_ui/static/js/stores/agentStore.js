@@ -118,6 +118,10 @@ document.addEventListener('alpine:init', () => {
     _turnActive: false,
     /** True when we close the socket on purpose (session switch / reconnect). */
     _intentionalClose: false,
+    /** Last telemetry frame received (ms epoch) — feeds the stale-socket watchdog. */
+    _lastFrameAt: 0,
+    /** Interval handle for the stale-socket watchdog (set once in connect()). */
+    _stalenessTimer: null,
     /**
      * Outbound frames waiting for an OPEN socket (or re-send after drop
      * before prompt_ack). Each entry: { payload, expectAck, clientMsgId, attempts }.
@@ -217,6 +221,34 @@ document.addEventListener('alpine:init', () => {
     // ── Connection Lifecycle ─────────────────────────────────
     connect(sessionId) {
       if (!sessionId) return;
+      // Half-dead socket watchdog (2026-08-21 YOLO-silent incident): the
+      // server heartbeats active turns every ~4s. If a turn is active and no
+      // frame has arrived for 30s, the socket is presumed dead (idle NAT/
+      // proxy cull, system sleep) — the server-side write goes into the OS
+      // buffer and never errors, so neither side notices. Force-reconnect:
+      // the live-socket rebind means subsequent heartbeats + turn_complete
+      // reach the new tab without a manual refresh.
+      if (!this._stalenessTimer) {
+        this._stalenessTimer = setInterval(() => {
+          try {
+            if (!this._turnActive || !this._socket) return;
+            if (this._socket.readyState !== WebSocket.OPEN) return;
+            const silentFor = Date.now() - (this._lastFrameAt || 0);
+            if (silentFor < 30000) return;
+            console.warn(
+              '[AgentStore] Stale live socket — no frames for ' +
+                Math.round(silentFor / 1000) + 's during an active turn; reconnecting'
+            );
+            // The turn keeps running server-side (detached + persisted).
+            // _closeSocket detaches onclose, so schedule the reconnect here
+            // explicitly; the reconnect handshake re-arms the SessionStore
+            // poller via the "previous turn still running" status frame.
+            this._intentionalClose = false;
+            this._closeSocket();
+            this._scheduleReconnect();
+          } catch (e) { /* never let the timer throw */ }
+        }, 5000);
+      }
       if (this.sessionId === sessionId && this._socket && this._socket.readyState === WebSocket.OPEN) {
         return;
       }
@@ -656,6 +688,14 @@ document.addEventListener('alpine:init', () => {
 
       const type = frame.type;
       const data = frame.data || {};
+
+      // Liveness bookkeeping (2026-08-21 YOLO-silent incident): the server
+      // heartbeats active turns every 4s ("Still working after approval…").
+      // No frame for this long while a turn is active means the socket is
+      // half-dead (idle NAT/proxy cull, system sleep) — the server keeps
+      // running and persisting, but nothing renders until a manual refresh.
+      // The staleness watchdog below force-reconnects so delivery rebinds.
+      this._lastFrameAt = Date.now();
 
       // Keep chat.js idle-watchdog armed on any live frame
       try {

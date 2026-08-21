@@ -57,3 +57,18 @@ def test_capacity_and_yolo_intercepts_exist_on_both_transports():
     ws = _WS.read_text(encoding="utf-8")
     assert '"/yolo"' in sse and "is_capacity_command" in sse
     assert '"/yolo"' in ws and "is_capacity_command" in ws
+
+
+def test_stale_socket_watchdog_exists():
+    """Half-dead WS sockets must self-heal (2026-08-21 YOLO-silent incident):
+    the server heartbeats active turns every ~4s; no frame for 30s during an
+    active turn forces a reconnect so heartbeats/turn_complete reach the tab
+    without a manual refresh."""
+    js = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js").read_text(
+        encoding="utf-8"
+    )
+    assert "_stalenessTimer" in js and "_lastFrameAt" in js
+    assert "Stale live socket" in js
+    # The server side must log heartbeat sends for diagnosability.
+    ws = _WS.read_text(encoding="utf-8")
+    assert "approve heartbeat n=" in ws

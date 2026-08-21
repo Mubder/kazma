@@ -839,5 +839,45 @@ Patch-15 validation: 5 new regressions (append-not-clobber, WARNING
 failure log, backfill surface/heal, answered no-op, stale-checkpoint
 guard) + SSE/chat/command/session suites 57 passed.
 
+## 23. Patch 16 (2026-08-21) — live incident: silent run after YOLO approval
+
+**Symptom (user report):** clicked YOLO on the approval card — no sign
+the task was running; the response appeared only after a page refresh.
+
+**Forensics (live log + code trace):**
+1. 00:45:09 UTC — YOLO approved via the WS card (`scope=yolo`); the
+   server resumed the paused graph and ran it for **67 seconds** (7
+   supervisor iterations, dozens of tool calls), emitting the initial
+   "Running after yolo approval…" status plus a 4-second heartbeat the
+   whole way; the final 3,405-char answer was persisted and
+   `turn_complete` sent at 00:46:16.
+2. The client showed nothing — yet the socket remained server-side
+   CONNECTED the entire window (no disconnect until the user's refresh
+   at 00:49:42). Every link in the client dispatcher chain was verified
+   by inspection (status_update → isThinking + banner + progress panel;
+   approval_* cases; turn_complete replace-paint).
+3. Conclusion: a **half-dead WebSocket** — the connection died at the
+   network level (idle NAT/proxy cull during the paused HITL card,
+   system sleep, or a network blip) without either side noticing:
+   server writes go into the OS buffer and do not error, so `is_lost()`
+   reports CONNECTED while nothing reaches the browser. The durable
+   persist is why the refresh showed the answer.
+
+**Fixes:**
+1. **Client stale-socket watchdog** (`agentStore.js`): the server's 4s
+   turn heartbeats double as a liveness signal. If a turn is active and
+   no telemetry frame has arrived for 30s, the socket is force-closed
+   and reconnect scheduled — the live-socket rebind means subsequent
+   heartbeats and `turn_complete` reach the new tab without a manual
+   refresh. Paused HITL turns (`_turnActive=false`) never trigger it.
+2. **Server heartbeat logging**: approve-stream heartbeats log at INFO
+   every ~32s with the `lost=` flag, so a half-dead client socket is
+   distinguishable from "no heartbeats sent" in future forensics.
+3. `tests/test_web_command_parity.py::test_stale_socket_watchdog_exists`
+   pins both.
+
+Patch-16 validation: agentStore.js + ws_chat.py syntax-clean; parity +
+WS telemetry suites 10 passed.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).

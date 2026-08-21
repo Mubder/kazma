@@ -2214,6 +2214,19 @@ def create_ws_chat_router(
                                     )
                                 except asyncio.TimeoutError:
                                     heartbeat_n += 1
+                                    if heartbeat_n % 8 == 1:
+                                        # Diagnosability (2026-08-21 YOLO-silent
+                                        # incident): heartbeat sends were
+                                        # invisible in the log, so a half-dead
+                                        # client socket was undistinguishable
+                                        # from "no heartbeats sent".
+                                        logger.info(
+                                            "[WS-Chat] approve heartbeat n=%d "
+                                            "thread=%s lost=%s",
+                                            heartbeat_n,
+                                            target_thread_id[:12],
+                                            is_lost(),
+                                        )
                                     if not is_lost():
                                         await send(
                                             TelemetryEvent(
