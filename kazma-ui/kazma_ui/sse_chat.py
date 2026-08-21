@@ -183,6 +183,193 @@ def _last_assistant_text(messages: list[Any] | None) -> str:
     return ""
 
 
+def _module_store():
+    """Session-store accessor for module-level helpers.
+
+    ``_get_store`` is a closure inside the router factory; the extracted
+    detached-persist/backfill helpers live at module scope and use the
+    same singleton through this alias.
+    """
+    from kazma_ui.session_manager import get_session_manager
+
+    return get_session_manager()
+
+
+# Graph accessor for module-level helpers: populated by the router factory
+# with its live ``_get_graph`` closure at creation time.
+_module_graph_holder: dict[str, Any] = {"getter": None}
+
+
+def _module_graph() -> Any:
+    getter = _module_graph_holder.get("getter")
+    if getter is None:
+        return None
+    try:
+        return getter()
+    except Exception:
+        return None
+
+
+async def _persist_detached_reply(
+    graph: Any, config: dict, session_id: str, thread_id: str
+) -> None:
+    """Persist a detached turn's final reply into the session store.
+
+    Extracted from the pump done-callback (live incident 2026-08-21) so the
+    persistence contract is testable:
+
+    * The reply is APPENDED after a trailing USER message. The old
+      ``has_asst`` logic overwrote the PREVIOUS turn's assistant reply in
+      multi-turn sessions — it would have replaced the prior answer with
+      the new one and lost history.
+    * Failures log at WARNING (they were debug-swallowed, leaving the user
+      waiting hours for a reply that existed in the checkpoint while the
+      log showed nothing).
+    """
+    try:
+        snap = await graph.aget_state(config)
+        asst = ""
+        if snap and snap.values:
+            msgs = snap.values.get("messages") or []
+            asst = _last_assistant_text(msgs)
+        with _module_store().transact(session_id) as sess:
+            if asst:
+                trailing = next(
+                    (
+                        m
+                        for m in reversed(sess.messages)
+                        if isinstance(m, dict)
+                        and m.get("role") in ("user", "assistant")
+                        and str(m.get("content") or "").strip()
+                    ),
+                    None,
+                )
+                if trailing is not None and trailing.get("role") == "user":
+                    # Normal detached completion: the user bubble is the last
+                    # entry — append the reply after it.
+                    sess.messages.append({"role": "assistant", "content": asst})
+                else:
+                    # No trailing user turn (e.g. a pending bubble from an
+                    # incremental persist) — replace the last assistant /
+                    # pending message as before.
+                    for m in reversed(sess.messages):
+                        if isinstance(m, dict) and m.get("role") == "assistant":
+                            m["content"] = asst
+                            m.pop("pending", None)
+                            break
+            else:
+                # The turn completed WITHOUT producing any assistant text.
+                # Never leave the pending bubble stuck — resolve it with a
+                # recovery notice so returning users see an explanation.
+                for m in reversed(sess.messages):
+                    if isinstance(m, dict) and m.get("role") == "assistant" and m.pop(
+                        "pending", False
+                    ):
+                        m["content"] = (
+                            "⚠️ Your previous turn finished without producing "
+                            "a reply (the model may have failed silently). "
+                            "Please try again."
+                        )
+                        break
+        logger.info(
+            "[SSE] Detached turn completed for thread=%s — response persisted (%d chars)",
+            thread_id[:12],
+            len(asst),
+        )
+    except Exception:
+        logger.warning(
+            "[SSE] Detached turn persist FAILED for thread=%s session=%s "
+            "(reply is still in the checkpoint; the session was NOT updated)",
+            thread_id[:12],
+            session_id[:12],
+            exc_info=True,
+        )
+
+
+async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
+    """Surface a checkpointed reply for a session whose last message is the
+    user's (live incident 2026-08-21 recovery).
+
+    When the detached-pump persist fails (or the process dies mid-turn),
+    the completed reply still lives in the thread's checkpoint. On session
+    load, if the transcript ends with an unanswered user message AND the
+    checkpoint state ends with an assistant reply, append it — and heal
+    the stored session so the fix outlives the reload.
+    Returns the (possibly extended) message list.
+    """
+    messages = list(getattr(session, "messages", None) or [])
+    last = next(
+        (
+            m
+            for m in reversed(messages)
+            if isinstance(m, dict) and str(m.get("content") or "").strip()
+        ),
+        None,
+    )
+    if not isinstance(last, dict) or (last.get("role") or "").lower() != "user":
+        return messages
+    try:
+        live = _module_graph()
+        tid = getattr(session, "thread_id", "") or ""
+        if not live or not tid or not getattr(live, "checkpointer", None):
+            return messages
+        snap = await live.aget_state(
+            {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
+        )
+        vals = (snap.values or {}) if snap else {}
+        cp_msgs = [m for m in (vals.get("messages") or []) if isinstance(m, dict)]
+        cp_last = next(
+            (
+                m
+                for m in reversed(cp_msgs)
+                if str(m.get("content") or "").strip()
+            ),
+            None,
+        )
+        asst = _last_assistant_text(vals.get("messages") or [])
+        cp_last_role = ""
+        if isinstance(cp_last, dict):
+            cp_last_role = (cp_last.get("role") or cp_last.get("type") or "").lower()
+        if not asst or cp_last_role not in ("assistant", "ai"):
+            return messages
+        # Already present? (idempotent heal)
+        if any(
+            isinstance(m, dict)
+            and m.get("role") == "assistant"
+            and str(m.get("content") or "") == asst
+            for m in messages
+        ):
+            return messages
+        messages = messages + [{"role": "assistant", "content": asst}]
+        with _module_store().transact(session.session_id) as sess:
+            trailing = next(
+                (
+                    m
+                    for m in reversed(sess.messages)
+                    if isinstance(m, dict) and str(m.get("content") or "").strip()
+                ),
+                None,
+            )
+            already = any(
+                isinstance(m, dict)
+                and m.get("role") == "assistant"
+                and str(m.get("content") or "") == asst
+                for m in sess.messages
+            )
+            if trailing is not None and trailing.get("role") == "user" and not already:
+                sess.messages.append({"role": "assistant", "content": asst})
+                logger.info(
+                    "[SSE] Backfilled unanswered turn from checkpoint for "
+                    "session=%s (%d chars)",
+                    session.session_id[:12],
+                    len(asst),
+                )
+        return messages
+    except Exception:
+        logger.debug("[SSE] unanswered-turn checkpoint backfill skipped", exc_info=True)
+        return messages
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # LangGraph event → SSE mapping
 # ══════════════════════════════════════════════════════════════════════════
@@ -372,65 +559,13 @@ async def _stream_langgraph_events(
                     if not session_id:
                         return
 
-                    async def _persist():
-                        try:
-                            snap = await graph.aget_state(config)
-                            asst = ""
-                            if snap and snap.values:
-                                msgs = snap.values.get("messages") or []
-                                asst = _last_assistant_text(msgs)
-                            # T4: mutate + persist under the per-session lock so
-                            # this never interleaves with a live turn's
-                            # incremental persist on the same ChatSession.
-                            with _get_store().transact(session_id) as sess:
-                                if asst:
-                                    has_asst = any(
-                                        m.get("role") == "assistant"
-                                        for m in sess.messages
-                                    )
-                                    if not has_asst:
-                                        sess.messages.append(
-                                            {"role": "assistant", "content": asst}
-                                        )
-                                    else:
-                                        for m in reversed(sess.messages):
-                                            if m.get("role") == "assistant":
-                                                m["content"] = asst
-                                                m.pop("pending", None)
-                                                break
-                                else:
-                                    # The turn completed WITHOUT producing any
-                                    # assistant text. Never leave the pending
-                                    # bubble stuck for 90s — resolve it with a
-                                    # recovery notice so returning users see an
-                                    # explanation instead of nothing.
-                                    for m in reversed(sess.messages):
-                                        if m.get("role") == "assistant" and m.pop(
-                                            "pending", False
-                                        ):
-                                            m["content"] = (
-                                                "⚠️ Your previous turn finished "
-                                                "without producing a reply (the "
-                                                "model may have failed silently). "
-                                                "Please try again."
-                                            )
-                                            break
-                            logger.info(
-                                "[SSE] Detached turn completed for thread=%s — "
-                                "response persisted (%d chars)",
-                                thread_id[:12], len(asst),
-                            )
-                        except Exception:
-                            logger.debug(
-                                "[SSE] Detached turn persist failed for thread=%s",
-                                thread_id, exc_info=True,
-                            )
-
                     # T5: schedule on the captured turn loop from whichever
                     # thread fired the callback (get_event_loop() would raise
                     # RuntimeError off-loop and drop the persist silently).
                     _turn_loop.call_soon_threadsafe(
-                        lambda: _turn_loop.create_task(_persist())
+                        lambda: _turn_loop.create_task(
+                            _persist_detached_reply(graph, config, session_id, thread_id)
+                        )
                     )
 
                 pump_task.add_done_callback(_on_pump_done)
@@ -916,6 +1051,10 @@ def create_sse_chat_router(
         if graph_holder and graph_holder.get("graph"):
             return graph_holder.get("graph")
         return graph
+
+    # Module-level helpers (detached persist / unanswered backfill) share
+    # this live resolver (live incident 2026-08-21).
+    _module_graph_holder["getter"] = _get_graph
 
     def _get_llm() -> Any:
         """Resolve the live LLM client (never a stale mount-time snapshot)."""
@@ -2025,7 +2164,10 @@ def create_sse_chat_router(
         if not session:
             return []
 
-        messages = list(session.messages or [])
+        # Unanswered-turn backfill (live incident 2026-08-21): if the last
+        # message is the user's, the detached-pump persist may have failed
+        # after the graph completed — the checkpoint still holds the reply.
+        messages = await _checkpoint_backfill_unanswered(session)
         # Hydrate from checkpointer when:
         # 1. messages is completely empty (original behavior), OR
         # 2. there are messages but NO assistant replies (partial sync from

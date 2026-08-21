@@ -793,5 +793,51 @@ a toast read as "not really working".
    the wiring (reset/compact on both transports, abort visibility,
    unknown-slash hint, yolo/capacity intercepts).
 
+## 22. Patch 15 (2026-08-21) — live incident: reply generated but never
+## delivered after Web tab disconnect
+
+**Symptom (user report):** Web question at 01:27 AM ("what was my XHypert
+name…") — no response ever; reload showed only the question.
+
+**Forensics (log + PG checkpoint + session store + py-spy on the live
+process):**
+1. 22:27:19 UTC — the Web tab disconnected mid-turn (refresh). The
+   detached pump correctly kept the turn running (3 `file_search` calls
+   completed; the supervisor's final answer — 898 tokens, `tool_calls=0`
+   — completed OK per the LLM trace DB).
+2. The reply WAS written to the thread's checkpoint (messages channel
+   v1258 ends with the full XHypert answer).
+3. The pump's done-callback persist (`_on_pump_done` → `_persist`)
+   **failed with a DEBUG-swallowed exception** — the INFO success log is
+   absent, nothing at WARNING+, and py-spy shows no hung frames: the
+   failure was completely invisible while the user waited hours.
+4. The session store row was frozen at the disconnect timestamp
+   (22:27:19) — reload read the stale session; the checkpoint answer was
+   never surfaced.
+
+**Second bug found in the same block:** the persist logic's `has_asst`
+check OVERWRITES the previous turn's assistant reply in multi-turn
+sessions — for this incident it would have replaced the prior answer
+(the AlfaFit sweep) with the new one instead of appending.
+
+**Fixes:**
+1. `_persist_detached_reply()` (extracted from the closure, testable):
+   appends after a trailing USER message (only replaces a message when
+   there is no trailing user turn / pending bubble); failures log at
+   **WARNING** with the checkpoint-still-has-it hint.
+2. `_checkpoint_backfill_unanswered()` wired into
+   `GET /api/chat/sessions/{id}/messages`: when the transcript ends with
+   an unanswered user message AND the checkpoint state ends with an
+   assistant reply, the reply is surfaced and the stored session healed
+   — this RECOVERS the incident's answer on the next chat open (guard:
+   a checkpoint not ending in an assistant message never fabricates an
+   answer).
+3. Module-level `_module_store`/`_module_graph` accessors bridge the
+   extracted helpers past the router-factory closures.
+
+Patch-15 validation: 5 new regressions (append-not-clobber, WARNING
+failure log, backfill surface/heal, answered no-op, stale-checkpoint
+guard) + SSE/chat/command/session suites 57 passed.
+
 Server restart required for runtime changes to take effect (per the standing
 directive, the server is never restarted by the agent).
