@@ -533,3 +533,106 @@ def test_fallback_embedder_loads_when_cached(monkeypatch):
     emb = LocalSentenceTransformerEmbedder(allow_download=False)
     assert emb._ensure_model() is st_ctor.return_value  # cached → loads
     assert st_ctor.call_count == 1
+
+
+# ── Patch 17 — scraper solidity (2026-08-21 domain-sweep incident) ───────
+
+
+def test_json_payload_detection():
+    from kazma_core.tools.read_url import _is_json_payload
+
+    assert _is_json_payload("application/json", "") is True
+    assert _is_json_payload("application/rdap+json", "") is True
+    assert _is_json_payload("", '{"errorCode":404,"title":"Object not found"}') is True
+    assert _is_json_payload("", '  [{"name": "x"}]') is True
+    assert _is_json_payload("text/html", "<html><body>") is False
+    assert _is_json_payload("", "") is False
+
+
+@pytest.mark.asyncio
+async def test_rdap_404_json_returns_as_is(monkeypatch):
+    """A FREE domain = RDAP 404 + JSON body — that body IS the answer and
+    must return without Firecrawl/Playwright recovery."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    ru = __import__("importlib").import_module("kazma_core.tools.read_url")
+
+    resp = MagicMock()
+    resp.text = '{"errorCode":404,"title":"Object not found"}'
+    resp.status_code = 404
+    resp.headers = {"content-type": "application/rdap+json"}
+
+    recover = AsyncMock(return_value=None)
+    monkeypatch.setattr(ru, "_fetch_via_optional_backends", AsyncMock(return_value=None))
+    monkeypatch.setattr(ru, "_get_capped", AsyncMock(return_value=(resp, resp.text, False)))
+    monkeypatch.setattr(ru, "_recover_hard_page", recover)
+    monkeypatch.setattr(ru, "_cache_get", lambda *a, **k: None)
+
+    out = await ru._fetch_full_text("https://rdap.identitydigital.services/rdap/domain/free.ai")
+    assert "Object not found" in out
+    assert "JSON response returned as-is" in out
+    # No hard-page recovery — the 10s Playwright fetch is gone.
+    assert recover.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_json_success_short_circuits_extraction(monkeypatch):
+    """200 JSON must skip trafilatura/thin-extract/recovery entirely."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    ru = __import__("importlib").import_module("kazma_core.tools.read_url")
+
+    resp = MagicMock()
+    resp.text = '{"name": "fitxai", "registered": true}'
+    resp.status_code = 200
+    resp.headers = {"content-type": "application/json"}
+
+    extract = MagicMock(return_value="SHOULD NOT BE CALLED")
+    recover = AsyncMock(return_value=None)
+    monkeypatch.setattr(ru, "_fetch_via_optional_backends", AsyncMock(return_value=None))
+    monkeypatch.setattr(ru, "_get_capped", AsyncMock(return_value=(resp, resp.text, False)))
+    monkeypatch.setattr(ru, "_extract_text", extract)
+    monkeypatch.setattr(ru, "_should_try_playwright", MagicMock(return_value=False))
+    monkeypatch.setattr(ru, "_recover_hard_page", recover)
+    monkeypatch.setattr(ru, "_cache_get", lambda *a, **k: None)
+
+    out = await ru._fetch_full_text("https://rdap.verisign.com/com/v1/domain/fitxai.com")
+    assert out == '{"name": "fitxai", "registered": true}'
+    assert extract.call_count == 0
+    assert recover.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_html_404_no_recovery(monkeypatch):
+    """A plain HTML 404 must not launch the recovery cascade either —
+    a browser cannot invent a missing page."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    ru = __import__("importlib").import_module("kazma_core.tools.read_url")
+
+    resp = MagicMock()
+    resp.text = "<html><body>404 not found</body></html>"
+    resp.status_code = 404
+    resp.headers = {"content-type": "text/html"}
+
+    recover = AsyncMock(return_value=None)
+    monkeypatch.setattr(ru, "_fetch_via_optional_backends", AsyncMock(return_value=None))
+    monkeypatch.setattr(ru, "_get_capped", AsyncMock(return_value=(resp, resp.text, False)))
+    monkeypatch.setattr(ru, "_recover_hard_page", recover)
+    monkeypatch.setattr(ru, "_cache_get", lambda *a, **k: None)
+
+    out = await ru._fetch_full_text("https://example.com/missing")
+    assert "404" in out and "does not exist" in out
+    assert recover.await_count == 0
+
+
+def test_firecrawl_cooldown_gate():
+    ru = __import__("importlib").import_module("kazma_core.tools.read_url")
+    import time
+
+    ru._FIRECRAWL_COOLDOWN["until"] = time.monotonic() + 60
+    try:
+        assert ru._firecrawl_in_cooldown() is True
+    finally:
+        ru._FIRECRAWL_COOLDOWN["until"] = 0.0
+    assert ru._firecrawl_in_cooldown() is False

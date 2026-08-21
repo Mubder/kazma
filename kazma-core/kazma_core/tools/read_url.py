@@ -132,6 +132,37 @@ def _is_textual_content_type(content_type: str) -> bool:
     return any(tok in ct for tok in _TEXTUAL_CONTENT_TYPES)
 
 
+def _is_json_payload(content_type: str, body: str) -> bool:
+    """True when the response is a JSON document (registry APIs, oEmbed, etc.).
+
+    JSON must short-circuit the whole HTML pipeline: trafilatura discards it
+    ("discarding data: None"), the empty extract is misclassified as a
+    thin/JS-shell page, and hard-page recovery then launches Playwright for a
+    10s+ browser fetch of what was a 300ms JSON call — the exact slowness the
+    2026-08-21 domain-sweep incident flagged (RDAP/oEmbed/Twitter-info JSON
+    endpoints each burning ~10s).
+    """
+    ct = (content_type or "").lower()
+    if "json" in ct:
+        return True
+    sn = (body or "").lstrip()[:1]
+    return sn in ("{", "[")
+
+
+# Firecrawl process-wide cooldown: when the API starts returning 429, parallel
+# read_url fan-outs (domain sweeps batch 4-8 URLs) each burn 1.5+3+4.5s of
+# backoff against an already-limited quota. After two consecutive 429-exhausted
+# attempts, skip Firecrawl entirely for 5 minutes and let the ladder fall
+# through to direct httpx (2026-08-21 domain-sweep incident).
+_FIRECRAWL_COOLDOWN: dict[str, float] = {"until": 0.0}
+
+
+def _firecrawl_in_cooldown() -> bool:
+    import time as _time
+
+    return _time.monotonic() < _FIRECRAWL_COOLDOWN["until"]
+
+
 async def _get_capped(client: Any, url: str, max_bytes: int) -> tuple[Any, str, bool]:
     """GET *url* with a streamed, byte-capped body read.
 
@@ -611,6 +642,9 @@ async def _try_firecrawl(url: str) -> str | None:
     api_key = (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip()
     if not api_key:
         return None
+    if _firecrawl_in_cooldown():
+        logger.debug("[read_url] Firecrawl skipped — rate-limit cooldown active")
+        return None
     base = (os.environ.get("KAZMA_FIRECRAWL_URL") or "https://api.firecrawl.dev").rstrip("/")
     try:
         import asyncio
@@ -649,6 +683,17 @@ async def _try_firecrawl(url: str) -> str | None:
                     await asyncio.sleep(delay)
                     continue
                 if r.status_code != 200:
+                    if r.status_code == 429:
+                        # Exhausted the retry budget against a rate-limited
+                        # API — cool the rung down process-wide so parallel
+                        # fan-outs stop burning 4.5s of backoff per URL
+                        # (2026-08-21 domain-sweep incident).
+                        import time as _time
+
+                        _FIRECRAWL_COOLDOWN["until"] = _time.monotonic() + 300.0
+                        logger.warning(
+                            "[read_url] Firecrawl rate-limited — cooling down for 300s"
+                        )
                     logger.debug(
                         "[read_url] Firecrawl status %s for %s", r.status_code, url
                     )
@@ -814,10 +859,12 @@ async def _fetch_full_text(url: str) -> str:
             # feeding megabytes of binary into the extractor.
             raw_status = getattr(response, "status_code", 200)
             status_code = raw_status if isinstance(raw_status, int) else 200
+            # Hoisted so the 4xx JSON branch below can read it (a 404 JSON
+            # body is a valid registry answer — see the JSON short-circuit).
+            _ct = response.headers.get("content-type", "")
+            if not isinstance(_ct, str):
+                _ct = ""
             if status_code < 400:
-                _ct = response.headers.get("content-type", "")
-                if not isinstance(_ct, str):
-                    _ct = ""
                 if not _is_textual_content_type(_ct):
                     return (
                         f"Error: URL returned non-text content ({_ct or 'unknown'}) — "
@@ -830,6 +877,16 @@ async def _fetch_full_text(url: str) -> str:
                 logger.info(
                     "[read_url] body capped at %d bytes for %s", _max_bytes, final_url
                 )
+
+            # JSON short-circuit (2026-08-21 domain-sweep incident): JSON
+            # bodies must NEVER enter the HTML pipeline — trafilatura discards
+            # them, the empty extract is misread as a JS shell, and recovery
+            # launches Playwright (~10s) for what was a fast API call
+            # (RDAP / oEmbed / Twitter info.json). Return the JSON as text.
+            if status_code < 400 and _is_json_payload(_ct, html):
+                _cache_put(url, html)
+                _cache_put(final_url, html)
+                return html
 
             if _looks_like_bot_block(html, status_code):
                 logger.info(
@@ -856,6 +913,27 @@ async def _fetch_full_text(url: str) -> str:
                     )
 
             if status_code >= 400 and not _looks_like_bot_block(html, status_code):
+                # JSON APIs answer with status codes: RDAP returns **404 with
+                # a JSON body for a FREE/unregistered domain** — that body IS
+                # the answer, and "recovering" it via Firecrawl/Playwright
+                # burns 10s+ per name launching a browser to re-fetch a 404
+                # (2026-08-21 domain-sweep incident). Return JSON bodies
+                # directly; for non-JSON, only recover statuses a browser can
+                # plausibly fix (403/429 bot walls, 5xx) — a 404/410 means
+                # the resource does not exist.
+                if _is_json_payload(_ct, html):
+                    _cache_put(url, html)
+                    _cache_put(final_url, html)
+                    return (
+                        f"[HTTP {status_code} — JSON response returned as-is]\n{html}"
+                    )
+                if status_code in (404, 410):
+                    return (
+                        f"Error: HTTP {status_code} for {final_url} — the resource "
+                        "does not exist (no recovery attempted: a browser cannot "
+                        "invent a missing page). If this was a registry/availability "
+                        "check, 404 usually means FREE/unregistered."
+                    )
                 try:
                     response.raise_for_status()
                 except Exception as exc:
