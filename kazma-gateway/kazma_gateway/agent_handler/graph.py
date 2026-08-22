@@ -703,7 +703,26 @@ def create_graph_handler(
                 disable_yolo(thread_id, actor=actor)
                 reply_msg = "🛡️ YOLO deactivated. Safety gates are active again."
             else:
-                st = enable_yolo(thread_id, actor=actor)
+                from kazma_core.safety.yolo import YoloDisabledError
+
+                try:
+                    st = enable_yolo(thread_id, actor=actor)
+                except YoloDisabledError as exc:
+                    # Policy-blocked (KAZMA_ALLOW_YOLO=0 / production) —
+                    # tell the operator instead of letting the exception
+                    # vanish into the gateway log ("no reply to /yolo").
+                    reply_msg = f"🛡️ YOLO is blocked: {exc}"
+                    ctx = await _store.get(thread_id) or msg.context_metadata
+                    out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=out_text,
+                        context_metadata=out_ctx,
+                    ))
+                    logger.warning(
+                        "[agent-handler] /yolo blocked thread=%s", thread_id,
+                    )
+                    return
                 rem = st.get("remaining_seconds")
                 ttl_note = (
                     f"Auto-expires in ~{rem // 60}m."
