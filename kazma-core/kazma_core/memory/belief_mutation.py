@@ -393,25 +393,13 @@ def mutate_belief(
         if result.get("action") not in ("noop", None) and result.get("belief_id"):
             try:
                 from kazma_core.memory.graph_backend import upsert_belief_edge
-                from kazma_core.memory.state_backend import mirror_belief_to_state
+                from kazma_core.memory.state_backend import remirror_belief_by_id
 
                 bid = str(result["belief_id"])
-                mirror_belief_to_state(
-                    {
-                        "id": bid,
-                        "tenant_id": tenant_id,
-                        "subject": sub,
-                        "predicate": pred,
-                        "predicate_type": ptype,
-                        "object": obj,
-                        "confidence": confidence,
-                        "structural_importance": importance,
-                        "source_trust_weight": trust,
-                        "valid_from": now,
-                        "valid_until": None,
-                        "invalidated_at": None,
-                    }
-                )
+                # Mirror the PERSISTED row (M-04): guarantees the mirror sees
+                # exactly what SQLite committed, death flags included — never
+                # a hand-built "definitely alive" dict.
+                remirror_belief_by_id(conn, bid)
                 upsert_belief_edge(
                     subject=sub,
                     predicate=pred,
@@ -643,6 +631,14 @@ def _mutate_functional(
             )
         except Exception:
             logger.debug("[belief_mutate] neo4j delete on supersede skipped", exc_info=True)
+        # Mirror tombstone: push the superseded row's death flags to shared
+        # state (M-04 — the mirror previously stayed live forever).
+        try:
+            from kazma_core.memory.state_backend import remirror_belief_by_id
+
+            remirror_belief_by_id(conn, str(superseded_id))
+        except Exception:
+            logger.debug("[belief_mutate] mirror tombstone skipped", exc_info=True)
     bid = _belief_id(tenant_id, sub, pred, now)
     state_after = _insert_belief(
         conn, bid, tenant_id, sub, pred, "functional", obj,

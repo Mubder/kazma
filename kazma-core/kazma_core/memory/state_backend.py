@@ -38,6 +38,10 @@ __all__ = [
     "backfill_state_mirror",
     "search_state_episodes",
     "search_state_beliefs",
+    "unmirror_belief_to_state",
+    "remirror_belief_by_id",
+    "reconcile_state_beliefs",
+    "mirror_drift_summary",
 ]
 
 # Singleton cache for the shared-state mirror backend (see get_state_backend).
@@ -91,6 +95,13 @@ class NullStateBackend:
 
     def count_beliefs(self, *, tenant_id: str = "default") -> int:
         return 0
+
+    def delete_belief(self, row_id: str) -> bool:
+        del row_id
+        return False
+
+    def mirror_belief_snapshot(self) -> dict[str, bool]:
+        return {}
 
     def search_episodes(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
@@ -331,6 +342,47 @@ class PostgresStateBackend:
 
     def count_beliefs(self, *, tenant_id: str = "default") -> int:
         return self._count("kazma_beliefs", tenant_id)
+
+    def delete_belief(self, row_id: str) -> bool:
+        """Hard-delete a mirrored belief (row left the SQLite SoT entirely)."""
+        if not self._dsn or not row_id:
+            return False
+        try:
+            conn = self._connect()
+            try:
+                self._ensure(conn)
+                cur = conn.cursor()
+                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s", (row_id,))
+                conn.commit()
+                cur.close()
+                return True
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[state_backend] postgres belief delete failed", exc_info=True)
+            return False
+
+    def mirror_belief_snapshot(self) -> dict[str, bool]:
+        """id → live-flag scan of the mirror (reconcile/drift inputs)."""
+        if not self._dsn:
+            return {}
+        try:
+            conn = self._connect()
+            try:
+                self._ensure(conn)
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id, invalidated_at IS NULL AND valid_until IS NULL "
+                    "FROM kazma_beliefs"
+                )
+                out = {r[0]: bool(r[1]) for r in cur.fetchall()}
+                cur.close()
+                return out
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[state_backend] snapshot failed", exc_info=True)
+            return {}
 
     def search_episodes(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
@@ -634,6 +686,142 @@ def mirror_belief_to_state(row: dict[str, Any]) -> bool:
         return bool(get_state_backend().mirror_belief(row))
     except Exception:
         return False
+
+
+def unmirror_belief_to_state(row_id: str) -> bool:
+    """Hard-delete a mirrored belief whose SQLite row no longer exists."""
+    try:
+        return bool(get_state_backend().delete_belief(row_id))
+    except Exception:
+        return False
+
+
+def remirror_belief_by_id(conn: Any, belief_id: str) -> bool:
+    """Tombstone/sync primitive: push a belief's CURRENT local row to the
+    mirror — including its death flags (valid_until / invalidated_at).
+
+    Call after ANY local life/death transition (supersede close, invalidate,
+    restore, edit). A row that vanished from SQLite mid-flight is treated as
+    a delete. Never raises.
+    """
+    try:
+        row = conn.execute(
+            "SELECT * FROM beliefs WHERE id = ?", (belief_id,)
+        ).fetchone()
+        if row is None:
+            return unmirror_belief_to_state(belief_id)
+        d = dict(row)
+        if isinstance(d.get("metadata_json"), str) and "metadata" not in d:
+            d["metadata_json"] = d["metadata_json"]
+        return mirror_belief_to_state(d)
+    except Exception:
+        logger.debug("[state_backend] remirror failed for %s", belief_id, exc_info=True)
+        return False
+
+
+def reconcile_state_beliefs(conn: Any, *, dry_run: bool = False) -> dict[str, int]:
+    """One-shot heal: make the mirror match the SQLite SoT exactly.
+
+    - ids only in the mirror            → hard-deleted
+    - shared ids with divergent flags   → re-pushed from the local row
+    - ids only in SQLite                → inserted (full row)
+
+    Returns stats. Safe to run while the server is up (short transactions).
+    """
+    stats = {
+        "sqlite_rows": 0,
+        "mirror_rows": 0,
+        "inserted": 0,
+        "tombstoned": 0,
+        "deleted_mirror_only": 0,
+        "errors": 0,
+        "dry_run": 1 if dry_run else 0,
+    }
+    try:
+        backend = get_state_backend()
+        if not getattr(backend, "available", False):
+            stats["errors"] = 1
+            return stats
+        lite = {
+            r["id"]: dict(r)
+            for r in conn.execute("SELECT * FROM beliefs").fetchall()
+        }
+        stats["sqlite_rows"] = len(lite)
+
+        mirror = getattr(backend, "mirror_belief_snapshot", None)
+        mirror = mirror() if callable(mirror) else {}
+        stats["mirror_rows"] = len(mirror)
+
+        for bid in list(mirror.keys()):
+            if bid in lite:
+                continue
+            stats["deleted_mirror_only"] += 1
+            if not dry_run:
+                unmirror_belief_to_state(bid)
+
+        for bid, row in lite.items():
+            live_mirror = mirror.get(bid)
+            live_local = (
+                row.get("invalidated_at") is None and row.get("valid_until") is None
+            )
+            needs_push = (
+                bid not in mirror
+                or (live_mirror != live_local)
+            )
+            if not needs_push:
+                continue
+            if live_mirror is not None and live_mirror != live_local:
+                stats["tombstoned"] += 1
+            else:
+                stats["inserted"] += 1
+            if dry_run:
+                continue
+            ok = mirror_belief_to_state(row)
+            if not ok:
+                stats["errors"] += 1
+    except Exception:
+        logger.warning("[state_backend] reconcile failed", exc_info=True)
+        stats["errors"] += 1
+    return stats
+
+
+def mirror_drift_summary(conn: Any, *, sample: int = 5) -> dict[str, Any]:
+    """Cheap nightly assertion input: count mirror rows that disagree with
+    the SQLite SoT (missing locally / dead-locally-but-live-in-mirror)."""
+    out: dict[str, Any] = {
+        "only_in_mirror": 0,
+        "dead_mismatch": 0,
+        "checked": 0,
+        "samples": [],
+    }
+    try:
+        backend = get_state_backend()
+        if not getattr(backend, "available", False):
+            out["skipped"] = "backend unavailable"
+            return out
+        snapshot = getattr(backend, "mirror_belief_snapshot", None)
+        mirror = snapshot() if callable(snapshot) else {}
+        lite = {
+            r["id"]: (r["invalidated_at"] is None and r["valid_until"] is None)
+            for r in conn.execute(
+                "SELECT id, invalidated_at, valid_until FROM beliefs"
+            ).fetchall()
+        }
+        out["checked"] = len(mirror)
+        for bid, m_live in mirror.items():
+            l_live = lite.get(bid)
+            if l_live is None:
+                out["only_in_mirror"] += 1
+                if len(out["samples"]) < sample:
+                    out["samples"].append({"id": bid, "why": "mirror_only"})
+            elif m_live and not l_live:
+                out["dead_mismatch"] += 1
+                if len(out["samples"]) < sample:
+                    out["samples"].append({"id": bid, "why": "mirror_live_sqlite_dead"})
+    except Exception:
+        logger.debug("[state_backend] drift summary failed", exc_info=True)
+        out["errors"] = 1
+    return out
 
 
 def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:

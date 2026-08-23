@@ -192,6 +192,14 @@ def run_macro_sleep(
             )
             primary_conn.execute("DELETE FROM beliefs WHERE id=?", (bid,))
             stats["archived_beliefs"] += 1
+            # Mirror hard-delete (M-04): the row left the SQLite SoT — the
+            # mirror must not keep serving it live.
+            try:
+                from kazma_core.memory.state_backend import unmirror_belief_to_state
+
+                unmirror_belief_to_state(bid)
+            except Exception:
+                logger.debug("[macro_sleep] unmirror skipped for %s", bid, exc_info=True)
 
         primary_conn.commit()
     except Exception:

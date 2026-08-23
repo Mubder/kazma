@@ -254,6 +254,15 @@ def invalidate_belief(
             except Exception:
                 logger.debug("[hygiene] entity count recompute skipped", exc_info=True)
 
+            # Mirror tombstone (M-04): push death flags to shared state so a
+            # role=primary cutover can never resurrect this fact.
+            try:
+                from kazma_core.memory.state_backend import remirror_belief_by_id
+
+                remirror_belief_by_id(conn, bid)
+            except Exception:
+                logger.debug("[hygiene] mirror tombstone skipped", exc_info=True)
+
         graph_removed = False
         if remove_graph and n > 0:
             try:

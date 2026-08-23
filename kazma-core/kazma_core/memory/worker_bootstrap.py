@@ -658,6 +658,30 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
         tenant_id = str(payload.get("tenant_id", "default"))
         written = export_nightly_snapshots(tenant_id=tenant_id)
         logger.info("[memory_worker] nightly_export done: %d file(s)", len(written))
+
+        # M-04 guard: nightly mirror-drift assertion (audit
+        # AUDIT_MEMORY_SYSTEM_2026-08-24). Tombstone propagation should keep
+        # this at zero; a non-zero count means dead facts are live in the
+        # shared-state mirror and role=primary cutover would resurrect them.
+        try:
+            import sqlite3 as _sq
+
+            from kazma_core.memory.state_backend import mirror_drift_summary
+            from kazma_core.paths import primary_memory_db
+
+            conn = _sq.connect(primary_memory_db(), timeout=10)
+            conn.row_factory = _sq.Row
+            try:
+                drift = mirror_drift_summary(conn)
+                if drift.get("only_in_mirror") or drift.get("dead_mismatch"):
+                    logger.warning(
+                        "[memory_worker] MIRROR DRIFT detected — run "
+                        "scripts/reconcile_memory_mirror.py: %s", drift,
+                    )
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[memory_worker] mirror drift check skipped", exc_info=True)
         return True
     except Exception:
         logger.warning("[memory_worker] nightly_export handler failed", exc_info=True)

@@ -230,9 +230,13 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             ensure_primary_schema(conn)
             now = time.time()
-            before = conn.execute(
-                "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
-            ).fetchone()[0]
+            cleared_ids = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT id FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                ).fetchall()
+            ]
+            before = len(cleared_ids)
             conn.execute(
                 "UPDATE beliefs SET valid_until=?, invalidated_at=? "
                 "WHERE valid_until IS NULL AND invalidated_at IS NULL",
@@ -250,6 +254,15 @@ def register_direct_routes(self: Any) -> None:
             after = conn.execute(
                 "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
             ).fetchone()[0]
+            # Mirror tombstones (M-04): every cleared row must die in shared
+            # state too. Best-effort; the nightly drift check reports gaps.
+            try:
+                from kazma_core.memory.state_backend import unmirror_belief_to_state
+
+                for bid in cleared_ids:
+                    unmirror_belief_to_state(str(bid))
+            except Exception:
+                logger.debug("[memory] graph-clear mirror tombstone skipped", exc_info=True)
             conn.close()
             return {"ok": True, "invalidated_beliefs": before, "active_remaining": after}
         except Exception as exc:
