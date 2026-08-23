@@ -10,8 +10,6 @@
   var currentMsgEl = null;
   var tokenAccum = '';
   var activeStream = null;
-  /** Timestamp of the last SSE activity (token/tool/done) — used by visibilitychange to detect stalled streams. */
-  var lastActivityTs = 0;
   /** Live typing-indicator element for the current turn (cleared on abort). */
   var activeTypingEl = null;
   // Track the last successfully-sent user message so the empty-turn
@@ -310,7 +308,6 @@
       if (_awaitingReply || _isGenerating) {
         if (lastMsg && lastMsg.pending) return; // pending row may still flush
         _awaitingReply = false;
-        lastActivityTs = 0;
         if (_isGenerating) endTurn();
         else {
           try { if (typingEl && KS.hideTyping) KS.hideTyping(typingEl); } catch (e3) {}
@@ -670,7 +667,6 @@
   /** Call on every live frame (token/tool/status) so long multi-tool turns stay open. */
   function noteTurnActivity() {
     _lastTurnActivityTs = Date.now();
-    lastActivityTs = _lastTurnActivityTs;
     _serverActivitySeen = true;
     if (_isGenerating && !_awaitingApproval) {
       _armTurnWatchdog();
@@ -710,7 +706,6 @@
     _serverActivitySeen = false;
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
-    lastActivityTs = _lastTurnActivityTs;
     _armTurnWatchdog();
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
@@ -1716,7 +1711,6 @@
       },
 
       onDone: function(data) {
-        lastActivityTs = 0;
         activeStream = null;
         KS.hideTyping(typingEl);
         activeTypingEl = null;
@@ -4324,7 +4318,6 @@
       }
       // Release wait only after paint — server content is on screen (or tried).
       _awaitingReply = false;
-      lastActivityTs = 0;
       if (opts.replay || opts.source === 'resync') {
         // Replay/resync paints are terminal for this turn — close the bubble
         // so the next message opens a fresh one.
