@@ -115,6 +115,7 @@ def register_undo(restore: Any, *, label: str, kind: str) -> str:
         "restore": restore,
         "label": label,
         "kind": kind,
+        "tenant": _memory_tenant_id(),  # M-05: bind to the originating tenant
         "expires_at": time.time() + _UNDO_TTL_SECONDS,
     }
     # LRU evict (dict preserves insertion order in Py3.7+).
@@ -124,11 +125,16 @@ def register_undo(restore: Any, *, label: str, kind: str) -> str:
 
 
 def _consume_undo(token: str) -> dict[str, Any] | None:
-    """Pop a non-expired undo entry, or None if missing/expired."""
+    """Pop a non-expired undo entry, or None if missing/expired.
+
+    M-05: cross-tenant redemption is refused (token is bound to the tenant
+    that created it)."""
     entry = _undo_store.pop(token, None)
     if entry is None:
         return None
     if time.time() > float(entry.get("expires_at") or 0):
+        return None
+    if str(entry.get("tenant") or "default") != _memory_tenant_id():
         return None
     return entry
 
@@ -195,6 +201,39 @@ def _memory_tenant_id() -> str:
             # leak another tenant's rows when isolation is required.
             return "__unscoped__"
     return "default"
+
+
+def _entity_tenant_ok(conn: sqlite3.Connection, eid: str) -> bool:
+    """Fail-closed tenant gate for id-keyed entity mutations (audit M-05).
+
+    Single-user ('default') always passes — legacy behavior preserved. Under
+    enforcement, a bare global-PK id belonging to another tenant reads as
+    not-found instead of being mutated/returned.
+    """
+    tid = _memory_tenant_id()
+    if tid == "default":
+        return True
+    try:
+        row = conn.execute(
+            "SELECT tenant_id FROM entities WHERE id=?", (eid,)
+        ).fetchone()
+    except Exception:
+        return False
+    return bool(row) and str(row[0] or "default") == tid
+
+
+def _belief_tenant_ok(conn: sqlite3.Connection, bid: str) -> bool:
+    """Same gate for belief-id-keyed endpoints."""
+    tid = _memory_tenant_id()
+    if tid == "default":
+        return True
+    try:
+        row = conn.execute(
+            "SELECT tenant_id FROM beliefs WHERE id=?", (bid,)
+        ).fetchone()
+    except Exception:
+        return False
+    return bool(row) and str(row[0] or "default") == tid
 
 
 def _belief_count_sql() -> str:
@@ -682,6 +721,9 @@ async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": f"cannot unprotect core entity: {eid}"}
     try:
         conn = _conn()
+        if not _entity_tenant_ok(conn, eid):
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         row = conn.execute(
             "SELECT id, is_protected FROM entities WHERE id=?", (eid,)
         ).fetchone()
@@ -718,6 +760,9 @@ async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
     want = bool(body.get("major"))
     try:
         conn = _conn()
+        if not _entity_tenant_ok(conn, eid):
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         row = conn.execute("SELECT id FROM entities WHERE id=?", (eid,)).fetchone()
         if not row:
             conn.close()
@@ -739,6 +784,9 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
     conn = _conn()
     # F3: protection covers the hardcoded floor AND the per-row is_protected
     # flag. Resolved against a connection so the per-row flag is read.
+    if not _entity_tenant_ok(conn, eid):
+        conn.close()
+        return {"ok": False, "error": "not_found"}
     if _is_protected(conn, eid):
         conn.close()
         return {"ok": False, "error": f"protected entity: {eid}"}
@@ -849,12 +897,21 @@ async def merge_entities(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": f"cannot merge protected source {source_id}"}
     try:
         src = conn.execute(
-            "SELECT id, name, aliases_json FROM entities WHERE id=?", (source_id,)
+            "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=?", (source_id,)
         ).fetchone()
         tgt = conn.execute(
-            "SELECT id, name, aliases_json FROM entities WHERE id=?", (target_id,)
+            "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=?", (target_id,)
         ).fetchone()
         if not src or not tgt:
+            conn.close()
+            return {"ok": False, "error": "source or target not found"}
+        # M-05/M-07: cross-tenant merges are refused; the belief rewire below
+        # is scoped to the source entity's tenant so it can never touch
+        # another tenant's rows.
+        src_tid = str(src["tenant_id"] or "default")
+        tgt_tid = str(tgt["tenant_id"] or "default")
+        active_tid = _memory_tenant_id()
+        if active_tid != "default" and (src_tid != active_tid or tgt_tid != active_tid):
             conn.close()
             return {"ok": False, "error": "source or target not found"}
 
@@ -882,11 +939,13 @@ async def merge_entities(request: Request) -> dict[str, Any]:
             if not old:
                 continue
             cur = conn.execute(
-                "UPDATE beliefs SET subject=? WHERE subject=?", (target_id, old)
+                "UPDATE beliefs SET subject=? WHERE subject=? AND tenant_id=?",
+                (target_id, old, src_tid),
             )
             beliefs_rewired += int(cur.rowcount or 0)
             cur = conn.execute(
-                "UPDATE beliefs SET object=? WHERE object=?", (target_id, old)
+                "UPDATE beliefs SET object=? WHERE object=? AND tenant_id=?",
+                (target_id, old, src_tid),
             )
             beliefs_rewired += int(cur.rowcount or 0)
         conn.execute(
@@ -1139,6 +1198,9 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
     sub_id = _entity_slug(subject)
     try:
         conn = _conn()
+        tid = _memory_tenant_id()
+        tsql = " AND tenant_id=?" if tid != "default" else ""
+        tparams: list = [tid] if tid != "default" else []
         row = conn.execute(
             """
             SELECT id FROM beliefs
@@ -1146,10 +1208,11 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
               AND predicate = ?
               AND object = ?
               AND (subject = ? OR subject = ?)
+            """ + tsql + """
             ORDER BY valid_from DESC
             LIMIT 1
             """,
-            (predicate, obj, subject, sub_id),
+            (predicate, obj, subject, sub_id, *tparams),
         ).fetchone()
         # Also try slugified object for entity-like targets
         if not row:
@@ -1161,10 +1224,11 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
                   AND predicate = ?
                   AND (object = ? OR object = ?)
                   AND (subject = ? OR subject = ?)
+                """ + tsql + """
                 ORDER BY valid_from DESC
                 LIMIT 1
                 """,
-                (predicate, obj, obj_slug, subject, sub_id),
+                (predicate, obj, obj_slug, subject, sub_id, *tparams),
             ).fetchone()
         conn.close()
         if not row:
@@ -1235,6 +1299,9 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
 
     try:
         conn = _conn()
+        if not _belief_tenant_ok(conn, bid):
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         row = conn.execute(
             "SELECT id, subject, predicate, predicate_type, object, "
             "valid_until, invalidated_at, metadata_json "
@@ -1471,14 +1538,24 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
 
     results = []
     invalidated_ids: list[str] = []
-    for bid in ids[:200]:
-        bid_s = str(bid)
-        r = invalidate_belief(bid_s, remove_graph=True)
-        results.append(r)
-        # Track only rows we actually flipped (not idempotent "already" ones)
-        # so the undo restores exactly what this call changed.
-        if r.get("ok") and not r.get("already"):
-            invalidated_ids.append(bid_s)
+    # M-05: per-id tenant gate — a bare global-PK id from another tenant is
+    # skipped (reported as not-found) instead of invalidated.
+    gate_conn = _conn()
+    try:
+        for bid in ids[:200]:
+            bid_s = str(bid)
+            if not _belief_tenant_ok(gate_conn, bid_s):
+                results.append({"ok": False, "updated": 0,
+                                "error": "not_found", "belief_id": bid_s})
+                continue
+            r = invalidate_belief(bid_s, remove_graph=True)
+            results.append(r)
+            # Track only rows we actually flipped (not idempotent "already" ones)
+            # so the undo restores exactly what this call changed.
+            if r.get("ok") and not r.get("already"):
+                invalidated_ids.append(bid_s)
+    finally:
+        gate_conn.close()
 
     undo_token = None
     if invalidated_ids:
@@ -1660,9 +1737,12 @@ async def graph_groups_delete(group_id: str) -> dict[str, Any]:
     try:
         conn = _conn()
         row = conn.execute(
-            "SELECT member FROM graph_associations WHERE id=?", (gid,)
+            "SELECT member, tenant_id FROM graph_associations WHERE id=?", (gid,)
         ).fetchone()
         if not row:
+            conn.close()
+            return {"ok": False, "error": "not_found"}
+        if not _entity_tenant_ok(conn, str(row["member"] or "")):
             conn.close()
             return {"ok": False, "error": "not_found"}
         cur = conn.execute("DELETE FROM graph_associations WHERE id=?", (gid,))
@@ -1693,6 +1773,9 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "new_root must differ from member"}
     try:
         conn = _conn()
+        if not _entity_tenant_ok(conn, member) or not _entity_tenant_ok(conn, new_root):
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         if _group_creates_cycle(conn, member, new_root):
             conn.close()
             return {"ok": False, "error": "cycle: member is an ancestor of new_root"}
@@ -1770,6 +1853,9 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
         return {"ok": False, "error": "tier must be an integer 0-4"}
     try:
         conn = _conn()
+        if not _entity_tenant_ok(conn, node):
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         cur = conn.execute(
             "UPDATE graph_associations SET member_tier=? WHERE member=?",
             (tier, node),
