@@ -61,14 +61,18 @@ def test_capacity_and_yolo_intercepts_exist_on_both_transports():
 
 def test_stale_socket_watchdog_exists():
     """Half-dead WS sockets must self-heal (2026-08-21 YOLO-silent incident):
-    the server heartbeats active turns every ~4s; no frame for 30s during an
-    active turn forces a reconnect so heartbeats/turn_complete reach the tab
-    without a manual refresh."""
+    during an active turn, prolonged frame silence forces a reconnect so
+    heartbeats/turn_complete reach the tab without a manual refresh.
+
+    Turn Delivery V2: detection moved into a WORKER-backed liveness ticker —
+    page timers get intensive-throttled in hidden tabs (>5 min => <=1/min),
+    exactly when detection is needed most; worker timers are never throttled.
+    Reconnect resumes via ?last_seq= journal replay."""
     js = (_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js").read_text(
         encoding="utf-8"
     )
-    assert "_stalenessTimer" in js and "_lastFrameAt" in js
-    assert "Stale live socket" in js
+    assert "_livenessCheck" in js and "_lastFrameAt" in js
+    assert "new Worker(" in js
     # The server side must log heartbeat sends for diagnosability.
     ws = _WS.read_text(encoding="utf-8")
     assert "approve heartbeat n=" in ws

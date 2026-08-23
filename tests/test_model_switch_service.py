@@ -142,7 +142,10 @@ class TestSourceContracts:
         # Idle watchdog must not call forceEndTurn as success path
         # (forceEndTurn may still exist for Stop/ESC)
         assert "Still working in background" in js or "still_working_bg" in js
-        assert "pollBackgroundTurn" in js or "_pollBackgroundTurn" in js
+        # Turn Delivery V2: catch-up is the unconditional snapshot resync
+        # (the old pollBackgroundTurn patch mechanism was deleted).
+        assert "_resyncDelivery" in js
+        assert "pollBackgroundTurn" not in js
 
     def test_chat_js_awaits_model_put_errors(self):
         js = _CHAT_JS.read_text(encoding="utf-8")

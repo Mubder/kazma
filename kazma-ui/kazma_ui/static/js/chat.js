@@ -219,8 +219,9 @@
       // Use setTimeout to ensure Alpine store is initialized before connecting
       setTimeout(function() {
         loadSession(initialSessionId);
-        // Also check if a background turn is running (survived refresh)
-        _checkBackgroundGeneration();
+        // Turn Delivery V2: reconcile with server truth (a turn may have
+        // finished or still be running while the page was closed).
+        _resyncDelivery('init');
       }, 100);
     }
 
@@ -233,149 +234,103 @@
     bindCapacityBar();
     refreshCapacity();
 
-    // Refresh the sidebar + reconcile delivery whenever the tab is shown.
-    // Browser throttling freezes timers/streams while hidden; the durable
-    // SessionStore is source of truth when WS/SSE frames were missed.
+    // ── Turn Delivery V2: unconditional snapshot resync ──────────────
+    // The browser throttles TIMERS in hidden tabs (≤1/min after ~5 min) but
+    // never network callbacks — so recovery must not depend on timers.
+    // resync() is gate-free and idempotent: fetch status + messages from the
+    // durable SessionStore and make the UI match server truth. Fired on tab
+    // visible / focus / pageshow / WS seq-gap / idle watchdog / init.
+    // Replaces the old gated reconciler, the 3s "nuclear" poll and
+    // the background-turn poller (all deleted).
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
         if (showArchived) loadArchivedSessions(); else loadSessions();
-        if (chatSessionId) {
-          _reconcileDelivery('visibility');
-        }
+        if (chatSessionId) _resyncDelivery('visibility');
       }
     });
     // Some browsers (esp. mobile) fire pageshow/focus without visibilitychange.
     window.addEventListener('pageshow', function() {
-      if (chatSessionId && !document.hidden) _reconcileDelivery('pageshow');
+      if (chatSessionId && !document.hidden) _resyncDelivery('pageshow');
     });
     window.addEventListener('focus', function() {
-      if (chatSessionId && !document.hidden) _reconcileDelivery('focus');
+      if (chatSessionId && !document.hidden) _resyncDelivery('focus');
     });
   }
 
   /**
-   * Single recovery path after tab hide/show, idle watchdog, or WS drop.
-   * Always consults SessionStore — never trusts client _isGenerating alone.
+   * Unconditional authoritative resync — server is source of truth.
+   * No debounce windows, no expectReply gating, no rendered-text matching:
+   * idempotent by construction, so it never needs guarding (plan KD-5).
    */
-  var _reconcileInFlight = false;
-  var _lastReconcileTs = 0;
-  function _reconcileDelivery(reason) {
+  function _resyncDelivery(reason) {
     if (!chatSessionId) return;
-    var now = Date.now();
-    // Debounce burst of visibility+focus+pageshow on the same resume.
-    if (_reconcileInFlight || (now - _lastReconcileTs) < 400) return;
-
-    // Cheap skip: nothing suggests an in-flight/missing reply.
-    var expectReply = !!_awaitingReply || !!_isGenerating;
-    try {
-      var store0 = window.Alpine && Alpine.store && Alpine.store('agent');
-      if (store0 && (store0._turnActive || store0.isThinking)) expectReply = true;
-    } catch (e) { /* ignore */ }
-    // Recent activity (10 min) — covers tab-switch before _awaitingReply was set
-    // on older code paths; cleared when delivery is confirmed.
-    if (!expectReply && lastActivityTs && (now - lastActivityTs) < 10 * 60 * 1000) {
-      expectReply = true;
-    }
-    // Nuclear poll always has _awaitingReply; visibility without pending can skip.
-    if (!expectReply && reason !== 'nuclear-poll' && reason !== 'check') {
-      return;
-    }
-
-    _reconcileInFlight = true;
-    _lastReconcileTs = now;
     var sid = chatSessionId;
-
     Promise.all([
       fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/status')
         .then(function(r) { return r.ok ? r.json() : null; })
         .catch(function() { return null; }),
       fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/messages')
-        .then(function(r) { return r.ok ? r.json() : null; })
-        .catch(function() { return null; }),
+        .then(function(r) { return r.ok ? r.json() : []; })
+        .catch(function() { return []; }),
     ]).then(function(pair) {
-      _reconcileInFlight = false;
       if (chatSessionId !== sid) return;
       var status = pair[0] || {};
-      var messages = pair[1];
+      var messages = pair[1] || [];
       var generating = !!status.generating;
-      var lastMsg = (messages && messages.length) ? messages[messages.length - 1] : null;
+      var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
+      // Still running server-side → keep waiting honestly. Result delivery
+      // is owned by the resumed WS stream (cursor replay) or the SSE resume
+      // retry — never by client-side timers.
       if (generating) {
-        // Still running: drop dead SSE handle, keep waiting, arm poller.
         if (activeStream) {
           try { activeStream.abort(); } catch (e) { /* already dead */ }
           activeStream = null;
         }
         _awaitingReply = true;
-        if (!_isGenerating) {
-          // UI unlocked but server still working — keep a soft indicator.
-          try {
-            if (typingEl && KS.showTyping) {
-              KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
-            }
-          } catch (e2) { /* ignore */ }
-        }
-        _pollBackgroundTurn(sid, (messages && messages.length) || 0);
+        noteTurnActivity();
+        try {
+          if (typingEl && KS.showTyping) {
+            KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
+          }
+        } catch (e2) { /* ignore */ }
         return;
       }
 
-      // Server idle with a durable assistant answer — SessionStore is SoT.
-      // Paint until the open-turn bubble actually shows it. Never clear
-      // _awaitingReply on a "maybe already painted" guess (that was the
-      // "no response until refresh" regression).
+      // Server idle with a durable assistant answer → paint server truth,
+      // unconditionally (applyFinal replaces the open-turn bubble).
       if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
-        if (_domMissingAssistantReply(lastMsg.content)) {
-          _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
+        if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
+          window.KazmaChat.applyFinalAssistantText(lastMsg.content, lastMsg.model || '', { source: 'resync' });
         }
-        if (_domMissingAssistantReply(lastMsg.content)) {
-          // Still not on screen — keep nuclear poll + bg poll armed.
-          _awaitingReply = true;
-          _pollBackgroundTurn(sid, (messages && messages.length) || 0);
-          return;
-        }
+        return;
+      }
+
+      // Idle with nothing to deliver → release the wait honestly.
+      if (_awaitingReply || _isGenerating) {
+        if (lastMsg && lastMsg.pending) return; // pending row may still flush
         _awaitingReply = false;
         lastActivityTs = 0;
-        try {
-          var st = window.Alpine && Alpine.store && Alpine.store('agent');
-          if (st) { st._turnActive = false; st.isThinking = false; }
-        } catch (e3) { /* ignore */ }
         if (_isGenerating) endTurn();
         else {
-          try { if (typingEl && KS.hideTyping) KS.hideTyping(typingEl); } catch (e4) {}
+          try { if (typingEl && KS.hideTyping) KS.hideTyping(typingEl); } catch (e3) {}
         }
-        return;
       }
-
-      // Idle with pending/empty assistant or trailing user — keep polling briefly.
-      if (expectReply || (lastMsg && lastMsg.role === 'user') || (lastMsg && lastMsg.pending)) {
-        _awaitingReply = true;
-        _pollBackgroundTurn(sid, (messages && messages.length) || 0);
-      } else {
-        _awaitingReply = false;
-        lastActivityTs = 0;
-      }
-    }).catch(function() {
-      _reconcileInFlight = false;
-    });
+    }).catch(function() { /* transient network — the next trigger retries */ });
   }
 
   /**
-   * Delivery rule (server → UI):
-   *   SessionStore / turn_complete is source of truth.
-   *   ALWAYS paint into the open-turn assistant bubble.
-   *   Dedupe only when that bubble ALREADY shows the same answer (visible
-   *   text). Never skip paint because of a fingerprint alone — that caused
-   *   "no response until refresh".
+   * Delivery rule (server → UI), Turn Delivery V2:
+   *   SessionStore / seq-journaled terminal frames are source of truth.
+   *   ALWAYS paint server truth into the open-turn assistant bubble.
+   *   Deduplication lives UPSTREAM in the transports (seq-journaled WS/SSE,
+   *   replay dedupe) — the painter never compares rendered text against
+   *   desired content to decide whether to paint. The old
+   *   fingerprint/≥90%-prefix "did it render?" heuristics were the root of
+   *   the "no response until refresh" class and are gone.
    */
-  var _lastFinalFingerprint = '';
 
-  function _finalFingerprint(content) {
-    var s = String(content || '').trim();
-    if (!s) return '';
-    return s.length + ':' + s.slice(0, 160) + ':' + s.slice(-120);
-  }
-
-  /** Render markdown to plain text for DOM ↔ source comparisons. */
+  /** Render markdown to plain text for transcript dedupe on load. */
   function _plainFromMarkdown(md) {
     var s = String(md || '').trim();
     if (!s) return '';
@@ -406,65 +361,6 @@
     }
     if (lastAsstAfterUser) return lastAsstAfterUser;
     return createAssistantMessage();
-  }
-
-  /**
-   * True only when the bubble visibly shows *content* (or near-complete plain).
-   * Empty / CoT-only bubbles always return false so we still paint.
-   */
-  function _bubbleShowsContent(textEl, content) {
-    if (!textEl || !content) return false;
-    var want = String(content).trim();
-    if (!want) return false;
-    var shown = (textEl.textContent || '').replace(/\s+/g, ' ').trim();
-    // Near-empty never counts as "delivered" (progress panels live outside .message-text).
-    if (!shown || shown.length < 8) return false;
-
-    var wantPlain = _plainFromMarkdown(want);
-    if (!wantPlain) wantPlain = want;
-
-    if (shown === want || shown === wantPlain) return true;
-
-    // data-final-len only counts when there is real visible text too.
-    var stamped = textEl.getAttribute('data-final-len') || '';
-    if (stamped === String(want.length) && shown.length >= Math.min(40, Math.floor(wantPlain.length * 0.5))) {
-      return true;
-    }
-
-    // Nearly-complete partial of the same answer (stream then final).
-    if (shown.length >= 40 && wantPlain.indexOf(shown.slice(0, Math.min(80, shown.length))) === 0) {
-      return shown.length >= wantPlain.length * 0.9;
-    }
-    if (wantPlain.length >= 40 && shown.indexOf(wantPlain.slice(0, Math.min(80, wantPlain.length))) === 0) {
-      return shown.length >= wantPlain.length * 0.9;
-    }
-    return false;
-  }
-
-  // Back-compat alias used by soft-apply fallback.
-  function _textElHasFinal(textEl, content) {
-    return _bubbleShowsContent(textEl, content);
-  }
-
-  /** True when the open-turn assistant bubble does not already show *content*. */
-  function _domMissingAssistantReply(content) {
-    if (!messagesEl || !content) return true;
-    var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
-    var lastAsst = null;
-    for (var i = 0; i < msgs.length; i++) {
-      if (msgs[i].classList.contains('message-user')) lastAsst = null;
-      else if (msgs[i].classList.contains('message-assistant')) lastAsst = msgs[i];
-    }
-    if (!lastAsst) return true;
-    var te = lastAsst.querySelector('.message-text');
-    if (!te) return true;
-    // Fingerprint alone is NOT enough — DOM must show the text.
-    return !_bubbleShowsContent(te, content);
-  }
-
-  // Back-compat name used on init / older call sites.
-  function _checkBackgroundGeneration() {
-    _reconcileDelivery('check');
   }
 
   // ── Slash commands (discoverable in Web UI) ───────────
@@ -765,17 +661,11 @@
     }
   }
 
-  // ── NUCLEAR DELIVERY: setInterval-based poll, independent of WS/SSE ──
-  // _awaitingReply is set on send and cleared only when SessionStore shows a
-  // durable assistant reply (or loadSession). WS premature endTurn cannot
-  // clear it. On each tick: if server idle → soft-apply from messages API
-  // (no full loadSession wipe — that caused blink loops and races).
+  // ── Delivery wait flag ────────────────────────────────────────────────
+  // Set on send and cleared only when server truth is on screen (paint or
+  // resync). No interval polls it anymore — recovery is trigger-driven
+  // (visibility/focus/resume/seq-gap) plus the idle watchdog below.
   var _awaitingReply = false;
-  setInterval(function() {
-    if (!chatSessionId || !_awaitingReply) return;
-    // Prefer the shared reconciler (status + messages in one shot).
-    _reconcileDelivery('nuclear-poll');
-  }, 3000);
 
   /** Call on every live frame (token/tool/status) so long multi-tool turns stay open. */
   function noteTurnActivity() {
@@ -798,34 +688,18 @@
         _armTurnWatchdog();
         return;
       }
-      // Idle too long: unlock Stop without claiming success, then poll for durable result.
-      console.warn('[KazmaChat] Idle turn watchdog — unlocking UI and starting catch-up poller');
+      // Idle too long (server heartbeats every ≤15s during active turns, so
+      // this means the transport is dead or the server stalled). Do NOT
+      // unlock or claim anything — ask the server what is true. Resync keeps
+      // the turn open if generating; paints/unlocks if the turn ended.
+      console.warn('[KazmaChat] Idle turn watchdog — reconciling with server truth');
       if (_progressEl) {
         var titleEl = _progressEl.querySelector('.agent-progress-title');
         if (titleEl) {
           titleEl.textContent = ti('still_working_bg', 'Still working in background\u2026');
         }
       }
-      _isGenerating = false;
-      if (sendBtn) {
-        sendBtn.disabled = false;
-        sendBtn.classList.remove('stop-mode');
-        sendBtn.title = 'Send (Enter / Ctrl+Enter)';
-        sendBtn.innerHTML = _SEND_SVG;
-      }
-      if (inputEl) {
-        inputEl.disabled = false;
-        inputEl.placeholder = 'Type a message\u2026 (agent may still be finishing)';
-      }
-      // Do NOT finalizeProgress(true) — that paints false "Done".
-      // Catch up from SessionStore when the detached turn finishes.
-      if (activeStream) {
-        try { activeStream.abort(); } catch (e) { /* already dead */ }
-        activeStream = null;
-      }
-      if (chatSessionId) {
-        _pollBackgroundTurn(chatSessionId, 0);
-      }
+      _resyncDelivery('idle-watchdog');
     }, TURN_IDLE_WATCHDOG_MS);
   }
 
@@ -837,8 +711,6 @@
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     lastActivityTs = _lastTurnActivityTs;
-    // New turn — allow a new final fingerprint (do not block the next answer).
-    _lastFinalFingerprint = '';
     _armTurnWatchdog();
     // Fresh progress log for this turn (don't reuse previous bubble's panel)
     if (currentMsgEl) {
@@ -1703,7 +1575,7 @@
     // Critical for WS path which used to skip loadSessions entirely.
     noteSessionActivity(text || content);
 
-    // Arm the nuclear delivery poll — set BEFORE any transport dispatch.
+    // Arm the delivery wait — set BEFORE any transport dispatch.
     // This flag is ONLY cleared in loadSession() (when we re-render from
     // the server). The WS/SSE/endTurn lifecycle CANNOT touch it.
     _awaitingReply = true;
@@ -1715,19 +1587,34 @@
       return;
     }
 
-    // Fallback to HTTP SSE stream if WS is disconnected
-    if (activeStream) {
-      activeStream.abort();
-      activeStream = null;
+    // Fallback to HTTP SSE stream if WS is disconnected — with Turn
+    // Delivery V2 cursor resume: a stream lost mid-turn (sleep / proxy
+    // cull / hidden-tab freeze) retries ONCE from its last journaled seq
+    // (`last_event_id`); the server replays exactly what was missed. No
+    // pollers — one retry, then reconcile from the durable store.
+    var _sseAttempts = 0;
+
+    function _dispatchSse(extraBody) {
+      if (activeStream) {
+        try { activeStream.abort(); } catch (e) { /* already dead */ }
+      }
+      var body = {
+        message: content,
+        session_id: chatSessionId,
+        model: selectedModel || '',
+        workspace_id: _activeWorkspaceId || '',
+        attachments: attachmentsPayload,
+      };
+      if (extraBody) {
+        for (var k in extraBody) {
+          if (Object.prototype.hasOwnProperty.call(extraBody, k)) body[k] = extraBody[k];
+        }
+      }
+      activeStream = KS.sse('/api/chat/stream', body, buildSseCallbacks());
     }
 
-    activeStream = KS.sse('/api/chat/stream', {
-      message: content,
-      session_id: chatSessionId,
-      model: selectedModel || '',
-      workspace_id: _activeWorkspaceId || '',
-      attachments: attachmentsPayload,
-    }, {
+    function buildSseCallbacks() {
+      return {
       onToken: function(data) {
         noteTurnActivity();
         KS.hideTyping(typingEl);
@@ -1900,6 +1787,24 @@
       },
 
       onError: function(msg) {
+        _sseAttempts++;
+        var lastId = (activeStream && typeof activeStream.lastEventId === 'function')
+          ? activeStream.lastEventId() : null;
+        activeStream = null;
+        // One cursor resume while the turn is still awaited — only possible
+        // if we actually saw a journaled id on the dead stream.
+        if (_sseAttempts <= 2 && _awaitingReply && !_awaitingApproval
+            && lastId != null && Number(lastId) > 0) {
+          console.warn('[KazmaChat] SSE stream lost at seq=' + lastId + ' — resuming');
+          noteTurnActivity();
+          try {
+            if (typingEl && KS.showTyping) KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
+          } catch (_t) {}
+          _dispatchSse({ last_event_id: Number(lastId) });
+          return;
+        }
+        // Final failure: surface it, then reconcile with server truth (the
+        // turn may have completed server-side and be durable already).
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();
@@ -1907,11 +1812,15 @@
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
           '<br><button class="btn btn-sm btn-danger" onclick="window.KazmaChat.retry()">Retry</button></div>';
         endTurn();
+        _resyncDelivery('sse-fail');
         if (msg && window.showToast) {
           try { window.showToast(String(msg), 'error', 4000); } catch (_t) {}
         }
       }
-    });
+      };
+    }
+
+    _dispatchSse(null);
   }
 
   function retry() {
@@ -3834,17 +3743,13 @@
   }
 
   function loadSession(sessionId) {
-    // Clear the nuclear delivery flag — we're loading from server, so the
-    // response IS being delivered. The setInterval poll will no-op.
+    // Loading from server — any previous wait is resolved by what renders.
     _awaitingReply = false;
-    _lastFinalFingerprint = '';
     // Abort any in-flight turn from the previous session so Stop never sticks.
     if (activeStream) {
       try { activeStream.abort(); } catch (e) {}
       activeStream = null;
     }
-    // Stop any background poller from the previous session (prevents blink loop).
-    _stopBackgroundPoll();
     endTurn();
 
     chatSessionId = sessionId;
@@ -3928,56 +3833,22 @@
           }
           // If the last assistant message is marked pending (client refreshed
           // mid-turn while the LLM was still processing), show a processing
-          // indicator and start polling for the background-completed result.
+          // indicator; resync below reconciles the final state.
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
-            // Poller is armed once after the loop (only for trailing pending).
           } else {
-            var painted = appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
+            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
               activity: msg.activity,
               model: msg.model || '',
             });
-            // Stamp final markers so WS reconnect replay cannot open a 2nd bubble.
-            if (role === 'assistant' && content && painted) {
-              var pte = painted.querySelector('.message-text');
-              if (pte) pte.setAttribute('data-final-len', String(String(content).trim().length));
-              try { painted.setAttribute('data-final-fp', _finalFingerprint(content)); } catch (e) {}
-            }
           }
         });
 
-        // Only arm background poller when a turn may still be in flight.
-        // Do NOT poll completed chats — that re-fetched messages every 2s and
-        // re-rendered the whole transcript (page blink).
-        var lastMsg = messages[messages.length - 1];
-
-        // Seed fingerprint from durable transcript so reconnect turn_complete
-        // (replay:true) is a pure no-op instead of a second bubble.
-        if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
-          _lastFinalFingerprint = _finalFingerprint(lastMsg.content);
-        } else if (messages && messages.length) {
-          for (var _si = messages.length - 1; _si >= 0; _si--) {
-            var _sm = messages[_si];
-            if (_sm && _sm.role === 'assistant' && (_sm.content || '').trim() && !_sm.pending) {
-              _lastFinalFingerprint = _finalFingerprint(_sm.content);
-              break;
-            }
-            if (_sm && _sm.role === 'user') break;
-          }
-        }
-
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.pending) {
-          if ((lastMsg.content || '').trim()) {
-            if (typeof typingEl !== 'undefined' && typingEl && typingEl.style.display === 'none') {
-              if (typeof KS !== 'undefined' && KS.showTyping) KS.showTyping(typingEl, 'Generating response');
-            }
-          }
-          _pollBackgroundTurn(sessionId, messages.length);
-        } else if (lastMsg && lastMsg.role === 'user') {
-          // May have a detached turn with no assistant row yet — check status once via poller.
-          _pollBackgroundTurn(sessionId, messages.length);
-        }
-        // Complete assistant (content, not pending) → idle UI, no poller.
+        // Turn Delivery V2: one authoritative reconciliation after render.
+        // Covers trailing-pending (turn still running → keep waiting) and
+        // trailing-user (detached turn may exist) without any pollers —
+        // live delivery arrives via the resumed WS cursor stream.
+        _resyncDelivery('load');
 
         scrollToBottom();
         checkPendingApprovals();
@@ -3994,231 +3865,6 @@
           '</div>';
         KS.toast('Failed to load session messages', 'error', 3000);
       });
-  }
-
-  /**
-   * Poll for a background-completed turn after refresh / idle-watchdog / WS drop.
-   *
-   * CRITICAL: never call full loadSession() on every tick — that wiped the
-   * chat DOM ("Loading…"), reconnected WS, and re-armed this poller → 2s blink
-   * loop (status + messages + sessions + pending-approvals in the access log).
-   *
-   * Soft-update only: when a pending bubble gains content, paint it in place.
-   */
-  var _bgPollingSession = null;
-  var _bgPollTimer = null;
-
-  function _stopBackgroundPoll() {
-    _bgPollingSession = null;
-    if (_bgPollTimer) {
-      clearTimeout(_bgPollTimer);
-      _bgPollTimer = null;
-    }
-  }
-
-  function _softApplyFinalAssistant(content, model) {
-    if (!content) return;
-    // Always go through applyFinal — it paints server truth into the open-turn bubble.
-    if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-      window.KazmaChat.applyFinalAssistantText(content, model || '', { source: 'soft' });
-      return;
-    }
-    var bubble = _assistantBubbleForOpenTurn();
-    var textEl = bubble.querySelector('.message-text');
-    if (textEl && _bubbleShowsContent(textEl, content)) {
-      scrollToBottom();
-      return;
-    }
-    if (textEl) {
-      textEl.innerHTML = (window.KS && KS.markdown) ? KS.markdown(content) : escapeHtml(content);
-      textEl.setAttribute('data-final-len', String(String(content).trim().length));
-      _lastFinalFingerprint = _finalFingerprint(content);
-    }
-    scrollToBottom();
-  }
-
-  function _pollBackgroundTurn(sessionId, originalCount) {
-    if (!sessionId) return;
-    // Already polling this session — do not stack timers.
-    if (_bgPollingSession === sessionId && _bgPollTimer) return;
-    _stopBackgroundPoll();
-    _bgPollingSession = sessionId;
-    var attempts = 0;
-    var maxIdleAttempts = 40;
-    var lastMessageHash = '';
-    var delayMs = 2500;
-    var sawPending = false;
-
-    function _hashMessages(msgs) {
-      var last = msgs[msgs.length - 1] || {};
-      var lastLen = last.content ? String(last.content).length : 0;
-      return msgs.length + ':' + lastLen + ':' + !!last.pending + ':' + (last.role || '');
-    }
-
-    function _schedule(next) {
-      if (_bgPollTimer) clearTimeout(_bgPollTimer);
-      _bgPollTimer = setTimeout(poll, next);
-    }
-
-    function poll() {
-      _bgPollTimer = null;
-      if (chatSessionId !== sessionId) { _stopBackgroundPoll(); return; }
-      // Live SSE stream still owns the pipe — don't fight it.
-      if (activeStream) { _stopBackgroundPoll(); return; }
-      // IMPORTANT: do NOT skip SessionStore just because agentStore._turnActive
-      // is true. After a tab-switch reconnect the server may set
-      // "Reconnected — previous turn still running…" which leaves _turnActive
-      // stuck forever while the real turn finished on a dead socket. Always
-      // poll SessionStore; only slow the cadence slightly when WS looks live.
-      var wsLooksLive = false;
-      try {
-        var store = window.Alpine && Alpine.store && Alpine.store('agent');
-        if (store && store.connectionStatus === 'connected' && store._turnActive) {
-          wsLooksLive = true;
-        }
-      } catch (e) { /* ignore */ }
-
-      attempts++;
-      Promise.all([
-        fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/status')
-          .then(function(r) { return r.ok ? r.json() : {}; })
-          .catch(function() { return {}; }),
-        fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
-          .then(function(r) { return r.ok ? r.json() : []; })
-          .catch(function() { return []; }),
-      ]).then(function(pair) {
-        if (chatSessionId !== sessionId) { _stopBackgroundPoll(); return; }
-        var status = pair[0] || {};
-        var messages = pair[1] || [];
-        var generating = !!status.generating;
-        var currentHash = _hashMessages(messages);
-        var lastMsg = messages[messages.length - 1];
-
-        if (lastMsg && lastMsg.pending) sawPending = true;
-
-        // ── Turn finished with content: soft-apply, never full loadSession ──
-        if (
-          lastMsg && lastMsg.role === 'assistant' &&
-          (lastMsg.content || '').trim() && !lastMsg.pending
-        ) {
-          var grew = originalCount > 0 && messages.length > originalCount;
-          var domMiss = _domMissingAssistantReply(lastMsg.content);
-          // Always paint when DOM is missing — server SoT. Also paint on first
-          // ticks / pending / grew so we never rely on a single racey frame.
-          if (domMiss || sawPending || grew || attempts <= 2 || _awaitingReply) {
-            _softApplyFinalAssistant(lastMsg.content, lastMsg.model || '');
-          }
-          // Only stop waiting when the bubble actually shows the answer.
-          if (!_domMissingAssistantReply(lastMsg.content)) {
-            _awaitingReply = false;
-            try {
-              var stDone = window.Alpine && Alpine.store && Alpine.store('agent');
-              if (stDone) { stDone._turnActive = false; stDone.isThinking = false; }
-            } catch (e2) { /* ignore */ }
-            if (_isGenerating) endTurn();
-            _stopBackgroundPoll();
-            return;
-          }
-          // Painted attempt failed visibility check — keep polling.
-          _awaitingReply = true;
-          delayMs = Math.min(delayMs + 500, 5000);
-          _schedule(delayMs);
-          return;
-        }
-
-        // Server idle but WS store still thinks a turn is active — heal it.
-        if (!generating && wsLooksLive && attempts >= 2) {
-          try {
-            var stHeal = window.Alpine && Alpine.store && Alpine.store('agent');
-            if (stHeal) { stHeal._turnActive = false; stHeal.isThinking = false; }
-          } catch (e3) { /* ignore */ }
-          if (_isGenerating) endTurn();
-        }
-
-        // Message count grew with non-pending assistant earlier in the list
-        if (originalCount > 0 && messages.length > originalCount && !generating) {
-          var newest = messages[messages.length - 1];
-          if (newest && newest.role === 'assistant' && (newest.content || '').trim()) {
-            _softApplyFinalAssistant(newest.content, newest.model || '');
-          }
-          _stopBackgroundPoll();
-          return;
-        }
-
-        if (currentHash !== lastMessageHash && lastMsg && lastMsg.pending) {
-          lastMessageHash = currentHash;
-          var pendingEl = messagesEl && messagesEl.querySelector('.message-assistant:last-child .message-text');
-          if (pendingEl && (pendingEl.textContent || '').indexOf('⏳') !== -1) {
-            var progress = lastMsg.content ? ' (' + String(lastMsg.content).length + ' chars)' : '';
-            pendingEl.innerHTML = '<p>⏳ <em>Previous turn still processing in the background' + progress + '…</em></p>';
-          }
-        }
-
-        if (generating) {
-          delayMs = Math.min(delayMs + 500, 10000);
-          _schedule(delayMs);
-          return;
-        }
-
-        // Dead pending: not generating, empty pending bubble
-        if (
-          lastMsg && lastMsg.role === 'assistant' &&
-          lastMsg.pending && !(lastMsg.content || '').trim() &&
-          attempts >= 2
-        ) {
-          _stopBackgroundPoll();
-          var stuck = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
-          if (stuck.length > 0) {
-            var textNode = stuck[stuck.length - 1].querySelector('.message-text') || stuck[stuck.length - 1];
-            textNode.innerHTML = '<p class="error-message" style="display:flex;align-items:flex-start;gap:6px;">' +
-              (window.KazmaIcons ? KazmaIcons.span('alert') : '') +
-              '<em>Previous turn ended without a stored reply. Send a new message to continue.</em></p>';
-          }
-          return;
-        }
-
-        // Idle complete conversation (assistant done, or empty session): STOP.
-        // Do not keep polling forever — that was the blink loop.
-        if (
-          !generating &&
-          lastMsg &&
-          lastMsg.role === 'assistant' &&
-          !lastMsg.pending
-        ) {
-          _stopBackgroundPoll();
-          return;
-        }
-        if (!generating && (!messages || messages.length === 0)) {
-          _stopBackgroundPoll();
-          return;
-        }
-        // Last message is user, server idle — no background turn; stop quickly.
-        if (!generating && lastMsg && lastMsg.role === 'user' && attempts >= 2) {
-          _stopBackgroundPoll();
-          return;
-        }
-
-        if (attempts > maxIdleAttempts) {
-          _stopBackgroundPoll();
-          var msgs = messagesEl ? messagesEl.querySelectorAll('.message-assistant') : [];
-          if (msgs.length > 0) {
-            var lastAsst = msgs[msgs.length - 1];
-            if ((lastAsst.textContent || '').indexOf('⏳') !== -1) {
-              lastAsst.querySelector('.message-text').innerHTML =
-                '<p><em>Could not confirm the previous turn finished. Send a new message if needed.</em></p>';
-            }
-          }
-          return;
-        }
-
-        delayMs = Math.min(delayMs + 500, 10000);
-        _schedule(delayMs);
-      }).catch(function() {
-        _schedule(5000);
-      });
-    }
-
-    _schedule(800);
   }
 
   function bindCapacityBar() {
@@ -4353,7 +3999,6 @@
     currentMsgEl = null;
     tokenAccum = '';
     lastSentUserText = '';
-    _lastFinalFingerprint = '';
     _awaitingReply = false;
 
     // Bind WS bus to the NEW session (disconnect old so late frames can't
@@ -4603,13 +4248,8 @@
       }
       if (lastAsst) {
         var te = lastAsst.querySelector('.message-text');
-        if (te && _bubbleShowsContent(te, incoming)) return;
-        if (te && (te.textContent || '').replace(/\s+/g, ' ').trim().length < 8) {
-          try { te.innerHTML = KS.markdown ? KS.markdown(incoming) : incoming; }
-          catch (e) { te.textContent = incoming; }
-          te.setAttribute('data-final-len', String(incoming.length));
-          return;
-        }
+        // Exact-match only — no fuzzy "did it render" heuristics (V2).
+        if (te && (te.textContent || '').replace(/\s+/g, ' ').trim() === incoming.replace(/\s+/g, ' ').trim()) return;
       }
       var prev = currentMsgEl;
       currentMsgEl = createAssistantMessage();
@@ -4623,8 +4263,7 @@
     finalizeProgress: finalizeProgress,
     noteTurnActivity: noteTurnActivity,
     applyMemoryExplain: applyMemoryExplain,
-    pollBackgroundTurn: _pollBackgroundTurn,
-    stopBackgroundPoll: _stopBackgroundPoll,
+    resync: function(reason) { _resyncDelivery(reason || 'api'); },
     /**
      * After HITL approve/YOLO: clear token accum so the resumed final answer
      * replaces rather than concatenating onto the pre-approval partial.
@@ -4655,24 +4294,10 @@
         textEl = currentMsgEl.querySelector('.message-text');
       }
 
-      var fp = _finalFingerprint(incoming);
-
-      // Skip ONLY when this bubble already visibly shows the answer.
-      // Fingerprint-alone no-op was wrong: it blocked paint after a failed
-      // soft path and left users needing a full refresh.
-      if (textEl && _bubbleShowsContent(textEl, incoming)) {
-        _lastFinalFingerprint = fp;
-        textEl.setAttribute('data-final-len', String(incoming.length));
-        _awaitingReply = false;
-        lastActivityTs = 0;
-        if (opts.replay || opts.source === 'soft') {
-          currentMsgEl = null;
-          tokenAccum = '';
-        }
-        return;
-      }
-
-      // Server truth → DOM. Always.
+      // Server truth → DOM. ALWAYS. No "already shows it?" text matching:
+      // dedupe belongs to the seq-journaled transports, painting twice is
+      // idempotent, and a skipped paint was the "no response until refresh"
+      // root cause.
       tokenAccum = incoming;
       tryIngestPlanFromText(tokenAccum);
       if (textEl) {
@@ -4683,11 +4308,6 @@
         }
         textEl.setAttribute('data-final-len', String(tokenAccum.length));
       }
-      // Fingerprint only AFTER a real paint attempt.
-      _lastFinalFingerprint = fp;
-      if (currentMsgEl) {
-        try { currentMsgEl.setAttribute('data-final-fp', fp); } catch (e) { /* ignore */ }
-      }
       if (model && currentMsgEl) {
         var meta = currentMsgEl.querySelector('.message-meta');
         if (meta && meta.textContent.indexOf(model) < 0) {
@@ -4697,6 +4317,12 @@
       // Release wait only after paint — server content is on screen (or tried).
       _awaitingReply = false;
       lastActivityTs = 0;
+      if (opts.replay || opts.source === 'resync') {
+        // Replay/resync paints are terminal for this turn — close the bubble
+        // so the next message opens a fresh one.
+        currentMsgEl = null;
+        tokenAccum = '';
+      }
       scrollToBottom();
     },
     appendLiveToken: function(content, opts) {

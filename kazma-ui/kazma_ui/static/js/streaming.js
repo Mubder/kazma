@@ -22,6 +22,10 @@ var KazmaStream = (function() {
       var reader = response.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';
+      // Turn Delivery V2: journaled SSE frames carry an ``id: <seq>`` line.
+      // Track the last seen id so a resume retry can present it as
+      // last_event_id and the server replays exactly what was missed.
+      var lastEventId = null;
 
       // Guard: the SSE ``event: done`` frame already completes the turn.
       // When the HTTP body closes, the reader also ends — without this flag
@@ -48,18 +52,23 @@ var KazmaStream = (function() {
 
           var eventType = null;
           var dataLines = [];
+          var frameId = null;
           for (var i = 0; i < lines.length; i++) {
             var line = lines[i];
             if (line.startsWith('event: ')) {
               eventType = line.slice(7).trim();
+            } else if (line.startsWith('id: ')) {
+              frameId = line.slice(4).trim();
             } else if (line.startsWith('data: ')) {
               dataLines.push(line.slice(6));
             } else if (line === '' && eventType) {
+              if (frameId != null && frameId !== '') lastEventId = frameId;
               var payload = null;
               try { payload = JSON.parse(dataLines.join('\n')); } catch(e) {}
               dispatch(eventType, payload);
               eventType = null;
               dataLines = [];
+              frameId = null;
             }
           }
           pump();
@@ -139,7 +148,11 @@ var KazmaStream = (function() {
       }
     });
 
-    return { abort: function() { controller.abort(); } };
+    return {
+      abort: function() { controller.abort(); },
+      /** Last journaled seq seen on this stream (Turn Delivery V2). */
+      lastEventId: function() { return lastEventId; },
+    };
   }
 
   // ── WebSocket with auto-reconnect ─────────────────────

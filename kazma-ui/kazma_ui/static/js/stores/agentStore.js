@@ -118,10 +118,13 @@ document.addEventListener('alpine:init', () => {
     _turnActive: false,
     /** True when we close the socket on purpose (session switch / reconnect). */
     _intentionalClose: false,
-    /** Last telemetry frame received (ms epoch) — feeds the stale-socket watchdog. */
+    /** Last telemetry frame received (ms epoch) — feeds the liveness ticker. */
     _lastFrameAt: 0,
-    /** Interval handle for the stale-socket watchdog (set once in connect()). */
-    _stalenessTimer: null,
+    /** Turn Delivery V2: seq tracker for the current connection. */
+    _cursor: null,
+    /** Liveness ticker started once (worker-backed, throttle-immune). */
+    _livenessStarted: false,
+    _livenessWorker: null,
     /**
      * Outbound frames waiting for an OPEN socket (or re-send after drop
      * before prompt_ack). Each entry: { payload, expectAck, clientMsgId, attempts }.
@@ -219,36 +222,54 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── Connection Lifecycle ─────────────────────────────────
+    /**
+     * Turn Delivery V2 liveness ticker.
+     *
+     * Runs inside a Web Worker when available: Chrome's intensive throttling
+     * clamps PAGE timers to ≤1/min in tabs hidden >5 min, but WORKER timers
+     * are never throttled. Dead-socket detection therefore keeps its 5s
+     * cadence regardless of tab state — replacing the old in-page watchdog
+     * whose detection latency balloled exactly when the tab was hidden.
+     * (The server also protocol-pings; this catches the black-holed-socket
+     * case where neither side notices until it tries to talk.)
+     */
+    _startLivenessTicker() {
+      if (this._livenessStarted) return;
+      this._livenessStarted = true;
+      const tick = () => { try { this._livenessCheck(); } catch (e) { /* never throw */ } };
+      if (typeof Worker !== 'undefined') {
+        try {
+          const src = 'setInterval(function(){postMessage(0)},5000);';
+          const blob = new Blob([src], { type: 'text/javascript' });
+          const w = new Worker(URL.createObjectURL(blob));
+          w.onmessage = tick;
+          this._livenessWorker = w;
+          return;
+        } catch (e) { /* CSP / no workers — fall through */ }
+      }
+      setInterval(tick, 5000);
+    },
+
+    /** Page-context liveness action (invoked from worker ticks). */
+    _livenessCheck() {
+      if (!this._turnActive || !this._socket) return;
+      if (this._socket.readyState !== WebSocket.OPEN) return;
+      const silentFor = Date.now() - (this._lastFrameAt || 0);
+      if (silentFor < 45000) return; // server heartbeats ≤15s during turns
+      console.warn(
+        '[AgentStore] Liveness: no frames for ' +
+          Math.round(silentFor / 1000) + 's during an active turn; reconnecting'
+      );
+      // The turn keeps running server-side (detached + journaled); on
+      // reconnect the ?last_seq= handshake replays everything missed.
+      this._intentionalClose = false;
+      this._closeSocket();
+      this._scheduleReconnect();
+    },
+
     connect(sessionId) {
       if (!sessionId) return;
-      // Half-dead socket watchdog (2026-08-21 YOLO-silent incident): the
-      // server heartbeats active turns every ~4s. If a turn is active and no
-      // frame has arrived for 30s, the socket is presumed dead (idle NAT/
-      // proxy cull, system sleep) — the server-side write goes into the OS
-      // buffer and never errors, so neither side notices. Force-reconnect:
-      // the live-socket rebind means subsequent heartbeats + turn_complete
-      // reach the new tab without a manual refresh.
-      if (!this._stalenessTimer) {
-        this._stalenessTimer = setInterval(() => {
-          try {
-            if (!this._turnActive || !this._socket) return;
-            if (this._socket.readyState !== WebSocket.OPEN) return;
-            const silentFor = Date.now() - (this._lastFrameAt || 0);
-            if (silentFor < 30000) return;
-            console.warn(
-              '[AgentStore] Stale live socket — no frames for ' +
-                Math.round(silentFor / 1000) + 's during an active turn; reconnecting'
-            );
-            // The turn keeps running server-side (detached + persisted).
-            // _closeSocket detaches onclose, so schedule the reconnect here
-            // explicitly; the reconnect handshake re-arms the SessionStore
-            // poller via the "previous turn still running" status frame.
-            this._intentionalClose = false;
-            this._closeSocket();
-            this._scheduleReconnect();
-          } catch (e) { /* never let the timer throw */ }
-        }, 5000);
-      }
+      this._startLivenessTicker();
       if (this.sessionId === sessionId && this._socket && this._socket.readyState === WebSocket.OPEN) {
         return;
       }
@@ -275,9 +296,22 @@ document.addEventListener('alpine:init', () => {
       // starts the SessionStore poller (that caused chat blink every 2s).
       this._intentionalClose = true;
       this._closeSocket();
+      // Turn Delivery V2: fresh seq tracker per connection + resume cursor.
+      // The persisted cursor tells the server where we stopped reading; its
+      // journal replays everything after it on accept.
+      this._cursor = (window.KazmaDeliveryCursor || {
+        createTracker: () => ({ observeSeq: () => 'dupe', last: () => null, reset: () => {} }),
+        loadPersisted: () => 0,
+        persist: () => {},
+      }).createTracker();
+      const cursorSeq = window.KazmaDeliveryCursor
+        ? KazmaDeliveryCursor.loadPersisted(sessionId)
+        : 0;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(sessionId)}`;
+      const wsUrl =
+        `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(sessionId)}` +
+        (cursorSeq > 0 ? `?last_seq=${encodeURIComponent(cursorSeq)}` : '');
 
       // Auth via the same-origin kazma-session cookie, which the browser sends
       // automatically on the WS handshake (+ loopback trust for localhost).
@@ -335,7 +369,8 @@ document.addEventListener('alpine:init', () => {
 
         // Unexpected drop mid-turn: if we still have an unacked send_prompt,
         // keep the UI in "thinking" and re-send after reconnect. Otherwise
-        // unlock and poll SessionStore for a detached turn result.
+        // reconcile with server truth (resync paints the durable result or
+        // keeps waiting — the reconnect handshake replays the journal).
         if (!intentional && this._turnActive) {
           if (hasUnacked) {
             // Re-queue any in-flight unacked prompts so open flushes them.
@@ -344,8 +379,8 @@ document.addEventListener('alpine:init', () => {
           } else {
             this._endTurn();
             try {
-              if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
-                window.KazmaChat.pollBackgroundTurn(this.sessionId, 0);
+              if (window.KazmaChat && typeof window.KazmaChat.resync === 'function' && this.sessionId) {
+                window.KazmaChat.resync('ws-drop');
               }
             } catch (e) { /* ignore */ }
           }
@@ -689,13 +724,29 @@ document.addEventListener('alpine:init', () => {
       const type = frame.type;
       const data = frame.data || {};
 
-      // Liveness bookkeeping (2026-08-21 YOLO-silent incident): the server
-      // heartbeats active turns every 4s ("Still working after approval…").
-      // No frame for this long while a turn is active means the socket is
-      // half-dead (idle NAT/proxy cull, system sleep) — the server keeps
-      // running and persisting, but nothing renders until a manual refresh.
-      // The staleness watchdog below force-reconnects so delivery rebinds.
+      // Liveness bookkeeping: any frame proves the socket is alive.
       this._lastFrameAt = Date.now();
+
+      // ── Turn Delivery V2: cursor bookkeeping ─────────────────────
+      // Every journaled frame carries a monotonic per-thread seq. Track it,
+      // persist for the next reconnect's ?last_seq= handshake, and treat a
+      // GAP as an immediate resync trigger — never wait for a terminal.
+      if (frame.seq != null && this.sessionId) {
+        const verdict = this._cursor
+          ? this._cursor.observeSeq(frame.seq)
+          : 'dupe';
+        if (window.KazmaDeliveryCursor) {
+          KazmaDeliveryCursor.persist(this.sessionId, frame.seq);
+        }
+        if (verdict === 'gap') {
+          console.warn('[AgentStore] Seq gap at seq=' + frame.seq + ' — resyncing');
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.resync === 'function') {
+              window.KazmaChat.resync('seq-gap');
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
 
       // Keep chat.js idle-watchdog armed on any live frame
       try {
@@ -703,6 +754,37 @@ document.addEventListener('alpine:init', () => {
           if (type !== 'pong' && type !== 'ping') window.KazmaChat.noteTurnActivity();
         }
       } catch (e) { /* ignore */ }
+
+      // Structured resume handshake (V2) — replaces the old prose frame +
+      // regex matching ("Reconnected — previous turn still running…").
+      if (type === 'resumed') {
+        const r = data || {};
+        console.log(
+          '[AgentStore] Resumed: from=' + r.from + ' to=' + r.to +
+          ' count=' + r.count + ' gap=' + !!r.gap + ' running=' + !!r.running
+        );
+        if (r.gap) {
+          // Cursor predates journal retention — snapshot resync is the only
+          // correct recovery; replay would be silently partial.
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.resync === 'function') {
+              window.KazmaChat.resync('resume-gap');
+            }
+          } catch (e) { /* ignore */ }
+        }
+        if (r.running) {
+          this.isThinking = true;
+          this._turnActive = true;
+          this.statusMessage = _ti('thinking', 'Kazma is thinking…');
+          this._syncThinkingBanner();
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.noteTurnActivity === 'function') {
+              window.KazmaChat.noteTurnActivity();
+            }
+          } catch (e) { /* ignore */ }
+        }
+        return;
+      }
 
       switch (type) {
         case 'memory_explain': {
@@ -737,15 +819,8 @@ document.addEventListener('alpine:init', () => {
               state: 'running',
             });
             this._syncThinkingBanner();
-            // Reconnect catch-up ("previous turn still running") — arm SessionStore
-            // poll so a turn that finishes on a rebound/dead socket still paints.
-            if (/reconnected|still running/i.test(this.statusMessage || '')) {
-              try {
-                if (window.KazmaChat && typeof window.KazmaChat.pollBackgroundTurn === 'function' && this.sessionId) {
-                  window.KazmaChat.pollBackgroundTurn(this.sessionId, 0);
-                }
-              } catch (e) { /* ignore */ }
-            }
+            // (V2) Reconnect delivery is owned by the structured 'resumed'
+            // handshake + journal replay — no prose matching here.
           } else if (statusVal === 'routing_node') {
             this.isThinking = true;
             this._turnActive = true;
