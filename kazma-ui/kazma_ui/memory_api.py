@@ -198,49 +198,26 @@ def _memory_tenant_id() -> str:
 
 
 def _belief_count_sql() -> str:
-    return """
-        (
-          SELECT COUNT(*) FROM beliefs b
-          WHERE b.tenant_id = e.tenant_id
-            AND b.valid_until IS NULL AND b.invalidated_at IS NULL
-            AND (b.subject = e.id OR b.object = e.name
-                 OR b.object = e.id OR b.subject = e.name)
-        )
+    """Canonical active-belief count for an ``entities e`` row.
+
+    Single source of truth lives in kazma_core.memory.entity_counts — the
+    materialized-column recompute must never drift from this read path.
     """
+    from kazma_core.memory.entity_counts import belief_count_sql
+
+    return belief_count_sql()
 
 
 def _entity_degree_sql() -> str:
-    """How many *other entity nodes* this entity co-occurs with in active beliefs.
+    """Canonical entity-only graph degree for an ``entities e`` row.
 
-    Only ENTITY-to-entity co-occurrence counts as graph degree. Literal
-    payload objects ("fully_clean", "4/4", a file path) are virtual fact
-    text on the belief — the v2 painter renders them as virtual nodes, but
-    they are not graph neighbors; counting them made truly isolated leaf
-    concepts report degree ≥ 1 and never fire the isolated flag.
+    Single source of truth lives in kazma_core.memory.entity_counts (the
+    2026-08-24 drift incident: two handwritten copies diverged when the
+    payload-object fix landed in only one of them).
     """
-    return """
-        (
-          SELECT COUNT(DISTINCT other_id) FROM (
-            SELECT CASE
-              WHEN b.subject = e.id THEN b.object
-              WHEN b.object = e.id THEN b.subject
-              WHEN b.subject = e.name THEN b.object
-              WHEN b.object = e.name THEN b.subject
-              ELSE NULL
-            END AS other_id
-            FROM beliefs b
-            WHERE b.tenant_id = e.tenant_id
-              AND b.valid_until IS NULL AND b.invalidated_at IS NULL
-              AND (b.subject = e.id OR b.object = e.id
-                   OR b.subject = e.name OR b.object = e.name)
-          )
-          WHERE other_id IS NOT NULL
-            AND other_id != e.id
-            AND other_id != e.name
-            AND other_id NOT IN ('', 'true', 'false', 'null')
-            AND EXISTS (SELECT 1 FROM entities oe WHERE oe.id = other_id)
-        )
-    """
+    from kazma_core.memory.entity_counts import entity_degree_sql
+
+    return entity_degree_sql()
 
 
 # ── Page ─────────────────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ def _seed_graph(state_path):
     now = time.time()
     c.execute("INSERT INTO entities (id, tenant_id, type, name) VALUES ('alice','default','person','Alice')")
     c.execute("INSERT INTO entities (id, tenant_id, type, name) VALUES ('paris','default','concept','Paris')")
+    c.execute("INSERT INTO entities (id, tenant_id, type, name) VALUES ('french','default','concept','French')")
     c.execute("INSERT INTO entities (id, tenant_id, type, name) VALUES ('shipx','default','project','ShipX')")
     for bid, sub, pred, obj in (
         ("b1", "alice", "lives_in", "paris"),
@@ -77,6 +78,8 @@ def test_backfill_populates_stale_counts(state_db):
     c.close()
 
     assert rows["alice"]["belief_count"] == 2, f"alice expected 2, got {rows['alice']}"
+    # Entity-only degree (2026-08-24 semantics): 'french' is now seeded as an
+    # entity; payload objects would NOT count as neighbors.
     assert rows["alice"]["graph_degree"] == 2  # co-occurs with paris + french
     assert rows["paris"]["belief_count"] == 1
     assert rows["shipx"]["belief_count"] == 1

@@ -147,6 +147,49 @@ class TestBackfillSweep:
         assert stats["anchored"] == 2
 
 
+class TestMaterializedDegree:
+    def test_materialized_recompute_ignores_payload_objects(self, mem_conn):
+        """The MATERIALIZED graph_degree column (entity_counts recompute)
+        must use the same entity-only semantics as the live subquery —
+        this was the drift incident: two handwritten SQL copies diverged."""
+        from kazma_core.memory.entity_counts import recompute_entity_counts
+
+        _add_belief(mem_conn, "sakhrfit", "availability_status", "fully_clean")
+        mem_conn.execute(
+            "INSERT INTO entities (id, name, type) VALUES ('sakhrfit', 'sakhrfit', 'concept')"
+        )
+        mem_conn.commit()
+
+        recompute_entity_counts(mem_conn, ["sakhrfit"])
+        row = mem_conn.execute(
+            "SELECT belief_count, graph_degree FROM entities WHERE id='sakhrfit'"
+        ).fetchone()
+        assert row["graph_degree"] == 0  # payload text is not a neighbor
+        assert row["belief_count"] == 1
+
+        # And an entity-object neighbor DOES count after recompute.
+        _add_entity(mem_conn, "hadidfit_ai")
+        _add_belief(mem_conn, "sakhrfit", "competes_with", "hadidfit_ai")
+        recompute_entity_counts(mem_conn, ["sakhrfit"])
+        row = mem_conn.execute(
+            "SELECT graph_degree FROM entities WHERE id='sakhrfit'"
+        ).fetchone()
+        assert row["graph_degree"] == 1
+
+    def test_single_source_of_truth(self):
+        """memory_api must import the canonical strings, not own copies."""
+        import inspect
+
+        from kazma_core.memory import entity_counts
+        from kazma_ui import memory_api
+
+        assert memory_api._belief_count_sql() == entity_counts.belief_count_sql()
+        assert memory_api._entity_degree_sql() == entity_counts.entity_degree_sql()
+        # And no second handwritten degree body remains in memory_api source.
+        src = inspect.getsource(memory_api)
+        assert "EXISTS (SELECT 1 FROM entities oe" not in src
+
+
 class TestDegreeSemantics:
     def test_degree_sql_ignores_payload_objects(self, mem_conn):
         """The isolated flag must fire for scalar-only leaf concepts."""
