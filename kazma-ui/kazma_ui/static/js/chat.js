@@ -1580,6 +1580,14 @@
     // the server). The WS/SSE/endTurn lifecycle CANNOT touch it.
     _awaitingReply = true;
 
+    // Hidden-tab UX (P4): permission may only be requested from a user
+    // gesture — arm it on send.
+    try {
+      if (window.KazmaTurnVisibility && KazmaTurnVisibility.armPermission) {
+        KazmaTurnVisibility.armPermission();
+      }
+    } catch (e) { /* ignore */ }
+
     // Route over Central WebSocket Telemetry Bus if connected
     const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
     if (agentStore && agentStore.connectionStatus === 'connected') {

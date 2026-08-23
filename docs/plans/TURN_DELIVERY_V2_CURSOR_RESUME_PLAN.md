@@ -1,7 +1,7 @@
 # Plan: Turn Delivery V2 — Event-Sourced Cursor Delivery (One-Shot Replacement)
 
 **Date:** 2026-08-23
-**Status:** PROPOSED
+**Status:** IMPLEMENTED (P0–P4 shipped 2026-08-23; P5 Web Push deliberately deferred as opt-in follow-up)
 **Supersedes (delivery portions of):** `docs/plans/RELIABILITY_MODEL_AND_TURN_DELIVERY.md` (2026-08-03) — that plan shipped `turn_complete` contracts + pollers + watchdogs as incident responses. They worked individually; collectively they form six overlapping recovery heuristics whose interactions are themselves the remaining bug class ("reply invisible until F5 after tab switch").
 
 ---

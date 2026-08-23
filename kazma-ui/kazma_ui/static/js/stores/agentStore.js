@@ -148,6 +148,7 @@ document.addEventListener('alpine:init', () => {
     _beginTurn() {
       this._turnActive = true;
       this.isThinking = true;
+      try { if (window.KazmaTurnVisibility) KazmaTurnVisibility.beginTurn(); } catch (e) {}
       const chat = this._chat();
       if (chat && typeof chat.beginTurn === 'function') chat.beginTurn();
     },
@@ -754,6 +755,22 @@ document.addEventListener('alpine:init', () => {
           if (type !== 'pong' && type !== 'ping') window.KazmaChat.noteTurnActivity();
         }
       } catch (e) { /* ignore */ }
+
+      // Hidden-tab awareness (plan P4): badge the title while a turn runs
+      // in a background tab; fire a desktop Notification on terminal.
+      try {
+        const V = window.KazmaTurnVisibility;
+        if (V) {
+          if (type === 'token' || type === 'llm_delta' || type === 'status_update' ||
+              type === 'status' || type === 'tool_start' || type === 'tool_lifecycle') {
+            V.noteActivity(type === 'token' || type === 'llm_delta' ? 'token' : 'tool',
+                           data.tool_name || '');
+          } else if (type === 'done' || type === 'turn_complete') {
+            const summary = (data && data.content) ? String(data.content) : '';
+            V.endTurn(summary.length > 120 ? summary.slice(0, 117) + '\u2026' : summary);
+          }
+        }
+      } catch (e) { /* visibility UX is best-effort */ }
 
       // Structured resume handshake (V2) — replaces the old prose frame +
       // regex matching ("Reconnected — previous turn still running…").

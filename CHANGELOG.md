@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## Unreleased — Turn Delivery V2: cursor-resume delivery replaces the recovery patch pile (2026-08-23)
+
+The "reply invisible until refresh after tab switch" bug class is fixed
+architecturally. Browsers throttle **timers** in hidden tabs (≤1/min after
+~5 min) but never network callbacks — so every prior fix (3s "nuclear"
+poll, background-turn poller, gated reconciler, in-page staleness
+watchdog, ≥90% rendered-text matching) degraded exactly when hidden.
+Replaced by the industry-standard pattern (Discord gateway RESUME /
+SSE-spec Last-Event-ID / swarm-bus replay):
+
+- **`kazma_ui/delivery.py`** — per-thread bounded event journal assigning
+  monotonic `seq` + process-wide broker; BOTH chat transports emit through
+  it. Events are journaled even with zero listeners, so a reconnecting
+  client replays exactly what it missed (`gap=True` forces snapshot resync
+  instead of silent partial history). Multi-slot sockets: N tabs per
+  session all stay live. Metrics: `kazma_delivery_*_total`.
+- **WS**: `?last_seq=` / `{"action":"resume"}` → structured
+  `resumed {from,to,count,gap,running}` handshake + replay (replaces the
+  regex-on-prose catch-up). Staleness watchdog moved into a **Worker**
+  timer (never throttled).
+- **SSE**: frames carry SSE-spec `id:` lines; POST `last_event_id`
+  attaches to a RUNNING turn with replay-then-live and seq dedupe —
+  previously impossible (turn_busy only). `_parse_frame` now parses SSE
+  fields line-scoped per spec (positional parsing would have broken
+  reply persistence once `id:` lines shipped).
+- **Client**: one unconditional gate-free `resync()` on
+  visible/focus/pageshow/init/load/seq-gap/resume-gap/idle-watchdog;
+  deleted the nuclear poll, bg-poller, reconcile gates,
+  fingerprint/≥90%-prefix "did it render?" heuristics — no code path
+  compares rendered text to desired content before painting.
+  `applyFinalAssistantText` paints server truth unconditionally.
+- **Hidden-tab UX**: title badge while running + desktop Notification on
+  terminal (`modules/turn_visibility.js`, localStorage toggle
+  `kazma.notifyOnComplete`).
+- Plan: `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md`. Server-side
+  suites: `tests/test_delivery.py`, `tests/test_ws_delivery_v2.py`,
+  `tests/test_sse_delivery_v2.py`; client contracts:
+  `tests/test_delivery_v2_client.py`.
+
 ## Unreleased — Telegram "Saved. Ready…" desync: continue-context gating + Partial pause (2026-08-19)
 
 After a mission ended **Partial** at the recursion limit, fresh Telegram

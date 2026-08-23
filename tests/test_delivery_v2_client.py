@@ -22,6 +22,7 @@ _CHAT_JS = _UI / "static" / "js" / "chat.js"
 _STORE_JS = _UI / "static" / "js" / "stores" / "agentStore.js"
 _STREAM_JS = _UI / "static" / "js" / "streaming.js"
 _CURSOR_JS = _UI / "static" / "js" / "modules" / "delivery_cursor.js"
+_VIS_JS = _UI / "static" / "js" / "modules" / "turn_visibility.js"
 _CHAT_HTML = _UI / "templates" / "chat.html"
 
 
@@ -111,6 +112,21 @@ class TestV2ArchitecturePresent:
     def test_apply_final_paints_unconditionally(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "Server truth \u2192 DOM. ALWAYS." in src
+
+
+class TestHiddenTabUX:
+    """Plan P4: hidden-tab awareness (title badge + terminal notification)."""
+
+    def test_visibility_module_exists_and_wired(self):
+        assert _VIS_JS.exists()
+        html = _CHAT_HTML.read_text(encoding="utf-8")
+        assert 'src="/static/js/modules/turn_visibility.js' in html
+
+    def test_store_reports_activity_and_terminal(self):
+        src = _STORE_JS.read_text(encoding="utf-8")
+        assert "KazmaTurnVisibility" in src
+        assert "noteActivity" in src
+        assert "endTurn(" in src
 
 
 class TestCursorTrackerNode:
