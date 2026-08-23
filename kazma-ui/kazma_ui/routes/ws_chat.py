@@ -33,6 +33,7 @@ from kazma_ui.active_turns import (
     unbind_live_socket,
     unregister_turn,
 )
+from kazma_ui.delivery import get_turn_broker
 from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
@@ -71,16 +72,24 @@ def _make_ws_sender(
     websocket: WebSocket,
     thread_id: str = "",
 ) -> tuple[Callable[[dict[str, Any]], Any], Callable[[], bool]]:
-    """Return (send, is_lost) around live WebSocket delivery that never raises.
+    """Return (send, is_lost) around broker-backed delivery that never raises.
 
-    After the client disconnects (page refresh / tab switch) every send used to
-    raise and abort the LangGraph ``astream_events`` generator mid-flight —
-    the classic "agent stops after switching tabs" bug.  ``send`` now:
+    Turn Delivery V2 (docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md):
+    every thread-scoped frame is journaled with a monotonic ``seq`` and
+    fanned out to ALL sockets bound to the thread (multi-tab safe), via
+    ``TurnBroker.emit``. Consequences vs. the old live-socket-preference
+    scheme:
 
-    1. Prefer the **live** socket for *thread_id* (rebound on reconnect via
-       ``bind_live_socket``) so ``turn_complete`` reaches the new tab.
-    2. Fall back to the socket that started the turn.
-    3. Return False on loss — callers keep draining the graph and persist.
+    1. Frames reach a *reconnected* tab without any rebind dance — the new
+       socket registered itself on connect.
+    2. Events are journaled even when zero sockets are listening, so a
+       client resuming from its cursor replays exactly what it missed.
+    3. ``is_lost()`` now means "no recipient is bound" rather than "the
+       originating socket died" — callers use it to decide orphan stamping,
+       not to drop events.
+
+    With an empty *thread_id* (connection-scoped sends) behaviour degrades
+    to the legacy direct-send path.
     """
 
     def _target() -> WebSocket:
@@ -91,23 +100,71 @@ def _make_ws_sender(
         return websocket
 
     def is_lost() -> bool:
-        ws = _target()
+        if thread_id:
+            return get_turn_broker().socket_count(thread_id) == 0
         try:
-            return ws.client_state != WebSocketState.CONNECTED
+            return websocket.client_state != WebSocketState.CONNECTED
         except Exception:
             return True
 
     async def send(payload: dict[str, Any]) -> bool:
-        ws = _target()
-        try:
-            if ws.client_state != WebSocketState.CONNECTED:
+        if not thread_id:
+            ws = _target()
+            try:
+                if ws.client_state != WebSocketState.CONNECTED:
+                    return False
+                await ws.send_json(payload)
+                return True
+            except Exception:
                 return False
-            await ws.send_json(payload)
-            return True
+        try:
+            await get_turn_broker().emit(thread_id, payload)
+            return get_turn_broker().socket_count(thread_id) > 0
         except Exception:
+            logger.debug("[WS-Chat] broker emit failed thread=%s", thread_id[:12], exc_info=True)
             return False
 
     return send, is_lost
+
+
+async def _ws_resume_handshake(socket: Any, thread_id: str, last_seq: int) -> None:
+    """V2 cursor resume: structured handshake + journal replay to one socket.
+
+    Replies with a single ``resumed`` frame describing what follows, then
+    replays journaled events strictly after *last_seq* — direct to this
+    socket (they are already journalled; re-emitting through the broker
+    would double-append them). ``gap=True`` tells the client its cursor
+    predates retention and it must snapshot-resync instead of replaying.
+    Never raises to the caller for per-frame socket failures mid-replay —
+    a dead socket aborts the replay silently.
+    """
+    broker = get_turn_broker()
+    frames, gap, head = broker.resume(thread_id, int(last_seq or 0))
+    try:
+        await socket.send_json(
+            TelemetryEvent(
+                type="resumed",
+                data={
+                    "from": int(last_seq or 0),
+                    "to": head,
+                    "count": len(frames),
+                    "gap": bool(gap),
+                    # Structured replacement for the old prose catch-up frame
+                    # ("Reconnected — previous turn still running…") that the
+                    # client used to regex-match.
+                    "running": bool(is_turn_running(thread_id)),
+                },
+                thread_id=thread_id,
+            ).to_dict()
+        )
+        for frame in frames:
+            await socket.send_json(frame)
+    except Exception:
+        logger.debug(
+            "[WS-Chat] resume replay aborted (socket gone) thread=%s",
+            thread_id[:12],
+            exc_info=True,
+        )
 
 
 def _record_ws_activity(
@@ -646,61 +703,80 @@ def create_ws_chat_router(
         except Exception as init_scan_err:
             logger.debug("[WS-Chat] Initial HITL scan on connect failed: %s", init_scan_err)
 
-        # Reconnect catch-up: if a turn is still running, tell the client to keep
-        # waiting; if the last assistant bubble already has content, push it.
+        # V2 cursor resume opt-in: ?last_seq=N on the WS URL. A cursor-aware
+        # client gets the structured handshake + journal replay instead of the
+        # legacy prose catch-up below (which stays byte-identical for legacy
+        # clients that connect without a cursor).
         try:
-            from kazma_ui.active_turns import get_active_turn
+            _raw_ls = str(websocket.query_params.get("last_seq") or "").strip()
+            _v2_last_seq: int | None = int(_raw_ls) if _raw_ls else None
+        except Exception:
+            _v2_last_seq = None
 
-            _alive = get_active_turn(thread_id)
-            if _alive is not None and not _alive.done():
-                await websocket.send_json(
-                    TelemetryEvent(
-                        type="status_update",
-                        data={
-                            "status": "thinking",
-                            "message": "Reconnected — previous turn still running…",
-                            "active_node": "Supervisor",
-                        },
-                        thread_id=thread_id,
-                    ).to_dict()
-                )
-            else:
-                try:
-                    sess = get_session_manager().get(session_id)
-                    if sess and sess.messages:
-                        last = sess.messages[-1]
-                        if (
-                            last.get("role") == "assistant"
-                            and (last.get("content") or "").strip()
-                            and not last.get("pending")
-                            # Slash confirmations are not a turn answer —
-                            # replaying them into the next prompt duplicated
-                            # "MISSION ON" (incident 2026-08-16).
-                            and last.get("kind") != "capacity"
-                        ):
-                            await websocket.send_json(
-                                TelemetryEvent(
-                                    type="turn_complete",
-                                    data={
-                                        "content": last.get("content") or "",
-                                        "interrupted": False,
-                                        "empty": False,
-                                        "model": last.get("model") or "",
-                                        "session_id": session_id,
-                                        "replay": True,
-                                        # Cumulative badges survive tab switches.
-                                        "session_tokens": int(sess.total_tokens or 0),
-                                        "session_cost": round(float(sess.total_cost or 0.0), 6),
-                                    },
-                                    thread_id=thread_id,
-                                ).to_dict()
-                            )
-                except Exception:
-                    logger.debug("[WS-Chat] reconnect message catch-up skipped", exc_info=True)
-        except Exception as reconnect_exc:
-            logger.debug("[WS-Chat] reconnect catch-up failed: %s", reconnect_exc)
+        if _v2_last_seq is not None:
+            await _ws_resume_handshake(websocket, thread_id, _v2_last_seq)
+        else:
+            # Legacy reconnect catch-up: if a turn is still running, tell the client to keep
+            # waiting; if the last assistant bubble already has content, push it.
+            try:
+                from kazma_ui.active_turns import get_active_turn
+
+                _alive = get_active_turn(thread_id)
+                if _alive is not None and not _alive.done():
+                    await websocket.send_json(
+                        TelemetryEvent(
+                            type="status_update",
+                            data={
+                                "status": "thinking",
+                                "message": "Reconnected — previous turn still running…",
+                                "active_node": "Supervisor",
+                            },
+                            thread_id=thread_id,
+                        ).to_dict()
+                    )
+                else:
+                    try:
+                        sess = get_session_manager().get(session_id)
+                        if sess and sess.messages:
+                            last = sess.messages[-1]
+                            if (
+                                last.get("role") == "assistant"
+                                and (last.get("content") or "").strip()
+                                and not last.get("pending")
+                                # Slash confirmations are not a turn answer —
+                                # replaying them into the next prompt duplicated
+                                # "MISSION ON" (incident 2026-08-16).
+                                and last.get("kind") != "capacity"
+                            ):
+                                await websocket.send_json(
+                                    TelemetryEvent(
+                                        type="turn_complete",
+                                        data={
+                                            "content": last.get("content") or "",
+                                            "interrupted": False,
+                                            "empty": False,
+                                            "model": last.get("model") or "",
+                                            "session_id": session_id,
+                                            "replay": True,
+                                            # Cumulative badges survive tab switches.
+                                            "session_tokens": int(sess.total_tokens or 0),
+                                            "session_cost": round(float(sess.total_cost or 0.0), 6),
+                                        },
+                                        thread_id=thread_id,
+                                    ).to_dict()
+                                )
+                    except Exception:
+                        logger.debug("[WS-Chat] reconnect message catch-up skipped", exc_info=True)
+            except Exception as reconnect_exc:
+                logger.debug("[WS-Chat] reconnect catch-up failed: %s", reconnect_exc)
 
         active_task: asyncio.Task | None = None
+        # Turn Delivery V2: register with the broker — multi-slot (N tabs may
+        # watch one session) and every thread-scoped send fans out to all of
+        # them. Registered flush against the try below so no pre-loop
+        # exception can leak a dead socket into the registry; conn_id is
+        # unregistered in the finally.
+        _broker_conn_id = get_turn_broker().register_socket(thread_id, websocket)
 
         try:
             while True:
@@ -721,6 +797,17 @@ def create_ws_chat_router(
 
                 if action == "ping":
                     await websocket.send_json({"type": "pong"})
+                    continue
+
+                # ── Action: resume (Turn Delivery V2) ────────────────────
+                # Mid-connection re-resume / late opt-in: same structured
+                # handshake + journal replay as the ?last_seq= connect form.
+                if action == "resume":
+                    try:
+                        _resume_from = int(payload.get("last_seq") or 0)
+                    except Exception:
+                        _resume_from = 0
+                    await _ws_resume_handshake(websocket, thread_id, _resume_from)
                     continue
 
                 # ── Action: stop (Stop button) — cancel the running turn ─
@@ -1604,13 +1691,18 @@ def create_ws_chat_router(
                                                             exc_info=True,
                                                         )
 
-                                    # CRITICAL: when the client disconnected (refresh /
-                                    # tab switch) is_lost() is True. Keep draining the
-                                    # LangGraph stream so the turn COMPLETES and
-                                    # persists — never let a dead socket abort the
-                                    # async-for and cancel the graph run.
+                                    # CRITICAL: when no recipient is bound (refresh /
+                                    # tab switch with no second tab) is_lost() is
+                                    # True. Keep draining the LangGraph stream so
+                                    # the turn COMPLETES and persists — never let a
+                                    # dead socket abort the async-for and cancel
+                                    # the graph run. V2: we now emit REGARDLESS —
+                                    # broker.emit journals every frame, so a client
+                                    # reconnecting mid-turn resumes losslessly from
+                                    # its cursor instead of relying on pollers.
                                     if is_lost():
                                         mark_turn_orphaned(thread_id)
+                                        await send(ev.to_dict())
                                         continue
                                     await send(ev.to_dict())
                             finally:
@@ -2458,6 +2550,17 @@ def create_ws_chat_router(
         except Exception as exc:
             logger.exception("[WS-Chat] WebSocket error: %s", exc)
         finally:
+            # V2: drop THIS connection's broker registration first so the
+            # orphan check below counts only *remaining* sockets.
+            try:
+                if _broker_conn_id:
+                    get_turn_broker().unregister_socket(thread_id, _broker_conn_id)
+            except Exception:
+                logger.debug(
+                    "[WS-Chat] broker unregister failed session=%s",
+                    session_id[:12] if session_id else "?",
+                    exc_info=True,
+                )
             # Only unbind if THIS socket is still the live one — a newer
             # reconnect may already own delivery for this thread.
             try:
@@ -2473,11 +2576,15 @@ def create_ws_chat_router(
             # result. Live rebind (above) + client poll pick it up on reconnect.
             if active_task and not active_task.done():
                 logger.info("[WS-Chat] Detached stream task continues in background for session=%s", session_id)
-                # Stamp orphan only when no replacement socket is live —
-                # otherwise a race (new conn accepted before old finally)
-                # would re-arm the TTL while the user is watching.
+                # Stamp orphan only when NO recipient remains — neither a
+                # replacement live socket (legacy rebind) nor any other bound
+                # tab in the V2 broker (multi-tab: one tab leaving must not
+                # arm the TTL while another is watching).
                 try:
-                    if get_live_socket(thread_id) is None:
+                    if (
+                        get_live_socket(thread_id) is None
+                        and get_turn_broker().socket_count(thread_id) == 0
+                    ):
                         mark_turn_orphaned(thread_id)
                 except Exception:
                     pass
