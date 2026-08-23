@@ -482,6 +482,15 @@ def decide_entity_merge(
         ).fetchone()
         if not row:
             return {"ok": False, "error": "not_found_or_resolved"}
+        # M-13: explicit self-merge guard (API/tool layers had one; this
+        # decision path did not).
+        if str(row["source_entity_id"] or "") == str(row["target_entity_id"] or ""):
+            conn.execute(
+                "UPDATE entity_merges SET status='rejected', resolved_at=? WHERE id=?",
+                (time.time(), merge_id),
+            )
+            conn.commit()
+            return {"ok": False, "error": "self_merge_refused", "merge_id": merge_id}
         now = time.time()
         if approve:
             source_id = row["source_entity_id"]

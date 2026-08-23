@@ -3634,6 +3634,15 @@
       var msg = String(truncI18n)
         .replace('{n}', stats.nodes || 0)
         .replace('{total}', stats.total_nodes);
+      // M-08 honesty: slicing also amputates edges — surface the delta so
+      // operators know missing connections are a view limit, not lost data.
+      var hiddenEdges = 0;
+      if (stats.total_links != null && stats.links != null) {
+        hiddenEdges = Math.max(0, Number(stats.total_links) - Number(stats.links));
+      }
+      if (hiddenEdges > 0) {
+        msg += ' · ' + hiddenEdges + ' connection' + (hiddenEdges === 1 ? '' : 's') + ' hidden';
+      }
       el.textContent = msg + ' — filter to narrow the view.';
       el.style.display = 'block';
     } else {

@@ -117,7 +117,11 @@ def anchor_leaf_subject(
         "user",
         ANCHOR_PREDICATE,
         subject,
-        predicate_type="semantic",
+        # 'set' (append-only) is REQUIRED here: a functional predicate would
+        # let later anchors supersede each other, and pairing system_tool
+        # trust with functional semantics would grant overwrite rights over
+        # LLM-inferred facts (§20 posture). related_to must stay append-only.
+        predicate_type="set",
         confidence=0.9,
         importance=1,
         extraction_method="system_tool",
