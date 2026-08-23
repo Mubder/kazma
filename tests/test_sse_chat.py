@@ -280,8 +280,8 @@ class TestStreamContent:
         asyncio.run(_collect())
 
         # Should have 2 token events + 1 done event
-        token_frames = [f for f in frames if f.startswith("event: token")]
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
         assert len(token_frames) == 2
         assert len(done_frames) == 1
         assert "hello" in token_frames[0]
@@ -311,8 +311,8 @@ class TestStreamContent:
 
         asyncio.run(_collect())
 
-        tool_calls = [f for f in frames if f.startswith("event: tool_call")]
-        tool_results = [f for f in frames if f.startswith("event: tool_result")]
+        tool_calls = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: tool_call")]
+        tool_results = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: tool_result")]
         assert len(tool_calls) == 1
         assert len(tool_results) == 1
         assert "file_list" in tool_calls[0]
@@ -346,7 +346,7 @@ class TestStreamContent:
 
         asyncio.run(_collect())
 
-        error_frames = [f for f in frames if f.startswith("event: error")]
+        error_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: error")]
         assert len(error_frames) == 1
         assert "LLM crashed" not in error_frames[0]
         assert "error" in error_frames[0].lower()

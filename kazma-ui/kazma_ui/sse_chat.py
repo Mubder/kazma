@@ -64,6 +64,7 @@ from kazma_ui.active_turns import (
     register_turn,
     unregister_turn,
 )
+from kazma_ui.delivery import get_turn_broker
 
 _active_turns = active_turns  # type: ignore[name-defined]
 
@@ -431,6 +432,24 @@ async def _stream_langgraph_events(
     thread_id = tid or ""
     _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
 
+    # ── Turn Delivery V2: journaled emit ──────────────────────────────
+    # Every client-visible frame of this turn is appended to the per-thread
+    # journal (monotonic seq) BEFORE it is yielded, so a reconnecting client
+    # presenting its cursor replays exactly what it missed — including the
+    # full window while it was disconnected (the pump survives; see the
+    # detached-pump block below). The frame carries both an SSE ``id:`` line
+    # and a ``seq`` key in the JSON payload.
+    _broker = get_turn_broker()
+
+    async def emit_j(event: str, data: dict[str, Any]) -> str:
+        if not thread_id:
+            return _sse_frame(event, data)
+        stamped = await _broker.emit(thread_id, {"type": event, "data": data})
+        seq = int(stamped.get("seq") or 0)
+        payload = dict(stamped.get("data") or {})
+        payload["seq"] = seq
+        return _sse_frame(event, payload, id=seq)
+
     try:
         try:
             # ── Detect Command input (HITL resume path) ─────────────────
@@ -466,7 +485,7 @@ async def _stream_langgraph_events(
                         "[SSE] Rejecting duplicate resume — turn already "
                         "running for thread=%s", thread_id,
                     )
-                    yield _sse_frame("error", {
+                    yield await emit_j("error", {
                         "content": "This conversation is already processing. "
                                    "Please wait for the current turn to finish."
                     })
@@ -615,7 +634,7 @@ async def _stream_langgraph_events(
 
                                 if token_text:
                                     content_acc += token_text
-                                    yield _sse_frame("token", {"content": token_text})
+                                    yield await emit_j("token", {"content": token_text})
 
                         # ── on_chat_model_end: LLM finished — extract usage ────
                         elif kind == "on_chat_model_end":
@@ -635,7 +654,7 @@ async def _stream_langgraph_events(
                             inputs = data.get("input", {})
                             if isinstance(inputs, dict) and "input" in inputs:
                                 inputs = inputs["input"]
-                            yield _sse_frame(
+                            yield await emit_j(
                                 "tool_call",
                                 {
                                     "tool_name": name,
@@ -652,7 +671,7 @@ async def _stream_langgraph_events(
                                 output = output.content
                             elif isinstance(output, dict):
                                 output = output.get("content", json.dumps(output, ensure_ascii=False))
-                            yield _sse_frame(
+                            yield await emit_j(
                                 "tool_result",
                                 {
                                     "tool_name": name,
@@ -667,7 +686,7 @@ async def _stream_langgraph_events(
                         ):
                             output = data.get("output", {})
                             if isinstance(output, dict) and output.get("memory_explain"):
-                                yield _sse_frame(
+                                yield await emit_j(
                                     "memory_explain", output["memory_explain"]
                                 )
 
@@ -676,7 +695,7 @@ async def _stream_langgraph_events(
                             # Emit synthesizing status so the client keeps the
                             # thinking indicator alive until the backfilled text
                             # arrives — prevents the "Done 0s" silence gap.
-                            yield _sse_frame("status_update", {
+                            yield await emit_j("status_update", {
                                 "status": "synthesizing",
                                 "active_node": "Respond",
                             })
@@ -701,7 +720,7 @@ async def _stream_langgraph_events(
                                     }
                                 # Late explain if only present on terminal state
                                 if output.get("memory_explain"):
-                                    yield _sse_frame(
+                                    yield await emit_j(
                                         "memory_explain", output["memory_explain"]
                                     )
 
@@ -714,7 +733,7 @@ async def _stream_langgraph_events(
                                     )
                                     if msg_content:
                                         content_acc = msg_content
-                                        yield _sse_frame(
+                                        yield await emit_j(
                                             "token",
                                             {"content": msg_content},
                                         )
@@ -739,7 +758,7 @@ async def _stream_langgraph_events(
             # shows the failure instead of a silent blank turn. The raw
             # exception never reaches the client.
             if stream_error:
-                yield _sse_frame("error", {"content": stream_error})
+                yield await emit_j("error", {"content": stream_error})
 
             # ── Post-stream: HITL + backfill assistant text ────────────
             # Custom LLM path never streams tokens. On HITL interrupt,
@@ -763,7 +782,7 @@ async def _stream_langgraph_events(
                         msg_content = _last_assistant_text(msgs or [])
                         if msg_content:
                             content_acc = msg_content
-                            yield _sse_frame("token", {"content": msg_content})
+                            yield await emit_j("token", {"content": msg_content})
                             # Give the client a beat to render the text
                             # before done — prevents "Done 0s" flash.
                             await asyncio.sleep(0.1)
@@ -780,7 +799,7 @@ async def _stream_langgraph_events(
                                 if not payload:
                                     continue
                                 interrupted = True
-                                yield _sse_frame(
+                                yield await emit_j(
                                     "approval_required",
                                     {
                                         "thread_id": thread_id,
@@ -814,7 +833,7 @@ async def _stream_langgraph_events(
                                 f"Thread: `{thread_id}`"
                             )
                             content_acc = notice
-                            yield _sse_frame("token", {"content": notice})
+                            yield await emit_j("token", {"content": notice})
                 except Exception as exc:
                     logger.warning("[SSE] interrupt scan failed: %s", exc, exc_info=True)
 
@@ -829,7 +848,7 @@ async def _stream_langgraph_events(
                     "Please try again or check server logs."
                 )
                 content_acc = notice
-                yield _sse_frame("token", {"content": notice})
+                yield await emit_j("token", {"content": notice})
                 logger.warning(
                     "[SSE] Empty turn with no HITL — thread=%s tokens=%s",
                     thread_id,
@@ -912,8 +931,8 @@ async def _stream_langgraph_events(
                 "session_tokens": sess_tokens,
                 "session_cost": round(float(sess_cost or 0.0), 6),
             }
-            yield _sse_frame("done", _done_payload)
-            yield _sse_frame("turn_complete", _done_payload)
+            yield await emit_j("done", _done_payload)
+            yield await emit_j("turn_complete", _done_payload)
             logger.info(
                 "SSE turn_complete: model=%s tokens=%d content_len=%d interrupted=%s",
                 _done_model or "?",
@@ -925,7 +944,7 @@ async def _stream_langgraph_events(
             # Time Travel: notify the UI a snapshot was captured (live
             # timeline growth). No-op if the replay panel isn't open.
             if _snapshot_info:
-                yield _sse_frame("snapshot", _snapshot_info)
+                yield await emit_j("snapshot", _snapshot_info)
 
         except asyncio.CancelledError:
             logger.info("SSE stream cancelled by client disconnect (thread=%s)", thread_id)
@@ -947,16 +966,108 @@ async def _stream_langgraph_events(
                     f"Thread: `{thread_id}`"
                 )
                 content_acc = recovery
-                yield _sse_frame("token", {"content": recovery})
+                yield await emit_j("token", {"content": recovery})
                 logger.warning(
                     "[SSE] Empty turn recovered on exception — thread=%s tokens=%s",
                     thread_id, total_tokens,
                 )
-            yield _sse_frame("error", {"content": sanitize_error(exc)})
+            yield await emit_j("error", {"content": sanitize_error(exc)})
     finally:
         if token is not None:
             reset_current_thread_id(token)
         reset_turn_id(_turn_token)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Turn Delivery V2 — SSE cursor attach (replay + live reattach)
+# ══════════════════════════════════════════════════════════════════════════
+
+#: Idle tick budget for the attach stream: ~10s per tick, 30 ticks ≈ 5 min
+#: of TOTAL silence (no events AND no running turn) before closing.
+_ATTACH_IDLE_TIMEOUT_S = 10.0
+_ATTACH_MAX_IDLE_TICKS = 30
+
+#: Journal frame types that terminate an attached stream.
+_SSE_ATTACH_TERMINAL = frozenset({"done", "turn_complete", "stream_end"})
+
+
+def _frame_from_journaled(frame: dict[str, Any]) -> str:
+    """Render a journal entry as an id:-lined SSE frame."""
+    data = dict(frame.get("data") or {})
+    seq = frame.get("seq")
+    data["seq"] = seq
+    return _sse_frame(str(frame.get("type") or "message"), data, id=seq)
+
+
+async def _sse_attach_stream(
+    thread_id: str,
+    session_id: str,
+    after_seq: int,
+) -> AsyncGenerator[str, None]:
+    """Reattach a reconnecting SSE client to a live (or finished) turn.
+
+    The swarm-bus ordering discipline: subscribe FIRST so nothing emitted
+    between replay and live streaming can be lost, then replay the journal
+    strictly after the client's cursor, then drain the queue. Frames that
+    land in the queue during the replay window are deduplicated by seq.
+
+    ``gap=True`` means the cursor predates journal retention — we signal
+    ``resync`` and close rather than serve a silent partial history; the
+    client rebuilds from SessionStore (durable truth) instead.
+    """
+    broker = get_turn_broker()
+    queue = broker.subscribe(thread_id)
+    last_yielded = int(after_seq or 0)
+    try:
+        frames, gap, head = broker.resume(thread_id, after_seq)
+        running = is_turn_running(thread_id)
+        yield _sse_frame(
+            "resumed",
+            {
+                "from": last_yielded,
+                "to": head,
+                "count": len(frames),
+                "gap": bool(gap),
+                "running": bool(running),
+                "session_id": session_id,
+                "thread_id": thread_id,
+            },
+        )
+        if gap:
+            yield _sse_frame("status_update", {"status": "resync", "seq": head})
+            return
+        for frame in frames:
+            yield _frame_from_journaled(frame)
+            last_yielded = max(last_yielded, int(frame.get("seq") or 0))
+        if not running:
+            # Nothing live to attach to — replay covered everything missed.
+            return
+
+        idle_ticks = 0
+        while True:
+            try:
+                frame = await asyncio.wait_for(
+                    queue.get(), timeout=_ATTACH_IDLE_TIMEOUT_S
+                )
+            except asyncio.TimeoutError:
+                idle_ticks += 1
+                yield ": keepalive\n\n"
+                still_running = is_turn_running(thread_id)
+                if not still_running and queue.empty():
+                    return
+                if idle_ticks >= _ATTACH_MAX_IDLE_TICKS and not still_running:
+                    return
+                continue
+            idle_ticks = 0
+            seq = int(frame.get("seq") or 0)
+            if seq <= last_yielded:
+                continue  # emitted during the replay window — already served
+            last_yielded = seq
+            yield _frame_from_journaled(frame)
+            if str(frame.get("type")) in _SSE_ATTACH_TERMINAL:
+                return
+    finally:
+        broker.unsubscribe(thread_id, queue)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1133,7 +1244,18 @@ def create_sse_chat_router(
         # Optional attachments uploaded via /api/chat/upload. The upload ID,
         # not a client filesystem path, is the server-side byte reference.
         raw_attachments = body.get("attachments") or []
-        if not user_message and not raw_attachments:
+        # Turn Delivery V2: a reconnecting client presents its cursor
+        # (``last_event_id``, SSE-spec name; ``last_seq`` accepted as alias).
+        # A request carrying one is an ATTACH, not a new prompt — it must
+        # pass the empty-message gate and never start a second graph run.
+        _attach_seq: int | None = None
+        _attach_raw = body.get("last_event_id", body.get("last_seq"))
+        if _attach_raw is not None:
+            try:
+                _attach_seq = int(_attach_raw)
+            except Exception:
+                _attach_seq = None
+        if not user_message and not raw_attachments and _attach_seq is None:
             return StreamingResponse(
                 iter([_sse_frame("error", {"content": "Empty message"})]),
                 media_type="text/event-stream",
@@ -1164,6 +1286,22 @@ def create_sse_chat_router(
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
+
+        # ── Turn Delivery V2: cursor attach (replay + live reattach) ──
+        # Serves the missed window of a RUNNING turn (pump survives client
+        # disconnects) or replays a finished one — without touching the
+        # checkpointer. This is SSE parity with the WS live-socket rebind.
+        if _attach_seq is not None:
+            return StreamingResponse(
+                _sse_attach_stream(thread_id, session_id, _attach_seq),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",  # nginx passthrough
+                    "Connection": "keep-alive",
+                },
+            )
+
         try:
             from kazma_core.sessions.directory import stamp_last_platform
 
@@ -1771,17 +1909,23 @@ def create_sse_chat_router(
             activity_log: list[dict[str, Any]] = []
 
             def _parse_frame(frame: str) -> tuple[str, dict[str, Any]] | None:
-                """Split an SSE frame into (event_type, data) or None."""
+                """Split an SSE frame into (event_type, data) or None.
+
+                Line-scoped field parsing per the SSE spec: ``id:`` /
+                ``retry:`` lines may legally precede or follow ``event:``
+                (Turn Delivery V2 prepends ``id: <seq>``), so the first
+                line is not assumed to be the event field.
+                """
                 try:
-                    head, _, rest = frame.partition("\n")
-                    if not head.startswith("event: "):
-                        return None
-                    ev_type = head[len("event: "):].strip()
+                    ev_type = ""
                     data: dict[str, Any] = {}
-                    for line in rest.split("\n"):
-                        if line.startswith("data: "):
+                    for line in frame.split("\n"):
+                        if line.startswith("event: "):
+                            ev_type = line[len("event: "):].strip()
+                        elif line.startswith("data: "):
                             data = json.loads(line[len("data: "):])
-                            break
+                    if not ev_type:
+                        return None
                     return ev_type, data
                 except (json.JSONDecodeError, ValueError):
                     return None

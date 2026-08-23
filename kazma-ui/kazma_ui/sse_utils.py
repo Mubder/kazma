@@ -13,19 +13,28 @@ from typing import Any
 __all__ = ["sse_frame", "ApprovalEventBridge"]
 
 
-def sse_frame(event: str, data: str | dict[str, Any] | list[Any]) -> str:
+def sse_frame(
+    event: str,
+    data: str | dict[str, Any] | list[Any],
+    id: int | str | None = None,
+) -> str:
     """Format a single SSE frame.
 
     Args:
         event: The event type name.
         data: Payload -- dict/list is JSON-serialized, str is used as-is.
+        id: Optional SSE ``id:`` line — the Turn Delivery V2 sequence number.
+            Spec-compliant EventSource clients echo it back as the
+            ``Last-Event-ID`` header on auto-reconnect; Kazma's fetch-based
+            client stores it and returns it as ``last_event_id`` in the body.
 
     Returns:
-        Formatted SSE string: ``event: <type>\ndata: <json>\n\n``
+        Formatted SSE string: ``[id: <n>\n]event: <type>\ndata: <json>\n\n``
     """
     if isinstance(data, (dict, list)):
         data = json.dumps(data, ensure_ascii=False)
-    return f"event: {event}\ndata: {data}\n\n"
+    prefix = f"id: {id}\n" if id is not None else ""
+    return f"{prefix}event: {event}\ndata: {data}\n\n"
 
 
 class ApprovalEventBridge:

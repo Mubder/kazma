@@ -121,8 +121,8 @@ class TestFinalMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
 
         # Must have exactly one token frame with the assistant content
         assert len(token_frames) == 1, f"Expected 1 token frame, got {len(token_frames)}"
@@ -169,7 +169,7 @@ class TestFinalMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
         # Should have only the 1 streaming token, NOT a duplicate from state
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
@@ -202,8 +202,8 @@ class TestFinalMessageExtraction:
         )
 
         # No assistant text, but the recovery notice token + done frame
-        token_frames = [f for f in frames if f.startswith("event: token")]
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert "No assistant text" in data["content"]
@@ -233,8 +233,8 @@ class TestFinalMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert "No assistant text" in data["content"]
@@ -267,7 +267,7 @@ class TestFinalMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert "hello" not in data["content"]
@@ -300,8 +300,8 @@ class TestFinalMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_idx = next(i for i, f in enumerate(frames) if f.startswith("event: token"))
-        done_idx = next(i for i, f in enumerate(frames) if f.startswith("event: done"))
+        token_idx = next(i for i, f in enumerate(frames) if f.lstrip("id: 0123456789\n").startswith("event: token"))
+        done_idx = next(i for i, f in enumerate(frames) if f.lstrip("id: 0123456789\n").startswith("event: done"))
         assert token_idx < done_idx
 
 
@@ -343,7 +343,7 @@ class TestErrorMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert data["content"] == error_text
@@ -376,7 +376,7 @@ class TestErrorMessageExtraction:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert data["content"] == error_text
@@ -475,7 +475,7 @@ class TestSessionHistoryPersistence:
         )
 
         # The token frame proves content was emitted
-        token_frames = [f for f in frames if f.startswith("event: token")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert data["content"] == "Greetings!"
@@ -516,7 +516,7 @@ class TestEdgeCases:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
         assert "No assistant text" in data["content"]
@@ -541,7 +541,7 @@ class TestEdgeCases:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
         assert len(done_frames) == 1
 
     def test_message_with_content_key_missing(self):
@@ -570,7 +570,7 @@ class TestEdgeCases:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
         assert len(done_frames) == 1
 
 
@@ -615,8 +615,8 @@ class TestLangGraphV1EventName:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        token_frames = [f for f in frames if f.startswith("event: token")]
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        token_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: token")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
 
         assert len(token_frames) == 1
         _, data = _parse_frame(token_frames[0])
@@ -652,7 +652,7 @@ class TestLangGraphV1EventName:
             {"configurable": {"thread_id": "t1"}},
         )
 
-        done_frames = [f for f in frames if f.startswith("event: done")]
+        done_frames = [f for f in frames if f.lstrip("id: 0123456789\n").startswith("event: done")]
         assert len(done_frames) == 1
         _, data = _parse_frame(done_frames[0])
         assert data["tokens"] == 42
