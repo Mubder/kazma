@@ -17,6 +17,8 @@ __all__ = [
     "record_memory_op",
     "record_swarm_dispatch",
     "record_swarm_handoff",
+    "record_delivery_event",
+    "record_delivery_replay",
 ]
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,27 @@ if _PROMETHEUS_AVAILABLE:
         ["decision"],  # clarify_unresolved | cancelled | denied
     )
 
+    # Turn Delivery V2 (kazma_ui/delivery.py — journal + cursor resume).
+    # seq_gaps is THE health signal for the tab-switch bug class: a non-zero
+    # rate means clients are resuming from cursors older than journal
+    # retention and falling back to snapshot resync (correct but slower).
+    DELIVERY_EVENTS_TOTAL = Counter(
+        "kazma_delivery_events_total",
+        "Turn events journaled + fanned out by the delivery broker",
+    )
+    DELIVERY_DROPPED_TOTAL = Counter(
+        "kazma_delivery_dropped_total",
+        "Turn events not delivered to a recipient (dead socket / full queue)",
+    )
+    DELIVERY_REPLAYED_TOTAL = Counter(
+        "kazma_delivery_replayed_total",
+        "Turn events served from journal replay on client resume",
+    )
+    DELIVERY_SEQ_GAPS_TOTAL = Counter(
+        "kazma_delivery_seq_gaps_total",
+        "Resume requests whose cursor predates retention (snapshot fallback)",
+    )
+
     # Latency histograms
     LLM_LATENCY_SECONDS = Histogram(
         "kazma_llm_latency_seconds",
@@ -95,6 +118,10 @@ else:
     LONG_TASK_EVENTS_TOTAL = None
     COMMITMENT_TERMINAL_TOTAL = None
     LLM_LATENCY_SECONDS = None
+    DELIVERY_EVENTS_TOTAL = None
+    DELIVERY_DROPPED_TOTAL = None
+    DELIVERY_REPLAYED_TOTAL = None
+    DELIVERY_SEQ_GAPS_TOTAL = None
 
 
 # ── Metrics Endpoint ───────────────────────────────────────────────────
@@ -167,3 +194,25 @@ def record_memory_op(operation: str, layer: str = "unknown") -> None:
     if not _PROMETHEUS_AVAILABLE:
         return
     MEMORY_OPERATIONS_TOTAL.labels(operation=operation, layer=layer).inc()
+
+
+def record_delivery_event(events: int = 1, replayed: int = 0, dropped: int = 0) -> None:
+    """Record turn-delivery broker activity. No-op without prometheus-client."""
+    if not _PROMETHEUS_AVAILABLE:
+        return
+    if events:
+        DELIVERY_EVENTS_TOTAL.inc(events)
+    if replayed:
+        DELIVERY_REPLAYED_TOTAL.inc(replayed)
+    if dropped:
+        DELIVERY_DROPPED_TOTAL.inc(dropped)
+
+
+def record_delivery_replay(replayed: int = 0, gap: bool = False) -> None:
+    """Record a client resume: events replayed and whether retention gap hit."""
+    if not _PROMETHEUS_AVAILABLE:
+        return
+    if replayed:
+        DELIVERY_REPLAYED_TOTAL.inc(replayed)
+    if gap:
+        DELIVERY_SEQ_GAPS_TOTAL.inc()

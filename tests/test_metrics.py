@@ -26,3 +26,35 @@ class TestMetricsModule:
         body, status, headers = get_metrics_response()
         # Body should be text/plain or text/plain; version=0.0.4...
         assert "plain" in headers["content-type"]
+
+    def test_delivery_counters_noop_and_exposed(self):
+        """Turn Delivery V2 counters: helpers never crash, names appear in
+        the registry when prometheus-client is available."""
+        from kazma_core.metrics import (
+            get_metrics_response,
+            record_delivery_event,
+            record_delivery_replay,
+        )
+
+        # Must be no-crash regardless of prometheus availability.
+        record_delivery_event(events=3, replayed=1, dropped=1)
+        record_delivery_replay(replayed=2, gap=True)
+
+        try:
+            import prometheus_client  # noqa: F401
+
+            has_prom = True
+        except ImportError:
+            has_prom = False
+
+        body, status, _ = get_metrics_response()
+        assert status == 200
+        if has_prom:
+            text = body.decode("utf-8")
+            for name in (
+                "kazma_delivery_events_total",
+                "kazma_delivery_dropped_total",
+                "kazma_delivery_replayed_total",
+                "kazma_delivery_seq_gaps_total",
+            ):
+                assert name in text
