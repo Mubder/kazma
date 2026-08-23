@@ -42,10 +42,24 @@ window.KazmaTurnVisibility = (function() {
   }
 
   function enabled() {
+    // Operator knob (Settings → notifications.turn_complete, served live at
+    // /api/notifications/turn-complete) AND the per-browser instant override.
+    if (_serverEnabled === false) return false;
     try {
       return window.localStorage.getItem('kazma.notifyOnComplete') !== '0';
     } catch (e) { return true; }
   }
+
+  var _serverEnabled = true;
+  // Consult the operator gate once at boot; a failed fetch fails open.
+  try {
+    fetch('/api/notifications/turn-complete')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (d && d.enabled === false) _serverEnabled = false;
+      })
+      .catch(function() { /* fail open */ });
+  } catch (e) { /* ignore */ }
 
   function notifyTerminal(summary) {
     _active = false;

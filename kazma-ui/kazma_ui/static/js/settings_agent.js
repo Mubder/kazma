@@ -541,8 +541,52 @@
             return Math.min(100, Math.round((this.embedderRebuildStatus.done / total) * 100));
         },
 
-        async loadTimeTravel() {
+        /** Turn-completion desktop notifications (Turn Delivery V2 P4). */
+        async loadTurnNotify() {
             try {
+                const data = await this._fetch('/api/notifications/turn-complete');
+                if (data && typeof data.enabled === 'boolean') {
+                    this.turnNotify = { enabled: data.enabled };
+                    // Mirror so already-open chat tabs pick up the operator
+                    // value without a reload.
+                    try {
+                        localStorage.setItem('kazma.notifyOnComplete', data.enabled ? '1' : '0');
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load turn notification setting:', e);
+            }
+        },
+
+        async saveTurnNotify() {
+            this.turnNotifySaving = true;
+            try {
+                const enabled = !!this.turnNotify.enabled;
+                const resp = await fetch('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        key: 'notifications.turn_complete',
+                        value: enabled ? '1' : '0',
+                        category: 'notifications',
+                    }),
+                });
+                const data = await resp.json();
+                if (data.status === 'error') {
+                    showToast(data.error || 'Save failed', 'error');
+                } else {
+                    try {
+                        localStorage.setItem('kazma.notifyOnComplete', enabled ? '1' : '0');
+                    } catch (e) { /* ignore */ }
+                    showToast('Notification preference saved.', 'success');
+                }
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+            this.turnNotifySaving = false;
+        },
+
+        async loadTimeTravel() {            try {
                 const data = await this._fetch('/api/settings/time_travel');
                 if (!data) return;
                 const store = data.store || {};

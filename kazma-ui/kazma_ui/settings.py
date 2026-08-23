@@ -186,6 +186,26 @@ class SettingsRouterBuilder:
                 "secret_count": len(vault.list_secrets()) if vault else 0,
             }
 
+        @router.get("/api/notifications/turn-complete")
+        async def api_get_turn_notify() -> dict[str, Any]:
+            """Task-completion desktop-notification gate (Turn Delivery V2 P4).
+
+            Live-read, never raises (mirrors get_lifecycle_config). The chat
+            client consults this once at boot; the Settings toggle writes it
+            via PUT /api/settings/single with key ``notifications.turn_complete``
+            ('1'/'0') and mirrors it into localStorage for instant effect on
+            already-open tabs.
+            """
+            try:
+                raw = config_store.get("notifications.turn_complete")
+                enabled = True if raw is None else str(raw).strip().lower() not in (
+                    "0", "false", "off", "no",
+                )
+            except Exception:
+                logger.debug("turn-complete config read failed; defaulting on", exc_info=True)
+                enabled = True
+            return {"enabled": bool(enabled)}
+
         @router.get("/api/settings/export")
         async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
             """Export settings as YAML or JSON file download (secrets masked)."""

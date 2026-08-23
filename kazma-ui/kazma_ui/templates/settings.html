@@ -1023,6 +1023,22 @@
         </div>
 
         <div class="settings-group">
+            <h3>{{ t('settings.turn_notify_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.turn_notify_hint') }}
+            </div>
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;justify-content:flex-start;">
+                    <input type="checkbox" class="form-check" x-model="turnNotify.enabled" style="width:16px;height:16px;accent-color:var(--success);">
+                    {{ t('settings.turn_notify_label') }}
+                </label>
+                <div class="form-hint">{{ t('settings.turn_notify_hint2') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveTurnNotify()" :disabled="turnNotifySaving" x-text="turnNotifySaving ? '…' : t('settings.turn_notify_save')"></button>
+        </div>
+
+        <div class="settings-group">
             <h3>{{ t('settings.embedder_db_title') }}</h3>
             <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px">{{ t('settings.embedder_db_hint') }}</div>
             <table style="width:100%;border-collapse:collapse;font-size:0.85rem">

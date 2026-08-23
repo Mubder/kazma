@@ -536,6 +536,11 @@
             } catch (e) {
                 console.error('[Settings] Failed to load document config:', e);
             }
+            if (typeof this.loadTurnNotify === 'function') {
+                Promise.resolve(this.loadTurnNotify()).catch(function (e) {
+                    console.error('[Settings] Failed to load turn notification setting:', e);
+                });
+            }
             try {
                 const voiceSettings = await this._fetch('/api/settings/voice');
                 if (voiceSettings) {

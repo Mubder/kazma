@@ -692,6 +692,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الافتراضي 50. كل لقطة تخزّن حالة المحادثة الكاملة عند تكرار مشرف واحد. القيم الأقل تصغّر قاعدة اللقطات؛ تُحذف لقطات المحادثات القديمة فقط عند التقاط جديد لنفس المحادثة.",
     },
     "settings.time_travel_save": {"en": "Save time travel settings", "ar": "حفظ إعدادات السفر عبر الزمن"},
+    "settings.turn_notify_title": {"en": "Task notifications", "ar": "إشعارات المهام"},
+    "settings.turn_notify_label": {"en": "Notify me when a running task finishes", "ar": "أشعرني عند انتهاء المهمة الجارية"},
+    "settings.turn_notify_hint": {
+        "en": "Desktop notification + tab-title marker when an agent turn completes in a background tab. Applies to the web chat.",
+        "ar": "إشعار سطح المكتب وعلامة في عنوان التبويب عند انتهاء مهمة الوكيل في تبويب بالخلفية. ينطبق على محادثة الويب.",
+    },
+    "settings.turn_notify_hint2": {
+        "en": "The browser will ask for notification permission the first time you send a task. Denying it there also disables this feature.",
+        "ar": "سيطلب المتصفح إذن الإشعارات عند إرسال أول مهمة. رفض الإذن هناك يعطل هذه الميزة أيضاً.",
+    },
+    "settings.turn_notify_save": {"en": "Save notification preference", "ar": "حفظ تفضيل الإشعارات"},
     "settings.time_travel_restart_needed": {"en": "Restart required to apply", "ar": "إعادة تشغيل مطلوبة للتطبيق"},
     "settings.time_travel_restart_needed_hint": {
         "en": "The snapshot cap is read when the server boots. The page will reconnect automatically after restart.",

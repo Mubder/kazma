@@ -157,6 +157,35 @@ class TestServerSidePingPin:
         assert "--ws-ping-timeout" in src
 
 
+class TestTurnNotifySettingsToggle:
+    """Plan P4 follow-up: operator-visible toggle for task-completion
+    notifications (ConfigStore key + Settings UI + live client gate)."""
+
+    def test_server_endpoint_exists(self):
+        src = (_UI / "settings.py").read_text(encoding="utf-8")
+        assert "/api/notifications/turn-complete" in src
+        assert "notifications.turn_complete" in src
+
+    def test_visibility_module_consults_operator_gate(self):
+        src = _VIS_JS.read_text(encoding="utf-8")
+        assert "/api/notifications/turn-complete" in src
+        assert "_serverEnabled" in src
+
+    def test_settings_ui_and_save_wired(self):
+        html = _CHAT_HTML.with_name("settings.html").read_text(encoding="utf-8")
+        assert "settings.turn_notify_title" in html
+        assert "saveTurnNotify()" in html
+        js = (_UI / "static" / "js" / "settings_agent.js").read_text(encoding="utf-8")
+        assert "notifications.turn_complete" in js
+        assert "kazma.notifyOnComplete" in js  # instant mirror to open tabs
+
+    def test_i18n_keys_present(self):
+        src = (_UI / "i18n.py").read_text(encoding="utf-8")
+        for key in ("settings.turn_notify_title", "settings.turn_notify_label",
+                    "settings.turn_notify_hint", "settings.turn_notify_save"):
+            assert f'"{key}"' in src
+
+
 class TestCursorTrackerNode:
     """Run the pure tracker logic under Node (no browser needed)."""
 
