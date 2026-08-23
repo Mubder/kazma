@@ -497,6 +497,29 @@ def _apply_beliefs_to_v2(
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
+        # Ego-graph anchoring: a belief whose object is a literal payload
+        # (not an entity) leaves the freshly minted subject concept
+        # disconnected from the hub — the "orphan node" class. Anchor it to
+        # the ego node once, as system_tool context (never a user fact).
+        try:
+            from kazma_core.memory.ego_anchor import anchor_leaf_subject, is_payload_object
+
+            if (
+                clean["subject"]
+                and clean["subject"] != "user"
+                and is_payload_object(primary_conn, clean["object"])
+            ):
+                anchor = anchor_leaf_subject(
+                    primary_conn,
+                    clean["subject"],
+                    tenant_id=tenant_id,
+                    cfg=cfg,
+                    source_session=session_id,
+                )
+                if anchor.get("action") not in ("noop", None):
+                    stats["anchored_leaf_subjects"] = stats.get("anchored_leaf_subjects", 0) + 1
+        except Exception:
+            logger.debug("[belief_extract] ego anchor skipped", exc_info=True)
     return stats
 
 

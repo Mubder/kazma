@@ -210,7 +210,14 @@ def _belief_count_sql() -> str:
 
 
 def _entity_degree_sql() -> str:
-    """How many *other* entity ids this entity co-occurs with in active beliefs."""
+    """How many *other entity nodes* this entity co-occurs with in active beliefs.
+
+    Only ENTITY-to-entity co-occurrence counts as graph degree. Literal
+    payload objects ("fully_clean", "4/4", a file path) are virtual fact
+    text on the belief — the v2 painter renders them as virtual nodes, but
+    they are not graph neighbors; counting them made truly isolated leaf
+    concepts report degree ≥ 1 and never fire the isolated flag.
+    """
     return """
         (
           SELECT COUNT(DISTINCT other_id) FROM (
@@ -231,6 +238,7 @@ def _entity_degree_sql() -> str:
             AND other_id != e.id
             AND other_id != e.name
             AND other_id NOT IN ('', 'true', 'false', 'null')
+            AND EXISTS (SELECT 1 FROM entities oe WHERE oe.id = other_id)
         )
     """
 

@@ -70,6 +70,21 @@ async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
             ensure_primary_schema(conn)
             stats = run_macro_sleep(conn, cfg=cfg, tenant_id=tenant_id)
             logger.info("[memory_worker] macro_sleep done: %s", stats)
+            # Ego-graph integrity sweep: anchor leaf subjects whose beliefs
+            # all carry payload objects (the disconnected-"orphan" class).
+            # Idempotent — anchored subjects stop qualifying.
+            try:
+                from kazma_core.memory.ego_anchor import anchor_orphan_leaf_concepts
+
+                anchor_stats = anchor_orphan_leaf_concepts(
+                    conn, tenant_id=tenant_id, limit=200, cfg=cfg
+                )
+                if anchor_stats.get("anchored"):
+                    logger.info(
+                        "[memory_worker] ego anchor sweep: %s", anchor_stats
+                    )
+            except Exception:
+                logger.debug("[memory_worker] ego anchor sweep skipped", exc_info=True)
             # False when the sweep flagged sweep_error — run_macro_sleep
             # never raises, so returning True unconditionally marked broken
             # sweeps as done and the queue never retried them.
