@@ -242,3 +242,58 @@ def test_endpoint_multi_tab_both_receive_live_frames():
             got2 = ws2.receive_json()
             assert got1["type"] == "status_update" and got1["seq"] == 1
             assert got2["type"] == "status_update" and got2["seq"] == 1
+
+
+def test_v2_cursor_connection_survives_send_prompt_ack_path():
+    """REGRESSION (2026-08-24 outage): a function-local
+    `from kazma_ui.active_turns import get_active_turn` inside the legacy
+    catch-up branch shadowed the module-level binding for the whole handler.
+    V2 connections SKIP that branch, so the duplicate-turn guard later read
+    an UNBOUND local -> handler died on every send_prompt -> client burned 5
+    retries -> 'Could not deliver your message after several retries'.
+
+    This test connects WITH a cursor (V2 path) and pushes a send_prompt past
+    the guard (graph mocked): it must reach prompt_ack, not die."""
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI as _FastAPI
+
+    _seed_session("v2-send-session", "v2-send-thread")
+
+    # A truthy graph lets the send path reach the duplicate-turn guard —
+    # the exact statement that raised UnboundLocalError pre-fix.
+    app = _FastAPI()
+    app.include_router(create_ws_chat_router(graph=MagicMock()))
+    client = TestClient(app)
+    with client.websocket_connect("/ws/chat/v2-send-session?last_seq=0") as ws:
+        resumed = ws.receive_json()
+        assert resumed["type"] == "resumed"
+
+        # Baseline liveness before the write path.
+        ws.send_json({"action": "ping"})
+        assert ws.receive_json() == {"type": "pong"}
+
+        ws.send_json({
+            "action": "send_prompt",
+            "text": "hello regression",
+            "client_msg_id": "regression-ack-1",
+        })
+        # Durability ack must arrive — pre-fix this socket died with
+        # UnboundLocalError before any frame.
+        ack = ws.receive_json()
+        assert ack["type"] == "prompt_ack", ack
+        assert ack["data"]["accepted"] is True
+
+
+def test_no_function_local_active_turns_imports():
+    """Source contract: active_turns names are imported ONCE at module level.
+    A function-local re-import inside chat_websocket shadows them for the
+    whole scope (the outage above)."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py"
+    ).read_text(encoding="utf-8")
+    body_after_imports = src.split("from kazma_ui.active_turns import", 2)[-1]
+    assert "from kazma_ui.active_turns import" not in body_after_imports

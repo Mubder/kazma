@@ -737,9 +737,12 @@ def create_ws_chat_router(
         else:
             # Legacy reconnect catch-up: if a turn is still running, tell the client to keep
             # waiting; if the last assistant bubble already has content, push it.
+            # NOTE: never re-import active_turns names inside this scope — a
+            # function-local import shadows the module-level binding for the
+            # ENTIRE handler, and V2 connections skip this branch, so later
+            # reads would raise UnboundLocalError mid-send_prompt
+            # (2026-08-24 "could not deliver after several retries" outage).
             try:
-                from kazma_ui.active_turns import get_active_turn
-
                 _alive = get_active_turn(thread_id)
                 if _alive is not None and not _alive.done():
                     await websocket.send_json(
