@@ -257,6 +257,38 @@ def _merge_duplicate_beliefs(
                 )
             except Exception:
                 pass
+            # M-09: mirror tombstone + audit row — dedupe invalidations must
+            # behave like every other invalidation path.
+            try:
+                from kazma_core.memory.state_backend import remirror_belief_by_id
+
+                remirror_belief_by_id(conn, str(loser["id"]))
+            except Exception:
+                logger.debug("[reconsolidation] mirror tombstone skipped", exc_info=True)
+            try:
+                import sqlite3 as _sq
+
+                from kazma_core.memory.belief_mutation import _write_audit
+                from kazma_core.memory.schema_v2 import ensure_ops_schema
+                from kazma_core.paths import memory_ops_db
+
+                ops = _sq.connect(memory_ops_db(), timeout=10)
+                try:
+                    ensure_ops_schema(ops)
+                    _write_audit(
+                        ops,
+                        tenant_id=tenant_id,
+                        event_type="dedupe_invalidate",
+                        target_id=str(loser["id"]),
+                        actor="global_reconsolidation",
+                        reason="duplicate of higher-ranked belief",
+                        state_before={"id": loser["id"], "subject": loser["subject"]},
+                        state_after={"supersedes_id": keep["id"]},
+                    )
+                finally:
+                    ops.close()
+            except Exception:
+                logger.debug("[reconsolidation] audit row skipped", exc_info=True)
             merged += 1
     if merged:
         conn.commit()

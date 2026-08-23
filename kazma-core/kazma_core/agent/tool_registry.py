@@ -1427,6 +1427,13 @@ class LocalToolRegistry:
                         _json.dumps({"via": "memory_merge_entities"}),
                     ),
                 )
+                # M-06: rewire invalidated the source's counts — refresh both.
+                try:
+                    from kazma_core.memory.entity_counts import recompute_entity_counts
+
+                    recompute_entity_counts(conn, [src_id, tgt_id], tenant_id=tenant)
+                except Exception:
+                    logger.debug("[memory_merge] count recompute skipped", exc_info=True)
                 conn.commit()
                 conn.close()
                 return json.dumps(

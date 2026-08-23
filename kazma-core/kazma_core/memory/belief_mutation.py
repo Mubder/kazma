@@ -431,7 +431,18 @@ def mutate_belief(
         try:
             from kazma_core.memory.entity_counts import recompute_entity_counts
 
-            recompute_entity_counts(primary_conn, [sub, obj], tenant_id=tenant_id)
+            affected = [sub, obj]
+            # M-09: a supersede also DROPS the old row — its former object
+            # entity (when it was an entity id) loses a belief that nobody
+            # recomputed otherwise.
+            if result.get("superseded_id"):
+                srow = primary_conn.execute(
+                    "SELECT object FROM beliefs WHERE id=?",
+                    (str(result["superseded_id"]),),
+                ).fetchone()
+                if srow and srow[0]:
+                    affected.append(str(srow[0]))
+            recompute_entity_counts(primary_conn, affected, tenant_id=tenant_id)
             primary_conn.commit()
         except Exception:
             logger.debug("[belief_mutate] entity count recompute failed", exc_info=True)

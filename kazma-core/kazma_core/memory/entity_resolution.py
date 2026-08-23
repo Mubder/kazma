@@ -535,6 +535,17 @@ def decide_entity_merge(
                        WHERE id = ?""",
                     (target_id, source_id),
                 )
+                # M-06: the rewire moved N beliefs between source and target —
+                # refresh both entities' materialized counts (they are sticky
+                # until the next touch otherwise).
+                try:
+                    from kazma_core.memory.entity_counts import recompute_entity_counts
+
+                    recompute_entity_counts(
+                        conn, [source_id, target_id], tenant_id=_merge_tenant
+                    )
+                except Exception:
+                    logger.debug("[entity_resolve] merge count recompute skipped", exc_info=True)
             conn.execute(
                 "UPDATE entity_merges SET status='approved', resolved_at=? WHERE id=?",
                 (now, merge_id),
