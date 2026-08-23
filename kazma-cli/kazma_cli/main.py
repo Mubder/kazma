@@ -222,7 +222,12 @@ def _run_serve(port: int) -> None:
     from kazma_core.eventloop import uvicorn_loop_factory
 
     try:
+        # Turn Delivery V2 (KD-7): pin server-side WS protocol pings — see
+        # kazma_ui/app.py main() for rationale. ~40s worst-case death
+        # detection for black-holed sockets; keeps broker registry + orphan
+        # TTL semantics truthful.
         uvicorn.run(app, host=host, port=port, log_level="info",
+                    ws_ping_interval=20.0, ws_ping_timeout=20.0,
                     timeout_graceful_shutdown=15, loop=uvicorn_loop_factory())
     except OSError as exc:
         # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.

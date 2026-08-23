@@ -128,7 +128,7 @@ Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`,
 pip install -e ".[rag]"
 kazma serve                 # 127.0.0.1:8000
 # or explicit:
-python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8000
+python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8000 --ws-ping-interval 20 --ws-ping-timeout 20
 ```
 
 For a public-facing host behind a reverse proxy:
@@ -213,7 +213,7 @@ Get-Process -Name python -ErrorAction SilentlyContinue |
 
 # Start (background), dev port 9090
 cd 'G:\GitHubRepos\kazma'
-& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
+& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090 --ws-ping-interval 20 --ws-ping-timeout 20
 ```
 
 ---

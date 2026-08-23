@@ -174,7 +174,7 @@ Get-Process -Name python -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Id $_.Id -Force }
 
 cd 'G:\GitHubRepos\kazma'
-& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
+& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090 --ws-ping-interval 20 --ws-ping-timeout 20
 ```
 
 ---

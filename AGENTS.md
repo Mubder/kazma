@@ -1078,8 +1078,9 @@ executing commands after a mission ended Partial) — full diagnosis in
 # Kill existing server
 Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } | ForEach-Object { Stop-Process -Id $_.Id -Force }
 
-# Start server (background)
-cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
+# Start server (background) — ws-ping flags are the Turn Delivery V2
+# server-side death certificate for black-holed sockets (KD-7); keep them.
+cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090 --ws-ping-interval 20 --ws-ping-timeout 20
 ```
 
 ## Testing & Validation

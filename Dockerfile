@@ -33,4 +33,4 @@ EXPOSE 8000
 # isolation provides the security boundary; 127.0.0.1 inside a
 # container means only the container itself can reach the port.
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
-CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]
+CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15", "--ws-ping-interval", "20", "--ws-ping-timeout", "20"]

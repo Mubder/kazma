@@ -129,6 +129,34 @@ class TestHiddenTabUX:
         assert "endTurn(" in src
 
 
+class TestServerSidePingPin:
+    """Plan KD-7: server-side WS protocol pings are the death certificate for
+    black-holed sockets. Without them the WS handler never unwinds on a dead
+    connection, the broker keeps a zombie registration, and orphan-TTL
+    reaping is suppressed. The 20s/20s values must be PINNED in every launch
+    surface — not left resting on an upstream library default."""
+
+    def test_programmatic_launcher_pins_pings(self):
+        src = (_UI / "app.py").read_text(encoding="utf-8")
+        assert "ws_ping_interval=20" in src
+        assert "ws_ping_timeout=20" in src
+
+    def test_cli_serve_pins_pings(self):
+        src = (_ROOT / "kazma-cli" / "kazma_cli" / "main.py").read_text(encoding="utf-8")
+        assert "ws_ping_interval=20" in src
+        assert "ws_ping_timeout=20" in src
+
+    def test_docker_cmd_pins_pings(self):
+        dockerfile = _ROOT / "Dockerfile"
+        if not dockerfile.exists():
+            import pytest
+
+            pytest.skip("no Dockerfile at repo root")
+        src = dockerfile.read_text(encoding="utf-8")
+        assert "--ws-ping-interval" in src
+        assert "--ws-ping-timeout" in src
+
+
 class TestCursorTrackerNode:
     """Run the pure tracker logic under Node (no browser needed)."""
 

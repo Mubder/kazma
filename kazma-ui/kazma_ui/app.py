@@ -2110,7 +2110,15 @@ def main() -> None:
 
     app = create_app()
     from kazma_core.eventloop import uvicorn_loop_factory
+    # Turn Delivery V2 (KD-7, plan TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md):
+    # protocol pings are the SERVER-side death certificate for black-holed
+    # sockets (sleep/NAT cull while a turn runs). Without them the WS handler
+    # never unwinds, the broker keeps a zombie registration, and orphan-TTL
+    # reaping is suppressed for that thread. Values match the websockets-lib
+    # default (~40s worst case); PINNED so an upstream default flip cannot
+    # silently regress it.
     uvicorn.run(app, host=host, port=args.port, log_level="info",
+                ws_ping_interval=20.0, ws_ping_timeout=20.0,
                 loop=uvicorn_loop_factory())
 
 
