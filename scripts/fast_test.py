@@ -296,7 +296,10 @@ def main() -> int:
         ).strip()
         if digest:
             print("\n[fast-test] failure tracebacks (per-chunk FAILURES sections):")
-            print(digest[:24000])
+            # Windows consoles default to cp1252 — tracebacks can contain
+            # replacement chars from crashed-chunk output. Never let the
+            # REPORTER crash after the suite already ran.
+            sys.stdout.buffer.write(digest[:24000].encode("utf-8", errors="replace"))
     if poison:
         print(f"\n[fast-test] POISON files (crash/hang even standalone):")
         for p in poison:
