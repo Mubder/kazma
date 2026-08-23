@@ -17,6 +17,29 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse as _J
 
 from kazma_ui.rate_limit import rate_limit
 
+
+def _mem_tid() -> str:
+    """Active memory tenant for THIS request (audit M-05).
+
+    Delegates to memory_api._memory_tenant_id: 'default' under single-user
+    (no narrowing — legacy behavior), the verified request tenant when
+    enforcement is on, or '__unscoped__' on failure (fail-closed: matches
+    nothing rather than leaking another tenant's rows).
+    """
+    try:
+        from kazma_ui.memory_api import _memory_tenant_id
+
+        return _memory_tenant_id()
+    except Exception:
+        return "default"
+
+
+def _tenant_clause(tid: str, col: str = "tenant_id") -> tuple[str, list]:
+    """(sql, params) tenant predicate; empty for the shared default tenant."""
+    if tid in ("", "default"):
+        return "", []
+    return f" AND {col} = ?", [tid]
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["register_direct_routes"]
@@ -195,7 +218,11 @@ def register_direct_routes(self: Any) -> None:
             return {"results": [], "query": ""}
         from kazma_core.memory.recall import search
 
-        hits = search(q.strip(), limit=max(1, min(int(limit), 50)))
+        hits = search(
+            q.strip(),
+            limit=max(1, min(int(limit), 50)),
+            tenant_id=_mem_tid(),
+        )
         return {
             "query": q.strip(),
             "results": [
@@ -211,7 +238,7 @@ def register_direct_routes(self: Any) -> None:
         }
 
     @self.app.post("/api/memory/graph/clear")
-    async def _memory_graph_clear():
+    async def _memory_graph_clear(tenant: str = "default"):
         """Invalidate all currently-active V2 beliefs (bi-temporal clear).
 
         Replaces the legacy destructive ``kg.clear()``. V2 is append-only /
@@ -219,9 +246,15 @@ def register_direct_routes(self: Any) -> None:
         currently-active belief invalidated (sets ``invalidated_at`` /
         ``valid_until``) so they stop surfacing in recall while history is
         preserved for point-in-time queries. Episodes are not touched.
+
+        Tenant-scoped (M-05): defaults to the shared ``default`` tenant;
+        pass ``tenant=<id>`` to clear a specific one. There is deliberately
+        NO all-tenants mode.
         """
         import sqlite3
         import time
+
+        tid = (tenant or "default").strip() or "default"
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
@@ -233,21 +266,26 @@ def register_direct_routes(self: Any) -> None:
             cleared_ids = [
                 r[0]
                 for r in conn.execute(
-                    "SELECT id FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                    "SELECT id FROM beliefs WHERE tenant_id=? "
+                    "AND valid_until IS NULL AND invalidated_at IS NULL",
+                    (tid,),
                 ).fetchall()
             ]
             before = len(cleared_ids)
             conn.execute(
                 "UPDATE beliefs SET valid_until=?, invalidated_at=? "
-                "WHERE valid_until IS NULL AND invalidated_at IS NULL",
-                (now, now),
+                "WHERE tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL",
+                (now, tid),
             )
-            # Phase 3: a clear invalidates every active belief, so every entity's
-            # belief_count/graph_degree drop to 0. Mark them all stale (-1) so
-            # the read path recomputes on next access rather than recomputing
-            # the whole table inline here.
+            # Phase 3: a clear invalidates every active belief in the cleared
+            # tenant, so those entities' belief_count/graph_degree drop to 0.
+            # Mark them all stale (-1) so the read path recomputes on next
+            # access rather than recomputing the whole table inline here.
             try:
-                conn.execute("UPDATE entities SET belief_count=-1, graph_degree=-1")
+                conn.execute(
+                    "UPDATE entities SET belief_count=-1, graph_degree=-1 WHERE tenant_id=?",
+                    (tid,),
+                )
             except Exception:
                 pass
             conn.commit()
@@ -476,8 +514,10 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
+            tid = _mem_tid()
+            tsql, tparams = _tenant_clause(tid)
             base_where = (
-                " FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                " FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL" + tsql
             )
 
             query = (q or "").strip()
@@ -487,13 +527,16 @@ def register_direct_routes(self: Any) -> None:
                 if match_q:
                     # FTS5 MATCH — collect matching active belief ids.
                     try:
-                        fts_rows = conn.execute(
+                        fts_sql = (
                             "SELECT b.id FROM beliefs_fts "
                             "JOIN beliefs b ON b.rowid = beliefs_fts.rowid "
                             "WHERE beliefs_fts MATCH ? "
-                            "AND b.valid_until IS NULL AND b.invalidated_at IS NULL "
-                            "LIMIT 1000",
-                            (match_q,),
+                            "AND b.valid_until IS NULL AND b.invalidated_at IS NULL"
+                            + (" AND b.tenant_id = ?" if tparams else "")
+                            + " LIMIT 1000"
+                        )
+                        fts_rows = conn.execute(
+                            fts_sql, [match_q, *tparams]
                         ).fetchall()
                         fts_ids = [str(r["id"]) for r in fts_rows]
                     except Exception:
@@ -579,7 +622,12 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
-            row = conn.execute("SELECT * FROM beliefs WHERE id=?", (belief_id,)).fetchone()
+            tid = _mem_tid()
+            row = conn.execute(
+                "SELECT * FROM beliefs WHERE id=?"
+                + (" AND tenant_id=?" if tid != "default" else ""),
+                (belief_id, tid) if tid != "default" else (belief_id,),
+            ).fetchone()
             if not row:
                 conn.close()
                 return {"ok": False, "error": "not_found"}
@@ -634,11 +682,13 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
+            tid = _mem_tid()
             row = conn.execute(
                 "SELECT id, subject, predicate, object, source_session, source_turn, "
                 "extraction_method, access_count, last_accessed, valid_from "
-                "FROM beliefs WHERE id=?",
-                (bid,),
+                "FROM beliefs WHERE id=?"
+                + (" AND tenant_id=?" if tid != "default" else ""),
+                (bid, tid) if tid != "default" else (bid,),
             ).fetchone()
             if not row:
                 conn.close()
@@ -707,7 +757,7 @@ def register_direct_routes(self: Any) -> None:
             ensure_primary_schema(conn)
             lim = max(1, min(limit, 200))
             off = max(0, int(offset or 0))
-            merges = list_pending_merges(conn, limit=lim, offset=off)
+            merges = list_pending_merges(conn, limit=lim, offset=off, tenant_id=_mem_tid())
             total = count_pending_merges(conn)
             conn.close()
             return {"merges": merges, "total": total, "offset": off, "limit": lim}
@@ -921,10 +971,11 @@ def register_direct_routes(self: Any) -> None:
                            total_trials, status, dag_steps_json
                     FROM procedural_dags
                     WHERE status = 'active'
+                      AND tenant_id = ?
                     ORDER BY confidence_score DESC, total_trials DESC
                     LIMIT ?
                     """,
-                    (max(1, min(limit, 50)),),
+                    (_mem_tid(), max(1, min(limit, 50))),
                 ).fetchall()
                 dags = []
                 for r in rows:
@@ -1037,15 +1088,20 @@ def register_direct_routes(self: Any) -> None:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
+            tid = _mem_tid()
+            tsql, tparams = _tenant_clause(tid)
             rows = conn.execute(
                 """
                 SELECT id, subject, object, predicate, confidence, predicate_type
                 FROM beliefs
                 WHERE valid_until IS NULL AND invalidated_at IS NULL
+                """
+                + tsql
+                + """
                 ORDER BY structural_importance DESC, confidence DESC
                 LIMIT ?
                 """,
-                (max(10, min(limit, 2000)),),
+                (*tparams, max(10, min(limit, 2000))),
             ).fetchall()
             conn.close()
             nodes: dict[str, dict] = {}
@@ -1407,12 +1463,18 @@ def register_direct_routes(self: Any) -> None:
             ensure_primary_schema(conn)
 
             # ── Belief links ──
+            # Tenant-scoped (M-05): the canvas renders only the requesting
+            # tenant's beliefs. Single-user default behaves identically.
+            _gtid = _mem_tid()
             bsql = (
                 "SELECT id, subject, object, predicate, predicate_type, "
                 "confidence, structural_importance, valid_from, valid_until "
                 "FROM beliefs WHERE invalidated_at IS NULL"
+                + (" AND tenant_id = ?" if _gtid != "default" else "")
             )
             bparams: list = []
+            if _gtid != "default":
+                bparams.append(_gtid)
             if at and float(at) > 0:
                 atf = float(at)
                 bsql += " AND valid_from <= ? AND (valid_until IS NULL OR valid_until >= ?)"
