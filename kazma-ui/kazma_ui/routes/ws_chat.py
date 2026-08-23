@@ -33,7 +33,7 @@ from kazma_ui.active_turns import (
     unbind_live_socket,
     unregister_turn,
 )
-from kazma_ui.delivery import get_turn_broker
+from kazma_ui.delivery import get_turn_broker, is_replayable
 from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
@@ -127,6 +127,24 @@ def _make_ws_sender(
     return send, is_lost
 
 
+async def _emit_journaled(event_type: str, data: dict[str, Any], tid: str) -> None:
+    """Journal a command-confirmation frame via the Turn Delivery V2 broker.
+
+    Live fan-out reaches EVERY bound tab (the issuing socket included — all
+    connections self-register), closing the multi-tab parity gap where only
+    the requesting tab saw /yolo, /long, /reset, /compact, steer or abort
+    confirmations. Replay of these frames is filtered out at resume time via
+    delivery.is_replayable (they are transcript-persisted already). Never
+    raises to the caller.
+    """
+    try:
+        await get_turn_broker().emit(
+            tid, TelemetryEvent(type=event_type, data=data, thread_id=tid).to_dict()
+        )
+    except Exception:
+        logger.debug("[WS-Chat] journaled emit failed type=%s", event_type, exc_info=True)
+
+
 async def _ws_resume_handshake(socket: Any, thread_id: str, last_seq: int) -> None:
     """V2 cursor resume: structured handshake + journal replay to one socket.
 
@@ -158,7 +176,8 @@ async def _ws_resume_handshake(socket: Any, thread_id: str, last_seq: int) -> No
             ).to_dict()
         )
         for frame in frames:
-            await socket.send_json(frame)
+            if is_replayable(frame):
+                await socket.send_json(frame)
     except Exception:
         logger.debug(
             "[WS-Chat] resume replay aborted (socket gone) thread=%s",
@@ -898,10 +917,7 @@ def create_ws_chat_router(
                     if _st_paused is None:
                         clear_all_steers(thread_id)
                         push_soft_steer(thread_id, _st_text)
-                        await websocket.send_json(TelemetryEvent(
-                            type="steer", data={"ok": True, "mode": "soft", "demoted": True},
-                            thread_id=thread_id,
-                        ).to_dict())
+                        await _emit_journaled("steer", {"ok": True, "mode": "soft", "demoted": True}, thread_id)
                         continue
 
                     from kazma_core.safety.commitment.resume import build_resume_command
@@ -919,12 +935,8 @@ def create_ws_chat_router(
                             _st_asst = _m["content"]
                             break
                     if _st_asst:
-                        await websocket.send_json(TelemetryEvent(
-                            type="llm_delta", data={"content": _st_asst}, thread_id=thread_id,
-                        ).to_dict())
-                    await websocket.send_json(TelemetryEvent(
-                        type="stream_end", data={"steer_resumed": True}, thread_id=thread_id,
-                    ).to_dict())
+                        await _emit_journaled("llm_delta", {"content": _st_asst}, thread_id)
+                    await _emit_journaled("stream_end", {"steer_resumed": True}, thread_id)
                     continue
 
                 # ── Action: abort — cancel + abandon the running task ────
@@ -950,16 +962,10 @@ def create_ws_chat_router(
                             "[WS-Chat] Abort thread=%s cancelled=%s",
                             thread_id[:12], _ab_task is not None,
                         )
-                        await websocket.send_json(TelemetryEvent(
-                            type="stream_end", data={"aborted": True},
-                            thread_id=thread_id,
-                        ).to_dict())
+                        await _emit_journaled("stream_end", {"aborted": True}, thread_id)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("[WS-Chat] Abort marker failed thread=%s: %s", thread_id[:12], exc)
-                        await websocket.send_json(TelemetryEvent(
-                            type="graph_error", data={"message": f"abort failed: {exc}"},
-                            thread_id=thread_id,
-                        ).to_dict())
+                        await _emit_journaled("graph_error", {"message": f"abort failed: {exc}"}, thread_id)
                     continue
 
                 graph_inst = _get_graph()
@@ -1041,20 +1047,12 @@ def create_ws_chat_router(
                         # Dedicated capacity frame — NOT llm_delta. Reconnect
                         # catch-up was re-playing the confirmation as the next
                         # turn's answer (duplicated MISSION ON / YOLO ON).
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="capacity",
-                                data={"action": "yolo", "reply": confirmation},
-                                thread_id=thread_id,
-                            ).to_dict()
+                        await _emit_journaled(
+                            "capacity",
+                            {"action": "yolo", "reply": confirmation},
+                            thread_id,
                         )
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="stream_end",
-                                data={"capacity": True},
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
+                        await _emit_journaled("stream_end", {"capacity": True}, thread_id)
                         session.messages.append({"role": "user", "content": text})
                         session.messages.append({
                             "role": "assistant",
@@ -1077,25 +1075,13 @@ def create_ws_chat_router(
                         _cap = apply_capacity_command(
                             thread_id, text, actor=f"ws:{session_id[:12]}",
                         )
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="capacity",
-                                data={
-                                    "long_active": _cap.long_active,
-                                    "yolo_active": _cap.yolo_active,
-                                    "action": _cap.action,
-                                    "reply": _cap.reply,
-                                },
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="stream_end",
-                                data={"capacity": True},
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
+                        await _emit_journaled("capacity", {
+                            "long_active": _cap.long_active,
+                            "yolo_active": _cap.yolo_active,
+                            "action": _cap.action,
+                            "reply": _cap.reply,
+                        }, thread_id)
+                        await _emit_journaled("stream_end", {"capacity": True}, thread_id)
                         session.messages.append({"role": "user", "content": text})
                         session.messages.append({
                             "role": "assistant",
@@ -1132,20 +1118,12 @@ def create_ws_chat_router(
                             get_session_manager().put(session)
                         except Exception:
                             logger.debug("[WS-Chat] Failed persisting /reset")
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="capacity",
-                                data={"action": "reset", "reply": "🔄 Conversation cleared. Starting fresh."},
-                                thread_id=thread_id,
-                            ).to_dict()
+                        await _emit_journaled(
+                            "capacity",
+                            {"action": "reset", "reply": "🔄 Conversation cleared. Starting fresh."},
+                            thread_id,
                         )
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="stream_end",
-                                data={"capacity": True},
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
+                        await _emit_journaled("stream_end", {"capacity": True}, thread_id)
                         continue
 
                     # ── /compact — context compaction on WS too (parity
@@ -1175,20 +1153,12 @@ def create_ws_chat_router(
                         except Exception as exc:
                             logger.error("[WS-Chat] failed to compact context: %s", exc)
                             _cp_reply = "⚠️ Failed to compact context. (Compaction error)"
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="capacity",
-                                data={"action": "compact", "reply": _cp_reply},
-                                thread_id=thread_id,
-                            ).to_dict()
+                        await _emit_journaled(
+                            "capacity",
+                            {"action": "compact", "reply": _cp_reply},
+                            thread_id,
                         )
-                        await websocket.send_json(
-                            TelemetryEvent(
-                                type="stream_end",
-                                data={"capacity": True},
-                                thread_id=thread_id,
-                            ).to_dict()
-                        )
+                        await _emit_journaled("stream_end", {"capacity": True}, thread_id)
                         continue
 
                     try:
@@ -1215,13 +1185,7 @@ def create_ws_chat_router(
                                     "Usage: `/research deep <topic>` — runs through "
                                     "the same agent as chat (not a side door)."
                                 )
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="llm_delta",
-                                        data={"content": _ws_out},
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
+                                await _emit_journaled("llm_delta", {"content": _ws_out}, thread_id)
                                 try:
                                     session.add_message("assistant", _ws_out)
                                     get_session_manager().put(session)
@@ -1229,28 +1193,10 @@ def create_ws_chat_router(
                                     pass
                             except Exception as exc:
                                 logger.exception("[WS-Chat] /research failed")
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="graph_error",
-                                        data={"message": f"Research failed: {exc}"},
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
+                                await _emit_journaled("graph_error", {"message": f"Research failed: {exc}"}, thread_id)
                             finally:
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="idle",
-                                        data={},
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
-                                await websocket.send_json(
-                                    TelemetryEvent(
-                                        type="stream_end",
-                                        data={},
-                                        thread_id=thread_id,
-                                    ).to_dict()
-                                )
+                                await _emit_journaled("idle", {}, thread_id)
+                                await _emit_journaled("stream_end", {}, thread_id)
 
                         await _ws_research()
                         continue

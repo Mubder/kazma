@@ -788,6 +788,15 @@ document.addEventListener('alpine:init', () => {
               window.KazmaChat.resync('resume-gap');
             }
           } catch (e) { /* ignore */ }
+        } else if (r.to != null) {
+          // Seed past the replay window: the server may legitimately skip
+          // non-resumable frames (command confirmations) inside it, and the
+          // tracker must not read those skips as gaps. Everything <= to is
+          // accounted for; real gaps after head are still detected.
+          if (this._cursor && this._cursor.seed) this._cursor.seed(Number(r.to));
+          if (window.KazmaDeliveryCursor && this.sessionId) {
+            KazmaDeliveryCursor.persist(this.sessionId, Number(r.to));
+          }
         }
         if (r.running) {
           this.isThinking = true;

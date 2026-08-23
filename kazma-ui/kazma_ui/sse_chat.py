@@ -64,7 +64,7 @@ from kazma_ui.active_turns import (
     register_turn,
     unregister_turn,
 )
-from kazma_ui.delivery import get_turn_broker
+from kazma_ui.delivery import get_turn_broker, is_replayable
 
 _active_turns = active_turns  # type: ignore[name-defined]
 
@@ -999,6 +999,27 @@ def _frame_from_journaled(frame: dict[str, Any]) -> str:
     return _sse_frame(str(frame.get("type") or "message"), data, id=seq)
 
 
+async def _journal_fast_path(thread_id: str, event: str, data: dict[str, Any]) -> str:
+    """Journal a slash-command confirmation and return its SSE frame.
+
+    Closes the multi-tab parity gap: /research, /long, /yolo, /reset,
+    /compact confirmations were direct-to-response only, so a second bound
+    tab never saw them live. Replay of these frames is filtered at attach
+    time (_REPLAY_SKIP_TYPES / capacity flag) — they are transcript-
+    persisted already; re-painting them into a reconnecting open turn was
+    the 2026-08-16 duplicated-MISSION-ON incident class.
+    """
+    if thread_id:
+        try:
+            stamped = await get_turn_broker().emit(
+                thread_id, {"type": event, "data": data}
+            )
+            return _frame_from_journaled(stamped)
+        except Exception:
+            logger.debug("[SSE] fast-path journal failed event=%s", event, exc_info=True)
+    return _sse_frame(event, data)
+
+
 async def _sse_attach_stream(
     thread_id: str,
     session_id: str,
@@ -1037,8 +1058,9 @@ async def _sse_attach_stream(
             yield _sse_frame("status_update", {"status": "resync", "seq": head})
             return
         for frame in frames:
-            yield _frame_from_journaled(frame)
-            last_yielded = max(last_yielded, int(frame.get("seq") or 0))
+            if is_replayable(frame):
+                yield _frame_from_journaled(frame)
+                last_yielded = max(last_yielded, int(frame.get("seq") or 0))
         if not running:
             # Nothing live to attach to — replay covered everything missed.
             return
@@ -1324,16 +1346,13 @@ def create_sse_chat_router(
         # to the supervisor (same brain as Telegram / TUI).
         if raw_msg.lower().startswith("/research"):
             async def _research_gen() -> AsyncGenerator[str, None]:
-                yield _sse_frame(
-                    "token",
-                    {
-                        "content": (
-                            "Usage: `/research deep <topic>` — runs through "
-                            "the same agent as chat (tools + HITL)."
-                        )
-                    },
-                )
-                yield _sse_frame("done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
+                yield await _journal_fast_path(thread_id, "token", {
+                    "content": (
+                        "Usage: `/research deep <topic>` — runs through "
+                        "the same agent as chat (tools + HITL)."
+                    )
+                })
+                yield await _journal_fast_path(thread_id, "done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
 
             return StreamingResponse(
                 _research_gen(),
@@ -1362,13 +1381,13 @@ def create_sse_chat_router(
                 logger.exception("[SSE] failed to persist /long message")
 
             async def _long_generator() -> AsyncGenerator[str, None]:
-                yield _sse_frame("capacity", {
+                yield await _journal_fast_path(thread_id, "capacity", {
                     "long_active": _cap.long_active,
                     "yolo_active": _cap.yolo_active,
                     "action": _cap.action,
                     "reply": _cap.reply,
                 })
-                yield _sse_frame("done", {
+                yield await _journal_fast_path(thread_id, "done", {
                     "tokens": 1, "cost": 0.0, "duration_ms": 100,
                 })
 
@@ -1459,8 +1478,8 @@ def create_sse_chat_router(
                 logger.exception("[SSE] failed to persist YOLO message")
 
             async def _yolo_generator() -> AsyncGenerator[str, None]:
-                yield _sse_frame("capacity", {"action": "yolo", "reply": confirmation})
-                yield _sse_frame("done", {
+                yield await _journal_fast_path(thread_id, "capacity", {"action": "yolo", "reply": confirmation})
+                yield await _journal_fast_path(thread_id, "done", {
                     "tokens": 1,
                     "cost": 0.0,
                     "duration_ms": 100,

@@ -13,9 +13,11 @@ from typing import Any
 import pytest
 
 from kazma_ui.delivery import (
+    REPLAY_SKIP_TYPES,
     TurnBroker,
     TurnJournal,
     get_turn_broker,
+    is_replayable,
     reset_turn_broker,
 )
 
@@ -341,6 +343,34 @@ class TestSubscribers:
         small.put_nowait({"pre": True})
         seq = await broker.emit("t1", {"type": "token"})  # must not raise
         assert seq["seq"] == 1
+
+
+# ── Replay filter (command confirmations are not resumable) ─────────────
+
+
+class TestReplayFilter:
+    def test_capacity_and_steer_never_replayable(self):
+        assert not is_replayable({"type": "capacity", "data": {"reply": "x"}})
+        assert not is_replayable({"type": "steer", "data": {}})
+        # capacity flag in data (fast-path stream_end) also excluded.
+        assert not is_replayable({"type": "stream_end", "data": {"capacity": True}})
+
+    def test_turn_content_always_replayable(self):
+        assert is_replayable({"type": "llm_delta", "data": {"content": "hi"}})
+        assert is_replayable({"type": "turn_complete", "data": {"content": "done"}})
+        assert is_replayable({"type": "approval_required", "data": {"tool": "shell_exec"}})
+
+    @pytest.mark.asyncio
+    async def test_resume_skips_command_confirmations(self):
+        broker = TurnBroker()
+        await broker.emit("tR", {"type": "token", "data": {"i": 1}})
+        await broker.emit("tR", {"type": "capacity", "data": {"action": "yolo", "reply": "ON"}})
+        await broker.emit("tR", {"type": "stream_end", "data": {"capacity": True}})
+        await broker.emit("tR", {"type": "turn_complete", "data": {"content": "ok"}})
+        frames, gap, head = broker.resume("tR", 0)
+        assert gap is False and head == 4
+        served = [f["seq"] for f in frames if is_replayable(f)]
+        assert served == [1, 4]  # 2,3 skipped — transcript-persisted already
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────

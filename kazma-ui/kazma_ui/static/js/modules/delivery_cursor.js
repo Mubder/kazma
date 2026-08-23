@@ -55,6 +55,20 @@ window.KazmaDeliveryCursor = (function() {
       },
       last: function() { return last; },
       reset: function() { last = null; },
+      /**
+       * Seed past a replay window. The server's resumed handshake reports
+       * the journal head (`to`); replay may legitimately SKIP frames
+       * (command confirmations are not resumable), so the client must treat
+       * everything <= head as already-accounted-for instead of reading the
+       * skips as gaps. Live frames after head still detect real gaps.
+       */
+      seed: function(seq) {
+        var n = parseInt(seq, 10);
+        if (isNaN(n) || n < 0) return;
+        if (last === null || n > last) {
+          last = n;
+        }
+      },
     };
   }
 

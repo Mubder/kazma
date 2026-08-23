@@ -49,6 +49,8 @@ __all__ = [
     "TurnBroker",
     "get_turn_broker",
     "reset_turn_broker",
+    "REPLAY_SKIP_TYPES",
+    "is_replayable",
 ]
 
 # ── Retention defaults ────────────────────────────────────────────────────
@@ -66,6 +68,23 @@ DEFAULT_MAX_THREADS = 500
 #: Per-subscriber live queue bound (SSE path). Full ⇒ drop + warn; the
 #: client's cursor/resync recovers, mirroring the swarm bus semantics.
 SUBSCRIBER_QUEUE_MAX = 1000
+
+
+#: Frame types excluded from RESUME REPLAY (both transports). Command
+#: confirmations (/yolo, /long, /reset, /compact, steer acks) are persisted
+#: in the session transcript and re-shown by loadSession; replaying them
+#: into a reconnecting client's open turn was the 2026-08-16 duplicated-
+#: MISSION-ON incident class. LIVE fan-out is unaffected — journaling them
+#: is exactly what gives second tabs real-time parity.
+REPLAY_SKIP_TYPES = frozenset({"capacity", "steer"})
+
+
+def is_replayable(frame: dict[str, Any]) -> bool:
+    """False for frames that must never be served on cursor replay."""
+    if frame.get("type") in REPLAY_SKIP_TYPES:
+        return False
+    data = frame.get("data") or {}
+    return not (isinstance(data, dict) and data.get("capacity"))
 
 
 class TurnJournal:

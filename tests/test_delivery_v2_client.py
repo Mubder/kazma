@@ -178,6 +178,11 @@ class TestCursorTrackerNode:
             "out.push(t.observeSeq(6));   // dupe\n"
             "out.push(t.observeSeq(9));   // gap\n"
             "out.push(t.last());          // stays 6 - never advances past a hole\n"
+            "const t2 = K.createTracker();\n"
+            "t2.seed(10);                 // seed past a replay window\n"
+            "out.push(t2.last());         // 10\n"
+            "out.push(t2.observeSeq(8));  // dupe (<= seeded head)\n"
+            "out.push(t2.observeSeq(11)); // ok - real gaps after head still fire\n"
             "out.push(K.loadPersisted('nope')); // 0\n"
             "K.persist('s1', 42);\n"
             "out.push(K.loadPersisted('s1'));   // 42\n"
@@ -192,6 +197,6 @@ class TestCursorTrackerNode:
             )
             assert proc.returncode == 0, proc.stderr
             out = json.loads(proc.stdout.strip().splitlines()[-1])
-            assert out == ["init", "ok", "dupe", "gap", 6, 0, 42]
+            assert out == ["init", "ok", "dupe", "gap", 6, 10, "dupe", "ok", 0, 42]
         finally:
             harness_path.unlink(missing_ok=True)
