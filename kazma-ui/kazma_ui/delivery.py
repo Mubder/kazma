@@ -287,7 +287,25 @@ class TurnBroker:
             record_delivery_event(events=1, replayed=0, dropped=dropped + (len(sockets) - delivered))
         except Exception:  # pragma: no cover — metrics must never break turns
             logger.debug("[Delivery] metric recording failed", exc_info=True)
+
+        # Turn Delivery V2 P5: Web Push on terminal — the ONE choke point
+        # both transports flow through, so WS and SSE turns both notify.
+        # Fire-and-forget: never raises into the turn, never blocks it.
+        if stamped.get("type") in ("turn_complete", "done"):
+            data = stamped.get("data") or {}
+            summary = str(data.get("content") or "").strip()
+            if summary:
+                asyncio.ensure_future(self._push_terminal(summary))
+
         return stamped
+
+    async def _push_terminal(self, summary: str) -> None:
+        try:
+            from kazma_ui.push import notify_push_turn_complete
+
+            await notify_push_turn_complete(summary)
+        except Exception:
+            logger.debug("[Delivery] push notification failed", exc_info=True)
 
     async def _fan_out_sockets(self, sockets: list[Any], frame: dict[str, Any]) -> int:
         """Send *frame* to every socket; isolate failures. Returns delivered count."""

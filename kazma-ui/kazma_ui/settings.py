@@ -8,6 +8,7 @@ appearance, shortcuts, account, tools, system, and import/export.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query, Request
@@ -205,6 +206,59 @@ class SettingsRouterBuilder:
                 logger.debug("turn-complete config read failed; defaulting on", exc_info=True)
                 enabled = True
             return {"enabled": bool(enabled)}
+
+        @router.get("/api/push/vapid-public-key")
+        async def api_push_vapid_key() -> dict[str, Any]:
+            """VAPID application server key for Web Push subscription (P5)."""
+            from kazma_ui.push import get_vapid_public_key, push_available
+
+            return {
+                "available": push_available(),
+                "public_key": get_vapid_public_key(),
+            }
+
+        @router.post("/api/push/subscribe")
+        async def api_push_subscribe(request: Request) -> dict[str, Any]:
+            """Persist a browser PushSubscription JSON (P5)."""
+            from kazma_ui.push import push_available, subscribe
+
+            if not push_available():
+                return {"status": "error", "error": "push support not installed"}
+            try:
+                body = await request.json()
+            except Exception:
+                return {"status": "error", "error": "invalid JSON"}
+            return subscribe(body.get("subscription") or body)
+
+        @router.post("/api/push/unsubscribe")
+        async def api_push_unsubscribe(request: Request) -> dict[str, Any]:
+            """Remove a browser PushSubscription by endpoint (P5)."""
+            from kazma_ui.push import unsubscribe
+
+            try:
+                body = await request.json()
+            except Exception:
+                return {"status": "error", "error": "invalid JSON"}
+            return unsubscribe(str((body.get("endpoint")) or ""))
+
+        @router.get("/sw.js")
+        async def api_service_worker() -> Response:
+            """Serve the Web Push service worker at ROOT scope.
+
+            Service worker scope = script URL directory, so /static/sw.js
+            could never notify on /chat. Must be served from the origin root
+            with the JS MIME type.
+            """
+            sw_path = Path(__file__).resolve().parent / "static" / "sw.js"
+            try:
+                body = sw_path.read_text(encoding="utf-8")
+            except Exception:
+                return Response("// service worker unavailable", media_type="application/javascript")
+            return Response(
+                content=body,
+                media_type="application/javascript",
+                headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+            )
 
         @router.get("/api/settings/export")
         async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:

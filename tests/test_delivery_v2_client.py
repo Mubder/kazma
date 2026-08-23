@@ -186,6 +186,46 @@ class TestTurnNotifySettingsToggle:
             assert f'"{key}"' in src
 
 
+class TestWebPushP5:
+    """Plan P5: Web Push for Memory-Saver-DISCARDED tabs.
+
+    Everything lazy-imports pywebpush — absent dependency ⇒ every entry
+    point is a cheap no-op (prometheus_client degradation contract).
+    """
+
+    def test_push_module_exists_and_degrades(self):
+        src = (_UI / "push.py").read_text(encoding="utf-8")
+        assert "from pywebpush import webpush" in src
+        assert "notifications.push.subscriptions" in src
+        # Degradation contract: availability check gates everything.
+        assert "def push_available" in src
+
+    def test_broker_terminal_hook_wired(self):
+        src = (_UI / "delivery.py").read_text(encoding="utf-8")
+        assert "notify_push_turn_complete" in src
+        assert '"turn_complete", "done"' in src
+
+    def test_push_routes_and_sw_scope(self):
+        src = (_UI / "settings.py").read_text(encoding="utf-8")
+        for route in ("/api/push/vapid-public-key", "/api/push/subscribe",
+                      "/api/push/unsubscribe"):
+            assert route in src, f"missing route {route}"
+        assert '@router.get("/sw.js")' in src  # ROOT scope — not /static/sw.js
+        sw = (_UI / "static" / "sw.js").read_text(encoding="utf-8")
+        assert "showNotification" in sw
+
+    def test_client_module_registered_in_chat_page(self):
+        html = _CHAT_HTML.read_text(encoding="utf-8")
+        assert "push_client.js" in html
+
+    def test_pyproject_optional_extra(self):
+        import tomllib
+
+        data = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        push = (data.get("project", {}).get("optional-dependencies", {}) or {}).get("push")
+        assert push and any("pywebpush" in p for p in push)
+
+
 class TestCursorTrackerNode:
     """Run the pure tracker logic under Node (no browser needed)."""
 

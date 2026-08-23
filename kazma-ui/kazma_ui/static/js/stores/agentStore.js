@@ -149,6 +149,7 @@ document.addEventListener('alpine:init', () => {
       this._turnActive = true;
       this.isThinking = true;
       try { if (window.KazmaTurnVisibility) KazmaTurnVisibility.beginTurn(); } catch (e) {}
+      try { this._armPush(); } catch (e) {}
       const chat = this._chat();
       if (chat && typeof chat.beginTurn === 'function') chat.beginTurn();
     },
@@ -266,6 +267,20 @@ document.addEventListener('alpine:init', () => {
       this._intentionalClose = false;
       this._closeSocket();
       this._scheduleReconnect();
+    },
+
+    /**
+     * P5: Web Push covers Memory-Saver-DISCARDED tabs. Permission is only
+     * requestable from a user gesture — the send path is that gesture.
+     * ensureSubscribed() is internally idempotent.
+     */
+    _armPush() {
+      try {
+        if (window.Notification && Notification.permission === 'granted'
+            && window.KazmaPushClient && KazmaPushClient.ensureSubscribed) {
+          Promise.resolve(KazmaPushClient.ensureSubscribed()).catch(function () {});
+        }
+      } catch (e) { /* best-effort */ }
     },
 
     connect(sessionId) {
