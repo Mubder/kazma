@@ -265,7 +265,11 @@ Kazma's chat memory is the **V2 Cognitive Engine** (bi-temporal belief graph, PP
 | **Durable consolidation queue** | SQLite-backed worker queue (`memory_ops.db`) | Async belief extraction, macro-sleep, backup/export | ✅ `memory/task_queue.py` |
 | **Knowledge Library** | Per-lib `kazma_kb_*` Chroma + SQLite chunks | Docs RAG (`knowledge_*` tools) | ✅ Isolated from chat memory |
 
-Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.config`); V2 is on at `memory.v2.use_new_stack: true`. Full details in [Memory & RAG](memory-and-rag).
+Write path: `mutate_belief` is the single INSERT choke. Payload-object beliefs also get a hub `related_to` edge (`memory/ego_anchor.py`) so the canvas does not show disconnected concepts. Optional Postgres state mirror receives **tombstones** on invalidate/supersede/clear; optional Neo4j dual-write deletes those edges too.
+
+Schedulers (started from `start_memory_worker()`): 6h `macro_sleep` (decay + ego-anchor backfill + FTS `*_docsize` drift rebuild), 24h backup/export + mirror-drift warning, 24h reconsolidation, 15m commitment GC.
+
+Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.config`); V2 is on at `memory.v2.use_new_stack: true`. Full details in [Memory & RAG](memory-and-rag). Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md).
 
 ---
 

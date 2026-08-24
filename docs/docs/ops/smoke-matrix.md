@@ -74,6 +74,9 @@ eval, and docs presence. **Live network / LLM rows below still need a human.**
 | M4 | With KB inject: technical doc question | Panel also lists **KB** rows with `kb_rrf` | ☐ |
 | M5 | Dashboard probe | Same channel chips; **Run golden eval** returns pass rate | ☐ |
 | M6 | Multi-hop beliefs (works_at → located_in) | Probe/chat can surface multi-hop object | ☐ |
+| M7 | Open `/memory` after restart | Previously payload-object concepts (literal objects) sit on a hub `related_to` edge, not a disconnected island | ☐ |
+| M8 | Inspect a grouped node → **Ungroup** | Grouping gone; beliefs unchanged | ☐ |
+| M9 | Truncation banner (graph > 200 nodes) | Banner names nodes **and** connections hidden by slicing | ☐ |
 
 ---
 

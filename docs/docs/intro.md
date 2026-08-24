@@ -72,7 +72,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 | Path | Purpose |
 |------|---------|
-| `docs/audits/` | Security & architecture audits |
+| `docs/audits/` | Security & architecture audits ([memory system 2026-08-24](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md) — M-01..M-17 closed) |
 | `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md), [Document docs goal](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md), [Document residuals](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_RESIDUALS_GOAL.md)) |
 | `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` | Document Intelligence certification report |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |

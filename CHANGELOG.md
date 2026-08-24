@@ -25,6 +25,10 @@ after M-01..M-09 / M-12 / M-13 shipped earlier the same day.
 - **M-17** — `/memory` graph poll uses the groups already embedded in
   `GET /api/memory/v2/graph` (no 30s extra GET). Inspector **Ungroup**
   consumes `DELETE /api/memory/v2/graph/groups/{id}`.
+- **Docs** — [Memory & RAG](docs/docs/guide/memory-and-rag.md),
+  [Memory best path](docs/docs/guide/memory-best-path.md), diagnosis map,
+  API routes, env vars (`KAZMA_MEMORY_STATE_ROLE`), recent features, and
+  `MEMORY_REMAINING.md` updated for the closed audit.
 
 ## Unreleased — Turn Delivery V2: cursor-resume delivery replaces the recovery patch pile (2026-08-23)
 

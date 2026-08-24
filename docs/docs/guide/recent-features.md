@@ -2,7 +2,7 @@
 id: recent-features
 title: Recent features guide
 sidebar_label: Recent features
-description: Operator guide for deep research, KB hardening, proxy coverage, memory explain, /memory admin (rename, list↔graph, hub), and Settings toggles
+description: Operator guide for deep research, KB hardening, proxy coverage, memory explain, /memory admin, and the 2026-08-24 memory audit fixes
 ---
 
 # Recent features guide
@@ -21,6 +21,7 @@ the deep docs when you need detail.
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Memory system audit (2026-08-24)** | Ego-graph hub anchors (no more floating concept nodes), PG-mirror tombstones + `scripts/reconcile_memory_mirror.py`, tenant-scoped graph-clear (no all-tenants wipe), FTS drift rebuild on the 6h sweep, merge-ledger archive, Ungroup, honest truncation banner | `/memory`; restart after `git pull` |
 | **Universal backup** | One unified backup of ALL data: every SQLite DB (WAL-safe), all assets (document-store, workspace, attachments, vectors), and Postgres — with auto (24h) + manual triggers, progress bar, and delete/archive/download | Settings → **Backup tab**; `POST /api/backup/now` |
 | **Postgres backup** | Nightly automatic `pg_dump` of Kazma's tables (atomic, validated, 7-day retention) + boot-time schema verification + one-command restore | `kazma-data/backups/pg/`; `python scripts/pg_backup.py backup\|restore --latest\|list` |
 | **Agent Skills marketplace** | Browse/install the open `agentskills.io` ecosystem (GitHub `topic:agent-skills`) from the UI; the agent can `search_agent_skills` + `install_agent_skill` | `/skills` → Marketplace tab |
@@ -31,9 +32,11 @@ the deep docs when you need detail.
 | **Boot fixes** | Paused-task restore no longer hangs (deferred timeout arming); PG schema guard actually verifies; research export fixed | transparent |
 
 **Operator actions after `git pull`:** restart the server to activate the
+memory audit fixes (hub anchors, FTS sweep, graph-clear bind), the
 template fixes (MCP/skills buttons), the backup system (first universal
 backup ~2 min after boot), and the Windows tool fixes. Full engineering
-detail in `CHANGELOG.md` and `AGENTS.md` §21–§23.
+detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
+[`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md).
 
 ---
 
@@ -45,7 +48,7 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23.
 | **Document Intelligence** | Secure ingest, OCR, index, generate/convert/redact, ops (capacity/GC/audit), cert | `/documents`, `/api/documents/*`, `/documents` slash, `document_*` tools, TUI Documents |
 | Proxy Provider | Residential proxy for scrape/crawl/Playwright/SERP | Settings → System |
 | Knowledge Library | Smart re-index, gone-URL prune, hybrid inject; **document_index** bridge | `/knowledge`, Settings → Memory, Documents → Index |
-| Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand | `/memory` |
+| Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand, Group/Ungroup, truncation honesty | `/memory` |
 | Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |
 | Topic-shift focus | Agent soft-resets focus when user changes subject; tunable drift threshold | Settings → `agent.topic_drift.*` |
@@ -297,6 +300,9 @@ Operator page **`/memory`**: graph on top, entities/beliefs/merge/hygiene below.
 | **List ↔ graph** | Click row ⇄ click node; rename/merge/invalidate refresh canvas |
 | **Edit belief** | Beliefs → **Edit** → PATCH triple (object/predicate/subject) |
 | **Hub identity** | `ent_*` person User shells map to hub `user`; rename syncs hub label |
+| **Ego-graph anchors** | Payload-object facts (`subject → pred → literal`) also get `user → related_to → subject` so they are not a disconnected component |
+| **Group / Ungroup** | View-only clustering from inspect; 30s poll uses `groups` on the graph payload (no extra GET) |
+| **Truncation honesty** | Banner reports nodes **and** connections hidden by the top-N cap |
 
 **Deep dive:** [Memory & RAG — admin UI](./memory-and-rag.md#memory-admin-ui-memory) · [Memory best path](./memory-best-path).
 
@@ -427,7 +433,9 @@ Industry-grade web scraping resilience and model output truncation recovery.
 | POST | `/api/memory/v2/probe` | Recall dry-run (explain on) |
 | POST | `/api/memory/v2/federated-search` | Memory + KB labeled |
 | POST | `/api/memory/v2/eval/golden` | Golden recall suite |
-| GET | `/api/memory/v2/graph` | Belief canvas payload (unique ids, hub label) |
+| GET | `/api/memory/v2/graph` | Belief canvas payload (unique ids, hub label, embedded `groups`) |
+| DELETE | `/api/memory/v2/graph/groups/{id}` | Ungroup (view-only) |
+| POST | `/api/memory/graph/clear` | Tenant-scoped bi-temporal invalidate + Neo4j cleanup |
 | GET | `/api/memory/v2/entities` | Entity list (`is_self`, `graph_id`) |
 | POST | `/api/memory/v2/entities/{id}/rename` | Display rename (+ hub sync for self) |
 | PATCH | `/api/memory/v2/beliefs/{id}` | Operator edit triple |

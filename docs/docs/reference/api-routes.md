@@ -64,7 +64,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | GET | `/api/memory/graph` | Session | Property graph JSON (`nodes`/`edges`); optional `?q=` filter |
 | GET | `/api/memory/graph/stats` | Session | Node/edge counts + backend path |
 | GET | `/api/memory/graph/search` | Session | FTS search over graph nodes (`?q=&limit=`) |
-| POST | `/api/memory/graph/clear` | Session | Destructive clear of L2 graph (UI confirms) |
+| POST | `/api/memory/graph/clear` | Session | Bi-temporal invalidate of **active V2 beliefs for one tenant** (`?tenant=` defaults to `default`; no all-tenants mode). Tombstones the PG mirror, deletes Neo4j edges, writes a `graph_clear` audit row. UI confirms. |
 | * | `/api/system/memory/*` | Session | Backup / restore / maintenance of memory stores |
 
 ### V2 cognitive engine (`/api/memory/v2/*`)
@@ -80,15 +80,17 @@ on error (never a bare 500); non-numeric params yield a FastAPI 422.
 | POST | `/api/memory/v2/beliefs/{id}/invalidate` | Session | Soft-invalidate one belief (+ best-effort Neo4j edge delete). |
 | POST | `/api/memory/v2/beliefs/invalidate-batch` | Session | Soft-invalidate many (`{ "ids": [...] }`). |
 | PATCH | `/api/memory/v2/beliefs/{id}` | Session | Operator edit of active triple: optional `subject`, `predicate`, `object`, `predicate_type`. Sets `extraction_method=user_explicit`; clears embedding if object changes. |
-| GET | `/api/memory/v2/graph` | Session | Belief graph `{nodes, links, stats}` for the canvas. Bi-temporal + filter params: `?at=<unix_ts>` (point-in-time scrub; superseded beliefs marked `superseded=true`), `?type=` (`functional`/`set`/`state` predicate_type), `?entity_type=` (person/tool/concept/…), `?limit=` (default 200), `?source=neo4j` (optional probe). **Invariants:** unique node ids; no virtual fact node when object text equals an entity id; no dangling links; hub node `id=user` with display `name` from `entities.user` (self person shells collapsed onto hub). |
+| GET | `/api/memory/v2/graph` | Session | Belief graph `{nodes, links, stats, groups}` for the canvas. Bi-temporal + filter params: `?at=<unix_ts>` (point-in-time scrub; superseded beliefs marked `superseded=true`), `?type=` (`functional`/`set`/`state` predicate_type), `?entity_type=` (person/tool/concept/…), `?limit=` (default 200), `?source=neo4j` (optional probe). `stats.total_links` vs `stats.links` is the slicing delta shown on the truncation banner. **Invariants:** unique node ids; no virtual fact node when object text equals an entity id; no dangling links; hub node `id=user` with display `name` from `entities.user` (self person shells collapsed onto hub); payload-object subjects carry a hub `related_to` anchor. |
 | GET | `/api/memory/v2/entities` | Session | Entity list for `/memory` ops. Flags: `empty`, `isolated`, `protected`, **`is_self`**, **`graph_id`** (self shells → `"user"`). Query: `?q=`, `?empty_only=`, `?isolated_only=`, `?limit=`. |
 | POST | `/api/memory/v2/entities/{id}/rename` | Session | Display rename only (`{ "name": "…" }`). Id stable; aliases preserved. Self/person User shells also upsert hub `entities.user`. Returns `hub_synced`, `graph_id`. |
 | POST | `/api/memory/v2/entities/merge` | Session | Merge source into target (beliefs rewired, aliases union). |
 | POST | `/api/memory/v2/entities/link` | Session | Create belief edge (`subject`, `predicate`, `object`). |
-| DELETE | `/api/memory/v2/entities/{id}` | Session | Delete entity shell (blocked for protected ids: `user`, `assistant`, …). |
+| DELETE | `/api/memory/v2/entities/{id}` | Session | Delete entity shell (blocked for protected ids: `user`, `assistant`, …). Copies matching `entity_merges` rows to `entity_merges_archive` before dropping live ledger rows (FK). |
 | GET | `/api/memory/v2/admin/summary` | Session | Counts for ops chips (live/invalidated beliefs, empty/isolated entities). |
 | GET/POST | `/api/memory/v2/hygiene/*` | Session | Preview + run empty purge / near-dup invalidate / archive. |
 | GET/POST | `/api/memory/v2/entity-merges*` | Session | Quarantine merge list + approve/reject. |
+| GET/POST/DELETE | `/api/memory/v2/graph/groups*` | Session | View-only groupings (list/create/delete/move/tier). Never mutates beliefs. Canvas poll uses `groups` on `GET /graph`; Ungroup is `DELETE …/groups/{id}`. |
+| GET | `/api/memory/v2/graph/export` | Session | On-demand JSON or GraphML (`?format=json\|graphml`). |
 | POST | `/api/memory/v2/probe` | Session | Recall dry-run (explain chips). |
 | POST | `/api/memory/v2/federated-search` | Session | Memory + KB labeled search. |
 | POST | `/api/memory/v2/eval/golden` | Session | Golden recall suite. |

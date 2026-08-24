@@ -1,15 +1,17 @@
 # Memory — Done vs Remaining
 
-**Status date:** 2026-08-04 (admin UI: graph dedupe, rename, list↔graph, hub identity)  
+**Status date:** 2026-08-24 (memory system audit M-01..M-17 **closed**)  
 **Primary guide:** [`docs/docs/guide/memory-and-rag.md`](../docs/guide/memory-and-rag.md)  
 **Best-path operator guide:** [`docs/docs/guide/memory-best-path.md`](../docs/guide/memory-best-path.md)  
+**Audit:** [`docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md`](../audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md)  
 **Priority lock:** [`MEMORY_PRIORITY_NEXT.md`](MEMORY_PRIORITY_NEXT.md)
 
 Use this file when picking up memory work. Do **not** start a greenfield rewrite.
 
 **Trust path:** Single-node V2 + optional scale adapters + KB chat inject is
-**complete**. Remaining work is either **trigger-only scale**, **optional
-Dashboard polish**, or **ops hardening** — not another memory rewrite.
+**complete**. The 2026-08-24 audit (orphans, mirror zombies, tenant gaps, FTS
+drift, graph-clear bind bug) is **closed**. Remaining work is **trigger-only
+scale** (hosted embed fleet) — not another memory rewrite.
 
 ---
 
@@ -23,6 +25,7 @@ Dashboard polish**, or **ops hardening** — not another memory rewrite.
 | Phase C–D + Dash + Eval | Procedural inject, entity merges API/UI, reconsolidation, working tier, backends UI, probe/queue, golden set |
 | Priority max batch | VectorBackend factory, failover honesty, tenant tests, working TTL, dashboard alerts, belief drawer, smoke script |
 | Admin UI ops (2026-08-04) | Graph entity/virtual id dedupe; entity display rename; list↔graph bridge; belief PATCH edit; self hub (`self_hub.py` User/Mubder → `user`); `/memory` docs |
+| System audit 2026-08-24 | M-01..M-17: send_prompt UnboundLocal, count SQL SoT, ego-anchor orphans, mirror tombstones + reconcile CLI, tenant gates, recompute-at-mutation, painter edge delta, FTS docsize drift, INSERT OR IGNORE rollback, merge-ledger archive, graph-clear Neo4j+audit+bind fix, export coverage, Ungroup |
 
 **V1 RRF is gone.** `use_new_stack=false` only disables V2 inject/post-turn.
 
@@ -41,7 +44,7 @@ User turn
 
 | Path | Role |
 |------|------|
-| `memory_state.db` | beliefs, episodes, entities, procedural |
+| `memory_state.db` | beliefs, episodes, entities, entity_merges (+ archive), procedural |
 | `memory_ops.db` | task queue + audit |
 
 ---
@@ -103,8 +106,11 @@ Federated search API remains for operator UI: `POST /api/memory/v2/federated-sea
 | DUI-14 Graph a11y | **Done** — arrows / ± / Home / Escape |
 | Settings consolidation | **Done** — Memory+Embedder one tab; connectors under LLM hub; Refresh Gateway on Platform Connectors |
 | Extraction hygiene | **Done** — block `kazma_v2_*` / stack-name subjects at extract + mutate |
-| Neo4j edge on invalidate | **Done** — `delete_belief_edge` + supersede path + invalidate API |
-| beliefs_fts self-heal | **Done** — `beliefs_write` rebuilds FTS on malformed DB errors |
+| Neo4j edge on invalidate | **Done** — `delete_belief_edge` + supersede path + invalidate API + graph-clear `clear_tenant_edges` |
+| beliefs_fts self-heal | **Done** — `beliefs_write` rebuilds FTS on malformed DB errors; 6h `fts_health` COUNT via `*_docsize` |
+| Ego-graph leaf orphans | **Done** — write-time + 6h backfill (`ego_anchor.py`) |
+| PG mirror tombstones | **Done** — remirror on invalidate/supersede/clear; `scripts/reconcile_memory_mirror.py`; nightly drift warning |
+| Tenant graph-clear | **Done** — no all-tenants mode; undo tokens bound to tenant |
 
 ---
 

@@ -47,6 +47,8 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] OIDC vars if SSO
 - [ ] `KAZMA_PUBLIC_URL` correct for redirects
 - [ ] HA compose / LB only if Postgres shared state verified
+- [ ] Memory: `KAZMA_MEMORY_ENFORCE_TENANT=1` when more than one tenant exists
+- [ ] Before `KAZMA_MEMORY_STATE_ROLE=primary`: `python scripts/reconcile_memory_mirror.py --dry-run` is clean (no dead-in-mirror rows)
 
 ## Document Intelligence (if enabled)
 

@@ -46,7 +46,8 @@ Use this page to clean topology without raw SQL.
 
 | Goal | How |
 |------|-----|
-| See the belief graph | Top **Graph & health** canvas; Refresh if labels look stale |
+| See the belief graph | Top **Graph & health** canvas; Refresh if labels look stale. Truncation banner also reports **connections hidden by the node cap**. |
+| Group / ungroup a node | Inspect → **Group under→** (click parent) or **Ungroup**. View-only — beliefs are untouched. |
 | Find an entity beyond the top 150 | Entities search box → type the name/alias (FTS5, diacritic-insensitive); use **Load more** if "Showing X of Y" shows more |
 | Rename hub “You” → brand name | Entities: find person **User** / `ent_…` or hub → **Rename** → e.g. `Mubder`. Canvas hub should show that name. |
 | Rename a project node | Click node or entity row → **Rename** (id stays `shipx`; label becomes `ShipX`) |
@@ -79,6 +80,7 @@ Includes isolation, KB toggles, backends, Neo4j Test/Sync, **and embedder** (no 
 | `memory.backends.*` | Vector / state / graph adapters + failover |
 | Graph provider `neo4j` | Dual-write triples; topology **paint** stays SQLite |
 | `tenant_mode` | shared / per_platform / per_user |
+| `KAZMA_MEMORY_ENFORCE_TENANT=1` | Scope `/memory` reads, mutations, undo, and graph-clear by request tenant (off = `default`) |
 
 ## Optional Neo4j
 
@@ -93,16 +95,16 @@ export KAZMA_NEO4J_PASSWORD=YOUR_PASSWORD_HERE
 Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → Neo4j**.
 
 - Masked password `***` in the form does **not** wipe the vault secret on Test.  
-- After bulk invalidate, Sync again if Neo4j should drop orphans.  
+- **Clear graph** invalidates SQLite beliefs **and** deletes that tenant's Neo4j edges. A manual Sync is only needed if dual-write was down during the clear.  
 - Do **not** make Neo4j a required install for single-user setups.
 
 ## Maintenance
 
 | Job | Cadence |
 |-----|---------|
-| macro_sleep (decay / tiers) | ~6h |
-| backup + export | ~24h |
-| global reconsolidation (dedupe + re-embed) | ~24h; **auto-partitions** large corpora |
+| macro_sleep (decay / tiers) + ego-anchor backfill + FTS drift rebuild | ~6h |
+| backup + export (beliefs, episodes, merges, archive, audit JSONL) + mirror-drift warning | ~24h |
+| global reconsolidation (dedupe + re-embed + count recompute) | ~24h; **auto-partitions** large corpora |
 
 Dashboard: **Run reconsolidation**, queue **retry** / **Clear failed**, component health board.
 
@@ -110,7 +112,7 @@ Dashboard: **Run reconsolidation**, queue **retry** / **Clear failed**, componen
 
 - Do **not** dump KB chunks into the `beliefs` table as raw SPO without provenance.  
 - Do **not** require Neo4j for a normal install.  
-- Do **not** run full Postgres-primary recall until multi-replica is a real product need.  
+- Do **not** set `KAZMA_MEMORY_STATE_ROLE=primary` until `python scripts/reconcile_memory_mirror.py --dry-run` reports no dead-in-mirror / only-in-mirror rows.  
 - Do **not** treat “memory V2” as a product version entity (hygiene blocks subjects like `kazma_v2_4_0`).  
 - Do **not** rewrite belief **subject** ids by hand to “fix” labels — use **Rename** (display) or **Merge** (identity).  
 - Do **not** expect empty person shells with zero beliefs to appear as extra graph nodes — self shells focus the hub.
@@ -120,4 +122,5 @@ Dashboard: **Run reconsolidation**, queue **retry** / **Clear failed**, componen
 - [Memory and RAG](./memory-and-rag.md)  
 - [Knowledge Library](./knowledge-library.md)  
 - Plan: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md)  
+- Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md) (M-01..M-17 closed)  
 - Scale: [#76](https://github.com/Mubder/kazma/issues/76) · [#77](https://github.com/Mubder/kazma/issues/77) · [#78](https://github.com/Mubder/kazma/issues/78)

@@ -1,7 +1,7 @@
 # Kazma Memory Subsystem — Code Map
 
 > **Purpose**: Single reference for all memory-related code locations, entry points, and data paths.
-> **Updated**: 2026-07-31
+> **Updated**: 2026-08-24
 > **Scope**: The V2 cognitive engine. The V1 4-layer RRF stack was removed in the V1→V2 cutover; V2 is the single stack.
 
 ---
@@ -36,22 +36,27 @@ kazma-data/                             # Runtime data (gitignored)
 | File | Purpose | Key Exports |
 |------|---------|-------------|
 | `schema_v2.py` | Bi-temporal DDL for `memory_state.db` + `memory_ops.db` | `ensure_primary_schema()`, `ensure_ops_schema()` |
-| `belief_mutation.py` | Functional/set/state mutation rules + audit log + memory_class derivation. State predicates record `event_type='transition'`; functional record `'supersede'` | `mutate_belief()`, `derive_memory_class()` |
+| `belief_mutation.py` | Functional/set/state mutation rules + audit log + memory_class derivation. INSERT OR IGNORE rowcount + uuid retry; IntegrityError rolls back a supersede close (M-11) | `mutate_belief()`, `derive_memory_class()` |
 | `belief_extractor.py` | Post-turn LLM + heuristic extraction (gatekeeper, fence) | `extract_and_apply_beliefs()`, `extract_and_apply_beliefs_sync()`, `is_filler_turn()` |
 | `recall.py` | Unified V2 recall — beliefs + episodes + PPR + RRF + fence. Accepts `session_id` (thread_id) for session-bias/episode-scoping | `recall()`, `search()`, `format_recall_block()`, `RecallHit`, `RecallResult` |
 | `vector_engine.py` | sqlite-vec native + guarded NumPy fallback | `VectorEngine` |
 | `ppr.py` | Local Ego-Graph Personalized PageRank | `compute_local_ppr()`, `build_ego_graph()` |
 | `task_queue.py` | Durable SQLite-backed consolidation queue | `enqueue_task()`, `register_handler()`, `start_worker()` |
-| `worker_bootstrap.py` | Handler registration + worker start at boot + schedulers (6h `macro_sleep`, 24h `native_backup` + `nightly_export`) | `start_memory_worker()`, `register_v2_handlers()`, `register_backup_export_handlers()` |
+| `worker_bootstrap.py` | Handler registration + worker start at boot + schedulers (6h `macro_sleep` + ego-anchor + FTS drift, 24h backup/export + mirror-drift warning) | `start_memory_worker()`, `register_v2_handlers()`, `register_backup_export_handlers()` |
 | `macro_sleep.py` | Decay scoring, tier demotion/promotion, archival | `run_macro_sleep()`, `compute_retention()` |
-| `entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine | `resolve_entity()` |
+| `entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine; `preserve_merge_ledger` copies rows to `entity_merges_archive` on entity DELETE (M-14) | `resolve_entity()`, `decide_entity_merge()`, `preserve_merge_ledger()` |
+| `ego_anchor.py` | Hub `related_to` edges for payload-object leaf subjects (orphan-node root fix, M-03) | `anchor_orphan_leaf_concepts()` |
+| `fts_health.py` | Periodic FTS `*_docsize` COUNT vs base + rebuild (M-10) | `fts_drift_check()` |
+| `entity_counts.py` | Single SoT for materialized `belief_count` / `graph_degree` SQL (M-02) | `belief_count_sql()`, `entity_degree_sql()`, `recompute_entity_counts()` |
 | `procedural.py` | Parametric DAG skills, Laplace C(d)=(S+1)/(N+2) | `record_procedural_outcome()`, `laplace_confidence()` |
 | `consolidator.py` | Post-turn pipeline: turn-text extraction, V2 mirror + belief extraction (LLM/heuristic, fence, dedup) | `schedule_post_turn_memory()`, `extract_turn_texts()` |
 | `dual_write.py` | Best-effort mirror of legacy/external writes into V2 | `DualWriteMirror`, `get_mirror()`, `mirror_belief()`, `mirror_episode()` |
+| `graph_backend.py` | SQLite default + Neo4j dual-write; tenant mass-clear after graph-clear (M-15) | `upsert_belief_edge()`, `delete_belief_edge()`, `clear_tenant_edges()` |
+| `state_backend.py` | Optional Postgres state mirror; tombstones on invalidate | `remirror_belief_by_id()`, `mirror_drift_summary()` |
 | `swarm_bridge.py` | V2-native writes for the swarm subsystem (worker results, SoulEvolution, compaction summaries) | `store_swarm_result()`, `log_evolution_v2()`, `store_compaction_summary()` |
 | `backfill_v2.py` | One-shot idempotent migration of the legacy corpus into V2 | `run_backfill()`, `backfill_status()`, `cleanup_polluted_backfill()` |
 | `backup.py` | Native `sqlite3.backup()` streaming copies + retention (scheduled 24h via `native_backup` task) | `perform_native_backups()` |
-| `export.py` | Nightly JSONL + GraphML long-term dumps (scheduled 24h via `nightly_export` task) | `export_nightly_snapshots()` |
+| `export.py` | Nightly JSONL + GraphML + episodes/merges/archive/audit dumps (scheduled 24h via `nightly_export` task) | `export_nightly_snapshots()` |
 | `health.py` | Health checks for V2 subsystems (embedder, vector engine, beliefs/episodes, consolidator, packages) | `build_memory_health()` |
 | `v2_health.py` | V2-specific DB health probes (primary + ops connections) | — |
 | `config.py` | **Config SoT** — merges defaults ← `kazma.yaml` ← ConfigStore (incl. `v2.*`) | `read_memory_cfg()`, `DEFAULT_MEMORY_CFG`, `memory_enabled()`, `memory_per_turn_enabled()`, `memory_v2_enabled()`, `set_memory_flag()` |
@@ -61,7 +66,7 @@ kazma-data/                             # Runtime data (gitignored)
 
 | Path | Role |
 |------|------|
-| `kazma-data/memory_state.db` | Cognitive state: beliefs, episodes, entities, entity_merges, procedural_dags, beliefs_archive |
+| `kazma-data/memory_state.db` | Cognitive state: beliefs, episodes, entities, entity_merges, entity_merges_archive, procedural_dags, beliefs_archive |
 | `kazma-data/memory_ops.db` | Operational: memory_task_queue (durable), memory_audit_log (immutable) |
 
 ### V2 key entry points
@@ -70,6 +75,9 @@ kazma-data/                             # Runtime data (gitignored)
 |------|---------------|
 | V2 recall (read path) | `memory/recall.py:recall()` |
 | Belief mutation (write path) | `memory/belief_mutation.py:mutate_belief()` |
+| Ego-graph leaf anchor | `memory/ego_anchor.py:anchor_orphan_leaf_concepts()` |
+| FTS drift heal | `memory/fts_health.py:fts_drift_check()` |
+| Mirror reconcile CLI | `scripts/reconcile_memory_mirror.py` |
 | Post-turn extraction | `memory/consolidator.py:schedule_post_turn_memory()` |
 | V2 enabled check | `memory/config.py:memory_v2_enabled()` |
 | Backfill migration | `memory/backfill_v2.py:run_backfill()` |

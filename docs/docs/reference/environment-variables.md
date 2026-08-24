@@ -114,7 +114,8 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 | `KAZMA_EMBED_BASE_URL` | unset | Remote only | `/embeddings` endpoint base URL for `openai-compatible`. |
 | `KAZMA_EMBED_API_KEY` | unset | Remote only | API key for the remote `/embeddings` endpoint. |
 | `KAZMA_DEMO_MODE` | unset | **No** | Demo fixtures — never enable in real prod. |
-| `KAZMA_MEMORY_ENFORCE_TENANT` | unset | Multi-tenant only | When `1`/`true`, the `/memory` operator endpoints scope reads/writes by the request-scoped tenant (set by the auth middleware from verified JWT/opaque-session claims). Unset = single-tenant `default` (identical to pre-Phase-4 behavior). Flip on only when you add a second tenant. |
+| `KAZMA_MEMORY_ENFORCE_TENANT` | unset | Multi-tenant only | When `1`/`true`, the `/memory` operator endpoints scope reads, id-keyed mutations, undo tokens, and graph-clear by the request-scoped tenant (set by the auth middleware from verified JWT/opaque-session claims). Unset = single-tenant `default`. Flip on only when you add a second tenant. |
+| `KAZMA_MEMORY_STATE_ROLE` | unset (`mirror`) | Multi-replica only | `primary` makes the Postgres state backend the recall SoT (fail-closed if down — no silent SQLite). Do **not** enable until `python scripts/reconcile_memory_mirror.py --dry-run` reports no dead-in-mirror / only-in-mirror rows. |
 
 ---
 

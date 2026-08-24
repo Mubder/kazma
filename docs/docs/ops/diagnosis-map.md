@@ -259,26 +259,52 @@ Precedence (high → low):
 
 ## 9. Memory / RAG
 
+V2 is the **only** chat memory stack (`recall()` in `memory/recall.py`). The V1
+4-layer RRF adapter (`UnifiedMemoryAdapter` / `VectorMemory`) was **removed**.
+
 | Layer | Role |
 |-------|------|
-| Default | `UnifiedMemoryAdapter` RRF (L1 Chroma + L2 SQLite graph + L3 FTS5 + L4 sqlite-vec) |
-| Fallback | `VectorMemory` singleton if adapter path fails |
+| Recall | FTS5 + sqlite-vec dense + belief/episode PPR + session bias |
+| Write | `mutate_belief` (single INSERT choke) + optional PG mirror + Neo4j dual-write |
 | Per-turn | Supervisor inject when `memory.per_turn_retrieval` (ConfigStore ← yaml) |
-| Post-turn | `schedule_post_turn_memory` → auto_store + consolidator |
-| Compaction | `compaction.py` / ContextAuthority → same adapter |
-| Health | `build_memory_health()` on Dashboard |
-| Graph UI (V2) | `GET /api/memory/v2/graph` · admin page `/memory` · `memory_console.js` |
+| Post-turn | `schedule_post_turn_memory` → extractor → `mutate_belief` + ego-anchor |
+| Health | `build_memory_health()` / `build_v2_health()` on Dashboard |
+| Graph UI | `GET /api/memory/v2/graph` · `/memory` · `memory_console.js` |
 | Entity rename / hub | `POST …/entities/{id}/rename` · `memory/self_hub.py` (User shells → hub `user`) |
 | Belief edit | `PATCH /api/memory/v2/beliefs/{id}` |
 
-**Orphaned duplicate node on canvas (same label twice):** belief object text
-equaled an entity id → dual entity + virtual node. Fixed by server dedupe;
-unique ids required. **Hub still says “You” after renaming person User:**
-rename must sync `entities.user` (self_hub); list `graph_id` focuses hub.
+**Disconnected concept on the canvas (subject with a literal object, no hub edge):**
+payload-object beliefs used to mint a leaf with no `user → related_to → subject`.
+Write-time ego-anchor + 6h backfill attach them (`memory/ego_anchor.py`). Restart
+after the 2026-08-24 audit if you still see orphans from before the backfill.
 
-If chat recall is empty: install `.[rag]`, check Dashboard health (embedder / L1 / L3), confirm `memory.enabled`.  
-If chat ≠ tool results: both should hit the adapter; look for fail-closed empty store or DEMO mode.  
-Backlog: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
+**Orphaned duplicate node (same label twice):** belief object text equaled an
+entity id → dual entity + virtual node. Fixed by server dedupe; unique ids required.
+
+**Hub still says “You” after renaming person User:** rename must sync
+`entities.user` (self_hub); list `graph_id` focuses hub.
+
+**Truncation banner shows missing edges:** painter keeps the top-N nodes then
+drops links whose endpoints were sliced. The banner reports **connections hidden
+by slicing** — filter or raise `limit`, this is not lost data.
+
+**Chat recall misses a fact that exists in SQLite:** FTS `content=` tables do
+not expose partial desync via `COUNT(*)` on the virtual table. The 6h sweep
+compares `*_docsize` vs base and rebuilds (`fts_health.fts_drift_check`).
+
+**Postgres mirror would resurrect dead facts on `role=primary`:** invalidate /
+supersede / archive / graph-clear now tombstone the mirror. Nightly export logs
+drift; reconcile with `python scripts/reconcile_memory_mirror.py`.
+
+**“Could not deliver your message after several retries” (Web, V2 cursor):**
+not a memory bug — a function-local `get_active_turn` import shadowed the
+module binding on `?last_seq=` sockets (`ws_chat.py`, audit M-01). Fixed; restart.
+
+If chat recall is empty: install `.[rag]`, check Dashboard health (embedder / V2),
+confirm `memory.enabled`.  
+If chat ≠ tool results: both should hit `recall()`; look for fail-closed empty
+store or DEMO mode.  
+Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md).
 
 ---
 
