@@ -90,7 +90,7 @@ Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connec
 - Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  
-- **Ego-graph anchor** — a payload-object belief (`sakhrfit → availability_status → fully_clean`) also writes `user → related_to → sakhrfit` so the subject is not a disconnected canvas node. Idempotent backfill runs on the 6h sweep.  
+- **Ego-graph anchor** — every non-hub subject that does not already reach `user` gets `user → related_to → <subject>` at write time (payload leaves **and** floating entity clusters). Payload objects (`fully_clean`, paths) are **not** minted as concept entities (that mint used to skip the hub edge). Idempotent backfill on the 6h sweep.  
 - Invalidate / supersede / graph-clear **tombstone the Postgres mirror** and best-effort **delete Neo4j edges** (mass clear uses `clear_tenant_edges`).  
 
 ### Schedulers (`worker_bootstrap`)

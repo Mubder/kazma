@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Unreleased — Ego-graph: stop minting payload objects; hub-reach not any-entity (2026-08-24)
+
+Write-time orphan factory was still live after M-03: `resolve_entity` minted
+every belief *object* as a concept (so `fully_clean` became a node), then
+`is_payload_object` saw that row and skipped the hub edge. Entity–entity
+pairs (`identity_digital_rdap → ai_domain_availability`) also skipped
+anchoring because "linked to *some* entity" was treated as enough.
+
+- Objects mint as entities only for relational predicates (`has_part`,
+  `is_authoritative_for`, …) or when the object already exists.
+- `anchor_leaf_subject` no-ops only when the subject already reaches
+  **`user`**. Extractor always tries it after mutate.
+- 6h backfill selects any subject without a hub edge (not just payload-only).
+- Do **not** change `entity_degree_sql` — it is already bidirectional.
+
 ## Unreleased — Memory audit P3 hygiene (M-10, M-11, M-14..M-17) (2026-08-24)
 
 Closes the leftover batch from `docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md`

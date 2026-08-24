@@ -16,7 +16,8 @@ from kazma_core.memory.ego_anchor import (
     anchor_leaf_subject,
     anchor_orphan_leaf_concepts,
     is_payload_object,
-    subject_has_entity_link,
+    object_should_mint_entity,
+    subject_reaches_hub,
 )
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
@@ -74,19 +75,19 @@ class TestPayloadClassification:
 
 
 class TestSubjectLinkage:
-    def test_payload_only_subject_has_no_entity_link(self, mem_conn):
+    def test_payload_only_subject_does_not_reach_hub(self, mem_conn):
         _add_belief(mem_conn, "sakhrfit", "availability_status", "fully_clean")
-        assert subject_has_entity_link(mem_conn, "sakhrfit") is False
+        assert subject_reaches_hub(mem_conn, "sakhrfit") is False
 
-    def test_entity_object_counts_as_link(self, mem_conn):
+    def test_entity_object_is_not_a_hub_link(self, mem_conn):
+        """A→B between two concepts is still a floating cluster."""
         _add_entity(mem_conn, "hadidfit_ai")
         _add_belief(mem_conn, "sakhrfit", "competes_with", "hadidfit_ai")
-        assert subject_has_entity_link(mem_conn, "sakhrfit") is True
+        assert subject_reaches_hub(mem_conn, "sakhrfit") is False
 
-    def test_inbound_from_entity_counts_as_link(self, mem_conn):
-        _add_entity(mem_conn, "research_session_1")
-        _add_belief(mem_conn, "research_session_1", "covered_brand", "sakhrfit")
-        assert subject_has_entity_link(mem_conn, "sakhrfit") is True
+    def test_direct_user_edge_reaches_hub(self, mem_conn):
+        _add_belief(mem_conn, "user", "related_to", "sakhrfit")
+        assert subject_reaches_hub(mem_conn, "sakhrfit") is True
 
 
 class TestAnchor:
@@ -114,11 +115,18 @@ class TestAnchor:
         assert n == 1
         assert first.get("action") != "error"
 
-    def test_linked_subject_never_anchored(self, mem_conn):
+    def test_floating_cluster_still_gets_hub_anchor(self, mem_conn):
+        """identity_rdap → ai_domain is linked-to-an-entity but not to user."""
         _add_entity(mem_conn, "hadidfit_ai")
         _add_belief(mem_conn, "thravor", "competes_with", "hadidfit_ai")
         result = anchor_leaf_subject(mem_conn, "thravor")
-        assert result == {"action": "noop", "reason": "already_linked"}
+        assert result.get("action") in ("append", "supersede", "transition")
+        row = mem_conn.execute(
+            "SELECT subject, object FROM beliefs "
+            "WHERE predicate='related_to' AND object='thravor'"
+        ).fetchone()
+        assert row is not None
+        assert row["subject"] == "user"
 
 
 class TestBackfillSweep:
@@ -129,12 +137,14 @@ class TestBackfillSweep:
         _add_belief(mem_conn, "hubby", "mentions", "connected_brand")  # linked
 
         stats = anchor_orphan_leaf_concepts(mem_conn)
-        assert stats["anchored"] == 2  # leaf_a + leaf_b; hubby untouched
+        # All three subjects lack a hub edge — including hubby (entity-linked
+        # but floating).
+        assert stats["anchored"] == 3
         n = mem_conn.execute(
             "SELECT COUNT(*) FROM beliefs WHERE predicate='related_to' "
             "AND object IN ('leaf_a','leaf_b','hubby')"
         ).fetchone()[0]
-        assert n == 2
+        assert n == 3
 
         # Second sweep: nothing new.
         again = anchor_orphan_leaf_concepts(mem_conn)
@@ -188,6 +198,82 @@ class TestMaterializedDegree:
         # And no second handwritten degree body remains in memory_api source.
         src = inspect.getsource(memory_api)
         assert "EXISTS (SELECT 1 FROM entities oe" not in src
+
+
+class TestObjectMinting:
+    def test_payload_status_is_not_minted(self, mem_conn):
+        assert object_should_mint_entity(
+            mem_conn, "fully_clean", predicate="availability_status"
+        ) is False
+
+    def test_relational_object_is_minted(self, mem_conn):
+        assert object_should_mint_entity(
+            mem_conn, "ai_domain_availability", predicate="has_part"
+        ) is True
+
+    def test_existing_entity_is_always_resolved(self, mem_conn):
+        _add_entity(mem_conn, "hadidfit_ai")
+        assert object_should_mint_entity(
+            mem_conn, "hadidfit_ai", predicate="availability_status"
+        ) is True
+
+
+class TestExtractorWriteTime:
+    def test_leaf_payload_does_not_mint_object_and_anchors_hub(self, mem_conn):
+        from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
+
+        stats = _apply_beliefs_to_v2(
+            [
+                {
+                    "subject": "sakhrfit",
+                    "predicate": "availability_status",
+                    "object": "fully_clean",
+                    "predicate_type": "set",
+                    "confidence": 0.9,
+                    "importance": 2,
+                }
+            ],
+            mem_conn,
+            None,
+            extraction_method="llm_inferred",
+        )
+        assert stats["applied"] >= 1
+        assert mem_conn.execute(
+            "SELECT 1 FROM entities WHERE id='fully_clean'"
+        ).fetchone() is None
+        hub = mem_conn.execute(
+            "SELECT 1 FROM beliefs WHERE subject='user' AND predicate='related_to' "
+            "AND object='sakhrfit' AND invalidated_at IS NULL"
+        ).fetchone()
+        assert hub is not None
+
+    def test_relational_pair_mints_object_and_hub_anchors_subject(self, mem_conn):
+        from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
+
+        stats = _apply_beliefs_to_v2(
+            [
+                {
+                    "subject": "identity_digital_rdap",
+                    "predicate": "is_authoritative_for",
+                    "object": "ai_domain_availability",
+                    "predicate_type": "set",
+                    "confidence": 0.9,
+                    "importance": 2,
+                }
+            ],
+            mem_conn,
+            None,
+            extraction_method="llm_inferred",
+        )
+        assert stats["applied"] >= 1
+        assert mem_conn.execute(
+            "SELECT 1 FROM entities WHERE id='ai_domain_availability'"
+        ).fetchone() is not None
+        hub = mem_conn.execute(
+            "SELECT 1 FROM beliefs WHERE subject='user' AND predicate='related_to' "
+            "AND object='identity_digital_rdap' AND invalidated_at IS NULL"
+        ).fetchone()
+        assert hub is not None
 
 
 class TestDegreeSemantics:

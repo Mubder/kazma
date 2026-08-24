@@ -462,8 +462,12 @@ def _apply_beliefs_to_v2(
                 stats["skipped_low_confidence"] = stats.get("skipped_low_confidence", 0) + 1
                 continue
         # Resolve entities through the 3-tier cascade (Tier-2 vector active).
+        # Payload objects (status strings, paths) must NOT be minted as
+        # concept entities — that mint made write-time payload detection
+        # fail and left leaf subjects unanchored (audit follow-up).
         try:
-            obj_vec = _embed(clean["object"]) if clean["object"] and clean["object"] != "user" else None
+            from kazma_core.memory.ego_anchor import object_should_mint_entity
+
             if clean["subject"] and clean["subject"] != "user":
                 sub_vec = _embed(clean["subject"].replace("_", " "))
                 resolve_entity(
@@ -471,7 +475,14 @@ def _apply_beliefs_to_v2(
                     entity_type="concept", tenant_id=tenant_id, cfg=cfg,
                     candidate_vectors=candidate_vecs, query_vector=sub_vec,
                 )
-            if clean["object"] and clean["object"] != "user":
+            if (
+                clean["object"]
+                and clean["object"] != "user"
+                and object_should_mint_entity(
+                    primary_conn, clean["object"], predicate=clean["predicate"]
+                )
+            ):
+                obj_vec = _embed(clean["object"])
                 resolve_entity(
                     primary_conn, clean["object"],
                     entity_type="concept", tenant_id=tenant_id, cfg=cfg,
@@ -497,18 +508,13 @@ def _apply_beliefs_to_v2(
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
-        # Ego-graph anchoring: a belief whose object is a literal payload
-        # (not an entity) leaves the freshly minted subject concept
-        # disconnected from the hub — the "orphan node" class. Anchor it to
-        # the ego node once, as system_tool context (never a user fact).
+        # Ego-graph: every non-hub subject must reach ``user``. Payload-only
+        # leaves AND floating entity clusters both qualify; the helper no-ops
+        # when a hub edge already exists.
         try:
-            from kazma_core.memory.ego_anchor import anchor_leaf_subject, is_payload_object
+            from kazma_core.memory.ego_anchor import anchor_leaf_subject
 
-            if (
-                clean["subject"]
-                and clean["subject"] != "user"
-                and is_payload_object(primary_conn, clean["object"])
-            ):
+            if clean["subject"] and clean["subject"] != "user":
                 anchor = anchor_leaf_subject(
                     primary_conn,
                     clean["subject"],
