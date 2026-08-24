@@ -223,6 +223,17 @@ PG mirror:       kazma_beliefs 434 → only-in-mirror 21 · state mismatches 35
 
 ## Fix plan (priority order)
 
+> **Progress note (2026-08-24, same day):** PR-1..PR-4 shipped — M-04
+> (tombstone propagation + `scripts/reconcile_memory_mirror.py` +
+> nightly drift assertion; prod mirror reconciled to `MIRROR == SOT`,
+> 433/433), M-05 reads/destructive-mutations/undo-binding (PR-2a/2b),
+> M-06/M-07/M-09 (PR-3), M-08 banner delta, M-12 predicate normalize,
+> M-13 self-merge guard (PR-4/5a). Still open as P3 hygiene: FTS
+> periodic COUNT reconciliation (M-10), INSERT-OR-IGNORE rowcount guard
+> (M-11), entity-delete merges-ledger preservation (M-14), graph-clear
+> Neo4j edge cleanup (M-15 partial — tombstones done), export coverage
+> extension (M-16), console double-fetch / dead routes cleanup (M-17).
+
 1. **M-04** mirror tombstones + one-time reconciliation + nightly drift
    assertion. (Blocks safe multi-replica cutover.)
 2. **M-05** tenant-hardening pass over the enumerated routes (mechanical:
