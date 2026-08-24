@@ -31,6 +31,7 @@ __all__ = [
     "slug",
     "list_pending_merges",
     "decide_entity_merge",
+    "preserve_merge_ledger",
 ]
 
 _HIGH_STAKES_TYPES = frozenset({"person", "project"})
@@ -570,3 +571,40 @@ def decide_entity_merge(
     except Exception as exc:
         logger.debug("[entity_resolve] decide failed", exc_info=True)
         return {"ok": False, "error": str(exc)[:200]}
+
+
+def preserve_merge_ledger(
+    conn: sqlite3.Connection,
+    entity_id: str,
+    *,
+    reason: str = "entity_delete",
+) -> int:
+    """Copy ``entity_merges`` rows for ``entity_id`` into the archive table.
+
+    Entity DELETE has to drop live ledger rows (SQLite FK to ``entities.id``).
+    Archiving first keeps the quarantine audit trail (M-14). Returns the
+    number of rows copied. Caller still DELETEs from ``entity_merges``.
+    """
+    eid = (entity_id or "").strip()
+    if not eid:
+        return 0
+    now = time.time()
+    try:
+        cur = conn.execute(
+            """
+            INSERT OR IGNORE INTO entity_merges_archive
+              (id, tenant_id, source_entity_id, target_entity_id, status,
+               merge_tier, confidence, requested_at, resolved_at, metadata_json,
+               archived_at, archive_reason)
+            SELECT id, tenant_id, source_entity_id, target_entity_id, status,
+                   merge_tier, confidence, requested_at, resolved_at, metadata_json,
+                   ?, ?
+            FROM entity_merges
+            WHERE source_entity_id=? OR target_entity_id=?
+            """,
+            (now, reason, eid, eid),
+        )
+        return int(cur.rowcount or 0)
+    except Exception:
+        logger.debug("[entity_resolve] merge-ledger archive failed", exc_info=True)
+        return 0

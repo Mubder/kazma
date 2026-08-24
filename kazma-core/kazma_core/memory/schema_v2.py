@@ -8,6 +8,7 @@ writes never cause WAL contention with live chat reads:
   - ``episodes``         — 4-tier episodic memory (working/episodic/recall/archived)
   - ``entities``         — canonical entity registry + aliases
   - ``entity_merges``    — quarantine merge ledger (3-tier resolution audit trail)
+  - ``entity_merges_archive`` — preserved merge rows after entity DELETE (M-14)
   - ``procedural_dags``  — parametric action skills (Laplace-smoothed confidence)
   - ``beliefs_archive``  — cold storage for superseded beliefs (>180 days)
 
@@ -178,6 +179,26 @@ CREATE TABLE IF NOT EXISTS entity_merges (
 
 CREATE INDEX IF NOT EXISTS idx_entity_merges_status
   ON entity_merges(tenant_id, status);
+
+-- Quarantine ledger archive — entity DELETE used to DROP merge rows (FK),
+-- wiping the identity-decision trail. Rows land here first (M-14).
+CREATE TABLE IF NOT EXISTS entity_merges_archive (
+  id                TEXT PRIMARY KEY,
+  tenant_id         TEXT NOT NULL DEFAULT 'default',
+  source_entity_id  TEXT NOT NULL,
+  target_entity_id  TEXT NOT NULL,
+  status            TEXT NOT NULL,
+  merge_tier        TEXT NOT NULL,
+  confidence        REAL NOT NULL,
+  requested_at      REAL NOT NULL,
+  resolved_at       REAL,
+  metadata_json     TEXT DEFAULT '{}',
+  archived_at       REAL NOT NULL,
+  archive_reason    TEXT NOT NULL DEFAULT 'entity_delete'
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_merges_archive_tenant
+  ON entity_merges_archive(tenant_id, archived_at);
 
 -- Graph groupings — operator-defined VIEW-ONLY associations for the /memory
 -- canvas. Lets the operator cluster nodes (e.g. "kazma_app belongs under
@@ -487,26 +508,33 @@ def _ensure_fts5(conn: Any) -> None:
             logger.debug("[schema_v2] FTS trigger create failed", exc_info=True)
 
     # Rebuild when index is empty but base table has rows (upgrade path).
+    # Empty-index upgrade path only. Partial desync (some rows indexed,
+    # others not) is M-10 — `fts_health.fts_drift_check` on the 6h sweep.
+    # COUNT(*) on the FTS virtual table follows the content table, so we
+    # read ``*_docsize`` (the indexed-rowid shadow) when present.
+    def _fts_n(name: str) -> int:
+        try:
+            return int(conn.execute(f"SELECT COUNT(*) FROM {name}_docsize").fetchone()[0])
+        except Exception:
+            return int(conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0])
+
     try:
         ep_n = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
-        fts_n = conn.execute("SELECT COUNT(*) FROM episodes_fts").fetchone()[0]
-        if ep_n and not fts_n:
+        if ep_n and not _fts_n("episodes_fts"):
             conn.execute("INSERT INTO episodes_fts(episodes_fts) VALUES('rebuild')")
             logger.info("[schema_v2] rebuilt episodes_fts (%d rows)", ep_n)
     except Exception:
         logger.debug("[schema_v2] episodes_fts rebuild skipped", exc_info=True)
     try:
         bel_n = conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0]
-        fts_n = conn.execute("SELECT COUNT(*) FROM beliefs_fts").fetchone()[0]
-        if bel_n and not fts_n:
+        if bel_n and not _fts_n("beliefs_fts"):
             conn.execute("INSERT INTO beliefs_fts(beliefs_fts) VALUES('rebuild')")
             logger.info("[schema_v2] rebuilt beliefs_fts (%d rows)", bel_n)
     except Exception:
         logger.debug("[schema_v2] beliefs_fts rebuild skipped", exc_info=True)
     try:
         ent_n = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
-        fts_n = conn.execute("SELECT COUNT(*) FROM entities_fts").fetchone()[0]
-        if ent_n and not fts_n:
+        if ent_n and not _fts_n("entities_fts"):
             conn.execute("INSERT INTO entities_fts(entities_fts) VALUES('rebuild')")
             logger.info("[schema_v2] rebuilt entities_fts (%d rows)", ent_n)
     except Exception:

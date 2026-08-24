@@ -85,6 +85,17 @@ async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
                     )
             except Exception:
                 logger.debug("[memory_worker] ego anchor sweep skipped", exc_info=True)
+            # M-10: partial FTS desync (some rows indexed, others not) never
+            # trips the schema-ensure rebuild (empty-only). Cheap COUNT +
+            # rebuild closes silent recall MISSES.
+            try:
+                from kazma_core.memory.fts_health import fts_drift_check
+
+                fts_stats = fts_drift_check(conn, auto_heal=True)
+                if fts_stats.get("healed") or fts_stats.get("drift"):
+                    logger.info("[memory_worker] FTS drift check: %s", fts_stats)
+            except Exception:
+                logger.debug("[memory_worker] FTS drift check skipped", exc_info=True)
             # False when the sweep flagged sweep_error — run_macro_sleep
             # never raises, so returning True unconditionally marked broken
             # sweeps as done and the queue never retried them.

@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Unreleased — Memory audit P3 hygiene (M-10, M-11, M-14..M-17) (2026-08-24)
+
+Closes the leftover batch from `docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md`
+after M-01..M-09 / M-12 / M-13 shipped earlier the same day.
+
+- **M-10** — `fts_health.fts_drift_check` compares base vs FTS row counts
+  (beliefs/episodes/entities) and rebuilds on drift. Wired into the 6h
+  `macro_sleep` sweep (schema-ensure only rebuilt when FTS was *empty*).
+- **M-11** — `_insert_belief` checks INSERT OR IGNORE rowcount, retries
+  once with a fresh uuid, and rolls back a functional supersede close if
+  the successor still cannot land (no closed fact without a successor).
+- **M-14** — entity DELETE copies `entity_merges` rows into
+  `entity_merges_archive` before dropping them (FK still requires the
+  live-row delete). Same archive on the agent `memory_delete_entity` /
+  purge-empty tools.
+- **M-15** — `/api/memory/graph/clear` writes a `graph_clear` audit row
+  and calls `clear_tenant_edges` (Neo4j tenant-scoped relationship
+  delete). Also fixed the invalidate UPDATE binding: three placeholders
+  were passed `(now, tenant)` so `invalidated_at` was the tenant string.
+- **M-16** — nightly export now dumps episodes, `beliefs_archive`,
+  `entity_merges` (+ archive), and the ops `memory_audit_log` as JSONL
+  (per-tenant filenames; native `.db` backups remain SoT).
+- **M-17** — `/memory` graph poll uses the groups already embedded in
+  `GET /api/memory/v2/graph` (no 30s extra GET). Inspector **Ungroup**
+  consumes `DELETE /api/memory/v2/graph/groups/{id}`.
+
 ## Unreleased — Turn Delivery V2: cursor-resume delivery replaces the recovery patch pile (2026-08-23)
 
 The "reply invisible until refresh after tab switch" bug class is fixed

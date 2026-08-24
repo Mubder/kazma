@@ -251,6 +251,7 @@ def register_direct_routes(self: Any) -> None:
         pass ``tenant=<id>`` to clear a specific one. There is deliberately
         NO all-tenants mode.
         """
+        import json
         import sqlite3
         import time
 
@@ -275,7 +276,7 @@ def register_direct_routes(self: Any) -> None:
             conn.execute(
                 "UPDATE beliefs SET valid_until=?, invalidated_at=? "
                 "WHERE tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL",
-                (now, tid),
+                (now, now, tid),
             )
             # Phase 3: a clear invalidates every active belief in the cleared
             # tenant, so those entities' belief_count/graph_degree drop to 0.
@@ -290,7 +291,9 @@ def register_direct_routes(self: Any) -> None:
                 pass
             conn.commit()
             after = conn.execute(
-                "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                "SELECT COUNT(*) FROM beliefs WHERE tenant_id=? "
+                "AND valid_until IS NULL AND invalidated_at IS NULL",
+                (tid,),
             ).fetchone()[0]
             # Mirror tombstones (M-04): every cleared row must die in shared
             # state too. Best-effort; the nightly drift check reports gaps.
@@ -301,8 +304,53 @@ def register_direct_routes(self: Any) -> None:
                     unmirror_belief_to_state(str(bid))
             except Exception:
                 logger.debug("[memory] graph-clear mirror tombstone skipped", exc_info=True)
+            # M-15: Neo4j dual-write edges must die with the SQLite invalidate.
+            neo_cleared = 0
+            try:
+                from kazma_core.memory.graph_backend import clear_tenant_edges
+
+                neo = clear_tenant_edges(tenant_id=tid)
+                neo_cleared = int(neo.get("cleared") or 0)
+            except Exception:
+                logger.debug("[memory] graph-clear neo4j cleanup skipped", exc_info=True)
+            # Audit row (ops DB) so a mass invalidate is as traceable as
+            # single-belief hygiene.
+            try:
+                import uuid as _uuid
+
+                from kazma_core.memory.schema_v2 import ensure_ops_schema
+                from kazma_core.paths import memory_ops_db
+
+                ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+                try:
+                    ensure_ops_schema(ops)
+                    ops.execute(
+                        """INSERT INTO memory_audit_log
+                           (id, tenant_id, timestamp, event_type, target_table, target_id,
+                            actor, reason, state_before_json, state_after_json)
+                           VALUES (?, ?, ?, 'graph_clear', 'beliefs', ?, 'operator', ?, ?, ?)""",
+                        (
+                            "a_" + _uuid.uuid4().hex[:20],
+                            tid,
+                            now,
+                            tid,
+                            f"invalidated {before} active beliefs",
+                            json.dumps({"count": before, "ids_sample": cleared_ids[:50]}),
+                            json.dumps({"active_remaining": after, "neo4j_cleared": neo_cleared}),
+                        ),
+                    )
+                    ops.commit()
+                finally:
+                    ops.close()
+            except Exception:
+                logger.debug("[memory] graph-clear audit skipped", exc_info=True)
             conn.close()
-            return {"ok": True, "invalidated_beliefs": before, "active_remaining": after}
+            return {
+                "ok": True,
+                "invalidated_beliefs": before,
+                "active_remaining": after,
+                "neo4j_cleared": neo_cleared,
+            }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

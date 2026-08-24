@@ -56,6 +56,7 @@ def test_primary_schema_creates_all_tables(isolated_data):
         "episodes",
         "entities",
         "entity_merges",
+        "entity_merges_archive",
         "procedural_dags",
         "beliefs_archive",
     }

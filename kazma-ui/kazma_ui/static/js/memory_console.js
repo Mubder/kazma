@@ -2878,6 +2878,31 @@
     }
   }
 
+  async function _v2gUngroup(memberId) {
+    memberId = String(memberId || '').trim();
+    if (!memberId) return false;
+    var row = (_v2gGroups || []).find(function(g) { return g.member === memberId; });
+    if (!row || !row.id) {
+      _v2gToast('Not grouped', 'info');
+      return false;
+    }
+    try {
+      var data = await _v2gApiJson('/api/memory/v2/graph/groups/' + encodeURIComponent(row.id), {
+        method: 'DELETE',
+      });
+      if (!data.ok) {
+        _v2gToast(data.error || 'Ungroup failed', 'error');
+        return false;
+      }
+      _v2gToast('Ungrouped ' + _v2gShortId(memberId) + ' · view-only, memory untouched', 'success');
+      await _v2gReloadGraph();
+      return true;
+    } catch (err) {
+      _v2gToast('Ungroup failed', 'error');
+      return false;
+    }
+  }
+
   async function _v2gDeleteEntity(id) {
     if (!id || id === 'user') {
       _v2gToast('Cannot delete protected hub', 'error');
@@ -3324,6 +3349,10 @@
       extra += _actBtn('merge-from', 'btn-secondary', 'Merge→', 'Start merge from this node (will be retired)');
       if (!_v2gIsUser(p)) {
         extra += _actBtn('group-under', 'btn-secondary', 'Group under→', 'Group this node under a parent');
+        var grouped = (_v2gGroups || []).some(function(g) { return g.member === p.id; });
+        if (grouped) {
+          extra += _actBtn('ungroup', 'btn-secondary', 'Ungroup', 'Remove view-only grouping for this node');
+        }
       }
       if (nodeEdges.length >= 1 && !_v2gIsUser(p)) {
         extra += _actBtn('cut-all', 'btn-secondary', 'Cut all (' + nodeEdges.length + ')', 'Cut every edge on this node');
@@ -3463,6 +3492,8 @@
         } else if (act === 'group-under') {
           // F: view-only grouping — pick the parent next.
           _v2gGroupUnder(p.id);
+        } else if (act === 'ungroup') {
+          _v2gUngroup(p.id);
         } else if (act === 'cut-hub') {
           _v2gCutHubLinks(p.id).then(function() {
             // Re-inspect node after graph reload if still present
@@ -3664,22 +3695,15 @@
 
   async function _v2gLoad() {
     try {
-      // P2: fetch view-only groupings in parallel (non-blocking — if it fails,
-      // the tree layout's group-spring just has no data, no harm).
-      try {
-        var gresp = await fetch('/api/memory/v2/graph/groups', { credentials: 'same-origin' });
-        var gdata = await gresp.json();
-        _v2gGroups = (gdata && gdata.ok && Array.isArray(gdata.groups)) ? gdata.groups : [];
-      } catch (ge) { _v2gGroups = []; }
       var resp = await fetch(_v2gBuildUrl());
       var data = await resp.json();
       var stats = data.stats || {};
       _v2gLastStats = stats;
       _v2gRawNodes = data.nodes || [];
       _v2gRawLinks = data.links || [];
-      // The payload may also carry groups inline (faster, one fetch); prefer
-      // the dedicated endpoint's result when both exist.
-      if (!_v2gGroups.length && Array.isArray(data.groups)) _v2gGroups = data.groups;
+      // M-17: graph payload already embeds groups — do not double-fetch
+      // GET /graph/groups on the 30s poll (POST create/DELETE ungroup remain).
+      _v2gGroups = Array.isArray(data.groups) ? data.groups : [];
       // Normalize link fields (neo4j probe may use predicate instead of label)
       _v2gRawLinks.forEach(function(l) {
         if (!l.label && l.predicate) l.label = l.predicate;
@@ -4391,6 +4415,7 @@
   window._v2gRepointBelief = _v2gRepointBelief;
   // F: view-only grouping (cluster + tier without mutating memory).
   window._v2gGroupUnder = _v2gGroupUnder;
+  window._v2gUngroup = _v2gUngroup;
   window._v2gToggleMajor = _v2gToggleMajor;
 
   try {

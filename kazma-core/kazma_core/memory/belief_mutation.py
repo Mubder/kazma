@@ -481,23 +481,35 @@ def _insert_belief(
         emb_version = ""
     from kazma_core.memory.hygiene import beliefs_write
 
-    beliefs_write(
-        conn,
-        """INSERT OR IGNORE INTO beliefs
+    params = (
+        bid, tenant_id, sub, pred, ptype, obj,
+        float(confidence), int(importance), float(trust),
+        now, now, supersedes_id, source_session, source_turn,
+        extraction_method, json.dumps(meta, ensure_ascii=False),
+        emb_version,
+    )
+    insert_sql = """INSERT OR IGNORE INTO beliefs
            (id, tenant_id, subject, predicate, predicate_type, object,
             confidence, structural_importance, source_trust_weight,
             valid_from, ingested_at, supersedes_id, source_session,
             source_turn, extraction_method, metadata_json,
             embedding_model_version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            bid, tenant_id, sub, pred, ptype, obj,
-            float(confidence), int(importance), float(trust),
-            now, now, supersedes_id, source_session, source_turn,
-            extraction_method, json.dumps(meta, ensure_ascii=False),
-            emb_version,
-        ),
-    )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    cur = beliefs_write(conn, insert_sql, params)
+    # M-11: INSERT OR IGNORE can drop a PK collision silently — the functional
+    # path already closed the prior fact, so a no-row insert would leave no
+    # successor. Retry once with a fresh uuid; if still ignored, raise so
+    # the caller rolls back the supersede close.
+    if not _insert_landed(conn, cur, bid):
+        import uuid as _uuid
+
+        bid = "b_" + _uuid.uuid4().hex[:26]
+        params = (bid,) + params[1:]
+        cur = beliefs_write(conn, insert_sql, params)
+        if not _insert_landed(conn, cur, bid):
+            raise sqlite3.IntegrityError(
+                f"belief insert ignored (id collision, retry failed) subject={sub} pred={pred}"
+            )
     # Compute + store the belief embedding so dense (semantic) recall can
     # match beliefs whose literal tokens don't overlap the query (e.g. the
     # query "where do I live" should semantically match "user lives_in Paris"
@@ -516,10 +528,32 @@ def _insert_belief(
     except Exception:
         logger.debug("[belief_mutation] belief embedding failed for %s", bid, exc_info=True)
     return {
+        "id": bid,
         "subject": sub, "predicate": pred, "predicate_type": ptype,
         "object": obj, "confidence": confidence, "importance": importance,
         "memory_class": mem_class,
     }
+
+
+def _insert_landed(
+    conn: sqlite3.Connection,
+    cur: sqlite3.Cursor,
+    bid: str,
+) -> bool:
+    """True when INSERT OR IGNORE actually wrote ``bid``.
+
+    ``Cursor.rowcount`` is 0 on a ignored PK collision; some drivers report
+    -1, in which case we fall back to a SELECT.
+    """
+    n = int(cur.rowcount if cur.rowcount is not None else -1)
+    if n > 0:
+        return True
+    if n == 0:
+        return False
+    try:
+        return conn.execute("SELECT 1 FROM beliefs WHERE id=? LIMIT 1", (bid,)).fetchone() is not None
+    except Exception:
+        return False
 
 
 def _insert_kw(kw: dict[str, Any]) -> dict[str, Any]:
@@ -651,10 +685,28 @@ def _mutate_functional(
         except Exception:
             logger.debug("[belief_mutate] mirror tombstone skipped", exc_info=True)
     bid = _belief_id(tenant_id, sub, pred, now)
-    state_after = _insert_belief(
-        conn, bid, tenant_id, sub, pred, "functional", obj,
-        supersedes_id=superseded_id, now=now, **_insert_kw(kw),
-    )
+    try:
+        state_after = _insert_belief(
+            conn, bid, tenant_id, sub, pred, "functional", obj,
+            supersedes_id=superseded_id, now=now, **_insert_kw(kw),
+        )
+    except sqlite3.IntegrityError:
+        logger.warning(
+            "[belief_mutate] insert ignored after supersede close — rolling back "
+            "subject=%s pred=%s", sub, pred,
+        )
+        if _began:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return {
+            "action": "noop",
+            "belief_id": superseded_id or "",
+            "superseded_id": None,
+            "blocked": "insert_ignored",
+        }
+    bid = str(state_after.get("id") or bid)
     conn.commit()
     _write_audit(
         ops_conn, tenant_id=tenant_id, event_type=audit_event_type,
@@ -735,9 +787,16 @@ def _mutate_set(
     # Give set beliefs a unique id suffix to avoid PK collision when the
     # same (s,p) gets multiple objects at the same timestamp.
     bid = bid + "_" + hashlib.sha256(obj.encode()).hexdigest()[:6]
-    state_after = _insert_belief(
-        conn, bid, tenant_id, sub, pred, "set", obj, now=now, **_insert_kw(kw),
-    )
+    try:
+        state_after = _insert_belief(
+            conn, bid, tenant_id, sub, pred, "set", obj, now=now, **_insert_kw(kw),
+        )
+    except sqlite3.IntegrityError:
+        logger.warning(
+            "[belief_mutate] set-append insert ignored subject=%s pred=%s", sub, pred
+        )
+        return {"action": "noop", "belief_id": "", "superseded_id": None, "blocked": "insert_ignored"}
+    bid = str(state_after.get("id") or bid)
     conn.commit()
     _write_audit(
         ops_conn, tenant_id=tenant_id, event_type="append",

@@ -18,6 +18,7 @@ __all__ = [
     "graph_capability",
     "upsert_belief_edge",
     "delete_belief_edge",
+    "clear_tenant_edges",
     "test_neo4j_connection",
     "sync_beliefs_to_neo4j",
     "reset_graph_backend_cache",
@@ -267,6 +268,27 @@ class Neo4jGraphBackend:
         except Exception:
             logger.debug("[graph_backend] neo4j delete failed", exc_info=True)
             return False
+
+    def clear_tenant_edges(self, *, tenant_id: str = "default") -> int:
+        """Delete every dual-written relationship for a tenant (graph-clear)."""
+        drv = self._get_driver()
+        if drv is None:
+            return 0
+        try:
+            with drv.session(database=self._database) as session:
+                result = session.run(
+                    """
+                    MATCH (a:Entity {tenant_id: $tid})-[r]->(:Entity {tenant_id: $tid})
+                    DELETE r
+                    """,
+                    tid=tenant_id,
+                )
+                summary = result.consume()
+                counters = getattr(summary, "counters", None)
+                return int(getattr(counters, "relationships_deleted", 0) or 0)
+        except Exception:
+            logger.debug("[graph_backend] neo4j tenant-clear failed", exc_info=True)
+            return 0
 
     def neighbors(
         self,
@@ -678,3 +700,24 @@ def delete_belief_edge(
         )
     except Exception:
         return False
+
+
+def clear_tenant_edges(*, tenant_id: str = "default") -> dict[str, Any]:
+    """Best-effort mass Neo4j edge cleanup after a tenant graph-clear (M-15).
+
+    SQLite-only installs no-op (beliefs SoT already invalidated). Never raises.
+    """
+    try:
+        be = get_graph_backend()
+        if getattr(be, "name", "") != "neo4j":
+            return {"ok": True, "cleared": 0, "skipped": "not_neo4j"}
+        if not getattr(be, "available", False):
+            return {"ok": True, "cleared": 0, "skipped": "neo4j_offline"}
+        clearer = getattr(be, "clear_tenant_edges", None)
+        if not callable(clearer):
+            return {"ok": True, "cleared": 0, "skipped": "no_clear_method"}
+        n = int(clearer(tenant_id=tenant_id) or 0)
+        return {"ok": True, "cleared": n}
+    except Exception as exc:
+        logger.debug("[graph_backend] clear_tenant_edges failed", exc_info=True)
+        return {"ok": False, "cleared": 0, "error": str(exc)[:300]}

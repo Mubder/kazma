@@ -1552,6 +1552,12 @@ class LocalToolRegistry:
                     return json.dumps(
                         {"ok": False, "error": "not_found", "entity_id": eid}
                     )
+                try:
+                    from kazma_core.memory.entity_resolution import preserve_merge_ledger
+
+                    preserve_merge_ledger(conn, eid, reason="entity_delete")
+                except Exception:
+                    logger.debug("[memory_delete_entity] merge-ledger archive skipped", exc_info=True)
                 conn.execute(
                     "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
                     (eid, eid),
@@ -1628,6 +1634,15 @@ class LocalToolRegistry:
                 deleted: list[str] = []
                 for r in empty:
                     eid = r["id"]
+                    try:
+                        from kazma_core.memory.entity_resolution import preserve_merge_ledger
+
+                        preserve_merge_ledger(conn, eid, reason="purge_empty")
+                    except Exception:
+                        logger.debug(
+                            "[memory_purge_empty] merge-ledger archive skipped",
+                            exc_info=True,
+                        )
                     conn.execute(
                         "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
                         (eid, eid),

@@ -809,6 +809,12 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             "is_high_stakes": int(row["is_high_stakes"] or 0),
             "is_protected": int(row["is_protected"] or 0),
         }
+        try:
+            from kazma_core.memory.entity_resolution import preserve_merge_ledger
+
+            preserve_merge_ledger(conn, eid, reason="entity_delete")
+        except Exception:
+            logger.debug("[memory_api] merge-ledger archive skipped", exc_info=True)
         conn.execute(
             "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
             (eid, eid),

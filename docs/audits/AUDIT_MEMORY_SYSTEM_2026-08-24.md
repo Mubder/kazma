@@ -4,7 +4,7 @@
 **Scope:** V2 memory stack end-to-end — write paths (extractor / mutation / hygiene / resolution / anchoring), recall + prompt-fencing, state mirror (PG), materialized counts, HTTP surfaces + tenant isolation, schedulers/queue, export/backup, legacy residuals.
 **Method:** static verification (every finding cited `file:line`) + live-data forensics against the production stores (`C:\Users\balfa\kazma\kazma-data`, SQLite SoT + PG mirror via `KAZMA_DATABASE_URL`) + three parallel recon passes.
 **Trigger:** operator-reported orphan nodes in the memory graph; investigation surfaced one live outage and multiple structural findings.
-**Status of fixes:** 3 findings already fixed during the audit window (M-01..M-03, commit hashes inline); remainder prioritized in §Fix Plan.
+**Status of fixes:** M-01..M-17 all closed (M-01..M-09 / M-12 / M-13 in the first same-day PRs; M-10, M-11, M-14..M-17 in the P3 hygiene sweep).
 
 ---
 
@@ -15,13 +15,20 @@
 | M-01 | **P0** | ✅ FIXED `942c026d` | Function-local import shadowing killed every send_prompt on cursor connections |
 | M-02 | **P1** | ✅ FIXED `a6d1066d` | Duplicated count/degree SQL drifted between maintainer and read path |
 | M-03 | **P1** | ✅ FIXED `98fcaa65` | Ego-graph leaf orphans: payload-object beliefs never anchored to hub |
-| M-04 | **P1** | 🔴 OPEN | PG mirror never receives invalidation/supersede/archive → 35 dead facts live in mirror, 21 ghosts |
-| M-05 | **P1** | 🔴 OPEN | Tenant isolation is advisory on ~13 memory routes incl. cross-tenant reads + all-tenant wipe |
-| M-06 | P2 | 🔴 OPEN | Entity-merge rewrites beliefs without recomputing materialized counts (3 surfaces) |
-| M-07 | P2 | 🔴 OPEN | UI manual merge rewires beliefs with NO tenant scoping |
-| M-08 | P2 | 🔴 OPEN | Painter top-N slicing amputates edges silently; link-drop delta never surfaced |
-| M-09 | P2/P3 | 🔴 OPEN | Reconsolidation dedupe invalidates without recompute or audit row |
-| M-10..17 | P3 | 🔴 OPEN | Hygiene batch (see below) |
+| M-04 | **P1** | ✅ FIXED `91891140` | PG mirror never receives invalidation/supersede/archive → 35 dead facts live in mirror, 21 ghosts |
+| M-05 | **P1** | ✅ FIXED `2e0c70f4`/`002da979` | Tenant isolation is advisory on ~13 memory routes incl. cross-tenant reads + all-tenant wipe |
+| M-06 | P2 | ✅ FIXED `38349759` | Entity-merge rewrites beliefs without recomputing materialized counts (3 surfaces) |
+| M-07 | P2 | ✅ FIXED `38349759` | UI manual merge rewires beliefs with NO tenant scoping |
+| M-08 | P2 | ✅ FIXED `a3acaff3` | Painter top-N slicing amputates edges silently; link-drop delta never surfaced |
+| M-09 | P2/P3 | ✅ FIXED `38349759` | Reconsolidation dedupe invalidates without recompute or audit row |
+| M-10 | P3 | ✅ FIXED | FTS periodic COUNT reconciliation |
+| M-11 | P3 | ✅ FIXED | INSERT OR IGNORE rowcount guard |
+| M-12 | P3 | ✅ FIXED `a3acaff3` | ego_anchor predicate normalize |
+| M-13 | P3 | ✅ FIXED `a3acaff3` | decide_entity_merge self/cycle guards |
+| M-14 | P3 | ✅ FIXED | entity-delete merges-ledger preservation |
+| M-15 | P3 | ✅ FIXED | graph-clear audit + Neo4j edge cleanup |
+| M-16 | P3 | ✅ FIXED | Export coverage (episodes/archive/merges/audit) |
+| M-17 | P3 | ✅ FIXED | Console groups double-fetch + Ungroup consumer |
 
 Verified-healthy list at bottom (what was audited and holds).
 
@@ -170,16 +177,16 @@ endpoints only); batch-undo/edit-undo raw UPDATEs without recompute/audit
 
 ## P3 batch (M-10..M-17)
 
-| ID | Finding | Cite |
-|----|---------|------|
-| M-10 | FTS partial desync never reconciled: auto-rebuild only when FTS==0 vs base; otherwise reactive to corruption only. Cheap periodic COUNT check would close silent recall-MISSES. | schema_v2.py:498-505, hygiene.py:115-148 |
-| M-11 | `_insert_belief` INSERT OR IGNORE + caller reports supersede: PK collision would close old fact with no successor. Add defensive rowcount check. | belief_mutation.py:487, :646-651 |
-| M-12 | ego_anchor passes `predicate_type="semantic"` — invalid value silently falls back to `'set'` (append-only, safe-by-luck). Normalize + assert anchor stays non-functional (system_tool must not gain supersede rights). | belief_mutation.py:179-188, ego_anchor.py:118-126 |
-| M-13 | decide_entity_merge lacks explicit self/cycle guards (API/tool layers have them); A→B→A cycles resolve to retired entry id. | entity_resolution.py:66-69, :520+ |
-| M-14 | DELETE entity purges its entity_merges ledger rows — loses quarantine audit trail. | memory_api.py:764-767 |
-| M-15 | graph-clear lacks audit row and Neo4j edge cleanup for the mass invalidation. | routes_direct.py:213-256 |
-| M-16 | Export skips episodes/ops-db/beliefs_archive/entity_merges and non-default tenants; acceptable only because native `.db` backups compensate. | export.py:21-79, worker_bootstrap.py:463 |
-| M-17 | Console double-fetches groups every 30s (payload already embeds them); 4 server group/export routes have no UI consumer. | memory_console.js:3661-3673, memory_api.py:1653-1785 |
+| ID | Finding | Status |
+|----|---------|--------|
+| M-10 | FTS partial desync never reconciled: auto-rebuild only when FTS==0 vs base; otherwise reactive to corruption only. Cheap periodic COUNT check would close silent recall-MISSES. | ✅ `fts_health.fts_drift_check` on the 6h macro-sleep sweep |
+| M-11 | `_insert_belief` INSERT OR IGNORE + caller reports supersede: PK collision would close old fact with no successor. Add defensive rowcount check. | ✅ rowcount + uuid retry; IntegrityError rolls back the supersede close |
+| M-12 | ego_anchor passes `predicate_type="semantic"` — invalid value silently falls back to `'set'` (append-only, safe-by-luck). Normalize + assert anchor stays non-functional (system_tool must not gain supersede rights). | ✅ shipped `a3acaff3` |
+| M-13 | decide_entity_merge lacks explicit self/cycle guards (API/tool layers have them); A→B→A cycles resolve to retired entry id. | ✅ shipped `a3acaff3` |
+| M-14 | DELETE entity purges its entity_merges ledger rows — loses quarantine audit trail. | ✅ copy into `entity_merges_archive` then drop live rows (FK) |
+| M-15 | graph-clear lacks audit row and Neo4j edge cleanup for the mass invalidation. | ✅ audit row + `clear_tenant_edges`; also fixed `(now, now, tenant)` bind (was 2 params for 3 placeholders) |
+| M-16 | Export skips episodes/ops-db/beliefs_archive/entity_merges and non-default tenants; acceptable only because native `.db` backups compensate. | ✅ extra JSONL dumps; per-tenant fan-out already in the 24h scheduler |
+| M-17 | Console double-fetches groups every 30s (payload already embeds them); 4 server group/export routes have no UI consumer. | ✅ poll uses payload `groups`; Ungroup wires DELETE `/graph/groups/{id}` |
 
 ---
 
@@ -228,11 +235,12 @@ PG mirror:       kazma_beliefs 434 → only-in-mirror 21 · state mismatches 35
 > nightly drift assertion; prod mirror reconciled to `MIRROR == SOT`,
 > 433/433), M-05 reads/destructive-mutations/undo-binding (PR-2a/2b),
 > M-06/M-07/M-09 (PR-3), M-08 banner delta, M-12 predicate normalize,
-> M-13 self-merge guard (PR-4/5a). Still open as P3 hygiene: FTS
-> periodic COUNT reconciliation (M-10), INSERT-OR-IGNORE rowcount guard
-> (M-11), entity-delete merges-ledger preservation (M-14), graph-clear
-> Neo4j edge cleanup (M-15 partial — tombstones done), export coverage
-> extension (M-16), console double-fetch / dead routes cleanup (M-17).
+> M-13 self-merge guard (PR-4/5a). **P3 hygiene (M-10, M-11, M-14..M-17)
+> shipped in the follow-up sweep the same day** — FTS COUNT
+> reconciliation on macro-sleep, INSERT-OR-IGNORE rowcount+rollback,
+> `entity_merges_archive`, graph-clear Neo4j + audit (and the 2-vs-3
+> bind bug on the invalidate UPDATE), export JSONL coverage, console
+> groups single-fetch + Ungroup. Audit findings are closed.
 
 1. **M-04** mirror tombstones + one-time reconciliation + nightly drift
    assertion. (Blocks safe multi-replica cutover.)
