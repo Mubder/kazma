@@ -512,25 +512,6 @@ html[data-theme="light"] { color-scheme: only light; }
   }
 }
 
-/* B1 — sidebar More disclosure */
-.nav-more {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 0;
-  border: 0;
-}
-.nav-more-summary {
-  cursor: pointer;
-  list-style: none;
-}
-.nav-more-summary::-webkit-details-marker { display: none; }
-.nav-more[open] > .nav-more-summary {
-  color: var(--text-primary);
-}
-.sidebar.collapsed .nav-more { display: contents; }
-.sidebar.collapsed .nav-more > summary { display: none; }
-
 /* B2 — quieter sessions chrome */
 .sessions-heading {
   font-size: 0.85rem;

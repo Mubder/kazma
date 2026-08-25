@@ -61,9 +61,11 @@ def test_immersive_chat_class_on_layout() -> None:
     assert ".app-layout.is-chat .chat-container" in v5
 
 
-def test_sidebar_more_keeps_hrefs_and_section_keys() -> None:
+def test_sidebar_is_grouped_not_more_disclosure() -> None:
+    """Operator rejected always-on More that hid Work to 3 items."""
     html = _SIDEBAR.read_text(encoding="utf-8")
-    assert "nav-more" in html
+    assert "nav-more" not in html
+    assert "<details" not in html
     assert "nav.primary" in html
     assert "nav.activity" in html
     assert "nav.configuration" in html
@@ -88,12 +90,6 @@ def test_sidebar_more_keeps_hrefs_and_section_keys() -> None:
         "/mcp",
     ):
         assert joined.count(f'href="{href}"') == 1, href
-    # Chat / Workspace / IDE stay outside More
-    more_at = html.find('class="nav-more"')
-    assert html.find('href="/chat"') < more_at
-    assert html.find('href="/workspace"') < more_at
-    assert html.find('href="/ide"') < more_at
-    assert html.find('href="/dashboard"') > more_at
 
 
 def test_reduced_motion_and_tap_target() -> None:

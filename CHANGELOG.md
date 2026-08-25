@@ -10,9 +10,11 @@ Chat is the product; dashboard is an inspector. Templates + `kazma.v5.css`.
   Mission / YOLO / Unrestricted / cost behind **⋯** (`<details>`).
 - **A4/A5** Assistant document measure; quieter user bubble; compact
   `.agent-progress` when done; `prefers-reduced-motion` kills pulses.
-- **B1–B3** Sidebar: Chat / Workspace / IDE visible; inspectors under More
-  (auto-opens on those pages). Sessions list quieter. Mobile sessions
-  hamburger stays on the composer row.
+- **B1–B3** Sessions list quieter. Mobile sessions hamburger stays on the
+  composer row. Sidebar **More** was reverted: it never collapsed
+  (`display:flex` on `<details>`), so every inspector stayed visible under
+  a useless label while Work shrank to Chat / Workspace / IDE. Nav is the
+  grouped Work / Activity / Settings list again.
 
 Plan: `docs/plans/CHAT_AS_PRODUCT_UI_GOAL.md`. Tests:
 `tests/test_chat_as_product.py`. Restart to see it.

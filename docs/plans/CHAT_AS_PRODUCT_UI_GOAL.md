@@ -103,7 +103,7 @@ Tokens live in `kazma.css` §1 / §23. Shell polish is `kazma.v5.css` (rollback 
 
 | ID | Slice | What changes | How |
 |----|-------|----------------|-----|
-| **B1** | **Sidebar: Chat first** | Visible: **Chat**, **Workspace**, **IDE**. One **More** (or `<details>`) for Memory, Dashboard, Agents, Research, Documents, Swarm, Knowledge, Time Travel, Settings, Skills, MCP. Active page in More still highlights and **auto-opens** More. Keyboard `⌘1`/`⌘2` stay. Footer model + avatar stay. | `sidebar.html` regroup. CSS for nested nav. Do not remove hrefs. |
+| **B1** | **Sidebar: Chat first** | **Reverted 2026-08-26.** `<details class="nav-more">` + `display:flex` never hid children, so every inspector stayed visible under a "More" label while Work shrank to Chat / Workspace / IDE. Nav is the grouped Work / Activity / Settings list again. | Keep all hrefs; no More disclosure. |
 | **B2** | **Sessions list** | Session rows: title + relative time, less kbd chrome, New session as a text+icon control not a fat primary brick. | CSS + small `chat.html` class cleanup. No session API change. |
 | **B3** | **Mobile** | Chat: bottom-nav Chat stays. Sessions via existing `.chat-sessions-btn` (must remain visible — v5 once hid the wrong hamburger). Composer ⋯ usable at 44px tap (`--tap`). | Viewport 375 and 768. `x-cloak` on new drawers. |
 
@@ -204,6 +204,6 @@ A single screenshot is **not** verification.
 
 ## Operator proceed
 
-Executed after operator **proceed** (2026-08-26). Templates + `kazma.v5.css` only; `chat.js` untouched.
+Executed after operator **proceed** (2026-08-26). Templates + `kazma.v5.css` only; `chat.js` untouched. **B1 More nav reverted** the same day: disclosure never collapsed.
 
 Restart the server to see the shell. Rollback of look: drop the `kazma.v5.css` link (layout still works).
