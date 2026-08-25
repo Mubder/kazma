@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased — Chat as the product (Web UI overhaul, 2026-08-26)
+
+Chat is the product; dashboard is an inspector. Templates + `kazma.v5.css`.
+`chat.js` untouched. Load-bearing IDs stay unique (hidden OK).
+
+- **A1** Immersive chat: hide `page-header` when `active_page==chat`.
+- **A2/A3** Composer dock: model select + WS pulse on a quiet row; Long /
+  Mission / YOLO / Unrestricted / cost behind **⋯** (`<details>`).
+- **A4/A5** Assistant document measure; quieter user bubble; compact
+  `.agent-progress` when done; `prefers-reduced-motion` kills pulses.
+- **B1–B3** Sidebar: Chat / Workspace / IDE visible; inspectors under More
+  (auto-opens on those pages). Sessions list quieter. Mobile sessions
+  hamburger stays on the composer row.
+
+Plan: `docs/plans/CHAT_AS_PRODUCT_UI_GOAL.md`. Tests:
+`tests/test_chat_as_product.py`. Restart to see it.
+
 ## Unreleased — Plan-fence delivery (plan drawn, no reply) (2026-08-26)
 
 Industry fix for the live hang: model streams a ```plan checklist, then

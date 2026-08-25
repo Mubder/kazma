@@ -65,6 +65,18 @@
             <span class="nav-label">{{ t('nav.ide') }}</span>
         </a>
 
+        {# Inspectors live under More. Open when the active page is inside. #}
+        {% set more_pages = ['memory','dashboard','agents','research','documents','swarm','knowledge','replay','settings','skills','mcp'] %}
+        <details class="nav-more"{% if active_page in more_pages %} open{% endif %}>
+        <summary class="nav-link nav-more-summary">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.more') }}</span>
+        </summary>
+
         <a href="/memory" class="nav-link {{ 'active' if active_page == 'memory' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -184,6 +196,7 @@
             </span>
             <span class="nav-label">{{ t('nav.mcp') }}</span>
         </a>
+        </details>
     </nav>
 
     {# Footer #}

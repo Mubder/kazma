@@ -369,3 +369,211 @@ html[data-theme="light"] { color-scheme: only light; }
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Chat as the product — immersive shell + composer dock + message craft
+   Rollback of this slice: remove .app-layout.is-chat rules. Templates
+   still work unstyled (G8).
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* A1 — hide page header on chat; transcript fills the column */
+.app-layout.is-chat .page-header { display: none; }
+.app-layout.is-chat .page-body {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.app-layout.is-chat .chat-container {
+  height: 100%;
+  max-height: 100%;
+  margin: 0;
+  flex: 1;
+  min-height: 0;
+}
+@media (max-width: 768px) {
+  .app-layout.is-chat .chat-container {
+    height: calc(var(--app-ivh, 100dvh) - var(--bottom-nav-height)) !important;
+    max-height: calc(var(--app-ivh, 100dvh) - var(--bottom-nav-height)) !important;
+  }
+}
+
+/* A2/A3 — composer dock: model + ⋯ on a quiet row; capacity behind details */
+.composer-dock { display: flex; flex-direction: column; gap: 8px; }
+.composer-dock-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.app-layout.is-chat .chat-model-bar {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.composer-model-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.composer-model-select {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  max-width: 280px;
+  min-width: 0;
+}
+.composer-ws-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+.composer-node-badge {
+  font-size: 0.72rem;
+  background: var(--bg-elevated);
+  color: var(--accent);
+}
+.composer-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+}
+.composer-more-toggle {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  user-select: none;
+}
+.composer-more-toggle::-webkit-details-marker { display: none; }
+.composer-more-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
+.composer-more[open] .composer-more-toggle {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+}
+.composer-more .capacity-bar {
+  flex: 1 0 100%;
+  margin-top: 6px;
+}
+.composer-more:not([open]) .capacity-bar { display: none; }
+.composer-icon-btn { padding: 4px; }
+.composer-file-input { display: none; }
+.composer-voice-btn { display: none; }
+.composer-mic-recording { display: none; }
+.composer-chrome { margin-top: 0; }
+
+/* A4 — message craft: document measure; quieter user bubble */
+.app-layout.is-chat .message { max-width: 72ch; }
+.app-layout.is-chat .message-assistant .message-text {
+  background: transparent;
+  border: 0;
+  padding-inline: 0;
+  max-width: 72ch;
+}
+.app-layout.is-chat .message-user .message-text {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+  color: var(--text-primary);
+  font-weight: 450;
+  border: 1px solid var(--border-subtle);
+}
+.app-layout.is-chat .message-user .message-avatar {
+  background: color-mix(in srgb, var(--accent) 35%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+/* A5 — compact workbench when done */
+.agent-progress.is-done {
+  box-shadow: none;
+  opacity: 0.92;
+}
+.agent-progress.is-done .agent-progress-header { padding: 8px 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-progress-pulse,
+  .pulse-dot,
+  .thinking-indicator .dot {
+    animation: none !important;
+    box-shadow: none !important;
+  }
+}
+
+/* B1 — sidebar More disclosure */
+.nav-more {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  border: 0;
+}
+.nav-more-summary {
+  cursor: pointer;
+  list-style: none;
+}
+.nav-more-summary::-webkit-details-marker { display: none; }
+.nav-more[open] > .nav-more-summary {
+  color: var(--text-primary);
+}
+.sidebar.collapsed .nav-more { display: contents; }
+.sidebar.collapsed .nav-more > summary { display: none; }
+
+/* B2 — quieter sessions chrome */
+.sessions-heading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0;
+}
+.sessions-heading .session-count {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.sessions-new-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.sessions-new-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.session-search-input {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+.sessions-archive-btn {
+  width: 100%;
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+}
+.sessions-kbd-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.sessions-kbd-hint kbd {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+}
+
+/* HITL card spacing (was inline) */
+.hitl-approval-card { margin: 12px 16px; }
+.hitl-approval-actions { flex-wrap: wrap; gap: 6px; }
+.hitl-scope-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; }

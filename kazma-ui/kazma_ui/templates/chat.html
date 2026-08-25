@@ -20,57 +20,28 @@
   <!-- ── Session Sidebar (slide-in drawer on mobile) ── -->
   <aside class="chat-sidebar" :class="{ 'mobile-open': mobileChatSidebarOpen }">
     <div class="chat-sidebar-header">
-      <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">{{ t('chat.sessions') }}
-        <span id="session-count" class="session-count" style="font-weight:500;color:var(--text-muted);"></span>
+      <h3 class="sessions-heading">{{ t('chat.sessions') }}
+        <span id="session-count" class="session-count"></span>
       </h3>
-      <button id="new-session-btn" class="btn btn-sm btn-primary" title="{{ t('chat.new_session') }} (Ctrl+N)">{{ t('chat.new_session') }}</button>
+      <button id="new-session-btn" class="btn btn-sm sessions-new-btn" title="{{ t('chat.new_session') }} (Ctrl+N)">{{ t('chat.new_session') }}</button>
     </div>
     <div class="session-search-wrapper">
-      <input type="text" id="session-search" class="form-input" placeholder="{{ t('chat.search_sessions') }}" style="font-size:0.8rem;padding:6px 10px;">
+      <input type="text" id="session-search" class="form-input session-search-input" placeholder="{{ t('chat.search_sessions') }}">
     </div>
     <div id="session-list" class="session-list">
       <div class="session-empty">{{ t('chat.loading_sessions') }}</div>
     </div>
     <div class="chat-sidebar-footer">
-      <button id="archive-toggle-btn" class="btn btn-xs btn-secondary" style="width:100%;margin-bottom:6px;font-size:0.72rem;" onclick="KazmaChat.toggleArchivedView()">{{ t('chat.archived') }}</button>
-      <span style="font-size:0.7rem;color:var(--text-muted);">
-        <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+K</kbd> {{ t('chat.search') }}
-        <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+N</kbd> {{ t('chat.new') }}
+      <button id="archive-toggle-btn" class="btn btn-xs btn-secondary sessions-archive-btn" onclick="KazmaChat.toggleArchivedView()">{{ t('chat.archived') }}</button>
+      <span class="sessions-kbd-hint">
+        <kbd>Ctrl+K</kbd> {{ t('chat.search') }}
+        <kbd>Ctrl+N</kbd> {{ t('chat.new') }}
       </span>
     </div>
   </aside>
 
   <!-- ── Chat Main ── -->
   <main class="chat-main">
-    <!-- Model selector bar & WebSocket connection status -->
-    <div class="chat-model-bar">
-      {# Mobile sessions-toggle button. Distinct class (.chat-sessions-btn), NOT
-         .hamburger-btn, so kazma.v5.css's mobile "retire the app-nav hamburger"
-         rule (.hamburger-btn { display:none !important }) can't hide it — that
-         rule previously made the session list unreachable on phones. #}
-      <button class="chat-sessions-btn" @click="toggleMobileChatSidebar()" aria-label="Sessions"
-              style="margin-inline-end: 4px;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-               stroke-linecap="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-      </button>
-      <label for="model-selector" style="font-size:0.75rem;color:var(--text-muted);margin-right:6px;">{{ t('chat.model') }}</label>
-      <select id="model-selector" class="form-select" style="font-size:0.8rem;padding:4px 8px;max-width:280px;">
-        <option value="">— loading models —</option>
-      </select>
-
-      <!-- Active Node / WS Telemetry Badge -->
-      <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" x-cloak>
-        <template x-if="$store.agent && $store.agent.activeNode">
-          <span class="badge badge-subtle" style="font-size:0.72rem;background:var(--bg-elevated);color:var(--accent);"
-                x-text="'Node: ' + $store.agent.activeNode"></span>
-        </template>
-        <span class="pulse-dot" :class="$store.agent && $store.agent.connectionStatus === 'connected' ? 'dot-online' : 'dot-offline'"
-              :title="'WS Status: ' + ($store.agent ? $store.agent.connectionStatus : 'disconnected')"></span>
-      </div>
-    </div>
-
     <!-- Chat Messages Transcript -->
     <div id="chat-messages" class="chat-messages">
       <div class="chat-welcome">
@@ -88,16 +59,16 @@
     </div>
 
     <!-- Reactive HITL Pending Approval Card -->
-    <div x-data x-cloak x-show="$store.agent && $store.agent.pendingApproval" class="hitl-approval-card" style="margin:12px 16px;">
+    <div x-data x-cloak x-show="$store.agent && $store.agent.pendingApproval" class="hitl-approval-card">
       <div class="hitl-approval-header"><span class="ki" data-icon="alert" aria-hidden="true"></span> Approval Required</div>
       <div class="hitl-approval-body">
         <p><strong>Tool:</strong> <code x-text="$store.agent?.pendingApproval?.tool"></code></p>
         <p x-show="$store.agent?.pendingApproval?.message" class="hitl-message" x-text="$store.agent?.pendingApproval?.message"></p>
-        <p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">
+        <p class="hitl-scope-hint">
           Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. <strong>YOLO</strong> skips all danger tools for this session.
         </p>
       </div>
-      <div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">
+      <div class="hitl-approval-actions">
         <button class="btn btn-sm btn-success" @click="$store.agent.submitApproval(true, 'once')">Approve once</button>
         <button class="btn btn-sm btn-primary" @click="$store.agent.submitApproval(true, 'tool')">Allow tool (session)</button>
         <button class="btn btn-sm btn-warning" @click="$store.agent.submitApproval(true, 'yolo')">YOLO session</button>
@@ -119,47 +90,33 @@
     <div class="chat-input-area" id="chat-input-area">
       {# Pending attachments shown above the composer (not as placeholder text) #}
       <div id="chat-attachments" class="chat-attachments" hidden aria-live="polite"></div>
-      <div class="input-wrapper" id="chat-drop-zone">
-        <button id="attach-btn" class="btn-icon" title="{{ t('chat.attach_file') }}" style="padding:4px;" type="button">
-          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-          </svg>
-        </button>
-        {# No accept= filter — any file type (docx, pdf, images, …) is selectable without switching to "All Files" #}
-        <input type="file" id="file-input" style="display:none;" multiple>
-        <button id="voice-btn" class="btn-icon" title="Record voice (Hold to record)" style="padding:4px;display:none;" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="KazmaVoice.startRecording()" ontouchend="KazmaVoice.stopRecording()">
-          <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-            <path d="M19 10v2a7 7 0 01-14 0v-2"/>
-            <line x1="12" y1="19" x2="12" y2="23"/>
-            <line x1="8" y1="23" x2="16" y2="23"/>
-          </svg>
-          <svg id="mic-recording-icon" width="20" height="20" fill="none" stroke="#ef4444" viewBox="0 0 24 24" stroke-width="2" style="display:none;">
-            <circle cx="12" cy="12" r="10"/>
-          </svg>
-        </button>
-        <button id="voice-live-btn" class="btn-icon" title="Live duplex voice (interrupt anytime)" style="padding:4px;display:none;" type="button" onclick="KazmaVoice.toggleLiveVoice()">
-          <svg id="live-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-          </svg>
-        </button>
-        <textarea
-          id="chat-input"
-          class="chat-input"
-          rows="1"
-          dir="auto"
-          placeholder="{{ t('chat.placeholder') }}"
-          spellcheck="true"
-        ></textarea>
-        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter / Ctrl+Enter)" type="button">
-          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-        </button>
-      </div>
-      <div class="chat-drop-hint" id="chat-drop-hint" hidden aria-hidden="true">{{ t('chat.drop_files') }}</div>
-      <div class="composer-chrome">
-        <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="Turn budget and HITL">
+      <div class="composer-dock">
+      <div class="composer-dock-top">
+        {# chat-model-bar class kept (unique #model-selector lives here, not cloned).
+           Mobile sessions toggle stays on this row — not .hamburger-btn. #}
+        <div class="chat-model-bar">
+          <button class="chat-sessions-btn" @click="toggleMobileChatSidebar()" aria-label="{{ t('chat.sessions') }}" type="button">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+          </button>
+          <label for="model-selector" class="composer-model-label">{{ t('chat.model') }}</label>
+          <select id="model-selector" class="form-select composer-model-select">
+            <option value="">— loading models —</option>
+          </select>
+          <div class="composer-ws-status" x-cloak>
+            <template x-if="$store.agent && $store.agent.activeNode">
+              <span class="badge badge-subtle composer-node-badge"
+                    x-text="'Node: ' + $store.agent.activeNode"></span>
+            </template>
+            <span class="pulse-dot" :class="$store.agent && $store.agent.connectionStatus === 'connected' ? 'dot-online' : 'dot-offline'"
+                  :title="'WS Status: ' + ($store.agent ? $store.agent.connectionStatus : 'disconnected')"></span>
+          </div>
+        </div>
+        <details class="composer-more">
+          <summary class="composer-more-toggle" aria-label="Turn budget and HITL">⋯</summary>
+          <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="Turn budget and HITL">
           <span id="capacity-status" class="capacity-status" title="Current turn budget">Chat · 100</span>
           <div class="capacity-group" role="group" aria-label="Budget">
             <button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="Research budget, HITL stays on">Long</button>
@@ -175,13 +132,56 @@
             <span id="session-tokens" class="capacity-stat token-badge">0 tok</span>
             <span id="context-size" class="capacity-stat context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
           </div>
-        </div>
+          </div>
+        </details>
+      </div>
+      <div class="input-wrapper" id="chat-drop-zone">
+        <button id="attach-btn" class="btn-icon composer-icon-btn" title="{{ t('chat.attach_file') }}" aria-label="{{ t('chat.attach_file') }}" type="button">
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+          </svg>
+        </button>
+        {# No accept= filter — any file type (docx, pdf, images, …) is selectable without switching to "All Files" #}
+        <input type="file" id="file-input" class="composer-file-input" multiple>
+        <button id="voice-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="Record voice (Hold to record)" aria-label="Record voice" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="KazmaVoice.startRecording()" ontouchend="KazmaVoice.stopRecording()">
+          <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+            <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+          <svg id="mic-recording-icon" width="20" height="20" fill="none" stroke="#ef4444" viewBox="0 0 24 24" stroke-width="2" class="composer-mic-recording">
+            <circle cx="12" cy="12" r="10"/>
+          </svg>
+        </button>
+        <button id="voice-live-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="Live duplex voice (interrupt anytime)" aria-label="Live duplex voice" type="button" onclick="KazmaVoice.toggleLiveVoice()">
+          <svg id="live-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+          </svg>
+        </button>
+        <textarea
+          id="chat-input"
+          class="chat-input"
+          rows="1"
+          dir="auto"
+          placeholder="{{ t('chat.placeholder') }}"
+          spellcheck="true"
+        ></textarea>
+        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter / Ctrl+Enter)" aria-label="{{ t('chat.send') }}" type="button">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+      <div class="chat-drop-hint" id="chat-drop-hint" hidden aria-hidden="true">{{ t('chat.drop_files') }}</div>
+      <div class="composer-chrome">
         <div class="input-footer">
           <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}" hidden>0</span>
           <span class="chat-input-footer-hint">
             <kbd>Enter</kbd> {{ t('chat.send_shortcut') }}
           </span>
         </div>
+      </div>
       </div>
     </div>
   </main>
