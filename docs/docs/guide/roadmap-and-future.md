@@ -2,9 +2,9 @@
 id: roadmap-and-future
 title: Roadmap & Future
 sidebar_label: Roadmap & Future
-description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.9+)
+description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.10+)
 ---
-> An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Anchored to the v0.9+ codebase (post production-readiness).
+> An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Anchored to the v0.10+ codebase.
 
 ---
 
@@ -122,8 +122,8 @@ Items are marked:
 | Local servers (Ollama/LM Studio) | ✅ | Dummy-key handling. |
 | MCP (stdio + SSE + Streamable HTTP) | ✅ | `mcp/manager.py` — Streamable HTTP (MCP 2025-03-26 spec) with `Mcp-Session-Id` resumption. Resources/prompts/sampling/roots client surfaces (2026-08-25); sampling is HITL fail-closed. Not an MCP *server*. |
 | Skill Hub (registry, signing, certification) | ✅ | `hub/`. |
-| Langfuse tracing | 🟡 | Dependency present; `logging.langfuse.enabled` flag; integration not active. |
-| OpenTelemetry | 🟡 | `[tracing]` extra has exporters; Kazma's own tracing is in-house spans, not OTel. |
+| Langfuse tracing | ✅ | `KazmaTracer`; `logging.langfuse.enabled: auto` when keys exist. `KAZMA_LANGFUSE=0`. |
+| OpenTelemetry | 🔴 | Purged. Langfuse + console only. Do not re-add unless OTLP to Jaeger is a real requirement (D5). |
 | Cloudflare Pages / edge | 🔴 | Not applicable — stateful Python service. |
 | PostgreSQL (main agent) | ✅ | First-class backend for ConfigStore/sessions/swarm/checkpoints; HITL pending-approvals enumerate Postgres threads (`hitl_approval.py`). |
 
@@ -162,4 +162,4 @@ Other open items:
 
 - This file intentionally resists over-promising. Where README/marketing copy describes a feature that is only partially wired, the status column says 🟡 with the specific reason.
 - The "Suggested next steps" are the audit's opinionated recommendations, prioritized by impact-to-effort ratio. They are not commitments.
-- This file reflects code reality as of v0.9+, not marketing futures.
+- This file reflects code reality as of v0.10+, not marketing futures.

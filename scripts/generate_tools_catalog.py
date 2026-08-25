@@ -50,8 +50,18 @@ def extract_builtin() -> list[dict]:
             for m in re.finditer(pat, text, re.S):
                 block, fn = m.group(1), m.group(2)
                 nm = re.search(r"name\s*=\s*['\"]([^'\"]+)['\"]", block)
-                desc = re.search(r"description\s*=\s*['\"]([^'\"]+)['\"]", block)
                 cat = re.search(r"category\s*=\s*['\"]([^'\"]+)['\"]", block)
+                desc_s = re.search(r"description\s*=\s*['\"]([^'\"]+)['\"]", block)
+                desc_p = re.search(
+                    r"description\s*=\s*\(\s*((?:['\"][^'\"]*['\"]\s*)+)\)",
+                    block,
+                )
+                if desc_s:
+                    description = desc_s.group(1)
+                elif desc_p:
+                    description = "".join(re.findall(r"['\"]([^'\"]*)['\"]", desc_p.group(1)))
+                else:
+                    description = ""
                 name = nm.group(1) if nm else fn
                 if name in seen:
                     continue
@@ -59,7 +69,7 @@ def extract_builtin() -> list[dict]:
                 tools.append(
                     {
                         "name": name,
-                        "description": (desc.group(1) if desc else "")[:200],
+                        "description": description[:200],
                         "category": cat.group(1) if cat else "",
                     }
                 )
@@ -127,9 +137,14 @@ def render(builtin: list[dict], modules: list[str], native: list[dict]) -> str:
         "| Layer | Module | Notes |",
         "|-------|--------|-------|",
         "| Built-in registry | `kazma_core/agent/tool_registry.py` | Supervisor SoT; HITL in `execute()` |",
+        "| Schema | `kazma_core/agent/tool_schema.py` | Closed JSON Schema (`additionalProperties: false`). `KAZMA_STRICT_TOOLS=1` adds OpenAI `function.strict`. |",
+        "| Structured JSON | `LLMProvider.chat(..., response_format=)` | Opt-in per call (`json_schema` / `json_object`). Not on every supervisor turn. |",
+        "| Hooks | `kazma_core/agent/tool_hooks.py` | PreToolUse (deny/rewrite) + PostToolUse (observe). Not HITL. `KAZMA_TOOL_HOOKS=0`. |",
         "| Unified executor | MCP + local | MCP non-allowlist tools force danger under production |",
         "| IDE path | `IdeService._call_tool` | Same registry — no bypass |",
         "| Native skills | `kazma-skills/kazma_skills/native/*` | Loaded via skill manifests |",
+        "| MCP spec (client) | `mcp_list_resources` / `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` | Resources fenced; prompts user-visible; sampling HITL. Not an MCP server. |",
+        "| Computer use | `computer_use` | Screenshot→action (Playwright). Native Anthropic CUA / Gemini function when that model is active; else vision-JSON. HITL **danger**. `KAZMA_COMPUTER_USE=0`. `KAZMA_CUA_PLANNER=0`. |",
         "",
         "## Built-in tools (LocalToolRegistry)",
         "",

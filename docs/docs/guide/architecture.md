@@ -218,7 +218,7 @@ Token streaming is `LLMProvider.chat_stream()` consumed by `invoke_llm_chat()` (
 | Per-call cost | `(prompt_tokens * in_cost/1M) + (completion_tokens * out_cost/1M)` | `llm_provider.py:411-422` |
 | Cost ceiling | `CostCircuitBreaker` (default $0.50, 5-min silence) — env `KAZMA_MAX_COST`, `KAZMA_SILENCE_WINDOW` | `cost_breaker.py` |
 | Retries | `tenacity`-based decorators, network/timeout only, **no 4xx** | `retry.py:39-109` |
-| Rate-limit (429) handling | **Not implemented** | — |
+| Rate-limit (429) handling | Retry-After + 3-attempt exponential backoff; exhausted 429 is `transient=True` + `kind=rate_limit_exhausted` (supervisor skips same-provider re-retry; failover still fires) | `llm_provider.py`, `anthropic_llm.py` |
 
 > The cost breaker is a standalone dataclass; the agent layer must drive it via `record_cost` / `should_halt`. It is not auto-wired into `chat()`.
 
@@ -323,7 +323,7 @@ See [Arabic & Cultural Features](arabic-cultural-features).
 | SSE telemetry | `/api/chat/stream` events; telemetry router | ✅ Active |
 | **Langfuse** | `KazmaTracer` with `backend="langfuse"`; `logging.langfuse.enabled: auto` turns on when keys exist | ✅ **Wired** (`KAZMA_LANGFUSE=0` kill-switch) |
 | **OpenTelemetry** | — | 🔴 **Removed** (dead code + dead deps purged; Langfuse + Console remain) |
-| **Prometheus** | — | 🔴 **Not implemented** |
+| **Prometheus** | `/metrics` + `/api/metrics` (`kazma_ui/metrics.py`) | ✅ Active |
 
 ### OpenTelemetry — removed (Option A)
 
