@@ -34,6 +34,14 @@ description: Kazma Troubleshooting — code-audited reference (unified docs, v0.
 
 **Fix:** `/plan go` (or **Proceed**) to execute the plan, or `/plan off` to leave without executing. `KAZMA_PLAN_MODE=0` disables the feature.
 
+### 1.1e Plan checklist drawn, then no reply (memory save / any tool turn)
+
+**Cause:** The supervisor asks the model to open tool turns with a ```plan fence for the workbench. Some providers (DeepSeek v4 flash) then (1) emit the fence and stop with no `tool_calls`, or (2) glue the real answer onto the closing ticks (` ```Saved.`). CommonMark never closes that fence, so the answer is hidden inside a code block. If the SSE client also drops after the plan tokens, the tab shows only the checklist.
+
+**What Kazma does (2026-08-26):** `plan_fence.py` is the SoT. Supervisor auto-continues a plan-only hop once (not in `/plan` mode). `respond_node` + SSE/WS `done.content` persist the un-glued payload. The chat bubble strips the fence and always replace-paints `done.content`.
+
+**Fix if you still see it on an old process:** refresh the tab (the reply is in the session). Restart the server to pick up this code. `/plan go` only if the **Plan** pill is on.
+
 ### 1.1c Every tool returns `[hook] blocked`
 
 **Cause:** A PreToolUse command or in-process hook is denying calls (`agent.hooks.pre_tool`, or a skill that called `register_pre_tool_hook`).

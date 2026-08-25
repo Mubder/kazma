@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased — Plan-fence delivery (plan drawn, no reply) (2026-08-26)
+
+Industry fix for the live hang: model streams a ```plan checklist, then
+the bubble stays empty even though `memory_store` (or other tools) ran.
+
+- **SoT:** `kazma_core.agent.plan_fence` splits / normalizes the fence.
+  Glued closers (` ```Saved.`) get a newline; CommonMark can close the
+  block. Persist and `done.content` always go through `pick_user_facing_text`.
+- **Supervisor:** a plan-only hop with no `tool_calls` (and plan mode off)
+  auto-continues once (`PLAN_EXECUTE_CONTINUE`). Declared state key
+  `plan_only_continues` (LangGraph drops undeclared keys).
+- **Respond / SSE / WS:** terminal assistant text is un-glued. SSE
+  `done.content` is SoT over the concatenated token stream.
+- **chat.js:** `splitPlanAndProse` + `stripPlanFenceForDisplay`; `onDone`
+  always `applyFinalAssistantText` (no `!tokenAccum` skip).
+- Tests: `tests/test_plan_fence.py`. Restart the server.
+
 ## Unreleased — MCP sampling HITL, native CUA, Playwright smoke (2026-08-25)
 
 Three real-value leftovers after 0.10.0:

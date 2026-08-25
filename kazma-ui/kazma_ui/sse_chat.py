@@ -184,6 +184,20 @@ def _last_assistant_text(messages: list[Any] | None) -> str:
     return ""
 
 
+def _user_facing_reply(*parts: str) -> str:
+    """Best user-facing assistant payload (plan fence un-glued). Never raises."""
+    try:
+        from kazma_core.agent.plan_fence import pick_user_facing_text
+
+        return pick_user_facing_text(*parts)
+    except Exception:
+        logger.debug("[SSE] plan_fence pick failed", exc_info=True)
+        for p in parts:
+            if p and str(p).strip():
+                return str(p).strip()
+        return ""
+
+
 def _module_store():
     """Session-store accessor for module-level helpers.
 
@@ -232,7 +246,7 @@ async def _persist_detached_reply(
         asst = ""
         if snap and snap.values:
             msgs = snap.values.get("messages") or []
-            asst = _last_assistant_text(msgs)
+            asst = _user_facing_reply(_last_assistant_text(msgs))
         with _module_store().transact(session_id) as sess:
             if asst:
                 trailing = next(
@@ -327,7 +341,7 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
             ),
             None,
         )
-        asst = _last_assistant_text(vals.get("messages") or [])
+        asst = _user_facing_reply(_last_assistant_text(vals.get("messages") or []))
         cp_last_role = ""
         if isinstance(cp_last, dict):
             cp_last_role = (cp_last.get("role") or cp_last.get("type") or "").lower()
@@ -783,20 +797,27 @@ async def _stream_langgraph_events(
                 logger.warning("[SSE] aget_state failed after stream: %s", exc)
 
             if snapshot is not None:
-                # Backfill assistant text from checkpoint (interrupt or complete)
-                if not content_acc:
-                    try:
-                        vals = getattr(snapshot, "values", None) or {}
-                        msgs = vals.get("messages") if isinstance(vals, dict) else None
-                        msg_content = _last_assistant_text(msgs or [])
-                        if msg_content:
-                            content_acc = msg_content
-                            yield await emit_j("token", {"content": msg_content})
-                            # Give the client a beat to render the text
-                            # before done — prevents "Done 0s" flash.
+                # Checkpoint last-hop vs streamed concat: the token stream
+                # glues hop-0 ```plan onto the final answer (````Saved.``).
+                # done.content is SoT — pick the best user-facing payload.
+                try:
+                    vals = getattr(snapshot, "values", None) or {}
+                    msgs = vals.get("messages") if isinstance(vals, dict) else None
+                    ckpt_text = _last_assistant_text(msgs or [])
+                    chosen = _user_facing_reply(ckpt_text, content_acc)
+                    if chosen and chosen != content_acc:
+                        # Do NOT re-yield as tokens when we already streamed —
+                        # the client applies done.content as a replace paint.
+                        if not content_acc:
+                            yield await emit_j("token", {"content": chosen})
                             await asyncio.sleep(0.1)
-                    except Exception:
-                        logger.debug("[SSE] post-stream text backfill failed", exc_info=True)
+                        content_acc = chosen
+                    elif not content_acc and ckpt_text:
+                        content_acc = ckpt_text
+                        yield await emit_j("token", {"content": ckpt_text})
+                        await asyncio.sleep(0.1)
+                except Exception:
+                    logger.debug("[SSE] post-stream text backfill failed", exc_info=True)
 
                 # HITL interrupt detection (strict type OR tool/args fallback)
                 try:
@@ -2096,6 +2117,12 @@ def create_sse_chat_router(
                             turn_usage["tokens"] = data.get("tokens")
                         if data.get("cost") is not None:
                             turn_usage["cost"] = data.get("cost")
+                        # Terminal frame is SoT — replace glued token concat
+                        # with the un-glued checkpoint/normalized payload.
+                        done_text = str(data.get("content") or "")
+                        if done_text.strip():
+                            content_acc = done_text.strip()
+                            temp_assistant_msg["content"] = content_acc
 
                     yield frame
 
@@ -2138,6 +2165,7 @@ def create_sse_chat_router(
                 # isn't left without an answer on reload.
                 try:
                     if content_acc:
+                        content_acc = _user_facing_reply(content_acc) or content_acc
                         has_assistant = any(
                             msg.get("role") == "assistant" for msg in session.messages
                         )

@@ -40,6 +40,11 @@ from kazma_core.agent.graph_helpers import (
     sanitize_tool_chains,
     truncate_tool_result,
 )
+from kazma_core.agent.plan_fence import (
+    is_plan_only,
+    normalize_plan_fence,
+    pick_user_facing_text,
+)
 from kazma_core.agent.graph_respond import respond_node
 from kazma_core.agent.graph_supervisor import supervisor_node
 from kazma_core.agent.graph_tool_worker import (
@@ -53,7 +58,10 @@ from kazma_core.time_travel import SnapshotRecorder
 __all__ = [
     "TOOL_RESULT_MAX_CHARS",
     "build_supervisor_graph",
+    "is_plan_only",
     "is_unusable_assistant_content",
+    "normalize_plan_fence",
+    "pick_user_facing_text",
     "respond_node",
     "sanitize_tool_chains",
     "supervisor_node",

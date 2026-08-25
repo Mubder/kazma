@@ -1611,7 +1611,7 @@
         tokenAccum += data.content;
         tryIngestPlanFromText(tokenAccum);
         var textEl = currentMsgEl.querySelector('.message-text');
-        textEl.innerHTML = KS.markdown(tokenAccum);
+        textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
         // Re-apply dir="auto" after innerHTML (the attribute survives but
         // the bidi direction may need recalculating for the new content).
         textEl.setAttribute('dir', 'auto');
@@ -1695,10 +1695,11 @@
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         var interrupted = !!(data && data.interrupted);
-        // Enriched done/turn_complete may carry full final content when tokens
-        // never streamed (custom LLM path).
-        if (data && data.content && !tokenAccum) {
-          window.KazmaChat.applyFinalAssistantText(data.content, data.model || '');
+        // Terminal frame is SoT — ALWAYS replace-paint, even when plan
+        // tokens already arrived (glued ```plan + answer used to be skipped
+        // because tokenAccum was nonempty).
+        if (data && data.content) {
+          window.KazmaChat.applyFinalAssistantText(data.content, data.model || '', { source: 'done' });
         }
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
         if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval) {
@@ -2256,17 +2257,63 @@
   }
 
   /**
+   * Split a ```plan fence (or ## Plan heading) from user-facing prose.
+   * Mirrors kazma_core.agent.plan_fence.split_plan_and_prose — handles the
+   * glued closer (```Saved.) that CommonMark never closes.
+   */
+  function splitPlanAndProse(text) {
+    var s = String(text || '');
+    if (!s.trim()) return { plan: '', prose: '' };
+    var m = s.match(/```plan[^\n]*\n?([\s\S]*?)```/i);
+    if (m) {
+      var after = s.slice(m.index + m[0].length).replace(/^[ \t]+/, '').replace(/^\n+/, '').trim();
+      var before = s.slice(0, m.index).trim();
+      var proseParts = [];
+      if (before) proseParts.push(before);
+      if (after) proseParts.push(after);
+      return { plan: String(m[1] || '').trim(), prose: proseParts.join('\n\n').trim() };
+    }
+    var open = s.match(/```plan[^\n]*\n?([\s\S]*)$/i);
+    if (open) {
+      var split = _splitListThenProse(open[1] || '');
+      var beforeOpen = s.slice(0, open.index).trim();
+      var proseOpen = [beforeOpen, split.prose].filter(Boolean).join('\n\n').trim();
+      return { plan: split.plan, prose: proseOpen };
+    }
+    var md = s.match(/(?:^|\n)(?:#{1,3}\s*plan\b|\*\*plan\*\*)[^\n]*\n([\s\S]*)/i);
+    if (md) {
+      var mdSplit = _splitListThenProse(md[1] || '');
+      return { plan: mdSplit.plan, prose: mdSplit.prose };
+    }
+    return { plan: '', prose: s.trim() };
+  }
+
+  function _splitListThenProse(body) {
+    var planLines = [];
+    var rest = [];
+    var inRest = false;
+    String(body || '').split('\n').forEach(function(line) {
+      if (inRest) { rest.push(line); return; }
+      if (/^\s*(?:[-*]|\d+[.)])\s+\S/.test(line) || !line.trim()) planLines.push(line);
+      else { inRest = true; rest.push(line); }
+    });
+    return { plan: planLines.join('\n').trim(), prose: rest.join('\n').trim() };
+  }
+
+  /** Bubble text: plan fence stripped when prose exists; never blank a plan-only turn. */
+  function stripPlanFenceForDisplay(text) {
+    var parts = splitPlanAndProse(text);
+    if (parts.prose) return parts.prose;
+    return String(text || '');
+  }
+
+  /**
    * Pull a plan from model text: ```plan ... ``` or ## Plan / **Plan** lists.
    */
   function tryIngestPlanFromText(text) {
     if (!text || _planParsedFromText) return;
-    var fence = text.match(/```plan\s*([\s\S]*?)```/i);
-    var block = fence ? fence[1] : '';
-    if (!block) {
-      var md = text.match(/(?:^|\n)#{1,3}\s*plan\b[^\n]*\n([\s\S]{0,800}?)(?:\n#{1,3}\s|\n```|$)/i);
-      if (!md) md = text.match(/(?:^|\n)\*\*plan\*\*[^\n]*\n([\s\S]{0,800}?)(?:\n\*\*|\n#{1,3}\s|$)/i);
-      if (md) block = md[1];
-    }
+    var parts = splitPlanAndProse(text);
+    var block = parts.plan || '';
     if (!block) return;
     var items = [];
     block.split('\n').forEach(function(line) {
@@ -2840,7 +2887,7 @@
       avatarHtml +
       '<div class="message-content">' +
         '<div class="message-text" dir="auto">' +
-          (role === 'user' ? renderUserContentHtml(content) : KS.markdown(content)) +
+          (role === 'user' ? renderUserContentHtml(content) : KS.markdown(stripPlanFenceForDisplay(content))) +
         '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
@@ -3078,7 +3125,8 @@
         currentMsgEl.querySelector('.message-content').appendChild(textEl);
       }
       var existing = textEl.innerHTML || '';
-      var rendered = KS.markdown ? KS.markdown(text) : escapeHtml(text);
+      tryIngestPlanFromText(text);
+      var rendered = KS.markdown ? KS.markdown(stripPlanFenceForDisplay(text)) : escapeHtml(stripPlanFenceForDisplay(text));
       // bidi applied after set on textEl below
       textEl.innerHTML = existing
         ? existing + '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:10px 0;">' + rendered
@@ -3140,8 +3188,9 @@
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
           if (!currentMsgEl) currentMsgEl = createAssistantMessage();
           tokenAccum += tokenData.content;
+          tryIngestPlanFromText(tokenAccum);
           var textEl = currentMsgEl.querySelector('.message-text');
-          if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+          if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
           scrollToBottom();
         },
         onToolCall: function(toolData) {
@@ -4288,13 +4337,14 @@
       // root cause.
       tokenAccum = incoming;
       tryIngestPlanFromText(tokenAccum);
+      var display = stripPlanFenceForDisplay(tokenAccum);
       if (textEl) {
         try {
-          textEl.innerHTML = KS.markdown(tokenAccum);
+          textEl.innerHTML = KS.markdown(display);
         } catch (mdErr) {
-          textEl.textContent = tokenAccum;
+          textEl.textContent = display;
         }
-        textEl.setAttribute('data-final-len', String(tokenAccum.length));
+        textEl.setAttribute('data-final-len', String(display.length));
       }
       if (model && currentMsgEl) {
         var meta = currentMsgEl.querySelector('.message-meta');
@@ -4338,7 +4388,7 @@
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+      if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
       scrollToBottom();
     },
     setPlan: setPlan,
@@ -4367,8 +4417,9 @@
       KS.hideTyping(typingEl);
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       tokenAccum += content;
+      tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+      if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
       scrollToBottom();
     },
     onStreamDone: function() {

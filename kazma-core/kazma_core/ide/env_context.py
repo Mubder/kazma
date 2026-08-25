@@ -340,9 +340,11 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "- Write findings / deliverable",
             "```",
             "",
-            "Rules: 3–7 bullets; concrete verbs; no empty plan. The UI pins this "
+            "Rules: 3–7 bullets; concrete verbs; no empty plan. Close the fence "
+            "with ``` alone on its own line, then a blank line, then the answer — "
+            "never glue prose onto the ticks (wrong: ```Saved.). The UI pins this "
             "above Activity (tools/status). After tools, give a clear final answer. "
-            "Prefer short narration of what you are checking (the workbench shows it).",
+            "A plan with no tool_calls is not a finished turn.",
         ]
     )
 

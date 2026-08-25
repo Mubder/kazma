@@ -70,6 +70,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Prompt with **"barcode"** routes to the coding model | `ModelRouter.classify` used to substring-match `code` | Word-boundary classify; `models.defaults.<kind>` wins over YAML keywords | §5 Providers |
 | MCP resource text **obeyed as instructions** | Resource body must be fenced | `mcp_read_resource` → `format_untrusted_block(source=mcp_resource:…)` | §12 Injection |
 | MCP server asked Kazma to **sample** (call our LLM) | `sampling/createMessage` must not auto-run | Denied without HITL; `KAZMA_MCP_SAMPLING` default off | §4 HITL |
+| Plan drawn, **no reply** (memory save / tools) | `plan_fence.py` split/normalize; supervisor plan-only continue | SSE/WS `done.content` SoT; chat.js strip + always applyFinal | §2 Chat transports |
 
 ---
 
@@ -97,12 +98,14 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | YOLO | `/yolo` slash in stream | same, only if WS graph is on |
 | Env context | per-turn `build_env_context()` | same when graph is on |
 | Soul inject | fenced self-improvement block | (see gateway for TG path) |
+| Plan fence / final text | `plan_fence.pick_user_facing_text` on `done.content` + session persist | `_persist_final_assistant_message` same pick (checkpoint vs stream) |
 
 ### Invariants
 
 - Adding a **new telemetry event** only on SSE or only on WS re-breaks the UI.  
 - Graph turns belong on SSE. Do not add a third graph client.  
 - `session_id` is UI/storage; **`thread_id` is LangGraph + YOLO + HITL**.  
+- User-facing assistant text is never a glued ```plan closer (` ```Saved.`). `plan_fence.py` is the SoT.  
 - HITL resume for custom LLMs: use **`ainvoke(Command)`**, not hanging `astream_events`.
 
 ### Key files

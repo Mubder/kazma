@@ -9,6 +9,11 @@ from kazma_core.agent.graph_helpers import (
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
+from kazma_core.agent.plan_fence import (
+    is_plan_only,
+    normalize_plan_fence,
+    rewrite_terminal_assistant_message,
+)
 from kazma_core.agent.state import SupervisorState
 from kazma_core.llm_stream import invoke_llm_chat
 from kazma_core.summarizer import _normalize_msg
@@ -76,7 +81,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             content = m.get("content") or ""
             if isinstance(content, str) and content.strip():
                 candidates.append(content.strip())
-        return candidates[-1] if candidates else ""
+        text = candidates[-1] if candidates else ""
+        if not text:
+            return ""
+        # Tools ran but the last hop is still just a ```plan — not a
+        # user-facing answer. Force synthesis (empty return).
+        if last_tool_idx >= 0 and is_plan_only(text):
+            return ""
+        return normalize_plan_fence(text)
 
     _last = messages[-1] if messages else {}
     _last_role = _last.get("role") if isinstance(_last, dict) else None
@@ -272,6 +284,11 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 ),
             }
         )
+
+    # Un-glue ```plan fences on the terminal assistant message so Telegram /
+    # SSE / WS / session reload never hide the answer inside an unclosed
+    # CommonMark code block (````Saved.`` incident, 2026-08-26).
+    messages = rewrite_terminal_assistant_message(messages)
 
     # Post-turn memory: signal that memory work is pending so the gateway
     # handler can fire it AFTER the graph reaches terminal state (preventing

@@ -17,6 +17,11 @@ from kazma_core.agent.graph_helpers import (
     prune_messages_if_exceeding_cap,
     sanitize_tool_chains,
 )
+from kazma_core.agent.plan_fence import (
+    PLAN_EXECUTE_CONTINUE,
+    normalize_plan_fence,
+    should_execute_plan_only_hop,
+)
 from kazma_core.agent.state import NodeName, PendingToolCall, SupervisorState
 from kazma_core.llm_provider import LLMProvider
 from kazma_core.llm_stream import invoke_llm_chat
@@ -630,6 +635,7 @@ async def supervisor_node(
 
     # First-class plan mode: union read_only constraints + system note.
     # Proceed / `/plan go` exits and injects the execute note instead.
+    _plan_kind = "off"
     try:
         from kazma_core.agent.plan_mode import apply_plan_mode_to_turn
 
@@ -644,6 +650,7 @@ async def supervisor_node(
             logger.info("[Supervisor] plan_mode=%s thread=%s", _plan_kind, str(state.get("thread_id") or "")[:12])
     except Exception:
         logger.debug("[Supervisor] plan mode skipped", exc_info=True)
+        _plan_kind = "off"
 
     # Merge working memory into intent_patch so every return path persists it.
     intent_patch = {**working_memory_patch, **intent_patch}
@@ -1060,7 +1067,10 @@ async def supervisor_node(
         _plan_nudge = (
             "UI WORKBENCH: If you will call any tools this turn, put a short "
             "```plan fence (3–7 bullets) in your content field before or "
-            "alongside tool_calls so the user sees your plan. Then use tools."
+            "alongside tool_calls so the user sees your plan. Then use tools. "
+            "Close the fence with ``` alone on its own line, then a blank line, "
+            "then any user-facing text — never glue the answer onto the ticks "
+            "(wrong: ```Saved.). A plan with no tool_calls is not a finished turn."
         )
         if not any(
             m.get("role") == "system" and "UI WORKBENCH" in str(m.get("content", ""))
@@ -1492,6 +1502,45 @@ async def supervisor_node(
             )
             content = ""
 
+        # Un-glue ```plan fences before we decide (````Saved.`` is not a
+        # finished answer until the closer is on its own line).
+        if content:
+            content = normalize_plan_fence(content)
+
+        max_iter = int(state.get("max_iterations") or 15)
+
+        # Workbench plan with no tool_calls is not a finished turn — the UI
+        # pins the checklist and the user sees silence. One auto-continue
+        # (not in /plan mode). See plan_fence.should_execute_plan_only_hop.
+        if should_execute_plan_only_hop(
+            content=content,
+            has_tool_calls=False,
+            tools_available=bool(effective_tool_definitions),
+            plan_mode_kind=_plan_kind,
+            plan_only_continues=int(state.get("plan_only_continues") or 0),
+            iteration=int(iteration or 0),
+            max_iterations=max_iter,
+        ):
+            logger.info(
+                "[Supervisor] plan-only hop with no tools (iteration=%d) — "
+                "auto-continue to execute",
+                iteration,
+            )
+            assistant_msg = {"role": "assistant", "content": content}
+            continuation_msg = {"role": "user", "content": PLAN_EXECUTE_CONTINUE}
+            return {
+                **breaker_reset,
+                **intent_patch,
+                **_mission_carry,
+                "messages": messages + [assistant_msg, continuation_msg],
+                "next_node": NodeName.SUPERVISOR,
+                "iteration": iteration + 1,
+                "plan_only_continues": int(state.get("plan_only_continues") or 0) + 1,
+                "last_model": response.model,
+                "last_tokens": response.usage.get("total_tokens", 0),
+                "last_cost_usd": response.cost_usd,
+            }
+
         # Auto-continuation guard for multi-step goals/tasks.
         # Topic shifts / superseded focus never auto-continue the old goal.
         is_auto = bool(state.get("auto_continue", False))
@@ -1506,12 +1555,6 @@ async def supervisor_node(
                 if intent_patch.get("intent_mode") != "shift":
                     is_auto = True
 
-        # ``max_iter`` was referenced here without ever being bound in
-        # ``supervisor_node`` (only the mission-mode local ``_max_iter`` and the
-        # router's own ``max_iter`` exist), so the auto-continue path raised
-        # NameError whenever ``is_auto`` was truthy. Resolve it from the same
-        # source the router uses (state.max_iterations, default 15).
-        max_iter = int(state.get("max_iterations") or 15)
         if is_auto and iteration + 1 < max_iter and content:
             logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
             assistant_msg = {"role": "assistant", "content": content}
@@ -1577,9 +1620,12 @@ async def supervisor_node(
     # content="" alongside tool_calls. Converting to None breaks the
     # message history on the next LLM call (API rejects null content).
     # Keep the original value — empty string is valid per OpenAI spec.
+    _tool_hop_content = response.content if response.content is not None else ""
+    if _tool_hop_content:
+        _tool_hop_content = normalize_plan_fence(_tool_hop_content)
     assistant_msg: dict[str, Any] = {
         "role": "assistant",
-        "content": response.content if response.content is not None else "",
+        "content": _tool_hop_content,
         "tool_calls": [
             {
                 "id": tc.id,

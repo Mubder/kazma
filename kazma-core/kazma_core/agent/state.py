@@ -222,6 +222,16 @@ class SupervisorState(TypedDict, total=False):
     (2026-08-03 empty-reply regression).
     """
 
+    plan_only_continues: int
+    """How many times this turn already auto-continued a plan-only hop.
+
+    The model sometimes emits a `````plan`` fence and stops with no
+    ``tool_calls`` (workbench drawn, no reply). The supervisor injects
+    ``PLAN_EXECUTE_CONTINUE`` once; this counter is the LangGraph-declared
+    guard so a second plan-only hop falls through to respond/synthesis
+    instead of looping.
+    """
+
     _research_depth_nudged: bool
     """One-shot guard so the research-depth "more sources" nudge fires once per
     turn, not every tool-worker iteration. Must be declared (undeclared keys
@@ -330,6 +340,7 @@ def initial_supervisor_state(
         hard_constraints=[],
         scratchpad={},
         force_synthesis=False,
+        plan_only_continues=0,
         _research_depth_nudged=False,
         _research_pipeline_nudged=False,
         turn_failed=False,

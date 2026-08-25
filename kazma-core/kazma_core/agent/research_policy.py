@@ -30,7 +30,7 @@ __all__ = [
 # Injected into product knowledge / tool guidance.
 RESEARCH_PROTOCOL = """
 ### Research protocol (follow when the user asks to research / investigate / report)
-1. Open with a short ```plan (3–7 steps) when you will use tools.
+1. Open with a short ```plan (3–7 steps) when you will use tools. Close the fence on its own line; never glue the answer onto ```.
 2. Run **≥2 distinct** `web_search` queries (different angles), not one query only.
 3. Acquire **≥2 full sources** via `read_url_to_file` (preferred) or multi-window `read_url`.
 4. For long pages: `digest_research_file` before writing conclusions.

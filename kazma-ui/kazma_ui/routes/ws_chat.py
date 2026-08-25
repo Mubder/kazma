@@ -577,9 +577,10 @@ def create_ws_chat_router(
         """Persist the latest *new* assistant text to SessionStore.
 
         Returns the text that was (or should have been) persisted so callers
-        can also emit it over the wire. Prefer *prefer_text* when the stream
-        already accumulated tokens; otherwise pull NEW messages after
-        *pre_msg_count* from the checkpoint (avoids re-appending older turns).
+        can also emit it over the wire. Checkpoint last-hop and *prefer_text*
+        (token concat) both go through ``plan_fence.pick_user_facing_text``
+        so a glued ```plan closer cannot hide the answer. New messages are
+        taken after *pre_msg_count* (avoids re-appending older turns).
         When *activity* (the CoT / workbench log for this turn) is given it is
         stored on the assistant message so a later reload restores it.
         *model* stamps which LLM produced the reply; *tokens*/*cost* stamp the
@@ -588,26 +589,43 @@ def create_ws_chat_router(
         text = (prefer_text or "").strip()
         model_id = (model or "").strip() or _resolve_active_model()
         try:
+            ckpt_text = ""
+            snapshot = await graph_inst.aget_state(config)
+            if snapshot is not None:
+                vals = getattr(snapshot, "values", None) or {}
+                msgs = vals.get("messages") if isinstance(vals, dict) else None
+                if msgs and isinstance(msgs, list):
+                    new_msgs = msgs[pre_msg_count:] if pre_msg_count < len(msgs) else msgs
+                    for m in reversed(new_msgs):
+                        role = None
+                        if isinstance(m, dict):
+                            role = m.get("role")
+                        else:
+                            role = getattr(m, "type", None) or getattr(m, "role", None)
+                        if role in ("assistant", "ai"):
+                            content = (
+                                m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
+                            )
+                            if isinstance(content, str) and content.strip():
+                                ckpt_text = content.strip()
+                                break
+            try:
+                from kazma_core.agent.plan_fence import pick_user_facing_text
+
+                chosen = pick_user_facing_text(ckpt_text, text)
+                if chosen:
+                    text = chosen
+                elif not text:
+                    text = ckpt_text
+            except Exception:
+                if not text:
+                    text = ckpt_text
             if not text:
-                snapshot = await graph_inst.aget_state(config)
                 if snapshot is not None:
                     vals = getattr(snapshot, "values", None) or {}
                     msgs = vals.get("messages") if isinstance(vals, dict) else None
                     if msgs and isinstance(msgs, list):
                         new_msgs = msgs[pre_msg_count:] if pre_msg_count < len(msgs) else msgs
-                        for m in reversed(new_msgs):
-                            role = None
-                            if isinstance(m, dict):
-                                role = m.get("role")
-                            else:
-                                role = getattr(m, "type", None) or getattr(m, "role", None)
-                            if role in ("assistant", "ai"):
-                                content = (
-                                    m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
-                                )
-                                if isinstance(content, str) and content.strip():
-                                    text = content.strip()
-                                    break
 
                         # Fallback: if no text response was produced, check if tools were executed
                         if not text and new_msgs:
