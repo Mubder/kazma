@@ -53,8 +53,77 @@ def test_sampling_denied_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_sampling_on_still_requires_hitl(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAZMA_MCP_SAMPLING", "1")
     ok, reason = authorize_mcp_sampling({})
-    assert ok is False
-    assert "HITL" in reason
+    assert ok is True
+    assert reason == ""
+
+
+@pytest.mark.asyncio
+async def test_sampling_hitl_card_then_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from kazma_core.mcp import spec_client as sc
+
+    monkeypatch.setenv("KAZMA_MCP_SAMPLING", "1")
+    monkeypatch.setenv("KAZMA_MCP_SAMPLING_TIMEOUT", "5")
+
+    async def _fake_complete(params=None):
+        return {
+            "role": "assistant",
+            "content": {"type": "text", "text": "sampled-ok"},
+            "model": "test",
+            "stopReason": "endTurn",
+        }
+
+    monkeypatch.setattr(sc, "complete_mcp_sample", _fake_complete)
+    monkeypatch.setattr(
+        "kazma_core.safety.hitl.get_current_thread_id", lambda: "eval-thread"
+    )
+
+    task = asyncio.create_task(
+        sc.handle_mcp_server_request(
+            "sampling/createMessage",
+            {"messages": [{"role": "user", "content": {"type": "text", "text": "hi"}}]},
+            server_name="think",
+        )
+    )
+    pending: list = []
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        pending = sc.list_sampling_pending()
+        if pending:
+            break
+    assert pending, "HITL card was not registered"
+    assert pending[0]["kind"] == "mcp_sampling"
+    assert sc.resolve_sampling_hitl(pending[0]["thread_id"], True) is True
+    result, error = await task
+    assert error is None
+    assert result["content"]["text"] == "sampled-ok"
+
+
+@pytest.mark.asyncio
+async def test_sampling_hitl_deny(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from kazma_core.mcp import spec_client as sc
+
+    monkeypatch.setenv("KAZMA_MCP_SAMPLING", "1")
+    monkeypatch.setenv("KAZMA_MCP_SAMPLING_TIMEOUT", "5")
+    monkeypatch.setattr(
+        "kazma_core.safety.hitl.get_current_thread_id", lambda: "eval-thread"
+    )
+
+    task = asyncio.create_task(
+        sc.handle_mcp_server_request("sampling/createMessage", {}, server_name="x")
+    )
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        pending = sc.list_sampling_pending()
+        if pending:
+            sc.resolve_sampling_hitl(pending[0]["thread_id"], False)
+            break
+    result, error = await task
+    assert result is None
+    assert error and "HITL" in error
 
 
 @pytest.mark.asyncio

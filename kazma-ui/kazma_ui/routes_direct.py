@@ -3081,6 +3081,20 @@ def register_direct_routes(self: Any) -> None:
                     status_code=404,
                 )
 
+            try:
+                from kazma_core.mcp.spec_client import resolve_sampling_hitl
+
+                if resolve_sampling_hitl(thread_id, approved):
+                    return _JSONResponse(
+                        {
+                            "status": "ok",
+                            "approved": approved,
+                            "sampling": True,
+                        }
+                    )
+            except Exception:
+                logger.debug("[HITL] sampling sidecar miss", exc_info=True)
+
             if self.session_store is not None:
                 ctx = None
                 try:
@@ -3336,10 +3350,21 @@ def register_direct_routes(self: Any) -> None:
 
         graph = _resolve_hitl_graph()
         checkpointer = _resolve_hitl_checkpointer()
+        sampling: list[Any] = []
+        try:
+            from kazma_core.mcp.spec_client import list_sampling_pending
+
+            sampling = list_sampling_pending()
+        except Exception:
+            sampling = []
         if graph is None or checkpointer is None:
             return _JSONResponse(
-                {"pending": [], "count": 0, "error": "Graph/checkpointer not yet initialized"},
-                status_code=503,
+                {
+                    "pending": sampling,
+                    "count": len(sampling),
+                    "error": None if sampling else "Graph/checkpointer not yet initialized",
+                },
+                status_code=200 if sampling else 503,
             )
         try:
             pending = [
@@ -3348,6 +3373,7 @@ def register_direct_routes(self: Any) -> None:
                 if get_session_manager().get_by_thread_id(str(item["thread_id"]))
                 is not None
             ]
+            pending = list(pending) + list(sampling)
             return _JSONResponse({"pending": pending, "count": len(pending)})
         except Exception:
             logger.exception("[HITL] Failed to list pending approvals")

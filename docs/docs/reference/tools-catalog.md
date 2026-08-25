@@ -19,7 +19,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | IDE path | `IdeService._call_tool` | Same registry — no bypass |
 | Native skills | `kazma-skills/kazma_skills/native/*` | Loaded via skill manifests |
 | MCP spec (client) | `mcp_list_resources` / `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` | Resources fenced; prompts user-visible; sampling HITL. Not an MCP server. |
-| Computer use | `computer_use` | Screenshot→action (Playwright). Optional CUA/Gemini planner. HITL **danger**. `KAZMA_COMPUTER_USE=0`. |
+| Computer use | `computer_use` | Screenshot→action (Playwright). Native Anthropic CUA / Gemini function when that model is active; else vision-JSON. HITL **danger**. `KAZMA_COMPUTER_USE=0`. `KAZMA_CUA_PLANNER=0`. |
 
 ## Built-in tools (LocalToolRegistry)
 

@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased — MCP sampling HITL, native CUA, Playwright smoke (2026-08-25)
+
+Three real-value leftovers after 0.10.0:
+
+- **MCP sampling HITL card:** `KAZMA_MCP_SAMPLING=1` then `sampling/createMessage`
+  waits in-place (does not unwind MCP stdio). Same Approve button
+  (`POST /api/approve/{thread_id}`, `kind=mcp_sampling`). The sample LLM call
+  has **no tools**. Default off. Timeout `KAZMA_MCP_SAMPLING_TIMEOUT`.
+- **Native CUA:** `computer_use` calls Anthropic `computer_20250124` (beta
+  header) when the active model is Claude; Gemini uses a forced
+  `computer_action` function. HTTP 4xx / missing client → existing vision-JSON
+  loop. `KAZMA_CUA_PLANNER=0`.
+- **Playwright CI smoke:** separate job. Polls `/health/live`, then asserts
+  `#chat-input` visible. Does not start the operator's server.
+
+Restart the server for sampling HITL and CUA. CI picks up the smoke job on push.
+
 ## Unreleased — post-industry leftovers (non-SaaS GOAL, 2026-08-25)
 
 Closed the remainder list except the SaaS park. Brain is still LangGraph.

@@ -66,7 +66,11 @@ def discover_test_files() -> list[Path]:
             continue
         files.extend(sorted(base.rglob("test_*.py")))
         files.extend(sorted(base.rglob("*_test.py")))
-    return sorted(set(f for f in files if f.is_file()))
+    # Playwright e2e is a separate CI job (polls /health/live). Do not boot
+    # uvicorn inside the chunked suite.
+    return sorted(
+        set(f for f in files if f.is_file() and "e2e" not in f.parts)
+    )
 
 
 def chunk_files(files: list[Path], chunks: int) -> list[list[Path]]:

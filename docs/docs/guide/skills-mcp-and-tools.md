@@ -252,7 +252,7 @@ Kazma is an MCP **client** (ACP already hosts Kazma in editors). As of 2026-08-2
 |---------|-----------|
 | **Resources** | `mcp_list_resources` / `mcp_read_resource`. Read body is wrapped in `format_untrusted_block(source="mcp_resource:…")` — data, not instructions. |
 | **Prompts** | `mcp_list_prompts` / `mcp_get_prompt`. Returned as **user-visible** text. Not injected as system. |
-| **Sampling** | `sampling/createMessage` from a server is **denied** unless HITL can approve. Default off (`KAZMA_MCP_SAMPLING` unset). There is no auto-sample path. |
+| **Sampling** | `sampling/createMessage` is **off** unless `KAZMA_MCP_SAMPLING=1`. Then a real HITL card (`kind=mcp_sampling`) waits in-place (does not unwind MCP stdio). Approve via the existing Once button (`POST /api/approve/{thread_id}`). The LLM call has **no tools**. Timeout `KAZMA_MCP_SAMPLING_TIMEOUT` (default 60s). |
 | **Elicitation** | Same: no auto-fill of server-driven forms. |
 | **Roots** | `roots/list` returns the **active workspace** only (same binding ladder as file tools). |
 

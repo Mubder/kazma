@@ -39,9 +39,9 @@ No. Classification uses word boundaries. An explicit
 
 ### Can an MCP server make Kazma call the LLM (sampling)?
 
-Not automatically. `sampling/createMessage` is denied without HITL
-(`KAZMA_MCP_SAMPLING` default off). Resource reads are fenced as untrusted
-data. See [Skills, MCP & tools](skills-mcp-and-tools#57-resources-prompts-sampling-roots).
+Not automatically. Default off (`KAZMA_MCP_SAMPLING`). When on, you get a
+HITL Once card; the sample call has **no tools**. Resource reads are fenced.
+See [Skills, MCP & tools](skills-mcp-and-tools#57-resources-prompts-sampling-roots).
 
 ### Can I run the agent without the web server?
 

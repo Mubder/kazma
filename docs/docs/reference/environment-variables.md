@@ -26,7 +26,8 @@ description: Master reference for Kazma environment variables (dev, single-opera
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | | LiveKit API credentials (room tokens). All three required to enable duplex |
 | `KAZMA_VOICE_DUPLEX` | `1` | `0` disables LiveKit duplex even if credentials are set |
 | `KAZMA_CUA_PLANNER` | `1` | `0` keeps `computer_use` on vision-JSON (no Anthropic CUA / Gemini mapping) |
-| `KAZMA_MCP_SAMPLING` | `0` | `1` still requires HITL; servers cannot auto-sample our LLM |
+| `KAZMA_MCP_SAMPLING` | `0` | `1` allows MCP `sampling/createMessage` after a HITL card (no tools on that LLM call) |
+| `KAZMA_MCP_SAMPLING_TIMEOUT` | `60` | Seconds to wait for the sampling HITL card |
 | `KAZMA_REALTIME_CODEC` | `0` | `1` uses REST STT/TTS as the audio codec. OpenAI Realtime / Gemini Live are skipped |
 
 ## Precedence (reminder)

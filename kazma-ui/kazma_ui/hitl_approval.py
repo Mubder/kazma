@@ -259,6 +259,12 @@ def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
         """
         try:
             pending = await _get_pending_approvals(graph, checkpointer)
+            try:
+                from kazma_core.mcp.spec_client import list_sampling_pending
+
+                pending = list(pending) + list(list_sampling_pending())
+            except Exception:
+                pass
             # A standalone router without tenant middleware is single-tenant.
             # When middleware establishes a tenant, never expose a checkpoint
             # unless that tenant owns its session projection.

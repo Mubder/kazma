@@ -1010,8 +1010,9 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   pure-wheel deps (pillow/pymupdf/sqlite-vec/pypdfium2/numpy — without numpy
   the belief-graph PPR silently runs its degraded uniform-seed path) that the
   `.[test]`-only install left `importorskip`ing/degrading. Still blind:
-  Playwright e2e (deliberately absent until its flaky boot-wait is
-  stabilized) and the torch-bearing `rag` extra.
+  Playwright **one smoke** is a separate CI job (`tests/e2e/test_smoke.py`,
+  polls `/health/live`); the full e2e matrix stays out. Torch-bearing
+  `rag` extra is still too heavy for CI.
 
 ### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
 

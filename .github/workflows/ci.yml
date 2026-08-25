@@ -64,8 +64,8 @@ jobs:
         # otherwise `importorskip` silently on the merge gate. numpy un-degrades
         # the PPR power iteration (without it compute_local_ppr returns uniform
         # seed weights and the memory-graph tests fail on the degraded path).
-        # Playwright e2e stays deliberately absent until its flaky boot-wait is
-        # stabilized; torch-bearing extras (rag) are too heavy for CI.
+        # Playwright smoke is a *separate* job (boot-wait polls /health/live).
+        # torch-bearing extras (rag) are too heavy for CI.
         run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy
       - name: Run tests (GATE — failures fail CI)
         # Industry eval pack (tests/test_eval_pack.py, marker `eval`) is in
@@ -80,6 +80,23 @@ jobs:
           KAZMA_DB_BACKEND: sqlite
       - name: Metrics check
         run: python scripts/generate_metrics.py --check || true
+
+  playwright-smoke:
+    name: Playwright smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install app + Playwright
+        run: |
+          pip install -e ".[test,web]"
+          python -m playwright install chromium --with-deps
+      - name: Health + composer smoke
+        run: python -m pytest tests/e2e/test_smoke.py -q --timeout=180
+        env:
+          KAZMA_DB_BACKEND: sqlite
 
   js-check:
     name: JS Syntax Check

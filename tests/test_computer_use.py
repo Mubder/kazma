@@ -107,3 +107,55 @@ class TestNativePlanners:
         a = await plan_next_action("x", "aaaa", [], chat_fn=fake)
         assert a.action == "click"
         assert a.x == 3
+
+    @pytest.mark.asyncio
+    async def test_native_anthropic_tool_use(self) -> None:
+        from kazma_core.tools.computer_use_planners import plan_with_native_api
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "computer",
+                            "input": {
+                                "action": "left_click",
+                                "coordinate": [7, 9],
+                            },
+                        }
+                    ]
+                }
+
+        async def post(_path, *, json=None, headers=None):
+            assert headers and "computer-use" in headers.get("anthropic-beta", "")
+            return _Resp()
+
+        a = await plan_with_native_api(
+            "g", "aaa", [], kind="anthropic_cua", http_post=post
+        )
+        assert a is not None
+        assert a.action == "click"
+        assert a.x == 7 and a.y == 9
+
+    @pytest.mark.asyncio
+    async def test_native_http_error_falls_back(self) -> None:
+        from kazma_core.tools.computer_use_planners import plan_with_native_api
+
+        class _Resp:
+            status_code = 400
+
+            def json(self):
+                return {"error": {"message": "no computer use"}}
+
+        async def post(_path, *, json=None, headers=None):
+            return _Resp()
+
+        assert (
+            await plan_with_native_api(
+                "g", "aaa", [], kind="anthropic_cua", http_post=post
+            )
+            is None
+        )

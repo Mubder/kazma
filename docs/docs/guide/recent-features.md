@@ -21,6 +21,7 @@ the deep docs when you need detail.
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Sampling HITL + native CUA + CI smoke (2026-08-25)** | MCP sampling is a real Once card (`KAZMA_MCP_SAMPLING=1`). `computer_use` calls Anthropic CUA / Gemini function when that model is active. CI Playwright job: `/health/live` + `#chat-input`. | [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots); `KAZMA_CUA_PLANNER=0` |
 | **Post-industry leftovers (2026-08-25)** | MCP resources/prompts (fenced; sampling HITL). CUA planner adapters on `computer_use`. LiveKit TTS published into the room. 429 backoff on Anthropic. Router word-boundaries + `models.defaults`. Eval tool-trace. Bright Data/Oxylabs stubs. | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md); [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots) |
 | **LiveKit duplex (web) (2026-08-25)** | Live button: WebRTC AEC + barge-in (interrupt TTS). Brain is still LangGraph. Needs `LIVEKIT_URL` + API key/secret. Telegram stays voice notes. | [Voice](./voice-and-media); `KAZMA_VOICE_DUPLEX=0` |
 | **LiteLLM optional gateway (2026-08-25)** | `KAZMA_LITELLM_URL` (or `llm.gateway.url`) sends OpenAI-compatible calls through a LiteLLM proxy. Native Anthropic/Azure/Bedrock/Gemini stay direct. Locals stay direct. Not exclusive. | [FAQ](./faq#do-i-need-litellm); `KAZMA_LITELLM=0` |

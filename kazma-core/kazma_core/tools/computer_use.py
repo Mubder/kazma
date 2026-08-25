@@ -156,6 +156,21 @@ async def plan_next_action(
         }
     ]
     if chat_fn is None:
+        try:
+            from kazma_core.tools.computer_use_planners import (
+                plan_with_native_api,
+                resolve_planner_kind,
+            )
+
+            kind = resolve_planner_kind()
+            if kind != "vision_json":
+                native_act = await plan_with_native_api(
+                    goal, screenshot_b64, history, kind=kind
+                )
+                if native_act is not None:
+                    return native_act
+        except Exception:
+            logger.debug("[computer_use] native CUA skipped", exc_info=True)
         chat_fn = _default_chat
     try:
         result = await chat_fn(messages)
